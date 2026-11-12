@@ -183,7 +183,7 @@ class LoanApplicationEntity : PanacheEntityBase() {
     @Column(name = "signature_artefact_hash", length = 64)
     var signatureArtefactHash: String? = null
 
-    /** V32: the declined application whose review this one succeeds; null on every other row. */
+    /** V33: the declined application whose review this one succeeds; null on every other row. */
     @Column(name = "predecessor_application_id", columnDefinition = "uuid")
     var predecessorApplicationId: UUID? = null
 }

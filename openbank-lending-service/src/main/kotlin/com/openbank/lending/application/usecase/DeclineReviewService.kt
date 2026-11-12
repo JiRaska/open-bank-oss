@@ -9,11 +9,16 @@ import com.openbank.lending.application.port.out.LendingOutboxMessage
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.application.port.out.OriginationWorkflowPort
+import com.openbank.lending.application.port.out.TimerArmingOutcome
 import com.openbank.lending.domain.model.DeclineReview
 import com.openbank.lending.domain.model.DeclineReviewDecision
 import com.openbank.lending.domain.model.DeclineReviewDecisionRequest
 import com.openbank.lending.domain.model.DeclineReviewStatus
+import com.openbank.lending.domain.model.FirstDueDate
 import com.openbank.lending.domain.model.LoanApplication
+import com.openbank.lending.domain.model.LoanRateType
+import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
+import com.openbank.lending.infrastructure.compliance.OriginationConfig
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.lending.origination.OriginationActorKind
@@ -25,6 +30,7 @@ import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -39,6 +45,13 @@ import java.util.UUID
  *
  * Events carry identifiers and machine codes only; the reviewer's free-text reason stays in the
  * review row and is never published.
+ *
+ * The successor does NOT pass back through intake. It re-runs intake's refusal gates (origination
+ * allowed for the product, the FLOATING-rate switch, rate terms against a recomputed first due date)
+ * and pins the compliance pack active today, but it keeps the declined application's rate and catalog
+ * snapshot as they were: there is no re-pricing step here, and no fresh engine evaluation — its
+ * engine fields are null and `predecessorApplicationId` names the declined row, which is what the
+ * four-eyes approver sees on the application.
  */
 @ApplicationScoped
 @Suppress("LongParameterList")
@@ -49,6 +62,8 @@ class DeclineReviewService(
     private val clock: Clock,
     private val config: DeclineReviewConfig,
     private val workflowPort: OriginationWorkflowPort,
+    private val complianceGuard: CompliancePackGuard,
+    private val originationConfig: OriginationConfig,
 ) : DeclineReviewUseCase {
 
     private val machine = OriginationStateMachine()
@@ -114,13 +129,19 @@ class DeclineReviewService(
                 review == null -> refused(DeclineReviewRefusedException.NOT_FOUND, "review not found")
                 review.status != DeclineReviewStatus.REQUESTED ->
                     refused(DeclineReviewRefusedException.ALREADY_DECIDED, "review already decided")
+                // A narrow guard, not a conflict-of-interest check: it fires only when the principal
+                // name IS the party id. Staff principals live in a different namespace and no staff-to-
+                // party mapping exists on the platform, so staff reviewing their own decline as a
+                // customer passes here; the four-eyes approval of any successor is the remaining control.
                 reviewer == review.partyId.toString() ->
-                    refused(DeclineReviewRefusedException.SELF_REVIEW, "the applicant cannot review their own decline")
+                    refused(
+                        DeclineReviewRefusedException.SELF_REVIEW,
+                        "a reviewer whose principal is the applicant's party id cannot review the decline",
+                    )
                 // Timers are armed only after the transaction has committed the successor.
                 else -> decideLocked(review, request, reviewer).call { d ->
-                    d.successorApplicationId?.let { armFourEyesTimer(LoanApplicationId(it)) }
-                        ?: Uni.createFrom().item(Unit)
-                }
+                    d.successor?.let { armFourEyesTimer(it) } ?: Uni.createFrom().item(Unit)
+                }.map { it.review }
             }
         }
     }
@@ -130,51 +151,70 @@ class DeclineReviewService(
      * under the declined application's lock: a decided review without its successor, or an announced
      * overturn that was rolled back, must not exist.
      */
-    private fun decideLocked(review: DeclineReview, request: DeclineReviewDecisionRequest, reviewer: String) =
-        applications.withLocked(LoanApplicationId(review.applicationId)) { original ->
-            if (original == null) {
-                refused(DeclineReviewRefusedException.NOT_FOUND, "declined application not found")
+    private fun decideLocked(
+        review: DeclineReview,
+        request: DeclineReviewDecisionRequest,
+        reviewer: String,
+    ): Uni<Decided> = applications.withLocked(LoanApplicationId(review.applicationId)) { original ->
+        if (original == null) {
+            refused(DeclineReviewRefusedException.NOT_FOUND, "declined application not found")
+        } else {
+            val overturn = request.outcome == DeclineReviewDecision.OVERTURNED
+            val firstDue = FirstDueDate.forApplicationOn(LocalDate.now(clock))
+            val notOriginable = if (overturn) {
+                originabilityRefusal(original, firstDue, complianceGuard, originationConfig.floatingRateEnabled)
             } else {
-                val overturn = request.outcome == DeclineReviewDecision.OVERTURNED
-                val successor = if (overturn) successorOf(original, reviewer) else null
-                val decided = review.copy(
-                    status = request.outcome.toStatus(),
-                    reviewedBy = reviewer,
-                    reviewedAt = OffsetDateTime.now(clock),
-                    reviewReason = request.reason.trim(),
-                    successorApplicationId = successor?.id?.value,
-                )
-                // Successor first: the review row's successor_application_id is a foreign key, so the
-                // claim can only name a row that already exists. A lost claim fails the whole
-                // transaction, which takes the successor back out with it.
-                (successor?.let { applications.save(it).replaceWithVoid() } ?: Uni.createFrom().voidItem())
-                    .flatMap {
-                        reviews.claimDecision(
-                            decided.id,
-                            decided.status,
-                            reviewer,
-                            checkNotNull(decided.reviewedAt),
-                            checkNotNull(decided.reviewReason),
-                            decided.successorApplicationId,
-                        )
-                    }
-                    .flatMap { claimed ->
-                        if (claimed == 0) {
-                            refused<DeclineReview>(
-                                DeclineReviewRefusedException.ALREADY_DECIDED,
-                                "review already decided",
-                            )
-                        } else {
-                            emitAll(
-                                listOfNotNull(
-                                    eventsOf.decidedEvent(decided, reviewer),
-                                    successor?.let { eventsOf.successorEntryEvent(it, reviewer) },
-                                ),
-                            ).replaceWith(decided)
-                        }
-                    }
+                null
             }
+            if (notOriginable != null) {
+                // Refused before anything is written: the review stays REQUESTED.
+                return@withLocked refused<Decided>(
+                    DeclineReviewRefusedException.SUCCESSOR_NOT_ORIGINABLE,
+                    notOriginable,
+                )
+            }
+            val successor = if (overturn) successorOf(original, reviewer, firstDue) else null
+            val decided = review.copy(
+                status = request.outcome.toStatus(),
+                reviewedBy = reviewer,
+                reviewedAt = OffsetDateTime.now(clock),
+                reviewReason = request.reason.trim(),
+                successorApplicationId = successor?.id?.value,
+            )
+            // Successor first: the review row's successor_application_id is a foreign key, so the
+            // claim can only name a row that already exists. A lost claim fails the whole
+            // transaction, which takes the successor back out with it.
+            (successor?.let { applications.save(it).replaceWithVoid() } ?: Uni.createFrom().voidItem())
+                .flatMap {
+                    reviews.claimDecision(
+                        decided.id,
+                        decided.status,
+                        reviewer,
+                        checkNotNull(decided.reviewedAt),
+                        checkNotNull(decided.reviewReason),
+                        decided.successorApplicationId,
+                    )
+                }
+                .flatMap { claimed ->
+                    if (claimed == 0) {
+                        refused<Decided>(
+                            DeclineReviewRefusedException.ALREADY_DECIDED,
+                            "review already decided",
+                        )
+                    } else {
+                        emitAll(
+                            listOfNotNull(
+                                eventsOf.decidedEvent(decided, reviewer),
+                                successor?.let { eventsOf.successorEntryEvent(it, reviewer) },
+                            ),
+                        ).replaceWith(Decided(decided, successor))
+                    }
+                }
         }
+    }
+
+    /** The decided review and, for an overturn, the successor it committed. */
+    private data class Decided(val review: DeclineReview, val successor: LoanApplication?)
 
     private fun emitAll(messages: List<LendingOutboxMessage>): Uni<Unit> =
         messages.fold(Uni.createFrom().item(Unit)) { acc, m -> acc.flatMap { events.emit(m) } }
@@ -185,7 +225,10 @@ class DeclineReviewService(
      * against the shared state machine (DECISION_PENDING -> FOUR_EYES is the edge the flow normally
      * takes) rather than asserted, so a change to the graph surfaces here.
      */
-    private fun successorOf(original: LoanApplication, reviewer: String): LoanApplication {
+    private fun successorOf(original: LoanApplication, reviewer: String, firstDue: LocalDate): LoanApplication {
+        // The compliance pack active TODAY, as intake pins it — not the declined row's.
+        val packVersion = complianceGuard.resolveOriginationPack(original.jurisdiction, original.productType)
+            ?.pack?.version
         val entry = machine.apply(
             OriginationTransition(
                 applicationId = original.id.value.toString(),
@@ -195,7 +238,7 @@ class DeclineReviewService(
                 actorKind = OriginationActorKind.HUMAN,
                 reason = "decline review overturned",
                 occurredAt = clock.instant(),
-                packVersion = original.packVersion?.toString(),
+                packVersion = packVersion?.toString(),
             ),
         )
         check(entry is OriginationTransitionResult.Applied) { "successor entry refused by the state machine" }
@@ -207,6 +250,9 @@ class DeclineReviewService(
             decisionReason = null,
             decidedAt = null,
             createdAt = OffsetDateTime.now(clock),
+            // The declined row's date can be in the past by now; bookLoan does not re-check it.
+            firstDueDate = firstDue,
+            packVersion = packVersion,
             decisionOutcome = null,
             decisionPriceBand = null,
             decisionReasons = null,
@@ -221,17 +267,35 @@ class DeclineReviewService(
         )
     }
 
-    private fun armFourEyesTimer(successorId: LoanApplicationId): Uni<Unit> =
-        workflowPort.stateEntered(successorId, OriginationState.FOUR_EYES, null).replaceWith(Unit)
+    /**
+     * Same contract as `LendingService.armTimers`: read the [TimerArmingOutcome] and warn on anything
+     * but ARMED, because a no-op backend answers with a value, not a failure (#6085).
+     */
+    private fun armFourEyesTimer(successor: LoanApplication): Uni<Unit> {
+        val reflectionDays = complianceGuard.resolveOriginationPack(successor.jurisdiction, successor.productType)
+            ?.pack?.reflectionPeriodDays
+        return workflowPort.stateEntered(successor.id, OriginationState.FOUR_EYES, reflectionDays)
+            .invoke { outcome ->
+                if (outcome != TimerArmingOutcome.ARMED) {
+                    log.warnf(
+                        "successor application %s entered FOUR_EYES with NO durable timer armed (%s): " +
+                            "its four-eyes SLA escalation is unenforced.",
+                        successor.id.value,
+                        outcome,
+                    )
+                }
+            }
+            .replaceWith(Unit)
             // The decision is already committed; a timer that did not arm costs the SLA escalation, not
             // the review. Logged without the cause's message, which can carry payload values.
             .onFailure().recoverWithItem { e ->
                 log.errorf(
                     "four-eyes timer NOT armed for successor %s, cause=%s",
-                    successorId.value,
+                    successor.id.value,
                     e.javaClass.simpleName,
                 )
             }
+    }
 
     private fun <T> refused(code: String, message: String): Uni<T> =
         Uni.createFrom().failure(DeclineReviewRefusedException(code, message))
@@ -240,4 +304,25 @@ class DeclineReviewService(
         private const val ENGINE_DECLINE = "DECLINE"
         private const val MAX_LIST = 100
     }
+}
+
+/**
+ * Intake's own refusal gates (`LendingService.applyLegacy`), re-run against today: a successor must
+ * not be something intake would refuse now. Returns the refusal reason, or null if originable.
+ */
+private fun originabilityRefusal(
+    original: LoanApplication,
+    firstDue: LocalDate,
+    complianceGuard: CompliancePackGuard,
+    floatingRateEnabled: Boolean,
+): String? = try {
+    complianceGuard.checkOriginationAllowed(original.jurisdiction, original.productType)
+    if (original.rateTerms.rateType != LoanRateType.FIXED && !floatingRateEnabled) {
+        "FLOATING-rate origination is not enabled: the successor cannot be opened"
+    } else {
+        original.rateTerms.validate(firstDue)
+        null
+    }
+} catch (e: IllegalArgumentException) {
+    e.message ?: "origination is not allowed for this product"
 }

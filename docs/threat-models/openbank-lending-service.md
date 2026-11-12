@@ -588,18 +588,26 @@ disbursement controls (§7) are passed.
 | **S**poofing | A service account decides reviews | `@RolesAllowed` is `ROLE_CREDIT_RISK`/`ROLE_ADMIN`; the actions `lending.declineReview.*` are deliberately NOT in `rules.yaml: role_action_matrix` (a matrix line is a grant to any HUMAN-typed principal, machines included), and `lending_rest_ext.rego` carries an explicit machine veto, proved by a negative OPA test. |
 | **T**ampering | A decline made by a person is re-opened, or an engine decline is re-reviewed in a loop | Reviewable only when `DECLINED` with a stored engine outcome and no recorded human decider; a human decision records `decidedBy`, which ends it. One review per application (unique constraint), repeats are idempotent. |
 | **T**ampering | Two reviewers decide the same review, or an overturn leaves a half-written state | The decision is one conditional UPDATE (`where status = REQUESTED`); the loser gets 409 and writes no successor or event. Claim, successor and events commit in one transaction under the application row lock. |
+| **T**ampering | An overturn opens an application intake would refuse today | Before anything is written, the overturn re-runs intake's refusal gates against today — origination allowed for the product (compliance pack, when enforced), the FLOATING-rate switch, rate terms against the new first due date — and answers 409 `SUCCESSOR_NOT_ORIGINABLE`, leaving the review `REQUESTED`. The successor's first due date is recomputed with intake's own rule (`FirstDueDate`) and its compliance pack is the one active today. |
 | **R**epudiation | A reviewer overturns a decline without a recorded reason | Impossible: the request type rejects a reason under 10 characters, the schema CHECK rejects a decided row without reviewer and reason, and the reviewer is the JWT subject, never client-supplied. The reason is kept on the review row and never published. |
 | **R**epudiation | "What did the engine say that the reviewer saw?" | The engine's reason codes, policy versions and decision time are snapshotted on the review at request time; events carry ids and machine codes only. |
 | **I**nformation disclosure | The customer reads an officer's note or the reviewer's reason | The customer DTO carries status and timestamps only; the engine's own reason codes are already on the journey projection. Events carry no free-text personal data. |
 | **D**oS | Review requests flood the staff queue | Bounded by construction to one review per application and by the window (`lending.decline-review.window-days`, default 30); a request needs an engine-declined application of the caller. The edge's rate limiting sits in front. |
-| **E**oP | A reviewer approves the credit they overturned | The successor's proposer is the reviewer, and the existing four-eyes `decide` refuses an approver equal to the proposer (`SEGREGATION_OF_DUTIES`); the applicant cannot be the reviewer (`SELF_REVIEW`). |
+| **E**oP | A reviewer approves the credit they overturned | The successor's proposer is the reviewer, and the existing four-eyes `decide` refuses an approver equal to the proposer (`SEGREGATION_OF_DUTIES`). |
+| **E**oP | A member of staff reviews their own decline | **Only partly mitigated.** `SELF_REVIEW` refuses a reviewer whose principal name equals the applicant's party id, and nothing more: staff principals are not party ids, and the platform has no staff-to-party identity mapping (the `party_id` claim exists only in the customers realm), so an employee reviewing their own decline is not detected. The four-eyes approval by a second person is the remaining control. |
 
 **Residual risks / gaps:**
 
 - **Not yet reachable by a customer**: no customer-edge proxy route or admin-ui screen exists in
   this change, so the control is not live end to end until both land.
-- **Successor carries forward the original facts**, including `firstDueDate`, which may be in the
-  past by the time a review is decided; the approver sees the application as filed.
+- **No staff-to-party conflict-of-interest check** (see the EoP row): needs an identity mapping the
+  platform does not have. Follow-up.
+- **The successor is not re-priced and not re-evaluated.** It keeps the declined application's
+  nominal rate and catalog snapshot (up to the review window old), and there is no fresh engine
+  evaluation: its engine fields are null and `predecessorApplicationId` names the declined row,
+  which is what the four-eyes approver sees. Re-pricing needs the intake pricing path (catalog
+  profile resolution, or the intake-configured rate) reachable from a non-request context; that is a
+  restructuring of intake, not part of this change. Follow-up.
 - **No SLA timer on a pending review**; only the successor's four-eyes wait has the 5-day escalation.
 
 ## 10. Change log

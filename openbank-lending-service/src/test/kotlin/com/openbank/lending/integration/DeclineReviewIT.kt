@@ -6,6 +6,7 @@ package com.openbank.lending.integration
 
 import com.openbank.lending.application.port.out.CreditAssessment
 import com.openbank.lending.application.port.out.CreditBureauPort
+import com.openbank.lending.domain.model.FirstDueDate
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.arc.Unremovable
@@ -32,6 +33,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.TestMethodOrder
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -229,8 +231,11 @@ class DeclineReviewIT {
 
     @Test
     @Order(4)
+    // What the guard really enforces: a reviewer principal NAMED as the applicant's party id. Real staff
+    // principals are not party ids and no staff-to-party mapping exists, so a staff member reviewing
+    // their own decline as a customer is NOT caught by this service (documented limit, threat model).
     @TestSecurity(user = PARTY_B, roles = ["ROLE_CREDIT_RISK"])
-    fun `4 - the applicant cannot review their own decline`() {
+    fun `4 - a reviewer whose principal name is the applicant's party id is refused`() {
         decideReview(overturnedReview, "OVERTURNED") Then {
             statusCode(409)
             body("error", equalTo("SELF_REVIEW"))
@@ -283,6 +288,11 @@ class DeclineReviewIT {
         ).isEqualTo("dr-it-reviewer")
         assertThat(outboxCount("credit.decline_review.overturned", overturnedApp)).isEqualTo(1)
         assertThat(outboxCount("credit.application.transition", successor)).isGreaterThanOrEqualTo(1)
+        // Intake's first-due-date rule, recomputed for the successor rather than copied from the decline.
+        assertThat(scalar("select first_due_date::text from loan_application where id = ?", successor))
+            .isEqualTo(FirstDueDate.forApplicationOn(LocalDate.now(ZoneOffset.UTC)).toString())
+        // No fresh engine evaluation: the successor carries no engine outcome of its own.
+        assertThat(scalar("select decision_outcome from loan_application where id = ?", successor)).isNull()
     }
 
     @Test

@@ -9,13 +9,20 @@ import com.openbank.lending.application.port.out.DeclineReviewRepository
 import com.openbank.lending.application.port.out.LendingOutboxMessage
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanEventEmitter
+import com.openbank.lending.application.port.out.OriginationWorkflowPort
+import com.openbank.lending.application.port.out.TimerArmingOutcome
 import com.openbank.lending.domain.model.DeclineReview
 import com.openbank.lending.domain.model.DeclineReviewDecision
 import com.openbank.lending.domain.model.DeclineReviewDecisionRequest
 import com.openbank.lending.domain.model.DeclineReviewStatus
 import com.openbank.lending.domain.model.LoanApplication
-import com.openbank.lending.infrastructure.adapter.NoOpOriginationWorkflowPort
+import com.openbank.lending.domain.model.LoanRateIndex
+import com.openbank.lending.domain.model.LoanRateTerms
+import com.openbank.lending.domain.model.LoanRateType
+import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
+import com.openbank.lending.infrastructure.compliance.OriginationConfig
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import com.openbank.libs.lending.origination.OriginationState
 import io.mockk.every
 import io.mockk.mockk
@@ -44,12 +51,15 @@ class DeclineReviewServiceTest {
     private val saved = mutableListOf<LoanApplication>()
     private val party = UUID.randomUUID()
     private val config = DeclineReviewConfig(WINDOW_DAYS)
+    private val workflow = mockk<OriginationWorkflowPort>()
 
     private lateinit var service: DeclineReviewService
 
     @BeforeEach
     fun setUp() {
-        service = DeclineReviewService(applications, reviews, events, clock, config, NoOpOriginationWorkflowPort())
+        service = service(enforcePack = false)
+        every { workflow.stateEntered(any(), any(), any()) } returns
+            Uni.createFrom().item(TimerArmingOutcome.NOT_ARMED_NO_WORKFLOW_BACKEND)
         every { applications.withLocked<Any>(any(), any()) } answers {
             applications.findById(firstArg()).flatMap(secondArg<(LoanApplication?) -> Uni<Any>>())
         }
@@ -65,18 +75,32 @@ class DeclineReviewServiceTest {
         every { reviews.loadByApplication(any()) } returns Uni.createFrom().nullItem()
     }
 
+    private fun service(enforcePack: Boolean, floatingEnabled: Boolean = false) = DeclineReviewService(
+        applications,
+        reviews,
+        events,
+        clock,
+        config,
+        workflow,
+        CompliancePackGuard(CompliancePackRegistry(), clock, enforcePack),
+        OriginationConfig(autoApprove = false, floatingRateEnabled = floatingEnabled),
+    )
+
     private fun declined(
         decidedBy: String? = null,
         outcome: String? = "DECLINE",
         status: OriginationState = OriginationState.DECLINED,
         engineAt: OffsetDateTime? = OffsetDateTime.ofInstant(now.minusSeconds(DAY * 2), ZoneOffset.UTC),
         owner: UUID = party,
+        firstDue: LocalDate = LocalDate.parse("2026-12-01"),
+        rateTerms: LoanRateTerms = LoanRateTerms.FIXED,
     ) = LoanApplication(
         partyId = owner,
         requestedAmount = Money.of(BigDecimal("100000"), "CZK"),
         nominalAnnualRate = BigDecimal("0.08"),
         termPeriods = 12,
-        firstDueDate = LocalDate.parse("2026-12-01"),
+        firstDueDate = firstDue,
+        rateTerms = rateTerms,
         status = status,
         proposedBy = "edge",
         decidedBy = decidedBy,
@@ -260,6 +284,83 @@ class DeclineReviewServiceTest {
         assertThat(successor.decisionInputHash).isNull()
         assertThat(emitted.map { it.eventType })
             .containsExactly("credit.decline_review.overturned", "credit.application.transition")
+        // The timer is reported for the successor's FOUR_EYES entry even when the backend answers NOT_ARMED.
+        verify(exactly = 1) { workflow.stateEntered(successor.id, OriginationState.FOUR_EYES, null) }
+    }
+
+    @Test
+    fun `an overturn whose original first due date has passed gives the successor a future one by the intake rule`() {
+        val app = declined(firstDue = LocalDate.parse("2026-10-01")).also(::stubApp)
+        val review = pendingReview(app)
+        claims()
+
+        decide(review, DeclineReviewDecision.OVERTURNED)
+
+        val successor = saved.single()
+        // now = 2026-11-12: first of the month after next.
+        assertThat(successor.firstDueDate).isEqualTo(LocalDate.parse("2027-01-01"))
+        assertThat(successor.firstDueDate).isAfter(LocalDate.ofInstant(now, ZoneOffset.UTC))
+    }
+
+    private fun floating() = LoanRateTerms(
+        rateType = LoanRateType.FLOATING,
+        rateIndex = LoanRateIndex.PRIBOR_3M,
+        spread = BigDecimal("0.02"),
+        resetFrequencyMonths = 3,
+        nextResetDate = LocalDate.parse("2027-04-01"),
+    )
+
+    private fun assertRefusedBeforeAnyWrite(review: DeclineReview) {
+        assertThat(
+            refusalCode { decide(review, DeclineReviewDecision.OVERTURNED) },
+        ).isEqualTo(DeclineReviewRefusedException.SUCCESSOR_NOT_ORIGINABLE)
+        // The review stays REQUESTED: no claim, no successor, no event, no timer.
+        verify(exactly = 0) { reviews.claimDecision(any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { workflow.stateEntered(any(), any(), any()) }
+        assertThat(saved).isEmpty()
+        assertThat(emitted).isEmpty()
+    }
+
+    @Test
+    fun `an overturn to a FLOATING rate while floating origination is off is refused and the review stays open`() {
+        val app = declined(rateTerms = floating()).also(::stubApp)
+        val review = pendingReview(app)
+        claims()
+
+        assertRefusedBeforeAnyWrite(review)
+    }
+
+    @Test
+    fun `with floating origination on, a FLOATING successor is opened`() {
+        service = service(enforcePack = false, floatingEnabled = true)
+        val app = declined(rateTerms = floating()).also(::stubApp)
+        val review = pendingReview(app)
+        claims()
+
+        decide(review, DeclineReviewDecision.OVERTURNED)
+
+        assertThat(saved.single().rateTerms.rateType).isEqualTo(LoanRateType.FLOATING)
+    }
+
+    @Test
+    fun `an overturn for a product origination is not allowed for is refused and the review stays open`() {
+        // Pack enforcement on and no active pack: intake would refuse this application today.
+        service = service(enforcePack = true)
+        val app = declined().also(::stubApp)
+        val review = pendingReview(app)
+        claims()
+
+        assertRefusedBeforeAnyWrite(review)
+    }
+
+    @Test
+    fun `confirming is not gated on originability - nothing is opened`() {
+        service = service(enforcePack = true)
+        val app = declined(rateTerms = floating()).also(::stubApp)
+        val review = pendingReview(app)
+        claims()
+
+        assertThat(decide(review, DeclineReviewDecision.CONFIRMED).status).isEqualTo(DeclineReviewStatus.CONFIRMED)
     }
 
     @Test
@@ -273,8 +374,12 @@ class DeclineReviewServiceTest {
         assertThat(emitted).allSatisfy { assertThat(it.payload).doesNotContain("income documents") }
     }
 
+    /**
+     * What this guard really enforces: a principal NAMED as the party id. Real staff principals are not
+     * party ids and no staff-to-party mapping exists, so this is not a conflict-of-interest check.
+     */
     @Test
-    fun `the applicant cannot review their own decline`() {
+    fun `a reviewer whose principal name is the applicant's party id is refused`() {
         val app = declined().also(::stubApp)
         val review = pendingReview(app)
 
@@ -291,9 +396,15 @@ class DeclineReviewServiceTest {
 
         assertThat(refusalCode { decide(review, DeclineReviewDecision.OVERTURNED) })
             .isEqualTo(DeclineReviewRefusedException.ALREADY_DECIDED)
-        // The successor is written before the claim (foreign key), so it is the failed transaction
-        // that removes it again. That rollback is NOT exercised here (mocks) nor in the IT.
+        // The claim was attempted and lost (the 0-row branch), and nothing after it ran: no event and
+        // no four-eyes timer for a successor that is not going to exist.
+        verify(exactly = 1) { reviews.claimDecision(review.id, any(), any(), any(), any(), any()) }
         assertThat(emitted).isEmpty()
+        verify(exactly = 0) { workflow.stateEntered(any(), any(), any()) }
+        // The successor IS saved before the claim — the review row's successor_application_id is a
+        // foreign key — so it is the failed transaction that removes it again. That rollback is NOT
+        // exercised here (mocks) nor in the IT.
+        assertThat(saved).hasSize(1)
     }
 
     @Test

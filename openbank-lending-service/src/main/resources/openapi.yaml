@@ -332,14 +332,20 @@ paths:
       operationId: decideDeclineReview
       summary: Confirm the engine decline or overturn it
       description: >-
-        The reviewer (the JWT subject, never client-supplied) is not bound by the engine outcome and
-        must not be the applicant. A reason of at least 10 characters is mandatory for both outcomes.
+        The reviewer (the JWT subject, never client-supplied) is not bound by the engine outcome. A
+        reviewer whose principal name equals the applicant's party id is refused (SELF_REVIEW); this is
+        not a staff conflict-of-interest check, which would need a staff-to-party mapping. A reason of at least 10 characters is mandatory for both outcomes.
         CONFIRMED records the human decision; the declined application is unchanged. OVERTURNED does
         not resurrect the declined application: it opens a successor application (linked in
         `successorApplicationId`) in FOUR_EYES with the reviewer as proposer, so the existing
         four-eyes decision (POST /applications/{id}/decision, approver different from proposer)
-        still makes the credit decision. The Idempotency-Key is required; the decision is replay-safe by a
-        conditional claim, so a retry answers 409. 409 codes: REVIEW_ALREADY_DECIDED, SELF_REVIEW.
+        still makes the credit decision. The successor gets a first due date recomputed by the intake
+        rule and today's compliance pack, but keeps the declined application's rate (no re-pricing) and
+        has no engine evaluation of its own. An overturn intake would refuse today (origination not
+        allowed for the product, FLOATING rate while floating origination is off, invalid rate terms)
+        answers 409 SUCCESSOR_NOT_ORIGINABLE and the review stays REQUESTED. The Idempotency-Key is required; the decision is replay-safe by a
+        conditional claim, so a retry answers 409. 409 codes: REVIEW_ALREADY_DECIDED, SELF_REVIEW,
+        SUCCESSOR_NOT_ORIGINABLE.
       parameters:
         - $ref: '#/components/parameters/IdPath'
         - $ref: '#/components/parameters/IdempotencyKey'
