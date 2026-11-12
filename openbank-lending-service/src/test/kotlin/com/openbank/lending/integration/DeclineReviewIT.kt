@@ -6,6 +6,7 @@ package com.openbank.lending.integration
 
 import com.openbank.lending.application.port.out.CreditAssessment
 import com.openbank.lending.application.port.out.CreditBureauPort
+import com.openbank.lending.domain.model.FirstDueDate
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.arc.Unremovable
@@ -33,6 +34,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.TestMethodOrder
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -40,9 +42,9 @@ import javax.sql.DataSource
  * Customer-requested human review of an engine decline, over real HTTP and a real database.
  * Ordered methods because `@TestSecurity` is fixed per method and each step needs its own principal.
  *
- * The declined application must stay DECLINED (read back with plain JDBC), a repeat request is the same
- * review and writes no second row or event, a stranger reads 404, and a decline a PERSON made is refused
- * 409 NOT_ENGINE_DECLINE.
+ * One flow per outcome, then the guards. The declined application must stay DECLINED in every case
+ * (read back with plain JDBC); an overturn must leave a SUCCESSOR in FOUR_EYES that a different
+ * operator can approve through the existing decision endpoint, and the reviewer must not be able to.
  */
 @QuarkusTest
 @TestProfile(DeclineReviewIT.IntakeProfile::class)
@@ -71,10 +73,12 @@ class DeclineReviewIT {
     @Inject
     lateinit var dataSource: DataSource
 
-    private lateinit var firstApp: String
-    private lateinit var secondApp: String
+    private lateinit var confirmedApp: String
+    private lateinit var overturnedApp: String
     private lateinit var humanDeclinedApp: String
-    private lateinit var firstReview: String
+    private lateinit var confirmedReview: String
+    private lateinit var overturnedReview: String
+    private lateinit var successor: String
 
     private companion object {
         const val EDGE = "service-account-openbank-customer-edge"
@@ -145,6 +149,19 @@ class DeclineReviewIT {
         post("/api/v1/lending/intake/applications/$applicationId/decline-review")
     }
 
+    private fun decideReview(
+        reviewId: String,
+        outcome: String,
+        reason: String = REASON,
+        idempotencyKey: String? = UUID.randomUUID().toString(),
+    ) = Given {
+        contentType("application/json")
+        idempotencyKey?.let { header("Idempotency-Key", it) }
+        body("""{"outcome":"$outcome","reason":"$reason"}""")
+    } When {
+        post("/api/v1/lending/decline-reviews/$reviewId/decision")
+    }
+
     private fun decideApplication(id: String, approve: Boolean) = Given {
         contentType("application/json")
         body("""{"approve":$approve,"reason":"$REASON"}""")
@@ -156,12 +173,12 @@ class DeclineReviewIT {
     @Order(1)
     @TestSecurity(user = "dr-it-officer", roles = ["ROLE_LENDING_OFFICER"])
     fun `1 - the engine declines two unaffordable applications and a person declines a third`() {
-        firstApp = submit(PARTY_A, income = "2000.00")
-        secondApp = submit(PARTY_B, income = "2000.00")
+        confirmedApp = submit(PARTY_A, income = "2000.00")
+        overturnedApp = submit(PARTY_B, income = "2000.00")
         humanDeclinedApp = submit(PARTY_C, income = "60000.00")
-        listOf(firstApp, secondApp, humanDeclinedApp).forEach(::advance)
+        listOf(confirmedApp, overturnedApp, humanDeclinedApp).forEach(::advance)
 
-        listOf(firstApp, secondApp).forEach {
+        listOf(confirmedApp, overturnedApp).forEach {
             assertThat(status(it)).isEqualTo("DECLINED")
             assertThat(scalar("select decision_outcome from loan_application where id = ?", it)).isEqualTo("DECLINE")
             assertThat(scalar("select decided_by from loan_application where id = ?", it)).isNull()
@@ -193,19 +210,19 @@ class DeclineReviewIT {
         ],
     )
     fun `3 - the customer asks - a repeat is the same review - a stranger and a human decline are refused`() {
-        firstReview = customerRequest(PARTY_A, firstApp) Then {
+        confirmedReview = customerRequest(PARTY_A, confirmedApp) Then {
             statusCode(201)
             body("status", equalTo("REQUESTED"))
-            body("applicationId", equalTo(firstApp))
+            body("applicationId", equalTo(confirmedApp))
         } Extract { path<String>("id") }
 
-        customerRequest(PARTY_A, firstApp) Then {
+        customerRequest(PARTY_A, confirmedApp) Then {
             statusCode(200)
-            body("id", equalTo(firstReview))
+            body("id", equalTo(confirmedReview))
         }
-        assertThat(outboxCount("credit.decline_review.requested", firstApp)).isEqualTo(1)
+        assertThat(outboxCount("credit.decline_review.requested", confirmedApp)).isEqualTo(1)
 
-        customerRequest(PARTY_B, firstApp) Then { statusCode(404) }
+        customerRequest(PARTY_B, confirmedApp) Then { statusCode(404) }
 
         // The engine-only guard: a decline a person made is never looped back.
         customerRequest(PARTY_C, humanDeclinedApp) Then {
@@ -213,12 +230,102 @@ class DeclineReviewIT {
             body("error", equalTo("NOT_ENGINE_DECLINE"))
         }
 
-        customerRequest(PARTY_B, secondApp) Then { statusCode(201) }
-        assertThat(status(firstApp)).isEqualTo("DECLINED")
+        overturnedReview =
+            customerRequest(PARTY_B, overturnedApp) Then { statusCode(201) } Extract { path<String>("id") }
+        assertThat(status(confirmedApp)).isEqualTo("DECLINED")
     }
 
     @Test
     @Order(4)
+    // What the guard really enforces: a reviewer principal NAMED as the applicant's party id. Real staff
+    // principals are not party ids and no staff-to-party mapping exists, so a staff member reviewing
+    // their own decline as a customer is NOT caught by this service (documented limit, threat model).
+    @TestSecurity(user = PARTY_B, roles = ["ROLE_CREDIT_RISK"])
+    fun `4 - a reviewer whose principal name is the applicant's party id is refused`() {
+        decideReview(overturnedReview, "OVERTURNED") Then {
+            statusCode(409)
+            body("error", equalTo("SELF_REVIEW"))
+        }
+    }
+
+    @Test
+    @Order(5)
+    @TestSecurity(user = "dr-it-reviewer", roles = ["ROLE_CREDIT_RISK"])
+    fun `5 - a reason is mandatory - confirming keeps the application declined and is final`() {
+        decideReview(confirmedReview, "CONFIRMED", reason = "short") Then { statusCode(400) }
+        decideReview(confirmedReview, "REQUESTED") Then { statusCode(400) }
+        decideReview(confirmedReview, "CONFIRMED", idempotencyKey = null) Then { statusCode(400) }
+
+        decideReview(confirmedReview, "CONFIRMED") Then {
+            statusCode(200)
+            body("status", equalTo("CONFIRMED"))
+            body("reviewedBy", equalTo("dr-it-reviewer"))
+        }
+        assertThat(status(confirmedApp)).isEqualTo("DECLINED")
+        assertThat(outboxCount("credit.decline_review.confirmed", confirmedApp)).isEqualTo(1)
+
+        decideReview(confirmedReview, "OVERTURNED") Then {
+            statusCode(409)
+            body("error", equalTo("REVIEW_ALREADY_DECIDED"))
+        }
+    }
+
+    @Test
+    @Order(6)
+    @TestSecurity(user = "dr-it-reviewer", roles = ["ROLE_CREDIT_RISK"])
+    fun `6 - overturning opens a linked successor in FOUR_EYES proposed by the reviewer`() {
+        Given { accept("application/json") } When { get("/api/v1/lending/decline-reviews") } Then {
+            statusCode(200)
+            body("id", org.hamcrest.Matchers.hasItem(overturnedReview))
+            body("id", org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem(confirmedReview)))
+        }
+
+        successor = decideReview(overturnedReview, "OVERTURNED") Then {
+            statusCode(200)
+            body("status", equalTo("OVERTURNED"))
+        } Extract { path<String>("successorApplicationId") }
+
+        assertThat(status(overturnedApp)).isEqualTo("DECLINED")
+        assertThat(status(successor)).isEqualTo("FOUR_EYES")
+        assertThat(scalar("select predecessor_application_id::text from loan_application where id = ?", successor))
+            .isEqualTo(overturnedApp)
+        assertThat(
+            scalar("select proposed_by from loan_application where id = ?", successor),
+        ).isEqualTo("dr-it-reviewer")
+        assertThat(outboxCount("credit.decline_review.overturned", overturnedApp)).isEqualTo(1)
+        assertThat(outboxCount("credit.application.transition", successor)).isGreaterThanOrEqualTo(1)
+        // Intake's first-due-date rule, recomputed for the successor rather than copied from the decline.
+        assertThat(scalar("select first_due_date::text from loan_application where id = ?", successor))
+            .isEqualTo(FirstDueDate.forApplicationOn(LocalDate.now(ZoneOffset.UTC)).toString())
+        // No fresh engine evaluation: the successor carries no engine outcome of its own.
+        assertThat(scalar("select decision_outcome from loan_application where id = ?", successor)).isNull()
+    }
+
+    @Test
+    @Order(7)
+    @TestSecurity(user = "dr-it-reviewer", roles = ["ROLE_CREDIT_RISK"])
+    fun `7 - the reviewer cannot also approve the successor`() {
+        decideApplication(successor, approve = true) Then {
+            statusCode(409)
+            body("error", equalTo("SEGREGATION_OF_DUTIES"))
+        }
+        assertThat(status(successor)).isEqualTo("FOUR_EYES")
+    }
+
+    @Test
+    @Order(8)
+    @TestSecurity(user = "dr-it-approver", roles = ["ROLE_CREDIT_RISK"])
+    fun `8 - a different operator approves it through the existing four-eyes decision`() {
+        decideApplication(successor, approve = true) Then {
+            statusCode(200)
+            body("status", equalTo("OFFERED"))
+            body("decidedBy", equalTo("dr-it-approver"))
+        }
+        assertThat(status(overturnedApp)).isEqualTo("DECLINED")
+    }
+
+    @Test
+    @Order(9)
     @TestSecurity(
         user = EDGE,
         roles = ["ROLE_OPERATOR"],
@@ -230,20 +337,19 @@ class DeclineReviewIT {
             Claim(key = "preferred_username", value = EDGE),
         ],
     )
-    fun `4 - a repeat request still answers with the same review`() {
-        customerRequest(PARTY_A, firstApp) Then {
+    fun `9 - after a decision a repeat request still answers with the decided review`() {
+        customerRequest(PARTY_A, confirmedApp) Then {
             statusCode(200)
-            body("id", equalTo(firstReview))
-            body("status", equalTo("REQUESTED"))
+            body("status", equalTo("CONFIRMED"))
         }
-        assertThat(outboxCount("credit.decline_review.requested", firstApp)).isEqualTo(1)
     }
 
     @Test
-    @Order(5)
+    @Order(10)
     @TestSecurity(user = "some-operator", roles = ["ROLE_OPERATOR"])
-    fun `5 - an operator is not the customer edge`() {
-        customerRequest(PARTY_A, firstApp) Then { statusCode(403) }
+    fun `10 - an operator is neither the customer edge nor a reviewer`() {
+        customerRequest(PARTY_A, confirmedApp) Then { statusCode(403) }
+        decideReview(confirmedReview, "CONFIRMED") Then { statusCode(403) }
     }
 }
 
