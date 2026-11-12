@@ -27,6 +27,11 @@ module is on `rules.yaml: four_eyes_enforcement.allowlist` with a live `expires`
   - has expired (today > expires) — a lapsed exception is a violation, not a silent pass;
   - is for a module that already enforces, or owns no four-eyes action (stale);
   - lacks `expires`/`reason`, has an unparseable date, or expires more than MAX_HORIZON_DAYS out.
+An entry within WARN_DAYS of expiry prints a `::warning::` (never fails); expiry itself fails. The
+exceptions are staggered in waves so one date never reddens every open PR at once.
+A gitops manifest that mentions `kind:` and fails to parse is a hard failure (it could hide a workload).
+`@Authorize` is matched with `action = "..."` anywhere in the argument list; `action = CONSTANT` is
+fail-closed (the gate cannot tell which action it is) — write a literal.
 The application.yaml default is deliberately NOT consulted: communication-service defaults to true,
 and a code default is exactly what a later edit can flip with no manifest diff to review.
 
@@ -51,7 +56,9 @@ COMPONENTS = pathlib.Path("openbank-infra/gitops/components")
 WORKLOAD_KINDS = {"Deployment", "Rollout", "StatefulSet"}
 ENV_NAME = "AUTHZ_FOUR_EYES_ENFORCE"
 MAX_HORIZON_DAYS = 120
-AUTHORIZE = re.compile(r'@Authorize\(\s*action\s*=\s*"([^"]+)"')
+WARN_DAYS = 14
+AUTHORIZE_OPEN = re.compile(r"@Authorize\(")
+ACTION_ARG = re.compile(r'(?:^|[,(\s])action\s*=\s*(?:"([^"]+)"|([A-Za-z_][\w.]*))')
 
 
 def load_rules(root: pathlib.Path) -> dict:
@@ -78,28 +85,59 @@ def is_four_eyes(action: str, rules: dict, scopes: set[str]) -> bool:
         action.endswith(f".{v}") for v in (fe.get("verbs") or []))
 
 
-def four_eyes_owners(root: pathlib.Path, rules: dict) -> dict[str, set[str]]:
-    """module -> the four-eyes actions its own @Authorize sites declare (comment lines skipped)."""
+def _annotation_args(text: str, start: int) -> str:
+    """The argument text of the annotation whose '(' is at start-1 (balanced parens, strings skipped)."""
+    depth, i, in_str = 1, start, False
+    while i < len(text) and depth:
+        ch = text[i]
+        if in_str:
+            if ch == "\\":
+                i += 1
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        i += 1
+    return text[start:i - 1]
+
+
+def four_eyes_owners(root: pathlib.Path, rules: dict) -> tuple[dict[str, set[str]], list[str]]:
+    """(module -> four-eyes actions its @Authorize sites declare, unresolvable-site errors).
+
+    Comment lines are skipped. `action` may be any argument, not only the first. `action = CONST`
+    cannot be classified, so it is an error naming the file (fail closed), never a silent skip.
+    """
     scopes = money_path_scopes(rules)
     owners: dict[str, set[str]] = {}
+    errors: list[str] = []
     for module in sorted(p for p in root.glob("openbank-*") if (p / "src" / "main" / "kotlin").is_dir()):
         for kt in gatelib.rglob(module / "src" / "main" / "kotlin", "*.kt"):
             text = gatelib.read_text(kt, errors="replace")
-            for m in AUTHORIZE.finditer(text):
+            for m in AUTHORIZE_OPEN.finditer(text):
                 line_start = text.rfind("\n", 0, m.start()) + 1
                 prefix = text[line_start:m.start()].strip()
                 if prefix.startswith(("*", "//")) or "`" in prefix:
                     continue  # KDoc / comment prose that quotes an annotation
-                if is_four_eyes(m.group(1), rules, scopes):
-                    owners.setdefault(module.name, set()).add(m.group(1))
-    return owners
+                arg = ACTION_ARG.search(_annotation_args(text, m.end()))
+                if arg is None:
+                    continue
+                if arg.group(2):
+                    errors.append(f"{module.name}: {kt.relative_to(root)} declares @Authorize(action = {arg.group(2)}) — the gate "
+                                  f"cannot classify a non-literal action; write the action as a string literal")
+                elif is_four_eyes(arg.group(1), rules, scopes):
+                    owners.setdefault(module.name, set()).add(arg.group(1))
+    return owners, errors
 
 
 def _image_matches(image: str, module: str) -> bool:
     return re.search(rf"(^|/){re.escape(module)}([:@]|$)", image) is not None
 
 
-def workload_containers(root: pathlib.Path) -> list[tuple[pathlib.Path, str, str | None]]:
+def workload_containers(root: pathlib.Path, errors: list[str]) -> list[tuple[pathlib.Path, str, str | None]]:
     """(manifest, image, literal AUTHZ_FOUR_EYES_ENFORCE or None) for every workload container.
 
     Parsed once: the gitops tree is ~1k YAML files and re-reading it per subject cost ~30 s.
@@ -110,7 +148,11 @@ def workload_containers(root: pathlib.Path) -> list[tuple[pathlib.Path, str, str
             continue
         try:
             docs = gatelib.load_yaml_all(path)
-        except yaml.YAMLError:
+        except yaml.YAMLError as exc:
+            # Every committed manifest mentioning `kind:` parses today (874 files, 0 failures), so a
+            # failure is a regression that could hide a workload from this gate: hard error.
+            errors.append(f"{path.relative_to(root)}: gitops manifest does not parse as YAML ({type(exc).__name__}) — "
+                          f"the gate cannot see the workloads in it")
             continue
         for doc in docs:
             if not isinstance(doc, dict) or doc.get("kind") not in WORKLOAD_KINDS:
@@ -132,15 +174,16 @@ def manifest_values(containers, module: str) -> list[tuple[pathlib.Path, str | N
     return [(p, v) for p, image, v in containers if _image_matches(image, module)]
 
 
-def run(root: pathlib.Path, today: dt.date) -> tuple[list[str], int]:
+def run(root: pathlib.Path, today: dt.date) -> tuple[list[str], int, list[str]]:
+    """(errors, subject count, warnings)."""
     rules = load_rules(root)
-    owners = four_eyes_owners(root, rules)
+    owners, errors = four_eyes_owners(root, rules)
+    warnings: list[str] = []
     section = rules.get("four_eyes_enforcement") or {}
     allowlist = section.get("allowlist") or {}
     if not isinstance(allowlist, dict):
-        return ["rules.yaml four_eyes_enforcement.allowlist must be a mapping of module -> {expires, reason}"], len(owners)
-    errors: list[str] = []
-    containers = workload_containers(root)
+        return ["rules.yaml four_eyes_enforcement.allowlist must be a mapping of module -> {expires, reason}"], len(owners), warnings
+    containers = workload_containers(root, errors)
 
     for module in sorted(owners):
         actions = ", ".join(sorted(owners[module]))
@@ -175,13 +218,16 @@ def run(root: pathlib.Path, today: dt.date) -> tuple[list[str], int]:
         if today > expires:
             errors.append(f"{module}: allowlist entry EXPIRED on {expires} (today {today}) — four-eyes is still not "
                           f"enforced for [{actions}]; fix the blocker and flip, or re-argue the exception")
+        elif (expires - today).days <= WARN_DAYS:
+            warnings.append(f"{module}: four-eyes allowlist entry expires {expires} ({(expires - today).days} days) — "
+                            f"enforce it or re-argue the exception before it fails the gate")
         elif (expires - today).days > MAX_HORIZON_DAYS:
             errors.append(f"{module}: allowlist `expires` {expires} is more than {MAX_HORIZON_DAYS} days out — "
                           f"a far-future date is a permanent waiver")
 
     for module in sorted(set(allowlist) - set(owners)):
         errors.append(f"{module}: STALE allowlist entry — the module owns no four-eyes action")
-    return errors, len(owners)
+    return errors, len(owners), warnings
 
 
 def self_test() -> int:
@@ -220,7 +266,9 @@ def self_test() -> int:
         return root
 
     def check(label: str, root: pathlib.Path, want_substrings: list[str], want_subjects: int = 3) -> None:
-        errors, n = run(root, today)
+        errors, n, warnings = run(root, today)
+        if warnings:
+            fails.append(f"{label}: unexpected warnings {warnings}")
         if n != want_subjects:
             fails.append(f"{label}: expected {want_subjects} subjects, got {n}")
         if not want_substrings and errors:
@@ -269,13 +317,42 @@ def self_test() -> int:
         "        - name: app\n          image: registry.example/openbank-ledger-service:sandbox-1\n")
     check("second unenforced workload flags", root, ["openbank-ledger-service: owns"])
 
+    # 11. Expiry warning window (14 days): silent outside, warning (exit-0 class) inside, failure after.
+    missing = {**all_on, "openbank-ledger-service": None}
+    root = tree(live, missing)
+    for label, day, want_err, want_warn in (
+            ("expiry not in window is silent", dt.date(2026, 11, 30), 0, 0),
+            ("expiry in window warns, does not fail", dt.date(2026, 12, 5), 0, 1),
+            ("expiry day itself still warns", dt.date(2026, 12, 15), 0, 1),
+            ("expired fails", dt.date(2026, 12, 16), 1, 0)):
+        errs, _, warns = run(root, day)
+        if len(errs) != want_err or len(warns) != want_warn:
+            fails.append(f"{label}: expected {want_err} error(s)/{want_warn} warning(s), got {errs}/{warns}")
+        elif want_warn and not ("openbank-ledger-service" in warns[0] and "2026-12-15" in warns[0]):
+            fails.append(f"{label}: warning does not name service and date: {warns}")
+    # 12. A gitops manifest that fails YAML parsing is a hard failure naming the file, not a skip.
+    root = tree("", all_on)
+    (root / COMPONENTS / "c" / "broken.yaml").write_text("kind: Deployment\nspec: [unclosed\n  x: : y\n")
+    errs, _, _ = run(root, today)
+    if not any("broken.yaml" in e and "does not parse" in e for e in errs):
+        fails.append(f"unparseable manifest not flagged: {errs}")
+    # 13. `action =` need not be the first @Authorize argument.
+    check("action not first arg is a subject",
+          tree("", all_on, extra_src='@Authorize(resource = "#id", action = "opsmessage.compose")\n'),
+          ["openbank-billing-service: owns four-eyes action(s) [opsmessage.compose] but no gitops workload"],
+          want_subjects=4)
+    # 14. `action = CONSTANT` fails closed instead of being silently ignored.
+    check("constant action fails closed", tree("", all_on, extra_src='@Authorize(action = ACTION_X)\n'),
+          ["cannot classify a non-literal action"])
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: four-eyes-enforce gate is falsifiable (11 cases: missing env, false, expired, "
-          "stale x2, far-future, no expiry, no workload, partial workloads, plus 2 positive controls)")
+    print("self-test ok: four-eyes-enforce gate is falsifiable (missing env, false, expired, stale x2, "
+          "far-future, no expiry, no workload, partial workloads, expiry warning window, unparseable manifest, "
+          "action not first, constant action, plus positive controls)")
     return 0
 
 
@@ -289,8 +366,10 @@ def main() -> int:
         return self_test()
     today = dt.date.fromisoformat(args.today) if args.today else dt.datetime.now(dt.timezone.utc).date()
     root = pathlib.Path(args.root)
-    errors, n = run(root, today)
+    errors, n, warnings = run(root, today)
     gatelib.subjects(n, "modules owning a four-eyes @Authorize action")
+    for w in warnings:
+        print(f"::warning::{w}")
     for e in errors:
         print(f"::error::{e}")
     if errors:

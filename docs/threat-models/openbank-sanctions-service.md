@@ -177,12 +177,13 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
   existed in code and in the UI but never stopped anything. The manifest now sets the flag: the
   maker's `POST /review` answers 202 with an `approvalId`, a DIFFERENT operator decides it from the
   admin-ui checker queue (`GET/PATCH /api/v1/sanctions/approvals`), and the maker's retry carries
-  `X-Approval-Id`, consumed once (the admin-ui review form already implements both halves).
+  `X-Approval-Id`, consumed once (completing the second approval through the admin-ui review form is not verified end to end; tracked separately).
   **STRIDE-E/R:** a lone operator can no longer clear a true positive; the self-approval guard in
   the Redis store refuses maker == checker. **No machine path is paused:** `sanctions.clear` has no
   `ROLE_API`, no service rule grants it to a `service-account-*`, and the screening callers use
-  `sanctions.create`. A service account holding `ROLE_OPERATOR` (the residual noted 2026-10-08)
-  is now parked at 202 instead of clearing a hit, which narrows that residual. **Availability
+  `sanctions.create`. The residual noted 2026-10-08 (a service account holding `ROLE_OPERATOR`)
+  is unchanged by this: base `rest.rego` `matrix-allows` already excludes machine principals, so
+  such a caller is denied before the four-eyes step is reached; four-eyes does not narrow it. **Availability
   dependency:** the approval queue now depends on `redis.sanctions.svc`; if it is down an
   operator's clear fails instead of proceeding — correct for this control. Residual: approvals
   are Redis records with the interceptor TTL, not durable audit; the disposition audit trail is
