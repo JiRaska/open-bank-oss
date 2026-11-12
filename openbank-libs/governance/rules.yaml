@@ -1725,6 +1725,100 @@ four_eyes:
       - service-account-openbank-pension                           # ADR-0335: scope is DATA, see scoped_sca_consumers
 
 # ---------------------------------------------------------------------------------------
+# Four-eyes ENFORCEMENT in the deployed manifest (#15748, ADR-0155). `four_eyes` above decides
+# WHICH actions OPA flags `four_eyes_required`; that flag does nothing unless the service's
+# AuthorizeInterceptor runs with authz.four-eyes.enforce=true, whose code default is false. So a
+# service can own a four-eyes action, carry the policy, wire an ApprovalStore, and still execute
+# every flagged call on one operator — which is what the whole fleet did until this section.
+#
+# Gate `four-eyes-enforce-deployed` (.github/scripts/check-four-eyes-enforce.py, enforced): every
+# module that declares an @Authorize action the policy flags four-eyes (same scope/verb/action
+# logic as rest.rego, derived from the source, never listed by hand) must set the literal env
+# AUTHZ_FOUR_EYES_ENFORCE: "true" on every gitops workload running its image — OR appear in
+# `allowlist` below. The allowlist is a list of FACTS with a shelf life, so the gate fails on:
+#   - an entry whose `expires` date has passed (a lapsed exception is a violation, not a pass —
+#     the authz-enforce allowlist once kept accepting a date months after it lapsed);
+#   - an entry for a module that already enforces, or that owns no four-eyes action (stale);
+#   - an entry without `expires` + `reason`, or `expires` more than 120 days out (a far-future
+#     date is a permanent waiver spelled as a temporary one).
+# Expiry is STAGGERED in three waves by how hard a service is to bring under enforcement, so no
+# single date reddens every open PR: 2026-12-15 (flag flip + ApprovalStore wired; needs the admin-ui
+# checker workbench / maker retry), 2027-01-29 (no ApprovalStore wired yet), 2027-03-10 (machine or
+# customer callers that need `four_eyes.exemptions` or a policy split first). An entry within 14 days
+# of expiry prints a `::warning::` (never fails); a lapsed one fails.
+# `reason` is the concrete blocker found by the #15748 readiness analysis. Clear the blocker,
+# flip the env, delete the entry — in one PR, which the stale-entry check forces.
+four_eyes_enforcement:
+  tracking_issue: 15748
+  allowlist:
+    openbank-account-service:
+      expires: "2026-12-15"
+      reason: "account.freeze is human-only, but admin-ui has no checker workbench for the account approval queue (inbox lists it read-only) and the freeze UI does not retry with X-Approval-Id."
+    openbank-balance-service:
+      expires: "2027-03-10"
+      reason: "balance.credit/debit are granted to machines (service-balance-m2m, service-settlement-balance-move); enforcing would park settlement's balance moves. Needs four_eyes.exemptions for those identities or a distinct operator-only adjustment action."
+    openbank-billing-service:
+      expires: "2026-12-15"
+      reason: "billing.post/reverse: no admin-ui checker workbench for the billing approval queue and no maker retry with X-Approval-Id."
+    openbank-campaign-service:
+      expires: "2026-12-15"
+      reason: "campaign.activate (CampaignResource + AudienceResource): admin-ui activation does not retry with X-Approval-Id, so an activation parked at 202 could be approved but never executed from the UI."
+    openbank-clearing-service:
+      expires: "2026-12-15"
+      reason: "clearingBatch.settle: no admin-ui checker workbench for the clearing approval queue and no maker retry with X-Approval-Id."
+    openbank-consent-service:
+      expires: "2027-03-10"
+      reason: "consent.grant/revoke are granted to machines (service-consent-m2m-marketing, service-consent-m2m-credit, edge-service-consent); enforcing would park those automated flows. Needs four_eyes.exemptions for the verified identities."
+    openbank-delegation-service:
+      expires: "2027-03-10"
+      reason: "delegation.revoke/disclosure.release/reserve.release are granted to the edge M2M identity (edge-service-delegation) and the service wires no shared ApprovalStore; enforcing would 503 or park customer self-service."
+    openbank-domestic-payment:
+      expires: "2026-12-15"
+      reason: "domestic-payment.transitionStatus: no admin-ui checker workbench for the domestic-payment approval queue and no maker retry with X-Approval-Id."
+    openbank-fx-service:
+      expires: "2026-12-15"
+      reason: "fx.convert is human-only, but admin-ui has no checker workbench for the fx approval queue and no maker retry with X-Approval-Id."
+    openbank-interest-service:
+      expires: "2027-01-29"
+      reason: "interest.create/trigger: the service wires no ApprovalStore, so enforcing answers 503 on every operator interest write."
+    openbank-ledger-service:
+      expires: "2027-03-10"
+      reason: "ledger.reverse is called by transaction-service's payment saga compensation (service-transaction-ledger-write, service-ledger-reverse); enforcing would park compensation at 202. Policy fix first: four_eyes.exemptions for the per-service transaction identity (retire the shared-client reverse grant), plus an admin-ui ledger checker workbench."
+    openbank-lending-service:
+      expires: "2026-12-15"
+      reason: "lending.disburse/collateralRegister: no admin-ui checker workbench for the lending approval queue and no maker retry with X-Approval-Id."
+    openbank-party-service:
+      expires: "2026-12-15"
+      reason: "party.merge is human-only, but admin-ui has no merge flow that retries with X-Approval-Id and no checker workbench for the party approval queue."
+    openbank-pension-service:
+      expires: "2027-01-29"
+      reason: "pension.operator.transfer: the service wires no shared ApprovalStore, so enforcing answers 503 on every operator transfer."
+    openbank-product-catalog:
+      expires: "2027-01-29"
+      reason: "catalog.publish/publish-ir: no ApprovalStore wired (maker != checker is enforced in-service by the revision-approval flow); enforcing answers 503 on every publish."
+    openbank-sca-service:
+      expires: "2027-03-10"
+      reason: "device.revoke has a customer self-revocation path (device-self-revocation, ROLE_CUSTOMER) with no exemption; enforcing would park a customer revoking a lost device behind an operator approval."
+    openbank-sdd-service:
+      expires: "2027-01-29"
+      reason: "sdd.approve: the service wires no ApprovalStore, so enforcing answers 503 on every mandate confirmation."
+    openbank-sepa-instant:
+      expires: "2026-12-15"
+      reason: "sctInstPayment.recall: no admin-ui checker workbench for the sepa-instant approval queue and no maker retry with X-Approval-Id."
+    openbank-sepa-payment:
+      expires: "2026-12-15"
+      reason: "sepaPayment.transitionStatus: no admin-ui checker workbench for the sepa-payment approval queue and no maker retry with X-Approval-Id."
+    openbank-swift-service:
+      expires: "2026-12-15"
+      reason: "swift.send: no admin-ui checker workbench for the swift approval queue and no maker retry with X-Approval-Id."
+    openbank-transaction-service:
+      expires: "2027-03-10"
+      reason: "transaction.reverse is granted to sepa-payment's machine identity (service-sepa-payment-transaction-write); enforcing would park that automated reversal. Needs a four_eyes.exemptions entry for it."
+    openbank-treasury-service:
+      expires: "2027-01-29"
+      reason: "treasury.deal.settle/reverse: no shared ApprovalStore wired (deal approval is its own in-service four-eyes); enforcing answers 503 on settle and reverse."
+
+# ---------------------------------------------------------------------------------------
 # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)
 # reads these when authorizing a `featureflag.flip` action:
 #   - prohibited_flag_combinations: a flip that would DISABLE a regulatory safety control

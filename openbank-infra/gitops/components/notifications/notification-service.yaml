@@ -78,6 +78,13 @@ spec:
             # default would address this pod, not the namespace-local Redis Service.
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.notifications.svc:6379
+            # Four-eyes ENFORCED (ADR-0155 / ADR-0176 D5, #15748): opsmessage.compose answers 202
+            # + approvalId until a DIFFERENT operator approves it in admin-ui /notifications; the
+            # maker's identical retry carries X-Approval-Id (opsMessageApi.compose). Human-only:
+            # the sole allow reason (operator-compose-message) excludes every service-account.
+            # Gate: four-eyes-enforce-deployed.
+            - name: AUTHZ_FOUR_EYES_ENFORCE
+              value: "true"
             # JDBC leg: Hibernate ORM + Flyway (blocking) onto the CNPG primary.
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://notifications-db-rw.notifications.svc:5432/openbank_notifications

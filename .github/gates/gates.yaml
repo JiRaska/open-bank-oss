@@ -6471,6 +6471,26 @@ gates:
     run: |
       python3 .github/scripts/check-authz-enforce-money-path.py . --enforce
 
+  # Four-eyes ENFORCED in the deployed manifest (#15748, ADR-0155). The policy flags an action
+  # four_eyes_required, but AuthorizeInterceptor acts on it only with authz.four-eyes.enforce=true
+  # (code default false), and on 2026-11-11 no manifest set it — every dual-control action ran on
+  # one operator. Subjects are derived from @Authorize sites with rest.rego's own scope/verb/action
+  # rule; an exception lives in rules.yaml four_eyes_enforcement.allowlist and FAILS the gate once
+  # expired, once stale (service already enforces), or when dated more than 120 days out.
+  - id: four-eyes-enforce-deployed
+    rationale: "A service that owns a four-eyes action but leaves AUTHZ_FOUR_EYES_ENFORCE unset executes every flagged money-path call on a single operator while the policy, approval store and inbox all read as a working control (#15748)."
+    review_after: "2027-02-15"
+    budget_seconds: 60   # ~6 s CPU locally (one gitops parse + a src/main walk); I/O-bound on a busy runner
+    min_subjects: 20   # 26 modules own a four-eyes @Authorize action today (2026-11-11)
+    name: "services owning a four-eyes action enforce it in the deployed manifest (enforced, #15748)"
+    group: security
+    mode: enforced
+    selftest: python3 .github/scripts/check-four-eyes-enforce.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-four-eyes-enforce.py"]
+    run: |
+      python3 .github/scripts/check-four-eyes-enforce.py
+
   # @RolesAllowed ⇒ realm parity (issue #2404). The JWT-role half of the check above: a role
   # name that exists in no realm never matches, so the endpoint answers 403 to every caller,
   # silently and forever. finrep's FINREP/COREP shipped that way (#2403), and 39 sites across
