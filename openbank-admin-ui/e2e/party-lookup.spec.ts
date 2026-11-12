@@ -119,7 +119,10 @@ test.describe('party-name lookup (ADR-0210 D8)', () => {
     const lookup = page.getByRole('search', { name: /^(Vyhledání klienta nebo firmy|Find a customer or company)$/ })
       .getByRole('textbox', { name: /^(Vyhledat stranu|Search parties)$/ })
     await expect(lookup).toBeVisible()
-    await expect(lookup).toHaveAttribute('placeholder', /Jméno, příjmení|Name, surname/)
+    await expect(lookup).toHaveAttribute(
+      'placeholder',
+      /^(Jméno nebo obchodní název klienta|Client name or trading name)$/,
+    )
   })
 
   test('a lens switch invalidates an IN-FLIGHT lookup, not just the settled rows', async ({ page }) => {

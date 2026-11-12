@@ -87,6 +87,8 @@ Flyway, neměnné historické skripty, pouze dopředu:
 - `matches` — pole objektů `SanctionsMatch` (viz doménový model)
 - `checked_lists` — `["OFAC_SDN", "EU_CONSOLIDATED", ...]`
 
+Každý z těchto sloupců drží pole nebo objekt, nikdy JSONB string. Starší řádky ukládaly JSON text zabalený jako JSONB string (`"[\"OFAC_SDN\"]"`); čtení přes `::text` pak vrátilo řetězec v uvozovkách, Jackson ho nenačetl a `GET /api/v1/sanctions` odpovídal 400. Migrace V20 tyto hodnoty rozbalí; hlídá to `SanctionsLegacyJsonbStringIT`.
+
 ## Retence
 
 | Tabulka | Retence | Důvod |

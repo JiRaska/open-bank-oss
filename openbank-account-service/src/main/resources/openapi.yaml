@@ -22,7 +22,7 @@ info:
   # 1.23 -> 1.24 (ADR-0341 D1, #668): additive — the Account response exposes the optional
   # productRevision pin (absent on accounts opened before it existed); open-account documents
   # 422 PRODUCT_REVISION_NOT_PUBLISHED and 503 PRODUCT_CATALOG_UNAVAILABLE (fail-closed on the pin).
-  version: 1.25.0
+  version: 1.26.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -213,6 +213,52 @@ paths:
                 $ref: '#/components/schemas/AccountPage'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/reporting/deposits:
+    get:
+      tags: [Accounts]
+      summary: List deposit accounts for the GSFT reference date
+      description: >
+        Tax-reporting service identity only. Pages the deposit account register at the end of
+        the Czech calendar date, including dormant and frozen accounts. The cursor is bound
+        to the date. Balances and eligibility are evaluated separately.
+      operationId: listGsftDepositAccounts
+      parameters:
+        - name: asOf
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 200
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated GSFT deposit account roster
+          headers:
+            Cache-Control:
+              schema: { type: string, example: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GsftDepositRosterPage'
+        '400':
+          description: Invalid reference date or cursor
+        '401':
+          description: Authentication required
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          description: The account register could not establish the roster
 
   /api/v1/accounts/{accountId}:
     get:
@@ -1626,6 +1672,44 @@ components:
             $ref: '#/components/schemas/AccountResponse'
         pagination:
           $ref: '#/components/schemas/CursorPagination'
+
+    GsftDepositRosterPage:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/GsftDepositRosterEntry'
+        pagination:
+          type: object
+          required: [limit, hasNextPage]
+          properties:
+            limit:
+              type: integer
+            hasNextPage:
+              type: boolean
+            nextCursor:
+              type: string
+              nullable: true
+
+    GsftDepositRosterEntry:
+      type: object
+      required: [id, accountNumber, partyId, currencyCode, accountType]
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountNumber:
+          type: string
+        partyId:
+          type: string
+          format: uuid
+        currencyCode:
+          type: string
+        accountType:
+          type: string
+          enum: [CURRENT, SAVINGS, TERM_DEPOSIT]
 
     CursorPagination:
       type: object

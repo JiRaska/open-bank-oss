@@ -87,6 +87,8 @@ Flyway, immutable historical scripts, forward-only:
 - `matches` — array of `SanctionsMatch` objects (see domain model)
 - `checked_lists` — `["OFAC_SDN", "EU_CONSOLIDATED", ...]`
 
+Each of these columns holds an array or object, never a JSONB string. Older rows stored the JSON text wrapped as a JSONB string (`"[\"OFAC_SDN\"]"`); reading through `::text` then returned a quoted string Jackson could not bind, and `GET /api/v1/sanctions` answered 400. Migration V20 unwraps those values; `SanctionsLegacyJsonbStringIT` guards it.
+
 ## Retention
 
 | Table | Retention | Reason |
