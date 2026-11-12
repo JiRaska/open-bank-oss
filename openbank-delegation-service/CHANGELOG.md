@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.6](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.5...delegation-service-v0.23.6) (2026-11-12)
+
+
+### Bug Fixes
+
+* **delegation:** require explicit sole authority for offers ([#15639](https://github.com/JiRaska/open-bank-oss/issues/15639)) ([25b2de9](https://github.com/JiRaska/open-bank-oss/commit/25b2de9c4040af4f3b22ac6f988834f894f6cb79))
+
 ## [0.23.5](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.4...delegation-service-v0.23.5) (2026-11-06)
 
 
