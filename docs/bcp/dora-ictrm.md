@@ -74,7 +74,7 @@ Articles 5–10 and 13–14 are marked ✓ as documented controls; they have not
 | R-05 | Single-AZ node failure | Medium | High | Karpenter replacement; ArgoCD resync | Medium |
 | R-06 | Multi-region outage | Low | Critical | M6 not yet deployed; T0 RTO = 4 h only | High until M6 |
 | R-07 | Third-party cloud failure | Low | Critical | Cloud-agnostic architecture (ADR-0027) | Medium |
-| R-08 | Insider threat / misconfiguration | Low | High | OPA authz; Falco; required status checks and money-path gates on `main`; signed commits; independent LLM review. No second human approval is required (single maintainer, see GOVERNANCE.md) | Low |
+| R-08 | Insider threat / misconfiguration | Low | High | OPA authz; Falco; required status checks and money-path gates on `main`; signed commits; independent LLM review. No second human approval is required (single maintainer, see GOVERNANCE.md), so a mistaken or malicious change by the one human with merge rights has no independent human check; the automated gates only catch defect classes someone has already encoded | Medium |
 
 ---
 
