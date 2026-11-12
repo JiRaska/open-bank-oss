@@ -63,6 +63,7 @@ import base64
 import contextlib
 import datetime
 import fnmatch
+import http.client
 import inspect
 import io
 import json
@@ -1681,7 +1682,9 @@ def api(method: str, path: str, body: dict | None = None, token: str | None = No
         except urllib.error.HTTPError as e:
             code, headers, text = e.code, e.headers, e.read().decode(errors="replace")[:300]
             _note_ratelimit(headers)
-        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+        except (urllib.error.URLError, ConnectionError, TimeoutError, http.client.HTTPException) as e:
+            # HTTPException covers IncompleteRead: a response body cut off mid-read (run 43181889887,
+            # publish died on 330268 of 356777 bytes). Same class as a reset: retried on a GET only.
             code, headers, text = None, None, f"{type(e).__name__}: {e}"
         delay = api_retry_delay(method, code, headers, attempt)
         if delay is None:
@@ -4607,7 +4610,7 @@ class FakeGitHub:
 class HttpFixture:
     """The GitHub REST API as `GitHub` sees it, served from a FakeGitHub: patched in place of
     urllib.request.urlopen, so the REAL GitHub class, api() and its retry policy run. `faults` is a list
-    of [predicate(method, path), (code, headers) | "reset", times] — `times` None = every attempt."""
+    of [predicate(method, path), (code, headers) | "reset" | "incomplete", times] — `times` None = every attempt."""
 
     def __init__(self, fake, faults=None):
         self.fake, self.faults, self.calls = fake, [list(f) for f in (faults or [])], []
@@ -4629,6 +4632,8 @@ class HttpFixture:
                     f[2] -= 1
                 if f[1] == "reset":
                     raise ConnectionResetError("connection reset by peer")
+                if f[1] == "incomplete":
+                    raise http.client.IncompleteRead(b"{", 99)
                 code, hdrs = f[1]
                 h = email.message.Message()
                 for k, v in hdrs.items():
@@ -9114,6 +9119,22 @@ def self_test() -> int:
                 except BaseException as exc:
                     ok, detail = False, f"{type(exc).__name__}: {exc}"
                 check("api: Retry-After and a reset are retried on a GET; a write is never retried", ok, detail)
+
+                # (e1) a body cut off mid-read (IncompleteRead) is retried on a GET; a write is not.
+                try:
+                    fx, real = with_http([[lambda m, p: True, "incomplete", 1]])
+                    got = api("GET", "/repos/o/r/git/ref/heads/main")
+                    ok = got[0] == 200 and slept == [API_BACKOFF_BASE_S] and len(fx.calls) == 2
+                    fx, real = with_http([[lambda m, p: m == "POST", "incomplete", None]])
+                    try:
+                        api("POST", f"/repos/o/r/statuses/{'a' * 40}", {"state": "success", "context": "x", "description": ""})
+                        ok = False
+                    except ApiAbort:
+                        ok = ok and len(fx.calls) == 1
+                    detail = f"slept={slept} calls={fx.calls}"
+                except BaseException as exc:          # the code before this change: IncompleteRead escapes api()
+                    ok, detail = False, f"{type(exc).__name__}: {exc}"
+                check("api: an IncompleteRead is retried on a GET; a write is never retried", ok, detail)
 
                 # (e2) a bare 500 is transient (run 41640891760: check-runs page 2 -> 500 killed the tick).
                 # Stubbed at _http_open: 500 then 200 succeeds; 500 always raises ApiAbort after
