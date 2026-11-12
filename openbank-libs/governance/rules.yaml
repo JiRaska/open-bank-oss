@@ -5190,3 +5190,77 @@ pr_span_limits:
   gate: pr-component-span
   enforced: enforced
   ci_producer: ".github/scripts/check-pr-component-span.py"
+
+# ---------------------------------------------------------------------------------------
+# Demo-only switches - check-demo-only-flags.py (gate demo-only-flags, enforced, #15760).
+# A switch that turns a regulatory control into a no-op may be true only in an environment
+# listed here. The environment of a manifest is derived from its PATH: the gitops tree IS the
+# sandbox cluster (no per-environment overlay exists), the kustomize overlays are
+# k8s/overlays/{sandbox,local}. Two fail-closed rules, in this order:
+#   1. A path with a non-sandbox TOKEN (non_sandbox_path_tokens: prod, production, prd, live,
+#      staging, stage, uat, preprod - matched on any path segment split at - _ .) is never
+#      permitted, WHEREVER it sits - also under a permitted root such as
+#      openbank-infra/gitops/environments/production/ or .../values-prod.yaml. Today's repo has
+#      one deployed environment and it is the sandbox, so the classification is exact for the
+#      files that exist; this makes it fail closed for the ones that do not exist yet.
+#   2. A file under no declared environment is "unclassified" and never permitted, so a new
+#      tree (deploy/, charts/, gitops-prod/) fails until someone declares it here, on purpose.
+# The code default must be false and no profile other than permitted_profiles may set it.
+#
+# THE LIST BELOW IS CURATED AND PARTIAL. It names the switches somebody found and judged to
+# weaken a control; it does not discover them. A demo switch that is not listed is not
+# checked. Adding a flag is a deliberate review decision (service, property, env var, reason);
+# a switch that is an environment fact rather than a control weakening is NOT listed (for
+# example QUARKUS_MAILER_MOCK: the deployed notification-service mocks its mailer because the
+# sandbox has no SMTP, and records such mail as SUPPRESSED/mailer_mocked, never SENT, with an
+# alert on it - nothing is bypassed, nothing is reported as delivered).
+# Known limits are listed in the script docstring. Read by no .rego: editing this key
+# restamps no bundle.
+# ---------------------------------------------------------------------------------------
+demo_only_flags:
+  gate: demo-only-flags
+  enforced: enforced
+  ci_producer: ".github/scripts/check-demo-only-flags.py"
+  environments:
+    sandbox:
+      paths: ["openbank-infra/gitops/", "openbank-infra/k8s/overlays/sandbox/"]
+    local:
+      paths: ["openbank-infra/k8s/overlays/local/"]
+  non_sandbox_path_tokens: [prod, production, prd, live, staging, stage, uat, preprod]
+  permitted_profiles: [dev, test]
+  flags:
+    - env_var: OPENBANK_AML_AUTO_CLEAR
+      service: openbank-aml-service
+      config_property: openbank.aml.auto-clear
+      reason: "Clears onboarding AML screenings without an analyst decision; sandbox straight-through only."
+      permitted_environments: [sandbox]
+    - env_var: OPENBANK_KYC_AUTO_APPROVE
+      service: openbank-kyc-service
+      config_property: openbank.kyc.auto-approve
+      reason: "Approves KYC cases without four-eyes review (ADR-0116 section 4); sandbox straight-through only."
+      permitted_environments: [sandbox]
+    - env_var: LENDING_RISK_ALLOW_DEMONSTRATION_MODEL
+      service: openbank-lending-service
+      config_property: lending.risk.allow-demonstration-model
+      reason: "Posts IFRS 9 allowances from unvalidated placeholder PD/LGD parameters; sandbox demonstration only."
+      permitted_environments: [sandbox]
+    - env_var: LENDING_ORIGINATION_AUTO_APPROVE
+      service: openbank-lending-service
+      config_property: lending.origination.auto-approve
+      reason: "Drives a submitted loan application to READY_TO_DISBURSE as 'sandbox-auto-approval', bypassing the four-eyes gate (ADR-0211 D5). Unset in gitops today."
+      permitted_environments: [sandbox]
+    - env_var: OPENBANK_KYB_DEMO_ENTITY_ENABLED
+      service: openbank-kyb-service
+      config_property: openbank.kyb.demo-entity.enabled
+      reason: "Makes the company register answer for a fictitious company, an onboarding bypass anywhere but a sandbox."
+      permitted_environments: [sandbox]
+    - env_var: CARD_SANDBOX_ACQUIRER_ENABLED
+      service: openbank-card-processing-service
+      config_property: openbank.card-processing.sandbox-acquirer-enabled
+      reason: "Exposes an endpoint that authorises and clears card transactions end to end without a real acquirer (can move money). Not even the sandbox sets it: gitops pins CARD_SANDBOX_ACQUIRER_ENABLED=false, so only the local overlay may."
+      permitted_environments: [local]
+    - env_var: OPENBANK_PENSION_STUB_INTEGRATIONS_ENABLED
+      service: openbank-pension-service
+      config_property: openbank.pension.stub-integrations.enabled
+      reason: "Swaps the KYC, signature-verification (SCA), counterparty and fund-administration ports for stubs, so a signature check that never happened passes. %dev and %test only; unset in gitops."
+      permitted_environments: [local]
