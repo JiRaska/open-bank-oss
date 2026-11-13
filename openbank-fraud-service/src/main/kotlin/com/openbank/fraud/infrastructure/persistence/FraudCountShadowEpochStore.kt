@@ -5,143 +5,96 @@
 package com.openbank.fraud.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.fraud.infrastructure.persistence.entity.FraudCountShadowEpochEntity
-import com.openbank.fraud.infrastructure.persistence.entity.FraudCountShadowEpochHeadEntity
 import com.openbank.libs.fincrime.pack.CountShadowAppendOutcome
 import com.openbank.libs.fincrime.pack.CountShadowEpoch
 import com.openbank.libs.fincrime.pack.CountShadowEpochStore
 import com.openbank.libs.fincrime.pack.PackDomain
 import com.openbank.libs.fincrime.pack.RecordedCountShadowEpoch
 import com.openbank.libs.fincrime.pack.SignedCountShadowEpoch
-import io.quarkus.hibernate.reactive.panache.Panache
-import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.vertx.mutiny.pgclient.PgPool
+import io.vertx.mutiny.sqlclient.Row
+import io.vertx.mutiny.sqlclient.Tuple
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.persistence.LockModeType
-import org.hibernate.reactive.mutiny.Mutiny
 import java.time.Instant
+import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
 
 @ApplicationScoped
-class FraudCountShadowEpochStore(private val mapper: ObjectMapper) : CountShadowEpochStore {
+class FraudCountShadowEpochStore(private val pool: PgPool, private val mapper: ObjectMapper) : CountShadowEpochStore {
     override suspend fun latest(domain: PackDomain): RecordedCountShadowEpoch? {
         requireFraud(domain)
-        return Panache.withSession {
-            Panache.getSession().flatMap { session ->
-                session.find(FraudCountShadowEpochHeadEntity::class.java, HEAD_ID)
-                    .flatMap { head -> epoch(session, requireNotNull(head).number) }
-            }
-        }.awaitSuspending()?.toRecord()
+        return pool.query("SELECT * FROM fraud_count_shadow_epoch ORDER BY epoch_number DESC LIMIT 1")
+            .execute().awaitSuspending().firstOrNull()?.toRecord()
     }
 
     override suspend fun recorded(domain: PackDomain, number: Long): RecordedCountShadowEpoch? {
         requireFraud(domain)
-        return Panache.withSession {
-            Panache.getSession().flatMap { session -> epoch(session, number) }
-        }.awaitSuspending()?.toRecord()
+        return pool.preparedQuery("SELECT * FROM fraud_count_shadow_epoch WHERE epoch_number = $1")
+            .execute(Tuple.of(number)).awaitSuspending().firstOrNull()?.toRecord()
     }
 
     override suspend fun effectiveAt(domain: PackDomain, at: Instant): RecordedCountShadowEpoch? {
         requireFraud(domain)
-        return Panache.withSession {
-            Panache.getSession().flatMap { session ->
-                session.createSelectionQuery(
-                    "from FraudCountShadowEpochEntity where effectiveAt <= :at order by number desc",
-                    FraudCountShadowEpochEntity::class.java,
-                ).setParameter("at", at.truncatedTo(ChronoUnit.MICROS)).setMaxResults(1).singleResultOrNull
-            }
-        }.awaitSuspending()?.toRecord()
+        return pool.preparedQuery(
+            "SELECT * FROM fraud_count_shadow_epoch WHERE effective_at <= $1 ORDER BY effective_at DESC LIMIT 1",
+        ).execute(Tuple.of(at.truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC)))
+            .awaitSuspending().firstOrNull()?.toRecord()
     }
 
     override suspend fun append(record: RecordedCountShadowEpoch): CountShadowAppendOutcome {
         requireFraud(record.domain)
-        val incoming = record.envelope.epoch
-        require(incoming.effectiveAt == incoming.effectiveAt.truncatedTo(ChronoUnit.MICROS)) {
+        val epoch = record.envelope.epoch
+        require(epoch.effectiveAt == epoch.effectiveAt.truncatedTo(ChronoUnit.MICROS)) {
             "shadow epoch timestamps must fit the database precision"
         }
         val exactRecord = record.copy(recordedAt = record.recordedAt.truncatedTo(ChronoUnit.MICROS))
-        return Panache.withTransaction {
-            Panache.getSession().flatMap { session ->
-                session.find(FraudCountShadowEpochHeadEntity::class.java, HEAD_ID, LockModeType.PESSIMISTIC_WRITE)
-                    .flatMap { head -> appendLocked(session, requireNotNull(head), exactRecord) }
-            }
-        }.awaitSuspending()
-    }
+        if (!followsPredecessor(record)) return CountShadowAppendOutcome.CONFLICT
 
-    private fun appendLocked(
-        session: Mutiny.Session,
-        head: FraudCountShadowEpochHeadEntity,
-        record: RecordedCountShadowEpoch,
-    ): Uni<CountShadowAppendOutcome> {
-        val incoming = record.envelope.epoch
-        return epoch(session, incoming.number).flatMap { stored ->
-            when {
-                stored != null -> Uni.createFrom().item(
-                    if (stored.toRecord().envelope == record.envelope) {
-                        CountShadowAppendOutcome.REPLAYED
-                    } else {
-                        CountShadowAppendOutcome.CONFLICT
-                    },
-                )
-
-                head.number != record.previousNumber -> Uni.createFrom().item(CountShadowAppendOutcome.CONFLICT)
-
-                else -> appendFollowingHead(session, head, record)
-            }
+        val stored = StoredEnvelope(epoch, record.envelope.signature)
+        val result = pool.preparedQuery(INSERT).execute(
+            Tuple.tuple()
+                .addLong(epoch.number)
+                .addLong(record.previousNumber)
+                .addUUID(epoch.proposalId)
+                .addString(record.envelope.digest)
+                .addString(mapper.writeValueAsString(stored))
+                .addOffsetDateTime(exactRecord.recordedAt.atOffset(ZoneOffset.UTC))
+                .addOffsetDateTime(epoch.effectiveAt.atOffset(ZoneOffset.UTC)),
+        ).awaitSuspending()
+        if (result.rowCount() == 1) return CountShadowAppendOutcome.APPENDED
+        return if (recorded(record.domain, epoch.number)?.envelope == record.envelope) {
+            CountShadowAppendOutcome.REPLAYED
+        } else {
+            CountShadowAppendOutcome.CONFLICT
         }
     }
 
-    private fun appendFollowingHead(
-        session: Mutiny.Session,
-        head: FraudCountShadowEpochHeadEntity,
-        record: RecordedCountShadowEpoch,
-    ): Uni<CountShadowAppendOutcome> {
-        val incoming = record.envelope.epoch
-        return epoch(session, head.number).flatMap { previous ->
-            if (previous != null) {
-                val last = previous.toRecord().envelope.epoch
-                require(incoming.effectiveAt > last.effectiveAt && incoming.replay.baseline == last.replay.candidate) {
-                    "fraud shadow publication must follow the locked epoch and artifact"
-                }
-            }
-            session.createSelectionQuery(
-                "from FraudCountShadowEpochEntity where proposalId = :id",
-                FraudCountShadowEpochEntity::class.java,
-            ).setParameter("id", incoming.proposalId).singleResultOrNull
-        }.flatMap { duplicateProposal ->
-            if (duplicateProposal != null) return@flatMap Uni.createFrom().item(CountShadowAppendOutcome.CONFLICT)
-            session.persist(record.toEntity()).flatMap {
-                head.number = incoming.number
-                session.flush().replaceWith(CountShadowAppendOutcome.APPENDED)
-            }
-        }
+    private suspend fun followsPredecessor(record: RecordedCountShadowEpoch): Boolean {
+        // Mirror the chain CHECK so a mis-linked record answers CONFLICT instead of a constraint error.
+        if (record.previousNumber != (record.envelope.epoch.number - 1).takeIf { it > 0 }) return false
+        val previousNumber = record.previousNumber ?: return true
+        val previous = recorded(record.domain, previousNumber)?.envelope?.epoch ?: return false
+        val epoch = record.envelope.epoch
+        return epoch.effectiveAt > previous.effectiveAt && epoch.replay.baseline == previous.replay.candidate
     }
 
-    private fun epoch(session: Mutiny.Session, number: Long?): Uni<FraudCountShadowEpochEntity?> = if (number == null) {
-        Uni.createFrom().nullItem()
-    } else {
-        session.find(FraudCountShadowEpochEntity::class.java, number)
-    }
-
-    private fun RecordedCountShadowEpoch.toEntity() = FraudCountShadowEpochEntity().also {
-        it.number = envelope.epoch.number
-        it.previousNumber = previousNumber
-        it.proposalId = envelope.epoch.proposalId
-        it.digest = envelope.digest
-        it.envelopeJson = mapper.writeValueAsString(StoredEnvelope(envelope.epoch, envelope.signature))
-        it.recordedAt = recordedAt
-        it.effectiveAt = envelope.epoch.effectiveAt
-    }
-
-    private fun FraudCountShadowEpochEntity.toRecord(): RecordedCountShadowEpoch {
-        val stored = mapper.readValue(envelopeJson, StoredEnvelope::class.java)
+    private fun Row.toRecord(): RecordedCountShadowEpoch {
+        val stored = mapper.readValue(getString("envelope_json"), StoredEnvelope::class.java)
         val signed = SignedCountShadowEpoch(stored.epoch, stored.signature)
-        val matchingEpoch = signed.epoch.number == number && signed.epoch.proposalId == proposalId
-        val matchingEvidence = signed.epoch.effectiveAt == effectiveAt && signed.digest == digest
+        val matchingEpoch = stored.epoch.number == getLong("epoch_number") &&
+            stored.epoch.proposalId == getUUID("proposal_id")
+        val matchingEvidence = stored.epoch.effectiveAt == getOffsetDateTime("effective_at").toInstant() &&
+            signed.digest == getString("envelope_digest")
         require(matchingEpoch && matchingEvidence) {
             "fraud shadow epoch row does not match its exact publisher envelope"
         }
-        return RecordedCountShadowEpoch(PackDomain.FRAUD, previousNumber, signed, recordedAt)
+        return RecordedCountShadowEpoch(
+            PackDomain.FRAUD,
+            getLong("previous_epoch_number"),
+            signed,
+            getOffsetDateTime("recorded_at").toInstant(),
+        )
     }
 
     private fun requireFraud(domain: PackDomain) = require(domain == PackDomain.FRAUD) {
@@ -151,6 +104,13 @@ class FraudCountShadowEpochStore(private val mapper: ObjectMapper) : CountShadow
     private data class StoredEnvelope(val epoch: CountShadowEpoch, val signature: String)
 
     private companion object {
-        const val HEAD_ID = 1
+        // The predecessor is immutable. The unique epoch key selects one competing writer, and
+        // the predecessor foreign key prevents a gap. A proposal cannot be reused on another epoch.
+        const val INSERT = """
+            INSERT INTO fraud_count_shadow_epoch (epoch_number, previous_epoch_number, proposal_id, envelope_digest,
+                                                envelope_json, recorded_at, effective_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT DO NOTHING
+        """
     }
 }

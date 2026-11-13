@@ -57,7 +57,7 @@ class FraudCountShadowEpochStoreIT {
     private val candidate = PackRef("fixture-fraud", 2, "b".repeat(64))
 
     @Test
-    fun `a locked database head accepts one proposal and preserves replay and rollback history`() {
+    fun `one writer per epoch is admitted and preserves replay and rollback history`() {
         val first = record(1, null, baseline, candidate)
         val rival = record(1, null, baseline, candidate)
         val attempts = listOf(first, rival).map { row -> onVertx { epochs.append(row) } }

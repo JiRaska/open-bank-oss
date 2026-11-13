@@ -31,10 +31,11 @@ Under the `%test` profile the `fraud-outbox-out` outgoing channel is disabled ne
 ### Count-pack SHADOW epoch evidence
 
 The SHADOW ledger stores the signed envelope, proposal ID, artifact lineage and effective
-time in immutable rows. A locked head advances one epoch at a time. Competing proposals
-cannot both advance it, and repeating the exact signed envelope replays its original record.
+time in immutable rows. The epoch primary key admits one writer per epoch and the
+predecessor key forbids a gap, so competing proposals cannot both land, and repeating the
+exact signed envelope replays its original record.
 A rollback appends a new independently signed epoch referencing the earlier artifact.
 
 Readers choose the epoch effective at the evaluation time and reverify its signed envelope
 before obtaining a request pin. The ledger is separate from the live threshold-set table.
-The V11 rollback leaves evidence rows in place and stops the shadow reader.
+The V12 rollback leaves evidence rows in place and stops the shadow reader.
