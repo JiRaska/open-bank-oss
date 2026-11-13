@@ -60,7 +60,11 @@ NaN, ne 0 a ne stáří odvozené od epochy: studený pod netvrdí prázdnou zdr
 - `KycRescreenBacklogOverdue` (critical): nejstarší stáří nad 86400 s po dobu 15 minut, pokud smyčka není vypnutá se zbylou prací.
 - `KycRescreenLoopDisabledWithPending` (warning): řada vypnuto-se-zbylou-prací je 1 po dobu 30 minut.
 
-Ani jeden nemůže vystřelit ve výchozím nasazení (smyčka vypnutá, tabulka prázdná: stáří 0, vypnuto-se-zbylou-prací 0). Testy: `openbank-infra/tests/promtool/kyc_rescreen_backlog_alerts_test.yaml`. Runbook: [05-operations](05-operations.cs.md#backlog-opětovného-prověření).
+- `KycSanctionsListChangeDroppedWhileDisabled` (warning): výsledek `disabled` consumeru se za poslední hodinu pohnul, takže změna seznamu byla při vypnutém vypínači zahozena bez prověření.
+
+**Proč se změna při vypnutém vypínači zahazuje, a nezařazuje.** Zařadit řádek triggeru i tak by vypadalo jako čistší oprava, protože zapnutí smyčky by pak zmeškané znovu prověřilo. Se současným kódem to bezpečné není: `ScreeningTriggerRetryJob` hlídá jen `retry-enabled` (výchozí true) a převezme každý PENDING řádek s prošlým leasem, takže řádek zařazený při vypnutí by se asi po deseti minutách dostal ke case coordinatoru. Tím by se smyčka zapnula mimo rollout gate. Místo toho se na zahození alertuje. Zařazování při vypnutí vyžaduje, aby retry job nejprve respektoval hlavní vypínač, což je změna chování pro samostatné PR.
+
+První dva alerty nemohou vystřelit ve výchozím nasazení (smyčka vypnutá, tabulka prázdná: stáří 0, vypnuto-se-zbylou-prací 0). Testy: `openbank-infra/tests/promtool/kyc_rescreen_backlog_alerts_test.yaml`. Runbook: [05-operations](05-operations.cs.md#backlog-opětovného-prověření).
 
 ## Obnova práce a rozsah ochrany proti duplicitám
 

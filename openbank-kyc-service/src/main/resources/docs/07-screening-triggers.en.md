@@ -60,7 +60,11 @@ NaN, not 0 and not an epoch-derived age: a cold pod neither claims an empty heal
 - `KycRescreenBacklogOverdue` (critical): oldest age above 86400 s for 15 minutes, unless the loop is disabled with pending work.
 - `KycRescreenLoopDisabledWithPending` (warning): the disabled-with-pending series is 1 for 30 minutes.
 
-Neither can fire for the shipped default (loop off, table empty: age 0, disabled-with-pending 0). Tests: `openbank-infra/tests/promtool/kyc_rescreen_backlog_alerts_test.yaml`. Runbook: [05-operations](05-operations.en.md#re-screening-backlog).
+- `KycSanctionsListChangeDroppedWhileDisabled` (warning): the consumer's `disabled` outcome moved within the last hour, so a list change was dropped unscreened while the switch was off.
+
+**Why a change is dropped, not queued, while the switch is off.** Queueing the trigger row anyway would look like the cleaner fix, because turning the loop on would then re-screen what was missed. It is not safe with the current code: `ScreeningTriggerRetryJob` is gated only on `retry-enabled` (default true) and claims any PENDING row whose lease has expired, so a row queued while off would reach the case coordinator about ten minutes later. That would switch the loop on behind the rollout gate. The drop is alerted on instead. Queueing while off needs the retry job to honour the master switch first, which is a behaviour change for its own PR.
+
+The first two alerts cannot fire for the shipped default (loop off, table empty: age 0, disabled-with-pending 0). Tests: `openbank-infra/tests/promtool/kyc_rescreen_backlog_alerts_test.yaml`. Runbook: [05-operations](05-operations.en.md#re-screening-backlog).
 
 ## Recovery ownership and duplicate scope
 
