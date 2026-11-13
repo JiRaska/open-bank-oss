@@ -24,8 +24,8 @@ import java.util.UUID
  * question.** That endpoint hard-codes `PAYMENT_ONLY` and returns a verdict, which is exactly
  * right for the edge pre-flight it was built for and structurally wrong for the admission chain.
  * The chain's authority step is a pure function whose *capability is an argument* — that is the
- * defect ADR-0375 D7 was opened for, where `CARD_MANAGE_STATUS` was gated by
- * `CARD_MANAGE_LIMITS` because a neighbouring capability was close enough. A rail that receives a
+ * defect ADR-0375 D7 was opened for, where two card capabilities were each gated by their
+ * neighbour because a nearby capability was close enough. A rail that receives a
  * verdict cannot ask about the capability its own action names; a rail that receives the facts can.
  *
  * **Why the facts come from here at all.** ADR-0232 D3 refuses a call to delegation-service on the
