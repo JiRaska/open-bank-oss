@@ -338,6 +338,10 @@ class CaseMonitoringTest {
         assertThatThrownBy { exiting.monitoringReviewResolved() }.isInstanceOf(CaseTransitionException::class.java)
         assertThatThrownBy { exiting.exitRequired("again", t1) }.isInstanceOf(CaseTransitionException::class.java)
         assertThatThrownBy { exiting.rejected("again", t1) }.isInstanceOf(CaseTransitionException::class.java)
+        // Not even the end of the case ends monitoring: only a carried-out exit will.
+        val abandoned = exiting.copy(status = CaseStatus.ABANDONED)
+        assertThat(abandoned.monitored).isTrue()
+        assertThat(abandoned.monitoredSubjects).hasSize(2)
         // A later finding is still recorded, and the exit stands.
         val later = exiting.monitoringMatched(
             entityParty.toString(),

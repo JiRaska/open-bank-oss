@@ -126,8 +126,15 @@ data class BusinessOnboardingCase(
      * The case was approved and has not ended: the bank has, or is about to have, a relationship
      * with the entity, so the entity and its related parties are under ongoing monitoring. This is
      * the ONE definition of who is monitored; nothing sets or clears monitoring anywhere else.
+     *
+     * A case whose exit an operator required stays monitored WHATEVER its status becomes: the
+     * relationship ends when the exit is carried out, not when the applicant abandons the case or
+     * a timer does, and until then a confirmed match must not drop out of monitoring.
      */
-    val monitored: Boolean get() = status == CaseStatus.SIGNED || status == CaseStatus.ACTIVE
+    val monitored: Boolean
+        get() = status == CaseStatus.SIGNED ||
+            status == CaseStatus.ACTIVE ||
+            monitoringReview?.exitRequiredAt != null
 
     /**
      * Whether this case can have rows in the monitoring registration store at all: only a case

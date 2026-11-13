@@ -577,6 +577,14 @@ class KybOngoingMonitoringIT {
             .then().statusCode(200)
         assertThat(journey.stored(caseId).exitRequired).isTrue()
         assertUnmoved("after an exit was required", before)
+        // An applicant who then abandons a signed case sees it end as any other would — and stays
+        // monitored: the exit decision, not the case status, is what holds the registration.
+        if (status == "SIGNED") {
+            journey.customer().post("/api/v1/kyb/cases/$caseId/abandon").then().statusCode(200)
+                .body("status", equalTo("ABANDONED"))
+            assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" }
+            return
+        }
         // And the timers see what they saw: an idle check for the approved status behaves as before.
         assertThat(journey.stored(caseId).status).isEqualTo(status)
     }

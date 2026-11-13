@@ -198,8 +198,7 @@ class MonitoringRegistrationStoreImpl(private val pool: Pool) : MonitoringRegist
                 "(SELECT COALESCE(EXTRACT(EPOCH FROM " +
                 "  ($1::timestamptz - min(c.monitoring_review_opened_at))), 0)::bigint " +
                 "  FROM kyb_cases c WHERE $OPEN_REVIEW), " +
-                "(SELECT count(*) FROM kyb_cases c WHERE c.monitoring_exit_required_at IS NOT NULL " +
-                "  AND c.status IN ('SIGNED', 'ACTIVE')), " +
+                "(SELECT count(*) FROM kyb_cases c WHERE c.monitoring_exit_required_at IS NOT NULL), " +
                 "(SELECT count(*) FROM kyb_cases c WHERE c.status IN ('SIGNED', 'ACTIVE') AND c.screening_json IS NULL)"
     }
 }
