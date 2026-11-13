@@ -9,6 +9,9 @@ import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.application.port.out.CollateralRepository
 import com.openbank.lending.application.port.out.CollateralValuationPort
+import com.openbank.lending.application.port.out.CreditAssessment
+import com.openbank.lending.application.port.out.CreditBureauPort
+import com.openbank.lending.application.port.out.CreditPolicyPort
 import com.openbank.lending.application.port.out.InstallmentRepository
 import com.openbank.lending.application.port.out.LedgerPostingPort
 import com.openbank.lending.application.port.out.LendingOutboxMessage
@@ -25,6 +28,7 @@ import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.infrastructure.adapter.NoOpOriginationWorkflowPort
 import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
 import com.openbank.lending.infrastructure.compliance.OriginationConfig
+import com.openbank.libs.decision.PolicyBundle
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
@@ -84,9 +88,9 @@ class OriginationCommandsTest {
         OriginationConfig(false, false),
         NoOpOriginationWorkflowPort(),
         OriginationDecisionService(
-            mockk<com.openbank.lending.application.port.out.CreditBureauPort> {
+            mockk<CreditBureauPort> {
                 every { assess(any(), any()) } returns Uni.createFrom().item(
-                    com.openbank.lending.application.port.out.CreditAssessment(null, false, "test-bureau", true),
+                    CreditAssessment(null, false, "test-bureau", true),
                 )
             },
             StarterCreditPolicy(),
@@ -134,6 +138,42 @@ class OriginationCommandsTest {
     )
 
     private fun evidence(eventType: String): LendingOutboxMessage? = emitted.firstOrNull { it.eventType == eventType }
+
+    @Test
+    fun `origination records the Czech revision effective after Prague midnight`() {
+        val beforeUtcMidnight = Clock.fixed(Instant.parse("2026-10-24T22:30:00Z"), ZoneOffset.UTC)
+        val effectiveDay = LocalDate.of(2026, 10, 25)
+        val starter = StarterCreditPolicy().activeBundle(effectiveDay).await().indefinitely()
+        val revision = PolicyBundle(starter.tables.map { it.copy(version = 901, effectiveFrom = effectiveDay) })
+        val policy = mockk<CreditPolicyPort> {
+            every { forApplication(effectiveDay, "CZ", "CONSUMER_CREDIT") } returns Uni.createFrom().item(revision)
+        }
+        val bureau = mockk<CreditBureauPort> {
+            every { assess(any(), any()) } returns Uni.createFrom().item(
+                CreditAssessment(null, false, "test-bureau", true),
+            )
+        }
+        val engine = OriginationDecisionService(
+            bureau,
+            policy,
+            CompliancePackGuard(CompliancePackRegistry(), beforeUtcMidnight, enforced = false),
+            beforeUtcMidnight,
+        )
+        val app = application(OriginationState.ASSESSMENT).copy(
+            jurisdiction = "CZ",
+            productType = "CONSUMER_CREDIT",
+            ageYears = 35,
+            residency = "CZ",
+            verifiedIncomeMonthly = Money.of("6000.00", "EUR"),
+            existingDebtServiceMonthly = Money.of("0.00", "EUR"),
+            existingDebtOutstanding = Money.of("0.00", "EUR"),
+        )
+
+        val result = engine.evaluate(app).await().indefinitely()
+
+        assertThat(result.decision.evaluation.policyVersions.values).containsOnly(901)
+        assertThat(result.recorded.policyVersions).contains("EXCLUSION=901", "ELIGIBILITY=901", "AFFORDABILITY=901")
+    }
 
     // --- withdraw -----------------------------------------------------------------------------------
 

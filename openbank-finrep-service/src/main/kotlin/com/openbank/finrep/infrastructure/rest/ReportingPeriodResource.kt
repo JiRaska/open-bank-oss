@@ -5,6 +5,7 @@ package com.openbank.finrep.infrastructure.rest
 
 import com.openbank.finrep.application.port.inbound.ReportingPeriodUseCase
 import com.openbank.finrep.application.port.inbound.ReportingPeriods
+import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
@@ -19,5 +20,6 @@ import jakarta.ws.rs.core.MediaType
 @RolesAllowed(Roles.ADMIN, Roles.OPERATOR)
 class ReportingPeriodResource(private val reportingPeriods: ReportingPeriodUseCase) {
     @GET
+    @Authorize(action = "finrep.periods.inspect")
     suspend fun list(): ReportingPeriods = reportingPeriods.listAvailable()
 }

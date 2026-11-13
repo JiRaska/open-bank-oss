@@ -66,7 +66,7 @@ We will make both failure modes recover on their own instead of freezing:
   only primary in place before the new standby exists, which is the outage class this ADR
   prevents. So a cluster gaining its standby first gets `instances: 2` alone (CNPG's default
   *preferred* hostname anti-affinity already places the standby elsewhere where it can), plus
-  the annotation `openbank.io/affinity-rollout-pending`. The required affinity lands in a later
+  the annotation `open-bank.tech/affinity-rollout-pending`. The required affinity lands in a later
   wave once the standby is Ready, and that wave removes the annotation. The gate excuses only
   the affinity checks for an annotated cluster. It never excuses `instances >= 2` or
   switchover, and it reports the annotation as stale once the affinity is present or on a

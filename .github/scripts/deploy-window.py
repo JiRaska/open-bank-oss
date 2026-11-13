@@ -313,18 +313,27 @@ def verify_pins(diff: str, fresh: Callable[[str, str], bool],
 
 
 def select_candidate(cands: list[dict], verify: Callable[[dict], list[str]],
-                     supersede: Callable[[dict], int]) -> dict | None:
+                     supersede: Callable[[dict], int],
+                     close_stale: Callable[[dict, list[str]], None] | None = None) -> dict | None:
     """First candidate that passes freshness verify and supersede, or None.
 
     Any per-kind refusal falls through to the next kind: kinds are independent, and a refused
     PR is never armed. 2026-10-24..29 an owner hold, and from 2026-10-30 a stale audit-service
     pin, refused the gitops kind on every run while admin-ui was never tried.
+
+    A stale pin is permanent: the check compares the image's source tree with main's, and main
+    only moves forward, so the PR can never go green on its head. `close_stale` closes it instead
+    of leaving it open as queue noise (2026-11-12: #15832, #15833 and #15846 sat red on exactly
+    this until a human closed them). An UNREADABLE diff is not evidence of staleness and never
+    closes anything.
     """
     for c in cands:
         stale = verify(c) if c["head"].startswith(DEPLOY_PREFIXES[0]) else []
         if stale:
             for pin in stale:
                 print(f"::error::stale GitOps image pin in #{c['number']}: {pin}", file=sys.stderr)
+            if close_stale is not None and not any(r.startswith("diff of #") for r in stale):
+                close_stale(c, stale)
         else:
             rc = supersede(c)
             if rc == 0:
@@ -403,6 +412,17 @@ def self_test() -> int:
           select_candidate([cand_g, cand_a], lambda c: [], sup({12: 3})) is cand_a)
     check("any supersede refusal falls through (rollback rc 1)",
           select_candidate([cand_g, cand_a], lambda c: [], sup({12: 1})) is cand_a)
+    closed = []
+    def closer(c, why):
+        closed.append(c["number"])
+    select_candidate([cand_g, cand_a], lambda c: ["openbank-audit-service:sandbox-x"], sup({}), closer)
+    check("a stale gitops pin closes that PR", closed == [12])
+    closed.clear()
+    select_candidate([cand_g, cand_a], lambda c: [f"diff of #{c['number']} unreadable (gh rc 1)"], sup({}), closer)
+    check("an unreadable diff closes nothing", closed == [])
+    closed.clear()
+    select_candidate([cand_g, cand_a], lambda c: [], sup({12: 3}), closer)
+    check("a supersede refusal (owner hold) closes nothing", closed == [])
     check("every kind refused -> nothing armed",
           select_candidate([cand_g, cand_a], lambda c: ["x"], sup({11: 1})) is None)
     check("first armable candidate wins, later kinds untouched",
@@ -692,7 +712,26 @@ def main() -> int:
             return subprocess.run(["bash", ".github/scripts/supersede-deploy-prs.sh", prefix, str(c["number"])],
                                   stdout=sys.stderr).returncode
 
-        pick = select_candidate(cands, verify, supersede)
+        def close_stale(c, why):
+            # A held PR (draft, or labelled `blocked`) is an owner's decision: leave it open.
+            view = subprocess.run(["gh", "pr", "view", str(c["number"]), "--repo", repo,
+                                   "--json", "isDraft,labels,state"], capture_output=True, text=True)
+            try:
+                meta = json.loads(view.stdout) if view.returncode == 0 else None
+            except ValueError:
+                meta = None
+            if not meta or meta.get("state") != "OPEN" or meta.get("isDraft") \
+                    or any(l.get("name") == "blocked" for l in meta.get("labels") or []):
+                print(f"::notice::stale #{c['number']} left open (held, closed, or unreadable)", file=sys.stderr)
+                return
+            body = ("Closing: this deploy PR's image pin no longer matches main's source "
+                    f"({why[0]}), so it can never pass 'Verify exact-head GitOps image source'. "
+                    "The next build of the service on main opens a fresh pin.")
+            done = subprocess.run(["gh", "pr", "close", str(c["number"]), "--repo", repo,
+                                   "--comment", body], stdout=sys.stderr)
+            print(f"::notice::closed stale deploy PR #{c['number']} (rc {done.returncode})", file=sys.stderr)
+
+        pick = select_candidate(cands, verify, supersede, close_stale)
         if pick is None:
             print("::error::every deploy kind was refused - nothing armed.", file=sys.stderr)
             return 1

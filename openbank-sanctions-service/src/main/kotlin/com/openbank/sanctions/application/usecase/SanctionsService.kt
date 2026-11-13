@@ -18,6 +18,7 @@ class SanctionsService(
     private val entryRepo: SanctionsEntryRepository,
     private val importer: SanctionsImportService,
     private val clock: Clock,
+    private val profiles: ScreeningProfileEvaluator,
 ) : SanctionsUseCase {
 
     /**
@@ -45,8 +46,14 @@ class SanctionsService(
      * `IllegalArgumentException` maps to 400 via libs-runtime's shared mapper (#526) — the same
      * route the `aliases[i]` guard in [screen] already relies on.
      */
-    private fun resolveTargetLists(cmd: ScreenEntityCommand): List<SanctionsListType> {
+    private fun resolveTargetLists(cmd: ScreenEntityCommand, profile: ScreeningProfile?): List<SanctionsListType> {
         val requested = cmd.listTypes?.filterNotNull()?.filterNot { it.isBlank() }.orEmpty()
+        if (profile != null) {
+            // A profile IS a list set. Accepting both would force a silent choice between them,
+            // and either choice screens something other than what one of the two inputs asked for.
+            require(requested.isEmpty()) { "listTypes cannot be combined with profile" }
+            return profile.lists
+        }
         if (requested.isEmpty()) return SanctionsListType.entries
         val known = SanctionsListType.entries.joinToString(", ") { it.name }
         return requested.map { raw ->
@@ -63,6 +70,7 @@ class SanctionsService(
     private suspend fun performScreening(
         cmd: ScreenEntityCommand,
         targetLists: List<SanctionsListType>,
+        searchFloor: Double,
     ): Pair<SanctionsCheckStatus, List<SanctionsMatch>> {
         val allNames = listOf(cmd.name) + cmd.aliases.filterNotNull()
         val matchMap = mutableMapOf<String, SanctionsEntryMatch>() // key=listType+externalId, keep best
@@ -72,7 +80,7 @@ class SanctionsService(
             val results = entryRepo.search(
                 normalizedQuery = normalized,
                 listTypes = targetLists,
-                threshold = HIT_THRESHOLD,
+                threshold = searchFloor,
                 limit = 10,
             )
             for (m in results) {
@@ -97,13 +105,7 @@ class SanctionsService(
                 programs = m.entry.programs,
             )
         }
-
-        val status = when {
-            hits.any { it.matchScore >= HIT_THRESHOLD } -> SanctionsCheckStatus.HIT
-            hits.any { it.matchScore >= POTENTIAL_HIT_THRESHOLD } -> SanctionsCheckStatus.POTENTIAL_HIT
-            else -> SanctionsCheckStatus.CLEAR
-        }
-        return status to hits
+        return profiles.statusOf(hits) to hits
     }
 
     override suspend fun screen(cmd: ScreenEntityCommand): SanctionsCheck {
@@ -119,22 +121,45 @@ class SanctionsService(
             requireNotNull(listType) { "listTypes[$index] must not be null" }
         }
         repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
-        val targetLists = resolveTargetLists(cmd)
-        val (status, matches) = performScreening(cmd, targetLists)
+        val profile = profiles.parseProfile(cmd.profile)
+        val country = profiles.parseCountry(cmd.country)
+        val bankIdentifier = profiles.parseBankIdentifier(cmd.bankIdentifier)
+        val targetLists = resolveTargetLists(cmd, profile)
+        val (nameStatus, nameMatches) = performScreening(cmd, targetLists, profiles.nameSearchFloor(profile))
+        val outcome = profiles.combine(
+            profile,
+            nameStatus,
+            nameMatches,
+            profiles.screenJurisdictions(country, bankIdentifier, targetLists),
+        )
+        val status = outcome.status
+        val matches = outcome.matches
         val checkedAt = Instant.now(clock)
-        val clearance = if (status == SanctionsCheckStatus.CLEAR || matches.isEmpty()) {
+        // A clearance dismisses a NAME false positive ("this subject is not the listed person").
+        // A jurisdiction match is a fact about the country, with no identity to be mistaken
+        // about, so no clearance ever covers it: the name matches may be cleared, and the status
+        // is then whatever the jurisdiction matches alone make it — never WHITELISTED.
+        val (jurisdiction, clearable) = matches.filterNot { it.matchKind == MatchKind.PEP }
+            .partition { it.matchKind == MatchKind.JURISDICTION }
+        val nameClearance = if (status == SanctionsCheckStatus.CLEAR || clearable.isEmpty()) {
             null
         } else {
-            findCoveringClearance(cmd, matches, checkedAt)
+            findCoveringClearance(cmd, clearable, checkedAt)
         }
+        val clearance = nameClearance.takeIf { jurisdiction.isEmpty() }
+        val namesCleared = nameClearance != null && clearance == null
         val check = SanctionsCheck(
             id = UUID.randomUUID(), idempotencyKey = cmd.idempotencyKey,
             entityType = cmd.entityType, name = cmd.name, aliases = cmd.aliases.filterNotNull(),
             dateOfBirth = cmd.dateOfBirth, nationality = cmd.nationality,
             identifiers = cmd.identifiers,
-            status = if (clearance == null) status else SanctionsCheckStatus.WHITELISTED,
+            status = when {
+                clearance != null -> SanctionsCheckStatus.WHITELISTED
+                namesCleared -> profiles.statusOf(jurisdiction)
+                else -> status
+            },
             matches = matches,
-            overallScore = matches.maxOfOrNull { it.matchScore } ?: 0.0,
+            overallScore = if (namesCleared) jurisdiction.maxOf { it.matchScore } else outcome.overallScore,
             checkedLists = targetLists,
             reviewedBy = clearance?.reviewedBy,
             reviewNote = clearance?.reviewNote,
@@ -142,6 +167,10 @@ class SanctionsService(
             reviewedAt = clearance?.reviewedAt,
             subjectId = cmd.subjectId,
             clearanceExpiresAt = clearance?.clearanceExpiresAt,
+            profile = profile,
+            country = country,
+            bankIdentifier = bankIdentifier,
+            pepStatus = outcome.pepStatus,
         )
         return repo.saveWithEvent(check, EVENT_SCREENED)
     }
@@ -173,12 +202,12 @@ class SanctionsService(
         aliases == cmd.aliases.filterNotNull() &&
         dateOfBirth == cmd.dateOfBirth &&
         nationality == cmd.nationality &&
-        identifiers == cmd.identifiers
+        identifiers == cmd.identifiers &&
+        profile?.name == cmd.profile?.takeIf { it.isNotBlank() } &&
+        country == cmd.country?.trim()?.uppercase()?.takeIf { it.isNotEmpty() } &&
+        bankIdentifier == cmd.bankIdentifier?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
 
     companion object {
-        private const val HIT_THRESHOLD = 0.85
-        private const val POTENTIAL_HIT_THRESHOLD = 0.65
-
         /**
          * Emitted by [screen]: an automated screening produced a status from list matching.
          *
