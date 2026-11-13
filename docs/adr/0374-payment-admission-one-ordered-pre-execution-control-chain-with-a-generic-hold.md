@@ -137,10 +137,18 @@ domestic and SEPA, with standing; (B) limits; (C) sanctions coverage and inputs;
 the first rail that adopts the chain. They are recorded here because the next rail must make the
 same choices, not new ones.
 
-- *The switch.* The chain is off by default per rail (`openbank.<rail>.admission.enabled`). The
-  workflow records the switch as it was when the run started, and with the switch off a run
-  schedules nothing it did not schedule before, so workers from before the change can serve it
-  during a rolling deployment. A payment already HELD is evaluated whatever the switch says.
+- *The switch.* The chain is off by default per rail (`openbank.<rail>.admission.enabled`). Whoever
+  starts a run reads the switch and puts it in the run's memo; workflow code never reads
+  configuration. A run started with the switch off carries no memo and writes no marker, so its
+  history is what the implementation from before the chain writes, and such a worker can serve and
+  replay it (proven by replay in both directions). The first revision of this note claimed that for
+  a switch recorded as a workflow side effect; that was false, a worker without the code fails the
+  replay of the marker. The guarantee stops at the switch: a run started with the chain ON is not
+  compatible with a worker from before the change, which either takes its first task down the
+  pre-chain path or fails its replay. So the order is fixed. Roll the image out to every worker,
+  then switch the chain on in a separate release. To go back, switch it off, wait until no run
+  started with it is open (no payment HELD, none RECEIVED under an open run), then roll the image
+  back. A payment already HELD is evaluated whatever the switch says.
 - *The case request travels on the rail's own event topic.* `PAYMENT_HELD` is one rail-neutral
   event type carrying `rail`; aml-service reads the rails' topics on one channel and ignores every
   other type. No new topic. The case key is `payment-hold:<rail>:<paymentId>`, derived by the
@@ -150,8 +158,23 @@ same choices, not new ones.
   fraud hold already used. An unavailable control is asked again every 15 minutes, five times,
   before the hold becomes a case.
 - *The manual status change* (point 13) refuses a transition out of HELD always, and out of
-  RECEIVED only while the chain is on for the rail. With the chain off a RECEIVED payment keeps
-  that exit: it is the only one a payment left by an exhausted screening re-drive has.
+  RECEIVED while the chain is on for the rail and something can still act on the payment. A
+  RECEIVED payment whose re-drive attempts are spent and which has no open run is picked up by
+  nothing; refusing it too would leave it with no exit. An operator may end that payment, REJECTED
+  or CANCELLED only, never VALIDATED, and the state is counted and alerted on. With the chain off a
+  RECEIVED payment keeps the exit it had.
+- *A hold outlives its run.* The run is what re-evaluates, waits and expires a hold, so the rail
+  records on the payment when it was held and when its case was requested, and a sweep gives every
+  HELD payment without an open run a new one. That run keeps the first hold's expiry and does not
+  evaluate a payment whose case was requested. A case decision that finds a HELD payment with no
+  run starts one and is delivered with it. Admission activities retry without limit.
+- *Release re-run* (point 13, funds). "A failed re-run rejects" is read as: a re-run that REFUSES
+  rejects. A standing read that got no answer (timeout, dependency down) is retried and decides
+  nothing; if it never answers the run ends, the sweep recovers the payment and its expiry rejects
+  it. Balance is not re-checked at release by this step (see below).
+- *One fraud score per payment.* The rail keeps the first real score on the payment and reuses it
+  on every later evaluation, because the fraud service stores and counts every score it gives and
+  cannot recognise a repeat.
 - *What a rail may leave unbound.* A step whose facts or owner do not exist yet is declared unbound
   with its reason, which every admission records. On domestic that is authority (decided when the
   payment is submitted, not again by the chain; ADR-0375 D1), limits (step B), AML destination risk (step E) and payee
@@ -160,9 +183,12 @@ same choices, not new ones.
 
 Not delivered by step A on domestic, and a precondition of switching it on in production: the
 four-eyes decision on a hold's case (point 3; the case keeps aml-service's single-analyst
-decision), funds reservation for a held payment (point 13; the release re-runs standing only),
-and party standing read by the rail (point 4; the rail reads account standing, which lags a
-party's suspension by the propagation delay).
+decision), the balance re-check at release and funds reservation for a held payment (point 13
+asks for standing AND balance; the release re-runs standing only), the release of a delegated
+payment's spend reservation when the chain rejects it or its hold expires, party standing read by
+the rail (point 4; the rail reads account standing, which lags a party's suspension by the
+propagation delay), one test across rail, case service and back, and a run against a real workflow
+server and a broker with access control.
 
 ## Alternatives considered
 
