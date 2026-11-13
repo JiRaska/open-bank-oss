@@ -81,7 +81,11 @@ internal fun inboundAmount(amount: BigDecimal?, currency: String?): Money {
     return DomesticSchemeRules.requireSchemeCurrency(parsed)
 }
 
-data class DomesticPaymentSubmissionLookup(val debtorAccountId: UUID?, val customerSubmissionScope: String?)
+data class DomesticPaymentSubmissionLookup(
+    val debtorAccountId: UUID?,
+    val customerSubmissionScope: String?,
+    val originalSubmissionKeyDigest: String? = null,
+)
 
 data class TransitionDomesticPaymentStatusRequest(
     val targetStatus: String,

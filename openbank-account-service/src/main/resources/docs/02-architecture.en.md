@@ -144,3 +144,23 @@ sequenceDiagram
 true. An unknown IBAN and another party's IBAN both answer `owned=false`, so the endpoint is not an
 existence oracle. Its declared callers are pension-service and sdd-service; neither holds
 `account.read`.
+
+## Delegation grant projection (ADR-0232 D3, ADR-0375 D2)
+
+`DelegationEventConsumer` keeps this service's own compacted projection of the `delegation-events`
+stream, so an account operation decides a delegated caller's authority locally and never calls
+delegation-service on the request path.
+
+The envelope is no longer parsed here. `com.openbank.libs.delegation.DelegationGrantEventDecoder`
+decodes it, `DelegationGrantEvents.ENABLING` / `DISABLING` classify the effect, and this consumer
+keeps only the part that is genuinely local: which fields of the grant it stores, and what it does
+with a record the decoder rejects. A `null` decode is a poison pill, not an empty grant.
+
+One field stays at the use site on purpose: a grant arriving with no `approvalPolicy` is stored as
+`APPROVAL_POLICY_SOLO`. That default is this service's reading of a missing value, not a property of
+the wire format, so it does not belong in the shared decoder.
+
+Before the shared decoder, the first nine lines of this consumer were character-for-character
+identical to card-issuance-service's. Both were green and nothing compared them, so a producer-side
+rename would have silently stopped one projection from matching — which leaves a revoked grant
+enforceable.
