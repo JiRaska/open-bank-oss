@@ -780,7 +780,13 @@ def resolve_reconcile_service_source(
 
 
 def resolve_reconcile_service_sources(
-    services: list[str], tip_sha: str, repository: str, token: str, api_url: str
+    services: list[str],
+    tip_sha: str,
+    repository: str,
+    token: str,
+    api_url: str,
+    *,
+    allow_partial: bool = False,
 ) -> dict[str, dict[str, str | int]]:
     """Resolve exact historical Sources CI/Pact versions for a batch of services.
 
@@ -874,6 +880,11 @@ def resolve_reconcile_service_sources(
                 pending.remove(service)
             if not pending:
                 return resolved
+    if allow_partial:
+        # The caller refuses each unresolved service individually. Only "no run proves
+        # this service" reaches here; API failures, bad pagination and an exhausted
+        # deadline still raise above, so they keep refusing the whole batch.
+        return resolved
     missing = ", ".join(sorted(pending))
     raise VerificationError(
         f"no successful main Services CI build+contract with exact Pact versions and "
@@ -895,6 +906,23 @@ def main() -> int:
             print(f"::error::exact Services CI verification failed: {exc}", file=sys.stderr)
             return 1
         print(json.dumps(proven, sort_keys=True))
+        return 0
+    if len(sys.argv) == 4 and sys.argv[1] == "--resolve-reconcile-sources-partial":
+        try:
+            services = json.loads(sys.argv[2])
+            resolved = resolve_reconcile_service_sources(
+                services,
+                sys.argv[3],
+                os.environ.get("GITHUB_REPOSITORY", ""),
+                os.environ.get("GH_TOKEN", ""),
+                os.environ.get("GITHUB_API_URL", "https://api.github.com"),
+                allow_partial=True,
+            )
+        except (json.JSONDecodeError, VerificationError) as exc:
+            print(f"::error::reconcile source refused: {exc}", file=sys.stderr)
+            return 1
+        unresolved = sorted(set(services) - set(resolved))
+        print(json.dumps({"resolved": resolved, "unresolved": unresolved}, sort_keys=True))
         return 0
     if len(sys.argv) == 4 and sys.argv[1] == "--resolve-reconcile-sources":
         try:
@@ -934,6 +962,7 @@ def main() -> int:
             "usage: verify-successful-service-ci.py <service> <sha> | "
             "--resolve-reconcile-source <service> <current-main-sha> | "
             "--resolve-reconcile-sources <services-json> <current-main-sha> | "
+            "--resolve-reconcile-sources-partial <services-json> <current-main-sha> | "
             "--verify-services <service-to-sha-json>",
             file=sys.stderr,
         )
