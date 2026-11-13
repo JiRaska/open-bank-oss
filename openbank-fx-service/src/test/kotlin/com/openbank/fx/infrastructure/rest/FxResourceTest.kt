@@ -195,7 +195,6 @@ class FxResourceTest {
                     ConvertRequest(
                         partyId = UUID.randomUUID(),
                         accountId = null,
-                        partyName = "Alice",
                         fromCurrency = "EUR",
                         toCurrency = "CZK",
                         fromAmountMinorUnits = 1000L,

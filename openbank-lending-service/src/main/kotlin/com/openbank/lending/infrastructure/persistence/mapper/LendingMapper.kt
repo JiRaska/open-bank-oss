@@ -66,6 +66,7 @@ class LendingMapper {
         it.catalogContentHash = a.catalogSnapshot?.contentHash
         it.catalogSchemaVersion = a.catalogSnapshot?.schemaVersion
         it.signatureArtefactHash = a.signatureArtefactHash
+        it.predecessorApplicationId = a.predecessorApplicationId
     }
 
     fun toDomain(e: LoanApplicationEntity) = LoanApplication(
@@ -90,6 +91,7 @@ class LendingMapper {
         decidedEngineAt = e.decidedEngineAt,
         signatureArtefactHash = e.signatureArtefactHash,
         catalogSnapshot = e.toCatalogSnapshot(),
+        predecessorApplicationId = e.predecessorApplicationId,
     )
 
     fun toEntity(l: Loan) = LoanEntity().also {

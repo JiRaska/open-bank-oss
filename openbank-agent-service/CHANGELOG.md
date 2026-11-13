@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.33.4](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.3...agent-service-v1.33.4) (2026-11-13)
+
+
+### Bug Fixes
+
+* **agent:** classify a missing OPA result as a PDP error, fail closed on unknown enforcement mode, correct stale fail-open text ([#15813](https://github.com/JiRaska/open-bank-oss/issues/15813)) ([bc62fba](https://github.com/JiRaska/open-bank-oss/commit/bc62fba7201951923ff5c790898a54d57b352118)), closes [#15758](https://github.com/JiRaska/open-bank-oss/issues/15758)
+
+## [1.33.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.2...agent-service-v1.33.3) (2026-11-12)
+
+
+### Bug Fixes
+
+* **agent:** fail closed when the policy decision point is unreachable for write and proposal tools ([#15770](https://github.com/JiRaska/open-bank-oss/issues/15770)) ([211468e](https://github.com/JiRaska/open-bank-oss/commit/211468e4d3e495baaff3be252c67f3d314d2add5))
+
 ## [1.33.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.1...agent-service-v1.33.2) (2026-11-12)
 
 

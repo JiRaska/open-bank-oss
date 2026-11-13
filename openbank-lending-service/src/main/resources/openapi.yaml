@@ -39,7 +39,12 @@ info:
   # 1.40.0 -> 1.41.0: additive — customer-requested human review of an engine decline (GDPR Art.
   # 22(3), EU AI Act Art. 86): POST /intake/applications/{id}/decline-review (customer-edge only) and
   # the DeclineReview schema. 1.40.0 is what live origin/main holds.
-  version: 1.41.0
+  # 1.41.0 -> 1.42.0 (#15656): effective-dated Czech credit policy versions; 1.41.0 was taken on
+  # main by #15786 after this branch was cut.
+  # 1.42.0 -> 1.43.0: additive — the staff side of the decline review: GET /decline-reviews and
+  # POST /decline-reviews/{id}/decision, and the StaffDeclineReview and DeclineReviewDecision schemas.
+  # 1.42.0 was taken on main by #15656 after this branch was cut.
+  version: 1.43.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -298,6 +303,73 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: No such application for this caller }
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/lending/decline-reviews:
+    get:
+      tags: [Lending]
+      operationId: listPendingDeclineReviews
+      summary: Pending decline reviews, oldest first, with the engine's recorded reasons
+      description: Humans only (ROLE_CREDIT_RISK or ROLE_ADMIN); never grantable to a service account.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Pending reviews
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StaffDeclineReview'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/lending/decline-reviews/{id}/decision:
+    post:
+      tags: [Lending]
+      operationId: decideDeclineReview
+      summary: Confirm the engine decline or overturn it
+      description: >-
+        The reviewer (the JWT subject, never client-supplied) is not bound by the engine outcome. A
+        reviewer whose principal name equals the applicant's party id is refused (SELF_REVIEW); this is
+        not a staff conflict-of-interest check, which would need a staff-to-party mapping. A reason of at least 10 characters is mandatory for both outcomes.
+        CONFIRMED records the human decision; the declined application is unchanged. OVERTURNED does
+        not resurrect the declined application: it opens a successor application (linked in
+        `successorApplicationId`) in FOUR_EYES with the reviewer as proposer, so the existing
+        four-eyes decision (POST /applications/{id}/decision, approver different from proposer)
+        still makes the credit decision. The successor gets a first due date recomputed by the intake
+        rule and today's compliance pack, but keeps the declined application's rate (no re-pricing) and
+        has no engine evaluation of its own. An overturn intake would refuse today (origination not
+        allowed for the product, FLOATING rate while floating origination is off, invalid rate terms)
+        answers 409 SUCCESSOR_NOT_ORIGINABLE and the review stays REQUESTED. The Idempotency-Key is required; the decision is replay-safe by a
+        conditional claim, so a retry answers 409. 409 codes: REVIEW_ALREADY_DECIDED, SELF_REVIEW,
+        SUCCESSOR_NOT_ORIGINABLE.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeclineReviewDecision'
+      responses:
+        '200':
+          description: The decided review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffDeclineReview'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404': { description: No such review }
         '409':
           $ref: '#/components/responses/Conflict'
 
@@ -581,15 +653,14 @@ paths:
       summary: The credit policy bundle the engine evaluates as of a date
       description: >-
         Every decision table (exclusion, eligibility, affordability, pricing band) with its rules,
-        version and effective window (ADR-0213 D1). codeSeeded is true while the ADR-0213 D3
-        starter policy is the binding — i.e. before the four-eyes table store D4 describes exists —
-        so a risk committee reading the table knows whether anyone can change it and how.
+        version and effective window for Czech consumer credit. codeSeeded is true when no
+        approved Czech revision was effective on the requested day.
       parameters:
         - name: asOf
           in: query
           required: false
           schema: { type: string, format: date }
-          description: ISO-8601 date; defaults to today. A malformed value is a 400.
+          description: ISO-8601 date. Defaults to today's date in Europe/Prague. A malformed value is a 400.
       responses:
         '200':
           description: The active bundle
@@ -600,6 +671,92 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/risk/policy/proposals:
+    get:
+      tags: [Lending]
+      operationId: listCzCreditPolicyProposals
+      summary: List Czech consumer credit policy revisions awaiting a checker
+      responses:
+        '200':
+          description: Pending immutable proposals
+          headers:
+            Cache-Control:
+              schema: { type: string, example: no-store }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CzCreditPolicyProposal' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Lending]
+      operationId: proposeCzCreditPolicy
+      summary: Propose an immutable Czech consumer credit policy revision
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CzCreditPolicyBundle' }
+      responses:
+        '201':
+          description: Stored revision proposal, including the original response on exact retry
+          headers:
+            X-Idempotency-Replayed:
+              description: True when the original command response is replayed.
+              schema: { type: string, enum: ['true'] }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CzCreditPolicyProposal' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The key was used for a different request or identical content is already pending or approved
+  /api/v1/lending/risk/policy/proposals/{id}/decide:
+    post:
+      tags: [Lending]
+      operationId: decideCzCreditPolicy
+      summary: Approve or reject an exact policy revision as a different staff actor
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve: { type: boolean }
+                reason: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Recorded policy decision, including the original response on exact retry
+          headers:
+            X-Idempotency-Replayed:
+              description: True when the original command response is replayed.
+              schema: { type: string, enum: ['true'] }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CzCreditPolicyProposal' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The policy proposal does not exist
+        '409':
+          description: The key was used for a different request, the proposal was decided, or the version or date is in use
+        '422':
+          description: The checker must differ from the maker
   /api/v1/lending/applications/recent:
     get:
       tags: [Lending]
@@ -2182,6 +2339,30 @@ components:
         rules:
           type: array
           items: { $ref: '#/components/schemas/PolicyRuleView' }
+    CzCreditPolicyBundle:
+      type: object
+      required: [tables]
+      properties:
+        tables:
+          type: array
+          items: { $ref: '#/components/schemas/PolicyTableView' }
+    CzCreditPolicyProposal:
+      type: object
+      required: [id, revision, effectiveFrom, contentHash, state, proposedBy, proposedAt, policyJson]
+      properties:
+        id: { type: string, format: uuid }
+        revision: { type: integer, minimum: 3 }
+        effectiveFrom: { type: string, format: date }
+        contentHash: { type: string }
+        state: { type: string, enum: [PROPOSED, EXECUTED, REJECTED] }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        decisionReason: { type: string, nullable: true }
+        policyJson:
+          type: string
+          description: Exact stored UTF-8 policy JSON covered by contentHash.
     CreditPolicyView:
       type: object
       required: [asOf, source, codeSeeded, tables]
@@ -2363,6 +2544,43 @@ components:
         applicationId: { type: string, format: uuid }
         status: { type: string, enum: [REQUESTED, CONFIRMED, OVERTURNED] }
         requestedAt: { type: string, format: date-time }
+    StaffDeclineReview:
+      type: object
+      required: [id, applicationId, partyId, status, requestedAt, engineOutcome, engineDecidedAt]
+      properties:
+        id: { type: string, format: uuid }
+        applicationId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        status: { type: string, enum: [REQUESTED, CONFIRMED, OVERTURNED] }
+        requestedAt: { type: string, format: date-time }
+        engineOutcome: { type: string, description: The engine's outcome as recorded (always DECLINE here). }
+        engineReasons:
+          type: string
+          nullable: true
+          description: The engine's machine-readable reasons, comma-separated CODE:ruleId pairs.
+        policyVersions:
+          type: string
+          nullable: true
+          description: The pinned policy table versions the engine used, comma-separated TABLE=version pairs.
+        engineDecidedAt: { type: string, format: date-time }
+        reviewedBy: { type: string, nullable: true }
+        reviewedAt: { type: string, format: date-time, nullable: true }
+        reviewReason: { type: string, nullable: true }
+        successorApplicationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set only when OVERTURNED; the application that entered the four-eyes decision.
+    DeclineReviewDecision:
+      type: object
+      required: [outcome, reason]
+      properties:
+        outcome: { type: string, enum: [CONFIRMED, OVERTURNED] }
+        reason:
+          type: string
+          minLength: 10
+          maxLength: 512
+          description: Why; recorded on the review and never published in events.
     WithdrawApplicationRequest:
       type: object
       required: [reason]

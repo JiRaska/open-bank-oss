@@ -56,8 +56,8 @@ metadata:
   labels:
     app.kubernetes.io/name: interest-service
     app.kubernetes.io/part-of: interest
-    openbank.io/finops-tier: T1
-    openbank.io/adr: "0057"
+    open-bank.tech/finops-tier: T1
+    open-bank.tech/adr: "0057"
 spec:
   hosts:
     - interest-service.interest.svc.cluster.local

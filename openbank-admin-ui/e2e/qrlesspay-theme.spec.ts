@@ -3,7 +3,7 @@
 // See LICENSE in the repository root for details.
 
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 test.beforeEach(async ({ context, baseURL }) => {

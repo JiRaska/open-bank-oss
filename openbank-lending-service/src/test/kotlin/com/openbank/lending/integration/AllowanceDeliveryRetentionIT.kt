@@ -145,10 +145,15 @@ class AllowanceDeliveryRetentionIT {
     fun `actual V30 upgrades a populated V29 database without fabricating purged deliveries`() {
         sql(
             // Reconstruct the actual V29 fixture, including removal of later additive observations.
-            "DROP TABLE loan_decline_review; " +
-                "DELETE FROM flyway_schema_history WHERE version = '32'; " +
+            "ALTER TABLE loan_application DROP COLUMN predecessor_application_id; " +
+                "DROP TABLE cz_credit_policy_command_receipt; " +
+                "DROP TABLE cz_credit_policy_revision; " +
+                "DROP FUNCTION check_cz_credit_policy_future_approval(); " +
+                "DROP FUNCTION cz_credit_policy_prague_day(); " +
+                "DROP FUNCTION protect_cz_credit_policy_revision(); " +
+                "DROP TABLE loan_decline_review; " +
                 "DROP TABLE lending_close_required_job; " +
-                "DELETE FROM flyway_schema_history WHERE version = '31'; " +
+                "DELETE FROM flyway_schema_history WHERE version IN ('31', '32', '33', '34'); " +
                 "DROP TRIGGER record_lending_allowance_delivery ON lending_outbox; " +
                 "DROP FUNCTION record_lending_allowance_delivery(); " +
                 "DROP INDEX idx_lending_allowance_outbox_date_status; " +
