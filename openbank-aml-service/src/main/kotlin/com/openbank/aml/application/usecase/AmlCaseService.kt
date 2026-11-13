@@ -206,7 +206,7 @@ class AmlCaseService(
         payload = objectMapper.writeValueAsString(
             AmlCaseStatusChangedEvent(
                 caseId = current.id,
-                partyId = current.partyId ?: AmlCase.UNRESOLVED_PARTY_WIRE_ID,
+                partyId = current.establishedPartyId,
                 previousStatus = previous.status,
                 newStatus = current.status,
                 decisionReason = current.decisionReason,
@@ -216,7 +216,6 @@ class AmlCaseService(
                 transactionId = current.transactionId,
                 alertCode = current.alertCode,
                 idempotencyKey = current.idempotencyKey,
-                partyResolved = current.partyResolved,
             ),
         ),
     )

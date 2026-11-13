@@ -61,31 +61,31 @@ class PartyEventConsumerTest {
     @Test
     fun `PARTY_ERASED with valid partyId calls anonymizeByPartyId`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        coEvery { amlCaseRepository.anonymizeByPartyId(partyId) } returns 2
+        coEvery { amlCaseRepository.anonymizeByPartyId(partyId, any()) } returns 2
 
         consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
 
-        coVerify(exactly = 1) { amlCaseRepository.anonymizeByPartyId(partyId) }
+        coVerify(exactly = 1) { amlCaseRepository.anonymizeByPartyId(partyId, any()) }
     }
 
     @Test
     fun `PARTY_ERASED with missing partyId is skipped without calling repository`(): Unit = runBlocking {
         consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"not-a-uuid"}""")
 
-        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any()) }
+        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any(), any()) }
     }
 
     @Test
     fun `PARTY_ERASED with absent partyId field is skipped without calling repository`(): Unit = runBlocking {
         consumer.consume("""{"eventType":"PARTY_ERASED"}""")
 
-        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any()) }
+        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any(), any()) }
     }
 
     @Test
     fun `PARTY_ERASED repository failure is RETHROWN so the connector dead-letters`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        coEvery { amlCaseRepository.anonymizeByPartyId(partyId) } throws TransientDbFailure()
+        coEvery { amlCaseRepository.anonymizeByPartyId(partyId, any()) } throws TransientDbFailure()
 
         // Replaces a test that asserted the opposite ("message is acked"). Acking a failed erasure
         // leaves the PII in place while the log records the erasure as done (#5698).
@@ -93,7 +93,7 @@ class PartyEventConsumerTest {
             runBlocking { consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""") }
         }
 
-        coVerify(exactly = 3) { amlCaseRepository.anonymizeByPartyId(partyId) }
+        coVerify(exactly = 3) { amlCaseRepository.anonymizeByPartyId(partyId, any()) }
     }
 
     @Test
@@ -102,7 +102,7 @@ class PartyEventConsumerTest {
         consumer.consume("""{"eventType":"PARTY_CREATED","partyType":"INDIVIDUAL","partyId":"$partyId"}""")
 
         coVerify(exactly = 1) { amlUseCase.createCase(any()) }
-        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any()) }
+        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any(), any()) }
     }
 
     @Test
@@ -110,7 +110,7 @@ class PartyEventConsumerTest {
         consumer.consume("""{"eventType":"PARTY_SUSPENDED","partyId":"${UUID.randomUUID()}"}""")
 
         coVerify(exactly = 0) { amlUseCase.createCase(any()) }
-        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any()) }
+        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any(), any()) }
     }
 
     @ParameterizedTest

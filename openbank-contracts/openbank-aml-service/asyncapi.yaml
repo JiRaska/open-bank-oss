@@ -165,14 +165,12 @@ components:
         idempotencyKey:
           type: string
         partyId:
-          type: string
+          type: [string, 'null']
           format: uuid
-        partyResolved:
-          type: boolean
           description: >-
-            Additive. False while the owning party of the case is not established; partyId is then
-            the all-zero UUID (or, on older cases, the account id) and identifies nobody. Absent
-            means true.
+            The party the case is about, or null while it is not established (a held payment whose
+            rail could not name the debtor is opened that way). Never a placeholder. When the party
+            is resolved, aml.case.status_changed.v1 states the case's status again with it.
         accountId:
           type: [string, 'null']
           format: uuid
@@ -222,14 +220,16 @@ components:
           type: string
           format: uuid
         partyId:
-          type: string
+          type: [string, 'null']
           format: uuid
-        partyResolved:
-          type: boolean
           description: >-
-            Additive. False while the owning party of the case is not established; partyId is then
-            the all-zero UUID (or, on older cases, the account id) and identifies nobody. Absent
-            means true.
+            The party the case is about, or null while it is not established; never a placeholder.
+            A decision on such a case is published for the payment rail, which binds it by
+            idempotencyKey, and has no party-level meaning yet. When the party is resolved the
+            case's status is published again on this message with the party: previousStatus equals
+            newStatus, and idempotencyKey, alertCode and transactionId are null, so a consumer that
+            binds a decision to a case key does not take it for a second decision. That restatement
+            is published for every case whose party is resolved after it was opened, decided or not.
         previousStatus:
           type: string
           enum: [OPEN, UNDER_REVIEW, ESCALATED, CLEARED, BLOCKED]

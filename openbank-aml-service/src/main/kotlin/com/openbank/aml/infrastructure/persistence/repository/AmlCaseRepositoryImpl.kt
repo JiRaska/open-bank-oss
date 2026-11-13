@@ -5,6 +5,7 @@
 package com.openbank.aml.infrastructure.persistence.repository
 
 import com.openbank.aml.application.port.out.AmlCaseRepository
+import com.openbank.aml.application.port.out.CaseChangedConcurrentlyException
 import com.openbank.aml.application.port.out.DisplacedCase
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
@@ -12,12 +13,16 @@ import com.openbank.aml.domain.model.ScreeningType
 import com.openbank.aml.infrastructure.persistence.entity.AmlCaseEntity
 import com.openbank.aml.infrastructure.persistence.mapper.toDomain
 import com.openbank.aml.infrastructure.persistence.mapper.toEntity
+import com.openbank.aml.infrastructure.persistence.repository.NativeSql.mutate
+import com.openbank.aml.infrastructure.persistence.repository.NativeSql.select
+import com.openbank.aml.infrastructure.persistence.repository.NativeSql.utc
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.LockModeType
 import java.time.Instant
 import java.util.UUID
 
@@ -83,10 +88,14 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
     }
 
     // ADR-0050: transition + outbox row persist in ONE transaction (atomic write-then-publish).
+    // The row is locked for the write, and the same lock is what `resolveParty` takes: a decision and
+    // a resolution of one case are serialised, so the decision's event either precedes the resolution
+    // (which then restates it for the party) or is refused here and rebuilt with the party in it.
     override suspend fun update(amlCase: AmlCase, event: OutboxMessage): AmlCase = Panache.withTransaction {
-        find("caseId", amlCase.id).firstResult()
+        find("caseId", amlCase.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
             .invoke { entity ->
                 if (entity != null) {
+                    if (entity.partyId != amlCase.partyId) throw CaseChangedConcurrentlyException(amlCase.id)
                     entity.status = amlCase.status.name
                     entity.decisionReason = amlCase.decisionReason
                     entity.assignedAnalyst = amlCase.assignedAnalyst
@@ -99,8 +108,6 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
             .replaceWith(amlCase)
     }.awaitSuspending()
 
-    // GDPR Art. 17: right of erasure — null out PII fields and replace customerReference with a
-    // non-identifying sentinel so the case row itself (required for audit/SAR trails) survives.
     // Two shapes of "party not established", both resolvable from the account. A missing party is
     // the explicit one (V14). The other is #3413: while `party_id` was NOT NULL the rails satisfied it
     // with the debtor ACCOUNT id, so on those rows the two columns are byte-for-byte equal — that
@@ -110,11 +117,29 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
         find("$RESOLVABLE order by partyResolutionAttemptedAt asc nulls first, id asc").range(0, limit - 1).list()
     }.awaitSuspending().map { it.caseId to it.accountId!! }
 
-    override suspend fun resolveParty(caseId: UUID, partyId: UUID) {
+    override suspend fun resolveParty(caseId: UUID, partyId: UUID, restatement: (AmlCase) -> OutboxMessage): Boolean =
         Panache.withTransaction {
-            update("partyId = ?1 where caseId = ?2", partyId, caseId)
+            find("caseId", caseId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().chain { entity ->
+                if (entity == null || (entity.partyId != null && entity.partyId != entity.accountId)) {
+                    Uni.createFrom().item(false)
+                } else {
+                    // Taken before the erasure record is read, and taken by the erasure before it writes
+                    // one: whichever of the two commits first, the other sees it.
+                    lockParty(partyId)
+                        .chain { _ -> select(ERASED, mapOf("partyId" to partyId)) }
+                        .chain { erased ->
+                            entity.partyId = partyId
+                            if (erased.isNotEmpty()) {
+                                entity.customerReference = erasedReference(partyId)
+                                entity.matchedEntity = null
+                                entity.alertDetail = null
+                            }
+                            outboxRepository.persistInTransaction(restatement(entity.toDomain()))
+                        }
+                        .replaceWith(true)
+                }
+            }
         }.awaitSuspending()
-    }
 
     override suspend fun markPartyResolutionAttempted(caseId: UUID, at: Instant) {
         Panache.withTransaction {
@@ -124,16 +149,34 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
 
     override suspend fun countUnresolvedParty(): Long = Panache.withSession { count(RESOLVABLE) }.awaitSuspending()
 
-    override suspend fun anonymizeByPartyId(partyId: UUID): Int = Panache.withTransaction {
-        update(
-            "customerReference = concat('ERASED-', cast(partyId as string))," +
-                " matchedEntity = null, alertDetail = null" +
-                " where partyId = ?1",
-            partyId,
-        )
-    }.awaitSuspending().toInt()
+    // GDPR Art. 17: right of erasure — null out PII fields and replace customerReference with a
+    // non-identifying sentinel so the case row itself (required for audit/SAR trails) survives.
+    // A case that does not name the party yet cannot be found here, so the erasure is RECORDED and
+    // `resolveParty` applies the same anonymisation when it attaches such a case to the party.
+    override suspend fun anonymizeByPartyId(partyId: UUID, erasedAt: Instant): Int = Panache.withTransaction {
+        lockParty(partyId)
+            .chain { _ -> mutate(RECORD_ERASURE, mapOf("partyId" to partyId, "erasedAt" to utc(erasedAt))) }
+            .chain { _ ->
+                mutate(ANONYMIZE, mapOf("partyId" to partyId, "reference" to erasedReference(partyId)))
+            }
+    }.awaitSuspending()
 
     private companion object {
+        fun erasedReference(partyId: UUID): String = "ERASED-$partyId"
+
+        const val ERASED = "SELECT 1 FROM aml_erased_party WHERE party_id = :partyId"
+
+        const val RECORD_ERASURE = """
+            INSERT INTO aml_erased_party (party_id, erased_at) VALUES (:partyId, :erasedAt)
+            ON CONFLICT (party_id) DO NOTHING
+        """
+
+        const val ANONYMIZE = """
+            UPDATE aml_cases
+               SET customer_reference = :reference, matched_entity = NULL, alert_detail = NULL
+             WHERE party_id = :partyId
+        """
+
         /** A case whose owning party is not established; mirrors `AmlCase.partyResolved`. */
         const val UNRESOLVED_PARTY = "partyId is null or partyId = accountId"
 
@@ -144,3 +187,11 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
         const val RESOLVABLE = "($UNRESOLVED_PARTY) and accountId is not null"
     }
 }
+
+/** Held to the end of the transaction; serialises an erasure of a party with a resolution to it. */
+private fun lockParty(partyId: UUID): Uni<Unit> =
+    // Cast to text: the function returns `void`, which the driver cannot hand back as a column.
+    select(
+        "SELECT cast(pg_advisory_xact_lock(hashtextextended(:party, 0)) AS text)",
+        mapOf("party" to partyId.toString()),
+    ).replaceWith(Unit)

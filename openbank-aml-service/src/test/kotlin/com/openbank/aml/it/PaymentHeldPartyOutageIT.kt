@@ -61,6 +61,8 @@ class PaymentHeldPartyOutageIT {
 
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "mp.messaging.incoming.payment-held-in.enabled" to "true",
+            // A record sent before the group's first assignment on this topic must still be read.
+            "mp.messaging.incoming.party-events-in.auto.offset.reset" to "earliest",
             "quarkus.scheduler.enabled" to "true",
             "openbank.aml.party-resolution.interval" to "2s",
             "openbank.aml.party-resolution.initial-delay" to "1s",

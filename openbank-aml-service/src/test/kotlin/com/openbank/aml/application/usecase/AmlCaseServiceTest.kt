@@ -254,9 +254,9 @@ class AmlCaseServiceTest {
             assertThat(decided.status).isEqualTo(AmlCaseStatus.CLEARED)
             val payload = objectMapper.readTree(event.captured.payload)
             assertThat(payload.get("idempotencyKey").asText()).isEqualTo(holdKey)
-            // The party was never established: the wire says so, and fills the required slot with the nil UUID.
-            assertThat(payload.get("partyResolved").asBoolean()).isFalse()
-            assertThat(payload.get("partyId").asText()).isEqualTo("00000000-0000-0000-0000-000000000000")
+            // The party was never established: the event publishes none, not a stand-in for one.
+            assertThat(payload.has("partyId")).isTrue()
+            assertThat(payload.get("partyId").isNull).isTrue()
         }
 
     @Test
@@ -272,12 +272,12 @@ class AmlCaseServiceTest {
         assertThat(saved.captured.partyResolved).isFalse()
         assertThat(saved.captured.accountId).isNotNull()
         val payload = objectMapper.readTree(event.captured.payload)
-        assertThat(payload.get("partyResolved").asBoolean()).isFalse()
-        assertThat(payload.get("partyId").asText()).isEqualTo("00000000-0000-0000-0000-000000000000")
+        assertThat(payload.has("partyId")).isTrue()
+        assertThat(payload.get("partyId").isNull).isTrue()
     }
 
     @Test
-    fun `a case with a party says it is resolved on both events`(): Unit = runBlocking {
+    fun `a case with a party publishes it`(): Unit = runBlocking {
         val event = slot<OutboxMessage>()
         val command = createCommand()
         coEvery { amlCaseRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
@@ -286,8 +286,20 @@ class AmlCaseServiceTest {
         val created = service.createCase(command)
 
         val payload = objectMapper.readTree(event.captured.payload)
-        assertThat(payload.get("partyResolved").asBoolean()).isTrue()
         assertThat(payload.get("partyId").asText()).isEqualTo(created.partyId.toString())
+    }
+
+    @Test
+    fun `an account id standing where the party belongs is not published as a party`(): Unit = runBlocking {
+        val account = UUID.randomUUID()
+        val legacy = amlCase(AmlCaseStatus.UNDER_REVIEW).copy(partyId = account, accountId = account)
+        val event = slot<OutboxMessage>()
+        coEvery { amlCaseRepository.findById(legacy.id) } returns legacy
+        coEvery { amlCaseRepository.update(any(), capture(event)) } answers { firstArg() }
+
+        service.updateDecision(UpdateAmlDecisionCommand(legacy.id, AmlCaseStatus.BLOCKED, "reason", null, "analyst"))
+
+        assertThat(objectMapper.readTree(event.captured.payload).get("partyId").isNull).isTrue()
     }
 
     private fun createCommand(idempotencyKey: String = "aml-idem-1", riskLevel: AmlRiskLevel = AmlRiskLevel.HIGH) =

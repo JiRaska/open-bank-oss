@@ -16,8 +16,8 @@ import java.util.concurrent.atomic.AtomicReference
  * wrapper are exercised against a refused connection, a 5xx and a 404 rather than against a stub
  * of the port.
  *
- * Two listeners. The ACCOUNT one answers `GET /api/v1/accounts/{id}`: the one known account with
- * its owning party, every other id with 404. The CONTROL one stays up for the whole run; it issues
+ * Two listeners. The ACCOUNT one answers `GET /api/v1/accounts/{id}`: each of its two known accounts
+ * with its owning party, every other id with 404. The CONTROL one stays up for the whole run; it issues
  * the client-credentials token the rest-client's filter asks for, and switches the account
  * listener between `up`, `unavailable` (503 to everything) and `refused` (listener closed, so the
  * connection itself is refused).
@@ -76,6 +76,7 @@ class FakeAccountServiceTestResource : QuarkusTestResourceLifecycleManager {
             when {
                 mode.get() == UNAVAILABLE -> exchange.reply(SERVICE_UNAVAILABLE, "")
                 id == KNOWN_ACCOUNT -> exchange.reply(OK, """{"id":"$KNOWN_ACCOUNT","partyId":"$OWNING_PARTY"}""")
+                id == SECOND_ACCOUNT -> exchange.reply(OK, """{"id":"$SECOND_ACCOUNT","partyId":"$SECOND_PARTY"}""")
                 else -> exchange.reply(NOT_FOUND, "")
             }
         }
@@ -101,6 +102,8 @@ class FakeAccountServiceTestResource : QuarkusTestResourceLifecycleManager {
         const val CONTROL_URL_KEY = "test.fake-account-service.control-url"
         const val KNOWN_ACCOUNT = "00000000-0000-4000-8000-0000000ac0b1"
         const val OWNING_PARTY = "00000000-0000-4000-8000-0000000bb0b1"
+        const val SECOND_ACCOUNT = "00000000-0000-4000-8000-0000000ac0c1"
+        const val SECOND_PARTY = "00000000-0000-4000-8000-0000000bb0c1"
         const val UP = "up"
         const val UNAVAILABLE = "unavailable"
         const val REFUSED = "refused"

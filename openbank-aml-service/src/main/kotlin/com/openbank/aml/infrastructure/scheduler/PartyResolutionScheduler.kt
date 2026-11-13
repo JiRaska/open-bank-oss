@@ -4,6 +4,7 @@
 package com.openbank.aml.infrastructure.scheduler
 
 import com.openbank.aml.application.port.out.AmlCaseRepository
+import com.openbank.aml.application.usecase.CasePartyResolver
 import com.openbank.aml.infrastructure.client.AccountServiceClient
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
@@ -21,6 +22,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -49,11 +51,12 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * ### Why a sweep, and not the two designs that were tried first
  *
- * **Not "make the published `partyId` nullable".** Measured with `oasdiff` against this service's
+ * **Not "make the REST response's `partyId` nullable".** Measured with `oasdiff` against this service's
  * own `openapi.yaml`: dropping it from the response's `required` is
  * `response-property-became-optional` and keeping it required-but-`nullable: true` is
  * `response-property-became-nullable` — **both** classify as breaking, so either costs a MAJOR bump
- * and a `/api/v2/aml/cases` URL. That is about the wire only. The STORED party may be missing, and
+ * and a `/api/v2/aml/cases` URL. That binds the REST response only: events publish `null`, and the
+ * STORED party may be missing, and
  * for a held payment it is; the response then says `partyResolved: false` beside a `partyId` that
  * is the nil UUID, an additive change. And a null alone fixes none of the three things above; it
  * only stops writing a wrong value, which is why the sweep exists either way.
@@ -82,6 +85,9 @@ class PartyResolutionScheduler {
 
     @Inject
     lateinit var caseRepository: AmlCaseRepository
+
+    @Inject
+    lateinit var resolver: CasePartyResolver
 
     @Inject
     lateinit var accounts: AccountServiceClient
@@ -123,36 +129,30 @@ class PartyResolutionScheduler {
         val batch = caseRepository.findUnresolvedParty(batchLimit)
         if (batch.isNotEmpty()) {
             log.infof("[party-resolution] resolving %d case(s) with no established party", batch.size)
-            for ((caseId, accountId) in batch) {
-                val partyId = withContext(Dispatchers.IO) { accounts.findPartyByAccountId(accountId) }
-                when {
-                    partyId == null -> {
-                        caseRepository.markPartyResolutionAttempted(caseId, Instant.now())
-                        log.warnf(
-                            "[party-resolution] account %s did not resolve; case %s left as is",
-                            accountId,
-                            caseId,
-                        )
-                    }
-                    partyId == accountId -> {
-                        // Would leave the row indistinguishable from unresolved and re-swept forever.
-                        caseRepository.markPartyResolutionAttempted(caseId, Instant.now())
-                        log.errorf(
-                            "[party-resolution] account %s reports itself as its own party — refusing",
-                            accountId,
-                        )
-                    }
-                    else -> {
-                        caseRepository.resolveParty(caseId, partyId)
-                        log.infof("[party-resolution] case %s → party %s", caseId, partyId)
-                    }
-                }
-            }
+            for ((caseId, accountId) in batch) resolveOne(caseId, accountId)
         }
         // Recomputed every tick, including a tick that resolved nothing, so the gauge reflects the
         // backlog rather than the last batch size.
         unresolved.set(caseRepository.countUnresolvedParty())
         liveness?.recordSuccess()
+    }
+
+    private suspend fun resolveOne(caseId: UUID, accountId: UUID) {
+        val partyId = withContext(Dispatchers.IO) { accounts.findPartyByAccountId(accountId) }
+        when {
+            partyId == null -> {
+                caseRepository.markPartyResolutionAttempted(caseId, Instant.now())
+                log.warnf("[party-resolution] account %s did not resolve; case %s left as is", accountId, caseId)
+            }
+            partyId == accountId -> {
+                // Would leave the row indistinguishable from unresolved and re-swept forever.
+                caseRepository.markPartyResolutionAttempted(caseId, Instant.now())
+                log.errorf("[party-resolution] account %s reports itself as its own party — refusing", accountId)
+            }
+            // One transaction: the party, the restated status for per-party consumers, and the
+            // anonymisation owed if the party was erased meanwhile.
+            resolver.resolve(caseId, partyId) -> log.infof("[party-resolution] case %s → party %s", caseId, partyId)
+        }
     }
 
     private companion object {

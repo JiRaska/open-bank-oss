@@ -14,7 +14,11 @@ import java.util.UUID
 data class AmlCaseCreatedEvent(
     val caseId: UUID,
     val idempotencyKey: String,
-    val partyId: UUID,
+    /**
+     * `null` while the case has no established party ([AmlCase.establishedPartyId]). An event never
+     * carries a stand-in: what is not a party is not published as one, so no consumer can act on it.
+     */
+    val partyId: UUID?,
     val accountId: UUID?,
     val transactionId: UUID?,
     val customerReference: String,
@@ -24,14 +28,12 @@ data class AmlCaseCreatedEvent(
     val alertCode: String,
     val matchedEntity: String?,
     val occurredAt: Instant,
-    // Additive: false while the owning party is not established. `partyId` is then the nil UUID
-    // (AmlCase.UNRESOLVED_PARTY_WIRE_ID) or, on rows from before #3413, the account id; neither is a party.
-    val partyResolved: Boolean = true,
 )
 
 data class AmlCaseStatusChangedEvent(
     val caseId: UUID,
-    val partyId: UUID,
+    /** As on [AmlCaseCreatedEvent]: `null` while the case has no established party. */
+    val partyId: UUID?,
     val previousStatus: AmlCaseStatus,
     val newStatus: AmlCaseStatus,
     val decisionReason: String?,
@@ -45,14 +47,12 @@ data class AmlCaseStatusChangedEvent(
     // Additive (#4403): binds a decision to the case a rail opened, since alertCode and
     // transactionId are free text any case creator may set.
     val idempotencyKey: String? = null,
-    // Additive: see AmlCaseCreatedEvent.partyResolved.
-    val partyResolved: Boolean = true,
 )
 
 fun AmlCase.toCreatedEvent(now: Instant) = AmlCaseCreatedEvent(
     caseId = id,
     idempotencyKey = idempotencyKey,
-    partyId = partyId ?: AmlCase.UNRESOLVED_PARTY_WIRE_ID,
+    partyId = establishedPartyId,
     accountId = accountId,
     transactionId = transactionId,
     customerReference = customerReference,
@@ -62,5 +62,4 @@ fun AmlCase.toCreatedEvent(now: Instant) = AmlCaseCreatedEvent(
     alertCode = alertCode,
     matchedEntity = matchedEntity,
     occurredAt = now,
-    partyResolved = partyResolved,
 )

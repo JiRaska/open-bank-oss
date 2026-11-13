@@ -5,6 +5,7 @@
 package com.openbank.aml.infrastructure.scheduler
 
 import com.openbank.aml.application.port.out.AmlCaseRepository
+import com.openbank.aml.application.usecase.CasePartyResolver
 import com.openbank.aml.infrastructure.client.AccountServiceClient
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessMetrics
@@ -115,6 +116,8 @@ class PartyResolutionWorkflowLivenessTest {
         val registry = SimpleMeterRegistry()
         val repository = mockk<AmlCaseRepository>(relaxUnitFun = true)
         val accounts = mockk<AccountServiceClient>()
+        val resolver = mockk<CasePartyResolver>()
+        coEvery { resolver.resolve(any(), any()) } returns true
         val (downCase, downAccount) = UUID.randomUUID() to UUID.randomUUID()
         val (selfCase, selfAccount) = UUID.randomUUID() to UUID.randomUUID()
         val (okCase, okAccount) = UUID.randomUUID() to UUID.randomUUID()
@@ -129,6 +132,7 @@ class PartyResolutionWorkflowLivenessTest {
 
         val scheduler = PartyResolutionScheduler().apply {
             caseRepository = repository
+            this.resolver = resolver
             this.accounts = accounts
             registryInstance = mockk<Instance<MeterRegistry>>().also {
                 every { it.isResolvable } returns true
@@ -145,8 +149,8 @@ class PartyResolutionWorkflowLivenessTest {
         coVerify(exactly = 1) { repository.markPartyResolutionAttempted(downCase, match { !it.isBefore(before) }) }
         coVerify(exactly = 1) { repository.markPartyResolutionAttempted(selfCase, any()) }
         coVerify(exactly = 0) { repository.markPartyResolutionAttempted(okCase, any()) }
-        coVerify(exactly = 1) { repository.resolveParty(okCase, party) }
-        coVerify(exactly = 1) { repository.resolveParty(any(), any()) }
+        coVerify(exactly = 1) { resolver.resolve(okCase, party) }
+        coVerify(exactly = 1) { resolver.resolve(any(), any()) }
     }
 
     private companion object {

@@ -88,6 +88,13 @@ data class AmlCase(
         get() = partyId != null && partyId != accountId
 
     /**
+     * The party, or `null` while it is not established. The ONE place that decides what an event
+     * may publish as this case's party: every event reads this, never [partyId].
+     */
+    val establishedPartyId: UUID?
+        get() = partyId.takeIf { partyResolved }
+
+    /**
      * A case that sits under a held-payment key without having been opened by the hold intake.
      * The key is reserved on the create endpoint, so such a row predates the reservation or came
      * past it; either way a decision on it would be published under a key a rail releases on.
@@ -174,10 +181,10 @@ data class AmlCase(
         val RESERVED_KEY_PREFIXES = listOf(PACK_MONITORING_KEY_PREFIX, PAYMENT_HOLD_KEY_PREFIX, QUARANTINED_KEY_PREFIX)
 
         /**
-         * What the wire carries in a REQUIRED `partyId` field while [partyId] is `null`: the nil UUID.
-         * The published contracts cannot express a missing party without a breaking change, so the
+         * What the REST response carries in its REQUIRED `partyId` while the party is not established:
+         * the nil UUID. That contract cannot express a missing party without a breaking change, so the
          * absence is stated by `partyResolved = false` next to it and this value only fills the slot.
-         * It is never stored and never accepted as a party.
+         * Events are not bound by it and publish `null`. It is never stored and never accepted as a party.
          */
         val UNRESOLVED_PARTY_WIRE_ID: UUID = UUID(0L, 0L)
 
