@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.45.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.45.0...ledger-service-v1.45.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **ledger:** give frozen-period and closed-year 409s a machine code ([#15811](https://github.com/JiRaska/open-bank-oss/issues/15811)) ([0f6fe9f](https://github.com/JiRaska/open-bank-oss/commit/0f6fe9facbb1f9484f2d5250875f8826cd3f5d97)), closes [#15760](https://github.com/JiRaska/open-bank-oss/issues/15760)
+
 ## [1.45.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.44.1...ledger-service-v1.45.0) (2026-11-12)
 
 
