@@ -35,6 +35,12 @@ JOBS_PER_PAGE = 20
 API_READ_ATTEMPTS = 3
 RECONCILE_RESOLUTION_SECONDS = 420
 CANDIDATE_WORKERS = 8
+# A matrix job whose job-level `if:` is false is never expanded: the attempt lists ONE
+# skipped job named with the literal, unexpanded template. Both recognized metadata
+# contracts (sharded and per-module) are spelled out; nothing else is a placeholder.
+UNEXPANDED_METADATA_JOB = re.compile(
+    r"verification-metadata \(\$\{\{ matrix\.(?:shard\.label|module) \}\}\)"
+)
 
 
 def _require_time_remaining(deadline: float | None) -> None:
@@ -355,6 +361,18 @@ def _jobs_prove_services(
         and job["name"].startswith("verification-metadata (")
     ]
     expected_metadata = _expected_verification_jobs(run, deadline=deadline)
+    # No build file changed, so the source selected no metadata module and the matrix
+    # was skipped whole. That is "nothing to verify", reported by the API as a single
+    # skipped placeholder — not as an absent job. It counts as no metadata job ONLY
+    # when the independently derived expectation is empty too; a placeholder beside an
+    # expected shard, a second metadata job, or any other conclusion still refuses.
+    if (
+        expected_metadata == set()
+        and len(metadata_jobs) == 1
+        and UNEXPANDED_METADATA_JOB.fullmatch(metadata_jobs[0]["name"])
+        and metadata_jobs[0].get("conclusion") == "skipped"
+    ):
+        metadata_jobs = []
     metadata_names = [job["name"] for job in metadata_jobs]
     # all-green also aggregates unrelated service builds, so its failure alone must
     # not erase valid per-service evidence. Its verification-metadata dependency is
