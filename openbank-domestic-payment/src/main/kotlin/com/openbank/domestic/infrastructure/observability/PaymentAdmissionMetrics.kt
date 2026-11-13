@@ -41,6 +41,7 @@ class PaymentAdmissionMetrics : PaymentAdmissionMetricsPort {
     private var unavailable: Map<Pair<AdmissionStep, UnavailableCause>, Counter> = emptyMap()
     private var holdEnds: Map<PaymentHoldEnd, Counter> = emptyMap()
     private var resolutions: Map<Pair<Boolean, Boolean>, Counter> = emptyMap()
+    private var unproven: Counter? = null
 
     @PostConstruct
     fun register() {
@@ -70,6 +71,7 @@ class PaymentAdmissionMetrics : PaymentAdmissionMetricsPort {
                     .tag("delivery", if (delivered) "DELIVERED" else "NOT_WAITING")
                     .register(registry)
             }
+        unproven = Counter.builder(UNPROVEN_DECISIONS_METRIC).tag(RAIL_TAG, RAIL).register(registry)
     }
 
     override fun recordDecision(decision: AdmissionDecision) {
@@ -88,11 +90,16 @@ class PaymentAdmissionMetrics : PaymentAdmissionMetricsPort {
         resolutions[release to delivered]?.increment()
     }
 
+    override fun recordUnprovenHoldDecision() {
+        unproven?.increment()
+    }
+
     companion object {
         const val DECISIONS_METRIC = "openbank.payment.admission.decisions"
         const val UNAVAILABLE_METRIC = "openbank.payment.admission.step.unavailable"
         const val HOLD_ENDS_METRIC = "openbank.payment.admission.hold.ends"
         const val RESOLUTIONS_METRIC = "openbank.payment.admission.hold.resolutions"
+        const val UNPROVEN_DECISIONS_METRIC = "openbank.payment.admission.hold.decisions.unproven"
         private const val RAIL_TAG = "rail"
         private const val RAIL = "domestic"
     }

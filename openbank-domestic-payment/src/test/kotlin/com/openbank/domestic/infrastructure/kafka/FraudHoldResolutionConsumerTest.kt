@@ -5,6 +5,7 @@
 package com.openbank.domestic.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.domestic.application.port.out.PaymentAdmissionMetricsPort
 import com.openbank.domestic.application.usecase.FraudHoldResolutionService
 import com.openbank.domestic.application.usecase.PaymentHoldResolutionService
 import com.openbank.domestic.application.workflow.FraudHoldDelivery
@@ -23,7 +24,8 @@ import java.util.UUID
 class FraudHoldResolutionConsumerTest {
     private val resolution: FraudHoldResolutionService = mockk()
     private val holdResolution: PaymentHoldResolutionService = mockk()
-    private val consumer = FraudHoldResolutionConsumer(ObjectMapper(), resolution, holdResolution)
+    private val admissionMetrics: PaymentAdmissionMetricsPort = mockk(relaxed = true)
+    private val consumer = FraudHoldResolutionConsumer(ObjectMapper(), resolution, holdResolution, admissionMetrics)
     private val paymentId = UUID.randomUUID()
 
     private fun event(
@@ -31,6 +33,7 @@ class FraudHoldResolutionConsumerTest {
         alert: String? = "FRAUD_REVIEW",
         tx: String? = paymentId.toString(),
         key: String? = fraudReviewCaseKey(paymentId),
+        origin: String? = if (alert == "PAYMENT_HELD") "PAYMENT_HOLD_INTAKE" else null,
     ) = ObjectMapper().writeValueAsString(
         mapOf(
             "caseId" to UUID.randomUUID(),
@@ -38,7 +41,7 @@ class FraudHoldResolutionConsumerTest {
             "alertCode" to alert,
             "transactionId" to tx,
             "idempotencyKey" to key,
-        ),
+        ) + (if (origin == null) emptyMap() else mapOf("origin" to origin)),
     )
 
     @Test
@@ -108,6 +111,29 @@ class FraudHoldResolutionConsumerTest {
                 verify(exactly = 1) { holdResolution.resolve(paymentId, other, HoldDecision.RELEASE) }
             }
         }
+
+    /**
+     * The event, not the key, must prove the hold intake opened the case: an aml-service that
+     * predates `origin`, or any case opened another way, publishes none, and such a decision must
+     * never reach the hold, even under the hold's exact canonical key.
+     */
+    @Test
+    fun `a hold decision whose event does not prove the intake opened its case is ignored`(): Unit = runBlocking {
+        every { holdResolution.resolve(any(), any(), any()) } returns true
+        val key = PaymentHoldPolicy.caseKey(paymentId)
+
+        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = key, origin = null))
+        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = key, origin = "REST"))
+        consumer.consume(event("BLOCKED", alert = "PAYMENT_HELD", key = key, origin = ""))
+
+        verify(exactly = 0) { holdResolution.resolve(any(), any(), any()) }
+        verify(exactly = 3) { admissionMetrics.recordUnprovenHoldDecision() }
+
+        // The control: the same decision, proven, under the exact canonical key, is applied.
+        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = key, origin = "PAYMENT_HOLD_INTAKE"))
+        verify(exactly = 1) { holdResolution.resolve(paymentId, key, HoldDecision.RELEASE) }
+        verify(exactly = 3) { admissionMetrics.recordUnprovenHoldDecision() }
+    }
 
     @Test
     fun `a malformed record reaches the dead-letter strategy instead of being acked`() {

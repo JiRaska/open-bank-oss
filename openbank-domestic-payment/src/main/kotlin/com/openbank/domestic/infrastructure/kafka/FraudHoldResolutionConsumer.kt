@@ -6,6 +6,7 @@ package com.openbank.domestic.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.domestic.application.port.out.PaymentAdmissionMetricsPort
 import com.openbank.domestic.application.usecase.FraudHoldResolutionService
 import com.openbank.domestic.application.usecase.PaymentHoldResolutionService
 import com.openbank.domestic.application.workflow.FraudReviewDecision
@@ -38,6 +39,7 @@ class FraudHoldResolutionConsumer(
     private val objectMapper: ObjectMapper,
     private val resolution: FraudHoldResolutionService,
     private val holdResolution: PaymentHoldResolutionService,
+    private val admissionMetrics: PaymentAdmissionMetricsPort,
 ) {
     private val log = Logger.getLogger(FraudHoldResolutionConsumer::class.java)
 
@@ -94,6 +96,19 @@ class FraudHoldResolutionConsumer(
             log.warnf("PAYMENT_HELD case %s decided without a payment id", node.path("caseId").asText())
             return
         }
+        // Provenance, fail closed: only a case the hold intake opened may decide a hold, and only
+        // aml-service can say which case that is. It says so with `origin` on the event; an event
+        // without it (any other case, or an aml-service that predates the field) decides nothing,
+        // whatever its key, so no deploy order lets a case created by hand release a payment.
+        if (node.path(ORIGIN_FIELD).asText("") != HOLD_INTAKE_ORIGIN) {
+            admissionMetrics.recordUnprovenHoldDecision()
+            log.warnf(
+                "PAYMENT_HELD case %s for payment %s does not prove it was opened by the hold intake; ignored",
+                node.path("caseId").asText(),
+                paymentId,
+            )
+            return
+        }
         // The key is handed on as it arrived. Whether it is the key of this hold's case is decided
         // against the payment's row by exact equality, never by parsing it here.
         val caseKey = node.path("idempotencyKey").asText("")
@@ -110,5 +125,7 @@ class FraudHoldResolutionConsumer(
     companion object {
         const val CHANNEL = "fraud-hold-resolution-in"
         const val FRAUD_REVIEW_ALERT = "FRAUD_REVIEW"
+        const val ORIGIN_FIELD = "origin"
+        const val HOLD_INTAKE_ORIGIN = "PAYMENT_HOLD_INTAKE"
     }
 }

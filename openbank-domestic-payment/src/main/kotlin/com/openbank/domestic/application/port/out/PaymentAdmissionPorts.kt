@@ -118,6 +118,9 @@ interface PaymentAdmissionMetricsPort {
 
     /** A case decision reached the rail; [delivered] is false when no run was open for it. */
     fun recordResolution(release: Boolean, delivered: Boolean)
+
+    /** A hold decision refused because its event did not prove the hold intake opened the case. */
+    fun recordUnprovenHoldDecision()
 }
 
 /** How a hold ended. */
