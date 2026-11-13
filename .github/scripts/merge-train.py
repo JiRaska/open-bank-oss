@@ -5395,8 +5395,8 @@ def retry_planner_self_test(check) -> None:
 # ceiling 19,700 (~2.3 %).
 # #15827 (moved member re-derived in publish, fast path held under a carrier, strict-ready hold): 12 cases,
 # ~6 more ticks: spawns=19,929 at 708 cases, measured locally on 2026-11-12; ceiling 20,400 (~2.4 %).
-# Expedite lane (ADR-0343 amendment 2026-11-13): ten cases E1-E10, ~14 more ticks: spawns=20,917 at 719 cases,
-# measured locally on 2026-11-13; ceiling 21,400 (~2.3 %).
+# Expedite lane (ADR-0343 amendment 2026-11-13): eleven cases E1-E11, ~17 more ticks: spawns=21,143 at 720 cases,
+# measured locally on 2026-11-13; ceiling 21,400 (~1.2 %).
 SELF_TEST_SPAWN_CEILING = 21400
 
 # A green carrier and a green, up-to-date strict holder cannot both keep their verification: whichever
@@ -7969,6 +7969,16 @@ def self_test() -> int:
             check("expedite (E7): at the daily cap no expedite carrier is built; one under it, it is",
                   capped == ("in-flight", None) and s.get("expedite_window") == 2 and st == "published",
                   f"capped={capped} under={s.get('expedite_window')} {st}")
+            exp_reset()
+
+            exp_setup()
+            s, st = exp_tick()                                       # the expedite carrier for #2 is published
+            both = [c["number"] for c in exp_open()]
+            gh.pending_shas.clear()                                  # both carriers go green in the same tick
+            s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False, expedite=True)
+            check("expedite (E11): both carriers green in one tick -> the expedite one is judged first and merges",
+                  st == "published" and len(both) == 2 and gh.merged == [2] and 1 not in gh.merged,
+                  f"{s} st={st} carriers={both} merged={gh.merged}")
             exp_reset()
 
             exp_setup()
