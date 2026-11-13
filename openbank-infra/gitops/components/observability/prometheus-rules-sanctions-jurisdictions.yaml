@@ -1,0 +1,92 @@
+# Jurisdiction reference data ageing (sanctions-service, issue #15723).
+#
+# sanctions_jurisdictions holds the high-risk countries a screen's `country` and BIC are matched
+# against. No feed imports it: the rows are copied from published lists by reviewed migration, and
+# those lists change several times a year. Ageing raises no error anywhere — a newly listed country
+# just keeps screening CLEAR — so the table carries two dates per publication and
+# JurisdictionReferenceDataGauge publishes their age per source_list:
+#
+#   openbank_sanctions_jurisdiction_rows                      active rows (0 = expected, not loaded)
+#   openbank_sanctions_jurisdiction_publication_age_seconds   age of the newest active publication
+#   openbank_sanctions_jurisdiction_verification_age_seconds  time since it was compared with source
+#
+# The alert reads the VERIFICATION age, not the publication age. An old publication is normal when
+# the publisher has issued nothing newer (the same reason CnbPolicyRateFeedStale measures the fetch
+# and never a rate's effective date); an old verification means nobody has looked.
+#
+# Not boot-seeded, on purpose. A workflow heartbeat is seeded at registration so a fresh pod reads
+# its own uptime. These ages are computed from dates stored in the table, so a pod that started a
+# second ago reports the true age — a restart must not make stale reference data look fresh. The
+# consequence: an alert here survives every deploy until a migration moves verified_on.
+#
+# severity: warning / info. Stale reference data is a compliance gap to close in days, not a page.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-sanctions-jurisdictions
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.sanctions.jurisdictions
+      interval: 5m
+      rules:
+        # 1. A loaded list has not been compared with its source for 150 days. The lists this table
+        # is copied from are revised after each plenary of the standard setter, three times a year
+        # (about 122 days apart), and the EU list follows; 150 days is one such cycle plus four
+        # weeks to write the migration.
+        - alert: JurisdictionReferenceDataNotReverified
+          expr: openbank_sanctions_jurisdiction_verification_age_seconds > 150 * 86400
+          for: 1h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Jurisdiction list {{ $labels.source_list }} last compared with its source {{ $value | humanizeDuration }} ago"
+            description: >-
+              sanctions-service screens countries against {{ $labels.source_list }} rows that nobody
+              has compared with the published list for more than 150 days. A country listed since
+              then screens CLEAR, and one delisted is still sent to review. Fetch the current
+              publication and add a migration: new rows with a higher version (retiring the ones
+              it supersedes) if it changed, or an UPDATE of verified_on if it did not — the comment
+              in V22__eu_high_risk_third_countries.sql shows both.
+              openbank_sanctions_jurisdiction_publication_age_seconds gives the age of the
+              publication currently loaded. This alert does not clear on a restart.
+
+        # 2. A list the service is meant to hold has no rows. Not an outage and not stale data: the
+        # list was never loaded (or its rows were all retired), so its countries match nothing.
+        # Reported at low severity for as long as it lasts, like WorkflowUnconfigured.
+        - alert: JurisdictionReferenceDataNotLoaded
+          expr: openbank_sanctions_jurisdiction_rows == 0
+          for: 1h
+          labels:
+            severity: info
+            team: platform
+          annotations:
+            summary: "Jurisdiction list {{ $labels.source_list }} is not loaded in sanctions-service"
+            description: >-
+              sanctions_jurisdictions holds no active row for {{ $labels.source_list }}, so a
+              screen's country is never matched against that list. Rows are added only by a
+              reviewed migration written from the published list itself; see the header of
+              V22__eu_high_risk_third_countries.sql for what was loaded and what was not.
+
+        # 3. The row count is unknown: the series is missing, or the table could not be read at
+        # startup (the gauge then reports NaN, which compares unequal to itself). Either way the
+        # two rules above are silent, and silence here must not read as "all lists fresh".
+        - alert: JurisdictionReferenceDataUnknown
+          expr: >-
+            absent(openbank_sanctions_jurisdiction_rows)
+            or (openbank_sanctions_jurisdiction_rows != openbank_sanctions_jurisdiction_rows)
+          for: 2h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "sanctions-service reports no usable jurisdiction reference-data row count"
+            description: >-
+              openbank_sanctions_jurisdiction_rows is absent or NaN. Either sanctions-service is
+              not scraped, or it could not read sanctions_jurisdictions when it started (the pod
+              log says "Jurisdiction reference data could not be read"). Until this clears,
+              JurisdictionReferenceDataNotReverified and JurisdictionReferenceDataNotLoaded cannot
+              fire, so their silence means nothing.

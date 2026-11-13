@@ -33,6 +33,8 @@ PostgreSQL 16, database **`openbank_kyc`** (reactive PG client + JDBC for Flyway
 | `screening_provider`, `screening_ref` | VARCHAR | screening provider + reference |
 | `next_review_date` | TIMESTAMPTZ | EBA periodic review (HIGH 1yr / MEDIUM 2yr / LOW 3yr) |
 | `escalated_to`, `escalated_at`, `escalation_reason` | | escalation trail |
+| `pending_screening_name` (V13) | TEXT | the party's legal name, kept ONLY while the customer screen still has to be retried after a `sanctions-service` outage; cleared when the check is settled, when the case closes and on GDPR erasure. Not part of the API, events or `checks_json` |
+| `screening_attempted_at` (V13) | TIMESTAMPTZ | last screen attempt; orders the retry sweep (partial index `idx_kyc_cases_screening_retry`) |
 
 Indexes: `idx_kyc_cases_party_id`, `idx_kyc_cases_status`, `idx_kyc_due_diligence`, partial `idx_kyc_review_date`, partial `idx_kyc_pep`, and the partial unique index **`uq_kyc_cases_active_party`** (V5) enforcing at most one active case per party.
 
@@ -49,6 +51,7 @@ Transactional outbox: `id`, `event_id` (UUID UNIQUE), `aggregate_id`, `event_typ
 | V3 | `V3__create_kyc_outbox.sql` | transactional outbox table |
 | V4 | `V4__hibernate_sequences.sql` | `kyc_cases_seq`, `kyc_outbox_seq` (Hibernate Reactive `INCREMENT BY 50`) |
 | V5 | `V5__unique_active_kyc_case_per_party.sql` | partial unique index `uq_kyc_cases_active_party` (ADR-0068 idempotency) |
+| V13 | `V13__kyc_unscreened_case_retry.sql` | `pending_screening_name`, `screening_attempted_at` + partial index for the screening retry sweep |
 
 Each migration carries a rollback note in-file (e.g. `DROP SEQUENCE …`, `DROP INDEX uq_kyc_cases_active_party`). **Never edit an applied migration** (checksum mismatch) — see the repo GitOps notes.
 

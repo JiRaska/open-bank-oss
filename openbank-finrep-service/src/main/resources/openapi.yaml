@@ -24,10 +24,13 @@ info:
     fails closed with `UNCLASSIFIED_GL_ACCOUNT` when a new active code has no mapping. Zero-only
     official facts are not emitted by this structured preview. COREP derives its subtotals from
     explicit capital source accounts; missing source data remains a flagged zero (`isDataGap`).
-  version: 1.14.0
+  # 1.16.0 -> 1.17.0 (#15671): COREP LCR preview rows move to EBA 4.2 coordinates; 1.16.0 was
+  # taken on main by #15666 after this branch was cut.
+  version: 1.17.0
 tags:
   - name: FINREP
   - name: COREP
+  - name: Submissions
 paths:
   /api/v1/finrep/templates/{templateId}/xbrl-csv/preflight:
     get:
@@ -138,43 +141,48 @@ paths:
       tags: [COREP]
       summary: Render a COREP template as of a reporting date
       description: >-
-        `C_01.00` (Own Funds) is derived from the ledger GL trial balance as of `asOf`. `C_02.00`
+        `C_01.00` (Own Funds) is derived from the ledger GL trial balance as of `asOf`. EBA 4.2 row
+        r0200 carries other reserves. Row r0160 (profit or loss attributable to owners of the parent)
+        and row r0300 (goodwill) are flagged source gaps. Unconverted capital is also a source gap.
+        `C_02.00`
         (Own Funds Requirements, EBA framework 4.0 CA2 layout, column c0010) is read from the risk
         engine's Pillar 1 standardised-approach result for the most recent TIED_OUT snapshot at
         exactly `asOf` (ADR-0313 D6); `evidence` does not apply to it. Row r0010 (TREA), the classes
         the engine does not model and market/operational/CVA risk are always `isDataGap: true`, and
         every credit-risk row is a gap with its reason when no tied snapshot exists or the read is
-        not enabled. `C_72.00` (LCR liquid assets, Delegated Regulation (EU) 2015/61; columns c0010
-        amount / market value and c0040 value according to Article 9, before the Level 2 caps) is
-        read from the risk engine's LCR result of the same TIED_OUT snapshot; `evidence` does not
-        apply to it. Coins and banknotes (r0040) and withdrawable central bank reserves (r0050) are
-        always `isDataGap: true` (the engine does not split them), every value row is a gap with its
-        reason when no tied snapshot exists, the read is not enabled, the engine states no combined
-        view (every currency in CZK at the ČNB fixing, Delegated Regulation (EU) 2015/61 Art. 4(5) —
-        a multi-currency book is reported from it; the engine's `totalNotStated` reason is carried)
-        or states it in a currency other than CZK, or balances are unclassified, and rows whose code is not yet verified against the EBA DPM carry
-        `[row code UNVERIFIED]` in their label. `C_73.00` (LCR outflows, Delegated Regulation (EU)
-        2015/61; columns c0010 amount and c0060 outflow) is read from the same LCR result; retail
-        deposits subject to higher outflows (r0060) and non-operational deposits (r0250) are always
-        `isDataGap: true` (the engine models neither), the outflow column of a component whose
-        engine run-off factor is not the 2015/61 rate is a gap, every row is a gap under the same
-        conditions as `C_72.00`, and rows whose code is not yet verified against the EBA DPM carry
-        `[row code UNVERIFIED]` in their label. `C_74.00` (LCR inflows, Delegated Regulation (EU)
-        2015/61 Arts. 32-34; columns c0010 amount and c0140 inflow subject to the 75 % cap, the
-        latter labelled `[column code UNVERIFIED]`) is read from the same LCR result; r0010 is the
-        engine's uncapped total inflows (the inflows after the Art. 33(1) cap belong to C 76.00 and
-        are not emitted; a capped figure that is not min(uncapped, cap) fails the render); secured lending (r0260) and central
-        bank claims (r0200) are always `isDataGap: true`, the inflow column of a component whose
-        engine factor is not the 2015/61 rate is a gap, every row is a gap under the same conditions
-        as `C_72.00`, and unverified row codes carry `[row code UNVERIFIED]`. `C_76.00` (LCR
-        calculation, Delegated Regulation (EU) 2015/61 Arts. 4, 17 and 33; column c0010) is read from
-        the same LCR result: the liquidity buffer after haircuts and the Level 2 caps (a gap when the
-        engine does not report it after the caps), net liquidity outflows, the LCR in percent (unit
-        `%`, 2 dp; a gap when net outflows are not positive), total outflows, inflows subject to the
-        75 % cap and the capped reduction; fully exempt and 90 %-cap rows are always `isDataGap: true`.
-        The render fails when buffer, net outflows, ratio or the capped inflows do not tie to the
-        engine's own figures. Every row code is unverified and labelled `[row code UNVERIFIED]`. Any
-        other template id is rejected.
+        not enabled. The four LCR previews use the EBA Reporting Framework 4.2 total-currency
+        (`.a`) table coordinates and the same TIED_OUT
+        risk-engine snapshot. `evidence` does not apply. They cover a subset of the tables for
+        internal use. Each cell is a data gap with its reason when the snapshot is unavailable,
+        the read is disabled, balances are unclassified, or the engine cannot state a combined
+        CZK total (including a missing FX fixing for a multi-currency book). Unsupported
+        breakdowns are absent or marked `isDataGap: true` where explicitly represented.
+
+        `C_72.00` (liquid assets) gives market value in c0010 and Article 9 value before the
+        Level 2 caps in c0040. Level 2 total is r0220, Level 2A r0230 and Level 2B r0310. Coins
+        and banknotes (r0040) and withdrawable central bank reserves (r0050) are gaps because
+        the engine does not split them.
+
+        `C_73.00` (outflows) gives amount in c0010 and weighted outflow in c0060 for the engine
+        total (r0010) and central-bank secured funding (r0930). Deposit rows (r0030, r0050, r0080,
+        r0110, r0120 and r0210) and other liabilities and due commitments (r0885) are classification
+        gaps. The weighted figure is a gap if the applicable engine factor or parameter set differs
+        from the EU 2015/61 assumption.
+
+        `C_74.00` (inflows) gives amount in c0010 and weighted inflows before the reduction in
+        c0140 for the 75% cap bucket. It includes the engine total (r0010), operational financial
+        claims (r0110) and non-operational financial claims (r0160). Non-financial claims
+        (r0030), central-bank claims (r0150) and secured-lending inflows (r0263) are classification
+        gaps. Both columns require the engine's EU 75% cap, and the weighted column requires the
+        expected factors. The render checks that the capped value equals min(uncapped, cap).
+
+        `C_76.00` (calculations, c0010) gives the post-cap liquidity buffer (r0010), net outflows
+        (r0020), the ratio in percent (r0030, unit `%`, 2 dp), total outflows (r0300), weighted
+        inflows subject to the 75% cap (r0330) and their reduction (r0360). Fully exempt and
+        90%-cap amounts and reductions are data gaps. The 75%-cap amounts require a reported
+        cap. A missing post-cap buffer or non-positive net outflows gaps the respective buffer
+        or ratio. The render checks the ties across the engine's buffer, net outflows, ratio
+        and capped inflows. Any other template id is rejected.
 
         The mapper derives CET1, Tier 1 and own funds from explicit ledger accounts 6000-6060; it
         never plugs capital as assets minus liabilities. With no recognised capital source every
@@ -218,8 +226,337 @@ paths:
         '403':
           description: Token lacks one of the SERVICE / ADMIN / OPERATOR roles
 
+  /api/v1/finrep/submissions:
+    post:
+      tags: [Submissions]
+      summary: Open (or return) the submission for a return revision
+      description: >-
+        Idempotent per (templateId, referencePeriod, revision): the first call creates a DRAFT and
+        answers 201, a repeat answers 200 with the same submission.
+      operationId: openFinrepSubmission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpenSubmissionRequest' }
+      responses:
+        '201':
+          description: Submission created in DRAFT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '200':
+          description: Submission already existed for this revision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '400':
+          description: Missing or invalid field
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+    get:
+      tags: [Submissions]
+      summary: List submissions, newest reference period first
+      operationId: listFinrepSubmissions
+      parameters:
+        - name: templateId
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Submissions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
+  /api/v1/finrep/submissions/{id}:
+    get:
+      tags: [Submissions]
+      summary: Read one submission
+      operationId: getFinrepSubmission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Submission
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '404':
+          description: Unknown submission id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
+  /api/v1/finrep/submissions/{id}/package:
+    post:
+      tags: [Submissions]
+      summary: Package a DRAFT return once the XBRL-CSV preflight is READY_FOR_RENDERING
+      description: >-
+        Records a package MANIFEST (identity plus framework/taxonomy versions, SHA-256 hashed). No
+        XBRL-CSV archive is rendered. Idempotent: an already-packaged submission is returned as is.
+      operationId: packageFinrepSubmission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Submission in PACKAGED (or later) state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '409':
+          description: Preflight BLOCKED; the blocker codes are in the message
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '404':
+          description: Unknown submission id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
+  /api/v1/finrep/submissions/{id}/submit:
+    post:
+      tags: [Submissions]
+      summary: Hand a PACKAGED return to the configured supervisory transport
+      description: >-
+        Every call records an attempt. The default transport is a dry run: it transmits nothing,
+        records outcome DRY_RUN and leaves the submission PACKAGED. Only a SUBMITTED transport
+        outcome moves it to SUBMITTED. A return already SUBMITTED, ACKNOWLEDGED or REJECTED is
+        returned unchanged without another transport call.
+      operationId: submitFinrepSubmission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Submission after the attempt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '409':
+          description: >-
+            Submission is still DRAFT, or another request holds the transmission claim
+            (SUBMISSION_IN_PROGRESS), or its outcome is unknown and an ADMIN must reconcile it
+            (OUTCOME_UNKNOWN). The claim is a conditional PACKAGED -> SUBMITTING update, so
+            concurrent submits never call the transport twice. A transport error or a cancelled
+            request records UNKNOWN and moves the return to OUTCOME_UNKNOWN, never back to PACKAGED.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '404':
+          description: Unknown submission id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
+  /api/v1/finrep/submissions/{id}/acknowledgement:
+    post:
+      tags: [Submissions]
+      summary: Record the supervisor's acknowledgement of a SUBMITTED return
+      operationId: acknowledgeFinrepSubmission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcknowledgementRequest' }
+      responses:
+        '200':
+          description: Submission now ACKNOWLEDGED (accepted) or REJECTED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '400':
+          description: Missing field
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '422':
+          description: Submission is not SUBMITTED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '409':
+          description: A concurrent acknowledgement settled the submission first; nothing was recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '404':
+          description: Unknown submission id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
+  /api/v1/finrep/submissions/{id}/reconcile:
+    post:
+      tags: [Submissions]
+      summary: Resolve an OUTCOME_UNKNOWN return after checking with the supervisor (ADMIN only)
+      description: >-
+        Allowed from OUTCOME_UNKNOWN, or from SUBMITTING once the claim lease has expired (the
+        claim is lapsed to OUTCOME_UNKNOWN first). `sent: true` (with the supervisor's reference)
+        moves the return to SUBMITTED; `sent: false` releases it to PACKAGED. Recorded as an
+        attempt by `operator-reconcile`.
+      operationId: reconcileFinrepSubmission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReconcileRequest' }
+      responses:
+        '200':
+          description: Submission after reconciliation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '400':
+          description: Missing field, or sent=true without a reference
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '409':
+          description: Submission is not in a reconcilable state (NOT_RECONCILABLE)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '404':
+          description: Unknown submission id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN
+
+  /api/v1/finrep/submissions/{id}/attempts:
+    get:
+      tags: [Submissions]
+      summary: List transport attempts for a submission
+      operationId: listFinrepSubmissionAttempts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Attempts in order
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SubmissionAttempt' }
+        '404':
+          description: Unknown submission id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
 components:
   schemas:
+    OpenSubmissionRequest:
+      type: object
+      required: [templateId, referencePeriod, revision]
+      properties:
+        templateId: { type: string }
+        referencePeriod: { type: string, format: date }
+        revision: { type: integer, minimum: 1 }
+    ReconcileRequest:
+      type: object
+      required: [sent]
+      properties:
+        sent: { type: boolean }
+        reference: { type: string }
+        note: { type: string }
+    AcknowledgementRequest:
+      type: object
+      required: [accepted, reference]
+      properties:
+        accepted: { type: boolean }
+        reference: { type: string }
+        message: { type: string }
+    SupervisorySubmission:
+      type: object
+      required: [id, templateId, referencePeriod, revision, state, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        templateId: { type: string }
+        referencePeriod: { type: string, format: date }
+        revision: { type: integer }
+        state: { type: string, enum: [DRAFT, PACKAGED, SUBMITTING, OUTCOME_UNKNOWN, SUBMITTED, ACKNOWLEDGED, REJECTED] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        reportingFrameworkVersion: { type: string, nullable: true }
+        taxonomyVersion: { type: string, nullable: true }
+        packageHash: { type: string, nullable: true }
+        packagedAt: { type: string, format: date-time, nullable: true }
+        submittedAt: { type: string, format: date-time, nullable: true }
+        transportReference: { type: string, nullable: true }
+        acknowledgementAccepted: { type: boolean, nullable: true }
+        acknowledgementReference: { type: string, nullable: true }
+        acknowledgedAt: { type: string, format: date-time, nullable: true }
+        claimedAt: { type: string, format: date-time, nullable: true }
+    SubmissionAttempt:
+      type: object
+      required: [attemptNo, transport, outcome, attemptedBy, attemptedAt]
+      properties:
+        attemptNo: { type: integer }
+        transport: { type: string }
+        outcome: { type: string, enum: [SUBMITTED, DRY_RUN, REJECTED, FAILED, UNKNOWN] }
+        transportReference: { type: string, nullable: true }
+        detail: { type: string, nullable: true }
+        attemptedBy: { type: string }
+        attemptedAt: { type: string, format: date-time }
     XbrlCsvPreflight:
       type: object
       description: >-
@@ -292,6 +629,10 @@ components:
           type: string
           format: date
           description: The reporting reference date the template was rendered as of
+        sourceEvidence:
+          type: string
+          enum: [FROZEN, LIVE_PREVIEW]
+          description: The ledger evidence mode used to produce the response.
         cells:
           type: array
           items: { $ref: '#/components/schemas/FinrepCell' }

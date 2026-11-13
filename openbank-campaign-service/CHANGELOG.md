@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.42.3](https://github.com/JiRaska/open-bank-oss/compare/campaign-service-v0.42.2...campaign-service-v0.42.3) (2026-11-12)
+
+
+### Security
+
+* **campaign:** drop baked-in datasource password fallbacks + gate ([#15540](https://github.com/JiRaska/open-bank-oss/issues/15540)) ([d5d111d](https://github.com/JiRaska/open-bank-oss/commit/d5d111df2bda173c5645fc9e05e52aebc4cd1cb0))
+
 ## [0.42.2](https://github.com/JiRaska/open-bank-oss/compare/campaign-service-v0.42.1...campaign-service-v0.42.2) (2026-11-06)
 
 

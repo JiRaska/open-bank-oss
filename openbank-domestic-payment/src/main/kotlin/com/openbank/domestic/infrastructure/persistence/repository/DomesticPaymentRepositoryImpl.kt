@@ -123,6 +123,19 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
     override suspend fun findByIdempotencyKey(idempotencyKey: String): DomesticPayment? =
         Panache.withSession { find("idempotencyKey", idempotencyKey).firstResult() }.awaitSuspending()?.toDomain()
 
+    override suspend fun findCustomerSubmission(
+        idempotencyKey: String,
+        debtorAccountId: UUID,
+        scope: String,
+    ): DomesticPayment? = Panache.withSession {
+        find(
+            "idempotencyKey = ?1 and debtorAccountId = ?2 and customerSubmissionScope = ?3",
+            idempotencyKey,
+            debtorAccountId,
+            scope,
+        ).firstResult()
+    }.awaitSuspending()?.toDomain()
+
     override suspend fun countByStatus(status: DomesticPaymentStatus): Long =
         Panache.withSession { count("status", status.name) }.awaitSuspending()
 
