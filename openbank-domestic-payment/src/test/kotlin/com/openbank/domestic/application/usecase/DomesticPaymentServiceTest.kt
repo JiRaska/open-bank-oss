@@ -292,7 +292,7 @@ class DomesticPaymentServiceTest {
         return received
     }
 
-    private fun move(payment: DomesticPayment, target: DomesticPaymentStatus) = runBlocking {
+    private fun move(payment: DomesticPayment, target: DomesticPaymentStatus): DomesticPayment = runBlocking {
         service.transitionStatus(
             TransitionDomesticPaymentStatusCommand(
                 paymentId = payment.id,
