@@ -97,6 +97,16 @@ CARRIER_LABEL = "merge-train"
 # fix for a red main, which always goes first). Agents run under the owner's token, so this is a
 # policy, not an identity check: agents never apply it (CLAUDE.md, Multi-agent).
 EXPEDITE_LABEL = "merge-priority:expedite"
+# Expedite lane (ADR-0343 amendment 2026-11-13): ONE extra carrier, holding exactly one expedited member,
+# may be published over live main while one ordinary carrier is still running, and merges first; the
+# overtaken carrier then fails its "main moved" check and is rebuilt with no verdict. The carrier is
+# identified by the App's own EXPEDITE_CONTEXT status on its head, never by its branch name: the
+# `train/<run>-<attempt>` shape is hard-coded in merge_train_carrier.py, check-security-checklist.py and
+# security.yml, and an expedite carrier is judged by exactly the same rules as any other carrier.
+EXPEDITE_CONTEXT = "merge-train/expedite-carrier"
+EXPEDITE_CARRIER_TITLE = "merge-train expedite carrier"
+EXPEDITE_LANE_DEFAULT = False      # MERGE_TRAIN_EXPEDITE_LANE; "false" = the label only reorders, as before
+EXPEDITE_DAILY_CAP_DEFAULT = 6     # expedite carriers per UTC day; the label is a policy, not an identity
 TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
 # Strict carrier (ADR-0343 amendment 2026-11-05): green strict-lane PRs that are BEHIND main are
 # batched into one execution-free tree over live main (`git merge-tree --write-tree` in settle, no
@@ -2208,9 +2218,10 @@ class GitHub:
         if code != 200:
             log(f"::error::merge train: tracking issue #{number} not closed ({code}): {json.dumps(detail)[:200]}")
 
-    def create_carrier(self, branch: str) -> int | None:
+    def create_carrier(self, branch: str, expedite: bool = False) -> int | None:
         assert_train_branch(branch)
-        kind = "strict carrier" if STRICT_TRAIN_BRANCH_RE.fullmatch(branch) else "carrier"
+        kind = ("strict carrier" if STRICT_TRAIN_BRANCH_RE.fullmatch(branch)
+                else "expedite carrier" if expedite else "carrier")
         code, data = api("POST", f"/repos/{self.repo}/pulls", {
             "title": f"merge-train {kind} {branch}", "head": branch, "base": self.branch, "draft": True,
             "body": f"{COMMENT_MARK}\nMerge-train {kind} (ADR-0343): CI on this head verifies one "
@@ -2224,6 +2235,23 @@ class GitHub:
 
     def close_carrier(self, n: int) -> None:
         api("PATCH", f"/repos/{self.repo}/pulls/{int(n)}", {"state": "closed"})
+
+    def expedite_carriers_today(self, day: str) -> int | None:
+        """Expedite carriers the App opened on UTC `day` (YYYY-MM-DD), open or closed; None when two pages
+        of newest-first PRs do not reach back past that day (the caller then fails closed)."""
+        count = 0
+        for page in (1, 2):
+            rows = get(f"/repos/{self.repo}/pulls?state=all&sort=created&direction=desc&per_page=100&page={page}")
+            for p in rows:
+                if (p.get("created_at") or "")[:10] < day:
+                    return count
+                if ((p.get("user") or {}).get("login") == BOT_LOGIN
+                        and (p.get("title") or "").startswith(EXPEDITE_CARRIER_TITLE)
+                        and (p.get("created_at") or "")[:10] == day):
+                    count += 1
+            if len(rows) < 100:
+                return count
+        return None
 
 
 def is_carrier(pr: dict, repo: str) -> bool:
@@ -2241,6 +2269,57 @@ def is_strict_carrier(pr: dict, repo: str) -> bool:
 
 def any_carrier_open(gh, repo: str) -> bool:
     return any(is_carrier(p, repo) or is_strict_carrier(p, repo) for p in gh.open_prs())
+
+
+def is_expedite_carrier(gh, p: dict) -> bool:
+    """A train carrier publish marked as the expedite lane's (App status on its head)."""
+    return gh.app_statuses(p["head"]["sha"]).get(EXPEDITE_CONTEXT, ("", ""))[0] == "success"
+
+
+def carrier_member_numbers(git, gh, p: dict) -> set[int] | None:
+    """Member PR numbers of an open train carrier, read execution-free from its own chain; None = unreadable."""
+    sha, branch = p["head"]["sha"], p["head"]["ref"]
+    if git("fetch", "-q", "origin", f"+refs/heads/{branch}:refs/merge-train/expedite-probe", check=False).returncode != 0:
+        return None
+    if git("rev-parse", "refs/merge-train/expedite-probe", check=False).stdout.strip() != sha:
+        return None
+    chain = parse_own_chain(git, sha)
+    return None if chain is None else {n for n, _ in chain[1]}
+
+
+def expedite_problem(gh, git, repo: str, n: int, cap: int, today: str | None = None) -> str | None:
+    """Why the expedite lane may NOT open a carrier for #n right now; None = it may. Read from live data
+    by settle (to open the window) and again by publish (never trusting settle's output). Bounds
+    (ADR-0343 amendment 2026-11-13): exactly one carrier open and it is an ordinary, unstacked train
+    carrier that does not already hold #n; no strict carrier; #n armed, open and carrying the label;
+    fewer than `cap` expedite carriers opened today."""
+    prs = gh.open_prs()
+    if any(is_strict_carrier(p, repo) for p in prs):
+        return "a strict carrier is open"
+    carriers = [p for p in prs if is_carrier(p, repo)]
+    if len(carriers) != 1:
+        return f"{len(carriers)} train carrier(s) open, the lane needs exactly one to overtake"
+    c = carriers[0]
+    marks = gh.app_statuses(c["head"]["sha"])
+    if marks.get(EXPEDITE_CONTEXT, ("", ""))[0] == "success":
+        return "an expedite carrier is already open"
+    if marks.get(STACK_CONTEXT, ("", ""))[0] == "success":
+        return "the open carrier is stacked over a strict holder"
+    pr = next((p for p in prs if p["number"] == n), None)
+    if pr is None or pr.get("draft") or not pr.get("auto_merge") or not is_expedited(pr):
+        return f"#{n} is not an open, armed PR carrying {EXPEDITE_LABEL}"
+    members = carrier_member_numbers(git, gh, c)
+    if members is None:
+        return f"carrier #{c['number']}: members unreadable"
+    if n in members:
+        return f"#{n} already rides carrier #{c['number']}"
+    day = today or time.strftime("%Y-%m-%d", time.gmtime())
+    used = gh.expedite_carriers_today(day)
+    if used is None:
+        return "today's expedite carrier count is unreadable"
+    if used >= cap:
+        return f"daily cap reached ({used}/{cap} expedite carriers on {day})"
+    return None
 
 
 def pr_view(repo: str, p: dict, files: list[str]) -> dict:
@@ -2498,10 +2577,16 @@ def live_base(gh, git) -> str:
 
 
 # --------------------------------------------------------------------------- the three modes
-def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_size: int) -> list[int]:
+def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_size: int,
+               expedite: int | None = None) -> list[int]:
     base = live_base(gh, git)
     with planning_reads():           # build writes nothing to GitHub; publish re-plans live
         _fast, batch, sizes = plan_batch(gh, git, repo, base, batch_size)
+        if expedite is not None:
+            # Expedite lane: a one-member train, that PR alone, or nothing. Publish re-validates everything.
+            _fast, train, sizes = plan_train(gh, git, repo, base)
+            batch = [m for m in train if m.number == expedite][:1]
+            log(f"build: expedite lane for #{expedite}: {'one-member train' if batch else 'not a live candidate, no train'}")
     builder.sizes, builder.default_size = sizes, batch_size
     capped = sorted({sizes[m.number] for m in batch if sizes.get(m.number)})
     if capped:
@@ -2671,10 +2756,20 @@ def mark_unverifiable(gh, batch: list[Member]) -> None:
 
 
 def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str, batch_size: int,
-                 stack: tuple[int, str] | None = None) -> str:
+                 stack: tuple[int, str] | None = None, expedite: int | None = None,
+                 expedite_cap: int = EXPEDITE_DAILY_CAP_DEFAULT) -> str:
     """Returns one of: idle, in-flight, rejected, published. `stack` = (holder PR, holder head) from
-    settle's speculative-stacking window: re-validated from live data here, never trusted as given."""
-    if any_carrier_open(gh, repo):   # a train carrier, or a strict carrier holding the strict reservation
+    settle's speculative-stacking window: re-validated from live data here, never trusted as given.
+    `expedite` = the PR of settle's expedite window, likewise re-validated (expedite_problem)."""
+    if expedite is not None:
+        if stack is not None:
+            log("::warning::expedite and stacking windows together — refusing both")
+            return "rejected"
+        why = expedite_problem(gh, git, repo, expedite, expedite_cap)
+        if why:
+            log(f"::notice::expedite lane for #{expedite} closed since settle: {why}")
+            return "in-flight"
+    elif any_carrier_open(gh, repo):   # a train carrier, or a strict carrier holding the strict reservation
         return "in-flight"
     branch = train_branch(run_id, attempt)
     base = live_base(gh, git)
@@ -2693,6 +2788,9 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
         log(f"::notice::declared member(s) {moved} no longer live train candidates at their declared heads — "
             f"left out, the rest re-derived this tick (#15827)")
     log(f"publish: declared batch {[m.number for m in batch]}")
+    if expedite is not None and [m.number for m in batch] != [expedite]:
+        log(f"::warning::expedite lane: declared batch is not exactly [#{expedite}] — rejected")
+        return "rejected"
     outputs = derived_output_patterns(git("show", f"{base}:{REGEN_INVENTORY}", check=False).stdout)
     if not outputs:
         log("::error::origin/main declares no DERIVED_OUTPUTS — refusing")
@@ -2775,9 +2873,15 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
             # Over main it could merge past a holder that already yielded once: never pre-empted twice.
             log(f"::notice::#{hn} already yielded once — carrier not published over main either")
             return "rejected"
+    if expedite is not None and v.applied != [expedite]:
+        log(f"::warning::expedite lane: train applies {v.applied}, not exactly [#{expedite}] — rejected")
+        return "rejected"
     Pusher(git, branch, gh.remote).push(v.tip)
     gh.post_status(v.tip, "success", f"tree={v.tree}", context=RECORD_CONTEXT)
-    gh.create_carrier(branch)
+    if expedite is not None:
+        # Marked BEFORE the carrier exists: settle identifies an expedite carrier by this status alone.
+        gh.post_status(v.tip, "success", f"expedite lane: #{expedite} alone over {base[:12]}", context=EXPEDITE_CONTEXT)
+    gh.create_carrier(branch, expedite=expedite is not None)
     record_deferral(gh, git, repo, base, branch)
     log(f"published {branch} over {base[:12]}: members {v.applied}, dropped {v.dropped}")
     return "published"
@@ -2807,8 +2911,23 @@ def defer_recovered_main_red(gh, base: str, main_red: dict[str, str], summary: d
 
 
 
+def expedite_candidate(gh, git, repo: str, train_waiting: list, cap: int) -> int | None:
+    """The first expedited train candidate the lane may serve now, or None. Order is the train's own."""
+    labels = {p["number"]: p for p in gh.open_prs()}
+    for m in train_waiting:
+        if not is_expedited(labels.get(m.number) or {}):
+            continue
+        why = expedite_problem(gh, git, repo, m.number, cap)
+        if why is None:
+            return m.number
+        log(f"expedite lane: #{m.number} not served — {why}")
+        return None   # one expedited PR per tick: the first in order, never a later one past it
+    return None
+
+
 def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str = "",
-                strict_cap: int = STRICT_BATCH_CAP_DEFAULT, stack: bool = SPECULATIVE_STACK_DEFAULT) -> dict:
+                strict_cap: int = STRICT_BATCH_CAP_DEFAULT, stack: bool = SPECULATIVE_STACK_DEFAULT,
+                expedite: bool = EXPEDITE_LANE_DEFAULT, expedite_cap: int = EXPEDITE_DAILY_CAP_DEFAULT) -> dict:
     """Judge every finished App carrier (strict carriers first), build the next strict carrier when the
     strict lane is free, then post the fast lane from live data. `run_id`/`attempt` name the strict
     carrier branch; without them (or at `strict_cap` 1) the strict lane behaves exactly as before."""
@@ -2838,7 +2957,10 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     if strict_carrier_open:
         summary["in_flight"] = True
         carrier_in_flight = True
-    for p in [p for p in gh.open_prs() if is_carrier(p, repo)]:
+    pending_carrier = None   # the one ordinary carrier still running CI, the only one the expedite lane overtakes
+    # Expedite carriers first (ADR-0343 amendment 2026-11-13): a green one merges in this tick before the
+    # carrier it overtook is judged, and that one then fails "main moved" with no verdict.
+    for p in sorted([p for p in gh.open_prs() if is_carrier(p, repo)], key=lambda p: not is_expedite_carrier(gh, p)):
         sha, branch, carrier = p["head"]["sha"], p["head"]["ref"], p["number"]
         # Speculative stacking: judged BEFORE any verdict on the carrier's own CI, so a red stacked carrier
         # over a holder without a verdict can never blame, bisect or halve anything.
@@ -2920,6 +3042,8 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                 continue
         if not failing and pending:
             summary["in_flight"] = True
+            if stacked_over is None and not is_expedite_carrier(gh, p):
+                pending_carrier = carrier
             if carrier_holds_strict(p):
                 carrier_in_flight = True
             else:
@@ -3226,6 +3350,15 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             f"over the same main during its CI (bounded deferral)")
         summary["in_flight"] = False
         summary["deferral_window"] = n
+    if (expedite and not shadow and pending_carrier is not None and summary["in_flight"]
+            and holder is None and not strict_carrier_open and not main_red
+            and not summary["updated"] and not summary["strict"] and not summary["merged"]
+            and not summary.get("stack_window") and not summary.get("deferral_window")):
+        n = expedite_candidate(gh, git, repo, train_waiting, expedite_cap)
+        if n is not None:
+            log(f"expedite lane: #{n} may ride its own carrier over main {base[:12]} beside carrier #{pending_carrier}")
+            summary["in_flight"] = False
+            summary["expedite_window"] = n
     # Strict priority (#15827): a holder GREEN on a head that contains live main but not merged in this
     # tick's strict_lane (a train in flight, merge refused, source intent re-read, main moved under the
     # read) would be pushed behind main by the next carrier and restart its full CI. For ONE tick per
@@ -4429,6 +4562,18 @@ def check_declaration() -> int:
         fails.append("settle must carry MERGE_TRAIN_SPECULATIVE_STACK")
     if "STACK_HEAD: ${{ needs.settle.outputs.stack_head }}" not in jobs.get("publish", ""):
         fails.append("publish must receive settle's stacking window (stack_pr / stack_head)")
+    # Expedite lane's rollback switch and cap: declared outright, carried by settle, its window handed on.
+    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_LANE: "(true|false)"\s*$', code, re.MULTILINE):
+        fails.append('MERGE_TRAIN_EXPEDITE_LANE must be declared as "true" or "false" ("false" = no expedite lane)')
+    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_DAILY_CAP: "[1-9][0-9]*"\s*$', code, re.MULTILINE):
+        fails.append("MERGE_TRAIN_EXPEDITE_DAILY_CAP must be declared as a positive integer")
+    if "EXPEDITE_LANE: ${{ env.MERGE_TRAIN_EXPEDITE_LANE }}" not in jobs.get("settle", ""):
+        fails.append("settle must carry MERGE_TRAIN_EXPEDITE_LANE")
+    for job in ("build", "publish"):
+        if "EXPEDITE_PR: ${{ needs.settle.outputs.expedite_pr }}" not in jobs.get(job, ""):
+            fails.append(f"{job} must receive settle's expedite window (expedite_pr)")
+    if "EXPEDITE_DAILY_CAP: ${{ env.MERGE_TRAIN_EXPEDITE_DAILY_CAP }}" not in jobs.get("publish", ""):
+        fails.append("publish must carry MERGE_TRAIN_EXPEDITE_DAILY_CAP (it re-checks the cap live)")
     # The safety is a runtime property: settle must consult the live ruleset before merging, whatever the flag says.
     guard_src = inspect.getsource(mode_settle)
     if "gh.merge_guard()" not in guard_src or inspect.getsource(ruleset_guard).count("integration_id") < 1:
@@ -4702,13 +4847,19 @@ class FakeGitHub:
         self.stuck_writes.append(None)
         self.stuck_open = (None, None)
 
-    def create_carrier(self, branch):
+    def create_carrier(self, branch, expedite=False):
         n = 9000 + len(self.carriers)
         self.carriers[n] = {"number": n, "state": "open", "draft": True, "user": {"login": BOT_LOGIN}, "created_at": "",
+                            "expedite": expedite,
                             "head": {"ref": branch, "sha": self.g("rev-parse", branch).stdout.strip(), "repo": {"full_name": "o/r"}}}
         return n
 
     def close_carrier(self, n): self.carriers[n]["state"] = "closed"
+
+    def expedite_carriers_today(self, day):
+        if getattr(self, "expedite_unreadable", False):
+            return None
+        return getattr(self, "expedite_used", 0) + sum(1 for c in self.carriers.values() if c.get("expedite"))
 
 
 class HttpFixture:
@@ -7014,9 +7165,10 @@ def self_test() -> int:
                   and gh.app_statuses(gh.prs[34]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0] == "success")
             check("fast lane: a docs/adr member is not fast-laned, and settle takes no state input",
                   33 not in sm["fast"] and not gh.app_statuses(gh.prs[33]["head"]["sha"])
-                  # run_id/attempt name the strict carrier branch and strict_cap bounds it: none is a classification.
+                  # run_id/attempt name the strict carrier branch and strict_cap bounds it; expedite/expedite_cap
+                  # are the lane's switch and cap: none is a classification.
                   and set(mode_settle.__code__.co_varnames[:mode_settle.__code__.co_argcount])
-                  == {"gh", "git", "repo", "shadow", "run_id", "attempt", "strict_cap", "stack"})
+                  == {"gh", "git", "repo", "shadow", "run_id", "attempt", "strict_cap", "stack", "expedite", "expedite_cap"})
             reset()
 
             # Bundle verification, directly.
@@ -7728,6 +7880,117 @@ def self_test() -> int:
                   gh.merged == [1] and gh.updates == [35], f"{s} merged={gh.merged} updates={gh.updates}")
             gh.updates.clear()
             reset()
+
+            # EXPEDITE LANE (ADR-0343 amendment 2026-11-13): an ordinary carrier for p1 is running; p2 carries
+            # merge-priority:expedite. With the lane on, p2 rides its own one-member carrier over main, merges
+            # first, and p1's carrier is rejected as "main moved" with nobody blamed.
+            def exp_tick(on=True, cap=6):
+                s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False, expedite=on, expedite_cap=cap)
+                if s["in_flight"]:
+                    return s, "in-flight"
+                counter[0] += 1
+                bdir = clone("build")
+                b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",),
+                                 overlay_roots=(".github/scripts",))
+                b.env["PROBE_OUT"] = probe
+                out = os.path.join(root, f"bundle-{counter[0]}")
+                w = s.get("expedite_window")
+                mode_build(gh, Git(bdir), b, "o/r", out, 8, expedite=w)
+                return s, mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8,
+                                       expedite=w, expedite_cap=cap)
+
+            def exp_open():
+                return [c for c in gh.carriers.values() if c["state"] == "open"]
+
+            def exp_setup(label="p2"):
+                open_only("p1")
+                s0, st0 = tick()
+                gh.pending_shas.update(c["head"]["sha"] for c in exp_open())
+                open_only("p2")
+                gh.prs[numbers[label]]["labels"] = [{"name": EXPEDITE_LABEL}]
+                return s0, st0
+
+            def exp_reset():
+                gh.pending_shas.clear()
+                for k in ("expedite_used", "expedite_unreadable"):
+                    if hasattr(gh, k):
+                        delattr(gh, k)
+                reset()
+
+            s0, st0 = exp_setup()
+            s, st = exp_tick(on=False)
+            check("expedite (E1): lane off -> the label only reorders; nothing is built beside a running carrier",
+                  st0 == "published" and st == "in-flight" and not s.get("expedite_window") and len(exp_open()) == 1,
+                  f"{s0} {st0} {s} {st}")
+            s, st = exp_tick()
+            oc = exp_open()
+            ex = [c for c in oc if c.get("expedite")]
+            eg = Git(clone("expchk"))
+            eg("fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
+            ech = parse_own_chain(eg, ex[0]["head"]["sha"]) if ex else None
+            check("expedite (E2): lane on -> #2 alone on a second carrier over main, marked by the App",
+                  s.get("expedite_window") == 2 and st == "published" and len(oc) == 2 and len(ex) == 1
+                  and ech is not None and ech[0] == gh.main_sha() and [n for n, _ in ech[1]] == [2]
+                  and gh.app_statuses(ex[0]["head"]["sha"]).get(EXPEDITE_CONTEXT, ("", ""))[0] == "success"
+                  and gh.merged == [], f"{s} st={st} open={[(c['number'], c.get('expedite')) for c in oc]} chain={ech}")
+            gh.pending_shas.update(c["head"]["sha"] for c in ex)                # its CI runs
+            s, st = exp_tick()
+            check("expedite (E3): with an expedite carrier open, no third carrier is built",
+                  st == "in-flight" and len(exp_open()) == 2 and not s.get("expedite_window"), f"{s} {st}")
+            gh.pending_shas.difference_update(c["head"]["sha"] for c in ex)   # the expedite carrier goes green
+            s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False, expedite=True)
+            check("expedite (E4): the green expedite carrier merges first while the overtaken carrier still runs",
+                  gh.merged == [2] and 1 not in gh.merged and len(exp_open()) == 1, f"{s} merged={gh.merged}")
+            gh.pending_shas.clear()                                             # the overtaken carrier goes green
+            s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False, expedite=True)
+            p1_blamed = (any(n == 1 for n, _ in gh.comments)
+                         or gh.app_statuses(gh.prs[1]["head"]["sha"]).get(STATUS_CONTEXT, ("", ""))[0] == "failure")
+            check("expedite (E5): the overtaken carrier is closed as main moved, nobody blamed, nothing bisected",
+                  gh.merged == [2] and not exp_open() and not p1_blamed and not s["culprits"] and not s["bisected"],
+                  f"{s} merged={gh.merged} comments={gh.comments}")
+            for _ in range(6):
+                s, st = exp_tick()
+                if 1 in gh.merged:
+                    break
+                gh.pending_shas.clear()
+            check("expedite (E6): the overtaken member is rebuilt and merges after the expedited one",
+                  gh.merged[:2] == [2, 1], f"merged={gh.merged}")
+            exp_reset()
+
+            exp_setup()
+            earlier = gh.expedite_carriers_today("")   # expedite carriers the fixture already opened today
+            gh.expedite_used = 6 - earlier
+            s, st = exp_tick(cap=6)
+            capped = (st, s.get("expedite_window"))
+            gh.expedite_used = 5 - earlier
+            s, st = exp_tick(cap=6)
+            check("expedite (E7): at the daily cap no expedite carrier is built; one under it, it is",
+                  capped == ("in-flight", None) and s.get("expedite_window") == 2 and st == "published",
+                  f"capped={capped} under={s.get('expedite_window')} {st}")
+            exp_reset()
+
+            exp_setup()
+            gh.expedite_unreadable = True
+            s, st = exp_tick()
+            check("expedite (E8): an unreadable daily count fails closed",
+                  st == "in-flight" and not s.get("expedite_window") and len(exp_open()) == 1, f"{s} {st}")
+            exp_reset()
+
+            exp_setup(label="p1")                                   # the expedited PR already rides the carrier
+            s, st = exp_tick()
+            check("expedite (E9): a PR already on the running carrier gets no second one",
+                  st == "in-flight" and not s.get("expedite_window") and len(exp_open()) == 1, f"{s} {st}")
+            exp_reset()
+
+            exp_setup()
+            open_only("pW")
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}   # a strict holder runs CI
+            s, st = exp_tick()
+            held = (st, s.get("expedite_window"), len([c for c in exp_open() if c.get("expedite")]))
+            check("expedite (E10): never beside a running strict reservation (the holder is not pre-empted)",
+                  held[1] is None and held[2] == 0, f"{s} {st} held={held}")
+            gh.head_checks.clear()
+            exp_reset()
 
             # SPECULATIVE STACKING (ADR-0343 amendment 2026-11-09): while strict holder pW (35) runs CI on an
             # up-to-date head h, the train carrier for p1 is published over h, never merged before pW, and
@@ -9569,6 +9832,14 @@ def main() -> int:
                     help="publish: settle's stacking window, holder PR number (re-validated live)")
     ap.add_argument("--stack-head", default=os.environ.get("STACK_HEAD", ""),
                     help="publish: settle's stacking window, holder head sha (re-validated live)")
+    ap.add_argument("--expedite-lane", choices=["true", "false"],
+                    default=os.environ.get("EXPEDITE_LANE", "true" if EXPEDITE_LANE_DEFAULT else "false"),
+                    help="settle: open an expedite window beside one running carrier (ADR-0343 amendment 2026-11-13)")
+    ap.add_argument("--expedite-cap", type=int,
+                    default=int(os.environ.get("EXPEDITE_DAILY_CAP", str(EXPEDITE_DAILY_CAP_DEFAULT))),
+                    help="settle/publish: expedite carriers per UTC day")
+    ap.add_argument("--expedite-pr", default=os.environ.get("EXPEDITE_PR", ""),
+                    help="build/publish: settle's expedite window, the one PR number (re-validated live)")
     ap.add_argument("--out", default="", help="build: directory for train.bundle")
     ap.add_argument("--bundle", default="", help="publish: directory holding train.bundle")
     ap.add_argument("--run-id", default="")
@@ -9630,7 +9901,8 @@ def run_mode(gh, args, ap) -> int:
     if args.mode == "build":
         if not args.out:
             ap.error("build needs --out")
-        applied = mode_build(gh, Git(workdir), TrainBuilder(workdir), args.repo, args.out, args.batch_size)
+        applied = mode_build(gh, Git(workdir), TrainBuilder(workdir), args.repo, args.out, args.batch_size,
+                             expedite_arg(args, ap))
         write_output("has_train", "true" if applied else "false")
         write_output("has_drops", "true" if os.path.isfile(os.path.join(args.out, DROPS_FILE)) else "false")
         return 0
@@ -9644,16 +9916,29 @@ def run_mode(gh, args, ap) -> int:
             if not (re.fullmatch(r"[0-9]+", args.stack_pr) and SHA_RE.fullmatch(args.stack_head)):
                 ap.error("--stack-pr must be a PR number and --stack-head a full sha")
             stack = (int(args.stack_pr), args.stack_head)
-        log(f"publish: {mode_publish(gh, git, args.repo, args.bundle, args.run_id, args.attempt, args.batch_size, stack)}")
+        log(f"publish: {mode_publish(gh, git, args.repo, args.bundle, args.run_id, args.attempt, args.batch_size, stack,
+                                     expedite_arg(args, ap), args.expedite_cap)}")
         return 0
     s = mode_settle(gh, git, args.repo, args.shadow, run_id=args.run_id, attempt=args.attempt,
-                    strict_cap=args.strict_batch_cap, stack=args.speculative_stack == "true")
+                    strict_cap=args.strict_batch_cap, stack=args.speculative_stack == "true",
+                    expedite=args.expedite_lane == "true", expedite_cap=args.expedite_cap)
     log(f"settle: {s}")
     write_output("in_flight", "true" if s["in_flight"] else "false")
     window = s.get("stack_window")
     write_output("stack_pr", str(window[0]) if window else "")
     write_output("stack_head", window[1] if window else "")
+    write_output("expedite_pr", str(s["expedite_window"]) if s.get("expedite_window") else "")
     return 0
+
+
+def expedite_arg(args, ap) -> int | None:
+    if not args.expedite_pr:
+        return None
+    if not re.fullmatch(r"[0-9]{1,9}", args.expedite_pr):
+        ap.error("--expedite-pr must be a PR number")
+    if args.expedite_cap < 1:
+        ap.error("--expedite-cap must be a positive integer")
+    return int(args.expedite_pr)
 
 
 if __name__ == "__main__":
