@@ -840,7 +840,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-c9c04a42@sha256:32b19260847d6cc4393e892e01cb3751797afd3bf2fca8b3261ffe5e258522de
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-1dffe5e0@sha256:b5c23fd3cf7efc265f9126b26cf2b0837261e5c4559579472ef3874637498bdf
 
           imagePullPolicy: IfNotPresent
           ports:
