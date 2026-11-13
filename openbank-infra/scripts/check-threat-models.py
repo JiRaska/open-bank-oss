@@ -110,8 +110,6 @@ DEPLOYED_BASELINE: dict[str, str] = {
         "#9167 — agent, not yet modelled",
     "openbank-keycloak":
         "#9167 — third-party image; a model here is about its CONFIGURATION, not code this repo ships",
-    "openbank-kyb-service":
-        "#9167 — bounded context, not yet modelled",
     "openbank-kyc-service":
         "#9167 — bounded context, not yet modelled",
     "openbank-onboarding-service":

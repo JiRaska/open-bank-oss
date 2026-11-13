@@ -105,6 +105,16 @@ interface RepresentationAttestationUseCase {
 
 data class RejectCaseCommand(val caseId: UUID, val reason: String, val operator: String)
 
+data class DecideMonitoringFindingCommand(
+    val caseId: UUID,
+    val findingId: UUID,
+    val disposition: FindingDisposition,
+    val reason: String,
+    val operator: String,
+)
+
+data class CompleteExitCommand(val caseId: UUID, val evidence: String, val operator: String)
+
 /**
  * Find a company by name instead of by identifier (issue #9707). [country] selects the register
  * through the country pack; the scheme follows from it.
@@ -164,6 +174,21 @@ interface BusinessOnboardingUseCase {
 
     /** An operator decides one screening finding. Never approves anything by itself. */
     suspend fun disposeFinding(cmd: DisposeFindingCommand): BusinessOnboardingCase
+
+    /** An operator decides ONE finding of ongoing monitoring on an approved case. */
+    suspend fun decideMonitoringFinding(cmd: DecideMonitoringFindingCommand): BusinessOnboardingCase
+
+    /** An operator records that the exit a confirmed sanctions match requires has been carried out. */
+    suspend fun completeExit(cmd: CompleteExitCommand): BusinessOnboardingCase
+
+    /** Cases with a monitoring hold: an undecided finding, or an exit owed. The operators' queue. */
+    suspend fun listMonitoringHolds(page: Int, size: Int): List<BusinessOnboardingCase>
+
+    /**
+     * Where each monitored subject of the case stands with the registry, by subject key:
+     * `PENDING`, `SYNCED` or `REFUSED`. Operators only; `REFUSED` is approved and NOT monitored.
+     */
+    suspend fun monitoringStates(caseId: UUID): Map<String, String>
 
     /** Consumer entry: the entity party for some case reached ACTIVE. Idempotent; no-op when no case owns [entityPartyId]. */
     suspend fun entityPartyActivated(entityPartyId: UUID)

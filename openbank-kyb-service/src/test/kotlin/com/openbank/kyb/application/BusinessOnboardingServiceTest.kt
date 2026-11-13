@@ -155,6 +155,7 @@ class BusinessOnboardingServiceTest {
             it.status ==
                 status
         }
+        override suspend fun listMonitoringHolds(page: Int, size: Int) = store.values.filter { it.monitoring.hold }
     }
 
     private lateinit var service: BusinessOnboardingService
