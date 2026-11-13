@@ -24,6 +24,9 @@ data class AmlCaseCreatedEvent(
     val alertCode: String,
     val matchedEntity: String?,
     val occurredAt: Instant,
+    // Additive: false while the owning party is not established. `partyId` is then the nil UUID
+    // (AmlCase.UNRESOLVED_PARTY_WIRE_ID) or, on rows from before #3413, the account id; neither is a party.
+    val partyResolved: Boolean = true,
 )
 
 data class AmlCaseStatusChangedEvent(
@@ -42,12 +45,14 @@ data class AmlCaseStatusChangedEvent(
     // Additive (#4403): binds a decision to the case a rail opened, since alertCode and
     // transactionId are free text any case creator may set.
     val idempotencyKey: String? = null,
+    // Additive: see AmlCaseCreatedEvent.partyResolved.
+    val partyResolved: Boolean = true,
 )
 
 fun AmlCase.toCreatedEvent(now: Instant) = AmlCaseCreatedEvent(
     caseId = id,
     idempotencyKey = idempotencyKey,
-    partyId = partyId,
+    partyId = partyId ?: AmlCase.UNRESOLVED_PARTY_WIRE_ID,
     accountId = accountId,
     transactionId = transactionId,
     customerReference = customerReference,
@@ -57,4 +62,5 @@ fun AmlCase.toCreatedEvent(now: Instant) = AmlCaseCreatedEvent(
     alertCode = alertCode,
     matchedEntity = matchedEntity,
     occurredAt = now,
+    partyResolved = partyResolved,
 )

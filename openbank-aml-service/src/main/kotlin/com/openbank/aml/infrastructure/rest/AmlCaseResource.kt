@@ -82,10 +82,11 @@ class AmlCaseResource(
         requireNamedMachineCaller(identity)
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
-        // ADR-0371: keys with this prefix mark cases the pack evaluation opened; nobody may mint one here.
-        require(!idempotencyKey.startsWith(AmlCase.PACK_MONITORING_KEY_PREFIX)) {
-            "Idempotency-Key prefix '${AmlCase.PACK_MONITORING_KEY_PREFIX}' is reserved"
-        }
+        // Key namespaces this service's own jobs and consumers write (ADR-0371 pack evaluation, the
+        // held-payment intake, displaced cases); nobody may mint a key in one here.
+        requireUnreservedKey(idempotencyKey)
+        // The nil UUID is what the wire shows for "party not established"; it is never a party.
+        require(request.partyId != AmlCase.UNRESOLVED_PARTY_WIRE_ID) { "partyId must identify a party" }
         requireFraudReviewKeyCaller(identity, idempotencyKey)
 
         // #10916: the key is bound to this request's fingerprint and claimed ATOMICALLY before any
@@ -162,6 +163,7 @@ class AmlCaseResource(
     suspend fun listCases(
         @QueryParam("status") status: String?,
         @QueryParam("partyId") partyId: UUID?,
+        @QueryParam("partyResolved") partyResolved: Boolean?,
         @QueryParam("screeningType") screeningType: String?,
         @QueryParam("limit") @DefaultValue("50") limit: Int,
         @QueryParam("offset") @DefaultValue("0") offset: Int,
@@ -170,6 +172,7 @@ class AmlCaseResource(
             ListAmlCasesQuery(
                 status = status?.let(AmlCaseStatus::valueOf),
                 partyId = partyId,
+                partyResolved = partyResolved,
                 screeningType = screeningType?.let(ScreeningType::valueOf),
                 limit = limit,
                 offset = offset,
@@ -228,6 +231,12 @@ internal fun requireNamedMachineCaller(identity: SecurityIdentity) {
     if (!ServiceAccountIdentity.isOneOf(identity, AML_CASE_CREATE_CALLERS)) {
         throw ForbiddenException("caller is not a named AML case-open service")
     }
+}
+
+/** A key in a namespace this service writes itself is never accepted from a caller, whoever it is. */
+internal fun requireUnreservedKey(idempotencyKey: String) {
+    val reserved = AmlCase.RESERVED_KEY_PREFIXES.firstOrNull(idempotencyKey::startsWith)
+    require(reserved == null) { "Idempotency-Key prefix '$reserved' is reserved" }
 }
 
 /** Only the rail's own verified machine identity may create or replay its fraud-review case. */

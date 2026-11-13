@@ -8,7 +8,11 @@ import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.ScreeningType
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import java.time.Instant
 import java.util.UUID
+
+/** A case that gives up its idempotency key to the case being saved, and the key it is moved to. */
+data class DisplacedCase(val caseId: UUID, val movedToKey: String)
 
 /**
  * Outbound persistence port for the AML case aggregate.
@@ -20,7 +24,12 @@ import java.util.UUID
  */
 interface AmlCaseRepository {
 
-    suspend fun save(amlCase: AmlCase, event: OutboxMessage): AmlCase
+    /**
+     * With [displacing], [amlCase] is opened under a key another case holds: in the SAME transaction
+     * that case is moved to [DisplacedCase.movedToKey] first. Either the key changes hands and the
+     * new case exists with its event, or nothing changed.
+     */
+    suspend fun save(amlCase: AmlCase, event: OutboxMessage, displacing: DisplacedCase? = null): AmlCase
 
     suspend fun findById(caseId: UUID): AmlCase?
 
@@ -29,6 +38,7 @@ interface AmlCaseRepository {
     suspend fun list(
         status: AmlCaseStatus?,
         partyId: UUID?,
+        partyResolved: Boolean?,
         screeningType: ScreeningType?,
         limit: Int,
         offset: Int,
@@ -37,15 +47,20 @@ interface AmlCaseRepository {
     suspend fun update(amlCase: AmlCase, event: OutboxMessage): AmlCase
 
     /**
-     * Cases whose `party_id` is a copy of `account_id` — i.e. never resolved to a real party
-     * (#3413). Bounded by [limit]; the sweep re-runs.
+     * Cases that know their account but not their party: `party_id` is missing, or is a copy of
+     * `account_id` (rows from before a missing party could be stored, #3413). Bounded by [limit] and
+     * ordered least recently attempted first, so cases that cannot be resolved (an account the
+     * authority does not know) cannot occupy every tick's batch ahead of ones that can.
      */
     suspend fun findUnresolvedParty(limit: Int): List<Pair<UUID, UUID>>
 
     /** Point [caseId] at its real owning party. */
     suspend fun resolveParty(caseId: UUID, partyId: UUID)
 
-    /** How many cases still carry an account id in `party_id`. Published as a gauge. */
+    /** Records that a resolution of [caseId] was tried at [at] and did not succeed. */
+    suspend fun markPartyResolutionAttempted(caseId: UUID, at: Instant)
+
+    /** How many cases [findUnresolvedParty] would still select. Published as a gauge. */
     suspend fun countUnresolvedParty(): Long
 
     /**

@@ -5,7 +5,6 @@
 package com.openbank.aml.it
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.aml.application.port.out.AccountPartyPort
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -14,8 +13,6 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
 import io.vertx.mutiny.pgclient.PgPool
 import io.vertx.mutiny.sqlclient.Tuple
-import jakarta.enterprise.context.ApplicationScoped
-import jakarta.enterprise.inject.Alternative
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,8 +34,8 @@ import java.util.concurrent.TimeUnit
  * must supply itself, and could not show a redelivery, a neighbouring event type or a poison record
  * as the connector delivers them.
  *
- * Only the account authority is stubbed. All ids are literals: a test profile loads in another
- * classloader, so a randomised companion value would differ between stub and test.
+ * All ids are literals: a test profile loads in another classloader, so a randomised companion
+ * value would differ between profile and test.
  */
 @QuarkusTest
 @TestProfile(PaymentHeldCaseIntakeIT.IntakeProfile::class)
@@ -55,20 +52,6 @@ class PaymentHeldCaseIntakeIT {
             "quarkus.scheduler.enabled" to "false",
             "openbank.outbox.dispatch-enabled" to "false",
         )
-
-        override fun getEnabledAlternatives(): MutableSet<Class<*>> = mutableSetOf(StubHeldAccountParty::class.java)
-    }
-
-    @Alternative
-    @ApplicationScoped
-    class StubHeldAccountParty : AccountPartyPort {
-        override suspend fun findPartyByAccountId(accountId: UUID): UUID? = if (accountId ==
-            RESOLVED_ACCOUNT
-        ) {
-            PARTY
-        } else {
-            null
-        }
     }
 
     @Inject
@@ -82,7 +65,7 @@ class PaymentHeldCaseIntakeIT {
 
     private data class Case(
         val key: String,
-        val party: UUID,
+        val party: UUID?,
         val alert: String,
         val status: String,
         val type: String,
@@ -165,14 +148,15 @@ class PaymentHeldCaseIntakeIT {
         assertThat(casesOf(ONE)).containsExactly(
             Case("payment-hold:domestic:$ONE", PARTY, "PAYMENT_HELD", "UNDER_REVIEW", "TRANSACTION_MONITORING", 1),
         )
-        // The event named no party; the consumer asked the account authority.
-        assertThat(casesOf(TWO).single().party).isEqualTo(PARTY)
+        // The event named no party. The case is opened all the same, with none: the intake does not
+        // ask the account authority (PaymentHeldPartyOutageIT covers what resolves it later).
+        assertThat(casesOf(TWO).single().party).isNull()
     }
 
     @Test
     fun `a hold whose case cannot be opened is dead-lettered and the channel keeps consuming`() {
         val forgedKey = held(THREE, RESOLVED_ACCOUNT, PARTY).replace("payment-hold:domestic:$THREE", "tm:forged")
-        val unresolved = held(FOUR, UNKNOWN_ACCOUNT, null)
+        val noAccount = held(FOUR, RESOLVED_ACCOUNT, PARTY).replace("\"$RESOLVED_ACCOUNT\"", "null")
         KafkaConsumer<String, String>(
             connection() + mapOf(
                 "group.id" to "aml-payment-held-dlq-proof",
@@ -183,7 +167,7 @@ class PaymentHeldCaseIntakeIT {
         ).use { deadLetters ->
             deadLetters.subscribe(listOf(DLQ))
             send(THREE, forgedKey)
-            send(FOUR, unresolved)
+            send(FOUR, noAccount)
             send(FIVE, held(FIVE, RESOLVED_ACCOUNT, PARTY))
 
             val parked = mutableListOf<String>()
@@ -191,11 +175,72 @@ class PaymentHeldCaseIntakeIT {
             while (parked.size < 2 && System.nanoTime() < deadline) {
                 deadLetters.poll(Duration.ofMillis(POLL_MILLIS)).forEach { parked += it.value() }
             }
-            assertThat(parked).containsExactlyInAnyOrder(forgedKey, unresolved)
+            assertThat(parked).containsExactlyInAnyOrder(forgedKey, noAccount)
         }
         await("the hold behind the parked records has its case") { casesOf(FIVE).size == 1 }
         assertThat(casesOf(THREE)).isEmpty()
         assertThat(casesOf(FOUR)).isEmpty()
+    }
+
+    /** A row as the create endpoint stored it before the hold namespace was reserved: no provenance. */
+    private fun plant(caseId: UUID, key: String, payment: UUID) = onEventLoop {
+        pool.preparedQuery(
+            """
+            INSERT INTO aml_cases
+              (id, case_id, idempotency_key, party_id, transaction_id, customer_reference, screening_type,
+               risk_level, status, alert_code, alert_detail, screened_at, created_at, updated_at, request_hash)
+            VALUES ($1, $2, $3, $4, $5, 'planted', 'TRANSACTION_MONITORING',
+                    'LOW', 'OPEN', 'PAYMENT_HELD', 'nothing to see', now(), now(), now(), $6)
+            """.trimIndent(),
+        ).execute(Tuple.of(PLANTED_ROW_ID, caseId, key, PARTY, payment, "a".repeat(HASH_LENGTH))).awaitSuspending()
+    }
+
+    private data class Stored(
+        val caseId: UUID,
+        val key: String,
+        val origin: String?,
+        val status: String,
+        val detail: String?,
+    )
+
+    /** `to_jsonb(c) ->> 'origin'` so the query reads the provenance without assuming how it is stored. */
+    private fun storedFor(payment: UUID): List<Stored> = onEventLoop {
+        pool.preparedQuery(
+            """
+            SELECT c.case_id, c.idempotency_key, to_jsonb(c) ->> 'origin', c.status, c.alert_detail
+              FROM aml_cases c WHERE c.transaction_id = $1
+            """.trimIndent(),
+        ).execute(Tuple.of(payment)).awaitSuspending()
+            .map { Stored(it.getUUID(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4)) }
+    }
+
+    @Test
+    fun `a case planted under the hold key is not accepted as the hold's case`() {
+        val holdKey = "payment-hold:domestic:$SIX"
+        plant(PLANTED_CASE, holdKey, SIX)
+
+        send(SIX, held(SIX, RESOLVED_ACCOUNT, PARTY))
+
+        await("the hold has a case of its own under the key the rail accepts decisions from") {
+            storedFor(SIX).any { it.key == holdKey && it.caseId != PLANTED_CASE }
+        }
+        val stored = storedFor(SIX)
+        assertThat(stored).hasSize(2)
+        val real = stored.single { it.caseId != PLANTED_CASE }
+        assertThat(real.origin).isEqualTo("PAYMENT_HOLD_INTAKE")
+        assertThat(real.status).isEqualTo("UNDER_REVIEW")
+        assertThat(real.detail).contains("FRAUD_REVIEW")
+        assertThat(casesOf(SIX).single { it.key == holdKey }.outboxEvents).isEqualTo(1)
+        // The planted row survives as evidence, under a key no rail matches and the endpoint cannot mint.
+        val planted = stored.single { it.caseId == PLANTED_CASE }
+        assertThat(planted.key).isEqualTo("quarantined:$PLANTED_CASE")
+        assertThat(planted.origin).isNull()
+
+        // Redelivery after the displacement finds the intake's own case and changes nothing.
+        send(SIX, held(SIX, RESOLVED_ACCOUNT, PARTY))
+        send(SEVEN, held(SEVEN, RESOLVED_ACCOUNT, PARTY))
+        await("the hold behind the redelivery has its case") { casesOf(SEVEN).size == 1 }
+        assertThat(storedFor(SIX)).containsExactlyInAnyOrderElementsOf(stored)
     }
 
     private companion object {
@@ -208,11 +253,15 @@ class PaymentHeldCaseIntakeIT {
 
         val PARTY: UUID = UUID.fromString("00000000-0000-4000-8000-0000000bb0a1")
         val RESOLVED_ACCOUNT: UUID = UUID.fromString("00000000-0000-4000-8000-0000000ac0a1")
-        val UNKNOWN_ACCOUNT: UUID = UUID.fromString("00000000-0000-4000-8000-0000000ac0a2")
         val ONE: UUID = UUID.fromString("00000000-0000-4000-8000-0000000d0a01")
         val TWO: UUID = UUID.fromString("00000000-0000-4000-8000-0000000d0a02")
         val THREE: UUID = UUID.fromString("00000000-0000-4000-8000-0000000d0a03")
         val FOUR: UUID = UUID.fromString("00000000-0000-4000-8000-0000000d0a04")
         val FIVE: UUID = UUID.fromString("00000000-0000-4000-8000-0000000d0a05")
+        val SIX: UUID = UUID.fromString("00000000-0000-4000-8000-0000000d0a06")
+        val SEVEN: UUID = UUID.fromString("00000000-0000-4000-8000-0000000d0a07")
+        val PLANTED_CASE: UUID = UUID.fromString("00000000-0000-4000-8000-0000000ca5e6")
+        const val PLANTED_ROW_ID = 9_000_000_001L
+        const val HASH_LENGTH = 64
     }
 }

@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -50,7 +51,7 @@ class PartyResolutionIT {
         onEventLoop { pool.query("DELETE FROM aml_cases").execute().awaitSuspending() }
     }
 
-    private fun case(key: String, partyId: UUID, accountId: UUID?): UUID {
+    private fun case(key: String, partyId: UUID?, accountId: UUID?): UUID {
         val caseId = UUID.randomUUID()
         onEventLoop {
             pool.preparedQuery(
@@ -66,7 +67,7 @@ class PartyResolutionIT {
         return caseId
     }
 
-    private fun partyOf(caseId: UUID): UUID = onEventLoop {
+    private fun partyOf(caseId: UUID): UUID? = onEventLoop {
         pool.preparedQuery("SELECT party_id FROM aml_cases WHERE case_id = $1")
             .execute(Tuple.of(caseId)).awaitSuspending().iterator().next().getUUID("party_id")
     }
@@ -107,5 +108,57 @@ class PartyResolutionIT {
             .describedAs("a resolved case must stop being re-swept")
             .isZero()
         assertThat(onEventLoop { repository.findUnresolvedParty(50) }).isEmpty()
+    }
+
+    @Test
+    fun `a case with no party at all is selected, counted and resolved like one holding an account id`() {
+        val account = UUID.randomUUID()
+        val noParty = case("no-party", partyId = null, accountId = account)
+        // Neither party nor account: nothing to resolve it from, so the sweep must not pick it up.
+        case("nothing-known", partyId = null, accountId = null)
+        case("healthy", partyId = UUID.randomUUID(), accountId = UUID.randomUUID())
+
+        assertThat(onEventLoop { repository.findUnresolvedParty(50) }).containsExactly(noParty to account)
+        assertThat(onEventLoop { repository.countUnresolvedParty() }).isEqualTo(1)
+
+        val realParty = UUID.randomUUID()
+        onEventLoop { repository.resolveParty(noParty, realParty) }
+
+        assertThat(partyOf(noParty)).isEqualTo(realParty)
+        assertThat(onEventLoop { repository.findUnresolvedParty(50) }).isEmpty()
+    }
+
+    @Test
+    fun `a failed attempt sends a case to the back, so one that cannot resolve does not starve the rest`() {
+        val stuck = case("stuck", partyId = null, accountId = UUID.randomUUID())
+        val waiting = case("waiting", partyId = null, accountId = UUID.randomUUID())
+        // Inserted first, so with no attempt recorded it heads a batch of one.
+        assertThat(onEventLoop { repository.findUnresolvedParty(1) }.map { it.first }).containsExactly(stuck)
+
+        onEventLoop { repository.markPartyResolutionAttempted(stuck, Instant.now()) }
+
+        assertThat(onEventLoop { repository.findUnresolvedParty(1) }.map { it.first })
+            .describedAs("the never-attempted case is taken before the one that just failed")
+            .containsExactly(waiting)
+        // Still unresolved and still counted: an attempt is not a resolution.
+        assertThat(onEventLoop { repository.countUnresolvedParty() }).isEqualTo(2)
+        assertThat(onEventLoop { repository.findUnresolvedParty(50) }.map { it.first }).containsExactly(waiting, stuck)
+    }
+
+    @Test
+    fun `the list can be narrowed to cases whose party is or is not established`() {
+        val account = UUID.randomUUID()
+        val noParty = case("no-party", partyId = null, accountId = account)
+        val accountAsParty = case("account-as-party", partyId = account, accountId = account)
+        val healthy = case("healthy", partyId = UUID.randomUUID(), accountId = UUID.randomUUID())
+        // A party and no account: `party_id <> account_id` is NULL here, and must not read as unresolved.
+        val onboarding = case("onboarding", partyId = UUID.randomUUID(), accountId = null)
+
+        fun ids(resolved: Boolean?) = onEventLoop { repository.list(null, null, resolved, null, 50, 0) }.map { it.id }
+
+        assertThat(ids(false)).containsExactlyInAnyOrder(noParty, accountAsParty)
+        assertThat(ids(true)).containsExactlyInAnyOrder(healthy, onboarding)
+        assertThat(ids(null)).hasSize(4)
+        assertThat(onEventLoop { repository.findById(noParty) }!!.partyId).isNull()
     }
 }

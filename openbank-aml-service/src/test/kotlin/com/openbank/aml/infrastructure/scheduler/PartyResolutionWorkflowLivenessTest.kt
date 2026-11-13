@@ -11,6 +11,7 @@ import com.openbank.libs.observability.WorkflowLivenessMetrics
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import jakarta.enterprise.inject.Instance
@@ -19,6 +20,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Duration
+import java.time.Instant
+import java.util.UUID
 
 class PartyResolutionWorkflowLivenessTest {
 
@@ -105,6 +108,45 @@ class PartyResolutionWorkflowLivenessTest {
         assertThat(successRecordedOf(registry))
             .describedAs("a failed run must not record a success")
             .isEqualTo(NOT_YET_SUCCEEDED)
+    }
+
+    @Test
+    fun `a lookup that does not resolve stamps the attempt, and one that does sets the party`(): Unit = runBlocking {
+        val registry = SimpleMeterRegistry()
+        val repository = mockk<AmlCaseRepository>(relaxUnitFun = true)
+        val accounts = mockk<AccountServiceClient>()
+        val (downCase, downAccount) = UUID.randomUUID() to UUID.randomUUID()
+        val (selfCase, selfAccount) = UUID.randomUUID() to UUID.randomUUID()
+        val (okCase, okAccount) = UUID.randomUUID() to UUID.randomUUID()
+        val party = UUID.randomUUID()
+        coEvery { repository.findUnresolvedParty(any()) } returns
+            listOf(downCase to downAccount, selfCase to selfAccount, okCase to okAccount)
+        coEvery { repository.countUnresolvedParty() } returns 2L
+        coEvery { accounts.findPartyByAccountId(downAccount) } returns null
+        coEvery { accounts.findPartyByAccountId(selfAccount) } returns selfAccount
+        coEvery { accounts.findPartyByAccountId(okAccount) } returns party
+        val before = Instant.now()
+
+        val scheduler = PartyResolutionScheduler().apply {
+            caseRepository = repository
+            this.accounts = accounts
+            registryInstance = mockk<Instance<MeterRegistry>>().also {
+                every { it.isResolvable } returns true
+                every { it.get() } returns registry
+            }
+            domainMetrics = metricsOver(registry)
+            enabled = true
+            batchLimit = 50
+        }
+        scheduler.register()
+        scheduler.sweep()
+
+        // Without the stamp these two would head every later batch and starve the cases behind them.
+        coVerify(exactly = 1) { repository.markPartyResolutionAttempted(downCase, match { !it.isBefore(before) }) }
+        coVerify(exactly = 1) { repository.markPartyResolutionAttempted(selfCase, any()) }
+        coVerify(exactly = 0) { repository.markPartyResolutionAttempted(okCase, any()) }
+        coVerify(exactly = 1) { repository.resolveParty(okCase, party) }
+        coVerify(exactly = 1) { repository.resolveParty(any(), any()) }
     }
 
     private companion object {

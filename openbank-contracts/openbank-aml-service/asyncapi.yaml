@@ -5,7 +5,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank AML Service — events
-  version: 1.1.0
+  version: 1.2.0
   description: |
     AML case lifecycle events on openbank.aml.events and minimal, non-PII oversight wake-ups
     for HIGH or CRITICAL case creation (ADR-0031 D9). Both are relayed from the durable outbox.
@@ -167,6 +167,12 @@ components:
         partyId:
           type: string
           format: uuid
+        partyResolved:
+          type: boolean
+          description: >-
+            Additive. False while the owning party of the case is not established; partyId is then
+            the all-zero UUID (or, on older cases, the account id) and identifies nobody. Absent
+            means true.
         accountId:
           type: [string, 'null']
           format: uuid
@@ -218,6 +224,12 @@ components:
         partyId:
           type: string
           format: uuid
+        partyResolved:
+          type: boolean
+          description: >-
+            Additive. False while the owning party of the case is not established; partyId is then
+            the all-zero UUID (or, on older cases, the account id) and identifies nobody. Absent
+            means true.
         previousStatus:
           type: string
           enum: [OPEN, UNDER_REVIEW, ESCALATED, CLEARED, BLOCKED]

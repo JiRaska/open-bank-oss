@@ -10,15 +10,19 @@ import com.openbank.aml.application.port.`in`.CreateAmlCaseCommand
 import com.openbank.aml.application.port.`in`.ListAmlCasesQuery
 import com.openbank.aml.application.port.`in`.UpdateAmlDecisionCommand
 import com.openbank.aml.application.port.out.AmlCaseRepository
+import com.openbank.aml.application.port.out.DisplacedCase
 import com.openbank.aml.domain.event.AmlCaseStatusChangedEvent
 import com.openbank.aml.domain.event.toCreatedEvent
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
+import com.openbank.aml.domain.model.CaseOrigin
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import io.micrometer.core.instrument.MeterRegistry
 import jakarta.enterprise.context.ApplicationScoped
+import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -36,14 +40,23 @@ class AmlCaseService(
     private val amlCaseRepository: AmlCaseRepository,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
+    private val meters: MeterRegistry,
 ) : AmlCaseUseCase {
+    private val log = Logger.getLogger(AmlCaseService::class.java)
 
     override suspend fun createCase(command: CreateAmlCaseCommand): AmlCase {
         // #10916: the durable half of the Idempotency-Key check. The Redis record can expire or be
         // evicted while this UNIQUE row lives forever, so a key reused for a DIFFERENT case must be
         // refused here too, not answered with the first case. A legacy row (no stored hash) or a
         // caller without one keeps the plain replay.
-        amlCaseRepository.findByIdempotencyKey(command.idempotencyKey)?.let { existing ->
+        val existing = amlCaseRepository.findByIdempotencyKey(command.idempotencyKey)
+        // A held payment's case is the one the hold intake opened, not whatever row holds its key:
+        // the rail releases on a decision published under that key. A row of any other provenance
+        // is not answered as the intake's case. It is moved aside and the real case takes the key.
+        val displaced = existing?.takeIf {
+            command.origin == CaseOrigin.PAYMENT_HOLD_INTAKE && it.origin != CaseOrigin.PAYMENT_HOLD_INTAKE
+        }
+        if (existing != null && displaced == null) {
             val stored = existing.requestHash
             if (stored != null && command.requestHash != null && stored != command.requestHash) {
                 throw IdempotencyKeyReusedException()
@@ -56,6 +69,7 @@ class AmlCaseService(
             id = UUID.randomUUID(),
             idempotencyKey = command.idempotencyKey,
             requestHash = command.requestHash,
+            origin = command.origin,
             partyId = command.partyId,
             accountId = command.accountId,
             transactionId = command.transactionId,
@@ -77,17 +91,38 @@ class AmlCaseService(
 
         // ADR-0050: the aggregate and its domain event commit atomically via the outbox.
         return try {
-            amlCaseRepository.save(amlCase, caseCreatedEvent(amlCase, now))
+            if (displaced == null) {
+                amlCaseRepository.save(amlCase, caseCreatedEvent(amlCase, now))
+            } else {
+                displace(displaced, amlCase, now)
+            }
         } catch (e: Exception) {
-            org.jboss.logging.Logger.getLogger(AmlCaseService::class.java)
-                .errorf(
-                    "createCase save failed: %s: %s | cause: %s",
-                    e::class.qualifiedName,
-                    e.message,
-                    e.cause?.message,
-                )
+            log.errorf(
+                "createCase save failed: %s: %s | cause: %s",
+                e::class.qualifiedName,
+                e.message,
+                e.cause?.message,
+            )
             throw e
         }
+    }
+
+    private suspend fun displace(foreign: AmlCase, amlCase: AmlCase, now: Instant): AmlCase {
+        val movedTo = AmlCase.quarantinedKey(foreign.id)
+        val saved = amlCaseRepository.save(amlCase, caseCreatedEvent(amlCase, now), DisplacedCase(foreign.id, movedTo))
+        meters.counter(FOREIGN_KEY_CLAIM_METRIC).increment()
+        log.errorf(
+            "Case %s (origin %s, status %s, decided by %s) held key %s without being the hold intake's case; " +
+                "moved to key %s and case %s opened in its place",
+            foreign.id,
+            foreign.origin ?: "unknown",
+            foreign.status,
+            foreign.decidedBy ?: "nobody",
+            foreign.idempotencyKey,
+            movedTo,
+            saved.id,
+        )
+        return saved
     }
 
     override suspend fun getCase(caseId: UUID): AmlCase =
@@ -96,6 +131,7 @@ class AmlCaseService(
     override suspend fun listCases(query: ListAmlCasesQuery): List<AmlCase> = amlCaseRepository.list(
         status = query.status,
         partyId = query.partyId,
+        partyResolved = query.partyResolved,
         screeningType = query.screeningType,
         limit = query.limit.coerceIn(1, 200),
         offset = query.offset.coerceAtLeast(0),
@@ -104,6 +140,14 @@ class AmlCaseService(
     override suspend fun updateDecision(command: UpdateAmlDecisionCommand): AmlCase {
         val amlCase = amlCaseRepository.findById(command.caseId)
             ?: throw AmlCaseNotFoundException(command.caseId)
+
+        // No decision, and so no status-changed event, for a case that sits under a held-payment key
+        // it was not opened under: a rail would release or reject the payment on that event.
+        if (amlCase.isForeignClaimOnHoldKey) {
+            throw InvalidAmlCaseStateTransitionException(
+                "This case holds a held-payment key it was not opened under and cannot be decided",
+            )
+        }
 
         // ADR-0371 §5: only an approved four-eyes proposal may close or escalate a pack-monitoring case.
         // A TRANSACTION_MONITORING case a payment rail opened is not one and keeps its single-analyst flow.
@@ -162,7 +206,7 @@ class AmlCaseService(
         payload = objectMapper.writeValueAsString(
             AmlCaseStatusChangedEvent(
                 caseId = current.id,
-                partyId = current.partyId,
+                partyId = current.partyId ?: AmlCase.UNRESOLVED_PARTY_WIRE_ID,
                 previousStatus = previous.status,
                 newStatus = current.status,
                 decisionReason = current.decisionReason,
@@ -172,6 +216,7 @@ class AmlCaseService(
                 transactionId = current.transactionId,
                 alertCode = current.alertCode,
                 idempotencyKey = current.idempotencyKey,
+                partyResolved = current.partyResolved,
             ),
         ),
     )
@@ -179,5 +224,8 @@ class AmlCaseService(
     companion object {
         const val EVENT_CASE_CREATED = "aml.case.created.v1"
         const val EVENT_STATUS_CHANGED = "aml.case.status_changed.v1"
+
+        /** Counts cases displaced from a held-payment key. Any increment is worth a look: the key is reserved. */
+        const val FOREIGN_KEY_CLAIM_METRIC = "openbank.aml.payment_held.foreign_key_claims"
     }
 }

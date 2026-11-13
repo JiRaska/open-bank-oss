@@ -12,6 +12,7 @@ import com.openbank.aml.application.usecase.AmlCaseService
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -165,7 +166,7 @@ class PartyEventConsumerTest {
             }
             val clock = Clock.fixed(Instant.parse("2026-09-17T10:00:00Z"), ZoneOffset.UTC)
             val autoClearing = PartyEventConsumer(
-                amlUseCase = AmlCaseService(repo, objectMapper, clock),
+                amlUseCase = AmlCaseService(repo, objectMapper, clock, SimpleMeterRegistry()),
                 amlCaseRepository = repo,
                 objectMapper = objectMapper,
                 autoClear = true,
@@ -189,7 +190,7 @@ class PartyEventConsumerTest {
         coEvery { repo.findByIdempotencyKey(any()) } returns null
         coEvery { repo.save(capture(saved), any()) } answers { saved.captured }
         val manual = PartyEventConsumer(
-            amlUseCase = AmlCaseService(repo, objectMapper, Clock.systemUTC()),
+            amlUseCase = AmlCaseService(repo, objectMapper, Clock.systemUTC(), SimpleMeterRegistry()),
             amlCaseRepository = repo,
             objectMapper = objectMapper,
             autoClear = false,

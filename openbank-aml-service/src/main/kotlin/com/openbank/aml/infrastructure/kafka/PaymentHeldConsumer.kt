@@ -8,8 +8,9 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.port.`in`.CreateAmlCaseCommand
-import com.openbank.aml.application.port.out.AccountPartyPort
+import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlRiskLevel
+import com.openbank.aml.domain.model.CaseOrigin
 import com.openbank.aml.domain.model.ScreeningType
 import com.openbank.libs.messaging.EventRetry
 import io.micrometer.core.instrument.MeterRegistry
@@ -17,10 +18,6 @@ import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
 import java.util.UUID
-
-/** The debtor's party could not be established right now; worth another attempt, then the dead-letter queue. */
-class HeldPaymentPartyUnresolvedException(accountId: UUID) :
-    RuntimeException("No owning party could be resolved for debtor account $accountId of a held payment")
 
 /**
  * Opens the ONE case of a held payment (ADR-0374 D3, D13).
@@ -35,7 +32,15 @@ class HeldPaymentPartyUnresolvedException(accountId: UUID) :
  * The case key is DERIVED here from the rail and the payment id, and an event that claims any other
  * key is refused. The key is what a rail later accepts a decision from, and it is the namespace that
  * separates a rail's case from a confidential pack-monitoring one, so a producer does not get to
- * choose it.
+ * choose it. Holding the key is not enough either: the case is opened with the origin
+ * [CaseOrigin.PAYMENT_HOLD_INTAKE], which only this class states, and a row of any other origin found
+ * under the key is displaced rather than taken for the hold's case (`AmlCaseService.createCase`).
+ *
+ * Opening the case depends on NOTHING but this service's own database. A rail that could not read
+ * the debtor's standing sends no party, and the usual reason is that the account authority is
+ * unreachable; asking that same authority here would park the hold in the dead-letter queue exactly
+ * when it most needs a reviewer. The case is opened with what the event carries, its party left
+ * unset, and the party-resolution sweep fills it in from the account afterwards.
  *
  * Failure rule, as for the other consumers of this service: an event that is not a held-payment
  * event is ignored; a held-payment event that cannot be read, or whose case cannot be written, is
@@ -45,7 +50,6 @@ class HeldPaymentPartyUnresolvedException(accountId: UUID) :
 @ApplicationScoped
 class PaymentHeldConsumer(
     private val cases: AmlCaseUseCase,
-    private val accountParty: AccountPartyPort,
     private val objectMapper: ObjectMapper,
     private val meters: MeterRegistry,
 ) {
@@ -67,7 +71,9 @@ class PaymentHeldConsumer(
             cases.createCase(
                 CreateAmlCaseCommand(
                     idempotencyKey = held.caseKey,
-                    partyId = debtorParty(held),
+                    origin = CaseOrigin.PAYMENT_HOLD_INTAKE,
+                    // Null when the rail could not name it; never looked up here (see the class comment).
+                    partyId = held.debtorPartyId,
                     accountId = held.debtorAccountId,
                     transactionId = held.paymentId,
                     customerReference = held.customerReference,
@@ -81,7 +87,14 @@ class PaymentHeldConsumer(
             )
         }
         meters.counter(METRIC, "outcome", "case_opened").increment()
-        log.infof("Held %s payment %s: case %s (%s)", held.rail, held.paymentId, case.id, case.status)
+        log.infof(
+            "Held %s payment %s: case %s (%s, party %s)",
+            held.rail,
+            held.paymentId,
+            case.id,
+            case.status,
+            if (case.partyResolved) "known" else "unresolved",
+        )
     }
 
     private fun read(payload: String): HeldPayment? = try {
@@ -93,11 +106,6 @@ class PaymentHeldConsumer(
         meters.counter(METRIC, "outcome", "rejected").increment()
         throw IllegalArgumentException("payment event is not JSON", e)
     }
-
-    /** The party the rail named, or the account authority's answer when standing could not be read. */
-    private suspend fun debtorParty(held: HeldPayment): UUID = held.debtorPartyId
-        ?: accountParty.findPartyByAccountId(held.debtorAccountId)
-        ?: throw HeldPaymentPartyUnresolvedException(held.debtorAccountId)
 
     /** A `PAYMENT_HELD` event, reduced to what a case needs. */
     data class HeldPayment(
@@ -124,7 +132,8 @@ class PaymentHeldConsumer(
         private val RAIL = Regex("[A-Z][A-Z0-9_]{0,31}")
 
         /** The key of the one case a hold on [paymentId] of [rail] opens. */
-        fun caseKey(rail: String, paymentId: UUID): String = "payment-hold:${rail.lowercase()}:$paymentId"
+        fun caseKey(rail: String, paymentId: UUID): String =
+            "${AmlCase.PAYMENT_HOLD_KEY_PREFIX}${rail.lowercase()}:$paymentId"
 
         /** `null` for any other event type on a rail's topic. */
         fun parse(node: JsonNode?): HeldPayment? {

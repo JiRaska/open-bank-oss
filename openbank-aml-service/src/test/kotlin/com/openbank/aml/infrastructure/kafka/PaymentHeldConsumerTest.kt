@@ -8,9 +8,9 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.port.`in`.CreateAmlCaseCommand
-import com.openbank.aml.application.port.out.AccountPartyPort
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlRiskLevel
+import com.openbank.aml.domain.model.CaseOrigin
 import com.openbank.aml.domain.model.ScreeningType
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
@@ -27,10 +27,9 @@ import java.util.UUID
 
 class PaymentHeldConsumerTest {
     private val cases: AmlCaseUseCase = mockk()
-    private val accountParty: AccountPartyPort = mockk()
     private val meters = SimpleMeterRegistry()
     private val mapper: ObjectMapper = jacksonObjectMapper()
-    private val consumer = PaymentHeldConsumer(cases, accountParty, mapper, meters)
+    private val consumer = PaymentHeldConsumer(cases, mapper, meters)
 
     private val paymentId = UUID.randomUUID()
     private val account = UUID.randomUUID()
@@ -76,6 +75,7 @@ class PaymentHeldConsumerTest {
 
         with(command.captured) {
             assertThat(idempotencyKey).isEqualTo("payment-hold:domestic:$paymentId")
+            assertThat(origin).isEqualTo(CaseOrigin.PAYMENT_HOLD_INTAKE)
             assertThat(alertCode).isEqualTo("PAYMENT_HELD")
             assertThat(transactionId).isEqualTo(paymentId)
             assertThat(partyId).isEqualTo(party)
@@ -90,20 +90,31 @@ class PaymentHeldConsumerTest {
                 .doesNotContain("LIMITS")
         }
         assertThat(outcome("case_opened")).isEqualTo(1.0)
-        coVerify(exactly = 0) { accountParty.findPartyByAccountId(any()) }
     }
 
     @Test
-    fun `a hold that could not name the party is resolved here, and an unresolvable one is not acked`() {
+    fun `a hold that could not name the party opens its case with the party left unset`(): Unit = runBlocking {
         opened()
-        coEvery { accountParty.findPartyByAccountId(account) } returns party
-        runBlocking { consumer.consume(held(mapOf("debtorPartyId" to null))) }
-        assertThat(command.captured.partyId).isEqualTo(party)
 
-        coEvery { accountParty.findPartyByAccountId(account) } returns null
-        assertThatThrownBy { runBlocking { consumer.consume(held(mapOf("debtorPartyId" to null))) } }
-            .isInstanceOf(HeldPaymentPartyUnresolvedException::class.java)
-        coVerify(exactly = 1) { cases.createCase(any()) }
+        // Both shapes a rail may send for "not known": an explicit null and no field at all.
+        consumer.consume(held(mapOf("debtorPartyId" to null)))
+        assertThat(command.captured.partyId).isNull()
+        consumer.consume(held().replace(""","debtorPartyId":"$party"""", ""))
+        assertThat(command.captured.partyId).isNull()
+
+        // Not a made-up party and not the account filed as one; the account stays where it belongs.
+        assertThat(command.captured.accountId).isEqualTo(account)
+        assertThat(command.captured.origin).isEqualTo(CaseOrigin.PAYMENT_HOLD_INTAKE)
+        coVerify(exactly = 2) { cases.createCase(any()) }
+        assertThat(outcome("case_opened")).isEqualTo(2.0)
+    }
+
+    @Test
+    fun `opening a hold's case depends on the case store alone`() {
+        // The account authority is not something this class can reach: were a lookup reintroduced,
+        // a hold would again be dead-lettered exactly when that authority is down.
+        assertThat(PaymentHeldConsumer::class.java.declaredConstructors.single().parameterTypes.map { it.simpleName })
+            .containsExactly("AmlCaseUseCase", "ObjectMapper", "MeterRegistry")
     }
 
     @Test
