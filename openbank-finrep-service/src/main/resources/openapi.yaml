@@ -24,7 +24,9 @@ info:
     fails closed with `UNCLASSIFIED_GL_ACCOUNT` when a new active code has no mapping. Zero-only
     official facts are not emitted by this structured preview. COREP derives its subtotals from
     explicit capital source accounts; missing source data remains a flagged zero (`isDataGap`).
-  version: 1.16.0
+  # 1.16.0 -> 1.17.0 (#15671): COREP LCR preview rows move to EBA 4.2 coordinates; 1.16.0 was
+  # taken on main by #15666 after this branch was cut.
+  version: 1.17.0
 tags:
   - name: FINREP
   - name: COREP
@@ -148,37 +150,39 @@ paths:
         exactly `asOf` (ADR-0313 D6); `evidence` does not apply to it. Row r0010 (TREA), the classes
         the engine does not model and market/operational/CVA risk are always `isDataGap: true`, and
         every credit-risk row is a gap with its reason when no tied snapshot exists or the read is
-        not enabled. `C_72.00` (LCR liquid assets, Delegated Regulation (EU) 2015/61; columns c0010
-        amount / market value and c0040 value according to Article 9, before the Level 2 caps) is
-        read from the risk engine's LCR result of the same TIED_OUT snapshot; `evidence` does not
-        apply to it. Coins and banknotes (r0040) and withdrawable central bank reserves (r0050) are
-        always `isDataGap: true` (the engine does not split them), every value row is a gap with its
-        reason when no tied snapshot exists, the read is not enabled, the engine states no combined
-        view (every currency in CZK at the ČNB fixing, Delegated Regulation (EU) 2015/61 Art. 4(5) —
-        a multi-currency book is reported from it; the engine's `totalNotStated` reason is carried)
-        or states it in a currency other than CZK, or balances are unclassified, and rows whose code is not yet verified against the EBA DPM carry
-        `[row code UNVERIFIED]` in their label. `C_73.00` (LCR outflows, Delegated Regulation (EU)
-        2015/61; columns c0010 amount and c0060 outflow) is read from the same LCR result; retail
-        deposits subject to higher outflows (r0060) and non-operational deposits (r0250) are always
-        `isDataGap: true` (the engine models neither), the outflow column of a component whose
-        engine run-off factor is not the 2015/61 rate is a gap, every row is a gap under the same
-        conditions as `C_72.00`, and rows whose code is not yet verified against the EBA DPM carry
-        `[row code UNVERIFIED]` in their label. `C_74.00` (LCR inflows, Delegated Regulation (EU)
-        2015/61 Arts. 32-34; columns c0010 amount and c0140 inflow subject to the 75 % cap, the
-        latter labelled `[column code UNVERIFIED]`) is read from the same LCR result; r0010 is the
-        engine's uncapped total inflows (the inflows after the Art. 33(1) cap belong to C 76.00 and
-        are not emitted; a capped figure that is not min(uncapped, cap) fails the render); secured lending (r0260) and central
-        bank claims (r0200) are always `isDataGap: true`, the inflow column of a component whose
-        engine factor is not the 2015/61 rate is a gap, every row is a gap under the same conditions
-        as `C_72.00`, and unverified row codes carry `[row code UNVERIFIED]`. `C_76.00` (LCR
-        calculation, Delegated Regulation (EU) 2015/61 Arts. 4, 17 and 33; column c0010) is read from
-        the same LCR result: the liquidity buffer after haircuts and the Level 2 caps (a gap when the
-        engine does not report it after the caps), net liquidity outflows, the LCR in percent (unit
-        `%`, 2 dp; a gap when net outflows are not positive), total outflows, inflows subject to the
-        75 % cap and the capped reduction; fully exempt and 90 %-cap rows are always `isDataGap: true`.
-        The render fails when buffer, net outflows, ratio or the capped inflows do not tie to the
-        engine's own figures. Every row code is unverified and labelled `[row code UNVERIFIED]`. Any
-        other template id is rejected.
+        not enabled. The four LCR previews use the EBA Reporting Framework 4.2 total-currency
+        (`.a`) table coordinates and the same TIED_OUT
+        risk-engine snapshot. `evidence` does not apply. They cover a subset of the tables for
+        internal use. Each cell is a data gap with its reason when the snapshot is unavailable,
+        the read is disabled, balances are unclassified, or the engine cannot state a combined
+        CZK total (including a missing FX fixing for a multi-currency book). Unsupported
+        breakdowns are absent or marked `isDataGap: true` where explicitly represented.
+
+        `C_72.00` (liquid assets) gives market value in c0010 and Article 9 value before the
+        Level 2 caps in c0040. Level 2 total is r0220, Level 2A r0230 and Level 2B r0310. Coins
+        and banknotes (r0040) and withdrawable central bank reserves (r0050) are gaps because
+        the engine does not split them.
+
+        `C_73.00` (outflows) gives amount in c0010 and weighted outflow in c0060 for the engine
+        total (r0010) and central-bank secured funding (r0930). Deposit rows (r0030, r0050, r0080,
+        r0110, r0120 and r0210) and other liabilities and due commitments (r0885) are classification
+        gaps. The weighted figure is a gap if the applicable engine factor or parameter set differs
+        from the EU 2015/61 assumption.
+
+        `C_74.00` (inflows) gives amount in c0010 and weighted inflows before the reduction in
+        c0140 for the 75% cap bucket. It includes the engine total (r0010), operational financial
+        claims (r0110) and non-operational financial claims (r0160). Non-financial claims
+        (r0030), central-bank claims (r0150) and secured-lending inflows (r0263) are classification
+        gaps. Both columns require the engine's EU 75% cap, and the weighted column requires the
+        expected factors. The render checks that the capped value equals min(uncapped, cap).
+
+        `C_76.00` (calculations, c0010) gives the post-cap liquidity buffer (r0010), net outflows
+        (r0020), the ratio in percent (r0030, unit `%`, 2 dp), total outflows (r0300), weighted
+        inflows subject to the 75% cap (r0330) and their reduction (r0360). Fully exempt and
+        90%-cap amounts and reductions are data gaps. The 75%-cap amounts require a reported
+        cap. A missing post-cap buffer or non-positive net outflows gaps the respective buffer
+        or ratio. The render checks the ties across the engine's buffer, net outflows, ratio
+        and capped inflows. Any other template id is rejected.
 
         The mapper derives CET1, Tier 1 and own funds from explicit ledger accounts 6000-6060; it
         never plugs capital as assets minus liabilities. With no recognised capital source every
