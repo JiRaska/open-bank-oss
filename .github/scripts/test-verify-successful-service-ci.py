@@ -600,6 +600,72 @@ class ResolveReconcileSourceTest(unittest.TestCase):
             )
         self.assertEqual(proven, set())
 
+    def test_unexpanded_skipped_metadata_matrix_is_no_metadata_job(self):
+        """The API shape of a main push that changed no build file (runs 43210743668,
+        43331225900): one SKIPPED job named with the literal matrix template. Before
+        this case existed every fixture omitted that job, so the resolver refused the
+        commonest run shape while its tests stayed green."""
+        run = self.run_record(38, self.OLDER, "2026-10-17T12:00:00Z")
+        shard = "verification-metadata (${{ matrix.shard.label }})"
+        module = "verification-metadata (${{ matrix.module }})"
+        cases = (
+            # (label, metadata jobs, expected metadata, service proven?)
+            ("skipped shard template", [(shard, "skipped")], set(), True),
+            ("skipped module template", [(module, "skipped")], set(), True),
+            ("template but a shard was expected", [(shard, "skipped")],
+             {"verification-metadata (shard 1/1)"}, False),
+            ("template not skipped", [(shard, "failure")], set(), False),
+            ("template cancelled", [(shard, "cancelled")], set(), False),
+            ("template reported green", [(shard, "success")], set(), False),
+            ("template beside a real shard",
+             [(shard, "skipped"), ("verification-metadata (shard 1/1)", "success")],
+             set(), False),
+            ("two templates", [(shard, "skipped"), (module, "skipped")], set(), False),
+            ("lookalike name", [("verification-metadata (${{ matrix.other }})", "skipped")],
+             set(), False),
+            ("unrecognized source contract", [(shard, "skipped")], None, False),
+        )
+        for label, metadata, expected, proves in cases:
+            jobs = job_fixture()["jobs"] + [
+                {"name": name, "conclusion": conclusion} for name, conclusion in metadata
+            ]
+            with (
+                self.subTest(case=label),
+                patch.object(MODULE, "_json_pages", return_value=jobs),
+                patch.object(
+                    MODULE, "_expected_verification_jobs", return_value=expected
+                ),
+            ):
+                proven = MODULE._jobs_prove_services(
+                    run, {SERVICE}, REPOSITORY, "fixture-token", "https://api.github.test"
+                )
+            self.assertEqual(proven, {SERVICE} if proves else set(), label)
+
+    def test_unrelated_red_job_does_not_erase_a_green_service_with_skipped_matrix(self):
+        """Two unrelated contract jobs killed by a runner shutdown reddened all-green;
+        this service's own build and contract stayed green and remain valid evidence."""
+        run = self.run_record(39, self.OLDER, "2026-10-17T12:00:00Z")
+        other = "openbank-other-service"
+        jobs = [
+            job if job["name"] != "all-green" else job | {"conclusion": "failure"}
+            for job in job_fixture()["jobs"]
+        ] + [
+            {"name": f"build ({other}) / {other} (build)", "conclusion": "success"},
+            {"name": f"build ({other}) / {other} (contract)", "conclusion": "failure"},
+            {
+                "name": "verification-metadata (${{ matrix.shard.label }})",
+                "conclusion": "skipped",
+            },
+        ]
+        with (
+            patch.object(MODULE, "_json_pages", return_value=jobs),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+        ):
+            proven = MODULE._jobs_prove_services(
+                run, {SERVICE, other}, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertEqual(proven, {SERVICE})
+
     def test_missing_required_verification_metadata_job_is_not_vacuously_green(self):
         run = self.run_record(35, self.OLDER, "2026-10-17T12:00:00Z")
         with (
