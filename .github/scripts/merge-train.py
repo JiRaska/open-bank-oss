@@ -3280,7 +3280,11 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     summary["main_red"] = sorted(main_red)
     fragments = regen_inventory_fragments(regen_text)
     fast, train_waiting = partition(git, base, cands, fragments)
-    yield_why = train_turn(gh, git, base, train_waiting,
+    # While main is red no train is built (plan_train serves only fixes), so the train's turn after a strict
+    # merge would hold the strict lane, which is the lane that serves the fix, for TRAIN_TURN_S with nobody
+    # using it; every further strict or bot merge restarted that wait (2026-11-13: fixes #15991/#15987 sat
+    # behind "train's turn" for ~2 h of red main). An open carrier still keeps its turn.
+    yield_why = train_turn(gh, git, base, [] if main_red else train_waiting,
                            any(is_carrier(p, repo) and carrier_holds_strict(p) for p in gh.open_prs()))
     if holder is None and not yield_why and not main_red:
         # A reservation already running is never affected; the fast lane only gets the gap between two.
@@ -8967,6 +8971,22 @@ def self_test() -> int:
                 else:
                     gh.head_checks[gh.prs[fn]["head"]["sha"]] = combined
                 return first, settle_now()
+
+            # Main red right after a strict merge, a train candidate waiting: the train cannot take its turn (no
+            # train over a red main), so the fix is still update-branched in this tick (2026-11-13).
+            mod = globals()
+            saved_lmws, saved_turn_s = mod["last_merge_was_strict"], TRAIN_TURN_S
+            mod["last_merge_was_strict"], TRAIN_TURN_S = (lambda *_a, **_k: True), 10 ** 9
+            try:
+                open_only("p1")
+                s1, _s2 = fix_behind(None)
+            finally:
+                mod["last_merge_was_strict"], TRAIN_TURN_S = saved_lmws, saved_turn_s
+            check("main red: the train's turn after a strict merge does not hold the fix (no train over a red main)",
+                  gh.updates == [36] and gh.merged == [] and s1.get("main_red", []) == [MR],
+                  f"updates={gh.updates} merged={gh.merged} {s1}")
+            gh.pending_shas.clear()
+            main_red_done()
 
             s1, s2 = fix_behind(None)
             check("main red: a fix behind main is update-branched, not merged, and holds main while its combined CI runs",
