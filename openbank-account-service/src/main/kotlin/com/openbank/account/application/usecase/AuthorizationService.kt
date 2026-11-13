@@ -5,6 +5,7 @@
 package com.openbank.account.application.usecase
 
 import com.openbank.account.application.port.`in`.AccountDelegationFact
+import com.openbank.account.application.port.`in`.AccountDelegationFacts
 import com.openbank.account.application.port.`in`.AuthorizationUseCase
 import com.openbank.account.application.port.`in`.DelegatedPaymentDecision
 import com.openbank.account.application.port.`in`.DelegatedPaymentOutcome
@@ -229,10 +230,11 @@ class AuthorizationService(
      *
      * An unknown account answers empty, not 404: this must not become an existence oracle.
      */
-    override suspend fun delegationFacts(accountId: UUID, partyId: UUID): List<AccountDelegationFact> {
-        val account = accountRepository.findById(accountId) ?: return emptyList()
+    override suspend fun delegationFacts(accountId: UUID, partyId: UUID): AccountDelegationFacts {
+        val account = accountRepository.findById(accountId)
+            ?: return AccountDelegationFacts(ownerPartyId = null, grants = emptyList())
         val now = OffsetDateTime.now(clock)
-        return delegationProjectionRepository
+        val grants = delegationProjectionRepository
             .findActiveByAccountPartyAndType(accountId, partyId, DelegatedAccessGrant.RESOURCE_TYPE_ACCOUNT)
             .filter { it.issuedBy(account.partyId) && it.isActiveOn(now) }
             .map {
@@ -247,6 +249,10 @@ class AuthorizationService(
                     validTo = it.validTo,
                 )
             }
+        // The owner travels with the grants deliberately: it is the same read, so the authority
+        // step cannot compare the actor against one owner while the write-time proof compares
+        // another.
+        return AccountDelegationFacts(ownerPartyId = account.partyId, grants = grants)
     }
 
     override suspend fun authorizeDelegatedPayment(

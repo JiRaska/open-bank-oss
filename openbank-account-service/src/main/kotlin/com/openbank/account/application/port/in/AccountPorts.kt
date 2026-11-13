@@ -142,6 +142,21 @@ data class ListAuthorizationsQuery(val accountId: UUID)
  * the grant that permitted the debit — a grant is revocable, so nothing after the fact can
  * reconstruct which one was live.
  */
+/**
+ * The owner and the grants, read together (ADR-0375 D1).
+ *
+ * **Why one answer and not two calls.** The authority decision compares the actor with the account
+ * OWNER before it looks at any grant, so owner and grants must come from ONE snapshot. A rail that
+ * resolved the owner through a separate lookup could decide the OWNER short-circuit against a
+ * different owner than the one its write-time proof later compares under the binding row lock —
+ * two reads, two answers, and the window between them is invisible in both.
+ *
+ * [ownerPartyId] is null exactly when the account is unknown, which is also when [grants] is
+ * empty: the pair stays indistinguishable from an account that exists and has no grant, so this is
+ * still not an existence oracle.
+ */
+data class AccountDelegationFacts(val ownerPartyId: UUID?, val grants: List<AccountDelegationFact>)
+
 data class AccountDelegationFact(
     val grantId: UUID,
     val grantorPartyId: UUID,
@@ -201,7 +216,7 @@ interface AuthorizationUseCase {
      *
      * Returns an empty list for an unknown account, so it is not an existence oracle.
      */
-    suspend fun delegationFacts(accountId: UUID, partyId: UUID): List<AccountDelegationFact>
+    suspend fun delegationFacts(accountId: UUID, partyId: UUID): AccountDelegationFacts
 
     /**
      * Amount-aware variant for the payment path (ADR-0232 D3 / AC6): a delegated

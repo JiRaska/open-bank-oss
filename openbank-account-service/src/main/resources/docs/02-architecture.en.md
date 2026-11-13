@@ -170,3 +170,13 @@ make the endpoint an existence oracle for other people's accounts.
 `authorizeDelegatedPayment` still ORs in is not represented, so a party permitted solely by a legacy
 row is absent from these facts. That divergence is already measured by the dual-run disagreement
 counter rather than being discovered later from a refusal.
+
+### The owner travels with the grants
+
+The response carries `ownerPartyId` alongside the grants. The authority decision compares the actor
+with the account owner *before* it consults any grant, so both must come from one snapshot: a caller
+that resolved the owner through a separate lookup could decide the owner case against one read while
+its own write-time proof compares another, and nothing observes the window between them. It also
+removes a round trip from a path that already calls this service more than once per delegated
+payment. `ownerPartyId` is null exactly when the account is unknown — where `grants` is empty too,
+so the pair stays indistinguishable from an existing account with no grant for the party.

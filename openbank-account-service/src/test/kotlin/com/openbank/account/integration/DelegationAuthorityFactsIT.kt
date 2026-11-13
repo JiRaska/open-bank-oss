@@ -83,6 +83,10 @@ class DelegationAuthorityFactsIT {
         // 404 would be the natural implementation and is the defect: it distinguishes an account
         // that exists from one that does not, for any party the caller can name.
         assertThat(json.getList<kotlin.Any>("grants")).isEmpty()
+        // No owner for an unknown account: revealing one would be the existence oracle this
+        // endpoint is written to avoid, and `grants` being empty is then indistinguishable from an
+        // account that exists and has no grant for the party.
+        assertThat(json.getString("ownerPartyId")).isNull()
         assertThat(json.getString("accountId")).isEqualTo(unknown.toString())
         assertThat(json.getString("partyId")).isEqualTo(delegateParty.toString())
     }
@@ -117,6 +121,8 @@ class DelegationAuthorityFactsIT {
         assertThat(json.getString("grants[0].grantorPartyId")).isEqualTo(ownerParty.toString())
         assertThat(json.getList<String>("grants[0].capabilities")).containsExactly("ACCOUNT_INITIATE_PAYMENT")
         assertThat(json.getString("grants[0].validFrom")).isNotBlank()
+        // Read in the same snapshot as the grants, so the rail decides owner-vs-delegate once.
+        assertThat(json.getString("ownerPartyId")).isEqualTo(ownerParty.toString())
         // `active` is deliberately absent from the wire: every grant returned is active, and a
         // field that is always true is an invitation to ship a path where it is not.
         assertThat(json.getMap<String, kotlin.Any?>("grants[0]")).doesNotContainKey("active")
