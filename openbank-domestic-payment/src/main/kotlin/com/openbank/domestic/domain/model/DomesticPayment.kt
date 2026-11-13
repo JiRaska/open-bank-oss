@@ -208,9 +208,10 @@ data class DomesticPayment(
      */
     val holdReview: Int = 1,
     /**
-     * What the current review's case was asked to decide: one `STEP:REASON` for every control that
-     * answered "review" when the case was requested. A case decision covers exactly these and
-     * nothing else. Empty for a case requested only because a control could not answer.
+     * What the current review's case was shown, and so what its decision covers: one
+     * `STEP:REASON:FINGERPRINT` for every control that answered "review" when the case was
+     * requested, the fingerprint being of that control's evidence. A case decision covers exactly
+     * these and nothing else. Empty for a case requested only because a control could not answer.
      */
     val holdCaseReasons: Set<String> = emptySet(),
     /**

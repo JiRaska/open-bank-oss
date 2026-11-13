@@ -65,15 +65,18 @@ interface PaymentAdmissionWrites {
     suspend fun requestNextReview(paymentId: UUID, fromReview: Int, reasons: Set<String>, event: OutboxMessage): Boolean
 
     /**
-     * Accept [decision] as the decision of review [review] of the payment's hold, once. It is
-     * accepted only for a payment that is HELD with its case requested, whose current review is
-     * [review], that has no decision yet, and whose hold has not reached [expiresAfter] since it
-     * began: expiry wins over a decision that comes later.
+     * Accept [decision], made by the case with the key [caseKey], as the decision of the payment's
+     * hold, once. It is accepted only for a payment that is HELD with its case requested, when
+     * [caseKey] is EXACTLY the key of the hold's current review ([caseKeyOfReview] of the review
+     * number on the row; the key is never parsed, so no second spelling of it can match), that has
+     * no decision yet, and whose hold has not reached [expiresAfter] since it began: expiry wins
+     * over a decision that comes later.
      * The answer says which of those it was; nothing else about the payment changes.
      */
     suspend fun recordHoldDecision(
         paymentId: UUID,
-        review: Int,
+        caseKey: String,
+        caseKeyOfReview: (Int) -> String,
         decision: HoldDecision,
         at: Instant,
         expiresAfter: Duration,
@@ -94,8 +97,8 @@ enum class HoldDecisionRecord {
     /** The hold already has a decision; the first one stands. */
     ALREADY_DECIDED,
 
-    /** The decision is of another review than the hold's current one; it decides nothing. */
-    OTHER_REVIEW,
+    /** The deciding case is not the case of the hold's current review; it decides nothing. */
+    OTHER_CASE,
 
     /** The hold has reached its expiry; it ends in rejection whatever the case says now. */
     EXPIRED,

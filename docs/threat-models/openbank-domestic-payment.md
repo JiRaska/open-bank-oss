@@ -167,12 +167,20 @@ The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit ma
     refusal rejects; a control that still cannot answer leaves the payment HELD.
   - **Elevation of privilege, a clearance applied to something nobody reviewed:** a case opened
     for an outage, or for a fraud review, says nothing about a sanctions match that the control
-    reports only at release. A case decision covers exactly the reasons the case was opened for.
-    They are recorded on the row with the case request (`hold_case_reasons`, one `STEP:REASON` per
-    control that asked for a human), and `release` validates only if every "review" in the fresh
-    evaluation is among them. Anything else keeps the payment HELD and requests a further review as
-    a case of its own (`hold_review`, key `payment-hold:domestic:<paymentId>:<n>`); a decision is
-    accepted only for the hold's current review, and the expiry still runs from the first
+    reports only at release, and a clearance of a match against one list entry says nothing about
+    a match against another. A case decision covers exactly the evidence the case was shown. It is
+    recorded on the row with the case request (`hold_case_reasons`: step, reason and a fingerprint
+    of that control's evidence, canonical and order-insensitive), and `release` validates only if
+    every "review" in the fresh evaluation is among them. A review whose evidence does not say what
+    was found (a potential match with no matched entry) is never covered: such a payment is never
+    released by a case and ends by its expiry. Residual: the screening contract returns no entry id
+    and no list version, so the fingerprint is of status, score and matched entry per role; an
+    entry changed in place under the same name and score is not told apart. Anything else keeps the payment HELD and requests a further review as
+    a case of its own (`hold_review`, key `payment-hold:domestic:<paymentId>:<n>`). **Trust
+    boundary, aml decision to rail:** the case key arrives from another service and is never parsed
+    to authorise. The rail computes the one canonical key of the review number on the row and
+    accepts a decision only on exact string equality, so no second spelling of a key (`:+2`, `:02`),
+    no other payment's key and no earlier review's key decides anything, and the expiry still runs from the first
     `held_at`. The customer view does not change while this happens.
   - **Elevation of privilege, a hold released after its term:** a hold ends in rejection 48 hours
     after `held_at`. Expiry is checked first and from the row (`concludeHold`), and a decision is

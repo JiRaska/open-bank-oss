@@ -282,39 +282,40 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
         }
     }.awaitSuspending()
 
-    // One guarded bulk update decides acceptance, so two deliveries of a decision, or a decision
-    // racing the expiry, cannot both win. When it changes nothing the row says why.
+    // The row is locked and judged in one transaction, so two deliveries of a decision, or a
+    // decision racing the expiry or a new review, cannot both win.
     override suspend fun recordHoldDecision(
         paymentId: UUID,
-        review: Int,
+        caseKey: String,
+        caseKeyOfReview: (Int) -> String,
         decision: HoldDecision,
         at: Instant,
         expiresAfter: Duration,
     ): HoldDecisionRecord = Panache.withTransaction {
-        // held_at is null only on a row held by a build from before the column; its last write was
-        // the move to HELD.
-        update(
-            "holdDecision = ?1 where paymentId = ?2 and status = ?3 and holdCaseRequestedAt is not null " +
-                "and holdDecision is null and coalesce(heldAt, updatedAt) > ?4 and coalesce(holdReview, 1) = ?5",
-            decision.name,
-            paymentId,
-            DomesticPaymentStatus.HELD.name,
-            at.minus(expiresAfter),
-            review,
-        ).flatMap { changed ->
-            if (changed == 1) {
-                Uni.createFrom().item(HoldDecisionRecord.ACCEPTED)
-            } else {
-                find("paymentId", paymentId).firstResult().map { entity ->
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "FROM DomesticPaymentEntity WHERE paymentId = :paymentId",
+                DomesticPaymentEntity::class.java,
+            ).setParameter("paymentId", paymentId)
+                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                .singleResultOrNull
+                .map { entity ->
                     when {
                         entity?.status != DomesticPaymentStatus.HELD.name || entity.holdCaseRequestedAt == null ->
                             HoldDecisionRecord.NO_HOLD
-                        (entity.holdReview ?: 1) != review -> HoldDecisionRecord.OTHER_REVIEW
+                        // Exact equality with the one canonical key. The key that arrived is not parsed.
+                        caseKeyOfReview(entity.holdReview ?: 1) != caseKey -> HoldDecisionRecord.OTHER_CASE
                         entity.holdDecision != null -> HoldDecisionRecord.ALREADY_DECIDED
-                        else -> HoldDecisionRecord.EXPIRED
+                        // held_at is null only on a row held by a build from before the column; its
+                        // last write was the move to HELD.
+                        !(entity.heldAt ?: entity.updatedAt).isAfter(at.minus(expiresAfter)) ->
+                            HoldDecisionRecord.EXPIRED
+                        else -> {
+                            entity.holdDecision = decision.name
+                            HoldDecisionRecord.ACCEPTED
+                        }
                     }
                 }
-            }
         }
     }.awaitSuspending()
 

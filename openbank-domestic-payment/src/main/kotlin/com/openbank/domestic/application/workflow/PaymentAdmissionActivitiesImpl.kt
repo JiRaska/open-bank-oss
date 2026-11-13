@@ -32,6 +32,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import org.jboss.logging.Logger
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -156,7 +157,7 @@ open class PaymentAdmissionActivitiesImpl(
                 record.outcome is StepOutcome.Decided &&
                     (record.effective ?: AdmissionDecision.ALLOW) > AdmissionDecision.ALLOW
             }
-        val reasons = result.reviewReasons()
+        val reasons = result.coveredByCase()
         if (payment.status == DomesticPaymentStatus.RECEIVED) {
             val held = payment.transitionTo(DomesticPaymentStatus.HELD, clock = clock)
             val updated = if (wantsReview) held.withHoldCaseRequested(Instant.now(clock), reasons) else held
@@ -204,10 +205,12 @@ open class PaymentAdmissionActivitiesImpl(
     /**
      * The one place a HELD payment becomes VALIDATED on a case decision, and so the one place that
      * holds the rule: a payment is sent only if every control bound on this rail answered for it,
-     * none refuses, and every "review" among the answers is one the released case was asked about.
+     * none refuses, and every "review" among the answers is one the released case was shown.
      *
-     * A case decision covers exactly what the case was opened for ([DomesticPayment.holdCaseReasons],
-     * recorded with the case request) and nothing else. It does not answer for a control that never
+     * A case decision covers exactly the evidence the case was shown ([DomesticPayment.holdCaseReasons],
+     * recorded with the case request: step, reason and a fingerprint of that step's evidence) and
+     * nothing else. The same reason on other evidence, another matched list entry or another score,
+     * is a different question. It does not answer for a control that never
      * spoke, and it does not answer a question nobody put to the reviewer. So the whole chain is
      * evaluated again here, hours after the hold began:
      *
@@ -224,7 +227,9 @@ open class PaymentAdmissionActivitiesImpl(
         val result = chain.admit(payment) { freshFraudScore = it }
         freshFraudScore?.let { writes.rememberFraudScore(payment.id, it) }
         val unanswered = result.steps.filter { it.outcome is StepOutcome.Unavailable }
-        val uncovered = result.reviewReasons() - payment.holdCaseReasons
+        // A review whose evidence has no identity is never covered, whatever the row says.
+        val uncovered = result.reviewed().filter { it.identity == null || it.covered() !in payment.holdCaseReasons }
+            .map { it.reason }
         return when {
             result.decision == AdmissionDecision.REJECT -> {
                 rejected(payment, result)
@@ -243,7 +248,7 @@ open class PaymentAdmissionActivitiesImpl(
                 HoldState.WAITING
             }
             uncovered.isNotEmpty() -> {
-                val next = payment.copy(holdReview = payment.holdReview + 1, holdCaseReasons = result.reviewReasons())
+                val next = payment.copy(holdReview = payment.holdReview + 1, holdCaseReasons = result.coveredByCase())
                 val asked = writes.requestNextReview(
                     payment.id,
                     fromReview = payment.holdReview,
@@ -328,16 +333,64 @@ private fun DomesticPaymentEventPublisher.statusChanged(previous: DomesticPaymen
         payload = statusChangedPayload(previous, current),
     )
 
-/**
- * What a reviewer is asked to decide: one `STEP:REASON` for every control that answered and wants a
- * human. A control that could not answer is not in it; nobody can decide for a control that did not
- * speak.
- */
-private fun AdmissionResult.reviewReasons(): Set<String> = steps.mapNotNull { record ->
+/** One control that answered "a human must look", with the identity of the evidence it showed. */
+private class Reviewed(val step: AdmissionStep, val reason: String, val identity: String?) {
+    /** What a decision on this review covers, as recorded on the row. Only meaningful with an identity. */
+    fun covered(): String = "${step.name}:$reason:$identity"
+}
+
+private fun AdmissionResult.reviewed(): List<Reviewed> = steps.mapNotNull { record ->
     val outcome = record.outcome as? StepOutcome.Decided
     val wantsHuman = outcome?.decision == AdmissionDecision.HOLD || outcome?.decision == AdmissionDecision.CHALLENGE
-    if (outcome != null && wantsHuman) "${record.step.name}:${outcome.reason.value}" else null
-}.toSet()
+    if (outcome != null && wantsHuman) {
+        Reviewed(record.step, outcome.reason.value, evidenceIdentity(record.step, outcome.evidence.attributes))
+    } else {
+        null
+    }
+}
+
+/**
+ * What the case of this result is asked to decide, and so what its decision will cover: step,
+ * reason and evidence identity of every control that wants a human. A control whose evidence has no
+ * identity contributes nothing, so no decision ever covers it. A control that could not answer is
+ * not in it either; nobody can decide for a control that did not speak.
+ */
+private fun AdmissionResult.coveredByCase(): Set<String> =
+    reviewed().filter { it.identity != null }.map { it.covered() }.toSet()
+
+/**
+ * A fingerprint of the evidence a control showed, from what the control itself returned, or null
+ * when that evidence does not say WHAT was found. Canonical: the attributes sorted by key, so the
+ * order a control lists things in neither fakes a change nor hides one.
+ *
+ *  - Sanctions: status, score and matched list entry of each screened role. A role that is not
+ *    clear and names no matched entry has no identity: "something matched" cannot be told from
+ *    "something else matched". The screening contract returns no entry id and no list version, so
+ *    an entry changed in place under the same name and score is not told apart either.
+ *  - Fraud: verdict, score and rule version.
+ *  - Any other step has no identity until someone says here what its evidence is.
+ */
+private fun evidenceIdentity(step: AdmissionStep, evidence: Map<String, String>): String? {
+    val identified = when (step) {
+        AdmissionStep.SANCTIONS -> evidence.keys.filter { it.endsWith("_status") }.let { statuses ->
+            statuses.isNotEmpty() &&
+                statuses.all { key ->
+                    evidence[key] in SANCTIONS_CLEAR_STATUSES ||
+                        !evidence[key.removeSuffix("_status") + "_matched_entity"].isNullOrBlank()
+                }
+        }
+        AdmissionStep.FRAUD -> FRAUD_IDENTITY.all { !evidence[it].isNullOrBlank() }
+        else -> false
+    }
+    if (!identified) return null
+    val canonical = evidence.toSortedMap().entries.joinToString("\n") { "${it.key}=${it.value}" }
+    return MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray())
+        .take(FINGERPRINT_BYTES).joinToString("") { "%02x".format(it) }
+}
+
+private val SANCTIONS_CLEAR_STATUSES = setOf("CLEAR", "WHITELISTED")
+private val FRAUD_IDENTITY = listOf("verdict", "score", "rule_version")
+private const val FINGERPRINT_BYTES = 8
 
 /** The reject reason a refusing step maps to. Top-level, after the class, for detekt's function count. */
 private fun rejectReasonFor(step: AdmissionStep): DomesticRejectReason = when (step) {

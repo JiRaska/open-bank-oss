@@ -673,7 +673,7 @@ class PaymentAdmissionJourneyIT {
         assertThat(status(payment)).isEqualTo("HELD")
         assertThat(column(payment, "hold_review")).isEqualTo("2")
         assertThat(column(payment, "hold_decision")).isEqualTo("none")
-        assertThat(column(payment, "hold_case_reasons")).isEqualTo("SANCTIONS:SANCTIONS_POTENTIAL_MATCH")
+        assertThat(column(payment, "hold_case_reasons")).matches("SANCTIONS:SANCTIONS_POTENTIAL_MATCH:[0-9a-f]{16}")
         assertThat(world.submissions(payment)).isZero()
         // The customer still reads what they read before: received, no reason.
         RestAssured.given().get("/api/v1/domestic-payments/$payment").then().statusCode(200)
@@ -685,6 +685,20 @@ class PaymentAdmissionJourneyIT {
         assertThat(status(payment)).isEqualTo("HELD")
         assertThat(column(payment, "hold_decision")).isEqualTo("none")
 
+        // The key of the current review is one exact string. Nothing that merely reads like it,
+        // no other payment's key and no earlier review's key decides anything.
+        val current = PaymentHoldPolicy.caseKey(payment, 2)
+        val first = PaymentHoldPolicy.caseKey(payment)
+        kafkaProducer().use { producer ->
+            for (lookalike in listOf("$first:+2", "$first:02", "$first:2 ", " $current", "$first:2:", "$first:3")) {
+                producer.decide(payment, "CLEARED", lookalike)
+            }
+            producer.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(UUID.randomUUID(), 2))
+        }
+        runtime.advance(PaymentHoldPolicy.HOLD_CHECK_INTERVAL.plusMinutes(1))
+        assertThat(column(payment, "hold_decision")).isEqualTo("none")
+        assertThat(status(payment)).isEqualTo("HELD")
+
         clear(payment, review = 2)
         awaitStatus(payment, "SETTLED")
         assertThat(world.submissions(payment)).isEqualTo(1)
@@ -695,7 +709,7 @@ class PaymentAdmissionJourneyIT {
     fun `a case cleared for a fraud review releases the payment - what the case decided does not block it`() {
         val payment = create(amount = FakeFraud.REVIEW_AMOUNT)
         awaitStatus(payment, "HELD")
-        assertThat(column(payment, "hold_case_reasons")).isEqualTo("FRAUD:FRAUD_REVIEW")
+        assertThat(column(payment, "hold_case_reasons")).matches("FRAUD:FRAUD_REVIEW:[0-9a-f]{16}")
 
         clear(payment)
 
@@ -708,7 +722,7 @@ class PaymentAdmissionJourneyIT {
     fun `a case cleared for a fraud review does not clear a sanctions match that appears during the hold`() {
         val payment = create(creditorName = "Newly Listed Ltd", amount = FakeFraud.REVIEW_AMOUNT)
         awaitStatus(payment, "HELD")
-        assertThat(column(payment, "hold_case_reasons")).isEqualTo("FRAUD:FRAUD_REVIEW")
+        assertThat(column(payment, "hold_case_reasons")).matches("FRAUD:FRAUD_REVIEW:[0-9a-f]{16}")
 
         // The list changes while the payment is held.
         world.newlyListed += "Newly Listed Ltd"
@@ -721,7 +735,7 @@ class PaymentAdmissionJourneyIT {
         assertThat(column(payment, "hold_review")).isEqualTo("2")
         assertThat(
             column(payment, "hold_case_reasons"),
-        ).isEqualTo("FRAUD:FRAUD_REVIEW,SANCTIONS:SANCTIONS_POTENTIAL_MATCH")
+        ).matches("FRAUD:FRAUD_REVIEW:[0-9a-f]{16},SANCTIONS:SANCTIONS_POTENTIAL_MATCH:[0-9a-f]{16}")
         assertThat(world.submissions(payment)).isZero()
 
         // The second review does not restart the clock: 48 hours from the FIRST hold, it is rejected.
@@ -734,6 +748,63 @@ class PaymentAdmissionJourneyIT {
         runtime.advance(Duration.ofMinutes(2))
         assertThat(status(payment)).isEqualTo("REJECTED")
         assertThat(world.submissions(payment)).isZero()
+    }
+
+    @Test
+    fun `a case cleared for one list entry does not clear a match against another entry`() {
+        val payment = create(creditorName = "REVIEW Two Entries")
+        awaitStatus(payment, "HELD")
+        val shown = column(payment, "hold_case_reasons")
+
+        // Same control, same reason, and a different entry on the list than the reviewer was shown.
+        world.matchedEntry["REVIEW Two Entries"] = "list entry B"
+        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment)) }
+
+        await("the second review to be requested") { heldEvents(payment).size == 2 }
+        assertThat(status(payment)).isEqualTo("HELD")
+        assertThat(column(payment, "hold_review")).isEqualTo("2")
+        assertThat(column(payment, "hold_case_reasons"))
+            .matches("SANCTIONS:SANCTIONS_POTENTIAL_MATCH:[0-9a-f]{16}")
+            .isNotEqualTo(shown)
+        assertThat(world.submissions(payment)).isZero()
+
+        // The second case was shown entry B, so its decision covers entry B.
+        clear(payment, review = 2)
+        awaitStatus(payment, "SETTLED")
+    }
+
+    @Test
+    fun `a case cleared for one fraud score does not clear another rule version's review`() {
+        val payment = create(amount = FakeFraud.REVIEW_AMOUNT)
+        awaitStatus(payment, "HELD")
+
+        // What the payment was scored with changes under the hold: the same verdict by other rules.
+        update("UPDATE domestic_payments SET admission_fraud_rule_version = 'rules-it-2' WHERE payment_id = ?", payment)
+        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment)) }
+
+        await("the second review to be requested") { heldEvents(payment).size == 2 }
+        assertThat(status(payment)).isEqualTo("HELD")
+        assertThat(world.submissions(payment)).isZero()
+    }
+
+    @Test
+    fun `a review whose evidence does not say what matched is never covered by a decision`() {
+        world.unnamedMatches += "REVIEW Unnamed"
+        val payment = create(creditorName = "REVIEW Unnamed")
+        awaitStatus(payment, "HELD")
+        assertThat(column(payment, "hold_case_reasons")).describedAs("nothing a decision could cover").isEqualTo("none")
+
+        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment)) }
+        await("the second review to be requested") { heldEvents(payment).size == 2 }
+        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment, 2)) }
+        await("the third review to be requested") { heldEvents(payment).size == 3 }
+
+        // However often it is cleared, it is not sent. It ends by its expiry.
+        assertThat(status(payment)).isEqualTo("HELD")
+        assertThat(world.submissions(payment)).isZero()
+        shiftHold(payment, PaymentHoldPolicy.EXPIRY.plusHours(1))
+        runtime.advance(PaymentHoldPolicy.HOLD_CHECK_INTERVAL.plusMinutes(1))
+        awaitStatus(payment, "REJECTED")
     }
 
     @Test
@@ -1010,6 +1081,12 @@ class AdmissionWorld {
 
     /** Names sanctions screening reports as a potential match from now on: a list that changed. */
     val newlyListed: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** The list entry a name matches, when it is not the default one: the match moved to another entry. */
+    val matchedEntry = ConcurrentHashMap<String, String>()
+
+    /** Names whose match comes back without saying which entry it is against. */
+    val unnamedMatches: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val submitted = ConcurrentHashMap<UUID, AtomicInteger>()
 
     fun submitted(paymentId: UUID) {
@@ -1026,6 +1103,8 @@ class AdmissionWorld {
         standingWaiters.set(0)
         standingUnanswered.set(0)
         newlyListed.clear()
+        matchedEntry.clear()
+        unnamedMatches.clear()
     }
 }
 
@@ -1071,7 +1150,13 @@ class FakeScreening(private val world: AdmissionWorld) : SanctionsScreeningPort 
             ScreeningMatchStatus.HIT -> 1.0
             else -> 0.8
         }
-        return ScreeningResult(name, role, status, score, null)
+        // A match names the list entry it is against, as the real screen does, unless a test says
+        // this one does not.
+        val matched = when {
+            status == ScreeningMatchStatus.CLEAR || name in world.unnamedMatches -> null
+            else -> world.matchedEntry[name] ?: "list entry ${Integer.toHexString(name.hashCode())}"
+        }
+        return ScreeningResult(name, role, status, score, matched)
     }
 }
 

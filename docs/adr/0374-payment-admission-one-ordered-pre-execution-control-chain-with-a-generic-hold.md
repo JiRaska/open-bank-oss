@@ -172,14 +172,18 @@ same choices, not new ones.
   is accepted only before that, and one accepted but not yet applied when the term ends is not
   applied (point 3: a hold never expires into a release). The run notices within its check
   interval, 15 minutes.
-- *Release* (point 13, funds). A case decision covers exactly the reasons the case was opened for,
-  and nothing else. Those reasons are recorded with the case request. At release the whole chain is
+- *Release* (point 13, funds). A case decision covers exactly the evidence the case was shown, and
+  nothing else: per control that asked for a human, its reason and a fingerprint of the evidence it
+  returned, recorded with the case request. The same reason on other evidence (another matched
+  list entry, another score or rule version) is a different question, and a control whose evidence
+  does not say what was found is never covered. At release the whole chain is
   evaluated again, and the payment is sent only if every bound control answers, none refuses, and
-  every "review" among the answers is one the released case was asked about. A refusal rejects. A
+  every "review" among the answers is one the released case was shown. A refusal rejects. A
   control that still cannot answer leaves the payment HELD. A "review" the case did not cover (a
   control that was down when the case was opened, a list that changed during the hold) leaves the
   payment HELD and requests a further review, as a case of its own with the key
-  `payment-hold:<rail>:<paymentId>:<n>`, inside the same hold and the same expiry.
+  `payment-hold:<rail>:<paymentId>:<n>`, inside the same hold and the same expiry. A decision is
+  accepted only from the case whose key equals, exactly, the key of the hold's current review.
   This is what keeps an outage that turned payments into cases from sending them unscreened.
   Balance is not re-checked at release by this step (see below).
 - *One fraud score per payment.* The rail keeps the first real score on the payment and reuses it

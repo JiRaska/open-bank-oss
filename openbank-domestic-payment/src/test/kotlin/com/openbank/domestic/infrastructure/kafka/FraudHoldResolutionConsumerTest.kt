@@ -80,27 +80,34 @@ class FraudHoldResolutionConsumerTest {
         runBlocking { consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = key)) }
         runBlocking { consumer.consume(event("BLOCKED", alert = "PAYMENT_HELD", key = key)) }
 
-        verify(exactly = 1) { holdResolution.resolve(paymentId, 1, HoldDecision.RELEASE) }
-        verify(exactly = 1) { holdResolution.resolve(paymentId, 1, HoldDecision.REJECT) }
+        verify(exactly = 1) { holdResolution.resolve(paymentId, key, HoldDecision.RELEASE) }
+        verify(exactly = 1) { holdResolution.resolve(paymentId, key, HoldDecision.REJECT) }
         verify(exactly = 0) { resolution.resolve(any(), any(), any()) }
     }
 
     @Test
-    fun `no other case can decide an admission hold`(): Unit = runBlocking {
-        val key = PaymentHoldPolicy.caseKey(paymentId)
-        consumer.consume(event("ESCALATED", alert = "PAYMENT_HELD", key = key))
-        consumer.consume(event("UNDER_REVIEW", alert = "PAYMENT_HELD", key = key))
-        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = "attacker-chosen-key"))
-        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = null))
-        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = PaymentHoldPolicy.caseKey(UUID.randomUUID())))
-        // The fraud hold's key does not open an admission hold, and the other way round.
-        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = fraudReviewCaseKey(paymentId)))
-        consumer.consume(event("CLEARED", alert = "FRAUD_REVIEW", key = key))
-        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", tx = null, key = key))
-        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", tx = "not-a-uuid", key = key))
-        verify(exactly = 0) { holdResolution.resolve(any(), any(), any()) }
-        verify(exactly = 0) { resolution.resolve(any(), any(), any()) }
-    }
+    fun `only a decision about this payment reaches the hold, and its case key is handed on unparsed`(): Unit =
+        runBlocking {
+            val key = PaymentHoldPolicy.caseKey(paymentId)
+            every { holdResolution.resolve(any(), any(), any()) } returns false
+            // Not decisions, or not about a payment: nothing is handed on.
+            consumer.consume(event("ESCALATED", alert = "PAYMENT_HELD", key = key))
+            consumer.consume(event("UNDER_REVIEW", alert = "PAYMENT_HELD", key = key))
+            consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", tx = null, key = key))
+            consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", tx = "not-a-uuid", key = key))
+            // The fraud hold's alert does not reach an admission hold.
+            consumer.consume(event("CLEARED", alert = "FRAUD_REVIEW", key = key))
+            verify(exactly = 0) { holdResolution.resolve(any(), any(), any()) }
+            verify(exactly = 0) { resolution.resolve(any(), any(), any()) }
+
+            // Whether a key is the key of the hold's case is the row's to say, by exact equality
+            // (PaymentAdmissionJourneyIT). The consumer does not parse it and does not guess.
+            val foreign = listOf("attacker-chosen-key", "$key:+2", "$key:02", fraudReviewCaseKey(paymentId))
+            for (other in foreign) consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = other))
+            for (other in foreign) {
+                verify(exactly = 1) { holdResolution.resolve(paymentId, other, HoldDecision.RELEASE) }
+            }
+        }
 
     @Test
     fun `a malformed record reaches the dead-letter strategy instead of being acked`() {

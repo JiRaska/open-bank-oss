@@ -31,16 +31,19 @@ import java.util.UUID
  * dies right after being told.
  *
  * The row decides whether the decision counts, in one guarded write: it is accepted only for a
- * payment that is HELD with its case requested, for the hold's current review, once, and only
- * before the hold's expiry. A decision
+ * payment that is HELD with its case requested, from the case whose key is exactly the key of the
+ * hold's current review, once, and only before the hold's expiry. A decision
  * that comes after the expiry is refused: a hold never expires into a release.
  *
  * Then the payment's run is nudged so it does not wait for its next check, and a HELD payment that
  * has no run is given one. Neither changes the outcome; they only make it prompt. A failure there
  * propagates, the record is retried, and the retry finds the decision already recorded.
  *
- * Blocking: call it off the event loop. Created at startup, not on first use: its first use is on a
- * worker thread of the consumer, and a bean that reads configuration must not be created there.
+ * Blocking: call it off the event loop. Created at startup, not on first use. Its first use is on a
+ * worker thread of the consumer, and under `@QuarkusTest` a bean that reads configuration cannot be
+ * created there (the test classloader has no configuration for that thread). The packaged
+ * application does not have that problem; eager creation costs nothing and keeps the tests on the
+ * production wiring.
  */
 @Startup
 @ApplicationScoped
@@ -54,21 +57,36 @@ class PaymentHoldResolutionService(
 ) {
     private val log = Logger.getLogger(PaymentHoldResolutionService::class.java)
 
-    private fun record(paymentId: UUID, review: Int, decision: HoldDecision): HoldDecisionRecord =
+    private fun record(paymentId: UUID, caseKey: String, decision: HoldDecision): HoldDecisionRecord =
         VertxContextSupport.subscribeAndAwait {
             CoroutineScope(Dispatchers.Unconfined).async {
-                writes.recordHoldDecision(paymentId, review, decision, Instant.now(clock), PaymentHoldPolicy.EXPIRY)
+                writes.recordHoldDecision(
+                    paymentId = paymentId,
+                    caseKey = caseKey,
+                    caseKeyOfReview = { review -> PaymentHoldPolicy.caseKey(paymentId, review) },
+                    decision = decision,
+                    at = Instant.now(clock),
+                    expiresAfter = PaymentHoldPolicy.EXPIRY,
+                )
             }.asUni()
         }
 
     /** True when the payment has a hold this decision was, or already had been, offered to. */
-    fun resolve(paymentId: UUID, review: Int, decision: HoldDecision): Boolean {
-        val record = record(paymentId, review, decision)
+    fun resolve(paymentId: UUID, caseKey: String, decision: HoldDecision): Boolean {
+        val record = record(paymentId, caseKey, decision)
         metrics.recordResolution(
             release = decision == HoldDecision.RELEASE,
             delivered =
             record == HoldDecisionRecord.ACCEPTED,
         )
+        if (record == HoldDecisionRecord.OTHER_CASE) {
+            log.warnf(
+                "Hold decision %s for payment %s came from a case that is not its hold's; ignored",
+                decision,
+                paymentId,
+            )
+            return false
+        }
         if (record == HoldDecisionRecord.NO_HOLD) {
             log.warnf(
                 "Hold decision %s for payment %s: it has no hold to decide; its status stands",
