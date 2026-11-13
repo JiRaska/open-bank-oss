@@ -594,6 +594,7 @@ public final class com/openbank/libs/audit/decision/DecisionClass : java/lang/En
 	public static final field AUTHZ Lcom/openbank/libs/audit/decision/DecisionClass;
 	public static final field CREDIT Lcom/openbank/libs/audit/decision/DecisionClass;
 	public static final field FRAUD Lcom/openbank/libs/audit/decision/DecisionClass;
+	public static final field SHADOW Lcom/openbank/libs/audit/decision/DecisionClass;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/audit/decision/DecisionClass;
 	public static fun values ()[Lcom/openbank/libs/audit/decision/DecisionClass;
@@ -690,6 +691,34 @@ public final class com/openbank/libs/audit/decision/DecisionOutcome$Fraud : java
 	public fun getKind ()Ljava/lang/String;
 	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/audit/decision/DecisionOutcome$Fraud;
 	public static fun values ()[Lcom/openbank/libs/audit/decision/DecisionOutcome$Fraud;
+}
+
+public final class com/openbank/libs/audit/decision/DecisionOutcome$Shadow : com/openbank/libs/audit/decision/DecisionOutcome {
+	public fun <init> (Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;JLcom/openbank/libs/audit/decision/InputDigest;Lcom/openbank/libs/audit/decision/InputDigest;Lcom/openbank/libs/audit/decision/InputDigest;)V
+	public final fun component1 ()Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;
+	public final fun component2 ()J
+	public final fun component3 ()Lcom/openbank/libs/audit/decision/InputDigest;
+	public final fun component4 ()Lcom/openbank/libs/audit/decision/InputDigest;
+	public final fun component5 ()Lcom/openbank/libs/audit/decision/InputDigest;
+	public final fun copy (Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;JLcom/openbank/libs/audit/decision/InputDigest;Lcom/openbank/libs/audit/decision/InputDigest;Lcom/openbank/libs/audit/decision/InputDigest;)Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow;
+	public static synthetic fun copy$default (Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow;Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;JLcom/openbank/libs/audit/decision/InputDigest;Lcom/openbank/libs/audit/decision/InputDigest;Lcom/openbank/libs/audit/decision/InputDigest;ILjava/lang/Object;)Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getApprovedEvidenceHash ()Lcom/openbank/libs/audit/decision/InputDigest;
+	public final fun getArtifactHash ()Lcom/openbank/libs/audit/decision/InputDigest;
+	public final fun getEpoch ()J
+	public fun getKind ()Ljava/lang/String;
+	public final fun getOutputHash ()Lcom/openbank/libs/audit/decision/InputDigest;
+	public final fun getResult ()Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result : java/lang/Enum {
+	public static final field EVALUATED Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;
+	public static final field INCOMPLETE Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;
+	public static fun values ()[Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;
 }
 
 public final class com/openbank/libs/audit/decision/DecisionReason {
