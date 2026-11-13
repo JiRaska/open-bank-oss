@@ -5,6 +5,7 @@
 package com.openbank.kyb.infrastructure.persistence.repository
 
 import com.openbank.kyb.application.port.out.BusinessOnboardingCaseRepository
+import com.openbank.kyb.application.port.out.ConcurrentCaseUpdateException
 import com.openbank.kyb.application.port.out.KybOutboxRepository
 import com.openbank.kyb.application.port.out.RegistryExtractCache
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
@@ -21,6 +22,8 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.OptimisticLockException
+import org.hibernate.StaleStateException
 import java.time.Instant
 import java.util.UUID
 
@@ -40,15 +43,33 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         return case
     }
 
+    /**
+     * Two guards, and both are needed. The explicit comparison catches the common case: the copy
+     * being written was read before somebody else's committed write (the row is loaded fresh here,
+     * so `@Version` alone would see the NEW version and happily overwrite). `@Version` then covers
+     * the window between this load and the flush, where two transactions hold the same version.
+     */
     override suspend fun update(case: BusinessOnboardingCase, event: KybEvent?): BusinessOnboardingCase {
-        Panache.withTransaction {
+        val written = Panache.withTransaction {
             find("caseId", case.id).firstResult().flatMap { e ->
-                requireNotNull(e) { "case ${case.id} vanished" }.fill(case)
-                withEvent(event)
+                val row = requireNotNull(e) { "case ${case.id} vanished" }
+                if (row.version != case.version) {
+                    Uni.createFrom().failure(ConcurrentCaseUpdateException(case.id))
+                } else {
+                    row.fill(case)
+                    withEvent(event)
+                        .flatMap { Panache.getSession() }
+                        .flatMap { session -> session.flush() }
+                        .map { row.version }
+                }
             }
-        }.awaitSuspending()
-        return case
+        }.onFailure(::isStaleWrite).transform { ConcurrentCaseUpdateException(case.id) }.awaitSuspending()
+        return case.copy(version = written)
     }
+
+    private fun isStaleWrite(failure: Throwable): Boolean = generateSequence(failure) { it.cause }
+        .take(MAX_CAUSE_DEPTH)
+        .any { it is OptimisticLockException || it is StaleStateException }
 
     private fun withEvent(event: KybEvent?): Uni<Void> =
         if (event == null) Uni.createFrom().voidItem() else outbox.persistInTransaction(event.toOutboxMessage())
@@ -103,6 +124,7 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         questionnaireJson = case.questionnaire?.let { KybJson.write(it) }
         declarationsJson = case.declarations?.let { KybJson.write(it) }
         agreementJson = case.agreement?.let { KybJson.write(it) }
+        screeningJson = case.screening?.let { KybScreeningJson.write(it) }
         updatedAt = case.updatedAt
     }
 
@@ -121,9 +143,15 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         questionnaire = questionnaireJson?.let { KybJson.readQuestionnaire(it) },
         declarations = declarationsJson?.let { KybJson.readDeclarations(it) },
         agreement = agreementJson?.let { KybJson.readAgreement(it) },
+        screening = screeningJson?.let { KybScreeningJson.read(it) },
+        version = version,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )
+
+    private companion object {
+        const val MAX_CAUSE_DEPTH = 8
+    }
 
     /** The typed payload is what goes on the wire; Jackson keeps declaration order, which the contract documents. */
     private fun KybEvent.toOutboxMessage() = OutboxMessage(
