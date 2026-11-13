@@ -55,7 +55,6 @@ tests:
               namespace: kyc
               severity: critical
             exp_annotations:
-              subject_period: continuous
               summary: "A sanctions list change has not reached a customer as a re-screening case within 24h"
               description: "openbank_kyc_rescreen_backlog_oldest_age_seconds is over 86400: the oldest kyc_screening_triggers row still PENDING or OPEN_FAILED was enqueued more than 24 hours ago, so a customer the list change could match has had no re-screening case opened. openbank_kyc_rescreen_backlog_pending says how many are waiting. Check the case coordinator (OPEN_FAILED rows carry failed_reason), the kyc.screening-trigger.retry heartbeat, and KYC_COORDINATOR_OPEN_FAILED outbox events for parked rows, which need an operator to open the case and reconcile the row. Runbook: kyc-service docs 05-operations, Re-screening backlog."
       - eval_time: 30m
@@ -108,7 +107,6 @@ tests:
               namespace: kyc
               severity: warning
             exp_annotations:
-              subject_period: continuous
               summary: "KYC re-screening loop is switched off with list changes still pending"
               description: "openbank_kyc_rescreen_loop_disabled_with_pending is 1: kyc-service's ADR-0256 trigger loop is disabled but kyc_screening_triggers still holds PENDING or OPEN_FAILED rows (openbank_kyc_rescreen_backlog_pending), so those customers will not be re-screened. Either re-enable the loop (KYC_SCREENING_TRIGGERS_ENABLED and KYC_SCREENING_TRIGGERS_RETRY_ENABLED) or reconcile each row by hand. While the loop is off, list changes arriving now are acked and counted as openbank_kyc_sanctions_list_change_events_total{outcome=\"disabled\"}, not queued. Runbook: kyc-service docs 05-operations, Re-screening backlog."
       - eval_time: 40m
