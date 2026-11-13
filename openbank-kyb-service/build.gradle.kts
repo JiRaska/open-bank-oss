@@ -6,6 +6,11 @@ plugins {
     id("openbank.quarkus-service")
 }
 
+// The monitoring consumer pact reuses the producer wire-shape helper from the regular test tree.
+kotlin.sourceSets.named("consumerPactTest") {
+    kotlin.include("com/openbank/kyb/infrastructure/kafka/MonitoredSubjectMatchedWire.kt")
+}
+
 dependencies {
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
