@@ -193,26 +193,87 @@ public final class com/openbank/libs/fincrime/admission/DelegatedDebitAuthority 
 	public final fun getOWNER-GAt_hAA ()Ljava/lang/String;
 }
 
+public final class com/openbank/libs/fincrime/admission/DelegationAuthorityFacts {
+	public static final field INSTANCE Lcom/openbank/libs/fincrime/admission/DelegationAuthorityFacts;
+	public final fun grantOf (Lcom/openbank/libs/fincrime/admission/DelegationAuthorityGrantWire;Ljava/util/UUID;Ljava/util/UUID;)Lcom/openbank/libs/fincrime/admission/DelegationFact;
+	public final fun lookupOf (Ljava/util/List;Ljava/util/UUID;Ljava/util/UUID;)Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup;
+	public final fun outcome (Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;Ljava/lang/String;Ljava/time/OffsetDateTime;)Lcom/openbank/libs/fincrime/admission/StepOutcome;
+}
+
+public final class com/openbank/libs/fincrime/admission/DelegationAuthorityGrantWire {
+	public fun <init> (Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/util/UUID;
+	public final fun component2 ()Ljava/util/UUID;
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun copy (Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/fincrime/admission/DelegationAuthorityGrantWire;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/admission/DelegationAuthorityGrantWire;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/admission/DelegationAuthorityGrantWire;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCapabilities ()Ljava/util/List;
+	public final fun getGrantId ()Ljava/util/UUID;
+	public final fun getGrantorPartyId ()Ljava/util/UUID;
+	public final fun getValidFrom ()Ljava/lang/String;
+	public final fun getValidTo ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class com/openbank/libs/fincrime/admission/DelegationFact {
-	public fun <init> (Ljava/util/UUID;Ljava/util/UUID;Ljava/util/Set;ZLjava/time/OffsetDateTime;Ljava/time/OffsetDateTime;)V
+	public fun <init> (Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/Set;ZLjava/time/OffsetDateTime;Ljava/time/OffsetDateTime;)V
 	public final fun authorizes (Ljava/util/UUID;Ljava/util/UUID;Ljava/lang/String;Ljava/time/OffsetDateTime;)Z
 	public final fun component1 ()Ljava/util/UUID;
 	public final fun component2 ()Ljava/util/UUID;
-	public final fun component3 ()Ljava/util/Set;
-	public final fun component4 ()Z
-	public final fun component5 ()Ljava/time/OffsetDateTime;
-	public final fun component6 ()Ljava/time/OffsetDateTime;
-	public final fun copy (Ljava/util/UUID;Ljava/util/UUID;Ljava/util/Set;ZLjava/time/OffsetDateTime;Ljava/time/OffsetDateTime;)Lcom/openbank/libs/fincrime/admission/DelegationFact;
-	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/admission/DelegationFact;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/Set;ZLjava/time/OffsetDateTime;Ljava/time/OffsetDateTime;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/admission/DelegationFact;
+	public final fun component3 ()Ljava/util/UUID;
+	public final fun component4 ()Ljava/util/UUID;
+	public final fun component5 ()Ljava/util/Set;
+	public final fun component6 ()Z
+	public final fun component7 ()Ljava/time/OffsetDateTime;
+	public final fun component8 ()Ljava/time/OffsetDateTime;
+	public final fun copy (Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/Set;ZLjava/time/OffsetDateTime;Ljava/time/OffsetDateTime;)Lcom/openbank/libs/fincrime/admission/DelegationFact;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/admission/DelegationFact;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/Set;ZLjava/time/OffsetDateTime;Ljava/time/OffsetDateTime;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/admission/DelegationFact;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getActive ()Z
 	public final fun getCapabilities ()Ljava/util/Set;
+	public final fun getGrantId ()Ljava/util/UUID;
 	public final fun getGranteePartyId ()Ljava/util/UUID;
+	public final fun getGrantorPartyId ()Ljava/util/UUID;
 	public final fun getResourceId ()Ljava/util/UUID;
 	public final fun getValidFrom ()Ljava/time/OffsetDateTime;
 	public final fun getValidTo ()Ljava/time/OffsetDateTime;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/openbank/libs/fincrime/admission/DelegationFactsLookup {
+}
+
+public final class com/openbank/libs/fincrime/admission/DelegationFactsLookup$Available : com/openbank/libs/fincrime/admission/DelegationFactsLookup {
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup$Available;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup$Available;Ljava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup$Available;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGrants ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/admission/DelegationFactsLookup$Unavailable : com/openbank/libs/fincrime/admission/DelegationFactsLookup {
+	public fun <init> (Lcom/openbank/libs/fincrime/admission/UnavailableCause;Ljava/lang/String;)V
+	public final fun component1 ()Lcom/openbank/libs/fincrime/admission/UnavailableCause;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Lcom/openbank/libs/fincrime/admission/UnavailableCause;Ljava/lang/String;)Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup$Unavailable;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup$Unavailable;Lcom/openbank/libs/fincrime/admission/UnavailableCause;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup$Unavailable;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCause ()Lcom/openbank/libs/fincrime/admission/UnavailableCause;
+	public final fun getDetail ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/openbank/libs/fincrime/admission/DelegationFactsSource {
+	public abstract fun factsFor (Ljava/util/UUID;Ljava/util/UUID;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public final class com/openbank/libs/fincrime/admission/PaymentAdmissionChain {
