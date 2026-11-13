@@ -18,7 +18,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken
  * `pact-verifier`, answered 403, and published a failed verification that blocked
  * tax-reporting's deploy.
  */
-internal object TaxReportingReplayIdentity {
+object TaxReportingReplayIdentity {
     private val DESCRIPTION_MARKERS = listOf("CRS FATCA", "GSFT deposit roster as of")
 
     fun appliesTo(description: String): Boolean = DESCRIPTION_MARKERS.any { description.contains(it) }

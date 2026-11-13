@@ -4,6 +4,8 @@
 
 'use client'
 import { useState } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { ShieldAlert, Search, Clock, RefreshCw, AlertTriangle, UserRoundSearch, AlertOctagon } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
@@ -13,7 +15,8 @@ import { useServiceResource } from '@/lib/services/useServiceResource'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader, ShortId, StatusBadge } from '@/components/ui'
 import { StatCard } from '@/components/ui/StatCard'
-import { parseAmlCases, type AmlCase } from '@/lib/aml/amlCaseContract'
+import { caseAgeHours, parseAmlCases, type AmlCase } from '@/lib/aml/amlCaseContract'
+import { usePartySummaries } from '@/lib/aml/usePartyNames'
 import { AmlCaseInvestigation } from '@/components/context/AmlCaseInvestigation'
 
 export default function AmlPage() {
@@ -34,9 +37,13 @@ export default function AmlPage() {
   // did. The old snapshot shape carried `excludedCount` because its parser silently dropped bad
   // rows, which is the behaviour that hid a total contract mismatch as partial corruption.
   const cases = data ?? []
+  const router = useRouter()
+  const parties = usePartySummaries(cases.map(c => c.partyId))
+  const nameOf = (c: AmlCase) => parties[c.partyId]?.name ?? null
   const hasSnapshot = data !== null
   const showingRetainedSnapshot = unavailable !== null && hasSnapshot
   const filtered = cases.filter(c =>
+    (nameOf(c) ?? '').toLowerCase().includes(search.toLowerCase()) ||
     c.customerReference.toLowerCase().includes(search.toLowerCase()) ||
     c.partyId.toLowerCase().includes(search.toLowerCase()) ||
     c.alertCode.toLowerCase().includes(search.toLowerCase()) ||
@@ -44,6 +51,13 @@ export default function AmlPage() {
     c.riskLevel.toLowerCase().includes(search.toLowerCase()) ||
     c.status.toLowerCase().includes(search.toLowerCase())
   )
+
+  const riskRank = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 } as const
+  const statusRank = { ESCALATED: 0, OPEN: 1, UNDER_REVIEW: 2, BLOCKED: 3, CLEARED: 4 } as const
+  // Work queue order: what needs a decision first, then by risk, then oldest first (SLA).
+  const ordered = [...filtered].sort((a, b) =>
+    statusRank[a.status] - statusRank[b.status] || riskRank[a.riskLevel] - riskRank[b.riskLevel] ||
+    Date.parse(a.createdAt) - Date.parse(b.createdAt))
 
   const highRisk = cases.filter(c => c.riskLevel === 'HIGH' || c.riskLevel === 'CRITICAL')
   const pending = cases.filter(c => c.status === 'OPEN' || c.status === 'UNDER_REVIEW')
@@ -154,15 +168,23 @@ export default function AmlPage() {
                   <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                 ))}
               </tr></thead>
-              <tbody>{filtered.map(c => {
+              <tbody>{ordered.map(c => {
+                const name = nameOf(c)
+                const open = ['OPEN', 'UNDER_REVIEW', 'ESCALATED'].includes(c.status)
                 return (
-                  <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}
+                  <tr key={c.id} style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+                    onClick={e => { if (!(e.target as HTMLElement).closest('a,button')) router.push(`/aml/${c.id}`) }}
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                     onMouseLeave={e => e.currentTarget.style.background = ''}>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-primary)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}><UserRoundSearch size={12} aria-hidden="true" />{c.customerReference}</div>
+                      <Link href={`/aml/${c.id}`} style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: 'var(--text-primary)', textDecoration: 'none' }} aria-label={`${t('Otevřít AML případ', 'Open AML case')} ${name ?? c.customerReference}`}><UserRoundSearch size={12} aria-hidden="true" />{name ?? (parties[c.partyId] === undefined ? t('Načítám jméno…', 'Loading name…') : t('Jméno nedostupné', 'Name unavailable'))}</Link>
+                      <div style={{ marginTop: 2, color: 'var(--text-tertiary)', fontSize: 11, fontFamily: 'var(--font-mono)', overflowWrap: 'anywhere' }}>{c.customerReference}</div>
+                      {open && <div style={{ marginTop: 2, fontSize: 11, color: caseAgeHours(c.createdAt) > 72 ? 'var(--danger-text)' : 'var(--text-tertiary)' }}>{t('otevřeno', 'open')} {caseAgeHours(c.createdAt)} h</div>}
                       <div style={{ marginTop: 3, color: 'var(--text-tertiary)' }}><ShortId value={c.id} copyLabel={t('Kopírovat ID případu', 'Copy case ID')} /></div>
-                      {['OPEN', 'UNDER_REVIEW', 'ESCALATED'].includes(c.status) && <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => setInvestigationCaseId(c.id)}>{t('Vazby v grafu', 'Explore graph')}</button>}
+                      <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                        <Link href={`/aml/${c.id}`} className="btn btn-primary btn-sm">{open ? t('Posoudit', 'Review') : t('Detail', 'Details')}</Link>
+                        {open && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setInvestigationCaseId(c.id)}>{t('Vazby v grafu', 'Explore graph')}</button>}
+                      </div>
                     </td>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.screeningType.replaceAll('_', ' ')}</td>
                     <td style={{ padding: '12px 16px' }}>

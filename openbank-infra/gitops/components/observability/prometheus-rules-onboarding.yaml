@@ -159,6 +159,70 @@ spec:
             subject_period: continuous
             summary: "kyc-service acked a sanctions list-change record it could not recognise"
             description: "openbank_kyc_sanctions_list_change_events_total{outcome=\"unrecognised\"} moved on {{ $labels.pod }} within the last hour: a record on the sanctions screening topic carried a missing or unknown `ce-type` header and was acked without opening a screening case. Either sanctions-service changed how it types its events (header value, or type moved into the body) or a new event type joined the topic. Until it is resolved, list changes do not trigger re-screening and nothing else reports it — no lag, no dead-letter, no error. kyc-service logs the offending type under `[sanctions-list-changes-in]`; compare it with the `ce-type` values in the committed kyc-service/sanctions-service pact, then replay the affected publications."
+        - alert: KycRescreenBacklogOverdue
+          # Issue #15961. A sanctions list change queues re-screening triggers in
+          # kyc_screening_triggers; a trigger leaves the backlog only when its case is opened.
+          # A stalled loop and an idle one both showed nothing, so this reads the backlog's
+          # OLDEST age, sampled from the database every minute by RescreenBacklogGauge.
+          #
+          # Deadline 24h. ADR-0256 promises a list change reaches the customer "within the
+          # refresh cycle", and the sanctions lists refresh daily. The healthy worst case is far
+          # inside it: five attempts at 5m * attempt backoff park a row within ~1h, so a row
+          # older than a day is one the next list change will overtake.
+          #
+          # Cold pod: every gauge reads NaN until the first sample, and NaN > x is false, so a
+          # fresh start cannot fire. A feature that is off with nothing pending reads age 0.
+          # Off WITH a backlog is KycRescreenLoopDisabledWithPending's job, hence the unless.
+          # Several kyc pods publish the same database value, so max by namespace, not by pod.
+          expr: |
+            max by (namespace) (openbank_kyc_rescreen_backlog_oldest_age_seconds) > 86400
+            unless on (namespace)
+            max by (namespace) (openbank_kyc_rescreen_loop_disabled_with_pending) > 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "A sanctions list change has not reached a customer as a re-screening case within 24h"
+            description: "openbank_kyc_rescreen_backlog_oldest_age_seconds is over 86400: the oldest kyc_screening_triggers row still PENDING or OPEN_FAILED was enqueued more than 24 hours ago, so a customer the list change could match has had no re-screening case opened. openbank_kyc_rescreen_backlog_pending says how many are waiting. Check the case coordinator (OPEN_FAILED rows carry failed_reason), the kyc.screening-trigger.retry heartbeat, and KYC_COORDINATOR_OPEN_FAILED outbox events for parked rows, which need an operator to open the case and reconcile the row. Runbook: kyc-service docs 05-operations, Re-screening backlog."
+        - alert: KycRescreenLoopDisabledWithPending
+          # Issue #15961. The trigger loop switched off (screening-triggers.enabled or
+          # retry-enabled false) while undrained triggers remain: nothing will ever open those
+          # cases. A distinct series from an empty queue, so "off and empty" (the shipped
+          # default) reads 0 and stays quiet, and the cold-pod NaN cannot fire either.
+          expr: max by (namespace) (openbank_kyc_rescreen_loop_disabled_with_pending) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "KYC re-screening loop is switched off with list changes still pending"
+            description: "openbank_kyc_rescreen_loop_disabled_with_pending is 1: kyc-service's ADR-0256 trigger loop is disabled but kyc_screening_triggers still holds PENDING or OPEN_FAILED rows (openbank_kyc_rescreen_backlog_pending), so those customers will not be re-screened. Either re-enable the loop (KYC_SCREENING_TRIGGERS_ENABLED and KYC_SCREENING_TRIGGERS_RETRY_ENABLED) or reconcile each row by hand. While the loop is off, list changes arriving now are acked and counted as openbank_kyc_sanctions_list_change_events_total{outcome=\"disabled\"}, not queued. Runbook: kyc-service docs 05-operations, Re-screening backlog."
+        - alert: KycSanctionsListChangeDroppedWhileDisabled
+          # Issue #15961. With openbank.kyc.screening-triggers.enabled false the consumer acks a
+          # SANCTIONS_LIST_CHANGED record WITHOUT writing a trigger row, so the backlog gauges
+          # (and KycRescreenLoopDisabledWithPending) cannot see it: the change is simply lost for
+          # re-screening. The only trace is this counter's `disabled` outcome.
+          #
+          # Queueing the row while off instead was rejected: ScreeningTriggerRetryJob is gated
+          # only on retry-enabled and would claim the expired-lease PENDING row and call the
+          # case coordinator, i.e. it would switch the loop on behind the rollout gate.
+          #
+          # Same two branches as KycSanctionsListChangeUnrecognised: the counter is registered
+          # lazily on its first increment, so the series is born positive and increase() alone
+          # misses the first burst after every pod start. Cold pod: no series, no operand, no
+          # fire. Loop on: the `disabled` outcome is never counted, no fire.
+          expr: |
+            sum by (namespace) (
+              (increase(openbank_kyc_sanctions_list_change_events_total{outcome="disabled"}[1h]) > 0)
+              or
+              (openbank_kyc_sanctions_list_change_events_total{outcome="disabled"} > 0
+                unless openbank_kyc_sanctions_list_change_events_total{outcome="disabled"} offset 1h)
+            ) > 0
+          labels:
+            severity: warning
+          annotations:
+            subject_period: continuous
+            summary: "Sanctions list changes are being dropped unscreened while the KYC re-screening loop is off"
+            description: "openbank_kyc_sanctions_list_change_events_total{outcome=\"disabled\"} moved within the last hour: kyc-service received SANCTIONS_LIST_CHANGED with KYC_SCREENING_TRIGGERS_ENABLED=false and acked it without queueing a re-screening trigger. Customers that change could match will not be re-screened, and enabling the loop later does not recover it. Either enable the loop or record the affected publications (logged under `[sanctions-list-changes-in]` at debug) for replay once it is on. Runbook: kyc-service docs 05-operations, Re-screening backlog."
         - alert: OnboardingProjectionWireFormatMismatch
           # #4353/#4692/#6248. sca-service published DEVICE_ENROLLED without the discriminator in
           # the payload body; onboarding's parser fell through to `?: return`, and 15 enrolments
@@ -211,3 +275,174 @@ spec:
           annotations:
             summary: "Kafka consumer group {{ $labels.consumergroup }} is falling behind"
             description: "Consumer group {{ $labels.consumergroup }} has lag >500 on topic {{ $labels.topic }} sustained for 15m — it is not keeping up. A wedged handler, a down dependency, or a missing topic ACL (the class that took party-service offline) all look like this. Check the consuming service's logs and its KafkaUser ACLs."
+    # Ongoing sanctions / PEP monitoring of approved business cases (ADR-0376, kyb side).
+    # kyb-service owes the monitored-subject registry of sanctions-service one registration per
+    # screened party of every approved case, and owes an operator a decision on every finding the
+    # registry sends back. Both debts are STOCKS read from stored timestamps, so both survive a
+    # restart, and both are silent when unpaid: the pod is healthy, no request fails, no record is
+    # dead-lettered. Held by tests/promtool/kyb_monitoring_alerts_test.yaml.
+    - name: openbank.kyb.ongoing-monitoring
+      rules:
+        - alert: KybMonitoringRegistrationStuck
+          # A registration or withdrawal has been owed to the registry for over half an hour. The
+          # relay retries with backoff and never gives up, so this is not "one call failed" — it is
+          # the registry refusing (503 while its own switch is off, 403 for a wrong client) or
+          # unreachable, and for as long as it lasts an approved customer is not monitored.
+          #
+          # Only while the switch is on: with it off the rows are owed by design and are sent when
+          # it is turned on, so the age grows without anything being wrong.
+          #
+          # Cold-pod reading: both gauges are NaN until the first scheduled run has looked at the
+          # store, and a comparison with NaN is false, so a fresh pod cannot fire this. After that
+          # the age comes from `pending_since` in the database, not from the process start, so a
+          # restart neither resets a real backlog nor invents one.
+          expr: |
+            max by (namespace) (
+              openbank_kyb_monitoring_registrations_oldest_pending_age_seconds
+              and on (namespace, pod) (openbank_kyb_monitoring_enabled == 1)
+            ) > 1800
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "kyb-service cannot register approved business customers for sanctions monitoring"
+            description: "The oldest registration kyb-service owes the monitored-subject registry has been pending for {{ $value | humanizeDuration }} in {{ $labels.namespace }}. Until it is delivered, the entity, representatives or beneficial owners of at least one APPROVED business case are not under ongoing monitoring: a new sanctions or PEP listing of them raises nothing. `openbank_kyb_monitoring_registrations_total{outcome=\"failed\"}` carries the reason: `http_503` means sanctions-service has `openbank.sanctions.monitoring.enabled` off, `http_403` means kyb-service is not calling as its own client, `unavailable` means the route or the mTLS path. Nothing is lost while this fires — the rows stay owed and are sent once the registry accepts them — but nothing is monitored either."
+        - alert: KybMonitoringReviewUnresolved
+          # A monitoring finding on an approved case has waited a day for an operator's decision.
+          # The case stays as it was for the customer on purpose, so nothing else in the system
+          # pushes anyone to look: no customer is blocked, no timer abandons it.
+          #
+          # Read whatever the registration switch says: a finding about a subject registered
+          # earlier is still a finding.
+          #
+          # Cold-pod reading: NaN until the first scheduled run, then the age of
+          # `monitoring_review_since` in the database — 0 when no such case exists.
+          expr: max by (namespace) (openbank_kyb_monitoring_reviews_oldest_open_age_seconds) > 86400
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "a sanctions-monitoring finding on an approved business customer has waited a day for review"
+            description: "The oldest undecided monitoring finding in {{ $labels.namespace }} has waited {{ $value | humanizeDuration }} (`openbank_kyb_monitoring_reviews_open` says how many cases have one). Ongoing monitoring matched the entity or a related party of an approved business case against a sanctions, terrorist or PEP list entry. The case keeps its status and appears in no status queue: list such cases with `GET /api/v1/kyb/cases?monitoring=open` and decide each finding with `POST /api/v1/kyb/cases/{id}/monitoring/findings/{findingId}/disposition`. The customer sees no change in the meantime, so nobody will chase it from that side."
+        - alert: KybMonitoringFindingNotRouted
+          # A record on the findings channel that this service could not turn into a review of one
+          # of its cases: an unknown or missing `ce-type` header (`unrecognised` — the wire-shape
+          # disagreement of #15900), a record typed as a finding whose body has no usable owner,
+          # finding id or subject reference (`malformed` — the same disagreement one level down; it
+          # is dead-lettered as well), a finding addressed to kyb-service about a reference it never
+          # registered (`unknown_subject`), or one whose case has ended (`not_monitored`), or one
+          # whose stored decision disagrees with the case being written (`decision_conflict`, nothing
+          # of that write commits). All but `malformed` and `decision_conflict` are acked, so there is no lag and no dead-letter; this counter is the only
+          # thing that moves.
+          #
+          # The counters are registered at ZERO when the service boots, so the first occurrence
+          # after a restart is an increase like any other and `increase()` sees it. `foreign_owner`
+          # and `ignored` are not here: other services' findings and the screening events that
+          # share the topic are expected traffic.
+          #
+          # Cold-pod reading: every series exists at 0 from boot, increase() is 0, and the rule
+          # cannot fire.
+          expr: |
+            sum by (namespace, outcome) (
+              increase(openbank_kyb_monitoring_findings_total{outcome=~"unrecognised|malformed|decision_conflict|unknown_subject|not_monitored"}[1h])
+            ) > 0
+          labels:
+            severity: warning
+          annotations:
+            # Driven by Kafka consumption, not by a scheduler: there is no period to size the
+            # window against.
+            subject_period: continuous
+            summary: "kyb-service acked a monitoring finding it could not route to a case ({{ $labels.outcome }})"
+            description: "`openbank_kyb_monitoring_findings_total{outcome=\"{{ $labels.outcome }}\"}` moved in {{ $labels.namespace }} within the last hour. `unrecognised`: a record on the sanctions screening topic carried a missing or unknown `ce-type` header — sanctions-service changed how it types its events, or a new type joined the topic; compare with the committed kyb-service/sanctions-service pact. `malformed`: a record typed as a finding had no usable `ownerService`, `findingId` or `subjectRef` — the producer changed the body; the record is in `openbank.dlq.kyb.sanctions-monitoring-in`. `decision_conflict`: a finding's stored decision disagrees with the case being written, so nothing of that write committed and the record is dead-lettered in `openbank.dlq.kyb.sanctions-monitoring-in`; compare `kyb_monitoring_findings` for the case with the decision log before replaying. `unknown_subject`: the registry holds a subject under kyb-service's client that kyb-service has no record of, so its finding reaches no case — look for a registration made outside the relay, or a store that was restored from an older backup. `not_monitored`: the finding's case has ended or no longer carries the subject, and its withdrawal had not reached the registry yet. In every one of them the match itself was NOT reviewed by anyone."
+        - alert: KybMonitoringRegistryUnauthorised
+          # The registry answered 401 or 403: it does not accept kyb-service as a caller. Not one
+          # subject can be registered until that is fixed, whatever the backlog age says so far.
+          # The two series exist at zero from boot, so the first refusal is an increase.
+          expr: |
+            sum by (namespace) (
+              increase(openbank_kyb_monitoring_registrations_total{outcome="unauthorised"}[30m])
+            ) > 0
+          labels:
+            severity: critical
+          annotations:
+            subject_period: continuous
+            summary: "the monitored-subject registry does not accept kyb-service as a caller"
+            description: "`openbank_kyb_monitoring_registrations_total{outcome=\"unauthorised\"}` moved in {{ $labels.namespace }}: sanctions-service answered 401 or 403 to a registration or withdrawal. `http_403` is the registry refusing the client (kyb-service must call as its OWN client, not the fleet's shared one); `http_401` is no valid token at all. No approved business customer is being registered for monitoring while this lasts. The rows stay owed and are sent once the caller is accepted."
+        - alert: KybMonitoringSubjectRefused
+          # The registry's validation rejects a subject as it is (400 or 422 — nothing else is
+          # read as a refusal), so retrying cannot help and the row left the retry loop. Each one is an approved party
+          # that is NOT monitored. Kept out of the backlog age on purpose: a permanent refusal
+          # there would hold the critical alert lit and hide the next real outage behind it.
+          #
+          # Cold-pod reading: NaN until the first scheduled run, then a count from the database.
+          expr: max by (namespace) (openbank_kyb_monitoring_registrations_refused) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "sanctions-service refuses to monitor {{ $value }} approved business subject(s)"
+            description: "{{ $value }} subject(s) of approved business cases in {{ $labels.namespace }} were rejected by the monitored-subject registry's validation with 400 or 422 (`openbank_kyb_monitoring_registrations_total{outcome=\"refused\"}` carries the status). They are approved and NOT monitored. The operator view of a case (`GET /api/v1/kyb/cases/{id}`) shows `monitoringState: REFUSED` on the subject. The registry rejects a name with no searchable character or over its length limit: the name comes from the register extract, so the fix is in the registry's validation or in the extract. A refused row is sent again at every write of its case and at the next re-assertion."
+        - alert: KybMonitoringApprovedCaseUnscreened
+          # An approved case that carries no screening at all has nobody to register: it was
+          # approved while related-party screening was switched off. Only while monitoring is on —
+          # before that, nothing is registered for anyone.
+          expr: |
+            max by (namespace) (
+              openbank_kyb_monitoring_cases_unscreened
+              and on (namespace, pod) (openbank_kyb_monitoring_enabled == 1)
+            ) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $value }} approved business case(s) were never screened and are not monitored"
+            description: "{{ $value }} business case(s) in {{ $labels.namespace }} are SIGNED or ACTIVE with no related-party screening, so ongoing monitoring has no subject to register for them. They were approved while `openbank.kyb.screening.enabled` was off. Nothing screens an approved case after the fact today; until something does, these customers are outside both the onboarding screen and ongoing monitoring."
+        - alert: KybMonitoringExitOwed
+          # An operator confirmed a sanctions match on an approved business customer, so the
+          # relationship has to end, and nobody has recorded that it did. kyb-service keeps the
+          # case monitored and publishes BUSINESS_RELATIONSHIP_EXIT_REQUIRED; nothing consumes that
+          # event yet, so this alert is what makes somebody carry the exit out. It clears when an
+          # operator records the exit (`monitoring/exit/complete`).
+          #
+          # Cold-pod reading: NaN until the first scheduled run, then a count from the database.
+          expr: max by (namespace) (openbank_kyb_monitoring_exits_owed) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "an approved business relationship must be exited and the exit is not recorded"
+            description: "{{ $value }} business case(s) in {{ $labels.namespace }} carry a CONFIRMED sanctions match found by ongoing monitoring and no record that the relationship was ended (`openbank_kyb_monitoring_exits_oldest_owed_age_seconds` says for how long). The customer is still active: the party, its mandates and its accounts are untouched, and the case stays monitored. No service acts on `BUSINESS_RELATIONSHIP_EXIT_REQUIRED` yet — restrict and exit the relationship by hand, then record it with `POST /api/v1/kyb/cases/{id}/monitoring/exit/complete`, which clears this alert. `GET /api/v1/kyb/cases?monitoring=open` lists the cases."
+        - alert: KybMonitoringCaseUnreconciled
+          # A case's registrations are written in the same transaction as the case — by this
+          # release. A pod of the previous release (a rolling deploy, a rollback) writes the case
+          # and not the registrations, and the relay brings such a case into step on its next run.
+          # This is that repair not happening: a rejected case whose subjects stay registered, or
+          # an approved one whose subjects are not owed.
+          #
+          # Only while the switch is on: the repair is part of the relay's run.
+          # Cold-pod reading: NaN until the first scheduled run, then a count from the database.
+          expr: |
+            max by (namespace) (
+              openbank_kyb_monitoring_cases_unreconciled
+              and on (namespace, pod) (openbank_kyb_monitoring_enabled == 1)
+            ) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $value }} business case(s) are out of step with their monitoring registrations"
+            description: "{{ $value }} approved or ended business case(s) in {{ $labels.namespace }} were last written without their monitoring registrations being brought into step, and the relay has not repaired them for half an hour. Until it does, a subject of such a case can be approved and not owed to the registry, or ended and still registered. Expected for a minute or two while pods of two releases run side by side; lasting, it means the relay's repair step fails — `openbank_kyb_monitoring_runs_total{outcome=\"failed\"}` and the log of `KybMonitoringScheduler` say why."
+        - alert: KybMonitoringFindingDeadLettered
+          # A finding that could not be applied after its retries, or that was malformed, is in the
+          # channel's dead-letter topic: a sanctions or PEP match nobody has reviewed.
+          expr: |
+            increase(kafka_topic_partition_current_offset{topic="openbank.dlq.kyb.sanctions-monitoring-in"}[1h]) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            # Driven by Kafka consumption, not by a scheduler: there is no period to size the
+            # window against.
+            subject_period: continuous
+            summary: "monitoring findings for kyb-service are being dead-lettered"
+            description: "Records are landing in `openbank.dlq.kyb.sanctions-monitoring-in`: kyb-service nacked a MONITORED_SUBJECT_MATCHED record, either because its body could not be read as a finding or because applying it kept failing. Each is a match on an approved business customer that reached no review. Read the topic, fix the cause (kyb-service logs it under `[sanctions-monitoring-in]`), and replay the records onto `openbank.sanctions.screening.event`."

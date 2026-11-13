@@ -740,6 +740,7 @@ public final class com/openbank/libs/fincrime/pack/PackRef {
 
 public final class com/openbank/libs/fincrime/pack/PinnedCountShadowEpoch {
 	public static final field Companion Lcom/openbank/libs/fincrime/pack/PinnedCountShadowEpoch$Companion;
+	public final fun decisionRecord (Ljava/util/UUID;Ljava/lang/String;Ljava/time/Instant;Ljava/util/List;Z)Ljava/util/Map;
 	public final fun evaluate (Ljava/time/Instant;Ljava/util/List;)Lcom/openbank/libs/fincrime/pack/CountShadowEvaluation;
 }
 
