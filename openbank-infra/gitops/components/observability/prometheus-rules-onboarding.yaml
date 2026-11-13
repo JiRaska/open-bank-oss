@@ -241,7 +241,6 @@ spec:
           labels:
             severity: critical
           annotations:
-            subject_period: continuous
             summary: "kyb-service cannot register approved business customers for sanctions monitoring"
             description: "The oldest registration kyb-service owes the monitored-subject registry has been pending for {{ $value | humanizeDuration }} in {{ $labels.namespace }}. Until it is delivered, the entity, representatives or beneficial owners of at least one APPROVED business case are not under ongoing monitoring: a new sanctions or PEP listing of them raises nothing. `openbank_kyb_monitoring_registrations_total{outcome=\"failed\"}` carries the reason: `http_503` means sanctions-service has `openbank.sanctions.monitoring.enabled` off, `http_403` means kyb-service is not calling as its own client, `unavailable` means the route or the mTLS path. Nothing is lost while this fires — the rows stay owed and are sent once the registry accepts them — but nothing is monitored either."
         - alert: KybMonitoringReviewUnresolved
@@ -259,7 +258,6 @@ spec:
           labels:
             severity: warning
           annotations:
-            subject_period: continuous
             summary: "a sanctions-monitoring finding on an approved business customer has waited a day for review"
             description: "The oldest monitoring review in {{ $labels.namespace }} has been open for {{ $value | humanizeDuration }} (`openbank_kyb_monitoring_reviews_open` says how many there are). Ongoing monitoring matched the entity or a related party of an APPROVED business case against a sanctions, terrorist or PEP list entry, and the case is in MANUAL_REVIEW waiting for an operator: decide the finding on the case's screening view, then resolve the review or reject the case. The customer sees no change in the meantime, so nobody will chase it from that side."
         - alert: KybMonitoringFindingNotRouted
