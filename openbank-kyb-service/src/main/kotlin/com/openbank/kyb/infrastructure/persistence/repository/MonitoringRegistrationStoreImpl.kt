@@ -4,6 +4,7 @@
 
 package com.openbank.kyb.infrastructure.persistence.repository
 
+import com.openbank.kyb.application.port.out.ConcurrentCaseUpdateException
 import com.openbank.kyb.application.port.out.MonitoringDesired
 import com.openbank.kyb.application.port.out.MonitoringRegistration
 import com.openbank.kyb.application.port.out.MonitoringRegistrationStore
@@ -55,7 +56,17 @@ class MonitoringRegistrationStoreImpl(private val pool: Pool) : MonitoringRegist
                 .setParameter(1, caseId)
                 .setParameter(2, KybJson.mapper.writeValueAsString(findings.map(::findingDocument)))
                 .executeUpdate()
-        }.replaceWithVoid()
+        }.map { written -> allWritten(caseId, expected = findings.size, written = written) }.replaceWithVoid()
+
+    /**
+     * Every finding the case holds must be a row that says the same. The statement writes each
+     * one or leaves it out, so a count short of [expected] means a stored row disagrees with the
+     * case being written — and then nothing of this case write may commit: the case's own
+     * monitoring columns would describe findings that are not there.
+     */
+    private fun allWritten(caseId: UUID, expected: Int, written: Int) {
+        if (written != expected) throw ConcurrentCaseUpdateException(caseId)
+    }
 
     /** Text only, so the statement casts each value itself and no mapper setting can change the wire form. */
     private fun findingDocument(f: MonitoringFinding): Map<String, String?> = mapOf(
@@ -269,13 +280,15 @@ class MonitoringRegistrationStoreImpl(private val pool: Pool) : MonitoringRegist
                 "OR (m.sync_state = 'REFUSED' AND m.subject_key IN (SELECT key FROM wanted)))"
 
         /**
-         * ?1 case id, ?2 the findings as a JSON array of text fields. A new finding is inserted; a
-         * stored one takes its decision once, while it is still OPEN, and is never written again.
-         * ?2 is cast to text before jsonb: bound as jsonb, the string would arrive as one JSON
-         * string and not as the array it spells.
+         * ?1 case id, ?2 the findings as a JSON array of text fields. A finding is a row per
+         * (case, finding). Each element either inserts its row, or rewrites a stored row that is
+         * still OPEN, or rewrites a stored row that already says exactly the same decision. A
+         * stored decision that differs is NOT written and so is missing from the row count,
+         * which the caller checks. ?2 is cast to text before jsonb: bound as jsonb, the string
+         * would arrive as one JSON string and not as the array it spells.
          */
         const val FINDINGS_SQL =
-            "INSERT INTO kyb_monitoring_findings (finding_id, case_id, subject_key, match_kind, list_type, " +
+            "INSERT INTO kyb_monitoring_findings AS s (finding_id, case_id, subject_key, match_kind, list_type, " +
                 "list_entry_ref, list_entry_version, match_score, match_status, detection, received_at, " +
                 "disposition, decided_by, decision_reason, decided_at) " +
                 "SELECT cast(f->>'findingId' as uuid), ?1, f->>'subjectKey', f->>'matchKind', f->>'listType', " +
@@ -283,11 +296,12 @@ class MonitoringRegistrationStoreImpl(private val pool: Pool) : MonitoringRegist
                 "f->>'matchStatus', f->>'detection', cast(f->>'receivedAt' as timestamptz), f->>'disposition', " +
                 "f->>'decidedBy', f->>'decisionReason', cast(f->>'decidedAt' as timestamptz) " +
                 "FROM jsonb_array_elements(cast(cast(?2 as text) as jsonb)) AS f " +
-                "ON CONFLICT (finding_id) DO UPDATE SET disposition = excluded.disposition, " +
+                "ON CONFLICT (case_id, finding_id) DO UPDATE SET disposition = excluded.disposition, " +
                 "decided_by = excluded.decided_by, decision_reason = excluded.decision_reason, " +
                 "decided_at = excluded.decided_at " +
-                "WHERE kyb_monitoring_findings.case_id = excluded.case_id " +
-                "AND kyb_monitoring_findings.disposition = 'OPEN'"
+                "WHERE s.disposition = 'OPEN' OR (s.disposition = excluded.disposition " +
+                "AND s.decided_by IS NOT DISTINCT FROM excluded.decided_by " +
+                "AND s.decided_at IS NOT DISTINCT FROM excluded.decided_at)"
 
         const val STATS_SQL =
             "SELECT " +

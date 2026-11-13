@@ -19,8 +19,9 @@
 --      claimed_until the lease of the relay delivering the row; a second relay leaves it alone.
 --      last_error   a short machine reason, never a response body.
 --
--- 2. kyb_monitoring_findings: one row per finding the registry reported, with the operator's
---    decision about THAT finding. No name: the list entry it matched and the subject key.
+-- 2. kyb_monitoring_findings: one row per (case, finding) the registry reported, with the
+--    operator's decision about THAT finding. It is the only place a finding lives: the case is
+--    loaded from it, and kyb_cases.screening_json holds none. No name: the list entry it matched and the subject key.
 --
 -- 3. kyb_cases gains what queries and alerts read without opening the findings:
 --      monitoring_finding_count      how many findings the case has (0 = nothing to load)
@@ -80,7 +81,7 @@ CREATE INDEX kyb_monitored_subjects_reassert_idx
 CREATE SEQUENCE IF NOT EXISTS kyb_monitored_subjects_seq;
 
 CREATE TABLE kyb_monitoring_findings (
-    finding_id         UUID         PRIMARY KEY,
+    finding_id         UUID         NOT NULL,
     case_id            UUID         NOT NULL,
     subject_key        VARCHAR(64)  NOT NULL,
     match_kind         VARCHAR(64)  NOT NULL,
@@ -95,10 +96,12 @@ CREATE TABLE kyb_monitoring_findings (
     decided_by         TEXT,
     decision_reason    TEXT,
     decided_at         TIMESTAMPTZ,
+    -- A finding is a row per (case, finding): the same finding id reported for two cases is two
+    -- rows, never a conflict. The key also serves the read of one case's findings.
+    CONSTRAINT kyb_monitoring_findings_pk PRIMARY KEY (case_id, finding_id),
     CONSTRAINT kyb_monitoring_findings_disposition_ck
         CHECK (disposition IN ('OPEN', 'CLEARED_FALSE_POSITIVE', 'CONFIRMED'))
 );
-CREATE INDEX kyb_monitoring_findings_case_idx ON kyb_monitoring_findings (case_id);
 
 ALTER TABLE kyb_cases ADD COLUMN monitoring_finding_count INT NOT NULL DEFAULT 0;
 ALTER TABLE kyb_cases ADD COLUMN monitoring_review_since TIMESTAMPTZ;

@@ -779,6 +779,60 @@ class KybOngoingMonitoringIT {
     }
 
     @Test
+    fun `one finding id reported for two cases is a finding on each of them`() {
+        val first = journey.approved("71000275")
+        val second = journey.approved("71000283")
+        run()
+        val findingId = UUID.randomUUID()
+
+        finding(personRef(first), findingId)
+        finding(personRef(second), findingId)
+
+        assertThat(journey.findings(first)).containsOnlyKeys(findingId.toString())
+        assertThat(journey.findings(second)).containsOnlyKeys(findingId.toString())
+        assertThat(journey.stored(first).reviewOpen).isTrue()
+        assertThat(journey.stored(second).reviewOpen).isTrue()
+        // Each is decided by itself.
+        decide(first, findingId, "CLEARED_FALSE_POSITIVE").then().statusCode(200)
+        assertThat(journey.findings(first)).containsEntry(findingId.toString(), "CLEARED_FALSE_POSITIVE")
+        assertThat(journey.findings(second)).containsEntry(findingId.toString(), "OPEN")
+        assertThat(journey.stored(second).reviewOpen).isTrue()
+    }
+
+    @Test
+    fun `a case write whose findings cannot all be stored as given commits nothing`() {
+        val caseId = journey.approved("71000291")
+        run()
+        val before = journey.stored(caseId)
+        val findingId = UUID.randomUUID()
+        // A stored decision the case being written does not know about.
+        journey.execute(
+            "insert into kyb_monitoring_findings (finding_id, case_id, subject_key, match_kind, list_type, " +
+                "list_entry_ref, list_entry_version, match_score, match_status, detection, received_at, disposition, " +
+                "decided_by, decision_reason, decided_at) values (?, ?, ?, 'SANCTIONS', 'EU', 'id:planted', '1', 1.0, " +
+                "'HIT', 'LIST_DELTA', now(), 'CONFIRMED', 'somebody', 'planted by the test', now())",
+            findingId,
+            UUID.fromString(caseId),
+            representativeKey(caseId),
+        )
+
+        val failure = runCatching { finding(personRef(caseId), findingId) }.exceptionOrNull()
+
+        // Nacked, so the record is retried and dead-lettered; nothing of the write is there.
+        assertThat(failure).isNotNull()
+        val after = journey.stored(caseId)
+        assertThat(after.xmin).describedAs("the case row was not written").isEqualTo(before.xmin)
+        assertThat(after.findingCount).isZero()
+        assertThat(after.reviewOpen).isFalse()
+        assertThat(journey.findings(caseId)).containsEntry(findingId.toString(), "CONFIRMED").hasSize(1)
+
+        // Control: without the planted row the same delivery is recorded.
+        journey.execute("delete from kyb_monitoring_findings where case_id = ?", UUID.fromString(caseId))
+        finding(personRef(caseId), findingId)
+        assertThat(journey.stored(caseId).reviewOpen).isTrue()
+    }
+
+    @Test
     fun `a finding owned by another service, or about nobody this service registered, changes nothing`() {
         val caseId = journey.approved("71000119")
         run()

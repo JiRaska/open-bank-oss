@@ -77,7 +77,11 @@ interface MonitoringRegistrationStore {
      */
     fun syncInTransaction(caseId: UUID, desiredKeys: Set<String>, now: Instant): Uni<Void>
 
-    /** Stores [findings] with their decisions, in ONE statement. */
+    /**
+     * Stores [findings] with their decisions, in ONE statement, keyed by (case, finding). Fails
+     * with [ConcurrentCaseUpdateException] — and so fails the whole case write — unless every one
+     * of them ends up stored as given: a stored decision is never replaced by a different one.
+     */
     fun saveFindingsInTransaction(caseId: UUID, findings: List<MonitoringFinding>): Uni<Void>
 
     suspend fun findingsOf(caseId: UUID): List<MonitoringFinding>
