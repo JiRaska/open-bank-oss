@@ -15,15 +15,12 @@ import { parsePaymentDetailEvidence, type PaymentDetailEvidence, type PaymentRai
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge, statusTone, type Tone } from '@/components/ui'
 
-// These statuses are specific to payment processing. Keep their explicit
+// These two statuses are specific to payment processing. Keep their explicit
 // meaning here rather than broadening the cross-domain status vocabulary:
-// RECEIVED means accepted by the payment service, not settled; HELD means a
-// domestic payment is parked before execution and waits for a control or a case
-// decision; SENT_TO_CLEARING remains an in-flight operator state that needs
-// attention.
+// RECEIVED means accepted by the payment service, not settled; SENT_TO_CLEARING
+// remains an in-flight operator state that needs attention.
 function paymentStatusTone(status: string | undefined): Tone {
   if (status === 'RECEIVED') return 'info'
-  if (status === 'HELD') return 'warning'
   if (status === 'SENT_TO_CLEARING') return 'warning'
   return statusTone(status)
 }
@@ -182,8 +179,6 @@ function PaymentDetailContent() {
               { label: t('Částka', 'Amount'), value: payment.amount != null ? `${Number(payment.amount).toLocaleString(numberLocale, { minimumFractionDigits: 2 })} ${payment.currency ?? ''}` : '—' },
               { label: 'End-to-End ID', value: payment.endToEndId ?? '—', mono: true },
               { label: t('Vytvořeno', 'Created'), value: payment.createdAt ? new Date(payment.createdAt).toLocaleString(numberLocale) : '—' },
-              ...(payment.rejectReason ? [{ label: t('Důvod zamítnutí', 'Reject reason'), value: payment.rejectReason, mono: true }] : []),
-              ...(payment.rejectDetail ? [{ label: t('Podrobnosti zamítnutí', 'Reject detail'), value: payment.rejectDetail }] : []),
             ]} />
           </div>
           <div className="card">
