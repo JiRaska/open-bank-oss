@@ -305,10 +305,12 @@ class AuthorizeDelegatedPaymentTest {
 
         val facts = service.delegationFacts(accountId, delegate)
 
-        assertThat(facts).hasSize(1)
-        assertThat(facts[0].grantId).isEqualTo(g.id)
-        assertThat(facts[0].grantorPartyId).isEqualTo(owner)
-        assertThat(facts[0].capabilities).containsExactly(DelegatedAccessGrant.CAP_INITIATE_PAYMENT)
+        assertThat(facts.grants).hasSize(1)
+        assertThat(facts.grants[0].grantId).isEqualTo(g.id)
+        assertThat(facts.grants[0].grantorPartyId).isEqualTo(owner)
+        assertThat(facts.grants[0].capabilities).containsExactly(DelegatedAccessGrant.CAP_INITIATE_PAYMENT)
+        // The owner comes from the same read as the grants — that is the whole point of the shape.
+        assertThat(facts.ownerPartyId).isEqualTo(owner)
     }
 
     @Test
@@ -324,7 +326,7 @@ class AuthorizeDelegatedPaymentTest {
             )
         } returns listOf(grant(grantorPartyId = stranger))
 
-        assertThat(service.delegationFacts(accountId, delegate)).isEmpty()
+        assertThat(service.delegationFacts(accountId, delegate).grants).isEmpty()
     }
 
     @Test
@@ -337,7 +339,7 @@ class AuthorizeDelegatedPaymentTest {
             )
         } returns listOf(grant(validFrom = now.plusDays(1), validTo = now.plusDays(2)))
 
-        assertThat(service.delegationFacts(accountId, delegate)).isEmpty()
+        assertThat(service.delegationFacts(accountId, delegate).grants).isEmpty()
     }
 
     @Test
@@ -347,6 +349,10 @@ class AuthorizeDelegatedPaymentTest {
 
         // Not an exception and not a distinguishable not-found: the endpoint above must not become
         // an existence oracle, and it can only be one if this layer hands it something to leak.
-        assertThat(service.delegationFacts(unknown, delegate)).isEmpty()
+        val facts = service.delegationFacts(unknown, delegate)
+        assertThat(facts.grants).isEmpty()
+        // Null owner AND empty grants: the pair must stay indistinguishable from an existing
+        // account with no grant, or the endpoint becomes an existence oracle.
+        assertThat(facts.ownerPartyId).isNull()
     }
 }

@@ -596,6 +596,15 @@ paths:
                   partyId:
                     type: string
                     format: uuid
+                  ownerPartyId:
+                    type: string
+                    format: uuid
+                    nullable: true
+                    description: >-
+                      The account's owner, read in the SAME snapshot as the grants, so a caller
+                      decides the owner case and the delegated case from one answer. Null exactly
+                      when the account is unknown — where `grants` is empty too, so the pair stays
+                      indistinguishable from an existing account with no grant.
                   grants:
                     type: array
                     items:

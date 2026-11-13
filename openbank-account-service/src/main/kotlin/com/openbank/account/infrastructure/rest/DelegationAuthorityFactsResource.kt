@@ -28,6 +28,13 @@ import java.util.UUID
  * neighbour because a nearby capability was close enough. A rail that receives a
  * verdict cannot ask about the capability its own action names; a rail that receives the facts can.
  *
+ * **The owner travels with the grants.** The authority decision compares the actor with the
+ * account owner before it consults any grant, so both must come from one snapshot. A rail that
+ * resolved the owner through a separate lookup could decide the OWNER short-circuit against a
+ * different owner than the one its own write-time proof compares later — two reads, two answers,
+ * and nothing observes the window between them. It also removes a round trip from the money path,
+ * which already calls this service more than once per delegated payment.
+ *
  * **Why the facts come from here at all.** ADR-0232 D3 refuses a call to delegation-service on the
  * money path. It does not refuse a call to the account's own service: a rail already calls
  * account-service there (`AccountServiceClient` in domestic-payment), and this service is the only
@@ -75,7 +82,10 @@ class DelegationAuthorityFactsResource(private val authorizationUseCase: Authori
         return DelegationAuthorityFactsResponse(
             accountId = accountId,
             partyId = partyId,
-            grants = facts.map {
+            // Travels with the grants so the caller decides the OWNER case and the delegated case
+            // from one snapshot. Null for an unknown account, where `grants` is empty too.
+            ownerPartyId = facts.ownerPartyId,
+            grants = facts.grants.map {
                 DelegationAuthorityGrant(
                     grantId = it.grantId,
                     grantorPartyId = it.grantorPartyId,
@@ -91,6 +101,7 @@ class DelegationAuthorityFactsResource(private val authorizationUseCase: Authori
 data class DelegationAuthorityFactsResponse(
     val accountId: UUID,
     val partyId: UUID,
+    val ownerPartyId: UUID?,
     val grants: List<DelegationAuthorityGrant>,
 )
 
