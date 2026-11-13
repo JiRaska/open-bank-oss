@@ -2881,7 +2881,10 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
     if expedite is not None:
         # Marked BEFORE the carrier exists: settle identifies an expedite carrier by this status alone.
         gh.post_status(v.tip, "success", f"expedite lane: #{expedite} alone over {base[:12]}", context=EXPEDITE_CONTEXT)
-    gh.create_carrier(branch, expedite=expedite is not None)
+    if expedite is not None:
+        gh.create_carrier(branch, expedite=True)
+    else:
+        gh.create_carrier(branch)
     record_deferral(gh, git, repo, base, branch)
     log(f"published {branch} over {base[:12]}: members {v.applied}, dropped {v.dropped}")
     return "published"
