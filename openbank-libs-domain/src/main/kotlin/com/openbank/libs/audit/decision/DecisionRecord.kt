@@ -13,7 +13,7 @@ import java.util.UUID
 
 /**
  * ADR-0322 phase 1 — **types only**. This package defines the shared envelope every automated
- * decision (authorization, fraud, credit, AI-agent) emits as the `payload` of an
+ * decision (authorization, fraud, credit, AI-agent or shadow evaluation) emits as the `payload` of an
  * [com.openbank.libs.audit.AuditEvent]. It deliberately carries no wiring: no interceptor
  * reference, no outbox/transport dependency (the hash-linked publisher proposed in #10926, still open), no service-level
  * producer. `libs-core-purity` requires this — ADR-0317 forbids a core module (this one) from
@@ -84,7 +84,7 @@ private fun parseInstant(value: String, field: String): Instant = try {
 }
 
 /** Closed set of automated-decision classes (ADR-0322 D1). */
-enum class DecisionClass { AUTHZ, FRAUD, CREDIT, AGENT }
+enum class DecisionClass { AUTHZ, FRAUD, CREDIT, AGENT, SHADOW }
 
 /** What produced the decision — an OPA bundle, a decision table, a scoring model or an LLM. */
 enum class DecisionEngineKind { OPA, DECISION_TABLE, MODEL, LLM }
@@ -290,7 +290,7 @@ sealed interface HumanReview {
  * Closed retention classes mapped onto the ADR-0118 GDPR data-lifecycle periods.
  *
  *  - [AUDIT_LOG_5Y] — the ADR-0118 default for audit-log records (AML Act §16 + GDPR Art. 5(2)):
- *    `AUTHZ`, `FRAUD` and `AGENT` decisions.
+ *    `AUTHZ`, `FRAUD`, `AGENT` and `SHADOW` decisions.
  *  - [CREDIT_EVIDENCE] — `CREDIT` decisions follow ADR-0214 D4 instead: the *stricter* of the
  *    ADR-0118 default and the pinned lending pack's requirement (ADR-0212), which is not a single
  *    fixed duration and is resolved by the credit producer, never by this enum.
@@ -348,9 +348,36 @@ sealed interface DecisionOutcome {
         override val kind: String = "AGENT"
     }
 
+    /** Evidence for a shadow evaluation that cannot authorize an operational action. */
+    data class Shadow(
+        val result: Result,
+        val epoch: Long,
+        val artifactHash: InputDigest,
+        val approvedEvidenceHash: InputDigest,
+        val outputHash: InputDigest,
+    ) : DecisionOutcome {
+        init {
+            require(epoch > 0) { "DecisionOutcome.epoch must be positive" }
+        }
+
+        enum class Result { EVALUATED, INCOMPLETE }
+
+        override val kind: String = "SHADOW_V1"
+    }
+
     companion object {
-        /** Pure-Kotlin, framework-free encoding: `kind` (subtype) + `name` (enum constant). */
-        fun DecisionOutcome.toMap(): Map<String, Any?> = mapOf("kind" to kind, "name" to (this as Enum<*>).name)
+        /** Framework-free encoding with a versioned discriminator for shadow evidence. */
+        fun DecisionOutcome.toMap(): Map<String, Any?> = when (this) {
+            is Shadow -> mapOf(
+                "kind" to kind,
+                "name" to result.name,
+                "epoch" to epoch.toString(),
+                "artifactHash" to artifactHash.hex,
+                "approvedEvidenceHash" to approvedEvidenceHash.hex,
+                "outputHash" to outputHash.hex,
+            )
+            else -> mapOf("kind" to kind, "name" to (this as Enum<*>).name)
+        }
 
         /**
          * Inverse of [toMap]. Throws [IllegalArgumentException] naming the offending field on a
@@ -365,8 +392,24 @@ sealed interface DecisionOutcome {
                 "FRAUD" -> parseEnum<Fraud>(name, "DecisionOutcome.name")
                 "CREDIT" -> parseEnum<Credit>(name, "DecisionOutcome.name")
                 "AGENT" -> parseEnum<Agent>(name, "DecisionOutcome.name")
+                "SHADOW_V1" -> decodeShadow(name, map)
                 else -> throw IllegalArgumentException("Unknown DecisionOutcome kind discriminator: '$kind'")
             }
+        }
+
+        private fun decodeShadow(name: String, map: Map<String, Any?>): Shadow {
+            val wireEpoch = req<String>(map, "epoch", field = "DecisionOutcome.epoch")
+            val epoch = wireEpoch.toLongOrNull()
+            require(epoch != null && epoch.toString() == wireEpoch) { "DecisionOutcome.epoch must be a decimal Long" }
+            return Shadow(
+                result = parseEnum(name, "DecisionOutcome.name"),
+                epoch = epoch,
+                artifactHash = InputDigest(req(map, "artifactHash", field = "DecisionOutcome.artifactHash")),
+                approvedEvidenceHash = InputDigest(
+                    req(map, "approvedEvidenceHash", field = "DecisionOutcome.approvedEvidenceHash"),
+                ),
+                outputHash = InputDigest(req(map, "outputHash", field = "DecisionOutcome.outputHash")),
+            )
         }
     }
 }
@@ -382,7 +425,8 @@ sealed interface DecisionOutcome {
  *
  * [outcome] must be the [DecisionOutcome] subtype that matches [decisionClass]
  * (`AUTHZ` -> [DecisionOutcome.Authz], `FRAUD` -> [DecisionOutcome.Fraud],
- * `CREDIT` -> [DecisionOutcome.Credit], `AGENT` -> [DecisionOutcome.Agent]); a mismatched pairing
+ * `CREDIT` -> [DecisionOutcome.Credit], `AGENT` -> [DecisionOutcome.Agent], `SHADOW` -> [DecisionOutcome.Shadow]);
+ * a mismatched pairing
  * is rejected at construction rather than left to a reader to notice later.
  */
 data class DecisionRecord(
@@ -406,6 +450,7 @@ data class DecisionRecord(
             DecisionClass.FRAUD -> DecisionOutcome.Fraud::class
             DecisionClass.CREDIT -> DecisionOutcome.Credit::class
             DecisionClass.AGENT -> DecisionOutcome.Agent::class
+            DecisionClass.SHADOW -> DecisionOutcome.Shadow::class
         }
         require(expectedOutcomeType.isInstance(outcome)) {
             "DecisionRecord.outcome must be a ${expectedOutcomeType.simpleName} for decisionClass=$decisionClass, " +
@@ -420,7 +465,8 @@ data class DecisionRecord(
         // beyond the ADR-0118 default with no CREDIT_EVIDENCE basis for it.
         val expectedRetentionClass = when (decisionClass) {
             DecisionClass.CREDIT -> DecisionRetentionClass.CREDIT_EVIDENCE
-            DecisionClass.AUTHZ, DecisionClass.FRAUD, DecisionClass.AGENT -> DecisionRetentionClass.AUDIT_LOG_5Y
+            DecisionClass.AUTHZ, DecisionClass.FRAUD, DecisionClass.AGENT, DecisionClass.SHADOW ->
+                DecisionRetentionClass.AUDIT_LOG_5Y
         }
         require(retentionClass == expectedRetentionClass) {
             "DecisionRecord.retentionClass must be $expectedRetentionClass for decisionClass=$decisionClass, " +

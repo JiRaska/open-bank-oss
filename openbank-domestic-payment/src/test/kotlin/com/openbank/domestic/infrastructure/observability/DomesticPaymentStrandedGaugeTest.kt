@@ -49,8 +49,12 @@ class DomesticPaymentStrandedGaugeTest {
         override suspend fun findById(paymentId: UUID) = error("unused")
         override suspend fun findByIdempotencyKey(idempotencyKey: String) = error("unused")
 
-        override suspend fun findCustomerSubmission(idempotencyKey: String, debtorAccountId: UUID, scope: String) =
-            error("unused")
+        override suspend fun findCustomerSubmission(
+            idempotencyKey: String,
+            debtorAccountId: UUID,
+            scope: String,
+            originalSubmissionKeyDigest: String?,
+        ) = error("unused")
         override suspend fun list(status: DomesticPaymentStatus?, debtorAccountId: UUID?, limit: Int, offset: Int) =
             error("unused")
         override suspend fun update(payment: DomesticPayment, outboxMessage: OutboxMessage) = error("unused")

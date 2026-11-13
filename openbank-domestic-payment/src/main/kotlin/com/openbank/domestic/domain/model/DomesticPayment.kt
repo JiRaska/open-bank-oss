@@ -238,6 +238,8 @@ data class DomesticPayment(
      * for the same payment would add to what it holds against the account.
      */
     val admissionFraudScore: RecordedFraudScore? = null,
+    /** Original business submission digest supplied only when the Edge releases a mode-bound approval. */
+    val originalSubmissionKeyDigest: String? = null,
 ) {
     /** ISO 4217 code of [amount], the spelling every outbound contract and the column carry. */
     val currency: String get() = amount.currency.code

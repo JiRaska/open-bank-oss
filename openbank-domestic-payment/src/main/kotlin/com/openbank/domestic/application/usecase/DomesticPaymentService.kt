@@ -180,6 +180,9 @@ class DomesticPaymentService(
         reservationId: UUID,
         command: CreateDomesticPaymentCommand,
     ): DelegatedDomesticPaymentResult {
+        require(command.originalSubmissionKeyDigest == null) {
+            "Original submission digest is supported only for customer-edge approval releases"
+        }
         DomesticSchemeRules.requireSchemeCurrency(command.amount)
         val binding = delegatedSpendBindingRepository.findByReservationId(reservationId)
             ?: return DelegatedDomesticPaymentResult.ReservationProjectionPending
@@ -240,7 +243,7 @@ class DomesticPaymentService(
         val requestFingerprint = DomesticPaymentRequestFingerprint.sha256(normalized)
 
         paymentRepository.findByIdempotencyKey(normalized.idempotencyKey)?.let { existing ->
-            verifyReplay(existing, requestFingerprint, normalized.customerSubmissionScope)
+            verifyReplay(existing, requestFingerprint, normalized)
             return DelegatedDomesticPaymentResult.Accepted(CreateDomesticPaymentResult(existing, replayed = true))
         }
 
@@ -287,7 +290,7 @@ class DomesticPaymentService(
         // no duplicate outbox entry exists. It is still a replay only when the durable fingerprints
         // match; a different or legacy-null binding fails closed.
         if (received.id != payment.id) {
-            verifyReplay(received, requestFingerprint, normalized.customerSubmissionScope)
+            verifyReplay(received, requestFingerprint, normalized)
             return DelegatedDomesticPaymentResult.Accepted(CreateDomesticPaymentResult(received, replayed = true))
         }
 
@@ -315,8 +318,15 @@ class DomesticPaymentService(
     private fun DelegatedDomesticPaymentResult.acceptedOrNull(): CreateDomesticPaymentResult? =
         (this as? DelegatedDomesticPaymentResult.Accepted)?.result
 
-    private fun verifyReplay(existing: DomesticPayment, requestFingerprint: String, scope: String?) {
-        if (existing.requestFingerprint != requestFingerprint || existing.customerSubmissionScope != scope) {
+    private fun verifyReplay(
+        existing: DomesticPayment,
+        requestFingerprint: String,
+        command: CreateDomesticPaymentCommand,
+    ) {
+        if (existing.requestFingerprint != requestFingerprint ||
+            existing.customerSubmissionScope != command.customerSubmissionScope ||
+            existing.originalSubmissionKeyDigest != command.originalSubmissionKeyDigest
+        ) {
             throw DomesticPaymentIdempotencyConflictException()
         }
     }
@@ -353,6 +363,7 @@ class DomesticPaymentService(
             initiatedByPartyId = command.actorId,
             requestFingerprint = requestFingerprint,
             customerSubmissionScope = command.customerSubmissionScope,
+            originalSubmissionKeyDigest = command.originalSubmissionKeyDigest,
             delegationId = command.delegationId,
             reservationId = command.reservationId,
             rejectReason = null,
@@ -371,7 +382,13 @@ class DomesticPaymentService(
         idempotencyKey: String,
         debtorAccountId: UUID,
         scope: String,
-    ): DomesticPayment? = paymentRepository.findCustomerSubmission(idempotencyKey, debtorAccountId, scope)
+        originalSubmissionKeyDigest: String?,
+    ): DomesticPayment? = paymentRepository.findCustomerSubmission(
+        idempotencyKey,
+        debtorAccountId,
+        scope,
+        originalSubmissionKeyDigest,
+    )
 
     override suspend fun listPayments(query: ListDomesticPaymentsQuery): List<DomesticPayment> = paymentRepository.list(
         status = query.status,

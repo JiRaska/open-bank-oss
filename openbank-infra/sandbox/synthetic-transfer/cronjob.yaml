@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: journey-synthetic-own-account-transfer
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: synthetic-own-account-transfer
+spec:
+  schedule: "15 3 * * *"
+  timeZone: Etc/UTC
+  suspend: true
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: observability
+            app.kubernetes.io/component: journey
+            openbank.tech/journey: synthetic-own-account-transfer
+        spec:
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 12345
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: k6
+              image: docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
+              workingDir: /tmp
+              args: ["run", "--no-usage-report", "/scripts/journey.js"]
+              envFrom:
+                - secretRef:
+                    name: journey-synthetic-transfer-fixture
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 128Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+                - name: temporary
+                  mountPath: /tmp
+          volumes:
+            - name: temporary
+              emptyDir:
+                sizeLimit: 16Mi
+            - name: script
+              configMap:
+                name: journey-synthetic-transfer-script

@@ -50,6 +50,21 @@ interface ScreeningTriggerRepository {
     /** Atomically claims a due row, returning false when another worker already owns it. */
     suspend fun claim(trigger: ScreeningTrigger, now: Instant, leaseUntil: Instant): Boolean
 
+    /**
+     * The re-screening backlog as the table holds it right now: rows still PENDING or
+     * OPEN_FAILED (retrying or parked), i.e. list changes that have not yet reached the customer
+     * as an opened case. One bounded aggregate; the age is computed by the DATABASE clock from
+     * `created_at` (the moment the trigger was enqueued), never from `next_attempt_at`, which a
+     * retry pushes forward and would make a perpetually failing row look young.
+     */
+    suspend fun backlog(): ScreeningTriggerBacklog
+
     /** The trigger row, whatever its state — test and replay read-back. */
     suspend fun findByTriggerId(triggerId: UUID): ScreeningTrigger?
 }
+
+/**
+ * [pending] undrained triggers; [oldestAgeSeconds] is `now() - min(created_at)` over them, and
+ * `0` only when [pending] is `0` — there is no sentinel for "no rows".
+ */
+data class ScreeningTriggerBacklog(val pending: Long, val oldestAgeSeconds: Long)
