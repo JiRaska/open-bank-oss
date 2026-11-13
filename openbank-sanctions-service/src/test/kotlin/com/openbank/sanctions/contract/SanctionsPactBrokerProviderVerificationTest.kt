@@ -107,7 +107,12 @@ class SanctionsPactBrokerProviderVerificationTest {
         }
         // The ongoing-monitoring interactions name their caller in the provider state.
         context?.let {
-            MonitoringPactStates.actAs(it.interaction.providerStates.mapNotNull { s -> s.name }, testIdentityAssociation)
+            MonitoringPactStates.actAs(
+                it.interaction.providerStates.mapNotNull { s ->
+                    s.name
+                },
+                testIdentityAssociation,
+            )
         }
         context?.verifyInteraction()
     }

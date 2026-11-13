@@ -148,8 +148,8 @@ data class BusinessOnboardingCase(
      * carries; the caller counts both, it does not guess.
      */
     fun monitoringMatched(subjectRef: String, match: MonitoringMatch, at: Instant): BusinessOnboardingCase {
-        if (!monitored) throw CaseTransitionException("case is not under ongoing monitoring (status $status)")
-        val current = screening ?: throw CaseTransitionException("this case has no screening")
+        val current = screening?.takeIf { monitored }
+            ?: throw CaseTransitionException("case is not under ongoing monitoring (status $status)")
         val next = current.monitoringMatched(subjectRef, match)
             ?: throw CaseTransitionException("no current subject of this case is registered under that reference")
         if (next === current) return this

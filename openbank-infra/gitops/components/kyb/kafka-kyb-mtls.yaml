@@ -2,7 +2,8 @@
 #
 # kyb-service PRODUCES openbank.kyb.events (its outbox) and CONSUMES openbank.party.events to
 # learn when an entity party passes the KYC + AML gate (ADR-0267) so the business case can
-# complete. It also WRITES its own dead-letter topic.
+# complete, and openbank.sanctions.screening.event for the findings of ongoing monitoring about
+# the subjects it registered (ADR-0376). It also WRITES its own dead-letter topics.
 #
 # Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all of
 # this service's Kafka traffic. The Strimzi User Operator mints the per-user Secret of the same
@@ -41,5 +42,35 @@ spec:
       - resource:
           type: group
           name: kyb-service
+          patternType: literal
+        operations: [Read]
+      # ADR-0376: the findings of ongoing monitoring (MONITORED_SUBJECT_MATCHED) travel on the
+      # shared sanctions screening topic; the consumer dispatches on the `ce-type` header and
+      # acks everything that is not a finding addressed to this service.
+      - resource:
+          type: topic
+          name: openbank.sanctions.screening.event
+          patternType: literal
+        operations: [Read, Describe]
+      # Same #5745 DLQ wedge applies to the `sanctions-monitoring-in` channel.
+      - resource:
+          type: topic
+          name: openbank.dlq.kyb.sanctions-monitoring-in
+          patternType: literal
+        operations: [Write, Describe]
+      # Granted TWICE on purpose (#8877 pattern): `kyb-service-sanctions-monitoring` is the group
+      # the msg-override ConfigMap sets in the follow-up that lands once an image carrying the
+      # `sanctions-monitoring-in` channel is deployed; `openbank-kyb-service` is the fallback group
+      # id SmallRye uses until then (quarkus.application.name). Without the fallback grant every
+      # poll answers GroupAuthorizationException in that window — silently, since a consumer that
+      # cannot join a group looks exactly like a topic with nothing on it.
+      - resource:
+          type: group
+          name: kyb-service-sanctions-monitoring
+          patternType: literal
+        operations: [Read]
+      - resource:
+          type: group
+          name: openbank-kyb-service
           patternType: literal
         operations: [Read]

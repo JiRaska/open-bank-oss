@@ -112,7 +112,12 @@ class SanctionsPactProviderVerificationTest {
         // registry takes the owner from a service's own token and answers the class-level
         // principal 403. See MonitoringPactStates.
         context?.let {
-            MonitoringPactStates.actAs(it.interaction.providerStates.mapNotNull { s -> s.name }, testIdentityAssociation)
+            MonitoringPactStates.actAs(
+                it.interaction.providerStates.mapNotNull { s ->
+                    s.name
+                },
+                testIdentityAssociation,
+            )
         }
         context?.verifyInteraction()
     }

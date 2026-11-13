@@ -104,7 +104,8 @@ class KybOngoingMonitoringIT {
 
     private fun run(): MonitoringRunOutcome = onEventLoop { registration.run() }
 
-    private fun counted(name: String, vararg tags: String): Double = meters.find(name).tags(*tags).counter()?.count() ?: 0.0
+    private fun counted(name: String, vararg tags: String): Double =
+        meters.find(name).tags(*tags).counter()?.count() ?: 0.0
 
     private fun registeredFor(caseId: String) =
         journey.rows(caseId).map { it.subjectRef }.let { refs -> registry.registered.filter { it.subjectRef in refs } }
@@ -148,7 +149,10 @@ class KybOngoingMonitoringIT {
         assertThat(screened.map { it.subjectId }).noneMatch { it.contains("kyb-case") || it.contains("Sledovan") }
         // The store itself holds no name at all.
         assertThat(
-            journey.query("select row_to_json(m)::text from kyb_monitored_subjects m where case_id = ?", UUID.fromString(caseId)) {
+            journey.query(
+                "select row_to_json(m)::text from kyb_monitored_subjects m where case_id = ?",
+                UUID.fromString(caseId),
+            ) {
                 it.getString(1)
             },
         ).noneMatch { it.contains("Sledovan") || it.contains("Příklad") }
@@ -189,7 +193,8 @@ class KybOngoingMonitoringIT {
     fun `the relay retries a refusal with backoff, registers what the case carries, and re-asserts`() {
         val caseId = journey.approved("71000071")
         val id = UUID.fromString(caseId)
-        val failedBefore = counted(MicrometerKybMonitoringMetrics.REGISTRATIONS, "outcome", "failed", "reason", "http_503")
+        val failedBefore =
+            counted(MicrometerKybMonitoringMetrics.REGISTRATIONS, "outcome", "failed", "reason", "http_503")
         val registeredBefore = counted(MicrometerKybMonitoringMetrics.REGISTRATIONS, "outcome", "registered")
 
         // The registry refuses (what it answers while its own switch is off).
@@ -206,7 +211,10 @@ class KybOngoingMonitoringIT {
 
         // The registry recovers and the backoff elapses.
         registry.failWith = null
-        journey.execute("update kyb_monitored_subjects set next_attempt_at = now() - interval '1 second' where case_id = ?", id)
+        journey.execute(
+            "update kyb_monitored_subjects set next_attempt_at = now() - interval '1 second' where case_id = ?",
+            id,
+        )
         run()
         val case = journey.stored(caseId)
         assertThat(registeredFor(caseId)).containsExactlyInAnyOrder(
@@ -249,7 +257,9 @@ class KybOngoingMonitoringIT {
         run()
         assertThat(registry.withdrawn).containsAll(refs)
         assertThat(journey.rows(caseId)).allMatch { it.desired == "WITHDRAWN" && it.syncState == "SYNCED" }
-        assertThat(counted(MicrometerKybMonitoringMetrics.REGISTRATIONS, "outcome", "withdrawn")).isGreaterThanOrEqualTo(2.0)
+        assertThat(
+            counted(MicrometerKybMonitoringMetrics.REGISTRATIONS, "outcome", "withdrawn"),
+        ).isGreaterThanOrEqualTo(2.0)
     }
 
     @Test
@@ -259,8 +269,8 @@ class KybOngoingMonitoringIT {
         // What an approval made by an earlier release left behind: no rows, no references.
         journey.execute("delete from kyb_monitored_subjects where case_id = ?", id)
         journey.execute(
-            "update kyb_cases set screening_json = regexp_replace(screening_json, '\"ref\":\"[^\"]*\"', '\"ref\":null', 'g') " +
-                "where case_id = ?",
+            "update kyb_cases set screening_json = " +
+                "regexp_replace(screening_json, '\"ref\":\"[^\"]*\"', '\"ref\":null', 'g') where case_id = ?",
             id,
         )
         assertThat(journey.stored(caseId).screeningJson).doesNotContain("\"ref\":\"")
@@ -378,7 +388,9 @@ class KybOngoingMonitoringIT {
         assertThat(journey.stored(caseId).status).isEqualTo("SIGNED")
         assertThat(journey.stored(caseId).xmin).isEqualTo(case.xmin)
         assertThat(counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "foreign_owner")).isEqualTo(foreign + 1)
-        assertThat(counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "unknown_subject")).isEqualTo(unknown + 1)
+        assertThat(
+            counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "unknown_subject"),
+        ).isEqualTo(unknown + 1)
 
         // Control: the same reference under this service's own name does open the review.
         send(MonitoredSubjectMatchedWire.body(person))

@@ -31,6 +31,7 @@ import java.util.UUID
  *    two tables and have no business loading entities.
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // one query per thing the relay and the consumer ask, plus the row mappers
 class MonitoringRegistrationStoreImpl(private val pool: Pool) :
     MonitoringRegistrationStore,
     PanacheRepository<MonitoredSubjectEntity> {
@@ -194,7 +195,8 @@ class MonitoringRegistrationStoreImpl(private val pool: Pool) :
                 "  FROM kyb_monitored_subjects WHERE sync_state = 'PENDING'), " +
                 "(SELECT count(*) FROM kyb_cases c " +
                 "  WHERE c.status = 'MANUAL_REVIEW' AND c.monitoring_review_opened_at IS NOT NULL), " +
-                "(SELECT COALESCE(EXTRACT(EPOCH FROM ($1::timestamptz - min(c.monitoring_review_opened_at))), 0)::bigint " +
+                "(SELECT COALESCE(EXTRACT(EPOCH FROM " +
+                "  ($1::timestamptz - min(c.monitoring_review_opened_at))), 0)::bigint " +
                 "  FROM kyb_cases c WHERE c.status = 'MANUAL_REVIEW' AND c.monitoring_review_opened_at IS NOT NULL), " +
                 "(SELECT count(*) FROM kyb_cases c WHERE c.status IN ('SIGNED', 'ACTIVE') AND c.screening_json IS NULL)"
     }

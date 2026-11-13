@@ -2,7 +2,7 @@
 date: 2026-11-12
 decision-status: proposed
 delivery-status: partial
-followup: "#15723 — the producer half is built and disabled; registering subjects and consuming the finding in kyc-service and kyb-service is a later slice of that issue"
+followup: "#15723 — the producer half and the kyb-service half are built and disabled; registering subjects and consuming the finding in kyc-service is a later slice of that issue"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
@@ -202,7 +202,32 @@ reports its own `DISABLED` outcome, and the liveness heartbeats are not register
 ## Delivery check
 
 `delivery-status` is `partial`: the registry, both paths, the finding event and the two REST
-operations are built and disabled; nothing registers a subject and nothing consumes the event.
+operations are built and disabled. kyb-service registers the subjects of its approved business
+cases and consumes the finding (see the delivery note below), also disabled; kyc-service does
+neither yet.
+
+**Delivery note (kyb-service slice).** kyb-service is the first owner. On every write of a
+business case it records, in the same transaction, which screened subjects must be registered or
+withdrawn; a scheduled relay delivers that to the registry under the service's own client and
+retries until accepted. A finding addressed to it sends the approved case to its existing review
+state, once per finding id, and is never shown to the customer. Three things turned out
+differently from what this ADR assumes:
+
+1. **The reference is not the pre-existing `subjectId`.** kyb's related-party screen used a
+   case-scoped id that embedded a hash of the person's name. A registry reference travels in a
+   URL path and comes back on an event, so kyb now screens and registers each subject under an
+   opaque reference (the entity's party id, or a random UUID) and D1's rule holds for subjects
+   screened from this change on. A subject screened earlier is given a new reference, so a
+   clearance recorded under its old id does not bind and its match is raised.
+2. **The baseline repeats onboarding.** Registering an approved case makes the registry's first
+   sweep report what the onboarding screen already reported, as D6's `BASELINE_SWEEP` allows, and
+   each such finding opens a review. kyb does not suppress them: it stores the matched name of an
+   onboarding finding, not the list entry, so it cannot tell a repeat from a different entry.
+3. **Only name and entity type are registered.** That is what kyb's onboarding screen sends. The
+   registry accepts date of birth, nationality and country; kyb does not send them yet.
+
+Both commands below now print kyb-service files. The ADR is `shipped` when kyc-service appears in
+both as well.
 
 Built, from the repository root:
 
@@ -214,12 +239,19 @@ grep -c 'MONITORED_SUBJECT_MATCHED' openbank-contracts/openbank-sanctions-servic
 
 Each prints a number greater than zero.
 
-Not delivered, and how to tell. Both commands print nothing today; the ADR is `shipped` when the
-first prints a caller in another service and the second prints a consumer:
+Callers and consumers outside sanctions-service, as the tree has them:
 
 ```bash
-git grep -l 'monitored-subjects' -- 'openbank-*/src/main' ':!openbank-sanctions-service'
-git grep -l 'MONITORED_SUBJECT_MATCHED' -- 'openbank-*/src/main' ':!openbank-sanctions-service'
+git grep -l 'monitored-subjects' -- 'openbank-*/src/main/*' ':!openbank-sanctions-service'
+git grep -l 'MONITORED_SUBJECT_MATCHED' -- 'openbank-*/src/main/*' ':!openbank-sanctions-service'
+```
+
+The pathspec ends in `/*` on purpose. As first written (`'openbank-*/src/main'`) it matched no
+file at all, sanctions-service's own included, so the check printed nothing whatever the tree
+held; the known positive is the same command without the exclusion:
+
+```bash
+git grep -l 'monitored-subjects' -- 'openbank-*/src/main/*'
 ```
 
 ## Compliance impact

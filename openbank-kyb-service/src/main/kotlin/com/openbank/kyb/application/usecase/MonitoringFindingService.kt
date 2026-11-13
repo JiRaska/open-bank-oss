@@ -68,7 +68,11 @@ class MonitoringFindingService {
             try {
                 return applyOnce(caseId, subjectRef, match)
             } catch (e: ConcurrentCaseUpdateException) {
-                log.infof("kyb case %s changed while a monitoring finding was applied; re-reading (%s)", caseId, e.message)
+                log.infof(
+                    "kyb case %s changed while a monitoring finding was applied; re-reading (%s)",
+                    caseId,
+                    e.message,
+                )
             }
         }
         return applyOnce(caseId, subjectRef, match)

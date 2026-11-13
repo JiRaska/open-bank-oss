@@ -36,8 +36,7 @@ class BusinessOnboardingCaseRepositoryImpl(
     private val outbox: KybOutboxRepository,
     private val monitoring: MonitoringRegistrationStore,
     private val clock: Clock,
-) :
-    BusinessOnboardingCaseRepository,
+) : BusinessOnboardingCaseRepository,
     PanacheRepository<BusinessOnboardingCaseEntity> {
 
     /** Row + outbox entry in ONE transaction — the event is evidence of the state, so they commit together or not at all. */

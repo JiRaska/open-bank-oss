@@ -1,0 +1,208 @@
+# SPDX-License-Identifier: Apache-2.0
+# The ongoing-monitoring alerts of kyb-service against the SHIPPED rules (ADR-0376, kyb side).
+# For each rule: the readings that must stay quiet (a cold pod, the feature switched off, a healthy
+# store) and the ones that must fire. A rule that cannot be made to fire here cannot fire anywhere.
+evaluation_interval: 1m
+rule_files:
+  - prometheus-rules-onboarding.yaml
+tests:
+  # ---- KybMonitoringRegistrationStuck ----------------------------------------------------------
+  - name: cold pod - the gauges read NaN until the first run has looked at the store
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyb_monitoring_enabled{namespace="kyb",pod="kyb-test"}'
+        values: 1+0x120
+      - series: 'openbank_kyb_monitoring_registrations_oldest_pending_age_seconds{namespace="kyb",pod="kyb-test"}'
+        values: NaN+0x120
+      - series: 'openbank_kyb_monitoring_reviews_oldest_open_age_seconds{namespace="kyb",pod="kyb-test"}'
+        values: NaN+0x120
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: KybMonitoringRegistrationStuck
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: KybMonitoringRegistrationStuck
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: KybMonitoringReviewUnresolved
+        exp_alerts: []
+  - name: switched off - rows are owed by design and their age pages nobody
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyb_monitoring_enabled{namespace="kyb",pod="kyb-test"}'
+        values: 0+0x120
+      - series: 'openbank_kyb_monitoring_registrations_oldest_pending_age_seconds{namespace="kyb",pod="kyb-test"}'
+        values: 86400+60x120
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: KybMonitoringRegistrationStuck
+        exp_alerts: []
+  - name: a healthy relay - rows are owed for seconds, never for half an hour
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyb_monitoring_enabled{namespace="kyb",pod="kyb-test"}'
+        values: 1+0x120
+      - series: 'openbank_kyb_monitoring_registrations_oldest_pending_age_seconds{namespace="kyb",pod="kyb-test"}'
+        values: 0 30 0 0 60 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: KybMonitoringRegistrationStuck
+        exp_alerts: []
+  - name: the registry refuses - the oldest row ages past half an hour and the alert fires, then clears
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyb_monitoring_enabled{namespace="kyb",pod="kyb-test"}'
+        values: 1+0x120
+      # Owed from minute 0, delivered at minute 60.
+      - series: 'openbank_kyb_monitoring_registrations_oldest_pending_age_seconds{namespace="kyb",pod="kyb-test"}'
+        values: 0+60x60 0+0x60
+    alert_rule_test:
+      - eval_time: 29m
+        alertname: KybMonitoringRegistrationStuck
+        exp_alerts: []
+      # Over the threshold at 31m, but `for: 10m` has not elapsed.
+      - eval_time: 35m
+        alertname: KybMonitoringRegistrationStuck
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: KybMonitoringRegistrationStuck
+        exp_alerts:
+          - exp_labels:
+              namespace: kyb
+              severity: critical
+            exp_annotations:
+              subject_period: continuous
+              summary: "kyb-service cannot register approved business customers for sanctions monitoring"
+              description: "The oldest registration kyb-service owes the monitored-subject registry has been pending for 45m 0s in kyb. Until it is delivered, the entity, representatives or beneficial owners of at least one APPROVED business case are not under ongoing monitoring: a new sanctions or PEP listing of them raises nothing. `openbank_kyb_monitoring_registrations_total{outcome=\"failed\"}` carries the reason: `http_503` means sanctions-service has `openbank.sanctions.monitoring.enabled` off, `http_403` means kyb-service is not calling as its own client, `unavailable` means the route or the mTLS path. Nothing is lost while this fires — the rows stay owed and are sent once the registry accepts them — but nothing is monitored either."
+      - eval_time: 75m
+        alertname: KybMonitoringRegistrationStuck
+        exp_alerts: []
+  - name: a restarted pod reports the stored age - a real backlog is neither reset nor invented
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyb_monitoring_enabled{namespace="kyb",pod="kyb-new"}'
+        values: _x2 1+0x60
+      # The new pod's first run reads a row that has been owed for two hours already.
+      - series: 'openbank_kyb_monitoring_registrations_oldest_pending_age_seconds{namespace="kyb",pod="kyb-new"}'
+        values: _x2 NaN 7200+60x60
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: KybMonitoringRegistrationStuck
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: KybMonitoringRegistrationStuck
+        exp_alerts:
+          - exp_labels:
+              namespace: kyb
+              severity: critical
+            exp_annotations:
+              subject_period: continuous
+              summary: "kyb-service cannot register approved business customers for sanctions monitoring"
+              description: "The oldest registration kyb-service owes the monitored-subject registry has been pending for 2h 17m 0s in kyb. Until it is delivered, the entity, representatives or beneficial owners of at least one APPROVED business case are not under ongoing monitoring: a new sanctions or PEP listing of them raises nothing. `openbank_kyb_monitoring_registrations_total{outcome=\"failed\"}` carries the reason: `http_503` means sanctions-service has `openbank.sanctions.monitoring.enabled` off, `http_403` means kyb-service is not calling as its own client, `unavailable` means the route or the mTLS path. Nothing is lost while this fires — the rows stay owed and are sent once the registry accepts them — but nothing is monitored either."
+  # ---- KybMonitoringReviewUnresolved -----------------------------------------------------------
+  - name: no monitoring review, or a fresh one, stays quiet - also with registration switched off
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyb_monitoring_enabled{namespace="kyb",pod="kyb-test"}'
+        values: 0+0x1600
+      # Nothing open for 5h, then a review that is resolved 20h later.
+      - series: 'openbank_kyb_monitoring_reviews_oldest_open_age_seconds{namespace="kyb",pod="kyb-test"}'
+        values: 0+0x300 0+60x1200 0+0x100
+    alert_rule_test:
+      - eval_time: 4h
+        alertname: KybMonitoringReviewUnresolved
+        exp_alerts: []
+      - eval_time: 24h
+        alertname: KybMonitoringReviewUnresolved
+        exp_alerts: []
+      - eval_time: 26h
+        alertname: KybMonitoringReviewUnresolved
+        exp_alerts: []
+  - name: a review nobody decides fires after a day, whatever the registration switch says
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyb_monitoring_enabled{namespace="kyb",pod="kyb-test"}'
+        values: 0+0x1600
+      - series: 'openbank_kyb_monitoring_reviews_oldest_open_age_seconds{namespace="kyb",pod="kyb-test"}'
+        values: 0+60x1600
+    alert_rule_test:
+      - eval_time: 23h
+        alertname: KybMonitoringReviewUnresolved
+        exp_alerts: []
+      - eval_time: 25h
+        alertname: KybMonitoringReviewUnresolved
+        exp_alerts:
+          - exp_labels:
+              namespace: kyb
+              severity: warning
+            exp_annotations:
+              subject_period: continuous
+              summary: "a sanctions-monitoring finding on an approved business customer has waited a day for review"
+              description: "The oldest monitoring review in kyb has been open for 1d 1h 0m 0s (`openbank_kyb_monitoring_reviews_open` says how many there are). Ongoing monitoring matched the entity or a related party of an APPROVED business case against a sanctions, terrorist or PEP list entry, and the case is in MANUAL_REVIEW waiting for an operator: decide the finding on the case's screening view, then resolve the review or reject the case. The customer sees no change in the meantime, so nobody will chase it from that side."
+  # ---- KybMonitoringFindingNotRouted -----------------------------------------------------------
+  - name: cold pod and expected traffic - counters at zero, foreign owners and siblings moving
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyb_monitoring_findings_total{namespace="kyb",pod="kyb-test",outcome="unrecognised"}'
+        values: 0+0x180
+      - series: 'openbank_kyb_monitoring_findings_total{namespace="kyb",pod="kyb-test",outcome="unknown_subject"}'
+        values: 0+0x180
+      - series: 'openbank_kyb_monitoring_findings_total{namespace="kyb",pod="kyb-test",outcome="not_monitored"}'
+        values: 0+0x180
+      - series: 'openbank_kyb_monitoring_findings_total{namespace="kyb",pod="kyb-test",outcome="ignored"}'
+        values: 0+5x180
+      - series: 'openbank_kyb_monitoring_findings_total{namespace="kyb",pod="kyb-test",outcome="foreign_owner"}'
+        values: 0+1x180
+      - series: 'openbank_kyb_monitoring_findings_total{namespace="kyb",pod="kyb-test",outcome="review_opened"}'
+        values: 0+0x60 1+0x120
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: KybMonitoringFindingNotRouted
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: KybMonitoringFindingNotRouted
+        exp_alerts: []
+      - eval_time: 180m
+        alertname: KybMonitoringFindingNotRouted
+        exp_alerts: []
+  - name: the first unrecognised record after a boot fires - the counter was registered at zero
+    interval: 1m
+    input_series:
+      # The series exists at 0 from the first scrape after the restart, so the first record is an increase.
+      - series: 'openbank_kyb_monitoring_findings_total{namespace="kyb",pod="kyb-test",outcome="unrecognised"}'
+        values: _x10 0+0x20 1+0x150
+    alert_rule_test:
+      - eval_time: 29m
+        alertname: KybMonitoringFindingNotRouted
+        exp_alerts: []
+      - eval_time: 33m
+        alertname: KybMonitoringFindingNotRouted
+        exp_alerts:
+          - exp_labels:
+              namespace: kyb
+              outcome: unrecognised
+              severity: warning
+            exp_annotations:
+              subject_period: continuous
+              summary: "kyb-service acked a monitoring finding it could not route to a case (unrecognised)"
+              description: "`openbank_kyb_monitoring_findings_total{outcome=\"unrecognised\"}` moved in kyb within the last hour. `unrecognised`: a record on the sanctions screening topic carried a missing or unknown `ce-type` header — sanctions-service changed how it types its events, or a new type joined the topic; compare with the committed kyb-service/sanctions-service pact. `unknown_subject`: the registry holds a subject under kyb-service's client that kyb-service has no record of, so its finding reaches no case — look for a registration made outside the relay, or a store that was restored from an older backup. `not_monitored`: the finding's case has ended or no longer carries the subject, and its withdrawal had not reached the registry yet. In all three the match itself was NOT reviewed by anyone."
+      - eval_time: 120m
+        alertname: KybMonitoringFindingNotRouted
+        exp_alerts: []
+  - name: a finding about a subject nobody here registered fires under its own outcome
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyb_monitoring_findings_total{namespace="kyb",pod="kyb-test",outcome="unknown_subject"}'
+        values: 0+0x60 2+0x120
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: KybMonitoringFindingNotRouted
+        exp_alerts:
+          - exp_labels:
+              namespace: kyb
+              outcome: unknown_subject
+              severity: warning
+            exp_annotations:
+              subject_period: continuous
+              summary: "kyb-service acked a monitoring finding it could not route to a case (unknown_subject)"
+              description: "`openbank_kyb_monitoring_findings_total{outcome=\"unknown_subject\"}` moved in kyb within the last hour. `unrecognised`: a record on the sanctions screening topic carried a missing or unknown `ce-type` header — sanctions-service changed how it types its events, or a new type joined the topic; compare with the committed kyb-service/sanctions-service pact. `unknown_subject`: the registry holds a subject under kyb-service's client that kyb-service has no record of, so its finding reaches no case — look for a registration made outside the relay, or a store that was restored from an older backup. `not_monitored`: the finding's case has ended or no longer carries the subject, and its withdrawal had not reached the registry yet. In all three the match itself was NOT reviewed by anyone."

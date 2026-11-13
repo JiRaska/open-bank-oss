@@ -181,17 +181,20 @@ mp:
       # Findings of ongoing monitoring (ADR-0376 D6): MONITORED_SUBJECT_MATCHED about a subject
       # this service registered sends its business case to review. The topic is shared with every
       # other sanctions event, which the consumer tells apart by the `ce-type` HEADER and acks.
-      # Own consumer group, offset earliest: the consumer is idempotent on the finding id, so a
-      # replay writes nothing, and a deploy must not miss a finding published while it was
-      # starting. As above, the two dotted keys are inert in the deployed pod and are supplied by
-      # kyb-service-msg-override.yaml. The dead-letter topic is the NESTED form on purpose: the
-      # dotted one-liner would be quoted the same way and the connector would fall back to a topic
-      # name derived from the channel.
+      #
+      # No `group.id` / `auto.offset.reset` here, on purpose. Written as YAML keys they would be
+      # inert in the deployed pod (see party-events-in above), and a new channel is two deploys:
+      # the override ConfigMap may name this channel only once the running image carries it, or
+      # the service refuses to boot. Until that second step the consumer joins the fallback
+      # group (the application name), which the KafkaUser is granted next to the intended one,
+      # `kyb-service-sanctions-monitoring`. The consumer is idempotent on the finding id, so
+      # either offset policy is safe to choose there.
+      #
+      # The dead-letter topic is the NESTED form on purpose: the dotted one-liner would be quoted
+      # the same way and the connector would fall back to a topic name derived from the channel.
       sanctions-monitoring-in:
         connector: smallrye-kafka
         topic: openbank.sanctions.screening.event
-        group.id: kyb-service-sanctions-monitoring
-        auto.offset.reset: earliest
         value:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
         failure-strategy: dead-letter-queue

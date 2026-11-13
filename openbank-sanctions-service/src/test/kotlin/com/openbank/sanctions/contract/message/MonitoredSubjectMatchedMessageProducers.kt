@@ -86,7 +86,10 @@ class MonitoredSubjectMatchedMessageProducers {
             }.single()
             // Selected by aggregate only, never by event type: the type is what is under test.
             val entry = onEventLoop {
-                bean<SanctionsOutboxRepository>().listProcessable(OUTBOX_SCAN_LIMIT).single { it.aggregateId == findingId }
+                bean<SanctionsOutboxRepository>().listProcessable(OUTBOX_SCAN_LIMIT).single {
+                    it.aggregateId ==
+                        findingId
+                }
             }
             onEventLoop { bean<OutboxEventPublisher>().publish(entry) }
             return emitted(entry.eventId)

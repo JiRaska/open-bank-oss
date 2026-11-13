@@ -19,7 +19,6 @@ import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.MediaType
-import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
@@ -64,6 +63,9 @@ data class MonitoredSubjectAck(val ownerService: String? = null, val subjectRef:
  * timeout, an answer about a different subject — surfaces as [MonitoredSubjectRegistryException]
  * with a short machine reason, and nothing here retries: the relay owns retry, with backoff, over
  * a durable row. Nothing here turns a failure into a delivery either.
+ *
+ * No fault-tolerance annotation on purpose. An interceptor's timeout would be thrown AROUND this
+ * class, past the translation below, and reach the relay as an exception it does not expect.
  */
 @ApplicationScoped
 class SanctionsMonitoredSubjectRegistryAdapter : MonitoredSubjectRegistryPort {
@@ -71,7 +73,6 @@ class SanctionsMonitoredSubjectRegistryAdapter : MonitoredSubjectRegistryPort {
     @Inject @RestClient
     lateinit var client: SanctionsMonitoringRestClient
 
-    @Timeout(TIMEOUT_MS)
     override suspend fun register(subjectRef: String, organisation: Boolean, name: String) = guarded {
         val ack = client.register(
             subjectRef,
@@ -81,25 +82,24 @@ class SanctionsMonitoredSubjectRegistryAdapter : MonitoredSubjectRegistryPort {
         if (ack.subjectRef != subjectRef) throw MonitoredSubjectRegistryException(REASON_UNEXPECTED, null)
     }
 
-    @Timeout(TIMEOUT_MS)
     override suspend fun withdraw(subjectRef: String) = guarded { client.withdraw(subjectRef) }
 
     // Deliberately broad: the relay must not have to enumerate which failure types mean "not delivered".
+    // The bound on the call is the REST client's own connect and read timeout, so a call that hangs
+    // ends INSIDE this function and is reported like every other failure.
     @Suppress("TooGenericExceptionCaught")
     private suspend fun guarded(call: suspend () -> Unit) {
         try {
             call()
-        } catch (e: MonitoredSubjectRegistryException) {
-            throw e
-        } catch (e: WebApplicationException) {
-            throw MonitoredSubjectRegistryException("http_${e.response?.status ?: 0}", e)
         } catch (e: Exception) {
-            throw MonitoredSubjectRegistryException(REASON_UNAVAILABLE, e)
+            throw e as? MonitoredSubjectRegistryException ?: MonitoredSubjectRegistryException(reasonOf(e), e)
         }
     }
 
+    private fun reasonOf(e: Exception): String =
+        if (e is WebApplicationException) "http_${e.response?.status ?: 0}" else REASON_UNAVAILABLE
+
     private companion object {
-        const val TIMEOUT_MS = 5_000L
         const val REASON_UNAVAILABLE = "unavailable"
         const val REASON_UNEXPECTED = "unexpected_response"
     }

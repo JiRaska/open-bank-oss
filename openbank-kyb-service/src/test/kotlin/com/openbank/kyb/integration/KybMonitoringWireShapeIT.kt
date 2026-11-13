@@ -100,7 +100,11 @@ class KybMonitoringWireShapeIT {
         }
         val case = journey.stored(caseId)
         val person = journey.rows(caseId).single { it.subjectRef != case.entityPartyId }.subjectRef
-        assertThat(registry.registered.filter { it.subjectRef == person }.map { it.name }).containsOnly("Emil Plánovaný")
+        assertThat(
+            registry.registered.filter {
+                it.subjectRef == person
+            }.map { it.name },
+        ).containsOnly("Emil Plánovaný")
         assertThat(meters.find("openbank.kyb.monitoring.runs").tag("outcome", "completed").counter()?.count())
             .isGreaterThanOrEqualTo(1.0)
 
@@ -116,7 +120,9 @@ class KybMonitoringWireShapeIT {
             // One key, so one partition and one order: by the time the finding has been applied,
             // the two records before it have been through the consumer as well.
             producer.send(record(MonitoredSubjectMatchedWire.EVENT_TYPE, foreign)).get(SEND_SECONDS, TimeUnit.SECONDS)
-            producer.send(ProducerRecord(MonitoredSubjectMatchedWire.TOPIC, KEY, typeInBody)).get(SEND_SECONDS, TimeUnit.SECONDS)
+            producer.send(
+                ProducerRecord(MonitoredSubjectMatchedWire.TOPIC, KEY, typeInBody),
+            ).get(SEND_SECONDS, TimeUnit.SECONDS)
             producer.send(record("SanctionChecked", "not json")).get(SEND_SECONDS, TimeUnit.SECONDS)
             producer.send(record(MonitoredSubjectMatchedWire.EVENT_TYPE, finding)).get(SEND_SECONDS, TimeUnit.SECONDS)
             // The same finding redelivered, as at-least-once delivery will.
@@ -141,7 +147,9 @@ class KybMonitoringWireShapeIT {
         val entry = MonitoredSubjectMatchedWire.entry(eventType, body)
         // What the producer's publisher does: verbatim payload, the outbox headers.
         return ProducerRecord(MonitoredSubjectMatchedWire.TOPIC, KEY, entry.payload).also { record ->
-            OutboxKafkaHeaders.headersFor(entry).forEach { (name, value) -> record.headers().add(name, value.toByteArray()) }
+            OutboxKafkaHeaders.headersFor(entry).forEach { (name, value) ->
+                record.headers().add(name, value.toByteArray())
+            }
         }
     }
 

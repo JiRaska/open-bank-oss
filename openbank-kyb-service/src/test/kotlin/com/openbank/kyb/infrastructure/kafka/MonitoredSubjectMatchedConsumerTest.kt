@@ -61,8 +61,10 @@ class MonitoredSubjectMatchedConsumerTest {
     private fun counted(outcome: String): Double =
         registry.find(MicrometerKybMonitoringMetrics.FINDINGS).tag("outcome", outcome).counter()?.count() ?: -1.0
 
-    private fun matched(body: Map<String, Any>) =
-        MonitoredSubjectMatchedWire.record(MonitoredSubjectMatchedWire.EVENT_TYPE, MonitoredSubjectMatchedWire.json(body))
+    private fun matched(body: Map<String, Any>) = MonitoredSubjectMatchedWire.record(
+        MonitoredSubjectMatchedWire.EVENT_TYPE,
+        MonitoredSubjectMatchedWire.json(body),
+    )
 
     @Test
     fun `the wire fixture carries exactly the producer contract's properties and no eventType`() {
@@ -92,24 +94,23 @@ class MonitoredSubjectMatchedConsumerTest {
     }
 
     @Test
-    fun `a finding typed only by the ce-type header reaches the service with the entry it names`(): Unit =
-        runBlocking {
-            val findingId = UUID.randomUUID()
+    fun `a finding typed only by the ce-type header reaches the service with the entry it names`(): Unit = runBlocking {
+        val findingId = UUID.randomUUID()
 
-            consumer.consume(matched(MonitoredSubjectMatchedWire.body(subjectRef, findingId, matchStatus = "HIT")))
+        consumer.consume(matched(MonitoredSubjectMatchedWire.body(subjectRef, findingId, matchStatus = "HIT")))
 
-            val match = slot<MonitoringMatch>()
-            coVerify(exactly = 1) { findings.handle(subjectRef, capture(match)) }
-            assertThat(match.captured.findingId).isEqualTo(findingId)
-            assertThat(match.captured.matchKind).isEqualTo("SANCTIONS")
-            assertThat(match.captured.listType).isEqualTo("EU_CONSOLIDATED")
-            assertThat(match.captured.listEntryRef).isEqualTo("id:synthetic-entry-1")
-            assertThat(match.captured.matchScore).isEqualTo(0.93)
-            assertThat(match.captured.verdict).isEqualTo(ScreeningVerdict.HIT)
-            assertThat(match.captured.detection).isEqualTo("LIST_DELTA")
-            assertThat(counted("review_opened")).isEqualTo(1.0)
-            assertThat(counted("unrecognised")).isEqualTo(0.0)
-        }
+        val match = slot<MonitoringMatch>()
+        coVerify(exactly = 1) { findings.handle(subjectRef, capture(match)) }
+        assertThat(match.captured.findingId).isEqualTo(findingId)
+        assertThat(match.captured.matchKind).isEqualTo("SANCTIONS")
+        assertThat(match.captured.listType).isEqualTo("EU_CONSOLIDATED")
+        assertThat(match.captured.listEntryRef).isEqualTo("id:synthetic-entry-1")
+        assertThat(match.captured.matchScore).isEqualTo(0.93)
+        assertThat(match.captured.verdict).isEqualTo(ScreeningVerdict.HIT)
+        assertThat(match.captured.detection).isEqualTo("LIST_DELTA")
+        assertThat(counted("review_opened")).isEqualTo(1.0)
+        assertThat(counted("unrecognised")).isEqualTo(0.0)
+    }
 
     @Test
     fun `the same body without the header is unrecognised and reaches nothing`(): Unit = runBlocking {
@@ -144,16 +145,15 @@ class MonitoredSubjectMatchedConsumerTest {
         }
 
     @Test
-    fun `the events that share the topic are acked as ignored without their body being parsed`(): Unit =
-        runBlocking {
-            // Not JSON on purpose: an ignored sibling must never reach the decoder (it can hold names).
-            listOf("SanctionChecked", "SanctionReviewed", "SANCTIONS_LIST_CHANGED", "SANCTIONS_LIST_CHANGE_STORM")
-                .forEach { consumer.consume(MonitoredSubjectMatchedWire.record(it, "not json")) }
+    fun `the events that share the topic are acked as ignored without their body being parsed`(): Unit = runBlocking {
+        // Not JSON on purpose: an ignored sibling must never reach the decoder (it can hold names).
+        listOf("SanctionChecked", "SanctionReviewed", "SANCTIONS_LIST_CHANGED", "SANCTIONS_LIST_CHANGE_STORM")
+            .forEach { consumer.consume(MonitoredSubjectMatchedWire.record(it, "not json")) }
 
-            coVerify(exactly = 0) { findings.handle(any(), any()) }
-            assertThat(counted("ignored")).isEqualTo(4.0)
-            assertThat(counted("malformed")).isEqualTo(0.0)
-        }
+        coVerify(exactly = 0) { findings.handle(any(), any()) }
+        assertThat(counted("ignored")).isEqualTo(4.0)
+        assertThat(counted("malformed")).isEqualTo(0.0)
+    }
 
     @Test
     fun `a finding that cannot be read is acked as malformed`(): Unit = runBlocking {

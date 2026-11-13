@@ -97,7 +97,9 @@ class KybSanctionsMonitoringPactConsumerTest {
     @Pact(consumer = CONSUMER, provider = PROVIDER)
     fun registerPact(builder: PactBuilder): V4Pact = builder
         .given(STATE_KYB_CALLER)
-        .expectsToReceiveHttpInteraction("PUT a related party of an approved business case for ongoing monitoring") { i ->
+        .expectsToReceiveHttpInteraction(
+            "PUT a related party of an approved business case for ongoing monitoring",
+        ) { i ->
             i.withRequest { req ->
                 req.method("PUT")
                 req.path("/api/v3/sanctions/monitored-subjects/$PERSON_REF")
@@ -158,7 +160,9 @@ class KybSanctionsMonitoringPactConsumerTest {
     @Test
     @PactTestFor(pactMethod = "withdrawPact")
     fun `a withdrawal is answered 204`(mockServer: MockServer) {
-        given().baseUri(mockServer.getUrl()).delete(clientPath(DELETE::class.java, WITHDRAWN_REF)).then().statusCode(204)
+        given().baseUri(
+            mockServer.getUrl(),
+        ).delete(clientPath(DELETE::class.java, WITHDRAWN_REF)).then().statusCode(204)
     }
 
     // ---- HTTP: refusals -----------------------------------------------------------------------

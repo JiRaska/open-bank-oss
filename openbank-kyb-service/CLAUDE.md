@@ -105,6 +105,28 @@ is a bug — that is the drift ADR-0212 already paid for once.
   `Case.screening` stays null, and `RelatedPartyScreeningService` is `@Startup` so the warning is
   printed at boot. The module's ITs run with it ON against `StubRelatedPartyScreening`.
 
+- **Who is monitored is DERIVED from the case, in the transaction that writes it — never called
+  from a use case.** `BusinessOnboardingCaseRepositoryImpl.update` brings `kyb_monitored_subjects`
+  to `BusinessOnboardingCase.monitoredSubjects` on every write (ADR-0376). There are three paths
+  into an approved state and three out of it; a registration one of them forgot is a customer
+  nobody monitors, with nothing reporting it. If you add a status or a path, change `monitored`,
+  not a call site. The relay (`MonitoringRegistrationService`) only sends what the store owes, and
+  it runs under the service's OWN OIDC client: the registry refuses the shared one with 403.
+- **A monitoring finding puts an APPROVED case back in `MANUAL_REVIEW`, and the customer must not
+  be able to tell.** Customer responses read `applicantStatus` / `applicantReviewReason`, no
+  lifecycle event is published for the review, and neither the applicant nor an idle timer can
+  abandon the case. Anything new that a customer can read off a case goes through those two
+  properties. Resolving such a review returns the case to where it stood and repeats nothing of
+  the approval — no mandates, no `AGREEMENT_SIGNED`.
+- **The screen's `subjectId` is the subject's opaque `ref`, not the name-derived `key`.** The key
+  is a hash of the normalised name: fine as a map key, a pseudonym in a URL path. The registry is
+  keyed by the same `ref`, which is what lets a clearance recorded in sanctions-service apply to
+  monitoring. Never build an outbound identifier from `key`.
+- **A new Kafka channel is two deploys.** `sanctions-monitoring-in` has no `group.id` in
+  `application.yaml` and none in `kyb-service-msg-override.yaml` until the image carrying the
+  channel is deployed; naming it there earlier is a boot failure. The KafkaUser is granted both
+  the intended group and the fallback one for the window in between.
+
 ## Authorization
 
 `kyb_rest_ext.rego` is narrow on purpose, for the reason `consent_rest_ext.rego` documents at
