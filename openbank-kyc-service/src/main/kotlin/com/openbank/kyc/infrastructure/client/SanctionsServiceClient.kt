@@ -6,7 +6,7 @@ package com.openbank.kyc.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
@@ -25,9 +25,11 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * kyc-service scopes every call to `listTypes = ["PEP_GLOBAL"]` (see [SanctionsScreeningAdapter]):
  * this is a dedicated PEP check, not the broader sanctions gate.
  */
+// #15723: the bearer for the PEP screen is minted by the NAMED oidc-client `m2m` - Keycloak
+// client `openbank-kyc` (ROLE_API only) - never the shared `openbank-services` default client.
+@OidcClientFilter("m2m")
 @RegisterRestClient(configKey = "sanctions-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/sanctions")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
