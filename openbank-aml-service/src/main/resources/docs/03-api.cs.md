@@ -134,7 +134,7 @@ Content-Type: application/json
 
 - `targetStatus` musí být platný přechod z aktuálního stavu (viz stavový automat v [02 — Architektura](./02-architecture.md)).
 - `decidedBy` v těle se **ignoruje** (zastaralé): rozhodujícím je přihlášený volající (ADR-0371). `decisionReason` je povinné při `targetStatus = BLOCKED`.
-- Případ otevřený vyhodnocením balíčku (nikoli případ `TRANSACTION_MONITORING` otevřený platebním kanálem) lze zde pouze převést do `UNDER_REVIEW`; uzavření nebo eskalace vrací 409 a jde přes návrh dispozice (níže). Volajícímu bez `ROLE_COMPLIANCE` takový případ vrací 404 a v seznamu chybí.
+- Případ otevřený vyhodnocením balíčku (nikoli případ `TRANSACTION_MONITORING` otevřený platebním kanálem) lze zde pouze převést do `UNDER_REVIEW`; uzavření nebo eskalace vrací 409 a jde přes návrh dispozice (níže). Volajícímu bez `ROLE_COMPLIANCE` takový případ vrací 404 a v seznamu chybí. Každá odpověď případu nese `requiresFourEyesDisposition` (true právě u takového případu), aby klient věděl, jaký postup nabídnout, dřív než officer napíše zdůvodnění.
 - **Vedlejší efekty:** přechod + událost `aml.case.status_changed.v1` se commitují atomicky přes outbox.
 
 ## Model chyb
@@ -179,6 +179,7 @@ Pouze `ROLE_COMPLIANCE`, pouze lidé. Každý aktér je přihlášený volajíc�
 | `POST /api/v1/aml/monitoring/cases/{caseId}/disposition-proposals` | `amlMonitoring.propose` | `disposition` `CLEAR` nebo `REPORT`, `outcomeCode` ze slovníku výsledků; jeden otevřený návrh na případ |
 | `POST /api/v1/aml/monitoring/disposition-proposals/{proposalId}/decision` | `amlMonitoring.decide` | druhá, jiná osoba; navrhovatel dostane 422 |
 | `GET /api/v1/aml/monitoring/disposition-proposals` | `amlMonitoring.inspect` | návrhy čekající na rozhodnutí |
+| `GET /api/v1/aml/monitoring/outcomes` | `amlMonitoring.inspect` | slovník výsledků, proti kterému se ověřuje `outcomeCode` (id, revize, hash, kód/popis/význam); klienti nabízejí tyto kódy, místo aby drželi vlastní kopii |
 | `POST /api/v1/aml/reports` | `amlReport.draft` | odkazuje na vlastní monitorovací případy a zaúčtované pohyby strany |
 | `GET /api/v1/aml/reports`, `GET /api/v1/aml/reports/{reportId}` | `amlReport.inspect` | |
 | `POST /api/v1/aml/reports/{reportId}/approval` | `amlReport.approve` | druhá, jiná osoba; autor dostane 422 |

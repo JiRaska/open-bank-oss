@@ -4,9 +4,12 @@
 
 package com.openbank.aml.infrastructure.rest
 
+import com.openbank.aml.application.report.DecisionOutcomes
 import com.openbank.aml.application.report.MonitoringDispositionService
 import com.openbank.aml.domain.report.CaseDisposition
 import com.openbank.aml.infrastructure.rest.dto.DecideDispositionRequest
+import com.openbank.aml.infrastructure.rest.dto.OutcomeCatalogueResponse
+import com.openbank.aml.infrastructure.rest.dto.OutcomeEntryResponse
 import com.openbank.aml.infrastructure.rest.dto.ProposeDispositionRequest
 import com.openbank.aml.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
@@ -44,6 +47,9 @@ class AmlMonitoringDispositionResource(private val dispositions: MonitoringDispo
     @Inject
     lateinit var identity: SecurityIdentity
 
+    @Inject
+    lateinit var outcomes: DecisionOutcomes
+
     @POST
     @Path("/cases/{caseId}/disposition-proposals")
     @RolesAllowed("ROLE_COMPLIANCE")
@@ -74,6 +80,23 @@ class AmlMonitoringDispositionResource(private val dispositions: MonitoringDispo
         val approve = requireNotNull(request?.approve) { "approve is required" }
         return Response.ok(
             dispositions.decide(proposalId, approve, request?.reason, identity.principal.name).toResponse(),
+        ).build()
+    }
+
+    @GET
+    @Path("/outcomes")
+    @RolesAllowed("ROLE_COMPLIANCE")
+    @Authorize(action = "amlMonitoring.inspect")
+    @Operation(summary = "The outcome vocabulary a disposition or a report outcome is chosen from")
+    fun outcomes(): Response {
+        val ref = outcomes.reference
+        return Response.ok(
+            OutcomeCatalogueResponse(
+                vocabularyId = ref.id,
+                vocabularyRevision = ref.revision,
+                vocabularyHash = ref.contentHash,
+                entries = outcomes.entries.map { OutcomeEntryResponse(it.code.value, it.label, it.meaning) },
+            ),
         ).build()
     }
 
