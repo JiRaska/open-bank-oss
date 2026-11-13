@@ -60,14 +60,14 @@ class ScreeningTriggerMasterSwitchOnIT {
         }
     }
 
-    /** Exactly the row the consumer writes with the switch off: PENDING, attempts 0, due now. */
+    /** Exactly the row the consumer writes with the switch off: DEFERRED, attempts 0, due now. */
     private fun insertDeferred(partyId: UUID) {
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 "INSERT INTO kyc_screening_triggers (trigger_id, party_id, trigger_type, publication_id, diff, " +
                     "state, attempts, next_attempt_at) VALUES (?, ?, 'SANCTIONS_LIST_CHANGED', ?, " +
                     "'{\"changedExternalIds\":[\"X\"],\"deactivatedExternalIds\":[],\"changeCount\":1}', " +
-                    "'PENDING', 0, now())",
+                    "'DEFERRED', 0, now())",
             ).use { insert ->
                 insert.setObject(1, UUID.randomUUID())
                 insert.setObject(2, partyId)

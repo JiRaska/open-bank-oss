@@ -183,7 +183,7 @@ spec:
             severity: critical
           annotations:
             summary: "A sanctions list change has not reached a customer as a re-screening case within 24h"
-            description: "openbank_kyc_rescreen_backlog_oldest_age_seconds is over 86400: the oldest kyc_screening_triggers row still PENDING or OPEN_FAILED was enqueued more than 24 hours ago, so a customer the list change could match has had no re-screening case opened. openbank_kyc_rescreen_backlog_pending says how many are waiting. Check the case coordinator (OPEN_FAILED rows carry failed_reason), the kyc.screening-trigger.retry heartbeat, and KYC_COORDINATOR_OPEN_FAILED outbox events for parked rows, which need an operator to open the case and reconcile the row. Runbook: kyc-service docs 05-operations, Re-screening backlog."
+            description: "openbank_kyc_rescreen_backlog_oldest_age_seconds is over 86400: the oldest kyc_screening_triggers row still PENDING, OPEN_FAILED or DEFERRED was enqueued more than 24 hours ago, so a customer the list change could match has had no re-screening case opened. openbank_kyc_rescreen_backlog_pending says how many are waiting. Check the case coordinator (OPEN_FAILED rows carry failed_reason), the kyc.screening-trigger.retry heartbeat, and KYC_COORDINATOR_OPEN_FAILED outbox events for parked rows, which need an operator to open the case and reconcile the row. Runbook: kyc-service docs 05-operations, Re-screening backlog."
         - alert: KycRescreenLoopDisabledWithPending
           # Issue #15961. The trigger loop is switched off (openbank.kyc.screening-triggers.enabled
           # false, the ONE switch for every path that opens a case) while undrained triggers
@@ -198,7 +198,7 @@ spec:
             severity: warning
           annotations:
             summary: "KYC re-screening loop is switched off with list changes still pending"
-            description: "openbank_kyc_rescreen_loop_disabled_with_pending is 1: kyc-service's ADR-0256 trigger loop is disabled but kyc_screening_triggers still holds PENDING or OPEN_FAILED rows (openbank_kyc_rescreen_backlog_pending), so those customers will not be re-screened. Enable the loop (KYC_SCREENING_TRIGGERS_ENABLED=true) and the retry job drains the queue in batches, or reconcile each row by hand. While the loop is off, list changes arriving now are still queued (one PENDING row per party) and counted as openbank_kyc_sanctions_list_change_events_total{outcome=\"recorded_while_disabled\"}, so nothing is lost. Runbook: kyc-service docs 05-operations, Re-screening backlog."
+            description: "openbank_kyc_rescreen_loop_disabled_with_pending is 1: kyc-service's ADR-0256 trigger loop is disabled but kyc_screening_triggers still holds PENDING, OPEN_FAILED or DEFERRED rows (openbank_kyc_rescreen_backlog_pending), so those customers will not be re-screened. Enable the loop (KYC_SCREENING_TRIGGERS_ENABLED=true) and the retry job drains the queue in batches, or reconcile each row by hand. While the loop is off, list changes arriving now are still queued (one PENDING row per party) and counted as openbank_kyc_sanctions_list_change_events_total{outcome=\"recorded_while_disabled\"}, so nothing is lost. Runbook: kyc-service docs 05-operations, Re-screening backlog."
         - alert: OnboardingProjectionWireFormatMismatch
           # #4353/#4692/#6248. sca-service published DEVICE_ENROLLED without the discriminator in
           # the payload body; onboarding's parser fell through to `?: return`, and 15 enrolments

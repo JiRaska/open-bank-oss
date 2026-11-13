@@ -138,9 +138,9 @@ class ScreeningTriggerServiceTest {
             assertThat(result.opened).isZero()
             assertThat(result.duplicates).isEqualTo(1) // partyB already waits — coalesced
             assertThat(recorded.map { it.partyId }).containsExactly(partyA, partyB)
-            // Deferred = PENDING, no attempt made, due at once for the retry job.
+            // DEFERRED, no attempt made, due at once for the retry job.
             assertThat(recorded).allMatch {
-                it.state.name == "PENDING" && it.attempts == 0 && it.nextAttemptAt == Instant.now(fixedClock)
+                it.state.name == "DEFERRED" && it.attempts == 0 && it.nextAttemptAt == Instant.now(fixedClock)
             }
             coVerify(exactly = 0) { coordinatorPort.openAmlAlertCase(any()) }
             coVerify(exactly = 0) { triggerRepository.insertIfAbsent(any()) }

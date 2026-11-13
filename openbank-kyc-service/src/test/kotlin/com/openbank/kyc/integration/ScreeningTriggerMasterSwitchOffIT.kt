@@ -91,11 +91,15 @@ class ScreeningTriggerMasterSwitchOffIT {
         }
 
         await("both list changes recorded while the loop is off") { counted("recorded_while_disabled") >= 2.0 }
+        // Rollback safety FIRST: the pre-#15961 image's claim must not see the recorded row.
+        assertThat(claimWithMainsSql(partyId))
+            .`as`("main's claim SQL claimed a row recorded while the switch was off — a rollback would open it")
+            .isZero()
         // Coalesced: one deferred row for the party, from the first publication, no attempt made.
         assertThat(count("SELECT count(*) FROM kyc_screening_triggers WHERE party_id = ?", partyId)).isEqualTo(1L)
         assertThat(
             count(
-                "SELECT count(*) FROM kyc_screening_triggers WHERE party_id = ? AND state = 'PENDING' " +
+                "SELECT count(*) FROM kyc_screening_triggers WHERE party_id = ? AND state = 'DEFERRED' " +
                     "AND attempts = 0 AND publication_id = '$first'",
                 partyId,
             ),
@@ -126,6 +130,34 @@ class ScreeningTriggerMasterSwitchOffIT {
                 insert.setString(4, state)
                 insert.setInt(5, attempts)
                 insert.executeUpdate()
+            }
+        }
+    }
+
+    /**
+     * Runs the CLAIM statement of the code this PR replaces against every row of [partyId], with
+     * `now` an hour ahead (every lease and backoff elapsed) and each row's own attempt count —
+     * the most permissive call the old retry job could make. Returns how many rows it claimed.
+     */
+    private fun claimWithMainsSql(partyId: UUID): Int = dataSource.connection.use { connection ->
+        val rows = connection.prepareStatement(
+            "SELECT trigger_id, attempts FROM kyc_screening_triggers WHERE party_id = ?",
+        ).use { query ->
+            query.setObject(1, partyId)
+            query.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.getObject(1) to rs.getInt(2)) } }
+        }
+        val jdbc = MAIN_CLAIM_SQL.replace(":triggerId", "?").replace(":attempts", "?").replace(":now", "?")
+            .replace(":legacyCutoff", "?").replace(":leaseUntil", "?")
+        val now = java.sql.Timestamp.from(java.time.Instant.now().plusSeconds(3600))
+        rows.sumOf { (triggerId, attempts) ->
+            connection.prepareStatement(jdbc).use { claim ->
+                // Placeholder order in MAIN_CLAIM_SQL: leaseUntil, triggerId, attempts, now, legacyCutoff.
+                claim.setTimestamp(1, now)
+                claim.setObject(2, triggerId)
+                claim.setInt(3, attempts)
+                claim.setTimestamp(4, now)
+                claim.setTimestamp(5, now)
+                claim.executeUpdate()
             }
         }
     }
@@ -189,5 +221,21 @@ class ScreeningTriggerMasterSwitchOffIT {
 
     private companion object {
         val SETTLE: Duration = Duration.ofSeconds(5)
+
+        /**
+         * Copied LITERALLY from `CLAIM` in
+         * openbank-kyc-service/.../ScreeningTriggerRepositoryImpl.kt at origin/main as of
+         * 2026-11-13 (before #15961): the statement an image rollback would run. Do not "update"
+         * it to the current code — its whole value is that it is the OLD code.
+         */
+        const val MAIN_CLAIM_SQL = """
+            UPDATE kyc_screening_triggers
+            SET state = 'PENDING', attempts = attempts + 1, next_attempt_at = :leaseUntil
+            WHERE trigger_id = :triggerId AND attempts = :attempts
+                AND (state = 'PENDING' OR attempts < 5)
+                AND state IN ('PENDING', 'OPEN_FAILED')
+                AND ((next_attempt_at IS NOT NULL AND next_attempt_at <= :now)
+                    OR (state = 'PENDING' AND next_attempt_at IS NULL AND created_at <= :legacyCutoff))
+        """
     }
 }

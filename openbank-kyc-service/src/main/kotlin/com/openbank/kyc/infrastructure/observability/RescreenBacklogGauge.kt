@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicReference
  * become an opened case — read from the DATABASE, so every pod reports the same truth and a
  * restart loses nothing (issue #15961).
  *
- *  - `openbank_kyc_rescreen_backlog_pending{service="kyc"}` — rows in PENDING or OPEN_FAILED
+ *  - `openbank_kyc_rescreen_backlog_pending{service="kyc"}` — rows in PENDING, OPEN_FAILED or DEFERRED
  *    (first attempt in flight, retrying, or parked after the attempt budget).
  *  - `openbank_kyc_rescreen_backlog_oldest_age_seconds{service="kyc"}` — `now() - created_at` of
  *    the oldest such row, measured by the database clock from ENQUEUE time. `0` only when the

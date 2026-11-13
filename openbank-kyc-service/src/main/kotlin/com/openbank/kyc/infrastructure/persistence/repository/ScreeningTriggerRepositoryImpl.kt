@@ -63,8 +63,8 @@ class ScreeningTriggerRepositoryImpl(private val outboxRepository: KycOutboxRepo
     }
 
     override suspend fun recordDeferred(trigger: ScreeningTrigger): Boolean {
-        require(trigger.state == ScreeningTriggerState.PENDING && trigger.attempts == 0) {
-            "A deferred screening trigger is PENDING with no attempt made"
+        require(trigger.state == ScreeningTriggerState.DEFERRED && trigger.attempts == 0) {
+            "A deferred screening trigger is DEFERRED with no attempt made"
         }
         return Panache.withTransaction {
             Panache.getSession().flatMap { session ->
@@ -76,7 +76,7 @@ class ScreeningTriggerRepositoryImpl(private val outboxRepository: KycOutboxRepo
                     .setParameter("chunkIndex", trigger.chunkIndex)
                     .setParameter("listType", trigger.listType)
                     .setParameter("diff", objectMapper.writeValueAsString(trigger.diff))
-                    .setParameter("state", ScreeningTriggerState.PENDING.name)
+                    .setParameter("state", ScreeningTriggerState.DEFERRED.name)
                     .setParameter("dueAt", trigger.nextAttemptAt ?: trigger.createdAt)
                     .executeUpdate()
             }
@@ -149,7 +149,11 @@ class ScreeningTriggerRepositoryImpl(private val outboxRepository: KycOutboxRepo
                 "OR (state = 'PENDING' AND nextAttemptAt IS NULL AND createdAt <= ?3)) " +
                 "AND (state = 'PENDING' OR attempts < 5) " +
                 "ORDER BY nextAttemptAt ASC, id ASC",
-            listOf(ScreeningTriggerState.PENDING.name, ScreeningTriggerState.OPEN_FAILED.name),
+            listOf(
+                ScreeningTriggerState.PENDING.name,
+                ScreeningTriggerState.OPEN_FAILED.name,
+                ScreeningTriggerState.DEFERRED.name,
+            ),
             now,
             now.minusSeconds(LEASE_SECONDS),
         ).page(0, limit).list()
@@ -193,7 +197,7 @@ class ScreeningTriggerRepositoryImpl(private val outboxRepository: KycOutboxRepo
             SELECT COUNT(*)::bigint,
                    COALESCE(GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - MIN(created_at))))), 0)::bigint
             FROM kyc_screening_triggers
-            WHERE state IN ('PENDING', 'OPEN_FAILED')
+            WHERE state IN ('PENDING', 'OPEN_FAILED', 'DEFERRED')
         """
 
         const val INSERT_IF_ABSENT = """
@@ -204,6 +208,7 @@ class ScreeningTriggerRepositoryImpl(private val outboxRepository: KycOutboxRepo
             ON CONFLICT (publication_id, party_id) DO NOTHING
         """
 
+        // DEFERRED, never PENDING: see V14 — pre-#15961 code claims PENDING whatever the switch says.
         // No conflict target: either unique index may reject it — (publication, party) for a
         // redelivery, or the V14 deferred-per-party index when the party already waits.
         const val INSERT_DEFERRED = """
@@ -219,7 +224,7 @@ class ScreeningTriggerRepositoryImpl(private val outboxRepository: KycOutboxRepo
             SET state = 'PENDING', attempts = attempts + 1, next_attempt_at = :leaseUntil
             WHERE trigger_id = :triggerId AND attempts = :attempts
                 AND (state = 'PENDING' OR attempts < 5)
-                AND state IN ('PENDING', 'OPEN_FAILED')
+                AND state IN ('PENDING', 'OPEN_FAILED', 'DEFERRED')
                 AND ((next_attempt_at IS NOT NULL AND next_attempt_at <= :now)
                     OR (state = 'PENDING' AND next_attempt_at IS NULL AND created_at <= :legacyCutoff))
         """

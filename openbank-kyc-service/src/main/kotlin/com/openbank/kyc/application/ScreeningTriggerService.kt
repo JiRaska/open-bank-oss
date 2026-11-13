@@ -32,7 +32,7 @@ import java.util.UUID
  *   independently, so a redelivery resumes instead of duplicating: completed parties find their
  *   row and are skipped, an in-flight party re-attempts its open.
  * - [recordListChange] — the same fan-out while the master switch is OFF: rows are recorded
- *   DEFERRED (PENDING, attempts 0) and no coordinator call is made.
+ *   DEFERRED (attempts 0) and no coordinator call is made.
  * - [retryFailedTriggers] — the scheduled worker's path, re-claiming OPEN_FAILED rows whose
  *   backoff elapsed, expired PENDING leases, and DEFERRED rows (due at once). Runs only while
  *   the master switch is on. The coordinator-call failure is NOT rethrown to Kafka here: the row plus
@@ -88,7 +88,7 @@ class ScreeningTriggerService(
                     listType = change.listType,
                     diff = diff,
                     now = now,
-                ).copy(nextAttemptAt = now)
+                ).copy(state = ScreeningTriggerState.DEFERRED, nextAttemptAt = now)
                 if (!triggerRepository.recordDeferred(trigger)) duplicates++
             }
             afterPartyId = candidates.lastOrNull()

@@ -44,11 +44,11 @@ Kandidátní množina **není** rozsahovaná per položka diffu: kyc-service neu
 
 ## Metriky a alerty backlogu
 
-Issue #15961. Backlog tvoří řádky `kyc_screening_triggers` ve stavu PENDING nebo OPEN_FAILED: změny seznamů, které se k zákazníkovi ještě nedostaly jako otevřený případ. `RescreenBacklogGauge` jej jednou za minutu vzorkuje z databáze (`openbank.kyc.screening-triggers.backlog-sample-interval`, výchozí `1m`) jedním agregátem nad úvodním sloupcem `state` indexu `ix_kyc_screening_triggers_retry`, takže každý pod publikuje stejnou hodnotu a restart nic neztratí.
+Issue #15961. Backlog tvoří řádky `kyc_screening_triggers` ve stavu PENDING, OPEN_FAILED nebo DEFERRED: změny seznamů, které se k zákazníkovi ještě nedostaly jako otevřený případ. `RescreenBacklogGauge` jej jednou za minutu vzorkuje z databáze (`openbank.kyc.screening-triggers.backlog-sample-interval`, výchozí `1m`) jedním agregátem nad úvodním sloupcem `state` indexu `ix_kyc_screening_triggers_retry`, takže každý pod publikuje stejnou hodnotu a restart nic neztratí.
 
 | Metrika | Význam | Studený pod |
 |---|---|---|
-| `openbank_kyc_rescreen_backlog_pending{service="kyc"}` | Řádky PENDING nebo OPEN_FAILED (rozpracované, opakované nebo odstavené). | NaN do prvního vzorku |
+| `openbank_kyc_rescreen_backlog_pending{service="kyc"}` | Řádky PENDING, OPEN_FAILED nebo DEFERRED (rozpracované, opakované, odstavené nebo zapsané při vypnutí). | NaN do prvního vzorku |
 | `openbank_kyc_rescreen_backlog_oldest_age_seconds{service="kyc"}` | `now() - created_at` nejstaršího takového řádku podle hodin databáze, od zařazení do fronty. `0` jen při prázdném backlogu. Nikdy z `next_attempt_at`, který každý pokus posouvá dopředu. | NaN do prvního vzorku |
 | `openbank_kyc_rescreen_loop_disabled_with_pending{service="kyc"}` | `1`, když je `enabled` false a backlog není prázdný, jinak `0`. Samostatná řada, aby „vypnuto a prázdno“ a „vypnuto se zbylou prací“ nikdy nesdílely hodnotu. | NaN do prvního vzorku |
 
@@ -64,8 +64,9 @@ NaN, ne 0 a ne stáří odvozené od epochy: studený pod netvrdí prázdnou zdr
 
 | Vypínač | Přijde `SANCTIONS_LIST_CHANGED` | Tick retry jobu |
 |---|---|---|
-| vypnuto | Jeden **odložený** řádek na kandidátní stranu (PENDING, `attempts` 0, splatný hned), žádné volání coordinatoru; počítá se `recorded_while_disabled`. Slučuje se: strana, která už čeká, druhý řádek nedostane (částečný unikátní index z V14). | Nepřevezme nic. Čekají i řádky z dřívějšího zapnutí (leasy, retry `OPEN_FAILED`). |
-| zapnuto | Beze změny: řádek s leasem, případ se otevře hned; počítá se `handled`. | Převezme až `KYC_SCREENING_TRIGGERS_RETRY_BATCH_SIZE` splatných řádků (odložené, prošlé leasy, `OPEN_FAILED` po backoffu) a každý otevře jednou. |
+| vypnuto | Jeden řádek ve stavu **`DEFERRED`** na kandidátní stranu (`attempts` 0, splatný hned), žádné volání coordinatoru; počítá se `recorded_while_disabled`. Slučuje se: strana, která už čeká, druhý řádek nedostane (částečný unikátní index z V14). | Nepřevezme nic. Čekají i řádky z dřívějšího zapnutí (leasy, retry `OPEN_FAILED`). |
+| zapnuto | Beze změny: řádek s leasem, případ se otevře hned; počítá se `handled`. | Převezme až `KYC_SCREENING_TRIGGERS_RETRY_BATCH_SIZE` splatných řádků (odložené, prošlé leasy, `OPEN_FAILED` po backoffu) a každý otevře jednou; řádek `DEFERRED` přejde v témže atomickém claimu do PENDING s leasem. |
+| image vrácený na kód před #15961 | Staré chování (při vypnutí zahazuje). | Starý job vybírá a claimuje jen `PENDING`/`OPEN_FAILED`, takže řádky `DEFERRED` nevidí a zůstanou netečné; vyprázdní se po návratu tohoto kódu. Hlídá `ScreeningTriggerMasterSwitchOffIT`, který spouští doslovný claim SQL z main. |
 
 Růst při vypnutí je omezen počtem aktivních KYC stran, ne časem: jeden odložený řádek na stranu bez ohledu na počet publikací (seznamy se obnovují zhruba denně). Měsíc vypnutí přidá nejvýš jeden řádek na aktivní stranu a nic za strany, které už čekají. Řádek nese diff první publikace; případ, který otevře, prověřuje proti aktuálním seznamům. Vyprázdnění po zapnutí: nejvýš batch size za interval a pod, výchozí 100 za minutu (6 000 za hodinu) při jedné replice; `429`/`503` coordinatoru posune řádek na backoff 5 minut krát pokus místo horkého opakování. Po dlouhém vypnutí `KycRescreenBacklogOverdue` vystřelí, dokud se neotevře nejstarší odložený řádek, protože tyto změny 24hodinový slib opravdu nesplnily.
 

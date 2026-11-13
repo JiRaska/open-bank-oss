@@ -44,11 +44,11 @@ The candidate set is **not** diff-scoped per entry: kyc-service persists no part
 
 ## Backlog metrics and alerts
 
-Issue #15961. The backlog is the set of `kyc_screening_triggers` rows in PENDING or OPEN_FAILED: list changes that have not yet reached the customer as an opened case. `RescreenBacklogGauge` samples it from the database once a minute (`openbank.kyc.screening-triggers.backlog-sample-interval`, default `1m`) with one aggregate over the leading `state` column of `ix_kyc_screening_triggers_retry`, so every pod publishes the same value and a restart loses nothing.
+Issue #15961. The backlog is the set of `kyc_screening_triggers` rows in PENDING, OPEN_FAILED or DEFERRED: list changes that have not yet reached the customer as an opened case. `RescreenBacklogGauge` samples it from the database once a minute (`openbank.kyc.screening-triggers.backlog-sample-interval`, default `1m`) with one aggregate over the leading `state` column of `ix_kyc_screening_triggers_retry`, so every pod publishes the same value and a restart loses nothing.
 
 | Metric | Meaning | Cold pod |
 |---|---|---|
-| `openbank_kyc_rescreen_backlog_pending{service="kyc"}` | Rows PENDING or OPEN_FAILED (in flight, retrying, or parked). | NaN until the first sample |
+| `openbank_kyc_rescreen_backlog_pending{service="kyc"}` | Rows PENDING, OPEN_FAILED or DEFERRED (in flight, retrying, parked, or recorded while off). | NaN until the first sample |
 | `openbank_kyc_rescreen_backlog_oldest_age_seconds{service="kyc"}` | `now() - created_at` of the oldest such row, by the database clock, from enqueue time. `0` only when the backlog is empty. Never from `next_attempt_at`, which each retry pushes forward. | NaN until the first sample |
 | `openbank_kyc_rescreen_loop_disabled_with_pending{service="kyc"}` | `1` when `enabled` is false and the backlog is non-empty, else `0`. A separate series, so "off and empty" and "off with work left" never share a value. | NaN until the first sample |
 
@@ -64,8 +64,9 @@ NaN, not 0 and not an epoch-derived age: a cold pod neither claims an empty heal
 
 | Switch | `SANCTIONS_LIST_CHANGED` arrives | Retry job tick |
 |---|---|---|
-| off | One **deferred** row per candidate party (PENDING, `attempts` 0, due now), no coordinator call; counted `recorded_while_disabled`. Coalesced: a party already waiting gets no second row (partial unique index from V14). | Claims nothing. Rows left from an earlier on-period (leases, `OPEN_FAILED` retries) wait too. |
-| on | Unchanged: row inserted with a lease, case opened at once; counted `handled`. | Claims up to `KYC_SCREENING_TRIGGERS_RETRY_BATCH_SIZE` due rows (deferred, expired leases, backed-off `OPEN_FAILED`) and opens each once. |
+| off | One row in state **`DEFERRED`** per candidate party (`attempts` 0, due now), no coordinator call; counted `recorded_while_disabled`. Coalesced: a party already waiting gets no second row (partial unique index from V14). | Claims nothing. Rows left from an earlier on-period (leases, `OPEN_FAILED` retries) wait too. |
+| on | Unchanged: row inserted with a lease, case opened at once; counted `handled`. | Claims up to `KYC_SCREENING_TRIGGERS_RETRY_BATCH_SIZE` due rows (deferred, expired leases, backed-off `OPEN_FAILED`) and opens each once; a `DEFERRED` row moves to PENDING with a lease in the same atomic claim. |
+| image rolled back to pre-#15961 code | Old behaviour (dropped while off). | The old job selects and claims only `PENDING`/`OPEN_FAILED`, so `DEFERRED` rows are invisible to it and stay inert; they drain when this code returns. Held by `ScreeningTriggerMasterSwitchOffIT`, which runs main's claim SQL verbatim. |
 
 Growth while off is bounded by the number of active KYC parties, not by time: one deferred row per party however many publications arrive (lists refresh about daily). A month off adds at most one row per active party, plus nothing for the parties already waiting. The row keeps the first publication's diff; the case it opens screens against the current lists. Drain after turning the switch on: at most batch size per interval per pod, by default 100 a minute (6,000 an hour) with the single replica, and a coordinator `429`/`503` moves the row onto the 5-minute-times-attempt backoff instead of retrying hot. After a long off period `KycRescreenBacklogOverdue` fires until the oldest deferred row is opened, because those changes did miss the 24-hour promise.
 
