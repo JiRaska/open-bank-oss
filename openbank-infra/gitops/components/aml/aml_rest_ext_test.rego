@@ -142,3 +142,57 @@ test_b8agent_other_api_identity_gets_nothing if {
 		not "service-agent-aml-case-read" in allowed_reasons with input as {"principal": b8agent_sa("service-account-openbank-services"), "action": action}
 	}
 }
+
+# --- ADR-0371: monitoring dispositions and the suspicious-transaction report ---
+
+confidential_actions := {
+	"amlMonitoring.propose",
+	"amlMonitoring.decide",
+	"amlMonitoring.inspect",
+	"amlReport.draft",
+	"amlReport.inspect",
+	"amlReport.approve",
+	"amlReport.file",
+	"amlReport.withdraw",
+}
+
+customer := {"service_account": false, "type": "HUMAN", "id": "u-cust", "roles": ["ROLE_CUSTOMER"]}
+
+operator_and_admin := {"service_account": false, "type": "HUMAN", "id": "u-opadm", "roles": ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_VIEWER"]}
+
+# must-ALLOW control: without it every must-DENY below would also pass against a rule that never fires.
+test_compliance_may_act_on_monitoring_and_reports if {
+	every action in confidential_actions {
+		"compliance-aml-monitoring-and-report" in allowed_reasons with input as {"principal": compliance, "action": action}
+	}
+}
+
+test_customer_is_denied_monitoring_and_reports if {
+	every action in confidential_actions {
+		count(allowed_reasons) == 0 with input as {"principal": customer, "action": action}
+	}
+}
+
+# Operators hold `operator-read-any`; the report verbs must stay outside it, with every staff role at once.
+test_operator_and_admin_are_denied_monitoring_and_reports if {
+	every action in confidential_actions {
+		count(allowed_reasons) == 0 with input as {"principal": operator_and_admin, "action": action}
+	}
+}
+
+test_machine_with_compliance_role_is_denied_monitoring_and_reports if {
+	every action in confidential_actions {
+		count(allowed_reasons) == 0 with input as {"principal": service_m2m, "action": action}
+	}
+}
+
+test_anonymous_is_denied_monitoring_and_reports if {
+	every action in confidential_actions {
+		count(allowed_reasons) == 0 with input as {"principal": {"type": "ANONYMOUS", "id": "anonymous", "roles": []}, "action": action}
+	}
+}
+
+# Negative control for the verb choice: had the read been named `.read`, an operator WOULD get it.
+test_a_read_verb_would_have_leaked_to_operators if {
+	count(allowed_reasons) > 0 with input as {"principal": operator, "action": "amlReport.read"}
+}
