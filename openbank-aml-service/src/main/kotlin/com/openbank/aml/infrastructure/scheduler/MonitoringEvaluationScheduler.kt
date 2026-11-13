@@ -11,6 +11,7 @@ import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.port.`in`.CreateAmlCaseCommand
 import com.openbank.aml.application.port.out.MonitoringEvaluationRepository
 import com.openbank.aml.application.port.out.MovementCounterReader
+import com.openbank.aml.application.port.out.SuspiciousTransactionReportRepository
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.ScreeningType
 import com.openbank.aml.domain.monitoring.CounterScheme
@@ -79,6 +80,9 @@ class MonitoringEvaluationScheduler(
     lateinit var cases: AmlCaseUseCase
 
     @Inject
+    lateinit var reports: SuspiciousTransactionReportRepository
+
+    @Inject
     lateinit var objectMapper: ObjectMapper
 
     @Inject
@@ -92,6 +96,7 @@ class MonitoringEvaluationScheduler(
 
     private val log = Logger.getLogger(MonitoringEvaluationScheduler::class.java)
     private val oldestUndecidedAgeSeconds = AtomicLong(0)
+    private val oldestUnfiledAgeSeconds = AtomicLong(0)
     private var liveness: WorkflowLivenessRecorder? = null
     private lateinit var evaluator: MonitoringEvaluator
 
@@ -100,6 +105,10 @@ class MonitoringEvaluationScheduler(
         evaluator = MonitoringEvaluator(pack, scheme, reader)
         if (registryInstance.isResolvable) {
             Gauge.builder("openbank.aml.monitoring.cases.oldest_undecided_age_seconds", oldestUndecidedAgeSeconds) {
+                it.get().toDouble()
+            }.tag("service", "aml").strongReference(true).register(registryInstance.get())
+            // ADR-0371 §8: time to report. An approved report nobody has filed is the one that ages.
+            Gauge.builder("openbank.aml.reports.oldest_approved_not_filed_age_seconds", oldestUnfiledAgeSeconds) {
                 it.get().toDouble()
             }.tag("service", "aml").strongReference(true).register(registryInstance.get())
         }
@@ -128,6 +137,9 @@ class MonitoringEvaluationScheduler(
         }
         oldestUndecidedAgeSeconds.set(
             repository.oldestUndecidedMonitoringCase()?.let { Duration.between(it, now).seconds.coerceAtLeast(0) } ?: 0,
+        )
+        oldestUnfiledAgeSeconds.set(
+            reports.oldestApprovedNotFiled()?.let { Duration.between(it, now).seconds.coerceAtLeast(0) } ?: 0,
         )
         if (evaluated > 0) log.infof("[monitoring-evaluation] evaluated %d party(ies)", evaluated)
         liveness?.recordSuccess()
