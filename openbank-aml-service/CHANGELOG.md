@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.17.0...aml-service-v0.18.0) (2026-11-13)
+
+
+### Features
+
+* **aml:** four-eyes flag on cases and the outcome vocabulary endpoint ([#15947](https://github.com/JiRaska/open-bank-oss/issues/15947)) ([d9db9f4](https://github.com/JiRaska/open-bank-oss/commit/d9db9f466ec97ad6094b54327a373c6f44a2a7b0))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.16.0...aml-service-v0.17.0) (2026-11-13)
+
+
+### Features
+
+* **aml:** four-eyes monitoring dispositions and the suspicious-transaction report (ADR-0371 slice 3) ([#15742](https://github.com/JiRaska/open-bank-oss/issues/15742)) ([4ab7b54](https://github.com/JiRaska/open-bank-oss/commit/4ab7b54e9ed2a60e23c831cc8151ee72d55d62d0))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.15.0...aml-service-v0.16.0) (2026-11-12)
+
+
+### Features
+
+* **aml:** evaluate the monitoring count pack in shadow (ADR-0371 slice 2) ([#15741](https://github.com/JiRaska/open-bank-oss/issues/15741)) ([0ba472d](https://github.com/JiRaska/open-bank-oss/commit/0ba472d8d24a976b2c293339317c253d270248c8))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.14.1...aml-service-v0.15.0) (2026-11-12)
+
+
+### Features
+
+* **aml:** record booked movements and count them per party (ADR-0371 slice 1) ([#15740](https://github.com/JiRaska/open-bank-oss/issues/15740)) ([c521c8e](https://github.com/JiRaska/open-bank-oss/commit/c521c8e53af07ffc55a926278fcdfa9ec7cfd8a9))
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.14.0...aml-service-v0.14.1) (2026-11-09)
 
 

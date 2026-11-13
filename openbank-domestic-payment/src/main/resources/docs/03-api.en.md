@@ -192,3 +192,15 @@ Events are **append-only**; corrections are made by a new status-changed event, 
 - **API version in URL** (`/api/v1/...`). A breaking change goes to `/api/v2/...`; classify the bump from the OpenAPI diff (`oasdiff`), not the commit type (ADR-0048).
 - **Event evolution:** additive (new optional fields) only on the existing topic; a breaking change means a new topic.
 - **OpenAPI diff** is gated in CI against `main`.
+
+## Customer submission lookup
+
+`POST /api/v1/domestic-payments/submissions/lookup` is a read-only operation reserved for
+the verified customer-edge service account. The original `Idempotency-Key` is sent as a
+header. The JSON body carries `debtorAccountId` and the edge-generated
+`customerSubmissionScope`. Postgres stores the scope with the original payment.
+
+The response has `Cache-Control: no-store`. `FOUND` contains only `paymentId` and
+current `status` alongside the outcome. `UNKNOWN` covers missing records, mismatched
+account or scope, and legacy records without a customer binding. Roll out this provider
+before enabling the customer-edge caller.

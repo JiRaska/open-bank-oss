@@ -41,3 +41,10 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## Owner portfolio path parameter
 
 `GET /api/v1/delegation-portfolios/owner/{ownerPartyId}` names its path parameter `ownerPartyId`, in the OpenAPI document and in the served resource alike. It must equal the authenticated active profile; any other value is rejected with `403`. Generated clients use `ownerPartyId`; the shared `partyId` parameter does not apply to this route.
+
+
+## Business payment approval retries
+
+The original consumed SCA challenge replays only the same entity, initiator, instruction kind
+and canonical frozen payload. A changed instruction with the same challenge receives HTTP 409
+before a new request or outbox event can be written.

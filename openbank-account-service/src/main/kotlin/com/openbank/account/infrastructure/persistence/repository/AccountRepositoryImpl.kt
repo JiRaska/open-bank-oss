@@ -7,11 +7,13 @@ package com.openbank.account.infrastructure.persistence.repository
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.account.application.port.out.AccountOutboxRepository
 import com.openbank.account.application.port.out.AccountRepository
+import com.openbank.account.application.port.out.GsftAccountRosterRepository
 import com.openbank.account.application.usecase.AccountUpdateConflictException
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.CurrencyPocket
+import com.openbank.account.domain.model.FreezeOrigin
 import com.openbank.account.domain.model.ProductRevisionPin
 import com.openbank.account.domain.model.SigningRule
 import com.openbank.account.infrastructure.persistence.entity.AccountEntity
@@ -55,6 +57,7 @@ class AccountRepositoryImpl(
     private val outboxRepository: AccountOutboxRepository,
     private val objectMapper: ObjectMapper,
 ) : AccountRepository,
+    GsftAccountRosterRepository,
     PanacheRepository<AccountEntity> {
 
     override suspend fun findById(id: UUID): Account? =
@@ -121,6 +124,18 @@ class AccountRepositoryImpl(
         }
         query.page(0, limit).list()
     }.awaitSuspending().map { it.toDomain() }
+
+    override suspend fun findDepositAccounts(dayEndExclusive: Instant, limit: Int, afterId: UUID?): List<Account> =
+        Panache.withSession {
+            val availableAtCutoff = "accountType IN ?1 AND openedAt < ?2 AND (closedAt IS NULL OR closedAt >= ?2)"
+            val types = listOf(AccountType.CURRENT.name, AccountType.SAVINGS.name, AccountType.TERM_DEPOSIT.name)
+            val query = if (afterId == null) {
+                find("$availableAtCutoff ORDER BY id", types, dayEndExclusive)
+            } else {
+                find("$availableAtCutoff AND id > ?3 ORDER BY id", types, dayEndExclusive, afterId)
+            }
+            query.page(0, limit).list()
+        }.awaitSuspending().map { it.toDomain() }
 
     override suspend fun save(account: Account): Account {
         val entity = account.toEntity()
@@ -253,6 +268,8 @@ private fun AccountRepositoryImpl.versionMatchedUpdate(entity: AccountEntity) = 
         // Same round-trip-through-update() story as the goal fields above: only
         // renameAccount in AccountService actually changes this.
         existing.nickname = entity.nickname
+        // Travels with status: set by a freeze, cleared by an unfreeze (chk_accounts_freeze_origin).
+        existing.freezeOrigin = entity.freezeOrigin
         // Audit timestamp comes from the injected Clock, not the entity default (ADR-0100 /
         // #540): the @PreUpdate callback's EPOCH default is never overwritten by the DB
         // DEFAULT since Hibernate writes every insertable/updatable column explicitly.
@@ -286,6 +303,7 @@ private fun AccountEntity.toDomain() = Account(
     termsUrl = termsUrl,
     termsEffectiveFrom = termsEffectiveFrom,
     productRevisionPin = productRevisionPinOrNull(),
+    freezeOrigin = freezeOrigin?.let(FreezeOrigin::valueOf),
 )
 
 // Whole or absent, as chk_accounts_product_revision_pin_whole guarantees for the row.
@@ -322,6 +340,7 @@ private fun Account.toEntity() = AccountEntity().also {
     it.goalTargetMinorUnits = goalTargetMinorUnits
     it.goalTargetDate = goalTargetDate
     it.nickname = nickname
+    it.freezeOrigin = freezeOrigin?.name
     it.termsVersion = termsVersion
     it.termsUrl = termsUrl
     it.termsEffectiveFrom = termsEffectiveFrom

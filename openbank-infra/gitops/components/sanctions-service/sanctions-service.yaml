@@ -60,14 +60,34 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sanctions-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sanctions-service:sandbox-e8e3b10a@sha256:fa36fd5ae9c0790be28f5ef473656d25b87cf270a5e0be504b7bfc2dd20d9972
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sanctions-service:sandbox-893c4e64@sha256:94e3efa1eecb99ee389da0fc70317475c614ba36108bd471ddb293f45f978481
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8123
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            # Parallel private-CA TLS listener for new east-west clients (#15723). HTTP/8123
+            # remains for existing callers until their independently reviewed migrations complete.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            # MIRRORS the build-time value baked into this service's application.yaml
+            # (quarkus.http.ssl.client-auth). That property is BUILD TIME fixed, so this env can
+            # never set it; it is kept, in the same spelling, so the manifest states the
+            # listener's posture and cannot silently disagree with the image.
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: required
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://sanctions-db-rw.sanctions.svc:5432/openbank_sanctions
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -168,6 +188,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: kafka-keystore
               mountPath: /mnt/kafka/keystore
               readOnly: true
@@ -259,6 +282,10 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: internal-tls
+          secret:
+            secretName: sanctions-service-internal-tls
+            optional: false
         - name: opa-tmp
           emptyDir: {}
         - name: opa-bundle
@@ -285,6 +312,9 @@ spec:
     - name: http
       port: 8123
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 apiVersion: v1
 kind: Service
@@ -300,3 +330,6 @@ spec:
     - name: http
       port: 8123
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https

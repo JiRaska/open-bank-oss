@@ -35,6 +35,12 @@
 # History: with full history the ancestry test is `git merge-base --is-ancestor`. In a shallow
 # clone (the CI gates shard checks out at fetch-depth: 1) it asks the GitHub compare API instead,
 # which needs `gh` and GH_TOKEN; without them a shallow clone is refused, never read as clean.
+# #15483: a shallow run first fetches main's history WITHOUT blobs (`--filter=blob:none`,
+# ~28 MB, ~15 s, git transport: no REST quota) and answers both the marker lookup and ancestry
+# with git there; the pickaxe lazily fetches only the blobs of commits touching MARKER_FILE.
+# Measured on main 2026-11-11: 18 gh calls -> 0, same verdict. That keeps the gate off the shared
+# GITHUB_TOKEN bucket, whose exhaustion had turned main red as NOT_EVALUATED. If the fetch
+# fails the API path runs as before; a commit outside main's graph (exit 128) still asks compare.
 set -euo pipefail
 
 MARKER_FILE="openbank-libs-runtime/src/main/kotlin/com/openbank/libs/authz/OpaSidecarPolicyDecisionPoint.kt"
@@ -45,10 +51,17 @@ cd "$(git rev-parse --show-toplevel)"
 
 REPO="${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
 API=0
+GRAPH_DIR=""
 
 # Follow canonical main: a stacked PR can retain a parallel pre-squash introduction.
 # Local callers must fetch origin/main before checking rollout.
 marker_commit() {
+  if [ -n "$GRAPH_DIR" ]; then
+    GIT_TERMINAL_PROMPT=0 git --git-dir="$GRAPH_DIR" log --first-parent --format=%H --reverse \
+      -S"$MARKER_TEXT" main -- "$MARKER_FILE" | head -1
+    [ "${PIPESTATUS[0]}" -eq 0 ] || return 2
+    return 0
+  fi
   if [ "$API" -eq 0 ]; then
     git rev-parse --verify refs/remotes/origin/main >/dev/null 2>&1 || {
       echo "::error::origin/main is unavailable; fetch main before checking rollout." >&2
@@ -80,6 +93,15 @@ is_ancestor() {
   if [ "$API" -eq 0 ]; then
     git merge-base --is-ancestor "$1" "$2"
     return
+  fi
+  if [ -n "$GRAPH_DIR" ]; then
+    local grc=0
+    GIT_TERMINAL_PROMPT=0 git --git-dir="$GRAPH_DIR" merge-base --is-ancestor "$1" "$2" 2>/dev/null || grc=$?
+    case "$grc" in
+      0) return 0 ;;
+      1) return 1 ;;
+    esac
+    # 128: a commit outside main's graph. Ask the compare API, as before the graph existed.
   fi
   local status cache="" attempt=1 max="${PDP_ROLLOUT_API_ATTEMPTS:-4}"
   # #14011: one GitOps invocation compares the same immutable (marker, source) pair once per
@@ -160,10 +182,22 @@ run() {
   fi
   # Fresh compare cache per GitOps invocation (#14011); live mode reads stay uncached.
   COMPARE_CACHE_DIR=""
-  if [ "$source" = gitops ] && [ "$API" -eq 1 ]; then
-    COMPARE_CACHE_DIR="$(mktemp -d)"
+  if [ "$API" -eq 1 ]; then
+    local work
+    work="$(mktemp -d)"
     # shellcheck disable=SC2064 # expand now: the path is fixed for this invocation
-    trap "rm -rf '$COMPARE_CACHE_DIR'" EXIT
+    trap "rm -rf '$work'" EXIT
+    if [ "$source" = gitops ]; then
+      COMPARE_CACHE_DIR="$work/cache"
+      mkdir -p "$COMPARE_CACHE_DIR"
+    fi
+    if [ "${PDP_ROLLOUT_COMMIT_GRAPH:-1}" = 1 ] && GIT_TERMINAL_PROMPT=0 git clone -q --bare --filter=blob:none \
+        --single-branch --branch main --no-tags "${GITHUB_SERVER_URL:-https://github.com}/${REPO}.git" "$work/graph.git" 2>/dev/null; then
+      GRAPH_DIR="$work/graph.git"
+      echo "main history fetched (no blobs): marker and ancestry via git; compare API only for commits outside it"
+    else
+      echo "::warning::could not fetch main's history; marker and ancestry fall back to the GitHub API" >&2
+    fi
   fi
   local marker_rc=0
   marker="$(marker_commit)" || marker_rc=$?
@@ -332,6 +366,28 @@ selftest() {
     [ "$(ncalls)" = 2 ] || { echo "selftest FAIL: live/uncached mode reused a verdict" >&2; f=1; }
     unset -f gh ncalls
     unset PDP_ROLLOUT_API_ATTEMPTS
+
+    # Commit graph (#15483): ancestry inside main's graph spends no compare call at all, and a
+    # commit outside it still asks the API. Without the GRAPH_DIR branch in is_ancestor the
+    # first two cases make 2 calls instead of 0, so they fail.
+    calls="$tmp/graph-calls"; : > "$calls"
+    gh() { echo x >> "$calls"; case "$*" in *compare/*) echo ahead ;; *) return 1 ;; esac; }
+    GRAPH_DIR="$GIT_DIR"
+    is_ancestor "$before_phase1" "$shipped" || { echo "selftest FAIL: graph ancestor not current" >&2; f=1; }
+    if is_ancestor "$shipped" "$before_phase1"; then echo "selftest FAIL: graph read a descendant as an ancestor" >&2; f=1; fi
+    [ "$(wc -l < "$calls" | tr -d '[:space:]')" = 0 ] || { echo "selftest FAIL: ancestry inside the graph still asked the compare API" >&2; f=1; }
+    PDP_ROLLOUT_API_ATTEMPTS=1 is_ancestor "$shipped" deadbeefdeadbeefdeadbeefdeadbeefdeadbeef \
+      || { echo "selftest FAIL: a commit outside the graph did not fall back to compare" >&2; f=1; }
+    [ "$(wc -l < "$calls" | tr -d '[:space:]')" = 1 ] || { echo "selftest FAIL: outside-graph fallback call count" >&2; f=1; }
+    # The marker is read from the graph too: with a dead API it is still the squash commit.
+    gh() { echo x >> "$calls"; return 1; }
+    : > "$calls"
+    git update-ref refs/heads/main "$shipped"
+    marker="$(marker_commit)" || { echo "selftest FAIL: graph marker lookup failed" >&2; f=1; }
+    [ "$marker" = "$shipped" ] || { echo "selftest FAIL: graph marker '$marker' != squash commit" >&2; f=1; }
+    [ "$(wc -l < "$calls" | tr -d '[:space:]')" = 0 ] || { echo "selftest FAIL: graph marker lookup asked the API" >&2; f=1; }
+    GRAPH_DIR=""
+    unset -f gh
 
     # Transient compare-API failures: retried, but a never-answering API stays LAGGING.
     export PDP_ROLLOUT_RETRY_SLEEP=0

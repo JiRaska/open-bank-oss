@@ -1,0 +1,28 @@
+{
+  "source": "SYNTHETIC_CAPITAL_SLICE",
+  "period": "2026-06-30",
+  "currency": "CZK",
+  "trialBalanceLines": [
+    {"code": "6000", "accountType": "EQUITY", "net": "-10000000"},
+    {"code": "6010", "accountType": "EQUITY", "net": "-2000000"},
+    {"code": "6020", "accountType": "EQUITY", "net": "-500000"},
+    {"code": "6030", "accountType": "EQUITY", "net": "-1000000"},
+    {"code": "6040", "accountType": "EQUITY", "net": "250000"},
+    {"code": "6050", "accountType": "EQUITY", "net": "-1000000"},
+    {"code": "6060", "accountType": "EQUITY", "net": "-2000000"}
+  ],
+  "previewFacts": [
+    {"rowRef": "r0010", "value": "16250000"},
+    {"rowRef": "r0015", "value": "14250000"},
+    {"rowRef": "r0020", "value": "13250000"},
+    {"rowRef": "r0030", "value": "12000000"},
+    {"rowRef": "r0130", "value": "500000"},
+    {"rowRef": "r0200", "value": "1000000"},
+    {"rowRef": "r0530", "value": "1000000"},
+    {"rowRef": "r0750", "value": "2000000"}
+  ],
+  "omittedGaps": [
+    {"rowRef": "r0160", "reason": "Profit or loss attributable to owners of the parent has no prudential source."},
+    {"rowRef": "r0300", "reason": "GL 6040 is an aggregate deduction, with no separate goodwill source."}
+  ]
+}

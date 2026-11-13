@@ -5,6 +5,7 @@
 package com.openbank.document.infrastructure.rest
 
 import com.openbank.document.application.port.`in`.CreateTemplateCommand
+import com.openbank.document.application.port.`in`.DocumentOwnershipUseCase
 import com.openbank.document.application.port.`in`.DocumentQueryUseCase
 import com.openbank.document.application.port.`in`.DocumentRenderUseCase
 import com.openbank.document.application.port.`in`.DocumentTemplateUseCase
@@ -13,6 +14,7 @@ import com.openbank.document.application.port.`in`.ExternalDisclosureExportUseCa
 import com.openbank.document.application.port.`in`.OnboardingDocumentUseCase
 import com.openbank.document.application.port.`in`.RenderDocumentCommand
 import com.openbank.document.infrastructure.rest.dto.CreateTemplateRequest
+import com.openbank.document.infrastructure.rest.dto.DocumentOwnerResponse
 import com.openbank.document.infrastructure.rest.dto.DocumentResponse
 import com.openbank.document.infrastructure.rest.dto.EnsureOnboardingAgreementRequest
 import com.openbank.document.infrastructure.rest.dto.ExportExternalDisclosureRequest
@@ -50,6 +52,7 @@ class DocumentResource(
     private val queryUseCase: DocumentQueryUseCase,
     private val onboardingUseCase: OnboardingDocumentUseCase,
     private val externalDisclosureExportUseCase: ExternalDisclosureExportUseCase,
+    private val ownershipUseCase: DocumentOwnershipUseCase,
 ) {
 
     /**
@@ -191,6 +194,28 @@ class DocumentResource(
     @Authorize(action = "document.read", resource = "#id")
     suspend fun getDocument(@PathParam("id") id: UUID) =
         queryUseCase.getMetadata(id)?.toResponse() ?: throw NotFoundException()
+
+    /**
+     * ADR-0375 D5 — the ownership projection: the owning party of a document and nothing else.
+     *
+     * delegation-service calls this before minting an OBJECT_READ grant over a document. Before it
+     * existed, `ResourceOwnershipClient` answered UNVERIFIABLE for every object type and the offer
+     * path refused on that, so no object grant could be created at all — while customer-edge's
+     * reader for one was already written and its KDoc described the sharing path as fixed.
+     *
+     * Deliberately NOT `document.read`, which returns the whole metadata record and is granted to
+     * other subjects: the authority needed to mint a delegation must not also be able to read the
+     * document. 404 covers both "no such document" and "no owner recorded" — a caller's gate treats
+     * them identically (definitively not this grantor's) and the distinction would leak existence.
+     */
+    @GET
+    @Path("/{id}/owner")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "document.verifyOwnership", resource = "#id")
+    suspend fun getDocumentOwner(@PathParam("id") id: UUID): DocumentOwnerResponse {
+        val partyId = ownershipUseCase.ownerOf(id) ?: throw NotFoundException()
+        return DocumentOwnerResponse(id = id, partyId = partyId)
+    }
 
     @GET
     @Path("/{id}/content")

@@ -141,7 +141,7 @@ sequenceDiagram
 
   S->>DB: INSERT platba + INSERT outbox(status=PENDING) [stejná TX]
   loop @Scheduled á 5s (dávka 25, SKIP soubězné)
-    D->>DB: listProcessable(25)  (PENDING, nejstarší první)
+    D->>DB: claimWithTokens(25)
     D->>K: publishWithResilience(payload)  (CircuitBreaker+Retry+Timeout+Bulkhead)
     alt publikováno
       D->>DB: markClaimsSent(claims)

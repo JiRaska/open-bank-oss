@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.integration
 
+import com.openbank.ledger.fixtures.journalTransaction
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -41,6 +42,11 @@ import java.util.UUID
  *
  * Dropping the currency filter makes the debit 1500 and the test red; so does summing
  * `base_amount` (26000) instead of `amount`.
+ *
+ * Every POSTED journal also carries a mirror leg on a third, contra account (ADR-0372: the database
+ * refuses a posted journal that does not net to zero per settlement currency). The mirror has the
+ * same native amount and currency on the opposite side, so an implementation that forgot the
+ * account filter would read debit == credit and fail every assertion below.
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.ledger.it.PostgresRedpandaTestResource::class)
@@ -48,52 +54,65 @@ class AccountCurrencyBalanceIT {
 
     private val code = "T" + UUID.randomUUID().toString().replace("-", "").take(12)
     private val otherCode = "T" + UUID.randomUUID().toString().replace("-", "").take(12)
+    private val contraCode = "T" + UUID.randomUUID().toString().replace("-", "").take(12)
+    private lateinit var contra: UUID
 
     @BeforeEach
     fun seed() {
-        connection().use { c ->
-            val account = insertAccount(c, code, "EUR")
-            val other = insertAccount(c, otherCode, "CZK")
-            posted(c, BEFORE).line(c, account, "D", "1000", "EUR", "25000", null)
-            posted(c, AS_OF).line(c, account, "C", "300", "EUR", "7500", null)
-            // FX revaluation shape (FxRevaluationPosting): a CZK line, base CZK, fx_rate carried.
-            posted(c, AS_OF).line(c, account, "D", "500", "CZK", "500", "25.1")
-            posted(c, AFTER).line(c, account, "D", "50", "EUR", "1250", null)
-            entry(c, BEFORE, "PENDING").line(c, account, "D", "70", "EUR", "1750", null)
-            posted(c, BEFORE).line(c, other, "D", "999", "CZK", "999", null)
-            posted(c, BEFORE).line(c, other, "D", "11", "EUR", "275", null)
+        connection().use { connection ->
+            connection.journalTransaction { c -> seedJournals(c) }
         }
     }
 
+    private fun seedJournals(c: Connection) {
+        val account = insertAccount(c, code, "EUR")
+        val other = insertAccount(c, otherCode, "CZK")
+        contra = insertAccount(c, contraCode, "CZK")
+        posted(c, BEFORE).line(c, account, "D", "1000", "EUR", "25000", null)
+        posted(c, AS_OF).line(c, account, "C", "300", "EUR", "7500", null)
+        // FX revaluation shape (FxRevaluationPosting): a CZK line, base CZK, fx_rate carried.
+        posted(c, AS_OF).line(c, account, "D", "500", "CZK", "500", "25.1")
+        posted(c, AFTER).line(c, account, "D", "50", "EUR", "1250", null)
+        entry(c, BEFORE, "PENDING").line(c, account, "D", "70", "EUR", "1750", null)
+        posted(c, BEFORE).line(c, other, "D", "999", "CZK", "999", null)
+        posted(c, BEFORE).line(c, other, "D", "11", "EUR", "275", null)
+    }
+
     /**
-     * The seeded journals are deliberately unbalanced and mixed-currency, so they must not outlive
-     * this class: the trial-balance tie-out and the journal listing in sibling ITs read the same
-     * database and would fail on them.
+     * The seeded journals are mixed-currency on throwaway accounts, so they must not outlive this
+     * class: the trial-balance tie-out and the journal listing in sibling ITs read the same
+     * database. Removing posted rows is a declared repair (ADR-0372).
      */
     @AfterEach
     fun cleanUp() {
-        connection().use { c ->
-            c.prepareStatement(
-                "delete from journal_entries where id in (select jl.journal_id from journal_lines jl " +
-                    "join gl_accounts ga on ga.id = jl.gl_account_id where ga.code in (?, ?))",
-            ).use {
-                it.setString(1, code)
-                it.setString(2, otherCode)
-                it.executeUpdate()
-            }
-            c.prepareStatement(
-                "delete from journal_lines where gl_account_id in (select id from gl_accounts where code in (?, ?))",
-            ).use {
-                it.setString(1, code)
-                it.setString(2, otherCode)
-                it.executeUpdate()
-            }
-            c.prepareStatement("delete from gl_accounts where code in (?, ?)")
-                .use {
+        connection().use { connection ->
+            connection.journalTransaction("AccountCurrencyBalanceIT fixture cleanup") { c ->
+                c.prepareStatement(
+                    "delete from journal_entries where id in (select jl.journal_id from journal_lines jl " +
+                        "join gl_accounts ga on ga.id = jl.gl_account_id where ga.code in (?, ?, ?))",
+                ).use {
                     it.setString(1, code)
                     it.setString(2, otherCode)
+                    it.setString(3, contraCode)
                     it.executeUpdate()
                 }
+                c.prepareStatement(
+                    "delete from journal_lines where gl_account_id in " +
+                        "(select id from gl_accounts where code in (?, ?, ?))",
+                ).use {
+                    it.setString(1, code)
+                    it.setString(2, otherCode)
+                    it.setString(3, contraCode)
+                    it.executeUpdate()
+                }
+                c.prepareStatement("delete from gl_accounts where code in (?, ?, ?)")
+                    .use {
+                        it.setString(1, code)
+                        it.setString(2, otherCode)
+                        it.setString(3, contraCode)
+                        it.executeUpdate()
+                    }
+            }
         }
     }
 
@@ -161,7 +180,7 @@ class AccountCurrencyBalanceIT {
         }
     }
 
-    private class Entry(val id: UUID, val date: LocalDate)
+    private class Entry(val id: UUID, val date: LocalDate, val posted: Boolean)
 
     private fun posted(c: Connection, date: LocalDate) = entry(c, date, "POSTED")
 
@@ -179,9 +198,10 @@ class AccountCurrencyBalanceIT {
             it.setObject(6, UUID.fromString(USER))
             it.executeUpdate()
         }
-        return Entry(id, date)
+        return Entry(id, date, status != "PENDING")
     }
 
+    /** One leg on [account]; a POSTED entry also gets its mirror leg on the contra account. */
     @Suppress("LongParameterList")
     private fun Entry.line(
         c: Connection,
@@ -192,18 +212,25 @@ class AccountCurrencyBalanceIT {
         baseAmount: String,
         fxRate: String?,
     ) {
-        c.prepareStatement(
-            "insert into journal_lines (journal_id, gl_account_id, side, amount, currency_code, fx_rate, " +
-                "base_amount, base_currency, sequence) values (?, ?, ?, ?, ?, ?, ?, 'CZK', 1)",
-        ).use {
-            it.setObject(1, id)
-            it.setObject(2, account)
-            it.setString(3, side)
-            it.setBigDecimal(4, BigDecimal(amount))
-            it.setString(5, currency)
-            it.setBigDecimal(6, fxRate?.let(::BigDecimal))
-            it.setBigDecimal(7, BigDecimal(baseAmount))
-            it.executeUpdate()
+        val legs = buildList {
+            add(account to side)
+            if (posted) add(contra to (if (side == "D") "C" else "D"))
+        }
+        legs.forEachIndexed { index, (legAccount, legSide) ->
+            c.prepareStatement(
+                "insert into journal_lines (journal_id, gl_account_id, side, amount, currency_code, fx_rate, " +
+                    "base_amount, base_currency, sequence) values (?, ?, ?, ?, ?, ?, ?, 'CZK', ?)",
+            ).use {
+                it.setObject(1, id)
+                it.setObject(2, legAccount)
+                it.setString(3, legSide)
+                it.setBigDecimal(4, BigDecimal(amount))
+                it.setString(5, currency)
+                it.setBigDecimal(6, fxRate?.let(::BigDecimal))
+                it.setBigDecimal(7, BigDecimal(baseAmount))
+                it.setInt(8, index + 1)
+                it.executeUpdate()
+            }
         }
     }
 

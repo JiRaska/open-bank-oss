@@ -26,6 +26,7 @@ const STATUS_STYLE: Record<CoverageStatus, { color: string; bg: string }> = {
   missing: { color: 'var(--danger-text)', bg: 'var(--danger-bg)' },
   'data-only': { color: 'var(--warning-text)', bg: 'var(--warning-bg)' },
   'bff-only': { color: 'var(--warning-text)', bg: 'var(--warning-bg)' },
+  'computed-preview': { color: 'var(--warning-text)', bg: 'var(--warning-bg)' },
   'filed-return': { color: 'var(--success-text)', bg: 'var(--success-bg)' },
   conditional: { color: 'var(--text-secondary)', bg: 'var(--surface-3)' },
   external: { color: 'var(--text-secondary)', bg: 'var(--surface-3)' },
@@ -45,6 +46,7 @@ export function RegulatoryObligations({ register }: { register: ObligationRegist
 
   const statusLabel: Record<CoverageStatus, string> = {
     'filed-return': t('Výkaz počítá backend', 'Computed by a backend'),
+    'computed-preview': t('Náhled z backendu, nelze podat', 'Backend preview, not fileable'),
     'bff-only': t('Výkaz počítá jen admin-ui', 'Computed in admin-ui only'),
     'data-only': t('Data ano, výkaz ne', 'Data exists, no return'),
     missing: t('Chybí', 'Missing'),

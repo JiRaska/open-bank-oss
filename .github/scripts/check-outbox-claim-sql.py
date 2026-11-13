@@ -40,7 +40,6 @@ BASELINE: dict[str, int] = {
     "openbank-consent-service/src/main/kotlin/com/openbank/consent/infrastructure/persistence/repository/ConsentOutboxRepositoryImpl.kt": 1,
     "openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/persistence/repository/DelegationOutboxRepositoryImpl.kt": 1,
     "openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/infrastructure/persistence/repository/DelegatedSpendBindingRepositoryImpl.kt": 1,
-    "openbank-fraud-service/src/main/kotlin/com/openbank/fraud/infrastructure/persistence/FraudOutboxRepositoryImpl.kt": 1,
     "openbank-fx-service/src/main/kotlin/com/openbank/fx/infrastructure/persistence/repository/FxOutboxRepositoryImpl.kt": 1,
     "openbank-incentive-service/src/main/kotlin/com/openbank/incentive/infrastructure/persistence/IncentivePersistence.kt": 1,
     "openbank-interest-service/src/main/kotlin/com/openbank/interest/infrastructure/persistence/repository/InterestOutboxRepositoryImpl.kt": 1,

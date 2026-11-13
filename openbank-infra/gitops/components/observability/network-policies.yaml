@@ -31,7 +31,7 @@ metadata:
   namespace: observability
   labels:
     app.kubernetes.io/part-of: observability
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -65,7 +65,7 @@ metadata:
   namespace: observability
   labels:
     app.kubernetes.io/part-of: observability
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -90,7 +90,7 @@ metadata:
   namespace: observability
   labels:
     app.kubernetes.io/part-of: observability
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -122,7 +122,7 @@ metadata:
   namespace: observability
   labels:
     app.kubernetes.io/part-of: observability
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
