@@ -40,7 +40,12 @@ interface DomesticPaymentRepository {
 
     suspend fun findByIdempotencyKey(idempotencyKey: String): DomesticPayment?
 
-    suspend fun findCustomerSubmission(idempotencyKey: String, debtorAccountId: UUID, scope: String): DomesticPayment?
+    suspend fun findCustomerSubmission(
+        idempotencyKey: String,
+        debtorAccountId: UUID,
+        scope: String,
+        originalSubmissionKeyDigest: String? = null,
+    ): DomesticPayment?
 
     suspend fun list(
         status: DomesticPaymentStatus?,
