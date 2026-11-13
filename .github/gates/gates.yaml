@@ -6287,7 +6287,7 @@ gates:
     group: security
     mode: enforced
     needs_base: optional
-    verified: "2026-11-06 — self-test pins red, absent, skipped, stale-green-masking, no-envelope, per-row attribution and baseline-growth cases; CLI run red on a skipped cited id and on an added baseline line"
+    verified: "2026-11-06 — self-test pins red, absent, skipped, stale-green-masking, no-envelope, per-row attribution and baseline-growth cases; CLI run red on a skipped cited id and on an added baseline line. 2026-11-12 — a cited test class ADDED by the diff under the same component's src/test is a warning (its own PR CI runs it); self-test red without the exemption, CLI run on the sanctions branch warns on C8"
     min_subjects: 23
     budget_seconds: 180
     rationale: "Resolving a cited test class by name proves it exists, not that it ran or passed: a class excluded from its CI task, skipped for a month or red on main still credited a mitigation. The next-latest envelope answers it."
