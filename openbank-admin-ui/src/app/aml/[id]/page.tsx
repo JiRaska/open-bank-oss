@@ -34,6 +34,7 @@ import {
 import { fetchPartySummary, type AmlPartySummary } from '@/lib/aml/usePartyNames'
 import { AmlCaseInvestigation } from '@/components/context/AmlCaseInvestigation'
 import { EntityChip } from '@/components/entities/EntityChip'
+import { AmlFourEyesPanel } from '@/components/aml/AmlFourEyesPanel'
 
 type Tr = (cs: string, en: string) => string
 
@@ -182,13 +183,16 @@ export default function AmlCaseDetailPage() {
     return () => controller.abort()
   }, [transactionId])
 
-  const transitions = amlCase ? allowedTransitions(amlCase.status) : []
+  // A four-eyes case may only be taken into review directly; closing goes through the panel below.
+  const transitions = amlCase
+    ? allowedTransitions(amlCase.status).filter(s => !amlCase.requiresFourEyesDisposition || s === 'UNDER_REVIEW')
+    : []
   const priorCases = useMemo(() => (otherCases ?? []).filter(c => c.id !== caseId), [otherCases, caseId])
   const priorConcerns = priorCases.filter(c => c.status === 'BLOCKED' || c.status === 'ESCALATED').length
 
   async function submitDecision() {
     if (!amlCase || !target) return
-    if (!officer) { setDecisionError(t('Nelze určit přihlášeného officera — obnovte relaci.', 'Cannot identify the signed-in officer — refresh your session.')); return }
+    if (target === 'UNDER_REVIEW' && !officer) { setDecisionError(t('Nelze určit přihlášeného officera — obnovte relaci.', 'Cannot identify the signed-in officer — refresh your session.')); return }
     if (requiresReason(target) && reason.trim().length < 10) { setDecisionError(t('Zdůvodnění musí mít alespoň 10 znaků — popište, co jste ověřili.', 'The rationale needs at least 10 characters — describe what you verified.')); return }
     setSubmitting(true); setDecisionError(null); setDecisionOk(null)
     try {
@@ -198,8 +202,9 @@ export default function AmlCaseDetailPage() {
         body: JSON.stringify({
           targetStatus: target,
           decisionReason: reason.trim() || null,
-          assignedAnalyst: target === 'UNDER_REVIEW' ? officer : (amlCase.assignedAnalyst ?? officer),
-          decidedBy: officer,
+          // No `decidedBy`: aml-service records the authenticated principal (ADR-0371 §5) and
+          // ignores a name in the body, so sending one would only suggest it mattered.
+          assignedAnalyst: target === 'UNDER_REVIEW' ? officer : amlCase.assignedAnalyst,
         }),
       })
       if (res.status === 403) { setDecisionError(t('K rozhodnutí o AML případu nemáte oprávnění (potřeba ROLE_COMPLIANCE nebo ROLE_OPERATOR).', 'You are not permitted to decide AML cases (requires ROLE_COMPLIANCE or ROLE_OPERATOR).')); return }
@@ -301,6 +306,7 @@ export default function AmlCaseDetailPage() {
               {!isOpenAmlStatus(amlCase.status)
                 ? <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 12 }}>{t('Případ je uzavřen. Další rozhodnutí již nelze zaznamenat.', 'The case is closed. No further decision can be recorded.')}</p>
                 : <div style={{ marginTop: 14 }}>
+                  {amlCase.requiresFourEyesDisposition && <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 8px' }}>{t('Uzavření nebo eskalace tohoto případu jde přes čtyři oči — viz panel níže.', 'Closing or escalating this case goes through four eyes — see the panel below.')}</p>}
                   <div role="group" aria-label={t('Volba rozhodnutí', 'Decision choice')} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     {transitions.map(s => {
                       const a = actionCopy(s, t)
@@ -320,7 +326,7 @@ export default function AmlCaseDetailPage() {
                         {submitting ? t('Ukládám…', 'Saving…') : t('Potvrdit', 'Confirm')}: {statusLabel(target, t)}
                       </button>
                       <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setTarget(null); setReason('') }}>{t('Zrušit', 'Cancel')}</button>
-                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{t('Zapíše se jako', 'Recorded as')}: {officer || '—'}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{t('Zapíše se pod váš přihlášený účet', 'Recorded under your signed-in account')}</span>
                     </div>
                   </div>}
                 </div>}
@@ -347,6 +353,8 @@ export default function AmlCaseDetailPage() {
               </div>
             </Card>
           </div>
+
+          <AmlFourEyesPanel key={`4e-${amlCase.id}`} amlCase={amlCase} onCaseChanged={() => { setLoading(true); void loadCase() }} />
 
           <AmlCaseInvestigation key={amlCase.id} initialCaseId={amlCase.id} fixedCase />
         </>}

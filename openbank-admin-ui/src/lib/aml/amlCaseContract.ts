@@ -9,6 +9,12 @@ export interface AmlCase {
   alertCode: string; alertDetail: string | null; matchedEntity: string | null
   decisionReason: string | null; assignedAnalyst: string | null; decidedBy: string | null
   screenedAt: string; decidedAt: string | null; createdAt: string; updatedAt: string
+  /**
+   * The case closes only through a four-eyes disposition (aml-service ADR-0371 §5). Absent on an
+   * aml-service older than openapi 1.5.0, which reads as false: the direct decision is then offered
+   * and the service still refuses it for a pack-monitoring case, so the fallback is safe.
+   */
+  requiresFourEyesDisposition: boolean
 }
 
 const record = (value: unknown): Record<string, unknown> => {
@@ -53,6 +59,7 @@ export function parseAmlCase(value: unknown): AmlCase {
     assignedAnalyst: optionalString(item.assignedAnalyst, 'assignedAnalyst'), decidedBy: optionalString(item.decidedBy, 'decidedBy'),
     screenedAt: instant(item.screenedAt, 'screenedAt'), decidedAt: optionalInstant(item.decidedAt, 'decidedAt'),
     createdAt: instant(item.createdAt, 'createdAt'), updatedAt: instant(item.updatedAt, 'updatedAt'),
+    requiresFourEyesDisposition: item.requiresFourEyesDisposition === true,
   }
 }
 
