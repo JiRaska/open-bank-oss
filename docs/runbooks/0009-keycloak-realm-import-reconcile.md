@@ -123,7 +123,7 @@ survives in it.
    ACCOUNT_CLIENT_SECRET=... SDD_CLIENT_SECRET=... STANDING_ORDER_CLIENT_SECRET=... \
    SEPA_PAYMENT_CLIENT_SECRET=... LENDING_CLIENT_SECRET=... CLEARING_CLIENT_SECRET=... \
    DOMESTIC_PAYMENT_CLIENT_SECRET=... SEPA_INSTANT_CLIENT_SECRET=... SWIFT_CLIENT_SECRET=... \
-   TRANSACTION_CLIENT_SECRET=... SETTLEMENT_CLIENT_SECRET=... FX_CLIENT_SECRET=... KYB_CLIENT_SECRET=... \
+   TRANSACTION_CLIENT_SECRET=... SETTLEMENT_CLIENT_SECRET=... FX_CLIENT_SECRET=... KYB_CLIENT_SECRET=... KYC_CLIENT_SECRET=... \
    ANALYTICS_SINK_CLIENT_SECRET=... BILLING_CLIENT_SECRET=... DOCUMENT_CLIENT_SECRET=... PARTY_CLIENT_SECRET=... \
    COPILOT_CLIENT_SECRET=... CAMPAIGN_CLIENT_SECRET=... DELEGATION_CLIENT_SECRET=... \
    AGENT_CLIENT_SECRET=... MCP_CLIENT_SECRET=... STATEMENT_CLIENT_SECRET=... \
@@ -436,6 +436,22 @@ document-service admits this caller only by `input.principal.id ==
 "service-account-openbank-delegation-disclosure"`, so the client needs the `profile` scope like
 every other per-service client. Without it the token has no `preferred_username` and the export
 is denied with a 403.
+
+### kyc-service — sanctions screens and party register read (#15723)
+
+Same recipe, same script, one more client. Consumed in the `kyc` namespace by the named oidc-client
+`m2m`. kyc-service's case-open call to the case coordinator stays on the shared client: that route
+is `ROLE_OPERATOR`-gated and this client holds `ROLE_API` only.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-kyc` | `keycloak/kyc-service` | `kyc-service-m2m-oidc` (kyc) | `KYC_CLIENT_SECRET` |
+
+Order matters, as for every client above: create the client and its service-account role, seed
+the Vault entry, confirm the ExternalSecret reports `SecretSynced`, and only then let the
+kyc-service manifest and image roll. Rollback is the reverse of the consumer only: revert the
+consuming change and the pod returns to the shared client for every call; the Keycloak client and
+the Vault entry can stay, since nothing else presents them.
 
 ### Synthetic journey identity: Product Catalog read (#7324)
 

@@ -44,6 +44,20 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    # #15723: the sanctions screens and the party register read no longer ride the shared
+    # openbank-services principal. Those rest-clients select this NAMED client
+    # (@OidcClientFilter("m2m")), so their token's principal is service-account-openbank-kyc
+    # (ROLE_API only): sanctions-service can then tell kyc-service from every other caller, which
+    # is what lets it own the subjects it registers for ongoing monitoring. The case-coordinator
+    # rest-client stays on the default (shared) client above: its case-open route is
+    # ROLE_OPERATOR-gated and this client deliberately does not hold that role.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-kyc
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
   rest-client:
     sanctions-service:
       url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
