@@ -15,14 +15,14 @@ const tmCaseId = '44444444-4444-4444-8444-444444444444'
 const partyId = '22222222-2222-4222-8222-222222222222'
 
 const onboardingCase = {
-  id: caseId, partyId, accountId: null, transactionId: null, customerReference: `onboarding-${partyId}`,
+  id: caseId, idempotencyKey: `onboarding-${partyId}`, partyId, accountId: null, transactionId: null, customerReference: `onboarding-${partyId}`,
   screeningType: 'CUSTOMER_ONBOARDING', riskLevel: 'HIGH', status: 'OPEN', alertCode: 'PEP_MATCH',
   alertDetail: 'Name matches a domestic PEP entry', matchedEntity: 'Jan Novák (PEP)', decisionReason: null,
   assignedAnalyst: null, decidedBy: null, screenedAt: '2026-11-12T08:00:00Z', decidedAt: null,
   createdAt: '2026-11-12T08:00:00Z', updatedAt: '2026-11-12T08:00:00Z', requiresFourEyesDisposition: false,
 }
 const monitoringCase = {
-  ...onboardingCase, id: tmCaseId, customerReference: 'tm:velocity', screeningType: 'TRANSACTION_MONITORING',
+  ...onboardingCase, id: tmCaseId, idempotencyKey: 'tm:velocity-1', customerReference: 'tm:velocity', screeningType: 'TRANSACTION_MONITORING',
   alertCode: 'TM_VELOCITY', alertDetail: '12 incoming transfers in 24 h', matchedEntity: null,
   status: 'UNDER_REVIEW', assignedAnalyst: 'alice', requiresFourEyesDisposition: true,
 }
@@ -80,8 +80,14 @@ test('a pack-monitoring case is closed only through a four-eyes proposal built f
   await page.route('**/api/svc/aml-service/api/v1/aml/reports?**', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
   await page.route(`**/api/svc/aml-service/api/v1/aml/monitoring/cases/${tmCaseId}/disposition-proposals`, async route => {
-    proposals.push(route.request().postDataJSON())
-    await route.fulfill({ status: 201, contentType: 'application/json', body: '{}' })
+    const sent = route.request().postDataJSON()
+    proposals.push(sent)
+    await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({
+      proposalId: 'proposal-1', caseId: tmCaseId, disposition: sent.disposition,
+      outcome: { vocabularyId: 'aml-decision-outcomes', vocabularyRevision: 1, vocabularyHash: 'h', code: sent.outcomeCode },
+      note: sent.note, state: 'PROPOSED', proposedBy: 'operator', proposedAt: '2026-11-13T09:00:00Z',
+      decidedBy: null, decidedAt: null, decisionReason: null, executedAt: null,
+    }) })
   })
   await page.route(`**/api/svc/party-service/api/v1/parties/${partyId}`, route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: partyId, legalName: 'Jan Novák' }) }))
