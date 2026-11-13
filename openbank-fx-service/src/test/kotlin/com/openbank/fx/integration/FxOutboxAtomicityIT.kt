@@ -4,6 +4,9 @@
 
 package com.openbank.fx.integration
 
+import com.openbank.fx.application.port.out.ScreeningEntityType
+import com.openbank.fx.application.port.out.ScreeningSubject
+import com.openbank.fx.infrastructure.client.PartyNameAdapter
 import com.openbank.fx.infrastructure.client.SanctionsScreeningAdapter
 import com.openbank.libs.fincrime.ScreeningMatchStatus
 import com.openbank.libs.fincrime.ScreeningResult
@@ -85,7 +88,7 @@ class FxOutboxAtomicityIT {
         val port = mockk<SanctionsScreeningAdapter>()
         coEvery { port.screen(any(), any(), any()) } answers {
             ScreeningResult(
-                subject = firstArg(),
+                subject = firstArg<ScreeningSubject>().primaryName,
                 role = ScreeningRole.DEBTOR,
                 status = ScreeningMatchStatus.CLEAR,
                 score = 0.0,
@@ -93,6 +96,11 @@ class FxOutboxAtomicityIT {
             )
         }
         QuarkusMock.installMockForType(port, SanctionsScreeningAdapter::class.java)
+        // The screened identity comes from party-service; without a name the conversion is held.
+        val names = mockk<PartyNameAdapter>()
+        coEvery { names.screeningSubject(any()) } returns
+            ScreeningSubject(listOf("Jan Novak"), ScreeningEntityType.INDIVIDUAL)
+        QuarkusMock.installMockForType(names, PartyNameAdapter::class.java)
     }
 
     @Test

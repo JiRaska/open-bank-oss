@@ -41,7 +41,7 @@ Tělo požadavku (`ConvertRequest`):
 }
 ```
 
-`partyName` je synchronně prověřen proti sankčním seznamům (ADR-0032). Konverze je spočítána z `askRate` posledního platného **SPOT** kurzu; aplikuje se fixní **0,5% poplatek** (`feeMinorUnits`), zaokrouhleno `HALF_UP` na celé minor units.
+`partyName` je **zastaralé a ignoruje se**. Konverze se synchronně prověřuje proti sankčním seznamům (ADR-0032) pod jmény, která pro `partyId` eviduje party-service (právní a obchodní jméno, s vlastním typem klienta); jméno zaslané volajícím se neprověřuje nikdy. Pokud klient není znám nebo nemá jméno, konverze se zadrží (`PENDING`) stejně, jako když je screening nedostupný. Konverze je spočítána z `askRate` posledního platného **SPOT** kurzu; aplikuje se fixní **0,5% poplatek** (`feeMinorUnits`), zaokrouhleno `HALF_UP` na celé minor units.
 
 Odpověď — `201 Created`, `Location: /api/v1/fx/conversions/{id}` (`ConversionResponse`):
 

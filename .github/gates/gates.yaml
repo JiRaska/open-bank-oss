@@ -76,6 +76,33 @@
 #
 gates:
 
+  - id: credential-expiry-watch-coverage
+    name: "Every CI PAT/token secret is probed by the expiry watch (#15483)"
+    group: lint
+    mode: enforced
+    rationale: "A GitHub PAT expiring broke merged-past-red-check-watch on the day with no warning (2026-11-12). date-driven-expiry-watch.yml probes each PAT daily; its list is checked against every *_PAT/*_TOKEN secret the workflows read, so a new credential cannot sit outside the watch while it reports green."
+    review_after: "2027-05-12"
+    budget_seconds: 30
+    min_subjects: 3
+    selftest: python3 .github/scripts/check-credential-expiry.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-credential-expiry.py"]
+    run: |
+      python3 .github/scripts/check-credential-expiry.py --coverage .github/workflows/date-driven-expiry-watch.yml
+
+  - id: apt-pin-verdicts-falsifiable
+    name: "apt pin freshness verdicts stay reachable (#15483)"
+    group: lint
+    mode: enforced
+    rationale: "The daily apt-pin probe must tell OK, SUPERSEDED and MISSING apart, and must never read an empty index (the 2026-11-11 DNS-failure shape) as OK. The live archive query runs in date-driven-expiry-watch.yml; this keeps its classifier falsified on every PR without network."
+    review_after: "2027-05-12"
+    budget_seconds: 30
+    # One subject per verdict assertion: OK, SUPERSEDED, MISSING, empty-index-is-not-OK.
+    min_subjects: 4
+    selftest_exempt: "is-a-test-suite - the run: IS the classifier's own --self-test over fixtures, which fails when any verdict is sabotaged"
+    run: |
+      python3 .github/scripts/check-apt-pins.py --self-test
+
   - id: capacity-profile-consistency
     name: "Proposed capacity profile is internally consistent (ADR-0356)"
     group: registry
@@ -3380,7 +3407,7 @@ gates:
     rationale: "Without it the script's error paths are exercised only when a real spot reclaim coincides with a real API failure — which is how #6255 shipped a detection call with no transient handling at all, stranding a reclaimed run at attempt 1 and telling nobody."
     review_after: "2027-02-23"
     # Subjects are assertions, not files: the floor drops the day someone deletes a case.
-    min_subjects: 52   # every case incl. the Gradle-distribution outage recogniser
+    min_subjects: 78   # every case incl. the Gradle-distribution and GitHub-transient recognisers
     run: |
       bash .github/scripts/spot-kill-retry.sh --self-test
 
@@ -3411,7 +3438,7 @@ gates:
     budget_seconds: 10
     rationale: "The scheduled reconciler replaces a per-completion listener; a broad or duplicate candidate set would recreate the API and runner amplification it removes."
     review_after: "2027-03-11"
-    min_subjects: 16
+    min_subjects: 19
     run: |
       python3 .github/scripts/select-ci-reconcile-candidates.py --self-test
 
@@ -6287,7 +6314,7 @@ gates:
     group: security
     mode: enforced
     needs_base: optional
-    verified: "2026-11-06 — self-test pins red, absent, skipped, stale-green-masking, no-envelope, per-row attribution and baseline-growth cases; CLI run red on a skipped cited id and on an added baseline line"
+    verified: "2026-11-06 — self-test pins red, absent, skipped, stale-green-masking, no-envelope, per-row attribution and baseline-growth cases; CLI run red on a skipped cited id and on an added baseline line. 2026-11-12 — a cited test class ADDED by the diff under the same component's src/test is a warning (its own PR CI runs it); self-test red without the exemption, CLI run on the sanctions branch warns on C8"
     min_subjects: 23
     budget_seconds: 180
     rationale: "Resolving a cited test class by name proves it exists, not that it ran or passed: a class excluded from its CI task, skipped for a month or red on main still credited a mitigation. The next-latest envelope answers it."

@@ -13,6 +13,22 @@ package com.openbank.libs.fincrime.admission
  * nothing. Reordering these constants is a behaviour change for every rail.
  */
 enum class AdmissionStep {
+    /**
+     * Whose money this is: the actor may debit this account, as its owner or under a delegation
+     * grant carrying the capability the action needs (ADR-0375 D1).
+     *
+     * First by the ordering rule above, not by seniority — it is the cheapest, most local and most
+     * deterministic question in the chain, and a payment refused here costs no remote call and
+     * leaks nothing to a later control. It is also a different question from [STANDING]: standing
+     * asks whether the ACCOUNT may transact at all, this asks whether this ACTOR may move it.
+     *
+     * Why it exists as a step rather than a guard at the edge: ADR-0232 D3 assigned the check to
+     * each product service, and three months later one payment rail of six performed it — a
+     * delegate was answered `403` on the other five, fail-closed and silent. One step the rail
+     * cannot omit replaces six guards it can.
+     */
+    AUTHORITY,
+
     /** Debtor party and account may transact: not frozen, blocked or closed. */
     STANDING,
 

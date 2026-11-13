@@ -121,3 +121,15 @@ Post-booking monitoring records booked money movement and counts it per party. N
 - A movement is attributed (party, rail) and counted in one transaction by the `aml-movement-attribution` sweep. A booking with no originating transaction event is counted under rail `NONE` after `origin-grace`. A movement whose account has no known party stays uncounted and is retried.
 - Known limits: a reversal is booked by the ledger as an opposite movement and counts as one; counterparty attributes are on no event today.
 - These tables hold party and account identifiers and amounts. They are monitoring records under the same retention duty as cases; the period is not asserted here (ADR-0371).
+
+## Transaction-monitoring evaluation (ADR-0371, migration V12)
+
+| Table | Key | Purpose |
+|---|---|---|
+| `aml_monitoring_evaluation` | `(party_id, pack_hash)` | latest evaluation of a party under one pack content: `NO_FINDING`, `FINDING` or `INCOMPLETE` with the reason |
+| `aml_monitoring_hit` | `hit_id`; unique `(party_id, scenario_code, window_start)` | one row per party, scenario and window with the pack hash and the counter snapshot; a repeat detection refreshes it |
+
+- There is no "clear" outcome. `NO_FINDING` means the pack's rules did not match the counts; `INCOMPLETE` means the pack could not be evaluated. Neither is a statement about the party.
+- The pack, its two vocabularies and its count features are **data** (`openbank.aml.monitoring.pack.*`). The shipped files are synthetic. A feature is pinned by a hash over its currency, band, direction, rail and window, so editing a window invalidates the pack's pin and the service does not start.
+- SHADOW is the default: a hit is recorded and nothing else happens. With `openbank.aml.monitoring.evaluation.open-cases=true` a hit opens an `AmlCase` of type `TRANSACTION_MONITORING` keyed by party, scenario and window.
+- Shipped scenarios: repeated movements in a below-mark band (three currency/direction variants). Rapid pass-through and activity after long inactivity are **not** shipped: a pack rule compares one count with a minimum, and those two need a conjunction of counts and an absence respectively.

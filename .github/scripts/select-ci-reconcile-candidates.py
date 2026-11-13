@@ -9,7 +9,12 @@ import json
 import sys
 from pathlib import Path
 
-WATCHED = {"Services CI", "Security scan", "Dependency submission"}
+WATCHED = {"Services CI", "Security scan", "Dependency submission", "CI"}
+# `CI` (ci.yml) is watched for FAILURES only: its gate shards go red NOT EVALUATED when the
+# installation API quota runs out, which spot-kill-retry.sh re-runs after the quota resets. Its
+# cancellations are concurrency supersessions on GitHub-hosted runners, never a spot reclaim, so
+# a `cancelled` CI run is not a candidate at all.
+FAILURE_ONLY = {"CI"}
 SHORT_MINUTES = 30
 DEEP_CREATED_MINUTES = 24 * 60
 DEEP_UPDATED_MINUTES = 180
@@ -79,7 +84,8 @@ def select(runs: list[dict], now: dt.datetime, lookback_minutes: int) -> dict[st
             "head_sha": run.get("head_sha") or "",
             "head_branch": run.get("head_branch") or "",
         }
-        if item["run_attempt"] == 1 and item["conclusion"] in {"failure", "cancelled"}:
+        retryable = {"failure"} if item["workflow_name"] in FAILURE_ONLY else {"failure", "cancelled"}
+        if item["run_attempt"] == 1 and item["conclusion"] in retryable:
             retry[item["run_id"]] = item
         elif item["run_attempt"] > 1 and item["conclusion"] == "success":
             flakes[item["run_id"]] = item
@@ -98,9 +104,12 @@ def self_test() -> int:
         base | {"id": 5, "name": "Other", "conclusion": "failure", "run_attempt": 1},
         (base | {"id": 6, "name": "Services CI", "conclusion": "failure", "run_attempt": 1, "updated_at": "2026-09-10T22:00:00Z"}),
         base | {"id": 1, "name": "Services CI", "conclusion": "cancelled", "run_attempt": 1},
+        base | {"id": 9, "name": "CI", "conclusion": "failure", "run_attempt": 1},
+        base | {"id": 10, "name": "CI", "conclusion": "cancelled", "run_attempt": 1},
+        base | {"id": 11, "name": "CI", "conclusion": "failure", "run_attempt": 2},
     ]
     got = select(runs, now, 90)
-    assert [x["run_id"] for x in got["retry"]] == [1, 2]
+    assert [x["run_id"] for x in got["retry"]] == [1, 2, 9], got["retry"]
     assert [x["run_id"] for x in got["flakes"]] == [3]
     assert all(x["event"] == "pull_request" for x in got["retry"])
     short = query_window("short", now)
@@ -131,8 +140,8 @@ def self_test() -> int:
             pass
         else:
             raise AssertionError(f"incomplete API result passed: {invalid!r}")
-    print("SUBJECTS=16")
-    print("select-ci-reconcile-candidates self-test: 16 cases passed, 0 failed")
+    print("SUBJECTS=19")
+    print("select-ci-reconcile-candidates self-test: 19 cases passed, 0 failed")
     return 0
 
 

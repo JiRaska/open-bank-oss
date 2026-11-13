@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.37.0...account-service-v0.38.0) (2026-11-13)
+
+
+### Features
+
+* **account:** expose account standing and freeze a party's accounts when it loses standing (ADR-0374 step A2) ([#15745](https://github.com/JiRaska/open-bank-oss/issues/15745)) ([bc2ad95](https://github.com/JiRaska/open-bank-oss/commit/bc2ad959361d552dc856c7f06be71f436c66caeb))
+
 ## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.36.1...account-service-v0.37.0) (2026-11-12)
 
 

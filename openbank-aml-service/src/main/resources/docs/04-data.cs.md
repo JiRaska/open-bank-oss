@@ -121,3 +121,15 @@ Monitoring po zaúčtování zaznamenává zaúčtované pohyby a počítá je p
 - Pohyb přiřadí straně a kanálu a započítá v jedné transakci úloha `aml-movement-attribution`. Zaúčtování bez události původní transakce se po `origin-grace` započítá s kanálem `NONE`. Pohyb, jehož účet nemá známou stranu, zůstává nezapočítaný a zkouší se znovu.
 - Známá omezení: storno účtuje ledger jako opačný pohyb a počítá se jako pohyb; atributy protistrany dnes nenese žádná událost.
 - Tabulky obsahují identifikátory stran a účtů a částky. Jsou to záznamy monitoringu se stejnou povinností uchování jako případy; lhůtu tento dokument neuvádí (ADR-0371).
+
+## Vyhodnocení monitoringu transakcí (ADR-0371, migrace V12)
+
+| Tabulka | Klíč | Účel |
+|---|---|---|
+| `aml_monitoring_evaluation` | `(party_id, pack_hash)` | poslední vyhodnocení strany pod jedním obsahem balíčku: `NO_FINDING`, `FINDING` nebo `INCOMPLETE` s důvodem |
+| `aml_monitoring_hit` | `hit_id`; unikátní `(party_id, scenario_code, window_start)` | jeden řádek na stranu, scénář a okno s hashem balíčku a snímkem čítače; opakovaný nález ho obnoví |
+
+- Výsledek „čisté“ neexistuje. `NO_FINDING` znamená, že pravidla balíčku počtům neodpovídala; `INCOMPLETE`, že balíček nešlo vyhodnotit. Ani jedno není tvrzení o straně.
+- Balíček, jeho dva slovníky a jeho počítané příznaky jsou **data** (`openbank.aml.monitoring.pack.*`). Dodané soubory jsou syntetické. Příznak je připnut hashem přes měnu, pásmo, směr, kanál a okno, takže úprava okna zneplatní připnutí v balíčku a služba nenastartuje.
+- Výchozí režim je SHADOW: nález se zaznamená a nic dalšího se nestane. S `openbank.aml.monitoring.evaluation.open-cases=true` nález otevře `AmlCase` typu `TRANSACTION_MONITORING` s klíčem strana, scénář a okno.
+- Dodané scénáře: opakované pohyby v pásmu pod hranicí (tři varianty měna/směr). Rychlý průtok a aktivita po dlouhé nečinnosti dodány **nejsou**: pravidlo balíčku porovnává jeden počet s minimem a tyto dva scénáře potřebují konjunkci počtů, respektive nepřítomnost.
