@@ -66,6 +66,14 @@ The ADR-0344 instrument chart (ledger V35) and the V26/V34 additions are classif
 
 Accrued interest receivable (1520/1521) is one account shared by interbank placements and the ČNB deposit facility, so the facility's accrued interest is reported with loans and advances rather than with cash. Accrued interest payable 2310/2311 is likewise included in aggregate deposits. F01.02 r0130 is debt securities issued and r0150 is hedge-accounting derivatives, not central-bank or credit-institution deposits; both are zero for the current ledger chart. The datapoint ids for these rows and F01.01 r0030 were verified against the pinned Framework 4.2 / DPM 4.2.1 annotated workbook (#13603).
 
+## COREP liquidity coverage previews
+
+`GET /api/v1/corep/templates/{templateId}` serves C_72.00, C_73.00, C_74.00 and C_76.00 as internal previews. They use the total-currency `.a` coordinates in EBA 4.2 and read the combined CZK view from the same `TIED_OUT` risk-engine snapshot for `asOf`. [EBA Reporting Framework 4.2](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks/reporting-framework-42)
+
+C_72.00 reports market and pre-cap Article 9 values, including Level 2 at r0220 and Level 2A at r0230. C_73.00 reports the modelled outflow total and central-bank secured funding at r0930. C_74.00 reports the 75% bucket before the inflow reduction. C_76.00 uses r0300 for total outflows, r0330 for inflows in that bucket and r0360 for their reduction.
+
+Use `isDataGap` and `gapReason` to distinguish unavailable inputs or classifications from a measured zero. The model does not provide regulatory deposit classifications or the borrower sector for its loan factor. It also lacks the 90% and exempt inflow categories. The previews cover a subset of regulatory cells and are for internal analysis.
+
 ## Shared configuration defaults
 
 This service's `application.yaml` does not declare the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
