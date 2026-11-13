@@ -102,7 +102,7 @@ class DomesticSubmissionKeyUpgradeIT {
                     .load()
                     .migrate()
                 DriverManager.getConnection(url, username, password).use { connection ->
-                    check(installedVersion(connection) == "20")
+                    check(appliedVersions(connection).maxOf { it.toInt() } == 20)
                     connection.autoCommit = false
                     seedV20Payment(connection)
                     seedV20Outbox(connection)
