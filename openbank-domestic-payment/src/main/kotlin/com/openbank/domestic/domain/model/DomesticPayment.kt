@@ -95,6 +95,8 @@ data class DomesticPayment(
     val aggregateRevision: Long = 1,
     /** Absent when no authenticated customer scope was captured at submission. */
     val customerSubmissionScope: String? = null,
+    /** Original business submission digest supplied only when the Edge releases a mode-bound approval. */
+    val originalSubmissionKeyDigest: String? = null,
 ) {
     /** ISO 4217 code of [amount], the spelling every outbound contract and the column carry. */
     val currency: String get() = amount.currency.code

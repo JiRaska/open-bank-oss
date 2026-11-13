@@ -43,6 +43,29 @@ The candidate set is **not** diff-scoped per entry: kyc-service persists no part
 - The consumer's failure path rethrows to the connector so infrastructure failures dead-letter; coordinator-call failures are the row + outbox event's job, not Kafka's.
 - The `kyc_screening_triggers` table (Flyway V12) is append-audited: `state` transitions are updates, the diff columns are write-once.
 
+## Backlog metrics and alerts
+
+Issue #15961. The backlog is the set of `kyc_screening_triggers` rows in PENDING or OPEN_FAILED: list changes that have not yet reached the customer as an opened case. `RescreenBacklogGauge` samples it from the database once a minute (`openbank.kyc.screening-triggers.backlog-sample-interval`, default `1m`) with one aggregate over the leading `state` column of `ix_kyc_screening_triggers_retry`, so every pod publishes the same value and a restart loses nothing.
+
+| Metric | Meaning | Cold pod |
+|---|---|---|
+| `openbank_kyc_rescreen_backlog_pending{service="kyc"}` | Rows PENDING or OPEN_FAILED (in flight, retrying, or parked). | NaN until the first sample |
+| `openbank_kyc_rescreen_backlog_oldest_age_seconds{service="kyc"}` | `now() - created_at` of the oldest such row, by the database clock, from enqueue time. `0` only when the backlog is empty. Never from `next_attempt_at`, which each retry pushes forward. | NaN until the first sample |
+| `openbank_kyc_rescreen_loop_disabled_with_pending{service="kyc"}` | `1` when `enabled` or `retry-enabled` is false and the backlog is non-empty, else `0`. A separate series, so "off and empty" and "off with work left" never share a value. | NaN until the first sample |
+
+NaN, not 0 and not an epoch-derived age: a cold pod neither claims an empty healthy queue nobody measured nor reports decades. A failed sample keeps the previous values, so a database outage cannot clear a firing alert; the `kyc-rescreen-backlog-sample` heartbeat goes stale instead.
+
+**Deadline: 24 hours.** ADR-0256 promises a list change reaches the customer within the refresh cycle, and the lists refresh daily. The healthy worst case is about an hour (five attempts with a 5-minute-times-attempt backoff), so a row older than a day will be overtaken by the next list change.
+
+- `KycRescreenBacklogOverdue` (critical): oldest age above 86400 s for 15 minutes, unless the loop is disabled with pending work.
+- `KycRescreenLoopDisabledWithPending` (warning): the disabled-with-pending series is 1 for 30 minutes.
+
+- `KycSanctionsListChangeDroppedWhileDisabled` (warning): the consumer's `disabled` outcome moved within the last hour, so a list change was dropped unscreened while the switch was off.
+
+**Why a change is dropped, not queued, while the switch is off.** Queueing the trigger row anyway would look like the cleaner fix, because turning the loop on would then re-screen what was missed. It is not safe with the current code: `ScreeningTriggerRetryJob` is gated only on `retry-enabled` (default true) and claims any PENDING row whose lease has expired, so a row queued while off would reach the case coordinator about ten minutes later. That would switch the loop on behind the rollout gate. The drop is alerted on instead. Queueing while off needs the retry job to honour the master switch first, which is a behaviour change for its own PR.
+
+The first two alerts cannot fire for the shipped default (loop off, table empty: age 0, disabled-with-pending 0). Tests: `openbank-infra/tests/promtool/kyc_rescreen_backlog_alerts_test.yaml`. Runbook: [05-operations](05-operations.en.md#re-screening-backlog).
+
 ## Recovery ownership and duplicate scope
 
 Each new PENDING row carries an initial ten-minute lease and attempt number. A worker atomically claims only an expired lease; result updates compare the claimed attempt and lease in the same transaction as any failure outbox row. A stale worker cannot overwrite a newer result. Historical PENDING rows without a lease become eligible only after ten minutes from creation; new unleased inserts are rejected. Terminal OPEN_FAILED rows have no next-attempt timestamp and are never automatically retried.

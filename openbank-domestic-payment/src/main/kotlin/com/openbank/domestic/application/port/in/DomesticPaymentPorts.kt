@@ -49,6 +49,8 @@ data class CreateDomesticPaymentCommand(
     val initiatorScope: InitiatorScope = InitiatorScope.General,
     /** Opaque customer binding asserted by the verified customer-edge workload. */
     val customerSubmissionScope: String? = null,
+    /** Original business submission digest supplied only when the Edge releases a mode-bound approval. */
+    val originalSubmissionKeyDigest: String? = null,
 ) {
     init {
         require((delegationId == null) == (reservationId == null)) {
@@ -77,7 +79,12 @@ data class TransitionDomesticPaymentStatusCommand(
 interface DomesticPaymentUseCase {
     suspend fun createPayment(command: CreateDomesticPaymentCommand): CreateDomesticPaymentResult
     suspend fun getPayment(paymentId: UUID): DomesticPayment
-    suspend fun findCustomerSubmission(idempotencyKey: String, debtorAccountId: UUID, scope: String): DomesticPayment?
+    suspend fun findCustomerSubmission(
+        idempotencyKey: String,
+        debtorAccountId: UUID,
+        scope: String,
+        originalSubmissionKeyDigest: String? = null,
+    ): DomesticPayment?
     suspend fun listPayments(query: ListDomesticPaymentsQuery): List<DomesticPayment>
     suspend fun transitionStatus(command: TransitionDomesticPaymentStatusCommand): DomesticPayment
 }

@@ -204,3 +204,34 @@ The response has `Cache-Control: no-store`. `FOUND` contains only `paymentId` an
 current `status` alongside the outcome. `UNKNOWN` covers missing records, mismatched
 account or scope, and legacy records without a customer binding. Roll out this provider
 before enabling the customer-edge caller.
+
+## Original business submission key on approval release
+
+Verified customer-edge may send `X-OpenBank-Original-Submission-Key-Digest` when releasing a
+mode-bound business approval. The existing `Idempotency-Key` remains the approval ID and the
+request body remains the frozen rail instruction. The optional header carries lowercase SHA-256
+of the exact original key as UTF-8 in the `openbank-domestic-approval-key-v1|` domain.
+
+PostgreSQL reserves one original submission key across new releases and older direct payments.
+An already accepted direct payment blocks a release with the same original key. A new release
+also blocks a later direct submission of that key. Both return the existing generic 409 without
+another payment or outbox event. An exact approval-ID replay requires the same digest as the
+first release. Older callers without this header keep their existing replay contract.
+
+V21 adds a nullable digest and the unique index. Rollback retains both as durable protection
+for committed rows. A populated deployment needs an index build plan before sending the header.
+
+### Reconcile a release whose rail response was lost
+
+For a mode-bound release, verified customer-edge sends the approval ID as the rail key to
+`/api/v1/domestic-payments/submissions/lookup` with the debit account, stored customer scope and
+`originalSubmissionKeyDigest`. The lookup requires all four values. It echoes the stored digest
+on `FOUND` so the edge can distinguish exact proof from an older provider's unqualified reply.
+An ordinary direct lookup omits the digest and matches only rows stored without it.
+
+### Dispatch a mode-bound approval
+
+Send mode-bound releases to `POST /api/v1/domestic-payments/approval-releases` with the frozen
+rail instruction, approval ID and original submission digest. The dedicated route requires the
+digest before the payment transaction starts. Its absence on an older provider leaves the
+release unavailable. General payment creation remains available for direct and legacy writes.
