@@ -3535,9 +3535,8 @@ def carrier_holds_strict(p: dict, now: float | None = None) -> bool:
 def train_turn_main_red_self_test(check) -> None:
     """The train's turn after a strict merge, with a red main and without (2026-11-13: fixes #15991/#15987
     waited ~2 h behind "train's turn" while no train could be built over the red main)."""
-    mod = globals()
-    saved = mod["last_merge_was_strict"]
-    mod["last_merge_was_strict"] = lambda *_a, **_k: True
+    saved = globals()["last_merge_was_strict"]
+    globals()["last_merge_was_strict"] = lambda *_a, **_k: True
     try:
         git = lambda *_a, **_k: subprocess.CompletedProcess([], 0, stdout="1000\n", stderr="")
         waiting = [object()]
@@ -3545,7 +3544,7 @@ def train_turn_main_red_self_test(check) -> None:
         red = train_turn(None, git, "b", waiting, False, now=1001, main_red={"Validate manifests": "failure"})
         red_carrier = train_turn(None, git, "b", waiting, True, now=1001, main_red={"Validate manifests": "failure"})
     finally:
-        mod["last_merge_was_strict"] = saved
+        globals()["last_merge_was_strict"] = saved
     check("train's turn: green main, strict merge just landed, a train candidate waits -> the train goes next",
           bool(green) and "train's turn" in green, f"{green!r}")
     check("train's turn: red main -> no turn, the strict lane serves the fix at once",
