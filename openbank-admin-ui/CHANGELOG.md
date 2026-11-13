@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.12.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.12.2...admin-ui-v4.12.3) (2026-11-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** admit ROLE_COMPLIANCE to the party detail permission ([#15991](https://github.com/JiRaska/open-bank-oss/issues/15991)) ([e67a677](https://github.com/JiRaska/open-bank-oss/commit/e67a677cef2de241ef4ff20240189448c474715d)), closes [#15939](https://github.com/JiRaska/open-bank-oss/issues/15939)
+
 ## [4.12.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.12.1...admin-ui-v4.12.2) (2026-11-13)
 
 
