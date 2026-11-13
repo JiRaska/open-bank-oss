@@ -10,7 +10,6 @@ import com.openbank.aml.application.port.`in`.CreateAmlCaseCommand
 import com.openbank.aml.application.port.`in`.ListAmlCasesQuery
 import com.openbank.aml.application.port.`in`.UpdateAmlDecisionCommand
 import com.openbank.aml.application.port.out.AmlCaseRepository
-import com.openbank.aml.application.port.out.DisplacedCase
 import com.openbank.aml.domain.event.AmlCaseStatusChangedEvent
 import com.openbank.aml.domain.event.toCreatedEvent
 import com.openbank.aml.domain.model.AmlCase
@@ -32,6 +31,14 @@ import java.util.UUID
 // ErrorCode.NOT_FOUND.code byte for byte). See AmlCaseNotFoundMapperEquivalenceTest.
 class AmlCaseNotFoundException(caseId: UUID) : ResourceNotFoundException("AML case not found: $caseId")
 
+/**
+ * The hold intake found a case it did not open under a hold's key. An [IllegalStateException] on
+ * purpose: the same row is there on every redelivery, so the intake does not retry it and the
+ * record goes to the dead-letter queue.
+ */
+class ForeignCaseUnderHoldKeyException(caseId: UUID) :
+    IllegalStateException("Case $caseId holds a held-payment key it was not opened under")
+
 // Same as above, mapped 409 by ResourceConflictExceptionMapper (default code "CONFLICT").
 class InvalidAmlCaseStateTransitionException(message: String) : ResourceConflictException(message)
 
@@ -50,13 +57,12 @@ class AmlCaseService(
         // refused here too, not answered with the first case. A legacy row (no stored hash) or a
         // caller without one keeps the plain replay.
         val existing = amlCaseRepository.findByIdempotencyKey(command.idempotencyKey)
-        // A held payment's case is the one the hold intake opened, not whatever row holds its key:
-        // the rail releases on a decision published under that key. A row of any other provenance
-        // is not answered as the intake's case. It is moved aside and the real case takes the key.
-        val displaced = existing?.takeIf {
-            command.origin == CaseOrigin.PAYMENT_HOLD_INTAKE && it.origin != CaseOrigin.PAYMENT_HOLD_INTAKE
-        }
-        if (existing != null && displaced == null) {
+        if (existing != null) {
+            // The hold intake takes only its own case for the hold's case. Anything else under its
+            // key is not adopted and not rearranged: the intake fails, loudly, and the hold expires.
+            if (command.origin == CaseOrigin.PAYMENT_HOLD_INTAKE && existing.origin != CaseOrigin.PAYMENT_HOLD_INTAKE) {
+                refuseForeignCase(existing)
+            }
             val stored = existing.requestHash
             if (stored != null && command.requestHash != null && stored != command.requestHash) {
                 throw IdempotencyKeyReusedException()
@@ -91,11 +97,7 @@ class AmlCaseService(
 
         // ADR-0050: the aggregate and its domain event commit atomically via the outbox.
         return try {
-            if (displaced == null) {
-                amlCaseRepository.save(amlCase, caseCreatedEvent(amlCase, now))
-            } else {
-                displace(displaced, amlCase, now)
-            }
+            amlCaseRepository.save(amlCase, caseCreatedEvent(amlCase, now))
         } catch (e: Exception) {
             log.errorf(
                 "createCase save failed: %s: %s | cause: %s",
@@ -107,22 +109,17 @@ class AmlCaseService(
         }
     }
 
-    private suspend fun displace(foreign: AmlCase, amlCase: AmlCase, now: Instant): AmlCase {
-        val movedTo = AmlCase.quarantinedKey(foreign.id)
-        val saved = amlCaseRepository.save(amlCase, caseCreatedEvent(amlCase, now), DisplacedCase(foreign.id, movedTo))
+    private fun refuseForeignCase(foreign: AmlCase): Nothing {
         meters.counter(FOREIGN_KEY_CLAIM_METRIC).increment()
         log.errorf(
-            "Case %s (origin %s, status %s, decided by %s) held key %s without being the hold intake's case; " +
-                "moved to key %s and case %s opened in its place",
+            "Case %s (origin %s, status %s) holds key %s without being the hold intake's case; " +
+                "no case is opened for the hold and that case cannot be decided",
             foreign.id,
             foreign.origin ?: "unknown",
             foreign.status,
-            foreign.decidedBy ?: "nobody",
             foreign.idempotencyKey,
-            movedTo,
-            saved.id,
         )
-        return saved
+        throw ForeignCaseUnderHoldKeyException(foreign.id)
     }
 
     override suspend fun getCase(caseId: UUID): AmlCase =
@@ -206,7 +203,7 @@ class AmlCaseService(
         payload = objectMapper.writeValueAsString(
             AmlCaseStatusChangedEvent(
                 caseId = current.id,
-                partyId = current.establishedPartyId,
+                partyId = current.partyId,
                 previousStatus = previous.status,
                 newStatus = current.status,
                 decisionReason = current.decisionReason,
@@ -224,7 +221,7 @@ class AmlCaseService(
         const val EVENT_CASE_CREATED = "aml.case.created.v1"
         const val EVENT_STATUS_CHANGED = "aml.case.status_changed.v1"
 
-        /** Counts cases displaced from a held-payment key. Any increment is worth a look: the key is reserved. */
+        /** Counts holds refused because another case held their key. Any increment is worth a look: the key is reserved. */
         const val FOREIGN_KEY_CLAIM_METRIC = "openbank.aml.payment_held.foreign_key_claims"
     }
 }

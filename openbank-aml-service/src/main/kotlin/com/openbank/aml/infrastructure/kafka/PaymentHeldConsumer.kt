@@ -20,7 +20,7 @@ import org.jboss.logging.Logger
 import java.util.UUID
 
 /**
- * Opens the ONE case of a held payment (ADR-0374 D3, D13).
+ * Opens the ONE case of each review of a held payment (ADR-0374 D3, D13).
  *
  * A payment rail writes `PAYMENT_HELD` to its outbox in the transaction that moves the payment to
  * HELD, so a hold whose case request was lost cannot exist; this consumer turns the request into a
@@ -34,7 +34,8 @@ import java.util.UUID
  * separates a rail's case from a confidential pack-monitoring one, so a producer does not get to
  * choose it. Holding the key is not enough either: the case is opened with the origin
  * [CaseOrigin.PAYMENT_HOLD_INTAKE], which only this class states, and a row of any other origin found
- * under the key is displaced rather than taken for the hold's case (`AmlCaseService.createCase`).
+ * under the key is not taken for the hold's case: `AmlCaseService.createCase` refuses, the event is
+ * dead-lettered, and the payment stays held until it expires into rejection.
  *
  * Opening the case depends on NOTHING but this service's own database. A rail that could not read
  * the debtor's standing sends no party, and the usual reason is that the account authority is
@@ -131,9 +132,26 @@ class PaymentHeldConsumer(
         private const val MAX_MATCHED_ENTITY = 255
         private val RAIL = Regex("[A-Z][A-Z0-9_]{0,31}")
 
-        /** The key of the one case a hold on [paymentId] of [rail] opens. */
-        fun caseKey(rail: String, paymentId: UUID): String =
-            "${AmlCase.PAYMENT_HOLD_KEY_PREFIX}${rail.lowercase()}:$paymentId"
+        /**
+         * The key of the case that [review] of the hold on [paymentId] of [rail] opens.
+         *
+         * A decision covers the reasons its case was opened for. A rail that finds a new reason at
+         * release keeps the payment held and asks for another review, and each review is a case of
+         * its own: the first under the key a hold has always had, review 2, 3, … with the number
+         * appended. Every one of them is in the reserved hold namespace.
+         */
+        fun caseKey(rail: String, paymentId: UUID, review: Int = 1): String =
+            "${AmlCase.PAYMENT_HOLD_KEY_PREFIX}${rail.lowercase()}:$paymentId" + if (review > 1) ":$review" else ""
+
+        /** Absent means the first review; anything but a whole number from 1 up is not a review. */
+        private fun review(node: JsonNode): Int {
+            val value = node.path("review")
+            if (value.isMissingNode || value.isNull) return 1
+            require(value.isIntegralNumber && value.canConvertToInt() && value.intValue() >= 1) {
+                "review is not a review number"
+            }
+            return value.intValue()
+        }
 
         /** `null` for any other event type on a rail's topic. */
         fun parse(node: JsonNode?): HeldPayment? {
@@ -142,8 +160,8 @@ class PaymentHeldConsumer(
             val paymentId = node.uuid("paymentId")
             val rail = node.path("rail").asText("")
             require(rail.matches(RAIL)) { "rail is not a rail code" }
-            val key = caseKey(rail, paymentId)
-            require(node.path("caseKey").asText() == key) { "caseKey is not this hold's case key" }
+            val key = caseKey(rail, paymentId, review(node))
+            require(node.path("caseKey").asText() == key) { "caseKey is not this review's case key" }
             val party = node.path("debtorPartyId")
             val reference = node.path("customerReference").asText("").trim()
             require(reference.isNotEmpty() && reference.length <= MAX_REFERENCE) { "customerReference is missing" }

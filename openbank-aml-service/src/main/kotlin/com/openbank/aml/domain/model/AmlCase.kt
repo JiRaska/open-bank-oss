@@ -54,9 +54,9 @@ data class AmlCase(
     val id: UUID,
     val idempotencyKey: String,
     /**
-     * The party the case is about; `null` while it is not known. A held payment whose rail could not
-     * name the debtor's party is recorded that way and resolved from [accountId] afterwards.
-     * Never a placeholder and never a copy of [accountId].
+     * The party the case is about; `null` while it is not known. Only the held-payment intake stores
+     * `null`: a hold whose rail could not name the debtor's party is recorded that way and resolved
+     * from [accountId] afterwards. Events publish this value exactly as stored, `null` included.
      */
     val partyId: UUID?,
     val accountId: UUID?,
@@ -88,16 +88,13 @@ data class AmlCase(
         get() = partyId != null && partyId != accountId
 
     /**
-     * The party, or `null` while it is not established. The ONE place that decides what an event
-     * may publish as this case's party: every event reads this, never [partyId].
-     */
-    val establishedPartyId: UUID?
-        get() = partyId.takeIf { partyResolved }
-
-    /**
      * A case that sits under a held-payment key without having been opened by the hold intake.
-     * The key is reserved on the create endpoint, so such a row predates the reservation or came
-     * past it; either way a decision on it would be published under a key a rail releases on.
+     *
+     * A rail releases a held payment on a status-changed event that carries the hold key, and the
+     * key alone says nothing about who wrote the row: the create endpoint refuses the namespace
+     * now, but a pod from before that refusal accepted it, and such a row can outlive the pod. This
+     * is the one guard that closes that path: [AmlCaseService.updateDecision] refuses to decide such
+     * a case, so no event can leave under a hold key from a case the intake did not open.
      */
     val isForeignClaimOnHoldKey: Boolean
         get() = idempotencyKey.startsWith(PAYMENT_HOLD_KEY_PREFIX) && origin != CaseOrigin.PAYMENT_HOLD_INTAKE
@@ -174,20 +171,16 @@ data class AmlCase(
         /** Reserved idempotency-key prefix of the one case a held payment opens. */
         const val PAYMENT_HOLD_KEY_PREFIX = "payment-hold:"
 
-        /** Reserved prefix a case is moved under when the hold intake displaces it from a hold key. */
-        const val QUARANTINED_KEY_PREFIX = "quarantined:"
-
         /** Key namespaces only this service's own jobs and consumers write; the create endpoint refuses them. */
-        val RESERVED_KEY_PREFIXES = listOf(PACK_MONITORING_KEY_PREFIX, PAYMENT_HOLD_KEY_PREFIX, QUARANTINED_KEY_PREFIX)
+        val RESERVED_KEY_PREFIXES = listOf(PACK_MONITORING_KEY_PREFIX, PAYMENT_HOLD_KEY_PREFIX)
 
         /**
-         * What the REST response carries in its REQUIRED `partyId` while the party is not established:
-         * the nil UUID. That contract cannot express a missing party without a breaking change, so the
-         * absence is stated by `partyResolved = false` next to it and this value only fills the slot.
-         * Events are not bound by it and publish `null`. It is never stored and never accepted as a party.
+         * What the REST response carries in its REQUIRED `partyId` when NO party is stored: the nil UUID.
+         * That contract cannot express a missing party without a breaking change, so the absence is
+         * stated by `partyResolved = false` next to it and this value only fills the slot. A stored
+         * party is always answered as stored. Events are not bound by the REST contract and publish
+         * `null`. The nil UUID is never stored and never accepted as a party.
          */
         val UNRESOLVED_PARTY_WIRE_ID: UUID = UUID(0L, 0L)
-
-        fun quarantinedKey(caseId: UUID): String = "$QUARANTINED_KEY_PREFIX$caseId"
     }
 }

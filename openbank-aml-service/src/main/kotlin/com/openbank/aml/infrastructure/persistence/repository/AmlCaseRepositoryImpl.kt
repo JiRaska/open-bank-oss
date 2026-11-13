@@ -6,7 +6,6 @@ package com.openbank.aml.infrastructure.persistence.repository
 
 import com.openbank.aml.application.port.out.AmlCaseRepository
 import com.openbank.aml.application.port.out.CaseChangedConcurrentlyException
-import com.openbank.aml.application.port.out.DisplacedCase
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.ScreeningType
@@ -32,20 +31,11 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
     PanacheRepository<AmlCaseEntity> {
 
     // ADR-0050: case row + outbox row persist in ONE transaction (atomic write-then-publish).
-    // The key is UNIQUE, so a displaced row must give it up before the new row claims it; a bulk
-    // update executes immediately, ahead of the insert Hibernate queues for flush.
-    override suspend fun save(amlCase: AmlCase, event: OutboxMessage, displacing: DisplacedCase?): AmlCase =
-        Panache.withTransaction {
-            val keyFreed = if (displacing == null) {
-                Uni.createFrom().item(0)
-            } else {
-                update("idempotencyKey = ?1 where caseId = ?2", displacing.movedToKey, displacing.caseId)
-            }
-            keyFreed
-                .chain { _ -> persist(amlCase.toEntity()) }
-                .chain { _ -> outboxRepository.persistInTransaction(event) }
-                .replaceWith(amlCase)
-        }.awaitSuspending()
+    override suspend fun save(amlCase: AmlCase, event: OutboxMessage): AmlCase = Panache.withTransaction {
+        persist(amlCase.toEntity())
+            .chain { _ -> outboxRepository.persistInTransaction(event) }
+            .replaceWith(amlCase)
+    }.awaitSuspending()
 
     override suspend fun findById(caseId: UUID): AmlCase? =
         Panache.withSession { find("caseId", caseId).firstResult() }.awaitSuspending()?.toDomain()
@@ -90,7 +80,7 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
     // ADR-0050: transition + outbox row persist in ONE transaction (atomic write-then-publish).
     // The row is locked for the write, and the same lock is what `resolveParty` takes: a decision and
     // a resolution of one case are serialised, so the decision's event either precedes the resolution
-    // (which then restates it for the party) or is refused here and rebuilt with the party in it.
+    // (which then states a BLOCK again for the party) or is refused here and rebuilt with the party in it.
     override suspend fun update(amlCase: AmlCase, event: OutboxMessage): AmlCase = Panache.withTransaction {
         find("caseId", amlCase.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
             .invoke { entity ->
@@ -117,14 +107,15 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
         find("$RESOLVABLE order by partyResolutionAttemptedAt asc nulls first, id asc").range(0, limit - 1).list()
     }.awaitSuspending().map { it.caseId to it.accountId!! }
 
-    override suspend fun resolveParty(caseId: UUID, partyId: UUID, restatement: (AmlCase) -> OutboxMessage): Boolean =
+    override suspend fun resolveParty(caseId: UUID, partyId: UUID, owed: (AmlCase) -> OutboxMessage?): Boolean =
         Panache.withTransaction {
             find("caseId", caseId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().chain { entity ->
                 if (entity == null || (entity.partyId != null && entity.partyId != entity.accountId)) {
                     Uni.createFrom().item(false)
                 } else {
-                    // Taken before the erasure record is read, and taken by the erasure before it writes
-                    // one: whichever of the two commits first, the other sees it.
+                    val event = owed(entity.toDomain())
+                    // Taken before the erasure record is read, and taken by the erasure before it
+                    // writes one: whichever of the two commits first, the other sees it.
                     lockParty(partyId)
                         .chain { _ -> select(ERASED, mapOf("partyId" to partyId)) }
                         .chain { erased ->
@@ -134,7 +125,13 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
                                 entity.matchedEntity = null
                                 entity.alertDetail = null
                             }
-                            outboxRepository.persistInTransaction(restatement(entity.toDomain()))
+                            if (event ==
+                                null
+                            ) {
+                                Uni.createFrom().voidItem()
+                            } else {
+                                outboxRepository.persistInTransaction(event)
+                            }
                         }
                         .replaceWith(true)
                 }

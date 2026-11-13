@@ -25,7 +25,7 @@ import javax.sql.DataSource
  * The key of a held payment's case is what a rail later accepts a release or reject decision from,
  * so nobody but the hold intake may hold a case under it. Through real HTTP and a real Postgres:
  *
- *  - the create endpoint refuses the namespace (and the one a displaced case is moved into);
+ *  - the create endpoint refuses the namespace;
  *  - a case that sits under a hold key WITHOUT having been opened by the intake — stored the way the
  *    create endpoint stored one before the namespace was reserved — cannot be decided, so no
  *    status-changed event carrying the hold key can come from it.
@@ -51,8 +51,12 @@ class AmlCaseReservedKeyIT {
     )
     fun `the create endpoint refuses the held-payment key namespace and opens no case`() {
         val payment = UUID.randomUUID()
-        for (prefix in listOf("payment-hold:", "quarantined:")) {
-            val key = "${prefix}domestic:$payment"
+        // The key of a later review of the same hold shares the prefix, so it is refused with the rest.
+        for ((prefix, key) in listOf(
+            "payment-hold:" to "payment-hold:domestic:$payment",
+            "payment-hold:" to "payment-hold:domestic:$payment:2",
+            "tm:" to "tm:domestic:$payment",
+        )) {
             Given {
                 contentType("application/json")
                 header("Idempotency-Key", key)
@@ -94,7 +98,20 @@ class AmlCaseReservedKeyIT {
     fun `a case under a hold key that the hold intake did not open cannot be decided`() {
         val payment = UUID.randomUUID()
         val planted = plant("payment-hold:domestic:$payment", payment)
+        val plantedLaterReview = plant("payment-hold:domestic:$payment:2", payment)
         val ordinary = plant("ordinary-$payment", payment)
+
+        // A later review's key is a hold key like the first: same refusal.
+        Given {
+            contentType("application/json")
+            body("""{"targetStatus":"CLEARED","decisionReason":"looks fine"}""")
+        } When {
+            put("/api/v1/aml/cases/$plantedLaterReview/decision")
+        } Then {
+            statusCode(409)
+            body("code", equalTo("CONFLICT"))
+        }
+        assertThat(statusOf(plantedLaterReview)).isEqualTo("OPEN")
 
         Given {
             contentType("application/json")

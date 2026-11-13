@@ -15,8 +15,8 @@ data class AmlCaseCreatedEvent(
     val caseId: UUID,
     val idempotencyKey: String,
     /**
-     * `null` while the case has no established party ([AmlCase.establishedPartyId]). An event never
-     * carries a stand-in: what is not a party is not published as one, so no consumer can act on it.
+     * The party exactly as the case stores it. `null` only for a case stored with no party, which
+     * only the held-payment intake writes; every other case publishes what it always did.
      */
     val partyId: UUID?,
     val accountId: UUID?,
@@ -32,7 +32,7 @@ data class AmlCaseCreatedEvent(
 
 data class AmlCaseStatusChangedEvent(
     val caseId: UUID,
-    /** As on [AmlCaseCreatedEvent]: `null` while the case has no established party. */
+    /** As on [AmlCaseCreatedEvent]: the stored party, `null` only when none is stored. */
     val partyId: UUID?,
     val previousStatus: AmlCaseStatus,
     val newStatus: AmlCaseStatus,
@@ -52,7 +52,7 @@ data class AmlCaseStatusChangedEvent(
 fun AmlCase.toCreatedEvent(now: Instant) = AmlCaseCreatedEvent(
     caseId = id,
     idempotencyKey = idempotencyKey,
-    partyId = establishedPartyId,
+    partyId = partyId,
     accountId = accountId,
     transactionId = transactionId,
     customerReference = customerReference,

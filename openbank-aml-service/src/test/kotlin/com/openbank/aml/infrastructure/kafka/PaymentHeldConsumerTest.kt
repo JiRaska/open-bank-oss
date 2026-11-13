@@ -145,6 +145,66 @@ class PaymentHeldConsumerTest {
         assertThat(outcome("rejected")).isEqualTo(4.0)
     }
 
+    /**
+     * A decision covers the reasons its case was opened for. When a rail finds a new reason at
+     * release it keeps the payment held and asks for another review, and that review is a case of
+     * its own: `review` 2, 3, … under the hold key with the review number appended.
+     */
+    @Test
+    fun `a later review of the same hold opens its own case under its own key`(): Unit = runBlocking {
+        opened()
+
+        consumer.consume(held(mapOf("review" to 2, "caseKey" to "payment-hold:domestic:$paymentId:2")))
+
+        assertThat(command.captured.idempotencyKey).isEqualTo("payment-hold:domestic:$paymentId:2")
+        assertThat(command.captured.transactionId).isEqualTo(paymentId)
+        assertThat(command.captured.origin).isEqualTo(CaseOrigin.PAYMENT_HOLD_INTAKE)
+        assertThat(command.captured.alertCode).isEqualTo("PAYMENT_HELD")
+        assertThat(
+            PaymentHeldConsumer.caseKey("DOMESTIC", paymentId, 17),
+        ).isEqualTo("payment-hold:domestic:$paymentId:17")
+        assertThat(PaymentHeldConsumer.caseKey("DOMESTIC", paymentId, 1)).isEqualTo("payment-hold:domestic:$paymentId")
+    }
+
+    @Test
+    fun `no review and review 1 are the first review, under the key a hold has always had`(): Unit = runBlocking {
+        opened()
+        val first = "payment-hold:domestic:$paymentId"
+
+        consumer.consume(held())
+        assertThat(command.captured.idempotencyKey).isEqualTo(first)
+        consumer.consume(held(mapOf("review" to 1)))
+        assertThat(command.captured.idempotencyKey).isEqualTo(first)
+        consumer.consume(held(mapOf("review" to null)))
+        assertThat(command.captured.idempotencyKey).isEqualTo(first)
+        assertThat(PaymentHeldConsumer.caseKey("DOMESTIC", paymentId)).isEqualTo(first)
+    }
+
+    @Test
+    fun `a review does not get another review's key, and a review that is not a count is unreadable`() {
+        val first = "payment-hold:domestic:$paymentId"
+        val refused = listOf(
+            // The key of the first review, claimed by the second: its decision would stand for both.
+            mapOf("review" to 2, "caseKey" to first),
+            mapOf("review" to 2, "caseKey" to "$first:3"),
+            mapOf("review" to 1, "caseKey" to "$first:1"),
+            mapOf("caseKey" to "$first:2"),
+            mapOf("review" to 0),
+            mapOf("review" to -1, "caseKey" to "$first:-1"),
+            mapOf("review" to "2", "caseKey" to "$first:2"),
+            mapOf("review" to 2.5, "caseKey" to "$first:2.5"),
+            mapOf("review" to true),
+            mapOf("review" to 99_999_999_999L, "caseKey" to "$first:99999999999"),
+        )
+        refused.forEach { overrides ->
+            assertThatThrownBy { runBlocking { consumer.consume(held(overrides)) } }
+                .describedAs(overrides.toString())
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+        coVerify(exactly = 0) { cases.createCase(any()) }
+        assertThat(outcome("rejected")).isEqualTo(refused.size.toDouble())
+    }
+
     @Test
     fun `an unreadable held-payment event is rethrown for the dead-letter queue`() {
         val broken = listOf(

@@ -149,8 +149,8 @@ class PartyResolutionScheduler {
                 caseRepository.markPartyResolutionAttempted(caseId, Instant.now())
                 log.errorf("[party-resolution] account %s reports itself as its own party — refusing", accountId)
             }
-            // One transaction: the party, the restated status for per-party consumers, and the
-            // anonymisation owed if the party was erased meanwhile.
+            // One transaction: the party, a BLOCK the party was owed, and the anonymisation owed if
+            // the party was erased meanwhile.
             resolver.resolve(caseId, partyId) -> log.infof("[party-resolution] case %s → party %s", caseId, partyId)
         }
     }

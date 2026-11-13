@@ -151,9 +151,10 @@ class PaymentHeldPartyOutageIT {
     fun `a hold with no named party gets its case while the account authority is down, and its party later`() {
         // Known positive for the fake and for the production client in front of it, before anything is
         // taken down: the lookup works when the authority is up. It also makes the client's first use
-        // happen on this thread. Under the test classloader a first use from a coroutine worker fails
-        // to load the generated client class, permanently, and every sweep would then abort for a
-        // reason that has nothing to do with the authority being down.
+        // happen on this thread, which is a test-classloader artefact only: under @QuarkusTest a first
+        // use from a coroutine worker cannot load the generated client class, while the packaged
+        // application (fast-jar run with `java -jar`, no warm-up) makes its first lookup from
+        // `DefaultDispatcher-worker-1` and resolves the case.
         assertThat(runBlocking { accounts.findPartyByAccountId(KNOWN_ACCOUNT) }).isEqualTo(OWNING_PARTY)
         assertThat(runBlocking { accounts.findPartyByAccountId(UNKNOWN_ACCOUNT) }).isNull()
 

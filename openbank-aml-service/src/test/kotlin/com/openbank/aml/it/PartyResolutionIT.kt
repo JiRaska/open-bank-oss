@@ -206,15 +206,15 @@ class PartyResolutionIT {
 
     private val untouched = Pii("acct-1/0800", "why", "who")
 
+    private fun setStatus(caseId: UUID, status: String) = onEventLoop {
+        pool.preparedQuery("UPDATE aml_cases SET status = $2, decided_by = 'analyst' WHERE case_id = $1")
+            .execute(Tuple.of(caseId, status)).awaitSuspending()
+    }.let { caseId }
+
     @Test
-    fun `resolving a case states its status again for the party, in the same write, and only once`() {
-        val account = UUID.randomUUID()
+    fun `a BLOCK decided before the party was known is stated again for the party, once, when it is resolved`() {
         val party = UUID.randomUUID()
-        val caseId = case("decided-unresolved", partyId = null, accountId = account)
-        onEventLoop {
-            pool.preparedQuery("UPDATE aml_cases SET status = 'BLOCKED', decided_by = 'analyst' WHERE case_id = $1")
-                .execute(Tuple.of(caseId)).awaitSuspending()
-        }
+        val caseId = setStatus(case("blocked-unresolved", partyId = null, accountId = UUID.randomUUID()), "BLOCKED")
         assertThat(eventsOf(caseId)).isEmpty()
 
         assertThat(onEventLoop { resolver.resolve(caseId, party) }).isTrue()
@@ -236,6 +236,61 @@ class PartyResolutionIT {
         assertThat(onEventLoop { resolver.resolve(UUID.randomUUID(), party) }).describedAs("no such case").isFalse()
     }
 
+    /**
+     * A restatement reaches a consumer that keeps ONE AML status per party and lets the last event
+     * win. So the only status ever restated is BLOCKED: it is the one whose loss would leave a party
+     * active that an analyst blocked, and it can never re-activate anybody. A cleared or undecided
+     * case has nothing owed to the party.
+     */
+    @Test
+    fun `resolving a case that is not BLOCKED publishes nothing`() {
+        for (status in listOf("OPEN", "UNDER_REVIEW", "ESCALATED", "CLEARED")) {
+            val caseId = setStatus(case("unresolved-$status", partyId = null, accountId = UUID.randomUUID()), status)
+
+            assertThat(onEventLoop { resolver.resolve(caseId, UUID.randomUUID()) }).isTrue()
+
+            assertThat(eventsOf(caseId)).describedAs("events of a resolved %s case", status).isEmpty()
+        }
+    }
+
+    /**
+     * The other order: resolved first, decided afterwards. The decision's own event then names the
+     * party and there is nothing to restate.
+     */
+    @Test
+    fun `a case resolved before it is decided publishes its decision once, with the party`() {
+        val party = UUID.randomUUID()
+        val caseId = case("resolved-then-blocked", partyId = null, accountId = UUID.randomUUID())
+        assertThat(onEventLoop { resolver.resolve(caseId, party) }).isTrue()
+        assertThat(eventsOf(caseId)).isEmpty()
+
+        val read = onEventLoop { repository.findById(caseId) }!!
+        assertThat(read.partyId).isEqualTo(party)
+        val decision = OutboxMessage(UUID.randomUUID(), caseId, "aml.case.status_changed.v1", """{"decision":true}""")
+        onEventLoop { repository.update(read.copy(status = AmlCaseStatus.BLOCKED, decidedBy = "analyst"), decision) }
+
+        assertThat(eventsOf(caseId).map { it.path("decision").asBoolean(false) }).containsExactly(true)
+    }
+
+    /**
+     * A case that carries the account id where the party belongs is resolved exactly as it always
+     * was: the party is corrected and NOTHING is published, whatever its status. Those rows exist
+     * with every switch of the hold intake off.
+     */
+    @Test
+    fun `resolving a case whose party was the account id publishes nothing, even when it is BLOCKED`() {
+        for (status in listOf("OPEN", "CLEARED", "BLOCKED")) {
+            val account = UUID.randomUUID()
+            val party = UUID.randomUUID()
+            val caseId = setStatus(case("account-as-party-$status", partyId = account, accountId = account), status)
+
+            assertThat(onEventLoop { resolver.resolve(caseId, party) }).isTrue()
+
+            assertThat(partyOf(caseId)).isEqualTo(party)
+            assertThat(eventsOf(caseId)).describedAs("events of a resolved %s account-as-party case", status).isEmpty()
+        }
+    }
+
     @Test
     fun `a decision built before the case was resolved is refused rather than published with no party`() {
         val caseId = case("raced", partyId = null, accountId = UUID.randomUUID())
@@ -250,7 +305,7 @@ class PartyResolutionIT {
 
         // Nothing of the refused write stayed: not the status, not the event.
         assertThat(onEventLoop { repository.findById(caseId) }!!.status).isEqualTo(AmlCaseStatus.OPEN)
-        assertThat(eventsOf(caseId).map { it.path("stale").asBoolean(false) }).containsExactly(false)
+        assertThat(eventsOf(caseId)).isEmpty()
 
         // Read again, the same decision goes through.
         val readAfter = onEventLoop { repository.findById(caseId) }!!
@@ -259,7 +314,7 @@ class PartyResolutionIT {
             repository.update(readAfter.copy(status = AmlCaseStatus.BLOCKED, decidedBy = "analyst"), retried)
         }
         assertThat(onEventLoop { repository.findById(caseId) }!!.status).isEqualTo(AmlCaseStatus.BLOCKED)
-        assertThat(eventsOf(caseId)).hasSize(2)
+        assertThat(eventsOf(caseId).map { it.path("stale").asBoolean(true) }).containsExactly(false)
     }
 
     @Test
@@ -289,7 +344,5 @@ class PartyResolutionIT {
         assertThat(piiOf(legacy)).isEqualTo(erased)
         assertThat(partyOf(late)).isEqualTo(erasedParty)
         assertThat(piiOf(control)).describedAs("a party that was never erased").isEqualTo(untouched)
-        // The restatement is still owed: an erased party's BLOCK is the party authority's to weigh.
-        assertThat(eventsOf(late).single().path("partyId").asText()).isEqualTo(erasedParty.toString())
     }
 }

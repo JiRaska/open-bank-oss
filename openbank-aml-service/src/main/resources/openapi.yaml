@@ -31,7 +31,7 @@ paths:
         the stored 201, reusing the key with a different body is refused with 409
         IDEMPOTENCY_KEY_REUSED, and a duplicate arriving while the first is still processing is
         refused with 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
-        A key in a namespace the service writes itself (`tm:`, `payment-hold:`, `quarantined:`) is
+        A key in a namespace the service writes itself (`tm:`, `payment-hold:`) is
         refused with 400: those cases are opened by the service's own jobs and consumers only.
         The all-zero UUID is refused as `partyId`.
       operationId: createAmlCase

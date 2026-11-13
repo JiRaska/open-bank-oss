@@ -4,7 +4,7 @@
 --    ONBOARDING_SCREENING). A rail releases a held payment on a decision published under the
 --    case key `payment-hold:<rail>:<paymentId>`, and a key says nothing about who wrote the row
 --    under it. The intake accepts as its case only a row whose origin it wrote itself; a row of
---    any other origin under that key is moved aside and cannot be decided. NULL means "written
+--    any other origin under that key is not adopted and cannot be decided. NULL means "written
 --    before this column existed, or by a pod that predates it": unknown, never a system origin.
 --
 -- 2. party_id may be NULL. A rail that could not read the debtor's standing sends no party, and

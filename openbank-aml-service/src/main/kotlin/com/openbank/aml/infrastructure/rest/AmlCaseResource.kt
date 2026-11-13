@@ -83,7 +83,7 @@ class AmlCaseResource(
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
         // Key namespaces this service's own jobs and consumers write (ADR-0371 pack evaluation, the
-        // held-payment intake, displaced cases); nobody may mint a key in one here.
+        // held-payment intake); nobody may mint a key in one here.
         requireUnreservedKey(idempotencyKey)
         // The nil UUID is what the wire shows for "party not established"; it is never a party.
         require(request.partyId != AmlCase.UNRESOLVED_PARTY_WIRE_ID) { "partyId must identify a party" }

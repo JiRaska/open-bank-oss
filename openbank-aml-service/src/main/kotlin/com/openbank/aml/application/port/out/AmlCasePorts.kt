@@ -16,9 +16,6 @@ import java.util.UUID
 class CaseChangedConcurrentlyException(caseId: UUID) :
     ResourceConflictException("AML case $caseId changed while it was being decided; read it again and retry")
 
-/** A case that gives up its idempotency key to the case being saved, and the key it is moved to. */
-data class DisplacedCase(val caseId: UUID, val movedToKey: String)
-
 /**
  * Outbound persistence port for the AML case aggregate.
  *
@@ -29,12 +26,7 @@ data class DisplacedCase(val caseId: UUID, val movedToKey: String)
  */
 interface AmlCaseRepository {
 
-    /**
-     * With [displacing], [amlCase] is opened under a key another case holds: in the SAME transaction
-     * that case is moved to [DisplacedCase.movedToKey] first. Either the key changes hands and the
-     * new case exists with its event, or nothing changed.
-     */
-    suspend fun save(amlCase: AmlCase, event: OutboxMessage, displacing: DisplacedCase? = null): AmlCase
+    suspend fun save(amlCase: AmlCase, event: OutboxMessage): AmlCase
 
     suspend fun findById(caseId: UUID): AmlCase?
 
@@ -66,18 +58,17 @@ interface AmlCaseRepository {
     suspend fun findUnresolvedParty(limit: Int): List<Pair<UUID, UUID>>
 
     /**
-     * Points [caseId] at its real owning party and settles, in the SAME transaction and under a lock
-     * on the case, what the party was owed while the case did not name it:
+     * Points [caseId] at its real owning party, in one transaction and under a lock on the case.
      *
-     *  - [restatement] is given the case as it now stands (its current status, its real party) and
-     *    its event is written to the outbox, so a decision taken before the resolution reaches the
-     *    consumers that act per party;
-     *  - if the party has been erased ([anonymizeByPartyId] recorded it), the case is anonymised
+     *  - [owed] is given the case AS IT WAS STORED, before the party is set, and returns the event
+     *    the party is owed for it, or `null` for none. The event is written to the outbox in the same
+     *    transaction, so it cannot be lost between the two writes.
+     *  - If the party has been erased ([anonymizeByPartyId] recorded it), the case is anonymised
      *    exactly as that erasure would have anonymised it.
      *
      * `false`, and nothing written, when the case is gone or already names a party.
      */
-    suspend fun resolveParty(caseId: UUID, partyId: UUID, restatement: (AmlCase) -> OutboxMessage): Boolean
+    suspend fun resolveParty(caseId: UUID, partyId: UUID, owed: (AmlCase) -> OutboxMessage?): Boolean
 
     /** Records that a resolution of [caseId] was tried at [at] and did not succeed. */
     suspend fun markPartyResolutionAttempted(caseId: UUID, at: Instant)

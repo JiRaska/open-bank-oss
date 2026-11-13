@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.aml.application.port.out.AmlCaseRepository
 import com.openbank.aml.domain.event.AmlCaseStatusChangedEvent
 import com.openbank.aml.domain.model.AmlCase
+import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
@@ -15,23 +16,26 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * Attaches a case to the party that owns its account, and pays what the party was owed meanwhile.
+ * Attaches a case to the party that owns its account, and pays the one thing the party can be owed.
  *
- * A case can be decided before it names a party: a held payment's case is opened without one when
- * the rail could not name the debtor, and the rail must still get its release or reject. That
- * decision's event carries no party (`partyId` is null), so there is nothing in it for a consumer
- * that acts per party to act on. A BLOCK must not end there. When the party
- * becomes known, the case's status is STATED AGAIN on the same event type, now with the real party,
- * in the transaction that resolves the case — so the decision reaches the party exactly once it
- * has someone to reach, and cannot be lost between the two writes.
+ * A held payment's case is opened with NO party when the rail could not name the debtor, and can be
+ * decided in that state: the rail must get its release or reject, and it binds the decision by the
+ * case key. That decision's event carries no party, so no consumer that acts per party sees one.
+ * For a BLOCK that is a debt: the party was blocked by an analyst and nobody was told. It is paid in
+ * the transaction that resolves the case, by stating the BLOCK again on the status-changed event,
+ * now with the party.
  *
- * The restatement is not a second decision. `previousStatus` equals `newStatus`, and it carries no
- * case key, alert code or payment id: those are what a payment rail matches a decision on, and a
- * rail has already had this one.
+ * Only that. The consumer that acts on it keeps ONE AML status per party and lets the last event
+ * win, so a restated status is not harmless in general: a restated CLEARED could re-activate a
+ * party that another case blocked in the meantime. A restated BLOCK can only block. Two rules
+ * follow, and both are decided here and nowhere else:
  *
- * It is published for every resolved case, decided or not. A consumer that keeps a per-party record
- * of cases learns from it whose case this is; one that acts only on CLEARED or BLOCKED ignores the
- * rest, as it does for any status change.
+ *  - only a BLOCKED case is restated; a cleared or undecided one has nothing owed to the party;
+ *  - only a case that was stored with no party is restated. A case that carried the account id in
+ *    the party's place published its events all along and is resolved as it always was, silently.
+ *
+ * The restatement is not a second decision: `previousStatus` equals `newStatus`, and it carries no
+ * case key, alert code or payment id, which are what a payment rail matches a decision on.
  */
 @ApplicationScoped
 class CasePartyResolver(
@@ -42,22 +46,25 @@ class CasePartyResolver(
     /** `false` when there was nothing to resolve: the case is gone or already names a party. */
     suspend fun resolve(caseId: UUID, partyId: UUID): Boolean {
         val now = Instant.now(clock)
-        return amlCaseRepository.resolveParty(caseId, partyId) { resolved -> restatement(resolved, now) }
+        return amlCaseRepository.resolveParty(caseId, partyId) { stored ->
+            val owed = stored.partyId == null && stored.status == AmlCaseStatus.BLOCKED
+            if (owed) blockRestated(stored, partyId, now) else null
+        }
     }
 
-    private fun restatement(resolved: AmlCase, now: Instant): OutboxMessage = OutboxMessage(
+    private fun blockRestated(blocked: AmlCase, partyId: UUID, now: Instant): OutboxMessage = OutboxMessage(
         eventId = UUID.randomUUID(),
-        aggregateId = resolved.id,
+        aggregateId = blocked.id,
         eventType = AmlCaseService.EVENT_STATUS_CHANGED,
         payload = objectMapper.writeValueAsString(
             AmlCaseStatusChangedEvent(
-                caseId = resolved.id,
-                partyId = checkNotNull(resolved.partyId) { "a resolved case names its party" },
-                previousStatus = resolved.status,
-                newStatus = resolved.status,
-                decisionReason = resolved.decisionReason,
-                assignedAnalyst = resolved.assignedAnalyst,
-                decidedBy = resolved.decidedBy,
+                caseId = blocked.id,
+                partyId = partyId,
+                previousStatus = blocked.status,
+                newStatus = blocked.status,
+                decisionReason = blocked.decisionReason,
+                assignedAnalyst = blocked.assignedAnalyst,
+                decidedBy = blocked.decidedBy,
                 occurredAt = now,
             ),
         ),

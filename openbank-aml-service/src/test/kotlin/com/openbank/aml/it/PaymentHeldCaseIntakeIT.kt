@@ -91,30 +91,31 @@ class PaymentHeldCaseIntakeIT {
         }
     }
 
-    private fun held(payment: UUID, account: UUID, party: UUID?): String = mapper.writeValueAsString(
-        mapOf(
-            "eventType" to "PAYMENT_HELD",
-            "paymentId" to payment.toString(),
-            "rail" to "DOMESTIC",
-            "caseKey" to "payment-hold:domestic:$payment",
-            "debtorAccountId" to account.toString(),
-            "debtorPartyId" to party?.toString(),
-            "customerReference" to "1234567890/0800",
-            "reasons" to listOf("FRAUD_REVIEW"),
-            "steps" to listOf(
-                mapOf(
-                    "step" to "FRAUD",
-                    "outcome" to "DECIDED",
-                    "decision" to "HOLD",
-                    "reason" to "FRAUD_REVIEW",
-                    "evidence" to mapOf("verdict" to "REVIEW", "score" to "71"),
+    private fun held(payment: UUID, account: UUID, party: UUID?, review: Int? = null): String =
+        mapper.writeValueAsString(
+            (if (review == null) emptyMap() else mapOf("review" to review)) + mapOf(
+                "eventType" to "PAYMENT_HELD",
+                "paymentId" to payment.toString(),
+                "rail" to "DOMESTIC",
+                "caseKey" to "payment-hold:domestic:$payment" + (if (review == null || review == 1) "" else ":$review"),
+                "debtorAccountId" to account.toString(),
+                "debtorPartyId" to party?.toString(),
+                "customerReference" to "1234567890/0800",
+                "reasons" to listOf("FRAUD_REVIEW"),
+                "steps" to listOf(
+                    mapOf(
+                        "step" to "FRAUD",
+                        "outcome" to "DECIDED",
+                        "decision" to "HOLD",
+                        "reason" to "FRAUD_REVIEW",
+                        "evidence" to mapOf("verdict" to "REVIEW", "score" to "71"),
+                    ),
                 ),
+                "heldAt" to "2026-03-02T09:30:00Z",
+                "expiresAt" to "2026-03-04T09:30:00Z",
+                "sourceService" to "domestic-payment",
             ),
-            "heldAt" to "2026-03-02T09:30:00Z",
-            "expiresAt" to "2026-03-04T09:30:00Z",
-            "sourceService" to "domestic-payment",
-        ),
-    )
+        )
 
     private fun connection(): Map<String, Any> =
         mapOf("bootstrap.servers" to ConfigProvider.getConfig().getValue("kafka.bootstrap.servers", String::class.java))
@@ -172,10 +173,11 @@ class PaymentHeldCaseIntakeIT {
 
             val parked = mutableListOf<String>()
             val deadline = System.nanoTime() + BUDGET_NANOS
-            while (parked.size < 2 && System.nanoTime() < deadline) {
+            // The topic is shared with the other tests of this class, so look for these two records.
+            while (!parked.containsAll(listOf(forgedKey, noAccount)) && System.nanoTime() < deadline) {
                 deadLetters.poll(Duration.ofMillis(POLL_MILLIS)).forEach { parked += it.value() }
             }
-            assertThat(parked).containsExactlyInAnyOrder(forgedKey, noAccount)
+            assertThat(parked).contains(forgedKey, noAccount)
         }
         await("the hold behind the parked records has its case") { casesOf(FIVE).size == 1 }
         assertThat(casesOf(THREE)).isEmpty()
@@ -214,33 +216,64 @@ class PaymentHeldCaseIntakeIT {
             .map { Stored(it.getUUID(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4)) }
     }
 
+    /**
+     * The key is reserved on the create endpoint, so a row of another origin under a hold key was
+     * written by a build from before the reservation. The intake does not take it for the hold's
+     * case and does not rearrange it: the hold event is parked, which is loud, and the payment stays
+     * held until it expires into rejection. (That such a row cannot be DECIDED is AmlCaseReservedKeyIT.)
+     */
     @Test
-    fun `a case planted under the hold key is not accepted as the hold's case`() {
+    fun `a hold whose key is held by a case the intake did not open is dead-lettered and nothing is adopted`() {
         val holdKey = "payment-hold:domestic:$SIX"
         plant(PLANTED_CASE, holdKey, SIX)
+        val hold = held(SIX, RESOLVED_ACCOUNT, PARTY)
 
-        send(SIX, held(SIX, RESOLVED_ACCOUNT, PARTY))
+        KafkaConsumer<String, String>(
+            connection() + mapOf(
+                "group.id" to "aml-payment-held-foreign-key-proof",
+                "auto.offset.reset" to "earliest",
+                "key.deserializer" to DESERIALIZER,
+                "value.deserializer" to DESERIALIZER,
+            ),
+        ).use { deadLetters ->
+            deadLetters.subscribe(listOf(DLQ))
+            send(SIX, hold)
+            send(SEVEN, held(SEVEN, RESOLVED_ACCOUNT, PARTY))
 
-        await("the hold has a case of its own under the key the rail accepts decisions from") {
-            storedFor(SIX).any { it.key == holdKey && it.caseId != PLANTED_CASE }
+            val parked = mutableListOf<String>()
+            val deadline = System.nanoTime() + BUDGET_NANOS
+            while (hold !in parked && System.nanoTime() < deadline) {
+                deadLetters.poll(Duration.ofMillis(POLL_MILLIS)).forEach { parked += it.value() }
+            }
+            assertThat(parked).describedAs("the hold event is parked, not acked").contains(hold)
         }
-        val stored = storedFor(SIX)
-        assertThat(stored).hasSize(2)
-        val real = stored.single { it.caseId != PLANTED_CASE }
-        assertThat(real.origin).isEqualTo("PAYMENT_HOLD_INTAKE")
-        assertThat(real.status).isEqualTo("UNDER_REVIEW")
-        assertThat(real.detail).contains("FRAUD_REVIEW")
-        assertThat(casesOf(SIX).single { it.key == holdKey }.outboxEvents).isEqualTo(1)
-        // The planted row survives as evidence, under a key no rail matches and the endpoint cannot mint.
-        val planted = stored.single { it.caseId == PLANTED_CASE }
-        assertThat(planted.key).isEqualTo("quarantined:$PLANTED_CASE")
-        assertThat(planted.origin).isNull()
+        await("the channel keeps consuming behind the parked hold") { casesOf(SEVEN).size == 1 }
 
-        // Redelivery after the displacement finds the intake's own case and changes nothing.
-        send(SIX, held(SIX, RESOLVED_ACCOUNT, PARTY))
-        send(SEVEN, held(SEVEN, RESOLVED_ACCOUNT, PARTY))
-        await("the hold behind the redelivery has its case") { casesOf(SEVEN).size == 1 }
-        assertThat(storedFor(SIX)).containsExactlyInAnyOrderElementsOf(stored)
+        // Nothing was opened, moved or re-keyed: the one row is the planted one, exactly as it was.
+        assertThat(storedFor(SIX)).containsExactly(Stored(PLANTED_CASE, holdKey, null, "OPEN", "nothing to see"))
+        assertThat(casesOf(SIX).single().outboxEvents).isZero()
+    }
+
+    @Test
+    fun `a second review of a held payment opens a second case and leaves the first as it was`() {
+        send(EIGHT, held(EIGHT, RESOLVED_ACCOUNT, PARTY))
+        await("the first review has its case") { casesOf(EIGHT).size == 1 }
+        val first = storedFor(EIGHT).single()
+        assertThat(first.key).isEqualTo("payment-hold:domestic:$EIGHT")
+
+        // Twice: a redelivered second review opens nothing a second time.
+        send(EIGHT, held(EIGHT, RESOLVED_ACCOUNT, PARTY, review = 2), held(EIGHT, RESOLVED_ACCOUNT, PARTY, review = 2))
+        send(NINE, held(NINE, RESOLVED_ACCOUNT, PARTY))
+        await("the hold behind the second review has its case") { casesOf(NINE).size == 1 }
+
+        val stored = storedFor(EIGHT)
+        assertThat(stored.map { it.key })
+            .containsExactlyInAnyOrder("payment-hold:domestic:$EIGHT", "payment-hold:domestic:$EIGHT:2")
+        assertThat(stored).contains(first)
+        val second = stored.single { it.caseId != first.caseId }
+        assertThat(second.origin).isEqualTo("PAYMENT_HOLD_INTAKE")
+        assertThat(second.status).isEqualTo("UNDER_REVIEW")
+        assertThat(casesOf(EIGHT).map { it.outboxEvents }).containsExactly(1L, 1L)
     }
 
     private companion object {
@@ -260,6 +293,8 @@ class PaymentHeldCaseIntakeIT {
         val FIVE: UUID = UUID.fromString("00000000-0000-4000-8000-0000000d0a05")
         val SIX: UUID = UUID.fromString("00000000-0000-4000-8000-0000000d0a06")
         val SEVEN: UUID = UUID.fromString("00000000-0000-4000-8000-0000000d0a07")
+        val EIGHT: UUID = UUID.fromString("00000000-0000-4000-8000-0000000d0a08")
+        val NINE: UUID = UUID.fromString("00000000-0000-4000-8000-0000000d0a09")
         val PLANTED_CASE: UUID = UUID.fromString("00000000-0000-4000-8000-0000000ca5e6")
         const val PLANTED_ROW_ID = 9_000_000_001L
         const val HASH_LENGTH = 64
