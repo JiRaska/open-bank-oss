@@ -105,6 +105,32 @@ is a bug — that is the drift ADR-0212 already paid for once.
   `Case.screening` stays null, and `RelatedPartyScreeningService` is `@Startup` so the warning is
   printed at boot. The module's ITs run with it ON against `StubRelatedPartyScreening`.
 
+- **Who is monitored is DERIVED from the case, in the transaction that writes it — never called
+  from a use case.** `BusinessOnboardingCaseRepositoryImpl.update` brings `kyb_monitored_subjects`
+  to `BusinessOnboardingCase.monitoredSubjects` on every write (ADR-0376), and
+  `BusinessOnboardingCase.monitored` is the ONE place that says when a case is monitored. If you
+  add a status or a path, change `monitored`, not a call site. It is one SQL statement, run only
+  for a case that was ever approved; every other write to that table names one row and repeats the
+  condition it relies on. The relay (`MonitoringRegistrationService`) only sends what the store
+  owes, under a lease, as the service's OWN OIDC client: the registry refuses the shared one.
+- **Monitoring state lives in its own tables and is DERIVED, never set.** Findings are rows of
+  `kyb_monitoring_findings`, each with its own decision; "under review" and "exit owed" are read
+  off them (`CaseMonitoring`). Nothing monitoring does changes `status`, `updatedAt` or
+  `screening_json`. That is the whole tipping-off defence, and it is also why a pod of the previous
+  release cannot erase anything: it rewrites the case row and its JSON, and neither holds
+  monitoring data. Do not put monitoring data into `screening_json` or add a status for it.
+- **The registry reference is minted by the DATABASE** (`subject_ref DEFAULT gen_random_uuid()`),
+  one per (case, subject), never shared and never derived from a name. `subject_key` is
+  name-derived personal data and never leaves the database. The onboarding screen's `subjectId`
+  is a different identifier and is unchanged; a clearance recorded under it does not bind the
+  registry reference.
+- **A case the previous release wrote is repaired by version, not by a migration.** Every write by
+  this release sets `monitoring_synced_version = version + 1`; the relay rewrites approved or
+  ended cases where the two differ. Do not write `kyb_cases` around the repository.
+- **The findings channel follows the monitoring switch** (`enabled: ${openbank.kyb.monitoring.enabled}`),
+  and its `group.id` / `auto.offset.reset` are NESTED YAML keys so the image carries them: no
+  override ConfigMap, no second deploy. Do not flatten them to the dotted form.
+
 ## Authorization
 
 `kyb_rest_ext.rego` is narrow on purpose, for the reason `consent_rest_ext.rego` documents at
