@@ -133,10 +133,15 @@ spec:
             # TLSv1.3, client auth REQUIRED, %prod bucket sanctions-authority, client certificate
             # kyb-internal-tls mounted at /mnt/sanctions-tls), not :8123. Declared in this env so
             # that gen-network-policies.py derives the sanctions-namespace ingress edge for kyb.
-            # The screening gate itself (OPENBANK_KYB_SCREENING_ENABLED) is NOT set here and stays
-            # off.
             - name: SANCTIONS_SERVICE_URL
               value: https://sanctions-service.sanctions.svc:8443
+            # The screening gate. On: the entity, every listed representative and every
+            # reportable beneficial owner are screened, and approval is refused while any of them
+            # has no answer. Switched on only after sanctions-service serves the 8443 listener and
+            # the v3 screen in this cluster; with no route every business case would stop at its
+            # last signature. Rollback: remove this entry.
+            - name: OPENBANK_KYB_SCREENING_ENABLED
+              value: "true"
             # Public registers, egress via the NAT gateway. Free, no key (ADR-0284 D1).
             - name: ARES_BASE_URL
               value: https://ares.gov.cz/ekonomicke-subjekty-v-be/rest

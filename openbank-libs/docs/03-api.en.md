@@ -135,6 +135,14 @@ class KafkaAuditEventPublisher(
 }
 ```
 
+### Shadow decision evidence
+
+`DecisionRecord` encodes shadow evaluations as `SHADOW_V1` with the epoch, the artifact
+hash, the approved evidence hash and the output hash. The epoch is a decimal string so
+the codec retains exact values across JSON implementations. The enclosing record still
+supplies its explicit evaluation time, input digest and subject reference. Existing
+decision kinds retain their encoding.
+
 ## idempotency — IdempotencyStore
 
 ```kotlin
