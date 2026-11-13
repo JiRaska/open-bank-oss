@@ -134,7 +134,7 @@ Content-Type: application/json
 
 - `targetStatus` must be a valid transition from the current status (see the state machine in [02 — Architecture](./02-architecture.md)).
 - `decidedBy` in the body is **ignored** (deprecated): the decider is the authenticated caller (ADR-0371). `decisionReason` is mandatory when `targetStatus = BLOCKED`.
-- A case opened by the pack evaluation (a pack-monitoring case; not a `TRANSACTION_MONITORING` case a payment rail opened) can only be moved to `UNDER_REVIEW` here; closing or escalating it answers 409 and goes through a disposition proposal (below). To a caller without `ROLE_COMPLIANCE` such a case answers 404 and is absent from the list.
+- A case opened by the pack evaluation (a pack-monitoring case; not a `TRANSACTION_MONITORING` case a payment rail opened) can only be moved to `UNDER_REVIEW` here; closing or escalating it answers 409 and goes through a disposition proposal (below). To a caller without `ROLE_COMPLIANCE` such a case answers 404 and is absent from the list. Every case response carries `requiresFourEyesDisposition` (true exactly for such a case), so a client knows which flow to offer before the officer writes a rationale.
 - **Side-effects:** the transition + an `aml.case.status_changed.v1` event commit atomically via the outbox.
 
 ## Error model
@@ -185,6 +185,7 @@ HTTP authentication fixtures exercise interactive staff JWT claims alongside the
 | `POST /api/v1/aml/monitoring/cases/{caseId}/disposition-proposals` | `amlMonitoring.propose` | `disposition` `CLEAR` or `REPORT`, `outcomeCode` from the outcome vocabulary; one open proposal per case |
 | `POST /api/v1/aml/monitoring/disposition-proposals/{proposalId}/decision` | `amlMonitoring.decide` | a second, different person; the proposer gets 422 |
 | `GET /api/v1/aml/monitoring/disposition-proposals` | `amlMonitoring.inspect` | proposals awaiting a decision |
+| `GET /api/v1/aml/monitoring/outcomes` | `amlMonitoring.inspect` | the outcome vocabulary `outcomeCode` is resolved against (id, revision, hash, code/label/meaning); clients offer these codes instead of keeping a copy |
 | `POST /api/v1/aml/reports` | `amlReport.draft` | links the party's own monitoring cases and booked movements |
 | `GET /api/v1/aml/reports`, `GET /api/v1/aml/reports/{reportId}` | `amlReport.inspect` | |
 | `POST /api/v1/aml/reports/{reportId}/approval` | `amlReport.approve` | a second, different person; the drafter gets 422 |

@@ -105,6 +105,10 @@ The daily run is automated by `FxRevaluationScheduler`. To re-run for a business
 
 `JournalPartitionMaintainer` rolls forward automatically. Verify partitions: `\d+ journal_entries`. Lifecycle actions are in `partition_lifecycle_audit`. A non-empty `journal_entries_default` (DEFAULT_NONEMPTY audit row) means roll-forward fell behind — investigate before it blocks new partition ATTACH.
 
+## Observability note: frozen-period refusals
+
+With `openbank.ledger.period-lock.mode=enforce` every refusal increments `openbank_ledger_period_lock_decisions_total{outcome="refused"}` (tags `operation`, `period_type`) and the HTTP response carries `code=ACCOUNTING_PERIOD_FROZEN`. A fiscal-year refusal carries `ACCOUNTING_YEAR_CLOSED` and has no counter of its own; find it by the response code in access logs. This is documentation only: no alert rule is defined for either code, and a non-zero `refused` count is expected whenever a caller back-dates into a closed month.
+
 ## Tech-stack version matrix
 
 | Component | Version |

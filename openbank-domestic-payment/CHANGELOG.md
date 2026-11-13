@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.6.0...domestic-payment-v1.6.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **domestic-payment:** keep outbox claims compatible with additive schema changes ([#15655](https://github.com/JiRaska/open-bank-oss/issues/15655)) ([e0ad686](https://github.com/JiRaska/open-bank-oss/commit/e0ad686f34299ed22747eb907f8ec5f1b4323e76)), closes [#11652](https://github.com/JiRaska/open-bank-oss/issues/11652)
+
 ## [1.6.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.5.0...domestic-payment-v1.6.0) (2026-11-12)
 
 

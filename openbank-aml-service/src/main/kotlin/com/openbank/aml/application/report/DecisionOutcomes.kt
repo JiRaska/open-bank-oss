@@ -21,6 +21,10 @@ import java.time.Instant
 class DecisionOutcomes(private val vocabulary: FincrimeVocabulary) {
     val codes: List<String> = vocabulary.entries.map { it.code.value }
 
+    /** The revision `label` resolves against, with its entries in vocabulary order. */
+    val reference get() = vocabulary.reference
+    val entries get() = vocabulary.entries
+
     fun label(code: String?, at: Instant): OutcomeLabel {
         require(!code.isNullOrBlank()) { "outcomeCode is required" }
         val parsed = runCatching {
