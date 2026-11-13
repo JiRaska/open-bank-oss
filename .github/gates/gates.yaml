@@ -3438,7 +3438,7 @@ gates:
     budget_seconds: 10
     rationale: "The scheduled reconciler replaces a per-completion listener; a broad or duplicate candidate set would recreate the API and runner amplification it removes."
     review_after: "2027-03-11"
-    min_subjects: 19
+    min_subjects: 33
     run: |
       python3 .github/scripts/select-ci-reconcile-candidates.py --self-test
 
