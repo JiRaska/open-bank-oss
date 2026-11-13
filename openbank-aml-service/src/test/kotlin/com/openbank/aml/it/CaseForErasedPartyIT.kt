@@ -85,7 +85,10 @@ class CaseForErasedPartyIT {
     private fun referenceOf(caseId: UUID): String = dataSource.connection.use { c ->
         c.prepareStatement("select customer_reference from aml_cases where case_id = ?").use { s ->
             s.setObject(1, caseId)
-            s.executeQuery().use { r -> check(r.next()); r.getString(1) }
+            s.executeQuery().use { r ->
+                check(r.next())
+                r.getString(1)
+            }
         }
     }
 
@@ -123,7 +126,10 @@ class CaseForErasedPartyIT {
             val party = UUID.randomUUID()
             val (createdId) = listOf(
                 async(Dispatchers.IO) { onEventLoop { cases.createCase(command(party)) }.id },
-                async(Dispatchers.IO) { onEventLoop { repository.anonymizeByPartyId(party, Instant.now()) }; null },
+                async(Dispatchers.IO) {
+                    onEventLoop { repository.anonymizeByPartyId(party, Instant.now()) }
+                    null
+                },
             ).awaitAll().filterNotNull()
             assertThat(referenceOf(createdId as UUID)).isEqualTo("ERASED-$party")
         }

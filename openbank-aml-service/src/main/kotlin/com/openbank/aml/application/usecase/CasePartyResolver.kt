@@ -57,7 +57,7 @@ class CasePartyResolver(
         eventId = Ids.newId(),
         aggregateId = blocked.id,
         eventType = AmlCaseService.EVENT_STATUS_CHANGED,
-        payload = objectMapper.writeValueAsString(
+        payload = objectMapper.statusChangedPayload(
             AmlCaseStatusChangedEvent(
                 caseId = blocked.id,
                 partyId = partyId,

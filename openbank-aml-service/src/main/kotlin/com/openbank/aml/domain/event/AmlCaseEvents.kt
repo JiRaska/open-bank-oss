@@ -47,6 +47,9 @@ data class AmlCaseStatusChangedEvent(
     // Additive (#4403): binds a decision to the case a rail opened, since alertCode and
     // transactionId are free text any case creator may set.
     val idempotencyKey: String? = null,
+    // Additive (ADR-0374): set only for a case the held-payment intake opened, and left off the
+    // wire otherwise, so every other case's event is unchanged.
+    val origin: String? = null,
 )
 
 fun AmlCase.toCreatedEvent(now: Instant) = AmlCaseCreatedEvent(

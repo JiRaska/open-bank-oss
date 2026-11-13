@@ -156,29 +156,7 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
             }
     }.awaitSuspending()
 
-    /**
-     * The one way a party is attached to a case, used by [save] and [resolveParty]. The party's lock
-     * is taken before the erasure record is read, and taken by [anonymizeByPartyId] before it writes
-     * one: whichever of the two commits first, the other sees it. An erased party's case is
-     * anonymised exactly as [anonymizeByPartyId] does it (same fields, same sentinel).
-     */
-    private fun attachParty(entity: AmlCaseEntity, partyId: UUID): Uni<Unit> =
-        lockParty(partyId)
-            .chain { _ -> select(ERASED, mapOf("partyId" to partyId)) }
-            .map { erased ->
-                entity.partyId = partyId
-                if (erased.isNotEmpty()) {
-                    entity.customerReference = erasedReference(partyId)
-                    entity.matchedEntity = null
-                    entity.alertDetail = null
-                }
-            }
-
     private companion object {
-        fun erasedReference(partyId: UUID): String = "ERASED-$partyId"
-
-        const val ERASED = "SELECT 1 FROM aml_erased_party WHERE party_id = :partyId"
-
         const val RECORD_ERASURE = """
             INSERT INTO aml_erased_party (party_id, erased_at) VALUES (:partyId, :erasedAt)
             ON CONFLICT (party_id) DO NOTHING
@@ -208,3 +186,24 @@ private fun lockParty(partyId: UUID): Uni<Unit> =
         "SELECT cast(pg_advisory_xact_lock(hashtextextended(:party, 0)) AS text)",
         mapOf("party" to partyId.toString()),
     ).replaceWith(Unit)
+
+/**
+ * The one way a party is attached to a case, used by [save] and [resolveParty]. The party's lock
+ * is taken before the erasure record is read, and taken by [anonymizeByPartyId] before it writes
+ * one: whichever of the two commits first, the other sees it. An erased party's case is
+ * anonymised exactly as [anonymizeByPartyId] does it (same fields, same sentinel).
+ */
+private fun attachParty(entity: AmlCaseEntity, partyId: UUID): Uni<Unit> = lockParty(partyId)
+    .chain { _ -> select(ERASED, mapOf("partyId" to partyId)) }
+    .map { erased ->
+        entity.partyId = partyId
+        if (erased.isNotEmpty()) {
+            entity.customerReference = erasedReference(partyId)
+            entity.matchedEntity = null
+            entity.alertDetail = null
+        }
+    }
+
+private fun erasedReference(partyId: UUID): String = "ERASED-$partyId"
+
+private const val ERASED = "SELECT 1 FROM aml_erased_party WHERE party_id = :partyId"

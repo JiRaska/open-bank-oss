@@ -261,7 +261,9 @@ class AmlCaseServiceTest {
         coEvery { amlCaseRepository.findById(rest.id) } returns rest
         coEvery { amlCaseRepository.update(any(), capture(event)) } answers { firstArg() }
 
-        service.updateDecision(UpdateAmlDecisionCommand(rest.id, AmlCaseStatus.CLEARED, "false positive", null, "analyst"))
+        service.updateDecision(
+            UpdateAmlDecisionCommand(rest.id, AmlCaseStatus.CLEARED, "false positive", null, "analyst"),
+        )
 
         assertThat(objectMapper.readTree(event.captured.payload).has("origin")).isFalse()
     }
