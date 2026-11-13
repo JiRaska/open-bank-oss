@@ -267,24 +267,7 @@ open class PaymentAdmissionActivitiesImpl(
             else -> {
                 val updated = payment.transitionTo(DomesticPaymentStatus.VALIDATED, clock = clock)
                 writes.transition(updated, listOf(eventPublisher.statusChanged(payment, updated)))
-                // A control the case was opened for that reports NotApplicable now was switched off
-                // during the hold (fraud enforcement, say). Configuration decides that, and it is
-                // made visible: the evidence it raised was never decided on.
-                val lapsed = payment.holdCaseReasons.map { it.substringBefore(':') }.distinct()
-                    .mapNotNull { name -> AdmissionStep.entries.firstOrNull { it.name == name } }
-                    .filter { result[it].outcome is StepOutcome.NotApplicable }
-                if (lapsed.isEmpty()) {
-                    metrics.recordHoldEnd(PaymentHoldEnd.RELEASED)
-                    log.infof("Held payment %s released by its case", payment.id)
-                } else {
-                    metrics.recordHoldEnd(PaymentHoldEnd.RELEASED_CONTROL_NOT_APPLICABLE)
-                    log.warnf(
-                        "Held payment %s released by its case while %s, which the case was opened for, no longer " +
-                            "applies; operator-controlled release",
-                        payment.id,
-                        lapsed,
-                    )
-                }
+                metrics.recordRelease(payment, result, log)
                 HoldState.RELEASED
             }
         }
@@ -411,6 +394,29 @@ fun evidenceIdentity(step: AdmissionStep, evidence: Map<String, String>): String
 private val SANCTIONS_CLEAR_STATUSES = setOf("CLEAR", "WHITELISTED")
 private val FRAUD_IDENTITY = listOf("verdict", "score", "rule_version")
 private const val FINGERPRINT_BYTES = 8
+
+/**
+ * Counts and logs a release. A control the case was opened for that reports NotApplicable now
+ * was switched off during the hold (fraud enforcement, say). Configuration decides that, and it
+ * is made visible: the evidence that control raised was never decided on.
+ */
+private fun PaymentAdmissionMetricsPort.recordRelease(payment: DomesticPayment, result: AdmissionResult, log: Logger) {
+    val lapsed = payment.holdCaseReasons.map { it.substringBefore(':') }.distinct()
+        .mapNotNull { name -> AdmissionStep.entries.firstOrNull { it.name == name } }
+        .filter { result[it].outcome is StepOutcome.NotApplicable }
+    if (lapsed.isEmpty()) {
+        recordHoldEnd(PaymentHoldEnd.RELEASED)
+        log.infof("Held payment %s released by its case", payment.id)
+    } else {
+        recordHoldEnd(PaymentHoldEnd.RELEASED_CONTROL_NOT_APPLICABLE)
+        log.warnf(
+            "Held payment %s released by its case while %s, which the case was opened for, no longer " +
+                "applies; operator-controlled release",
+            payment.id,
+            lapsed,
+        )
+    }
+}
 
 /** The reject reason a refusing step maps to. Top-level, after the class, for detekt's function count. */
 private fun rejectReasonFor(step: AdmissionStep): DomesticRejectReason = when (step) {
