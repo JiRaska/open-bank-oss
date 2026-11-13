@@ -26,6 +26,7 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.LockModeType
 import jakarta.persistence.OptimisticLockException
 import org.hibernate.StaleStateException
 import java.time.Clock
@@ -59,7 +60,13 @@ class BusinessOnboardingCaseRepositoryImpl(
      */
     override suspend fun update(case: BusinessOnboardingCase, event: KybEvent?): BusinessOnboardingCase {
         val written = Panache.withTransaction {
-            find("caseId", case.id).firstResult().flatMap { e ->
+            // The case row is locked BEFORE its version is compared, and everything below — the
+            // registration rows, the findings — is written under that lock. So a version that
+            // matches here cannot move before this write commits: a finding row that then does not
+            // take this write's decision is a genuine conflict, never a race lost to another
+            // writer. Lock order is case row first, then its monitoring rows, on every path; the
+            // relay never holds a monitoring row while it waits for a case row.
+            find("caseId", case.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().flatMap { e ->
                 val row = requireNotNull(e) { "case ${case.id} vanished" }
                 if (row.version != case.version) {
                     Uni.createFrom().failure(ConcurrentCaseUpdateException(case.id))

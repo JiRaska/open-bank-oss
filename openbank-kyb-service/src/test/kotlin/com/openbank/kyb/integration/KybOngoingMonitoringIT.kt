@@ -820,10 +820,13 @@ class KybOngoingMonitoringIT {
             representativeKey(caseId),
         )
 
+        val conflictsBefore = counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "decision_conflict")
         val failure = runCatching { finding(personRef(caseId), findingId) }.exceptionOrNull()
 
         // Nacked as its own failure, not retried as a lost race: dead-lettered; nothing of the write is there.
         assertThat(failure).isInstanceOf(FindingDecisionConflictException::class.java)
+        assertThat(counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "decision_conflict"))
+            .isEqualTo(conflictsBefore + 1)
         val after = journey.stored(caseId)
         assertThat(after.xmin).describedAs("the case row was not written").isEqualTo(before.xmin)
         assertThat(after.findingCount).isZero()
@@ -834,6 +837,45 @@ class KybOngoingMonitoringIT {
         journey.execute("delete from kyb_monitoring_findings where case_id = ?", UUID.fromString(caseId))
         finding(personRef(caseId), findingId)
         assertThat(journey.stored(caseId).reviewOpen).isTrue()
+    }
+
+    @Test
+    fun `a finding delivered while an operator decides another one on the same case is applied, not dead-lettered`() {
+        val caseId = journey.approved("71000313")
+        run()
+        val first = UUID.randomUUID()
+        finding(personRef(caseId), first)
+        val conflictsBefore = counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "decision_conflict")
+        val second = UUID.randomUUID()
+
+        // The operator's decision, held open: it has locked the case and decided the first finding.
+        val delivery = journey.connection().use { operator ->
+            operator.autoCommit = false
+            fun exec(sql: String, vararg args: Any?) = operator.prepareStatement(sql).use { st ->
+                args.forEachIndexed { i, a -> st.setObject(i + 1, a) }
+                st.execute()
+            }
+            exec("select version from kyb_cases where case_id = ? for update", UUID.fromString(caseId))
+            exec(
+                "update kyb_monitoring_findings set disposition = 'CLEARED_FALSE_POSITIVE', decided_by = 'op', " +
+                    "decision_reason = 'decided concurrently', decided_at = now() where case_id = ? and finding_id = ?",
+                UUID.fromString(caseId),
+                first,
+            )
+            exec("update kyb_cases set version = version + 1 where case_id = ?", UUID.fromString(caseId))
+            // The delivery starts while the decision is uncommitted, and has to wait for it.
+            val pending = CompletableFuture.supplyAsync { runCatching { finding(personRef(caseId), second) } }
+            Thread.sleep(CONCURRENT_OVERLAP_MS)
+            operator.commit()
+            pending
+        }.get(WAIT_SECONDS, TimeUnit.SECONDS)
+
+        assertThat(delivery.exceptionOrNull()).describedAs("a lost race is retried, not dead-lettered").isNull()
+        assertThat(journey.findings(caseId))
+            .containsEntry(first.toString(), "CLEARED_FALSE_POSITIVE")
+            .containsEntry(second.toString(), "OPEN")
+        assertThat(counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "decision_conflict"))
+            .isEqualTo(conflictsBefore)
     }
 
     @Test
@@ -988,5 +1030,6 @@ class KybOngoingMonitoringIT {
         const val BLOCKED_FOR_MS = 700L
         const val SLOW_CALL_MS = 400L
         const val WAIT_SECONDS = 30L
+        const val CONCURRENT_OVERLAP_MS = 1_000L
     }
 }

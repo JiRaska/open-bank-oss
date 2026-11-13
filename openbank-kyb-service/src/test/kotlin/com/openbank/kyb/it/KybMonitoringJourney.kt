@@ -72,6 +72,9 @@ class KybMonitoringJourney(
             }
         }
 
+    /** A connection the caller holds open, for a transaction that has to overlap another one. */
+    fun connection(): java.sql.Connection = DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword)
+
     fun execute(sql: String, vararg args: Any?): Int =
         DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { c ->
             c.prepareStatement(sql).use { st ->
