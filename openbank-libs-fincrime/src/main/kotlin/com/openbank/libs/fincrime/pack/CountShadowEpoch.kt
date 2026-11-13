@@ -6,6 +6,16 @@ package com.openbank.libs.fincrime.pack
 
 import com.openbank.libs.audit.AuditChain
 import com.openbank.libs.audit.CanonicalJson
+import com.openbank.libs.audit.decision.DecisionClass
+import com.openbank.libs.audit.decision.DecisionEngine
+import com.openbank.libs.audit.decision.DecisionEngineKind
+import com.openbank.libs.audit.decision.DecisionOutcome
+import com.openbank.libs.audit.decision.DecisionReason
+import com.openbank.libs.audit.decision.DecisionRecord
+import com.openbank.libs.audit.decision.DecisionRecord.Companion.toMap
+import com.openbank.libs.audit.decision.DecisionRetentionClass
+import com.openbank.libs.audit.decision.InputDigest
+import com.openbank.libs.audit.decision.SubjectRef
 import com.openbank.libs.governance.Proposal
 import java.security.GeneralSecurityException
 import java.security.PublicKey
@@ -46,8 +56,8 @@ object CountShadowReplay {
             mapOf(
                 "case" to case.id,
                 "inputs" to CountPackCanonical.inputHash(case.at, case.observations.sortedBy { it.reference.id }),
-                "baseline" to difference.baseline.evidence(),
-                "candidate" to difference.candidate.evidence(),
+                "baseline" to difference.baseline.shadowEvidence(),
+                "candidate" to difference.candidate.shadowEvidence(),
                 "changed" to difference.behaviorChanged,
             )
         }
@@ -65,23 +75,6 @@ object CountShadowReplay {
             AuditChain.sha256Hex(evidence),
             differences.count { it.baseline is CountEvaluation.Evaluated && it.candidate is CountEvaluation.Evaluated },
             differences.count { it.behaviorChanged },
-        )
-    }
-
-    private fun CountEvaluation.evidence(): Map<String, Any?> = when (this) {
-        is CountEvaluation.Incomplete -> mapOf("failure" to failure.name, "feature" to featureId)
-        is CountEvaluation.Evaluated -> mapOf(
-            "inputHash" to inputHash,
-            "evaluatedRules" to evaluatedRules,
-            "findings" to findings.map {
-                mapOf(
-                    "rule" to it.ruleId,
-                    "reason" to it.reason.value,
-                    "effect" to CountPackCanonical.effect(it.effect),
-                    "reasonVocabulary" to CountPackCanonical.vocabulary(it.reasonVocabulary),
-                    "severityVocabulary" to it.severityVocabulary?.let(CountPackCanonical::vocabulary),
-                )
-            },
         )
     }
 }
@@ -145,6 +138,50 @@ class PinnedCountShadowEpoch private constructor(
         )
     }
 
+    /** The existing DecisionRecord wire payload. [atomic] describes the caller's persistence transaction. */
+    fun decisionRecord(
+        decisionId: UUID,
+        pseudonymousSubject: String,
+        at: Instant,
+        observations: List<CountObservation>,
+        atomic: Boolean,
+    ): Map<String, Any?> {
+        val inputs = observations.take(CompiledCountPack.MAX_RULES + 1)
+        require(inputs.size <= CompiledCountPack.MAX_RULES) { "shadow decision record exceeds its input bound" }
+        val ordered = inputs.sortedBy { it.reference.id }
+        val result = evaluate(at, ordered).result
+        val state = when (result) {
+            is CountEvaluation.Evaluated -> DecisionOutcome.Shadow.Result.EVALUATED
+            is CountEvaluation.Incomplete -> DecisionOutcome.Shadow.Result.INCOMPLETE
+        }
+        val reasons = when (result) {
+            is CountEvaluation.Evaluated -> result.findings.map { DecisionReason(it.reason.value, it.ruleId) }
+            is CountEvaluation.Incomplete -> listOf(DecisionReason(result.failure.name))
+        }
+        return DecisionRecord(
+            decisionId = decisionId,
+            decisionClass = DecisionClass.SHADOW,
+            decidedAt = at,
+            inputDigest = InputDigest(CountPackCanonical.inputHash(at, ordered)),
+            engine = DecisionEngine(
+                DecisionEngineKind.DECISION_TABLE,
+                pack.reference.id,
+                pack.reference.revision.toString(),
+            ),
+            outcome = DecisionOutcome.Shadow(
+                result = state,
+                epoch = epoch.number,
+                artifactHash = InputDigest(pack.reference.contentHash),
+                approvedEvidenceHash = InputDigest(epoch.replay.digest),
+                outputHash = InputDigest(AuditChain.sha256Hex(CanonicalJson.write(result.shadowEvidence()))),
+            ),
+            reasons = reasons,
+            subjectRef = SubjectRef(pseudonymousSubject),
+            atomic = atomic,
+            retentionClass = DecisionRetentionClass.AUDIT_LOG_5Y,
+        ).toMap()
+    }
+
     companion object {
         /**
          * [trustedKeys] and [approvalIsCurrent] come from publisher-independent trust configuration.
@@ -194,3 +231,20 @@ class PinnedCountShadowEpoch private constructor(
 }
 
 private fun PackRef.fields(): Map<String, Any> = mapOf("id" to id, "revision" to revision, "hash" to contentHash)
+
+private fun CountEvaluation.shadowEvidence(): Map<String, Any?> = when (this) {
+    is CountEvaluation.Incomplete -> mapOf("failure" to failure.name, "feature" to featureId)
+    is CountEvaluation.Evaluated -> mapOf(
+        "inputHash" to inputHash,
+        "evaluatedRules" to evaluatedRules,
+        "findings" to findings.map {
+            mapOf(
+                "rule" to it.ruleId,
+                "reason" to it.reason.value,
+                "effect" to CountPackCanonical.effect(it.effect),
+                "reasonVocabulary" to CountPackCanonical.vocabulary(it.reasonVocabulary),
+                "severityVocabulary" to it.severityVocabulary?.let(CountPackCanonical::vocabulary),
+            )
+        },
+    )
+}

@@ -21,7 +21,7 @@ info:
   # contra) that migration V35 maps for the posting-rule matrix classes.
   # 1.29.0 -> 1.30.0: additive raw journal snapshot reads and optional unverified caller-origin evidence.
   # 1.30.0 -> 1.31.0: additive immutable close evidence, monthly readiness and explicit participant mode.
-  version: 1.34.0
+  version: 1.35.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -420,6 +420,43 @@ paths:
           description: Closed fiscal period, conflicting journal state, or mismatched replay origin
         '422':
           description: Unbalanced journal or GL account validation failure
+
+  /api/v1/journals/synthetic/transactions/{transactionId}:
+    get:
+      tags: [Journals]
+      operationId: proveSyntheticTransferJournal
+      summary: Prove the configured fixture has exactly one posted synthetic transfer journal
+      description: >-
+        The dedicated proof reader can see one committed CZK 0.01 journal between the two
+        configured fixture accounts. The proof is scoped to the supplied transaction identifier.
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: One scoped posting matches the fixture
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [journalId, transactionId, debitAccountId, creditAccountId, valueDate,
+                  postingCount, amountMinor, currency, synthetic]
+                properties:
+                  journalId: {type: string, format: uuid}
+                  transactionId: {type: string, format: uuid}
+                  debitAccountId: {type: string, format: uuid}
+                  creditAccountId: {type: string, format: uuid}
+                  valueDate: {type: string, format: date}
+                  postingCount: {type: integer, const: 1}
+                  amountMinor: {type: integer, const: 1}
+                  currency: {type: string, const: CZK}
+                  synthetic: {type: boolean, const: true}
+        '403':
+          description: Verified proof reader is required
+        '404':
+          description: Scoped posting proof is unavailable
 
   /api/v1/journals/{journalId}:
     get:

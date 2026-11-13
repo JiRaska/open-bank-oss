@@ -232,6 +232,12 @@ when a feature is missing. The tests use ephemeral Ed25519 keys and exercise bot
 The library slice leaves durable approval, publisher custody, epoch compare-and-set, replica
 routing, DecisionRecord persistence and the deployment conformance gate open under #13775.
 
+The existing DecisionRecord codec has a versioned shadow outcome. It records evaluated and
+incomplete results with the exact artifact hash, epoch, approved evidence hash and result hash.
+The count-pack pin encodes this outcome through the shared codec with a canonical input digest.
+The transport rollout must teach the audit reader the new outcome before publishing it from a
+service outbox. Existing decision classes retain their wire shape.
+
 ## Evidence required before claiming completion
 
 - Pin source/schema/pack/model/prompt/input versions, approvals and activation epoch on

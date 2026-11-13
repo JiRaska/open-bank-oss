@@ -61,7 +61,8 @@ info:
   # GET /notifications/unified, and an optional origin `partyId` on PATCH /notifications/read-all.
   # 1.88.0 -> 1.89.0 (#14649): additive — documents the 403 PENSION_ACCESS_DENIED response on
   # GET /pension/transfers (a pension-service read refusal, never a change refusal).
-  version: 1.92.0
+  # 1.92.0 -> 1.94.0 (#15669): additive synthetic transfer canary route (1.93.x claimed by open PRs).
+  version: 1.94.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -4398,6 +4399,67 @@ paths:
           description: Malformed body, or source and target account are the same
         '403':
           description: Source or target account does not belong to caller
+
+  /synthetic/transfers:
+    get:
+      tags: [Transfers]
+      operationId: syntheticTransferBankDate
+      summary: Read the current bank date for the pinned synthetic transfer fixture
+      security:
+        - customerOidc: [payments:initiate]
+      parameters:
+        - name: x-openbank-synthetic
+          in: header
+          required: true
+          schema: {type: string, const: 'true'}
+      responses:
+        '200':
+          description: Current Europe/Prague booking date from the bank calendar
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runDate]
+                properties:
+                  runDate: {type: string, format: date}
+        '403':
+          description: Verified synthetic fixture identity or taint is absent
+    post:
+      tags: [Transfers]
+      operationId: createSyntheticTransfer
+      summary: Run one direction of the pinned synthetic own-account transfer
+      description: >-
+        The dedicated synthetic customer must match the configured active synthetic party and both
+        configured accounts must belong to it. The fixture supplies the accounts, amount and currency.
+        The transaction service derives an idempotency key from the party, run date and direction.
+      security:
+        - customerOidc: [payments:initiate]
+      parameters:
+        - name: x-openbank-synthetic
+          in: header
+          required: true
+          schema: {type: string, const: 'true'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [runDate, direction]
+              properties:
+                runDate: {type: string, format: date, description: Current Europe/Prague booking date}
+                direction: {type: string, enum: [OUTBOUND, RETURN]}
+      responses:
+        '201':
+          description: Transfer initiated or replayed with the same transaction ID
+        '400':
+          description: Invalid direction or run date
+        '403':
+          description: Verified synthetic identity, fixture ownership or taint is absent
+        '422':
+          description: The bank date changed or the outbound booking window closed
+        '502':
+          description: Upstream service unavailable
 
   /complaints:
     post:

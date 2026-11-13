@@ -185,7 +185,7 @@ export const PERMISSIONS = {
   // Single-party DETAIL read only (GET /api/v1/parties/{id}, PartyResource.getParty): that endpoint
   // additionally admits ROLE_RISK so a risk officer can see an obligor's name. Search and list stay
   // on `parties:view`; never use this for a directory link.
-  "parties:view-detail":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.KYC, ROLES.RISK],
+  "parties:view-detail":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.KYC, ROLES.RISK, ROLES.COMPLIANCE],
   "parties:search":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
   "parties:reveal-pii":   [ROLES.ADMIN, ROLES.KYC],
   // Mirrors party-service POST /api/v1/parties: a viewer may inspect parties but
