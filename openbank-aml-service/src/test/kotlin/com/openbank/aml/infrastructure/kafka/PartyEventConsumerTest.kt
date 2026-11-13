@@ -12,7 +12,6 @@ import com.openbank.aml.application.usecase.AmlCaseService
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.libs.persistence.outbox.OutboxMessage
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -61,31 +60,31 @@ class PartyEventConsumerTest {
     @Test
     fun `PARTY_ERASED with valid partyId calls anonymizeByPartyId`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        coEvery { amlCaseRepository.anonymizeByPartyId(partyId, any()) } returns 2
+        coEvery { amlCaseRepository.anonymizeByPartyId(partyId) } returns 2
 
         consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
 
-        coVerify(exactly = 1) { amlCaseRepository.anonymizeByPartyId(partyId, any()) }
+        coVerify(exactly = 1) { amlCaseRepository.anonymizeByPartyId(partyId) }
     }
 
     @Test
     fun `PARTY_ERASED with missing partyId is skipped without calling repository`(): Unit = runBlocking {
         consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"not-a-uuid"}""")
 
-        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any(), any()) }
+        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any()) }
     }
 
     @Test
     fun `PARTY_ERASED with absent partyId field is skipped without calling repository`(): Unit = runBlocking {
         consumer.consume("""{"eventType":"PARTY_ERASED"}""")
 
-        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any(), any()) }
+        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any()) }
     }
 
     @Test
     fun `PARTY_ERASED repository failure is RETHROWN so the connector dead-letters`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        coEvery { amlCaseRepository.anonymizeByPartyId(partyId, any()) } throws TransientDbFailure()
+        coEvery { amlCaseRepository.anonymizeByPartyId(partyId) } throws TransientDbFailure()
 
         // Replaces a test that asserted the opposite ("message is acked"). Acking a failed erasure
         // leaves the PII in place while the log records the erasure as done (#5698).
@@ -93,7 +92,7 @@ class PartyEventConsumerTest {
             runBlocking { consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""") }
         }
 
-        coVerify(exactly = 3) { amlCaseRepository.anonymizeByPartyId(partyId, any()) }
+        coVerify(exactly = 3) { amlCaseRepository.anonymizeByPartyId(partyId) }
     }
 
     @Test
@@ -102,7 +101,7 @@ class PartyEventConsumerTest {
         consumer.consume("""{"eventType":"PARTY_CREATED","partyType":"INDIVIDUAL","partyId":"$partyId"}""")
 
         coVerify(exactly = 1) { amlUseCase.createCase(any()) }
-        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any(), any()) }
+        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any()) }
     }
 
     @Test
@@ -110,7 +109,7 @@ class PartyEventConsumerTest {
         consumer.consume("""{"eventType":"PARTY_SUSPENDED","partyId":"${UUID.randomUUID()}"}""")
 
         coVerify(exactly = 0) { amlUseCase.createCase(any()) }
-        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any(), any()) }
+        coVerify(exactly = 0) { amlCaseRepository.anonymizeByPartyId(any()) }
     }
 
     @ParameterizedTest
@@ -166,7 +165,7 @@ class PartyEventConsumerTest {
             }
             val clock = Clock.fixed(Instant.parse("2026-09-17T10:00:00Z"), ZoneOffset.UTC)
             val autoClearing = PartyEventConsumer(
-                amlUseCase = AmlCaseService(repo, objectMapper, clock, SimpleMeterRegistry()),
+                amlUseCase = AmlCaseService(repo, objectMapper, clock),
                 amlCaseRepository = repo,
                 objectMapper = objectMapper,
                 autoClear = true,
@@ -190,7 +189,7 @@ class PartyEventConsumerTest {
         coEvery { repo.findByIdempotencyKey(any()) } returns null
         coEvery { repo.save(capture(saved), any()) } answers { saved.captured }
         val manual = PartyEventConsumer(
-            amlUseCase = AmlCaseService(repo, objectMapper, Clock.systemUTC(), SimpleMeterRegistry()),
+            amlUseCase = AmlCaseService(repo, objectMapper, Clock.systemUTC()),
             amlCaseRepository = repo,
             objectMapper = objectMapper,
             autoClear = false,

@@ -7,7 +7,6 @@ package com.openbank.aml.infrastructure.persistence.mapper
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.AmlRiskLevel
-import com.openbank.aml.domain.model.CaseOrigin
 import com.openbank.aml.domain.model.ScreeningType
 import com.openbank.aml.infrastructure.persistence.entity.AmlCaseEntity
 
@@ -32,7 +31,6 @@ fun AmlCase.toEntity() = AmlCaseEntity().also {
     it.createdAt = createdAt
     it.updatedAt = updatedAt
     it.requestHash = requestHash
-    it.origin = origin?.name
 }
 
 fun AmlCaseEntity.toDomain() = AmlCase(
@@ -56,6 +54,4 @@ fun AmlCaseEntity.toDomain() = AmlCase(
     createdAt = createdAt,
     updatedAt = updatedAt,
     requestHash = requestHash,
-    // A name this build does not know (written by a newer pod) reads as unknown, never as a system origin.
-    origin = origin?.let { name -> CaseOrigin.entries.firstOrNull { it.name == name } },
 )

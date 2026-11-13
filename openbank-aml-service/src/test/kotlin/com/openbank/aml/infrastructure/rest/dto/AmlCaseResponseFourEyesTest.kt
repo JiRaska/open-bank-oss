@@ -34,27 +34,6 @@ class AmlCaseResponseFourEyesTest {
         assertThat(onboarding.requiresFourEyesDisposition).isFalse()
     }
 
-    @Test
-    fun `a case with no established party says so instead of presenting something as its party`() {
-        val account = UUID.randomUUID()
-        val base = amlCase(ScreeningType.TRANSACTION_MONITORING, "${AmlCase.PAYMENT_HOLD_KEY_PREFIX}domestic:x")
-
-        val missing = base.copy(partyId = null, accountId = account).toResponse()
-        assertThat(missing.partyResolved).isFalse()
-        assertThat(missing.partyId).isEqualTo(UUID(0L, 0L)).isNotEqualTo(account)
-        assertThat(missing.accountId).isEqualTo(account)
-
-        // A row from before a missing party could be stored: the account id sits where the party belongs.
-        val accountAsParty = base.copy(partyId = account, accountId = account).toResponse()
-        assertThat(accountAsParty.partyResolved).isFalse()
-
-        val party = UUID.randomUUID()
-        val resolved = base.copy(partyId = party, accountId = account).toResponse()
-        assertThat(resolved.partyResolved).isTrue()
-        assertThat(resolved.partyId).isEqualTo(party)
-        assertThat(base.toResponse().partyResolved).describedAs("a party and no account").isTrue()
-    }
-
     private fun amlCase(type: ScreeningType, key: String) = AmlCase(
         id = UUID.randomUUID(),
         idempotencyKey = key,

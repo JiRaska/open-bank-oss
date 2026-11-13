@@ -13,7 +13,6 @@ import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
-import java.time.Instant
 import java.util.UUID
 
 /**
@@ -105,7 +104,7 @@ class PartyEventConsumer(
         // An acked-but-failed erasure is worse than a stalled workflow: the PII stays, and the log
         // line says it went. anonymizeByPartyId is idempotent, so retry and redelivery are safe.
         EventRetry.withRetry(log, "PARTY_ERASED AML anonymisation", partyId) {
-            val count = amlCaseRepository.anonymizeByPartyId(partyId, Instant.now())
+            val count = amlCaseRepository.anonymizeByPartyId(partyId)
             log.infof(
                 "[party-events-in] GDPR Art. 17: anonymised PII in %d AML case(s) for erased party %s",
                 count,

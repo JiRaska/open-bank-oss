@@ -19,7 +19,7 @@ class MonitoringDeadLetterQueueConfigTest {
     private val config = YamlConfigSource("application.yaml", File("src/main/resources/application.yaml").readText())
 
     @ParameterizedTest
-    @ValueSource(strings = ["ledger-events-in", "transaction-events-in", "payment-held-in"])
+    @ValueSource(strings = ["ledger-events-in", "transaction-events-in"])
     fun `each monitoring channel resolves a dead-letter strategy and its own explicit topic`(channel: String) {
         val prefix = "mp.messaging.incoming.$channel"
         assertThat(config.getValue("$prefix.failure-strategy")).isEqualTo("dead-letter-queue")

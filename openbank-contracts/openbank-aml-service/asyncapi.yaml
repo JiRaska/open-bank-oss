@@ -5,7 +5,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank AML Service — events
-  version: 1.2.0
+  version: 1.1.0
   description: |
     AML case lifecycle events on openbank.aml.events and minimal, non-PII oversight wake-ups
     for HIGH or CRITICAL case creation (ADR-0031 D9). Both are relayed from the durable outbox.
@@ -165,12 +165,8 @@ components:
         idempotencyKey:
           type: string
         partyId:
-          type: [string, 'null']
+          type: string
           format: uuid
-          description: >-
-            The party the case is about, exactly as the case stores it. Null only for a case stored
-            with no party, which only the held-payment intake writes (a hold whose rail could not
-            name the debtor). Every other case publishes the value it always did.
         accountId:
           type: [string, 'null']
           format: uuid
@@ -220,17 +216,8 @@ components:
           type: string
           format: uuid
         partyId:
-          type: [string, 'null']
+          type: string
           format: uuid
-          description: >-
-            The party the case is about, exactly as the case stores it. Null only for a case stored
-            with no party, which only the held-payment intake writes. A decision on such a case is
-            published for the payment rail, which binds it by idempotencyKey; a consumer that acts
-            per party has no party to act on and must neither act nor fail. If that decision was
-            BLOCKED, it is published once more on this message when the party is resolved, with the
-            party: previousStatus and newStatus are both BLOCKED, and idempotencyKey, alertCode and
-            transactionId are null, so a consumer that binds a decision to a case key does not take
-            it for a second decision. No other status is ever published again.
         previousStatus:
           type: string
           enum: [OPEN, UNDER_REVIEW, ESCALATED, CLEARED, BLOCKED]
