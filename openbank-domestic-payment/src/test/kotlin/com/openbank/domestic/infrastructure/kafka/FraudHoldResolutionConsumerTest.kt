@@ -9,9 +9,9 @@ import com.openbank.domestic.application.usecase.FraudHoldResolutionService
 import com.openbank.domestic.application.usecase.PaymentHoldResolutionService
 import com.openbank.domestic.application.workflow.FraudHoldDelivery
 import com.openbank.domestic.application.workflow.FraudReviewDecision
-import com.openbank.domestic.application.workflow.PaymentHoldDecision
 import com.openbank.domestic.application.workflow.PaymentHoldPolicy
 import com.openbank.domestic.application.workflow.fraudReviewCaseKey
+import com.openbank.domestic.domain.model.HoldDecision
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -74,14 +74,14 @@ class FraudHoldResolutionConsumerTest {
 
     @Test
     fun `the decision of an admission hold's own case releases or rejects it (ADR-0374)`() {
-        every { holdResolution.resolve(any(), any(), any()) } returns true
+        every { holdResolution.resolve(any(), any()) } returns true
         val key = PaymentHoldPolicy.caseKey(paymentId)
 
         runBlocking { consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = key)) }
         runBlocking { consumer.consume(event("BLOCKED", alert = "PAYMENT_HELD", key = key)) }
 
-        verify(exactly = 1) { holdResolution.resolve(paymentId, PaymentHoldDecision.RELEASE, key) }
-        verify(exactly = 1) { holdResolution.resolve(paymentId, PaymentHoldDecision.REJECT, key) }
+        verify(exactly = 1) { holdResolution.resolve(paymentId, HoldDecision.RELEASE) }
+        verify(exactly = 1) { holdResolution.resolve(paymentId, HoldDecision.REJECT) }
         verify(exactly = 0) { resolution.resolve(any(), any(), any()) }
     }
 
@@ -98,7 +98,7 @@ class FraudHoldResolutionConsumerTest {
         consumer.consume(event("CLEARED", alert = "FRAUD_REVIEW", key = key))
         consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", tx = null, key = key))
         consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", tx = "not-a-uuid", key = key))
-        verify(exactly = 0) { holdResolution.resolve(any(), any(), any()) }
+        verify(exactly = 0) { holdResolution.resolve(any(), any()) }
         verify(exactly = 0) { resolution.resolve(any(), any(), any()) }
     }
 

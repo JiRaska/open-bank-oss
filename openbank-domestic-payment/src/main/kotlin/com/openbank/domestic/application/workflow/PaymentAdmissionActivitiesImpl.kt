@@ -16,6 +16,7 @@ import com.openbank.domestic.domain.event.PaymentHeldEvent
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
+import com.openbank.domestic.domain.model.HoldDecision
 import com.openbank.domestic.domain.model.RecordedFraudScore
 import com.openbank.libs.fincrime.AmlCaseSeverity
 import com.openbank.libs.fincrime.admission.AdmissionDecision
@@ -23,7 +24,6 @@ import com.openbank.libs.fincrime.admission.AdmissionResult
 import com.openbank.libs.fincrime.admission.AdmissionStep
 import com.openbank.libs.fincrime.admission.StepOutcome
 import com.openbank.libs.fincrime.admission.StepRecord
-import com.openbank.libs.fincrime.admission.UnavailableCause
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -31,7 +31,6 @@ import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
@@ -59,10 +58,6 @@ open class PaymentAdmissionActivitiesImpl(
     private val amlCasePort: AmlCasePort,
     private val metrics: PaymentAdmissionMetricsPort,
     private val clock: Clock,
-    // Read HERE, by the activity, so a workflow replay never depends on configuration. Off by
-    // default: switching the chain on for this rail is its own approved release (ADR-0374).
-    @ConfigProperty(name = "openbank.domestic.admission.enabled", defaultValue = "false")
-    private val admissionEnabled: Boolean,
 ) : PaymentAdmissionActivities {
 
     private val log = Logger.getLogger(PaymentAdmissionActivitiesImpl::class.java)
@@ -74,10 +69,9 @@ open class PaymentAdmissionActivitiesImpl(
         val payment = paymentRepository.findById(paymentId)
             ?: error("Payment $paymentId not found during admission activity")
         when (payment.status) {
-            // A payment already HELD is evaluated whatever the switch says: turning the chain off
-            // must not strand the holds it placed.
-            DomesticPaymentStatus.RECEIVED ->
-                if (admissionEnabled) evaluate(payment, lastAttempt) else AdmissionAction.NOT_ENABLED
+            // Whether a payment goes through admission was decided when its run was started, by the
+            // task queue it was started on. The activity does not ask again.
+            DomesticPaymentStatus.RECEIVED -> evaluate(payment, lastAttempt)
             DomesticPaymentStatus.HELD ->
                 // Its case was requested: the hold is the case's to decide. Evaluating again could
                 // let a control that answers differently now release a payment a reviewer holds.
@@ -126,7 +120,12 @@ open class PaymentAdmissionActivitiesImpl(
                 }
                 AdmissionAction.ADMITTED
             }
-            AdmissionDecision.REJECT -> rejected(payment, result)
+            AdmissionDecision.REJECT -> {
+                if (payment.status == DomesticPaymentStatus.HELD) {
+                    metrics.recordHoldEnd(PaymentHoldEnd.REJECTED_BY_REEVALUATION)
+                }
+                rejected(payment, result)
+            }
             // No step-up exists inside an accepted domestic payment, so a CHALLENGE is a hold.
             AdmissionDecision.CHALLENGE, AdmissionDecision.HOLD -> held(payment, result, lastAttempt)
         }
@@ -140,7 +139,6 @@ open class PaymentAdmissionActivitiesImpl(
             clock = clock,
         )
         writes.transition(updated, listOf(eventPublisher.statusChanged(payment, updated)))
-        if (payment.status == DomesticPaymentStatus.HELD) metrics.recordHoldEnd(PaymentHoldEnd.REJECTED_BY_REEVALUATION)
         if (rejecting == AdmissionStep.SANCTIONS) recordSanctionsHit(payment, result[AdmissionStep.SANCTIONS])
         // No customer notification: every reason this chain rejects for is one the customer is not
         // told (a sanctions hit, a fraud decline, a freeze that may be an AML block).
@@ -175,54 +173,82 @@ open class PaymentAdmissionActivitiesImpl(
         return if (wantsReview) AdmissionAction.HELD_FOR_REVIEW else AdmissionAction.HELD_UNAVAILABLE
     }
 
-    override fun releaseHeld(paymentId: UUID): Boolean = vtx {
+    override fun concludeHold(paymentId: UUID): HoldState = vtx {
         val payment = paymentRepository.findById(paymentId)
-            ?: error("Payment $paymentId not found during hold release activity")
+            ?: error("Payment $paymentId not found while concluding its hold")
         when (payment.status) {
-            DomesticPaymentStatus.HELD -> release(payment)
-            DomesticPaymentStatus.REJECTED, DomesticPaymentStatus.CANCELLED -> false
-            DomesticPaymentStatus.RECEIVED -> error("Payment $paymentId is not held and cannot be released")
+            DomesticPaymentStatus.HELD -> {
+                val expiresAt = checkNotNull(payment.holdExpiresAt(PaymentHoldPolicy.EXPIRY))
+                when {
+                    // Expiry first, and from the row: a hold that has run its term is rejected
+                    // whatever its case decided, whenever that decision arrived and whichever run
+                    // gets here (ADR-0374 D3).
+                    !Instant.now(clock).isBefore(expiresAt) -> rejectHeld(payment, HoldRejectCause.EXPIRED)
+                    payment.holdDecision == null -> HoldState.WAITING
+                    payment.holdDecision == HoldDecision.REJECT ->
+                        rejectHeld(payment, HoldRejectCause.REVIEW_REJECTED)
+                    else -> release(payment)
+                }
+            }
+            DomesticPaymentStatus.REJECTED, DomesticPaymentStatus.CANCELLED -> HoldState.REJECTED
+            DomesticPaymentStatus.RECEIVED -> error("Payment $paymentId is not held; it has no hold to conclude")
             DomesticPaymentStatus.VALIDATED,
             DomesticPaymentStatus.SENT_TO_CLEARING,
             DomesticPaymentStatus.SETTLED,
             DomesticPaymentStatus.RETURNED,
-            -> true
+            -> HoldState.RELEASED
         }
     }
 
-    private suspend fun release(payment: DomesticPayment): Boolean {
-        // The case decided the reason for the hold, not whether the account can still be debited.
-        // Hours may have passed; the account may have been frozen since. Until a hold reserves its
-        // amount, this re-run is what stands between a release and a debit of a frozen account.
-        val standing = chain.standing(payment)
-        // Only an ANSWER decides. A standing read that timed out or failed says nothing about the
-        // account, so it neither releases nor rejects: the attempt fails and Temporal retries it on
-        // the admission policy (unlimited attempts, capped backoff). Rejecting here turned a blip
-        // of account-service into the rejection of a payment a reviewer had just released.
-        if (standing !is StepOutcome.Decided) {
-            metrics.recordUnavailable(AdmissionStep.STANDING, (standing as? StepOutcome.Unavailable)?.cause.orMissing())
-            throw StandingUnavailableAtReleaseException(payment.id, standing)
+    /**
+     * The one place a HELD payment becomes VALIDATED on a case decision, and so the one place that
+     * holds the rule: a payment is sent only if every control bound on this rail ANSWERED for it
+     * and none refuses.
+     *
+     * The case decided what a control asked a human about. It did not answer for a control that
+     * never spoke: a hold that became a case because sanctions screening was down has no screening
+     * result, and releasing it on the case alone would send an unscreened payment. So the whole
+     * chain is evaluated again here. Hours may also have passed, and the account may have been
+     * frozen since; that is the standing step of the same evaluation.
+     *
+     *  - a control refuses: REJECTED;
+     *  - a control still cannot answer: the payment stays HELD and the run looks again later;
+     *  - every control answered, some with "review": the case decision is the answer to that, and
+     *    the payment is VALIDATED.
+     */
+    private suspend fun release(payment: DomesticPayment): HoldState {
+        var freshFraudScore: RecordedFraudScore? = null
+        val result = chain.admit(payment) { freshFraudScore = it }
+        freshFraudScore?.let { writes.rememberFraudScore(payment.id, it) }
+        val unanswered = result.steps.filter { it.outcome is StepOutcome.Unavailable }
+        return when {
+            result.decision == AdmissionDecision.REJECT -> {
+                rejected(payment, result)
+                metrics.recordHoldEnd(PaymentHoldEnd.RELEASE_REFUSED)
+                HoldState.REJECTED
+            }
+            unanswered.isNotEmpty() -> {
+                unanswered.forEach { record ->
+                    metrics.recordUnavailable(record.step, (record.outcome as StepOutcome.Unavailable).cause)
+                }
+                log.warnf(
+                    "Held payment %s was released by its case but %s could not answer; it stays HELD",
+                    payment.id,
+                    unanswered.map { it.step },
+                )
+                HoldState.WAITING
+            }
+            else -> {
+                val updated = payment.transitionTo(DomesticPaymentStatus.VALIDATED, clock = clock)
+                writes.transition(updated, listOf(eventPublisher.statusChanged(payment, updated)))
+                metrics.recordHoldEnd(PaymentHoldEnd.RELEASED)
+                log.infof("Held payment %s released by its case", payment.id)
+                HoldState.RELEASED
+            }
         }
-        val mayDebit = standing.decision == AdmissionDecision.ALLOW
-        val updated = if (mayDebit) {
-            payment.transitionTo(DomesticPaymentStatus.VALIDATED, clock = clock)
-        } else {
-            payment.transitionTo(
-                targetStatus = DomesticPaymentStatus.REJECTED,
-                reason = DomesticRejectReason.DEBTOR_ACCOUNT_BLOCKED,
-                clock = clock,
-            )
-        }
-        writes.transition(updated, listOf(eventPublisher.statusChanged(payment, updated)))
-        metrics.recordHoldEnd(if (mayDebit) PaymentHoldEnd.RELEASED else PaymentHoldEnd.RELEASE_REFUSED)
-        log.infof("Held payment %s released by its case: %s (standing=%s)", payment.id, updated.status, standing)
-        return mayDebit
     }
 
-    override fun rejectHeld(paymentId: UUID, cause: HoldRejectCause): Unit = vtx {
-        val payment = paymentRepository.findById(paymentId)
-            ?: error("Payment $paymentId not found during hold reject activity")
-        if (payment.status != DomesticPaymentStatus.HELD) return@vtx
+    private suspend fun rejectHeld(payment: DomesticPayment, cause: HoldRejectCause): HoldState {
         val updated = payment.transitionTo(
             targetStatus = DomesticPaymentStatus.REJECTED,
             reason = DomesticRejectReason.AML_HOLD,
@@ -235,7 +261,8 @@ open class PaymentAdmissionActivitiesImpl(
                 HoldRejectCause.EXPIRED -> PaymentHoldEnd.EXPIRED
             },
         )
-        log.infof("Held payment %s REJECTED (cause=%s)", paymentId, cause)
+        log.infof("Held payment %s REJECTED (cause=%s)", payment.id, cause)
+        return HoldState.REJECTED
     }
 
     private fun heldEvent(held: DomesticPayment, result: AdmissionResult) = OutboxMessage(
@@ -271,15 +298,6 @@ open class PaymentAdmissionActivitiesImpl(
         }
     }
 }
-
-/**
- * The standing re-run of a release got no answer. Retryable on purpose: thrown out of the activity
- * so Temporal tries the release again; the payment stays HELD meanwhile.
- */
-class StandingUnavailableAtReleaseException(paymentId: UUID, standing: StepOutcome) :
-    RuntimeException("Standing of held payment $paymentId could not be read at release ($standing); retrying")
-
-private fun UnavailableCause?.orMissing(): UnavailableCause = this ?: UnavailableCause.MISSING_DATA
 
 private fun DomesticPaymentEventPublisher.statusChanged(previous: DomesticPayment, current: DomesticPayment) =
     OutboxMessage(

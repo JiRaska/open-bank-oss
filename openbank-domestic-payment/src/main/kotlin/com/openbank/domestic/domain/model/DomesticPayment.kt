@@ -6,6 +6,7 @@ package com.openbank.domestic.domain.model
 
 import com.openbank.libs.domain.money.Money
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -120,6 +121,9 @@ enum class DomesticRejectReason {
         }
 }
 
+/** What the case of a hold decided. A hold that nobody decides has none and ends by expiry. */
+enum class HoldDecision { RELEASE, REJECT }
+
 /**
  * A fraud score as the rail remembers it for one payment: what fraud-service answered, never an
  * adapter's stand-in for an unreachable one. [verdict] is the verdict's name as it was received.
@@ -199,6 +203,12 @@ data class DomesticPayment(
      */
     val holdCaseRequestedAt: Instant? = null,
     /**
+     * What the hold's case decided, recorded on the row when the decision is accepted and applied
+     * by whichever workflow run reaches it. Null until a decision is accepted. The row is the only
+     * place the decision lives, so a run that dies after the decision loses nothing.
+     */
+    val holdDecision: HoldDecision? = null,
+    /**
      * The fraud score the admission chain first obtained for this payment, reused by every later
      * evaluation of it. Fraud-service keeps every score it gives and counts them, so asking again
      * for the same payment would add to what it holds against the account.
@@ -255,6 +265,14 @@ data class DomesticPayment(
             heldAt = if (targetStatus == DomesticPaymentStatus.HELD) now else heldAt,
         )
     }
+
+    /**
+     * When this hold ends in rejection if nobody releases it, [term] after it began. Null for a
+     * payment that is not HELD. A row held by a build from before `held_at` existed falls back to
+     * its last write, which was the move to HELD.
+     */
+    fun holdExpiresAt(term: Duration): Instant? =
+        if (status == DomesticPaymentStatus.HELD) (heldAt ?: updatedAt).plus(term) else null
 
     /** The same held payment with its case marked as requested at [at]. */
     fun withHoldCaseRequested(at: Instant): DomesticPayment {

@@ -98,14 +98,6 @@ class DomesticAdmissionChain(
     suspend fun admit(payment: DomesticPayment, onFreshFraudScore: (RecordedFraudScore) -> Unit): AdmissionResult =
         chain.admit(Evaluation(payment, onFreshFraudScore))
 
-    /**
-     * The standing step alone, for the re-run a release makes before it lets a payment go.
-     *
-     * Not a default argument on [standingWithin]: this bean is called through a client proxy, and a
-     * default that reads a field is evaluated on the PROXY, whose fields are null.
-     */
-    suspend fun standing(payment: DomesticPayment): StepOutcome = standingWithin(payment, budget)
-
     private suspend fun standingWithin(payment: DomesticPayment, remaining: Duration): StepOutcome {
         val lookup = withTimeoutOrNull(remaining.toMillis()) { standingPort.debtorStanding(payment.debtorAccountId) }
             ?: return StepOutcome.Unavailable(UnavailableCause.BUDGET_EXCEEDED)

@@ -6,7 +6,6 @@ package com.openbank.domestic.infrastructure.temporal
 
 import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
 import com.openbank.domestic.application.workflow.FraudReviewDecision
-import com.openbank.domestic.application.workflow.PaymentHoldDecision
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import io.temporal.client.WorkflowClient
 import io.temporal.testing.TestWorkflowEnvironment
@@ -53,6 +52,6 @@ class WorkflowClientTestProducer {
     class NoOpDomesticPaymentWorkflow : DomesticPaymentWorkflow {
         override fun process(paymentId: UUID): DomesticPaymentStatus = DomesticPaymentStatus.RECEIVED
         override fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?) = Unit
-        override fun resolvePaymentHold(decision: PaymentHoldDecision, caseKey: String?) = Unit
+        override fun holdChanged() = Unit
     }
 }

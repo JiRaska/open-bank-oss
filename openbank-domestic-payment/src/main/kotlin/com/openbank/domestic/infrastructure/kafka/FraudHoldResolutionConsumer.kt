@@ -9,9 +9,9 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.domestic.application.usecase.FraudHoldResolutionService
 import com.openbank.domestic.application.usecase.PaymentHoldResolutionService
 import com.openbank.domestic.application.workflow.FraudReviewDecision
-import com.openbank.domestic.application.workflow.PaymentHoldDecision
 import com.openbank.domestic.application.workflow.PaymentHoldPolicy
 import com.openbank.domestic.application.workflow.fraudReviewCaseKey
+import com.openbank.domestic.domain.model.HoldDecision
 import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.Dispatchers
@@ -85,8 +85,8 @@ class FraudHoldResolutionConsumer(
      */
     private suspend fun consumePaymentHold(node: JsonNode) {
         val decision = when (node.path("newStatus").asText()) {
-            "CLEARED" -> PaymentHoldDecision.RELEASE
-            "BLOCKED" -> PaymentHoldDecision.REJECT
+            "CLEARED" -> HoldDecision.RELEASE
+            "BLOCKED" -> HoldDecision.REJECT
             else -> return
         }
         val paymentId = runCatching { UUID.fromString(node.path("transactionId").asText("")) }.getOrNull()
@@ -109,7 +109,7 @@ class FraudHoldResolutionConsumer(
             key = paymentId,
             isRetryable = EventRetry.RETRY_UNLESS_DETERMINISTIC,
         ) {
-            withContext(Dispatchers.IO) { holdResolution.resolve(paymentId, decision, caseKey) }
+            withContext(Dispatchers.IO) { holdResolution.resolve(paymentId, decision) }
         }
     }
 

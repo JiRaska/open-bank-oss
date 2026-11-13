@@ -85,9 +85,6 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
         /** One admission attempt: the chain's budget is 30 s by default, so two minutes is a dead worker. */
         val ADMISSION_START_TO_CLOSE: Duration = Duration.ofMinutes(2)
 
-        /** A hold signal the run refused (not holding, another case, already decided). */
-        const val IGNORED_HOLD_SIGNAL_METRIC = "openbank_domestic_payment_hold_signal_ignored"
-
         /** A fraud-hold signal the run refused (not holding, another case, already decided). */
         const val IGNORED_FRAUD_SIGNAL_METRIC = "openbank_domestic_fraud_hold_signal_ignored"
 
@@ -120,32 +117,15 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
     private val admission: PaymentAdmissionActivities =
         Workflow.newActivityStub(PaymentAdmissionActivities::class.java, admissionActivityOptions)
 
-    /**
-     * The decision of the hold's own case: the first one this run is given, kept until the run
-     * waits on the case. It may arrive before that wait begins, because the case is requested by
-     * the admission activity's COMMIT and the run learns of it only when the activity completes
-     * (an attempt lost after its commit and retried, or a run started to recover a hold whose first
-     * run died). One rule covers every such ordering: the decision is bound to the case by its key,
-     * and the case is the hold's, so it is the hold's decision whenever it arrives.
-     */
-    private var holdDecision: PaymentHoldDecision? = null
+    /** Set by [holdChanged]; cleared by the run right before it looks at the hold. */
+    private var holdNudged = false
 
-    /** True once this run's hold is over, or it turned out to have none. */
-    private var holdOver = false
-
-    /**
-     * Hold signals delivered before [process] has run its first statement, which happens when a run
-     * is started together with its signal. They are judged by the same rule once the run knows its
-     * payment, not dropped for arriving first.
-     */
-    private val signalsBeforeStart = mutableListOf<Pair<PaymentHoldDecision, String?>>()
-    private var expectedHoldCaseKey: String? = null
+    private var expectedFraudCaseKey: String? = null
 
     private var fraudReviewDecision: FraudReviewDecision? = null
 
     /** True only between the HOLD and its end; a decision outside that window is not a decision. */
     private var awaitingFraudReview = false
-    private var expectedFraudCaseKey: String? = null
 
     override fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?) {
         // Deterministic: the flag is set by workflow code right before the await, and signal order
@@ -169,52 +149,20 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
             .inc(1)
     }
 
-    override fun resolvePaymentHold(decision: PaymentHoldDecision, caseKey: String?) {
-        if (expectedHoldCaseKey == null) {
-            signalsBeforeStart += decision to caseKey
-            return
-        }
-        // Deterministic for the same reason as resolveFraudHold: the flags are set by workflow code,
-        // the memo is fixed at the start of the run, and signal order is in history.
-        // A decision is taken from the hold's own case only, first one wins, and only by a run that
-        // goes through admission and whose hold is not over.
-        val ignoredBecause = when {
-            !AdmissionRun.chainOn() || holdOver -> "not_holding"
-            caseKey == null || caseKey != expectedHoldCaseKey -> "case_mismatch"
-            holdDecision != null -> "already_decided"
-            else -> null
-        }
-        if (ignoredBecause == null) {
-            holdDecision = decision
-            return
-        }
-        Workflow.getLogger(DomesticPaymentWorkflowImpl::class.java)
-            .warn("Ignored payment hold signal $decision: $ignoredBecause")
-        Workflow.getMetricsScope()
-            .tagged(mapOf("reason" to ignoredBecause))
-            .counter(IGNORED_HOLD_SIGNAL_METRIC)
-            .inc(1)
+    override fun holdChanged() {
+        holdNudged = true
     }
 
     override fun process(paymentId: UUID): DomesticPaymentStatus {
         // Known from the start, so the case binding and the holding window are independent guards.
         expectedFraudCaseKey = fraudReviewCaseKey(paymentId)
-        expectedHoldCaseKey = PaymentHoldPolicy.caseKey(paymentId)
-        signalsBeforeStart.forEach { (decision, caseKey) -> resolvePaymentHold(decision, caseKey) }
-        signalsBeforeStart.clear()
-        // Whether this run goes through admission was decided by whoever STARTED it and travels in
-        // the run's memo ([AdmissionRun]). The memo is part of the start event, so it is the same on
-        // every replay whatever the configuration says by then, and reading it writes nothing to the
-        // history. A run started with the chain off carries no memo, takes no version marker and
-        // records no side effect: its history is, event for event, what the implementation from
-        // before the chain produces, so such a worker can serve or replay it. (An earlier revision
-        // recorded the switch with a version marker and a side effect in EVERY run; a worker without
-        // that code fails a replay of the side-effect marker with a non-determinism error.)
+        // Whether this run goes through admission is the task queue it was started on
+        // ([AdmissionRun]): part of the start event, the same on every replay, and nothing a pre-chain
+        // run writes to its history. A run on the rail's own queue takes no version marker and
+        // records no side effect here, so its history is, event for event, what the implementation
+        // from before the chain produces.
         if (AdmissionRun.chainOn()) {
-            val first = admission.admit(paymentId, false)
-            // NOT_ENABLED here means the activity ran on a worker that has the chain off.
-            if (first != AdmissionAction.NOT_ENABLED) return processAdmission(paymentId, first)
-            holdOver = true
+            return processAdmission(paymentId, admission.admit(paymentId, false))
         }
         val decision = activities.screenPayment(paymentId)
 
@@ -273,9 +221,6 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
      * hold. Nothing here screens, scores or validates: the admission activity did, in chain order.
      */
     private fun processAdmission(paymentId: UUID, first: AdmissionAction): DomesticPaymentStatus {
-        // A run started to recover a hold whose first run died is told when the hold began, so the
-        // expiry still counts from the first hold and not from the recovery.
-        val heldAtMillis = AdmissionRun.heldAtMillis() ?: Workflow.currentTimeMillis()
         var action = first
         var reevaluations = 0
         // A control that could not answer is asked again on a bounded schedule; the last attempt
@@ -287,12 +232,11 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
         }
         val admitted = when (action) {
             AdmissionAction.ADMITTED -> true
-            AdmissionAction.HELD_FOR_REVIEW -> awaitHoldDecision(paymentId, heldAtMillis)
-            // NOT_ENABLED cannot follow a first answer that was not NOT_ENABLED (a HELD payment is
-            // always evaluated); treated as a refusal so an impossible answer cannot send money.
-            AdmissionAction.REJECTED, AdmissionAction.HELD_UNAVAILABLE, AdmissionAction.NOT_ENABLED -> false
+            AdmissionAction.HELD_FOR_REVIEW -> awaitHoldEnd(paymentId)
+            // HELD_UNAVAILABLE cannot leave the loop above; refused, so an impossible answer cannot
+            // send money.
+            AdmissionAction.REJECTED, AdmissionAction.HELD_UNAVAILABLE -> false
         }
-        holdOver = true
         if (!admitted) return DomesticPaymentStatus.REJECTED
         val schemeStatus = activities.submitScheme(paymentId)
         return if (schemeStatus == DomesticPaymentStatus.SENT_TO_CLEARING) {
@@ -302,24 +246,24 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
         }
     }
 
-    /** Waits for the case decision until the hold expires. True only when the payment was released. */
-    private fun awaitHoldDecision(paymentId: UUID, heldAtMillis: Long): Boolean {
-        // The expiry counts from the moment the payment was first held, not from the case.
-        val remaining = PaymentHoldPolicy.EXPIRY.minusMillis(Workflow.currentTimeMillis() - heldAtMillis)
-        // A decision that arrived ahead of this wait is already in holdDecision and ends it at once,
-        // also when the hold has expired meanwhile: the case did decide, and a release still has to
-        // pass the standing re-run.
-        val answered = holdDecision != null ||
-            (!remaining.isNegative && !remaining.isZero && Workflow.await(remaining) { holdDecision != null })
-        return when {
-            !answered -> {
-                admission.rejectHeld(paymentId, HoldRejectCause.EXPIRED)
-                false
-            }
-            holdDecision == PaymentHoldDecision.RELEASE -> admission.releaseHeld(paymentId)
-            else -> {
-                admission.rejectHeld(paymentId, HoldRejectCause.REVIEW_REJECTED)
-                false
+    /**
+     * Stays with a hold until it ends. True only when the payment was released.
+     *
+     * The run holds no state of the hold: the decision, the expiry and what the controls say are
+     * all read from the payment's row by [PaymentAdmissionActivities.concludeHold], every time. So
+     * it does not matter whether the decision arrived before this run existed, while it was
+     * starting, or after an earlier run died with it; nor whether the nudge was delivered. The run
+     * looks, waits for a nudge or for the check interval, and looks again.
+     */
+    private fun awaitHoldEnd(paymentId: UUID): Boolean {
+        while (true) {
+            // Cleared BEFORE looking: a nudge that lands while the activity runs is not lost, it
+            // ends the next wait at once.
+            holdNudged = false
+            when (admission.concludeHold(paymentId)) {
+                HoldState.RELEASED -> return true
+                HoldState.REJECTED -> return false
+                HoldState.WAITING -> Workflow.await(PaymentHoldPolicy.HOLD_CHECK_INTERVAL) { holdNudged }
             }
         }
     }

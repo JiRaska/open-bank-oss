@@ -5,11 +5,13 @@
 package com.openbank.domestic.application.port.out
 
 import com.openbank.domestic.domain.model.DomesticPayment
+import com.openbank.domestic.domain.model.HoldDecision
 import com.openbank.domestic.domain.model.RecordedFraudScore
 import com.openbank.libs.fincrime.admission.AdmissionDecision
 import com.openbank.libs.fincrime.admission.AdmissionStep
 import com.openbank.libs.fincrime.admission.UnavailableCause
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -48,10 +50,38 @@ interface PaymentAdmissionWrites {
     suspend fun requestCaseWhileHeld(paymentId: UUID, event: OutboxMessage, requestedAt: Instant): Boolean
 
     /**
+     * Accept [decision] as the decision of the payment's hold, once. It is accepted only for a
+     * payment that is HELD with its case requested, that has no decision yet, and whose hold has
+     * not reached [expiresAfter] since it began: expiry wins over a decision that comes later.
+     * The answer says which of those it was; nothing else about the payment changes.
+     */
+    suspend fun recordHoldDecision(
+        paymentId: UUID,
+        decision: HoldDecision,
+        at: Instant,
+        expiresAfter: Duration,
+    ): HoldDecisionRecord
+
+    /**
      * Keep the first fraud score obtained for the payment. A payment that already has one keeps
      * it; the score does not change the payment's revision or its status.
      */
     suspend fun rememberFraudScore(paymentId: UUID, score: RecordedFraudScore)
+}
+
+/** What became of a case decision offered to a hold. One value per outcome, never a boolean. */
+enum class HoldDecisionRecord {
+    /** Accepted now; the run that reaches the payment applies it. */
+    ACCEPTED,
+
+    /** The hold already has a decision; the first one stands. */
+    ALREADY_DECIDED,
+
+    /** The hold has reached its expiry; it ends in rejection whatever the case says now. */
+    EXPIRED,
+
+    /** The payment is not HELD with a requested case: there is no hold to decide. */
+    NO_HOLD,
 }
 
 /** Admission outcomes as enums, one series per value, never a pass/fail boolean. */

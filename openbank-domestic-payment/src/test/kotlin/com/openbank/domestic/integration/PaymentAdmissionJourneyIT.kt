@@ -9,23 +9,29 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.domestic.application.port.out.AccountStandingLookup
 import com.openbank.domestic.application.port.out.AccountStandingPort
 import com.openbank.domestic.application.port.out.AmlCasePort
+import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.port.out.FraudScoreCommand
 import com.openbank.domestic.application.port.out.FraudScoreOutcome
 import com.openbank.domestic.application.port.out.FraudScoringPort
 import com.openbank.domestic.application.port.out.OpenAmlCaseCommand
+import com.openbank.domestic.application.port.out.PaymentAdmissionWrites
 import com.openbank.domestic.application.port.out.SanctionsScreeningPort
 import com.openbank.domestic.application.port.out.SchemeGatewayPort
 import com.openbank.domestic.application.port.out.SchemeSubmissionOutcome
 import com.openbank.domestic.application.port.out.ScreeningUnavailableException
 import com.openbank.domestic.application.port.out.SettlementOutcome
 import com.openbank.domestic.application.port.out.SettlementPort
+import com.openbank.domestic.application.workflow.AdmissionRun
 import com.openbank.domestic.application.workflow.DomesticPaymentActivitiesImpl
 import com.openbank.domestic.application.workflow.DomesticPaymentWorkflowImpl
 import com.openbank.domestic.application.workflow.PaymentAdmissionActivitiesImpl
 import com.openbank.domestic.application.workflow.PaymentHoldPolicy
 import com.openbank.domestic.application.workflow.domesticPaymentWorkflowId
 import com.openbank.domestic.domain.model.DomesticPayment
+import com.openbank.domestic.domain.model.DomesticPaymentStatus
+import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.infrastructure.scheduler.ScreeningRedriveScheduler
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.fincrime.FraudVerdict
 import com.openbank.libs.fincrime.ScreeningMatchStatus
 import com.openbank.libs.fincrime.ScreeningResult
@@ -68,6 +74,7 @@ import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -107,6 +114,9 @@ private const val SCOPE = "0123456789abcdef0123456789abcdef0123456789abcdef01234
         Claim(key = "preferred_username", value = OPERATOR),
     ],
 )
+// One application boot, one broker and one database serve every journey; a second class would
+// start all three again to run the same fakes.
+@Suppress("LargeClass")
 class PaymentAdmissionJourneyIT {
 
     class Profile : QuarkusTestProfile {
@@ -145,6 +155,12 @@ class PaymentAdmissionJourneyIT {
 
     @Inject
     lateinit var redrive: ScreeningRedriveScheduler
+
+    @Inject
+    lateinit var payments: DomesticPaymentRepository
+
+    @Inject
+    lateinit var admissionWrites: PaymentAdmissionWrites
 
     @Inject
     @ConfigProperty(name = "kafka.bootstrap.servers")
@@ -255,9 +271,13 @@ class PaymentAdmissionJourneyIT {
         val payment = create(creditorName = "REVIEW Imports")
         awaitStatus(payment, "HELD")
 
-        runtime.advance(PaymentHoldPolicy.EXPIRY.minusMinutes(10))
+        // The expiry is read from the row. An hour short of its term the hold is still a hold,
+        // however often the run looks.
+        shiftHold(payment, PaymentHoldPolicy.EXPIRY.minusHours(1))
+        runtime.advance(Duration.ofMinutes(40))
         assertThat(status(payment)).isEqualTo("HELD")
-        runtime.advance(Duration.ofMinutes(20))
+        shiftHold(payment, Duration.ofHours(2))
+        runtime.advance(PaymentHoldPolicy.HOLD_CHECK_INTERVAL.plusMinutes(1))
 
         awaitStatus(payment, "REJECTED")
         assertThat(rejectReason(payment)).isEqualTo("AML_HOLD")
@@ -380,7 +400,7 @@ class PaymentAdmissionJourneyIT {
         assertThat(world.submissions(payment)).isZero()
 
         world.standingDown.set(false)
-        runtime.advance(Duration.ofMinutes(6))
+        runtime.advance(PaymentHoldPolicy.HOLD_CHECK_INTERVAL.plusMinutes(1))
         awaitStatus(payment, "SETTLED")
         assertThat(world.submissions(payment)).isEqualTo(1)
     }
@@ -433,12 +453,14 @@ class PaymentAdmissionJourneyIT {
         awaitStatus(payment, "HELD")
         runtime.terminate(payment)
         // Held 47 hours ago, as the row says.
-        update("UPDATE domestic_payments SET held_at = held_at - interval '47 hours' WHERE payment_id = ?", payment)
+        shiftHold(payment, Duration.ofHours(47))
 
         sweep()
         runtime.advance(Duration.ofMinutes(30))
         assertThat(status(payment)).isEqualTo("HELD")
-        runtime.advance(Duration.ofMinutes(45))
+        // An hour and a bit later by the row, which is where the new run reads it from.
+        shiftHold(payment, Duration.ofMinutes(61))
+        runtime.advance(PaymentHoldPolicy.HOLD_CHECK_INTERVAL.plusMinutes(1))
 
         awaitStatus(payment, "REJECTED")
         assertThat(rejectReason(payment)).isEqualTo("AML_HOLD")
@@ -529,18 +551,174 @@ class PaymentAdmissionJourneyIT {
             .then().statusCode(200).body("rejectReason", equalTo("DEBTOR_ACCOUNT_BLOCKED"))
     }
 
+    @Test
+    fun `a hold is never released after its expiry - a CLEARED that arrives at hour 60 rejects`() {
+        val payment = create(creditorName = "REVIEW Latecomer")
+        awaitStatus(payment, "HELD")
+        // The run is gone and nobody looked at the payment for 60 hours.
+        runtime.terminate(payment)
+        shiftHold(payment, Duration.ofHours(60))
+
+        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment)) }
+
+        awaitStatus(payment, "REJECTED")
+        assertThat(rejectReason(payment)).isEqualTo("AML_HOLD")
+        assertThat(column(payment, "hold_decision")).describedAs("the late decision was not accepted").isEqualTo("none")
+        assertThat(world.submissions(payment)).isZero()
+    }
+
+    @Test
+    fun `a decision accepted before its run died is applied by the run that recovers the hold`() {
+        val payment = create(creditorName = "REVIEW Survivor")
+        awaitStatus(payment, "HELD")
+        // The release cannot complete yet, so the decision is on the row and nowhere else.
+        world.standingDown.set(true)
+        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment)) }
+        await("the decision to be recorded on the payment") { column(payment, "hold_decision") == "RELEASE" }
+        await("the release to have been tried") { world.standingUnanswered.get() >= 1 }
+        runtime.terminate(payment)
+        assertThat(status(payment)).isEqualTo("HELD")
+
+        // Nothing sends the decision again. The row has it.
+        world.standingDown.set(false)
+        sweep()
+
+        awaitStatus(payment, "SETTLED")
+        assertThat(world.submissions(payment)).isEqualTo(1)
+    }
+
+    @Test
+    fun `a release does not send a payment whose control never answered - it waits, then follows the control`() {
+        world.screeningDown.set(true)
+        val clean = create(creditorName = "Brno Waterworks")
+        val listed = create(creditorName = "SANCTIONED Trading")
+        for (payment in listOf(clean, listed)) awaitStatus(payment, "HELD")
+        repeat(PaymentHoldPolicy.MAX_REEVALUATIONS) {
+            runtime.advance(PaymentHoldPolicy.REEVALUATION_INTERVAL.plusMinutes(1))
+        }
+        for (payment in listOf(clean, listed)) {
+            await("the outage to become the case of $payment") { heldEvents(payment).size == 1 }
+        }
+
+        // The reviewer clears both. Neither was ever screened.
+        kafkaProducer().use { producer ->
+            for (payment in listOf(
+                clean,
+                listed,
+            )) {
+                producer.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment))
+            }
+        }
+        for (payment in listOf(clean, listed)) {
+            await("the release of $payment to be recorded") { column(payment, "hold_decision") == "RELEASE" }
+        }
+        runtime.advance(PaymentHoldPolicy.HOLD_CHECK_INTERVAL.plusMinutes(1))
+
+        // Screening is still down: a case decision does not stand in for it.
+        for (payment in listOf(clean, listed)) {
+            assertThat(status(payment)).isEqualTo("HELD")
+            assertThat(world.submissions(payment)).isZero()
+        }
+
+        world.screeningDown.set(false)
+        runtime.advance(PaymentHoldPolicy.HOLD_CHECK_INTERVAL.plusMinutes(1))
+
+        // It answers now: the clean payment goes, the listed one does not, release or no release.
+        awaitStatus(clean, "SETTLED")
+        awaitStatus(listed, "REJECTED")
+        assertThat(rejectReason(listed)).isEqualTo("SANCTIONS_HIT")
+        assertThat(world.submissions(clean)).isEqualTo(1)
+        assertThat(world.submissions(listed)).isZero()
+    }
+
+    @Test
+    fun `the re-drive budget counts runs that were started, and offering a run to an open one spends nothing`() {
+        val gate = CompletableDeferred<Unit>()
+        world.standingGate.set(gate)
+        val received = create()
+        await("the admission to be waiting on standing") { world.standingWaiters.get() > 0 }
+        val held = create(creditorName = "REVIEW Ledgerworks")
+        await("the second payment to be HELD") { status(held) == "HELD" || world.standingWaiters.get() > 1 }
+
+        repeat(3) { sweep() }
+
+        // Both have an open run: offered three times, never re-driven.
+        assertThat(column(received, "redrive_attempts")).isEqualTo("0")
+        assertThat(column(received, "run_checked_at")).isNotEqualTo("none")
+        assertThat(status(received)).isEqualTo("RECEIVED")
+        gate.complete(Unit)
+        awaitStatus(received, "SETTLED")
+        awaitStatus(held, "HELD")
+        repeat(2) { sweep() }
+        assertThat(column(held, "redrive_attempts")).describedAs("a HELD payment is not re-driven").isEqualTo("0")
+        assertThat(column(held, "run_checked_at")).isNotEqualTo("none")
+    }
+
+    @Test
+    fun `what a payment was scored on cannot be changed by a later write`() {
+        val account = UUID.randomUUID()
+        val payment = create(debtorAccountId = account, creditorName = "REVIEW Fixtures")
+        awaitStatus(payment, "HELD")
+        val before = scoredFacts(payment)
+
+        // A lifecycle write handed a payment whose amount, currency, debtor and creditor differ.
+        onVertx {
+            val stored = checkNotNull(payments.findById(payment))
+            val tampered = stored.copy(
+                amount = Money.of(BigDecimal("999999.00"), "EUR"),
+                debtorAccountId = UUID.randomUUID(),
+                debtorAccountNumber = "0000000001",
+                creditorAccountNumber = "0000000002",
+                creditorBankCode = "9999",
+                creditorName = "Somebody Else",
+            ).transitionTo(
+                DomesticPaymentStatus.REJECTED,
+                DomesticRejectReason.TECHNICAL_ERROR,
+                clock = Clock.systemUTC(),
+            )
+            admissionWrites.transition(tampered, emptyList())
+        }
+
+        assertThat(status(payment)).isEqualTo("REJECTED")
+        // The write moved the status and nothing the fraud score was computed from. If an amend path
+        // for these columns ever appears, the kept score (admission_fraud_*) must be bound to them.
+        assertThat(scoredFacts(payment)).isEqualTo(before)
+    }
+
+    private fun scoredFacts(paymentId: UUID): List<String> = query(
+        """
+        SELECT amount::text || '|' || currency || '|' || debtor_account_id::text || '|' || debtor_account_number
+            || '|' || creditor_account_number || '|' || creditor_bank_code || '|' || creditor_name
+        FROM domestic_payments WHERE payment_id = ?
+        """.trimIndent(),
+        paymentId,
+    ) { it.getString(1) }
+
+    /** Moves the start of the payment's hold [by] this much into the past, as if that time had passed. */
+    private fun shiftHold(paymentId: UUID, by: Duration) = update(
+        "UPDATE domestic_payments SET held_at = held_at - interval '${by.toMinutes()} minutes' WHERE payment_id = ?",
+        paymentId,
+    )
+
+    private fun column(paymentId: UUID, name: String): String = query(
+        "SELECT coalesce($name::text, 'none') FROM domestic_payments WHERE payment_id = ?",
+        paymentId,
+    ) { it.getString(1) }.single()
+
+    private fun <T> onVertx(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
+        val context = Vertx.currentContext()
+        val onContext = Executor { task -> context.runOnContext { task.run() } }.asCoroutineDispatcher()
+        CoroutineScope(onContext).async { block() }.asUni()
+    }
+
     /** One tick of the re-drive and hold-reconciliation sweep, with no minimum age. */
     private fun sweep() {
         val minAge = redrive.minAgeMinutes
         redrive.minAgeMinutes = -1
         try {
-            VertxContextSupport.subscribeAndAwait {
-                // As the scheduler runs it: every resumption returns to the Vert.x context, also the
-                // one after the blocking Temporal start, or the next repository call has no session.
-                val context = Vertx.currentContext()
-                val onContext = Executor { task -> context.runOnContext { task.run() } }.asCoroutineDispatcher()
-                CoroutineScope(onContext).async { redrive.sweep() }.asUni()
-            }
+            // As the scheduler runs it: every resumption returns to the Vert.x context, also the
+            // one after the blocking Temporal start, or the next repository call has no session.
+            onVertx { redrive.sweep() }
         } finally {
             redrive.minAgeMinutes = minAge
         }
@@ -774,8 +952,17 @@ class FakeScreening(private val world: AdmissionWorld) : SanctionsScreeningPort 
         if (world.screeningDown.get()) throw ScreeningUnavailableException(IllegalStateException("sanctions is down"))
         world.screened += idempotencyKey
         world.screenings.incrementAndGet()
-        val status = if (name.startsWith("REVIEW")) ScreeningMatchStatus.POTENTIAL_HIT else ScreeningMatchStatus.CLEAR
-        return ScreeningResult(name, role, status, if (status == ScreeningMatchStatus.CLEAR) 0.0 else 0.8, null)
+        val status = when {
+            name.startsWith("REVIEW") -> ScreeningMatchStatus.POTENTIAL_HIT
+            name.startsWith("SANCTIONED") -> ScreeningMatchStatus.HIT
+            else -> ScreeningMatchStatus.CLEAR
+        }
+        val score = when (status) {
+            ScreeningMatchStatus.CLEAR -> 0.0
+            ScreeningMatchStatus.HIT -> 1.0
+            else -> 0.8
+        }
+        return ScreeningResult(name, role, status, score, null)
     }
 }
 
@@ -830,9 +1017,12 @@ class AdmissionJourneyRuntime(
     @PostConstruct
     fun start() {
         environment = TestWorkflowEnvironment.newInstance()
-        val worker = environment.newWorker("openbank-domestic-payments")
-        worker.registerWorkflowImplementationTypes(DomesticPaymentWorkflowImpl::class.java)
-        worker.registerActivitiesImplementations(activities, admission)
+        // As the worker registrar does: the rail's queue and the admission queue.
+        for (queue in listOf("openbank-domestic-payments", AdmissionRun.queue("openbank-domestic-payments"))) {
+            val worker = environment.newWorker(queue)
+            worker.registerWorkflowImplementationTypes(DomesticPaymentWorkflowImpl::class.java)
+            worker.registerActivitiesImplementations(activities, admission)
+        }
         environment.start()
     }
 

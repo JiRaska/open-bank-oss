@@ -40,9 +40,17 @@ class DomesticPaymentWorkerRegistrar(
         }
         log.infof("Registering Temporal worker on task queue '%s' (admission chain %s)", taskQueue, admissionEnabled)
         val factory = WorkerFactory.newInstance(workflowClient)
-        val worker = factory.newWorker(taskQueue)
-        worker.registerWorkflowImplementationTypes(DomesticPaymentWorkflowImpl::class.java)
-        worker.registerActivitiesImplementations(activities, admissionActivities)
+        // Two queues, one implementation. The rail's own queue carries pre-chain runs, which any
+        // build can serve. The admission queue carries runs that go through the chain, and only a
+        // build that knows the chain polls it, so no other worker can be handed their tasks
+        // (AdmissionRun). It is polled whatever the switch says: holds must be served after the
+        // chain is switched off, and a pod with the switch off must be able to serve a run a pod
+        // with the switch on has started.
+        for (queue in listOf(taskQueue, AdmissionRun.queue(taskQueue))) {
+            val worker = factory.newWorker(queue)
+            worker.registerWorkflowImplementationTypes(DomesticPaymentWorkflowImpl::class.java)
+            worker.registerActivitiesImplementations(activities, admissionActivities)
+        }
         factory.start()
         log.infof("Temporal worker started on task queue '%s'", taskQueue)
     }

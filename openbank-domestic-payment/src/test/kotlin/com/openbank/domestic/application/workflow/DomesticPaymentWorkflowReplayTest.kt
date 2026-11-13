@@ -8,23 +8,33 @@ import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.libs.fincrime.ScreeningDecision
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import io.temporal.activity.ActivityOptions
 import io.temporal.api.enums.v1.EventType
 import io.temporal.client.WorkflowOptions
 import io.temporal.client.WorkflowStub
+import io.temporal.common.WorkflowExecutionHistory
 import io.temporal.testing.TestWorkflowEnvironment
 import io.temporal.testing.WorkflowReplayer
 import io.temporal.workflow.Workflow
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.util.UUID
 
 /**
- * #4403: a run that started before the fraud gate existed recorded `shadowFraudScore` and no
- * `fraud-enforcement` marker. The current implementation must replay that history without a
- * non-determinism error, which only the `Workflow.getVersion` branch makes possible.
+ * Replay in the directions recorded histories cannot cover.
+ *
+ * Histories recorded by a worker built from `main` are replayed on the current implementation by
+ * [RecordedMainHistoryReplayTest]. Two things remain for this class, and each needs a stand-in for
+ * old code, because old code cannot run in this build:
+ *
+ *  - a run from before the fraud gate (#4403) has no `fraud-enforcement` marker, and `main` can no
+ *    longer produce such a history;
+ *  - the OTHER direction, on which a rolling deployment and an image rollback depend: a pre-chain
+ *    run the CURRENT implementation recorded must be a run a worker from before the chain can
+ *    replay. That is checked twice: by replaying it on a stand-in for that worker, and by comparing
+ *    it event for event with the history `main` itself recorded for the same path.
  */
 class DomesticPaymentWorkflowReplayTest {
 
@@ -56,46 +66,8 @@ class DomesticPaymentWorkflowReplayTest {
         }
     }
 
-    /**
-     * ADR-0374: a run recorded by the implementation as it stood before the admission chain has the
-     * `fraud-enforcement` and `settlement-unbounded-retry` markers and no `admission-chain` one. It
-     * must replay on the current implementation without a non-determinism error. Its start event has
-     * no admission memo, so the current implementation takes the path it recorded.
-     */
-    @Test
-    fun `a pre-admission-chain history replays against the current workflow`() {
-        TestWorkflowEnvironment.newInstance().use { env ->
-            val worker = env.newWorker(QUEUE)
-            worker.registerWorkflowImplementationTypes(PreAdmissionChainDomesticPaymentWorkflow::class.java)
-            val activities = mockk<DomesticPaymentActivities>(relaxed = true)
-            every { activities.screenPayment(any()) } returns ScreeningDecision.CLEAR
-            every { activities.fraudGate(any()) } returns FraudGateAction.PROCEED
-            every { activities.submitScheme(any()) } returns DomesticPaymentStatus.SENT_TO_CLEARING
-            every { activities.settlePayment(any()) } returns DomesticPaymentStatus.SETTLED
-            worker.registerActivitiesImplementations(activities)
-            env.start()
-
-            val stub = WorkflowStub.fromTyped(
-                env.workflowClient.newWorkflowStub(
-                    DomesticPaymentWorkflow::class.java,
-                    WorkflowOptions.newBuilder().setTaskQueue(QUEUE).build(),
-                ),
-            )
-            val execution = stub.start(UUID.randomUUID())
-            assertThat(stub.getResult(DomesticPaymentStatus::class.java)).isEqualTo(DomesticPaymentStatus.SETTLED)
-            val history = env.getWorkflowExecutionHistory(execution)
-
-            WorkflowReplayer.replayWorkflowExecution(history, DomesticPaymentWorkflowImpl::class.java)
-        }
-    }
-
-    /**
-     * The other direction, and the one a rolling deployment and an image rollback depend on: a run
-     * the CURRENT implementation started with the chain off must replay on the implementation as it
-     * stood before the chain, command for command and marker for marker.
-     */
-    @Test
-    fun `a run recorded by the current workflow with the chain off replays on the pre-chain workflow`() {
+    /** A pre-chain run recorded by the current implementation, started the way the rail starts it. */
+    private fun recordPreChainRun(use: (WorkflowExecutionHistory) -> Unit) {
         TestWorkflowEnvironment.newInstance().use { env ->
             val worker = env.newWorker(QUEUE)
             worker.registerWorkflowImplementationTypes(DomesticPaymentWorkflowImpl::class.java)
@@ -107,76 +79,108 @@ class DomesticPaymentWorkflowReplayTest {
             worker.registerActivitiesImplementations(activities)
             env.start()
 
-            // Started the way the rail's own starters start a run while the chain is off.
             val paymentId = UUID.randomUUID()
-            val stub = WorkflowStub.fromTyped(
-                env.workflowClient.newWorkflowStub(
-                    DomesticPaymentWorkflow::class.java,
-                    AdmissionRun.options(QUEUE, paymentId, chainOn = false).build(),
-                ),
-            )
-            val execution = stub.start(paymentId)
+            DomesticPaymentRuns(env.workflowClient, QUEUE).start(paymentId, chainOn = false)
+            val stub = env.workflowClient.newUntypedWorkflowStub(domesticPaymentWorkflowId(paymentId))
             assertThat(stub.getResult(DomesticPaymentStatus::class.java)).isEqualTo(DomesticPaymentStatus.SETTLED)
-            val history = env.getWorkflowExecutionHistory(execution)
+            use(env.getWorkflowExecutionHistory(stub.execution))
+        }
+    }
 
+    @Test
+    fun `a pre-chain run recorded by the current workflow replays on the pre-chain workflow`() {
+        recordPreChainRun { history ->
             WorkflowReplayer.replayWorkflowExecution(history, PreAdmissionChainDomesticPaymentWorkflow::class.java)
-
-            // And not merely tolerated: the run wrote nothing the pre-chain implementation does not
-            // write. No memo on the start event, and the only markers are the two version markers
-            // that implementation records itself.
-            val events = history.history.eventsList
-            assertThat(events.first().workflowExecutionStartedEventAttributes.memo.fieldsMap).isEmpty()
-            assertThat(
-                events.filter { it.eventType == EventType.EVENT_TYPE_MARKER_RECORDED }
-                    .map { it.markerRecordedEventAttributes.markerName }
-                    .distinct(),
-            ).containsExactly("Version")
-            assertThat(
-                events.filter { it.eventType == EventType.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED }
-                    .map { it.activityTaskScheduledEventAttributes.activityType.name },
-            ).containsExactly("ScreenPayment", "ValidatePayment", "FraudGate", "SubmitScheme", "SettlePayment")
         }
     }
 
     /**
-     * The limit of that compatibility, stated as a test so nobody reads more into it: a run started
-     * with the chain ON cannot be replayed by a worker from before the chain. Such a worker fails the
-     * workflow task and the run waits for a current worker. This is why the chain is switched on only
-     * after every worker runs this code, and switched off and drained before an older image returns.
+     * Not against a stand-in: against the history a worker built from `main` recorded for the same
+     * path. Same events in the same order, the same activities and markers, the same task queue, no
+     * memo, no search attribute. What may differ is what identifies one run: ids and times.
      */
     @Test
-    fun `a run started with the chain on does not replay on the pre-chain workflow`() {
+    fun `a pre-chain run recorded by the current workflow is, event for event, the run main records`() {
+        val recordedByMain = WorkflowExecutionHistory.fromJson(
+            checkNotNull(javaClass.getResource("/workflow-histories/main/happy-path.json")).readText(),
+        )
+        recordPreChainRun { history ->
+            assertThat(shape(history)).isEqualTo(shape(recordedByMain))
+            val started = history.history.eventsList.first().workflowExecutionStartedEventAttributes
+            val startedOnMain = recordedByMain.history.eventsList.first().workflowExecutionStartedEventAttributes
+            assertThat(started.memo.fieldsMap).isEmpty()
+            assertThat(started.searchAttributes.indexedFieldsMap).isEmpty()
+            assertThat(started.workflowType).isEqualTo(startedOnMain.workflowType)
+            assertThat(started.taskQueue.name).isEqualTo(QUEUE)
+        }
+    }
+
+    /** One line per event: its type and, where it has one, the activity, marker or timer it names. */
+    private fun shape(history: WorkflowExecutionHistory): List<String> = history.history.eventsList.map { event ->
+        val detail = when (event.eventType) {
+            EventType.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED -> {
+                val scheduled = event.activityTaskScheduledEventAttributes
+                // The retry policy and timeouts are part of what a worker asks the server for.
+                "${scheduled.activityType.name} attempts=${scheduled.retryPolicy.maximumAttempts} " +
+                    "stc=${scheduled.scheduleToCloseTimeout.seconds} s2c=${scheduled.startToCloseTimeout.seconds}"
+            }
+            EventType.EVENT_TYPE_MARKER_RECORDED -> {
+                val marker = event.markerRecordedEventAttributes
+                "${marker.markerName} ${marker.detailsMap.keys.sorted()}"
+            }
+            EventType.EVENT_TYPE_TIMER_STARTED -> "${event.timerStartedEventAttributes.startToFireTimeout.seconds}s"
+            else -> ""
+        }
+        "${event.eventType.name} $detail".trim()
+    }
+
+    /**
+     * The mechanical half of the rollout: a run that goes through admission is never offered to a
+     * worker that polls only the rail's queue, which is every worker from before the chain. Here
+     * such a worker is the only one running, and the run it must not touch simply waits.
+     */
+    @Test
+    fun `an admission run is never handed to a worker that polls only the rail's queue`() {
         TestWorkflowEnvironment.newInstance().use { env ->
-            val worker = env.newWorker(QUEUE)
-            worker.registerWorkflowImplementationTypes(DomesticPaymentWorkflowImpl::class.java)
+            val oldWorker = env.newWorker(QUEUE)
+            oldWorker.registerWorkflowImplementationTypes(PreAdmissionChainDomesticPaymentWorkflow::class.java)
             val activities = mockk<DomesticPaymentActivities>(relaxed = true)
-            every { activities.submitScheme(any()) } returns DomesticPaymentStatus.SENT_TO_CLEARING
-            every { activities.settlePayment(any()) } returns DomesticPaymentStatus.SETTLED
-            val admission = mockk<PaymentAdmissionActivities>(relaxed = true)
-            every { admission.admit(any(), any()) } returns AdmissionAction.ADMITTED
-            worker.registerActivitiesImplementations(activities, admission)
+            oldWorker.registerActivitiesImplementations(activities)
             env.start()
+            val runs = DomesticPaymentRuns(env.workflowClient, QUEUE)
+            val firstRun = UUID.randomUUID()
+            val redriven = UUID.randomUUID()
+            val recovered = UUID.randomUUID()
 
-            val paymentId = UUID.randomUUID()
-            val stub = WorkflowStub.fromTyped(
-                env.workflowClient.newWorkflowStub(
-                    DomesticPaymentWorkflow::class.java,
-                    AdmissionRun.options(QUEUE, paymentId, chainOn = true).build(),
-                ),
-            )
-            val execution = stub.start(paymentId)
-            assertThat(stub.getResult(DomesticPaymentStatus::class.java)).isEqualTo(DomesticPaymentStatus.SETTLED)
-            val history = env.getWorkflowExecutionHistory(execution)
+            runs.start(firstRun, chainOn = true)
+            assertThat(runs.redrive(redriven, chainOn = true)).isTrue()
+            // A held payment's run is an admission run whatever the switch says.
+            assertThat(runs.recoverHeld(recovered)).isTrue()
+            // Real time, not the test clock: the server does not advance its clock while a workflow
+            // task is waiting for a worker, which is exactly the state under test.
+            Thread.sleep(Duration.ofSeconds(2).toMillis())
 
-            WorkflowReplayer.replayWorkflowExecution(history, DomesticPaymentWorkflowImpl::class.java)
-            assertThatThrownBy {
-                WorkflowReplayer.replayWorkflowExecution(history, PreAdmissionChainDomesticPaymentWorkflow::class.java)
-            }.hasStackTraceContaining("NonDeterministicException")
+            for (paymentId in listOf(firstRun, redriven, recovered)) {
+                val events = env.workflowClient.fetchHistory(domesticPaymentWorkflowId(paymentId)).events
+                assertThat(events.first().workflowExecutionStartedEventAttributes.taskQueue.name)
+                    .isEqualTo(AdmissionRun.queue(QUEUE))
+                    .isNotEqualTo(QUEUE)
+                assertThat(events.map { it.eventType })
+                    .describedAs("no worker here may start a task of this run")
+                    .doesNotContain(EventType.EVENT_TYPE_WORKFLOW_TASK_STARTED)
+            }
+            verify(exactly = 0) { activities.screenPayment(any()) }
+            // The control: the same worker does serve a run on its own queue.
+            val preChain = UUID.randomUUID()
+            every { activities.screenPayment(preChain) } returns ScreeningDecision.REVIEW
+            runs.start(preChain, chainOn = false)
+            val served = env.workflowClient.newUntypedWorkflowStub(domesticPaymentWorkflowId(preChain))
+            assertThat(served.getResult(DomesticPaymentStatus::class.java)).isEqualTo(DomesticPaymentStatus.RECEIVED)
         }
     }
 
     private companion object {
-        const val QUEUE = "replay-domestic-payments"
+        const val QUEUE = "openbank-domestic-payments"
     }
 }
 
@@ -192,7 +196,7 @@ class PreFraudGateDomesticPaymentWorkflow : DomesticPaymentWorkflow {
 
     override fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?) = Unit
 
-    override fun resolvePaymentHold(decision: PaymentHoldDecision, caseKey: String?) = Unit
+    override fun holdChanged() = Unit
 
     override fun process(paymentId: UUID): DomesticPaymentStatus = when (activities.screenPayment(paymentId)) {
         ScreeningDecision.BLOCK -> {
@@ -231,10 +235,12 @@ class PreAdmissionChainDomesticPaymentWorkflow : DomesticPaymentWorkflow {
 
     override fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?) = Unit
 
-    override fun resolvePaymentHold(decision: PaymentHoldDecision, caseKey: String?) = Unit
+    override fun holdChanged() = Unit
 
     override fun process(paymentId: UUID): DomesticPaymentStatus {
-        check(activities.screenPayment(paymentId) == ScreeningDecision.CLEAR) { "fixture covers the CLEAR path" }
+        val screened = activities.screenPayment(paymentId)
+        if (screened == ScreeningDecision.REVIEW) return DomesticPaymentStatus.RECEIVED
+        check(screened == ScreeningDecision.CLEAR) { "fixture covers the CLEAR and REVIEW paths" }
         activities.validatePayment(paymentId)
         Workflow.getVersion(DomesticPaymentWorkflowImpl.FRAUD_ENFORCEMENT_CHANGE_ID, Workflow.DEFAULT_VERSION, 1)
         check(activities.fraudGate(paymentId) == FraudGateAction.PROCEED) { "fixture covers PROCEED" }

@@ -137,18 +137,17 @@ domestic and SEPA, with standing; (B) limits; (C) sanctions coverage and inputs;
 the first rail that adopts the chain. They are recorded here because the next rail must make the
 same choices, not new ones.
 
-- *The switch.* The chain is off by default per rail (`openbank.<rail>.admission.enabled`). Whoever
-  starts a run reads the switch and puts it in the run's memo; workflow code never reads
-  configuration. A run started with the switch off carries no memo and writes no marker, so its
-  history is what the implementation from before the chain writes, and such a worker can serve and
-  replay it (proven by replay in both directions). The first revision of this note claimed that for
-  a switch recorded as a workflow side effect; that was false, a worker without the code fails the
-  replay of the marker. The guarantee stops at the switch: a run started with the chain ON is not
-  compatible with a worker from before the change, which either takes its first task down the
-  pre-chain path or fails its replay. So the order is fixed. Roll the image out to every worker,
-  then switch the chain on in a separate release. To go back, switch it off, wait until no run
-  started with it is open (no payment HELD, none RECEIVED under an open run), then roll the image
-  back. A payment already HELD is evaluated whatever the switch says.
+- *The switch.* The chain is off by default per rail (`openbank.<rail>.admission.enabled`). One
+  fact says whether a run goes through admission: the task queue it is started on. Whoever starts
+  a run reads the switch and picks the rail's own queue or its admission queue; workflow code reads
+  the queue from the run's start event and never reads configuration. A run on the rail's own
+  queue writes nothing the implementation from before the chain does not write (compared event for
+  event with a history that implementation recorded, and replayed both ways). Only a build that
+  knows the chain polls the admission queue, so a worker from before it is never handed a task of
+  an admission run; if no such worker is up, admission runs wait. Deployment order is therefore not
+  a rule to follow: the switch can be set on any pod at any time, and an older image can return
+  with admission runs open. They resume when a worker that knows the chain does. A payment already
+  HELD is recovered on the admission queue whatever the switch says.
 - *The case request travels on the rail's own event topic.* `PAYMENT_HELD` is one rail-neutral
   event type carrying `rail`; aml-service reads the rails' topics on one channel and ignores every
   other type. No new topic. The case key is `payment-hold:<rail>:<paymentId>`, derived by the
@@ -163,15 +162,22 @@ same choices, not new ones.
   nothing; refusing it too would leave it with no exit. An operator may end that payment, REJECTED
   or CANCELLED only, never VALIDATED, and the state is counted and alerted on. With the chain off a
   RECEIVED payment keeps the exit it had.
-- *A hold outlives its run.* The run is what re-evaluates, waits and expires a hold, so the rail
-  records on the payment when it was held and when its case was requested, and a sweep gives every
-  HELD payment without an open run a new one. That run keeps the first hold's expiry and does not
-  evaluate a payment whose case was requested. A case decision that finds a HELD payment with no
-  run starts one and is delivered with it. Admission activities retry without limit.
-- *Release re-run* (point 13, funds). "A failed re-run rejects" is read as: a re-run that REFUSES
-  rejects. A standing read that got no answer (timeout, dependency down) is retried and decides
-  nothing; if it never answers the run ends, the sweep recovers the payment and its expiry rejects
-  it. Balance is not re-checked at release by this step (see below).
+- *A hold lives on the payment's row, not in its run.* The row records when the payment was held,
+  when its case was requested and what the case decided. The run keeps none of it: it asks one
+  activity to look at the row and end the hold if it can be ended, and asks again when nudged or
+  after its check interval. So the order of events does not matter. A decision that arrives before
+  the run, while it starts, or after it died is on the row for whichever run comes; a sweep gives
+  every HELD payment without an open run a new one. Admission activities retry without limit.
+- *Expiry wins.* A hold ends in rejection 48 hours after `held_at`, read from the row. A decision
+  is accepted only before that, and one accepted but not yet applied when the term ends is not
+  applied (point 3: a hold never expires into a release). The run notices within its check
+  interval, 15 minutes.
+- *Release* (point 13, funds). A case decision answers the control that asked a human. It does not
+  answer for a control that never spoke. At release the whole chain is evaluated again, and the
+  payment is sent only if every bound control answers and none refuses: a refusal rejects, a
+  control that still cannot answer leaves the payment HELD until it answers or the hold expires.
+  This is what keeps an outage that turned payments into cases from sending them unscreened.
+  Balance is not re-checked at release by this step (see below).
 - *One fraud score per payment.* The rail keeps the first real score on the payment and reuses it
   on every later evaluation, because the fraud service stores and counts every score it gives and
   cannot recognise a repeat.

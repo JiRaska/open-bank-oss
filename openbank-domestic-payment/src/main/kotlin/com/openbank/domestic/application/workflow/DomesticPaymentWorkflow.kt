@@ -28,17 +28,13 @@ interface DomesticPaymentWorkflow {
     fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?)
 
     /**
-     * ADR-0374 D3: release or reject a payment the admission chain HELD. With no signal before the
-     * hold expires the payment is REJECTED; a hold never expires into a release.
-     *
-     * Accepted only for the hold's own case ([caseKey] must equal [PaymentHoldPolicy.caseKey] for
-     * this payment), only by a run that goes through admission, and only until that run's hold is
-     * over. The first such decision wins and is applied when the run waits on the case, also when
-     * it arrived before that wait began. A signal that names another case, or reaches a run that
-     * has no hold or whose hold is over, is ignored and counted.
+     * ADR-0374 D3: something about this payment's hold changed, look at it now. It carries nothing:
+     * the decision of the hold's case is recorded on the payment's row before this is sent, and the
+     * run reads it from there. A signal that is lost, duplicated, early or forged therefore changes
+     * no outcome; the run looks again on its own interval anyway.
      */
     @SignalMethod
-    fun resolvePaymentHold(decision: PaymentHoldDecision, caseKey: String?)
+    fun holdChanged()
 }
 
 /**

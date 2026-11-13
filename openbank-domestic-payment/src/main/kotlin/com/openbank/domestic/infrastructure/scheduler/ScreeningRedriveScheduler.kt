@@ -4,8 +4,7 @@
 package com.openbank.domestic.infrastructure.scheduler
 
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
-import com.openbank.domestic.application.workflow.AdmissionRun
-import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
+import com.openbank.domestic.application.workflow.DomesticPaymentRuns
 import com.openbank.domestic.application.workflow.PaymentAdmissionConfig
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
@@ -13,10 +12,7 @@ import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
-import io.temporal.api.enums.v1.WorkflowIdConflictPolicy
-import io.temporal.api.enums.v1.WorkflowIdReusePolicy
 import io.temporal.client.WorkflowClient
-import io.temporal.client.WorkflowExecutionAlreadyStarted
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import jakarta.enterprise.inject.Instance
@@ -128,17 +124,37 @@ class ScreeningRedriveScheduler {
         if (stuck.isNotEmpty()) {
             log.infof("[screening-redrive] re-screening %d payment(s) held in RECEIVED", stuck.size)
         }
+        val runs = DomesticPaymentRuns(workflowClient, temporalTaskQueue)
+        // Read here, on the scheduler's own thread, and not inside the blocking call below.
+        val chainOn = admission.enabled
         var hadFailure = false
         for (paymentId in stuck) {
-            if (!ensureRun(paymentId, heldAt = null)) hadFailure = true
+            val started = offerRun(paymentId) { runs.redrive(paymentId, chainOn) }
+            when (started) {
+                // The budget counts re-drives, and a re-drive is a run that was started. An offer
+                // Temporal refused because a run is still open spends nothing.
+                true -> {
+                    paymentRepository.recordRedriveAttempt(paymentId)
+                    log.infof("[screening-redrive] re-drove payment %s", paymentId)
+                }
+                false -> log.infof("[screening-redrive] payment %s still has an open run; not re-driven", paymentId)
+                null -> hadFailure = true
+            }
         }
         // ADR-0374: a HELD payment lives only as long as its workflow run does. The run is what
-        // re-evaluates it, waits for its case and expires it, so a HELD payment whose run is gone
-        // (failed, terminated, timed out) would stay HELD for good. Every tick offers a run to the
-        // least recently checked holds; Temporal refuses the offer while a run is open, which is the
-        // normal case and costs one call.
+        // re-evaluates it, applies its case's decision and expires it, so a HELD payment whose run
+        // is gone (failed, terminated, timed out) would stay HELD for good. Every tick offers a run
+        // to the least recently checked holds; Temporal refuses the offer while a run is open, which
+        // is the normal case, costs one call and is not logged.
         for (ref in held) {
-            if (!ensureRun(ref.paymentId, heldAt = ref.heldAt)) hadFailure = true
+            when (offerRun(ref.paymentId) { runs.recoverHeld(ref.paymentId) }) {
+                true -> {
+                    recoveredHolds?.increment()
+                    log.warnf("[screening-redrive] HELD payment %s had no open run; started one", ref.paymentId)
+                }
+                false -> Unit
+                null -> hadFailure = true
+            }
         }
         if (!hadFailure) {
             liveness?.recordSuccess()
@@ -146,57 +162,23 @@ class ScreeningRedriveScheduler {
     }
 
     /**
-     * Start a run for the payment unless one is open. [heldAt] is set for a payment that is HELD:
-     * its run goes through admission whatever the switch says and keeps the first hold's expiry.
-     * Returns false only when the attempt itself failed.
+     * Offer the payment a run. True when one was started, false when one was already open, null
+     * when the offer itself failed. The check is noted BEFORE the offer, so a payment whose offer
+     * kills the sweep goes to the back of the queue instead of heading every tick.
      */
-    private suspend fun ensureRun(paymentId: UUID, heldAt: Instant?): Boolean {
-        // Counted BEFORE the attempt: a re-drive that dies mid-flight must still consume its
-        // budget, or a payment that reliably kills the sweep is retried forever.
-        paymentRepository.recordRedriveAttempt(paymentId)
-        try {
+    private suspend fun offerRun(paymentId: UUID, start: () -> Boolean): Boolean? {
+        paymentRepository.markRunChecked(paymentId, Instant.now(clock))
+        return try {
             // Temporal's start is a BLOCKING gRPC call. This method is `suspend`, so Quarkus
             // dispatches it on a duplicated Vert.x context — blocking there stalls the event
             // loop, and with ConcurrentExecution.SKIP one stalled tick wedges every later one.
             // Measured: the sweep re-drove exactly one payment and then never ran again.
-            withContext(Dispatchers.IO) {
-                val stub = workflowClient.newWorkflowStub(
-                    DomesticPaymentWorkflow::class.java,
-                    // The SAME id as the first run, with the reuse policy stated rather than
-                    // inherited: a new run may start only once the previous one has closed.
-                    // A fraud-hold decision is signalled to this id and so always reaches the
-                    // current run; a per-attempt id stranded it on the closed one and let the
-                    // re-driven hold time out into REJECTED.
-                    AdmissionRun.options(temporalTaskQueue, paymentId, admission.enabled, heldAt)
-                        .setWorkflowIdReusePolicy(WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE)
-                        .setWorkflowIdConflictPolicy(WorkflowIdConflictPolicy.WORKFLOW_ID_CONFLICT_POLICY_FAIL)
-                        .build(),
-                )
-                WorkflowClient.start(stub::process, paymentId)
-            }
-            if (heldAt == null) {
-                log.infof("[screening-redrive] re-drove payment %s", paymentId)
-            } else {
-                recoveredHolds?.increment()
-                log.warnf("[screening-redrive] HELD payment %s had no open run; started one", paymentId)
-            }
-        } catch (_: WorkflowExecutionAlreadyStarted) {
-            // A run for this payment is still open — typically a fraud hold awaiting an analyst,
-            // during which the payment stays RECEIVED. Starting a second run would re-screen,
-            // re-score and hold the payment twice in parallel; leaving it alone is correct.
-            // The attempt counted above is spent without a re-drive, and that is harmless: a run
-            // that reached the fraud hold has already cleared screening, so it ends VALIDATED or
-            // REJECTED and never returns the payment to RECEIVED for this sweep to need.
-            // For a HELD payment this is every healthy hold on every tick, so it is not logged.
-            if (heldAt == null) {
-                log.infof("[screening-redrive] payment %s still has an open run; not re-driven", paymentId)
-            }
+            withContext(Dispatchers.IO) { start() }
         } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
             // One payment must not abort the sweep for the rest — the #846 shape.
-            log.warnf(ex, "[screening-redrive] could not re-drive payment %s", paymentId)
-            return false
+            log.warnf(ex, "[screening-redrive] could not offer payment %s a run", paymentId)
+            null
         }
-        return true
     }
 
     private companion object {

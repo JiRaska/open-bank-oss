@@ -98,18 +98,23 @@ interface DomesticPaymentRepository {
      */
     suspend fun findRedrivable(maxAttempts: Int, minAge: Instant, limit: Int): List<UUID>
 
-    /** Count one re-drive against [paymentId], before it is attempted. */
+    /** Count one re-drive against [paymentId]: a run was started for it. */
     suspend fun recordRedriveAttempt(paymentId: UUID)
 
     /**
      * HELD payments to check for a live workflow run (ADR-0374): held before [heldBefore], the
-     * least recently checked first. The check is counted on the same per-row counter as a re-drive,
-     * which a HELD payment no longer needs for anything else, so every held payment gets its turn
-     * however many are held.
+     * least recently checked first ([markRunChecked]), so every held payment gets its turn however
+     * many are held.
      */
     suspend fun findHeldToReconcile(heldBefore: Instant, limit: Int): List<HeldPaymentRef> = emptyList()
 
-    /** How many re-drives of [paymentId] were attempted; 0 for an unknown payment. */
+    /**
+     * Note that the sweep offered [paymentId] a run at [at]. Ordering only; it spends nothing.
+     * Written before the offer, so a payment whose offer fails goes to the back of the queue.
+     */
+    suspend fun markRunChecked(paymentId: UUID, at: Instant) = Unit
+
+    /** How many re-drives of [paymentId] actually started a run; 0 for an unknown payment. */
     suspend fun redriveAttempts(paymentId: UUID): Int = 0
 
     /** RECEIVED payments whose re-drive budget of [maxAttempts] is spent: nothing automatic moves them. */

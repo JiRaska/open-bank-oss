@@ -152,6 +152,17 @@ class DomesticPaymentEntity : PanacheEntity() {
     @Column(name = "hold_case_requested_at")
     var holdCaseRequestedAt: Instant? = null
 
+    /** ADR-0374: the accepted decision of the hold's case (RELEASE or REJECT); null until one is. */
+    @Column(name = "hold_decision")
+    var holdDecision: String? = null
+
+    /**
+     * When the sweep last offered this payment a workflow run. Ordering only: the least recently
+     * checked payments are offered first. Not a count of anything.
+     */
+    @Column(name = "run_checked_at")
+    var runCheckedAt: Instant? = null
+
     @Column(name = "admission_fraud_verdict")
     var admissionFraudVerdict: String? = null
 

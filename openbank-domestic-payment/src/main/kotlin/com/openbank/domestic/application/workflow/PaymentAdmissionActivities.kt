@@ -5,19 +5,14 @@
 package com.openbank.domestic.application.workflow
 
 import io.temporal.activity.ActivityInterface
-import io.temporal.client.WorkflowOptions
 import io.temporal.workflow.Workflow
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Duration
-import java.time.Instant
 import java.util.UUID
 
 /** What the workflow does after one admission (ADR-0374). */
 enum class AdmissionAction {
-    /** The chain is switched off for this rail; the workflow follows the path it had before. */
-    NOT_ENABLED,
-
     /** Every control that applies answered and admitted: the payment is VALIDATED. */
     ADMITTED,
 
@@ -30,59 +25,30 @@ enum class AdmissionAction {
 }
 
 /**
- * How a run is told, at its START, whether it goes through admission (ADR-0374).
+ * Which runs go through admission (ADR-0374), decided by ONE fact: the task queue a run is started
+ * on.
  *
- * The decision belongs to whoever starts the run and travels in the run's memo. It is not read from
- * configuration by workflow code and not recorded as a side effect, for two reasons. The memo is
- * part of the start event, so every replay of the run sees the same value. And a run started with
- * the chain off carries NO memo and writes nothing extra to its history, so its history is exactly
- * what the implementation from before the chain produces and such a worker can serve it.
+ * A run on the rail's task queue is a pre-chain run. A run on the admission queue goes through the
+ * chain. Whoever starts a run picks the queue ([DomesticPaymentRuns]); workflow code reads it from
+ * the run's own start event, never from configuration, so every replay sees the same answer and a
+ * pre-chain run's history carries nothing the implementation from before the chain does not write.
  *
- * What the memo does not do: a worker from before this change does not read it. If one takes a task
- * of a run started with the chain ON it follows the path it knows (screening and the fraud gate,
- * no standing check, no hold) or, for a run already past its first admission, fails the task as
- * non-deterministic until a current worker takes it. So the chain is switched on only once every
- * worker runs this code, and switched off, and its runs drained, before an image from before it is
- * rolled back to.
+ * The queue is also what keeps the two kinds of worker apart, mechanically. Only a build that
+ * knows the chain polls the admission queue, so a worker from before it can never be handed a task
+ * of an admission run: not its first task, which it would take down the pre-chain path, and not a
+ * later one, which it could not replay. If no worker that knows the chain is running, admission
+ * runs wait; they are not processed wrongly.
  */
 object AdmissionRun {
-    /** Memo key: present and true on a run that goes through admission, absent otherwise. */
-    const val CHAIN_MEMO = "admissionChain"
+    private const val ADMISSION_QUEUE_SUFFIX = "-admission"
 
-    /** Memo key: epoch millis of the first hold, on a run started to recover a HELD payment. */
-    const val HELD_AT_MEMO = "admissionHeldAtEpochMillis"
+    /** The queue admission runs of the rail whose pre-chain queue is [railQueue] are started on. */
+    fun queue(railQueue: String): String = railQueue + ADMISSION_QUEUE_SUFFIX
 
-    /**
-     * Start options of a run for [paymentId]. [chainOn] is the rail's switch as the starter read it;
-     * a payment that is already HELD ([heldAt] set) goes through admission whatever the switch says,
-     * because turning the chain off must not strand the holds it placed.
-     */
-    fun options(
-        taskQueue: String,
-        paymentId: UUID,
-        chainOn: Boolean,
-        heldAt: Instant? = null,
-    ): WorkflowOptions.Builder {
-        val builder = WorkflowOptions.newBuilder()
-            .setTaskQueue(taskQueue)
-            .setWorkflowId(domesticPaymentWorkflowId(paymentId))
-        // No memo at all for a chain-off run: its start event stays what it was before the chain.
-        if (chainOn || heldAt != null) {
-            builder.setMemo(
-                buildMap<String, Any> {
-                    put(CHAIN_MEMO, true)
-                    if (heldAt != null) put(HELD_AT_MEMO, heldAt.toEpochMilli())
-                },
-            )
-        }
-        return builder
-    }
+    fun isAdmissionQueue(taskQueue: String): Boolean = taskQueue.endsWith(ADMISSION_QUEUE_SUFFIX)
 
     /** For workflow code only. */
-    fun chainOn(): Boolean = Workflow.getMemo(CHAIN_MEMO, Boolean::class.javaObjectType) == true
-
-    /** For workflow code only. */
-    fun heldAtMillis(): Long? = (Workflow.getMemo(HELD_AT_MEMO, Number::class.java) as? Number)?.toLong()
+    fun chainOn(): Boolean = isAdmissionQueue(Workflow.getInfo().taskQueue)
 }
 
 /**
@@ -110,8 +76,17 @@ class ScreeningRedriveConfig(
 /** Why a held payment is being rejected without a release. */
 enum class HoldRejectCause { REVIEW_REJECTED, EXPIRED }
 
-/** A case decision on a held payment, delivered by [DomesticPaymentWorkflow.resolvePaymentHold]. */
-enum class PaymentHoldDecision { RELEASE, REJECT }
+/** Where a hold stands after the run looked at it ([PaymentAdmissionActivities.concludeHold]). */
+enum class HoldState {
+    /** The payment left HELD for VALIDATED: send it. */
+    RELEASED,
+
+    /** The payment left HELD for REJECTED: by its case, by its expiry or by a control that refuses. */
+    REJECTED,
+
+    /** Still HELD: no decision yet, or a release that a control could not answer for. Look again. */
+    WAITING,
+}
 
 /** The fixed terms of a hold. Constants, so a workflow replay and the event agree on them. */
 object PaymentHoldPolicy {
@@ -123,6 +98,13 @@ object PaymentHoldPolicy {
 
     /** How long the workflow waits before asking an unavailable control again (ADR-0374 D13). */
     val REEVALUATION_INTERVAL: Duration = Duration.ofMinutes(REEVALUATION_MINUTES)
+
+    /**
+     * How long a run waits before it looks at a hold again when nothing told it to. A decision
+     * wakes it at once; this interval is what bounds how late an expiry, or a control that came
+     * back, is noticed.
+     */
+    val HOLD_CHECK_INTERVAL: Duration = Duration.ofMinutes(REEVALUATION_MINUTES)
 
     /** Re-evaluations before an outage becomes a case. With the interval: 75 minutes. */
     const val MAX_REEVALUATIONS = 5
@@ -150,18 +132,24 @@ interface PaymentAdmissionActivities {
      *
      * With [lastAttempt] a hold caused only by an unavailable control is escalated to a case
      * instead of asking for another evaluation, so it never answers [AdmissionAction.HELD_UNAVAILABLE].
-     *
-     * Answers [AdmissionAction.NOT_ENABLED] without touching anything when
-     * `openbank.domestic.admission.enabled` is false and the payment is not already HELD.
      */
     fun admit(paymentId: UUID, lastAttempt: Boolean): AdmissionAction
 
     /**
-     * Let a released payment go: re-run standing and move HELD to VALIDATED. Returns false when the
-     * re-run did not allow it, in which case the payment is REJECTED (ADR-0374 D13, funds).
+     * Look at a HELD payment and end its hold if it can be ended. Everything is read from the
+     * payment's row, so any run can call this at any time and in any order with the decision:
+     *
+     *  - the hold has reached its expiry: REJECTED, whatever its case decided or decides later
+     *    (ADR-0374 D3: a hold never expires into a release);
+     *  - its case decided to reject: REJECTED;
+     *  - its case decided to release: the whole chain is evaluated again, and the payment is
+     *    VALIDATED only if every bound control ANSWERS and none refuses. The case decision
+     *    overrides a control that asked for a review; it does not stand in for a control that
+     *    never answered. A control that refuses rejects; one that still cannot answer leaves the
+     *    payment HELD ([HoldState.WAITING]);
+     *  - no decision yet: [HoldState.WAITING].
+     *
+     * A payment that already left HELD answers for itself.
      */
-    fun releaseHeld(paymentId: UUID): Boolean
-
-    /** HELD to REJECTED. Notifies nobody: the customer is not told why. */
-    fun rejectHeld(paymentId: UUID, cause: HoldRejectCause)
+    fun concludeHold(paymentId: UUID): HoldState
 }

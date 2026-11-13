@@ -116,9 +116,9 @@ The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit ma
   and is safer than a time-only release; the callback is a transactional domestic outbox event.
 - **Admission chain, not delivered with step A (ADR-0374):** (1) the decision on a hold's case is a
   single analyst's in aml-service, where ADR-0374 D3 asks for four eyes; (2) a hold reserves no funds, so
-  the release re-runs standing only and balance is checked where it always was, at booking, where
-  ADR-0374 D13 asks for standing and balance at release; a standing read with no answer at release is
-  retried, never treated as a refusal; (5) nothing in this service releases the spend reservation of a
+  the release evaluates the controls again but not the balance, which is checked where it always was, at booking, where
+  ADR-0374 D13 asks for standing and balance at release; a control that cannot answer at release
+  keeps the payment HELD, which is never a refusal and never a pass; (5) nothing in this service releases the spend reservation of a
   delegated payment that the chain rejects or whose hold expires; (3) the
   chain's `AUTHORITY` step is unbound on this rail: authority is decided when the payment is submitted
   (the customer edge, and the rail's create path), not again by the chain (ADR-0375 D1/D3); (4) between a party's suspension and account-service consuming it the
@@ -136,27 +136,40 @@ The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit ma
   off).** With `openbank.domestic.admission.enabled` the workflow asks `PaymentAdmissionActivitiesImpl`
   before anything else; `DomesticAdmissionChain` binds account standing, the ADR-0032 sanctions screen and
   the ADR-0084 fraud score to the shared chain kernel, which fixes their order and maps a control that
-  cannot answer to a hold. Whether a run goes through admission is fixed by its starter in the run's
-  memo; a run started with the switch off writes nothing a run of the previous implementation does
-  not write (replay-tested in both directions). A run started with the switch ON is not compatible
-  with a worker from before the change, so the switch goes on only after every worker has the code
-  and comes off, with its runs drained, before an older image returns.
+  cannot answer to a hold. Whether a run goes through admission is one fact, the task queue it is
+  started on (`AdmissionRun`, `DomesticPaymentRuns`). A run on the rail's own queue writes nothing a
+  run of the previous implementation does not write (compared event for event with a history that
+  implementation recorded). Only a build that knows the chain polls the admission queue, so a worker
+  from before it is never handed a task of an admission run and cannot take one down the pre-chain
+  path; with no such worker up, admission runs wait.
   - **New outbound read (trust boundary):** `GET /api/v1/accounts/{id}` on account-service is now read
     for `standing.mayDebit`, under the M2M identity the rail already uses for that route. **Tampering /
     spoofing:** the answer decides whether a payment is rejected, so the rail treats every unusable answer
     as *unavailable*, never as "may debit": an unknown account, a response without `standing`, a non-2xx
     and a timeout all hold the payment (`AccountServiceClient.debtorStanding`, `toStandingLookup`).
     A consumer pact pins the field and account-service replays it on a pull request.
-  - **Elevation of privilege, release path:** a HELD payment is released only by `resolvePaymentHold`,
-    which the workflow accepts only for the key `PaymentHoldPolicy.caseKey`
-    (`payment-hold:domestic:<paymentId>`), first decision wins, and only in a run that goes through
-    admission and whose hold is not over. `FraudHoldResolutionConsumer` checks the same key before
-    signalling, so a case somebody else created for the payment and the fraud hold's case
-    decide nothing. The key is derivable from the payment id, so this guard binds a
-    decision to the right case and is not a secret; what stops a forged case is aml-service's
-    provenance rule for that key namespace (see its threat model). Whoever
-    may decide that case in aml-service can release the payment; that decision is a single analyst's
-    today (see residual risks).
+  - **Elevation of privilege, release path:** a HELD payment is released only by the decision of its
+    own case. `FraudHoldResolutionConsumer` accepts a decision only for the key
+    `PaymentHoldPolicy.caseKey` (`payment-hold:domestic:<paymentId>`), so a case somebody else created
+    for the payment and the fraud hold's case decide nothing. The decision is then written to the
+    payment's row in one guarded statement (`recordHoldDecision`): only for a payment that is HELD
+    with its case requested, once, and only before the hold's expiry. The workflow signal carries no
+    decision at all; a forged, duplicated or lost signal changes no outcome. The key is derivable
+    from the payment id, so it binds a decision to the right case and is not a secret; what stops a
+    forged case is aml-service's provenance rule for that key namespace (see its threat model).
+    Whoever may decide that case in aml-service can release the payment; that decision is a single
+    analyst's today (see residual risks).
+  - **Tampering, a release that skips a control:** an outage of sanctions screening longer than the
+    re-evaluation window turns every payment submitted in it into a case, and none of them was
+    screened. Releasing one on the case decision alone would send an unscreened payment.
+    `PaymentAdmissionActivitiesImpl.release` is the one place a HELD payment becomes VALIDATED, and
+    it evaluates the whole chain again: every bound control must answer and none may refuse. A
+    refusal rejects; a control that still cannot answer leaves the payment HELD. The case decision
+    overrides a control that asked for a review, never one that did not answer.
+  - **Elevation of privilege, a hold released after its term:** a hold ends in rejection 48 hours
+    after `held_at`. Expiry is checked first and from the row (`concludeHold`), and a decision is
+    not accepted after it, so a late decision, or one accepted while no run was alive to apply it,
+    cannot release the payment (ADR-0374 D3).
   - **Elevation of privilege, status endpoint:** `PATCH /{id}/status` answers 409 for a HELD payment
     always, and with the chain on for a RECEIVED payment while a re-drive attempt is left or a workflow
     run is open (ADR-0374 D13). It starts no workflow, so it could otherwise move a payment past
@@ -166,13 +179,13 @@ The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit ma
     with and cannot wave it through. When Temporal cannot say whether a run is open the endpoint
     refuses. The state is counted (`openbank_domestic_payments_redrive_exhausted`) and alerted on.
     With the chain off a RECEIVED payment keeps the exit it had.
-  - **Denial of service, a hold without a run:** a HELD payment exists only as long as its workflow
-    run. Admission activities retry without limit and are re-entrant on the row (`held_at`,
-    `hold_case_requested_at`), the re-drive sweep gives a HELD payment without an open run a new one
-    that keeps the first hold's expiry, and a case decision that finds no run starts one. A recovered
-    run does not evaluate a payment whose case was requested, so a control answering differently later
-    cannot release what a reviewer holds. `DomesticPaymentHeldPastExpiry` measures the hold's age from
-    `held_at` and fires if all of that failed.
+  - **Denial of service, a hold without a run:** the hold lives on the payment's row (`held_at`,
+    `hold_case_requested_at`, `hold_decision`) and the run keeps no state of it, so a run that dies
+    loses nothing. Admission activities retry without limit and are re-entrant on the row, the
+    re-drive sweep gives a HELD payment without an open run a new one, and a recovered run does not
+    evaluate a payment whose case was requested, so a control answering differently later cannot
+    release what a reviewer holds. `DomesticPaymentHeldPastExpiry` measures the hold's age from
+    `held_at` and fires if all of that failed, or if no worker that knows the chain is running.
   - **Tampering with another service's state:** the chain evaluates a payment several times, and
     fraud-service stores and counts every score. The rail keeps the first real score on the payment
     and reuses it, so one payment adds one score to what fraud-service holds against the account.

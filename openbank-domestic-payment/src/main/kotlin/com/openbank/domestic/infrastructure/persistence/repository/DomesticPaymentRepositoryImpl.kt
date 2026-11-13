@@ -8,12 +8,14 @@ import com.openbank.domestic.application.port.out.DelegatedPaymentSaveOutcome
 import com.openbank.domestic.application.port.out.DomesticBookingWrites
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.port.out.HeldPaymentRef
+import com.openbank.domestic.application.port.out.HoldDecisionRecord
 import com.openbank.domestic.application.port.out.PaymentAdmissionWrites
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DelegatedSpendReservationSnapshot
 import com.openbank.domestic.domain.model.DelegatedSpendReservationState
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
+import com.openbank.domestic.domain.model.HoldDecision
 import com.openbank.domestic.domain.model.RecordedFraudScore
 import com.openbank.domestic.infrastructure.persistence.entity.DelegatedSpendBindingEntity
 import com.openbank.domestic.infrastructure.persistence.entity.DomesticPaymentEntity
@@ -26,6 +28,7 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.LockModeType
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -173,7 +176,8 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
     override suspend fun findRedrivable(maxAttempts: Int, minAge: Instant, limit: Int): List<UUID> =
         Panache.withSession {
             find(
-                "status = ?1 and redriveAttempts < ?2 and createdAt < ?3 order by createdAt asc",
+                "status = ?1 and redriveAttempts < ?2 and createdAt < ?3 " +
+                    "order by runCheckedAt asc nulls first, createdAt asc",
                 DomesticPaymentStatus.RECEIVED.name,
                 maxAttempts,
                 minAge,
@@ -189,11 +193,17 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
     override suspend fun findHeldToReconcile(heldBefore: Instant, limit: Int): List<HeldPaymentRef> =
         Panache.withSession {
             find(
-                "status = ?1 and updatedAt < ?2 order by redriveAttempts asc, updatedAt asc",
+                "status = ?1 and updatedAt < ?2 order by runCheckedAt asc nulls first, updatedAt asc",
                 DomesticPaymentStatus.HELD.name,
                 heldBefore,
             ).range(0, limit - 1).list()
         }.awaitSuspending().map { HeldPaymentRef(it.paymentId, it.heldAt ?: it.updatedAt) }
+
+    override suspend fun markRunChecked(paymentId: UUID, at: Instant) {
+        Panache.withTransaction {
+            update("runCheckedAt = ?1 where paymentId = ?2", at, paymentId)
+        }.awaitSuspending()
+    }
 
     override suspend fun redriveAttempts(paymentId: UUID): Int = Panache.withSession {
         find("paymentId", paymentId).firstResult()
@@ -237,6 +247,39 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
                     }
             }
         }.awaitSuspending()
+
+    // One guarded bulk update decides acceptance, so two deliveries of a decision, or a decision
+    // racing the expiry, cannot both win. When it changes nothing the row says why.
+    override suspend fun recordHoldDecision(
+        paymentId: UUID,
+        decision: HoldDecision,
+        at: Instant,
+        expiresAfter: Duration,
+    ): HoldDecisionRecord = Panache.withTransaction {
+        // held_at is null only on a row held by a build from before the column; its last write was
+        // the move to HELD.
+        update(
+            "holdDecision = ?1 where paymentId = ?2 and status = ?3 and holdCaseRequestedAt is not null " +
+                "and holdDecision is null and coalesce(heldAt, updatedAt) > ?4",
+            decision.name,
+            paymentId,
+            DomesticPaymentStatus.HELD.name,
+            at.minus(expiresAfter),
+        ).flatMap { changed ->
+            if (changed == 1) {
+                Uni.createFrom().item(HoldDecisionRecord.ACCEPTED)
+            } else {
+                find("paymentId", paymentId).firstResult().map { entity ->
+                    when {
+                        entity?.status != DomesticPaymentStatus.HELD.name || entity.holdCaseRequestedAt == null ->
+                            HoldDecisionRecord.NO_HOLD
+                        entity.holdDecision != null -> HoldDecisionRecord.ALREADY_DECIDED
+                        else -> HoldDecisionRecord.EXPIRED
+                    }
+                }
+            }
+        }
+    }.awaitSuspending()
 
     // A bulk update guarded by "is null": the first score wins, and neither the revision nor any
     // other column of the aggregate is touched, so it cannot race a lifecycle write.
@@ -293,6 +336,7 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
                     // the payment must not clear what another transaction recorded meanwhile.
                     entity.heldAt = entity.heldAt ?: payment.heldAt
                     entity.holdCaseRequestedAt = entity.holdCaseRequestedAt ?: payment.holdCaseRequestedAt
+                    // holdDecision is written by recordHoldDecision alone and never by a lifecycle write.
                 }
                 // One after another on the one session; every row is part of this transaction.
                 .flatMap {

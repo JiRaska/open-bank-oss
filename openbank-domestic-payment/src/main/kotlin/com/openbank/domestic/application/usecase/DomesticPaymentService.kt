@@ -16,8 +16,7 @@ import com.openbank.domestic.application.port.out.DelegatedPaymentSaveOutcome
 import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepository
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
-import com.openbank.domestic.application.workflow.AdmissionRun
-import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
+import com.openbank.domestic.application.workflow.DomesticPaymentRuns
 import com.openbank.domestic.application.workflow.PaymentAdmissionConfig
 import com.openbank.domestic.application.workflow.ScreeningRedriveConfig
 import com.openbank.domestic.application.workflow.domesticPaymentWorkflowId
@@ -310,13 +309,7 @@ class DomesticPaymentService(
     )
 
     private fun startWorkflow(paymentId: UUID) {
-        // Whether the run goes through admission is decided HERE, at its start, and travels in its
-        // memo; see AdmissionRun for why it is not read by the workflow from configuration.
-        val stub = workflowClient.newWorkflowStub(
-            DomesticPaymentWorkflow::class.java,
-            AdmissionRun.options(temporalTaskQueue, paymentId, chainOn = admission.enabled).build(),
-        )
-        WorkflowClient.start(stub::process, paymentId)
+        DomesticPaymentRuns(workflowClient, temporalTaskQueue).start(paymentId, chainOn = admission.enabled)
     }
 
     private fun DelegatedDomesticPaymentResult.acceptedOrNull(): CreateDomesticPaymentResult? =

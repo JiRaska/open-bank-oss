@@ -11,7 +11,6 @@ import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
 import com.openbank.domestic.application.workflow.FraudReviewDecision
-import com.openbank.domestic.application.workflow.PaymentHoldDecision
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
@@ -188,6 +187,6 @@ class DomesticPaymentServiceTemporalTest {
     class NoOpDomesticPaymentWorkflow : DomesticPaymentWorkflow {
         override fun process(paymentId: UUID): DomesticPaymentStatus = DomesticPaymentStatus.RECEIVED
         override fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?) = Unit
-        override fun resolvePaymentHold(decision: PaymentHoldDecision, caseKey: String?) = Unit
+        override fun holdChanged() = Unit
     }
 }
