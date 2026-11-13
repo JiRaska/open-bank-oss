@@ -26,3 +26,22 @@ unavailable — a grant whose authority we cannot establish is not a grant we ma
 An owner's authority does not come from a grant, so failing to read grants is not failing to
 establish it; asking the lookup first would hold every ordinary payment whenever account-service
 blipped, which is the kind of fail-closed overreach that gets a control switched off.
+
+## What a rail adapter is allowed to contain
+
+`DelegationAuthorityGrantPayload` is the wire form with every field nullable and stringly typed,
+because that is what a deserializer can actually produce: a missing key, a null, or an unparseable
+value. `DelegationAuthorityFacts.lookupOfPayload` validates and maps it, and
+`DelegationAuthorityFacts.dependencyDown` is the one shape every adapter raises for a transport
+failure.
+
+What is left in a rail is transport: build the client, fetch the token, call, and convert any
+throwable with `dependencyDown`. That boundary is deliberate, because the judgement a rail would
+otherwise make for itself has exactly one dangerous mistake available — dropping the grant it cannot
+read. A dropped grant leaves an otherwise-successful answer, and an otherwise-successful answer with
+no grants in it is a *definitive* refusal downstream. So a refusal gets manufactured out of a parse
+failure, and nothing anywhere disagrees.
+
+That is why the nullable form lives in the shared module rather than in each rail's DTO: the five
+rails that have yet to bind the step inherit the decision instead of re-making it.
+

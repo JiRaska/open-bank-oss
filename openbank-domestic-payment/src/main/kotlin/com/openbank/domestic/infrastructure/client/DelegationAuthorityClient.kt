@@ -6,9 +6,8 @@ package com.openbank.domestic.infrastructure.client
 
 import com.openbank.domestic.application.port.out.DelegationAuthorityPort
 import com.openbank.libs.fincrime.admission.DelegationAuthorityFacts
-import com.openbank.libs.fincrime.admission.DelegationAuthorityGrantWire
+import com.openbank.libs.fincrime.admission.DelegationAuthorityGrantPayload
 import com.openbank.libs.fincrime.admission.DelegationFactsLookup
-import com.openbank.libs.fincrime.admission.UnavailableCause
 import io.quarkus.oidc.client.OidcClient
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -39,15 +38,12 @@ interface DelegationAuthorityRestClient {
     ): Uni<AuthorityFactsDto>
 }
 
-data class AuthorityFactsDto(val grants: List<AuthorityGrantDto> = emptyList())
-
-data class AuthorityGrantDto(
-    val grantId: String? = null,
-    val grantorPartyId: String? = null,
-    val capabilities: List<String> = emptyList(),
-    val validFrom: String? = null,
-    val validTo: String? = null,
-)
+/**
+ * Only the envelope is local. Each grant deserializes straight into the SHARED
+ * [DelegationAuthorityGrantPayload], so the "is this grant usable?" judgement — the one with a
+ * dangerous mistake available — is made once in `openbank-libs-fincrime` and not per rail.
+ */
+data class AuthorityFactsDto(val grants: List<DelegationAuthorityGrantPayload> = emptyList())
 
 /**
  * Reads account-service's authority facts for the chain's AUTHORITY step (ADR-0375 D1).
@@ -84,42 +80,16 @@ class DelegationAuthorityClient(
         val dto = httpClient
             .authorityFacts("Bearer $token", accountId.toString(), partyId.toString())
             .awaitSuspending()
-        lookupOrUnavailable(dto.grants.map(::wireOf), accountId, partyId)
+        DelegationAuthorityFacts.lookupOfPayload(dto.grants, accountId, partyId)
     } catch (ex: jakarta.ws.rs.WebApplicationException) {
         // Deliberately including 404. account-service answers 200 with an empty list for an
         // unknown account precisely so that this client never has to read a status code as a
         // statement about grants; a 404 therefore means the route is not there, which is a
         // deployment fault.
         log.warnf("Delegation authority facts unavailable: HTTP %d", ex.response.status)
-        unavailable(UnavailableCause.DEPENDENCY_DOWN, "HTTP ${ex.response.status}")
+        DelegationAuthorityFacts.dependencyDown("HTTP ${ex.response.status}")
     } catch (ex: Exception) {
         log.warnf("Delegation authority facts unavailable (%s)", ex.javaClass.simpleName)
-        unavailable(UnavailableCause.DEPENDENCY_DOWN, ex.javaClass.simpleName)
+        DelegationAuthorityFacts.dependencyDown(ex.javaClass.simpleName)
     }
-
-    /**
-     * A grant missing any identifying field is [DelegationFactsLookup.Unavailable], not a grant we
-     * silently drop: dropping it would turn a payload we cannot read into a refusal.
-     */
-    private fun wireOf(dto: AuthorityGrantDto): DelegationAuthorityGrantWire? {
-        val grantId = dto.grantId?.let { runCatching { UUID.fromString(it) }.getOrNull() } ?: return null
-        val grantor = dto.grantorPartyId?.let { runCatching { UUID.fromString(it) }.getOrNull() } ?: return null
-        val validFrom = dto.validFrom ?: return null
-        return DelegationAuthorityGrantWire(grantId, grantor, dto.capabilities, validFrom, dto.validTo)
-    }
-
-    private fun lookupOrUnavailable(
-        wire: List<DelegationAuthorityGrantWire?>,
-        accountId: UUID,
-        partyId: UUID,
-    ): DelegationFactsLookup {
-        if (wire.any { it == null }) {
-            return unavailable(UnavailableCause.MISSING_DATA, "a grant was missing an identifying field")
-        }
-        // The shared mapper owns the rest: timestamp parsing, `active`, and the decision that one
-        // unreadable validity window makes the WHOLE lookup unavailable rather than one grant absent.
-        return DelegationAuthorityFacts.lookupOf(wire.filterNotNull(), accountId, partyId)
-    }
-
-    private fun unavailable(cause: UnavailableCause, detail: String) = DelegationFactsLookup.Unavailable(cause, detail)
 }
