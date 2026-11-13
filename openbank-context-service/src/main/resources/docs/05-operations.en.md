@@ -47,7 +47,3 @@ internal persistence identity, not the graph's public node key.
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
-
-## Held domestic payments (ADR-0374)
-
-The domestic payment projection accepts the status `HELD`: a payment parked by payment admission before anything was sent. It is projected as a payment stage like `RECEIVED` and `VALIDATED`, never as rail evidence. The status vocabulary of this projection is closed and an event outside it is refused and dead-lettered, so a new status of a rail has to be added here before the rail starts emitting it. The rail's `PAYMENT_HELD` case request on the same topic is not a lifecycle event and is ignored.

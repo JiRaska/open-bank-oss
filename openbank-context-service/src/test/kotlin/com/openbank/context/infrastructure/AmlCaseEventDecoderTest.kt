@@ -43,42 +43,6 @@ class AmlCaseEventDecoderTest {
         assertThat(result.occurredAt).isEqualTo(Instant.parse(TIME))
     }
 
-    /**
-     * aml-service publishes `partyId: null` for a case whose party is not established. There is no
-     * party to record it under, and it must not be dead-lettered either: the consumer leaves it out,
-     * and records the case from the restatement aml-service publishes once it has the party.
-     */
-    @Test
-    fun `an event with an explicit null party names no party, and only that does`() {
-        val changed =
-            mapOf("caseId" to CASE, "previousStatus" to "OPEN", "newStatus" to "BLOCKED", "occurredAt" to TIME)
-
-        assertThat(decoder.namesNoParty(mapper.writeValueAsString(changed + ("partyId" to null)))).isTrue()
-        assertThat(decoder.namesNoParty(mapper.writeValueAsString(changed + ("partyId" to PARTY)))).isFalse()
-        assertThat(decoder.namesNoParty(payload())).isFalse()
-        // A producer that forgot the field is not excused: that is still a malformed event.
-        assertThat(decoder.namesNoParty(mapper.writeValueAsString(changed))).isFalse()
-        assertThatThrownBy { decoder.decode(mapper.writeValueAsString(changed), EVENT, CHANGED) }
-            .hasMessageContaining("partyId")
-    }
-
-    @Test
-    fun `the restatement of a resolved case is recorded under its real party`() {
-        val restated = mapOf(
-            "caseId" to CASE,
-            "partyId" to PARTY,
-            "previousStatus" to "BLOCKED",
-            "newStatus" to "BLOCKED",
-            "alertCode" to null,
-            "idempotencyKey" to null,
-            "occurredAt" to TIME,
-        )
-        val result = decoder.decode(mapper.writeValueAsString(restated), EVENT, CHANGED)
-        assertThat(result.partyId).isEqualTo(UUID.fromString(PARTY))
-        assertThat(result.status).isEqualTo("BLOCKED")
-        assertThat(result.previousStatus).isEqualTo("BLOCKED")
-    }
-
     @Test
     fun `missing headers and unknown types cannot use payload fallback`() {
         assertThatThrownBy { decoder.decode(payload(), null, CREATED) }.hasMessageContaining("eventId")

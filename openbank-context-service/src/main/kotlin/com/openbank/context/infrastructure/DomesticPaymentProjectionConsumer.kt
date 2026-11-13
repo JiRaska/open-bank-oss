@@ -194,8 +194,6 @@ class DomesticPaymentProjectionConsumer(
         val EVENT_TYPES = setOf(CREATED, STATUS_CHANGED)
         val PAYMENT_STATUSES = setOf(
             "RECEIVED",
-            // ADR-0374: parked by payment admission; a stage like any other, never rail evidence.
-            "HELD",
             "VALIDATED",
             "SENT_TO_CLEARING",
             "SETTLED",
