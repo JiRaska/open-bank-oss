@@ -327,13 +327,20 @@ data class CaseResponse(
      * a customer can read, because naming who matched a list to the customer is tipping off.
      */
     val screening: ScreeningResponse?,
+    /**
+     * Set while an approved case is back under review because ongoing monitoring reported a match.
+     * OPERATOR view only, for the same reason as [screening].
+     */
+    val monitoringReview: MonitoringReviewResponse?,
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
     companion object {
         fun from(c: BusinessOnboardingCase, viewerPartyId: UUID?) = CaseResponse(
             id = c.id,
-            status = c.status.name,
+            // A review opened by ongoing monitoring is not visible to the applicant: they keep
+            // reading the status the case held when it was approved.
+            status = (if (viewerPartyId == null) c.status else c.applicantStatus).name,
             scheme = c.identifier.scheme.name,
             identifier = c.identifier.value,
             country = c.identifier.country ?: c.extract?.registeredAddress?.countryCode,
@@ -351,11 +358,33 @@ data class CaseResponse(
             agreement = c.agreement?.let { AgreementSummary.from(it) },
             // viewerPartyId is null only on the operator routes (each calls requireOperator first).
             screening = c.screening?.takeIf { viewerPartyId == null }?.let { ScreeningResponse.from(it) },
+            monitoringReview = c.monitoringReview?.takeIf { viewerPartyId == null }?.let {
+                MonitoringReviewResponse(openedAt = it.openedAt, from = it.from.name)
+            },
             createdAt = c.createdAt,
             updatedAt = c.updatedAt,
         )
     }
 }
+
+/** When ongoing monitoring sent an approved case to review, and the status it returns to. */
+data class MonitoringReviewResponse(val openedAt: Instant, val from: String)
+
+/**
+ * One finding of ongoing monitoring on a subject: which list entry matched and how it was found.
+ * It names no person; the subject it belongs to does.
+ */
+data class MonitoringFindingResponse(
+    val findingId: UUID,
+    val matchKind: String,
+    val listType: String,
+    val listEntryRef: String,
+    val listEntryVersion: String,
+    val matchScore: Double,
+    val matchStatus: String,
+    val detection: String,
+    val receivedAt: Instant,
+)
 
 /** One screened subject of the case, as an operator sees it. */
 data class ScreeningSubjectResponse(
@@ -376,6 +405,8 @@ data class ScreeningSubjectResponse(
     val disposedBy: String?,
     val dispositionReason: String?,
     val disposedAt: Instant?,
+    /** What ongoing monitoring reported about this subject after approval; empty when nothing. */
+    val monitoringFindings: List<MonitoringFindingResponse>,
 )
 
 /** An operator's decision about one finding. Who decides is the authenticated principal, not a field here. */
@@ -409,6 +440,19 @@ data class ScreeningResponse(
                     disposedBy = it.disposedBy,
                     dispositionReason = it.dispositionReason,
                     disposedAt = it.disposedAt,
+                    monitoringFindings = it.monitoringFindings.map { m ->
+                        MonitoringFindingResponse(
+                            findingId = m.findingId,
+                            matchKind = m.matchKind,
+                            listType = m.listType,
+                            listEntryRef = m.listEntryRef,
+                            listEntryVersion = m.listEntryVersion,
+                            matchScore = m.matchScore,
+                            matchStatus = m.matchStatus,
+                            detection = m.detection,
+                            receivedAt = m.receivedAt,
+                        )
+                    },
                 )
             },
         )

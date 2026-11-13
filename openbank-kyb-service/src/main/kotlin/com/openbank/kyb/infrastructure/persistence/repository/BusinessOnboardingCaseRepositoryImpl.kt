@@ -7,12 +7,14 @@ package com.openbank.kyb.infrastructure.persistence.repository
 import com.openbank.kyb.application.port.out.BusinessOnboardingCaseRepository
 import com.openbank.kyb.application.port.out.ConcurrentCaseUpdateException
 import com.openbank.kyb.application.port.out.KybOutboxRepository
+import com.openbank.kyb.application.port.out.MonitoringRegistrationStore
 import com.openbank.kyb.application.port.out.RegistryExtractCache
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.KybEvent
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
+import com.openbank.kyb.domain.model.MonitoringReview
 import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.infrastructure.persistence.entity.BusinessOnboardingCaseEntity
 import com.openbank.kyb.infrastructure.persistence.entity.RegistryExtractEntity
@@ -24,12 +26,17 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.OptimisticLockException
 import org.hibernate.StaleStateException
+import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
 @Suppress("TooManyFunctions") // one query per lookup the use cases need, plus the two mappers
-class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxRepository) :
+class BusinessOnboardingCaseRepositoryImpl(
+    private val outbox: KybOutboxRepository,
+    private val monitoring: MonitoringRegistrationStore,
+    private val clock: Clock,
+) :
     BusinessOnboardingCaseRepository,
     PanacheRepository<BusinessOnboardingCaseEntity> {
 
@@ -48,6 +55,11 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
      * being written was read before somebody else's committed write (the row is loaded fresh here,
      * so `@Version` alone would see the NEW version and happily overwrite). `@Version` then covers
      * the window between this load and the flush, where two transactions hold the same version.
+     *
+     * The ongoing-monitoring registrations are brought to the case's desired set HERE, inside the
+     * transaction and for every write, not by the use cases: there are several paths into and out
+     * of an approved case, and a registration that one of them forgot is a customer nobody
+     * monitors, with nothing anywhere reporting it.
      */
     override suspend fun update(case: BusinessOnboardingCase, event: KybEvent?): BusinessOnboardingCase {
         val written = Panache.withTransaction {
@@ -58,6 +70,7 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
                 } else {
                     row.fill(case)
                     withEvent(event)
+                        .flatMap { monitoring.syncInTransaction(case.id, monitoredRefs(case), Instant.now(clock)) }
                         .flatMap { Panache.getSession() }
                         .flatMap { session -> session.flush() }
                         .map { row.version }
@@ -66,6 +79,9 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         }.onFailure(::isStaleWrite).transform { ConcurrentCaseUpdateException(case.id) }.awaitSuspending()
         return case.copy(version = written)
     }
+
+    private fun monitoredRefs(case: BusinessOnboardingCase): Set<String> =
+        case.monitoredSubjects.mapNotNull { it.ref }.toSet()
 
     private fun isStaleWrite(failure: Throwable): Boolean = generateSequence(failure) { it.cause }
         .take(MAX_CAUSE_DEPTH)
@@ -125,6 +141,8 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         declarationsJson = case.declarations?.let { KybJson.write(it) }
         agreementJson = case.agreement?.let { KybJson.write(it) }
         screeningJson = case.screening?.let { KybScreeningJson.write(it) }
+        monitoringReviewFrom = case.monitoringReview?.from?.name
+        monitoringReviewOpenedAt = case.monitoringReview?.openedAt
         updatedAt = case.updatedAt
     }
 
@@ -144,6 +162,9 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         declarations = declarationsJson?.let { KybJson.readDeclarations(it) },
         agreement = agreementJson?.let { KybJson.readAgreement(it) },
         screening = screeningJson?.let { KybScreeningJson.read(it) },
+        monitoringReview = monitoringReviewOpenedAt?.let { opened ->
+            MonitoringReview(opened, CaseStatus.valueOf(requireNotNull(monitoringReviewFrom)))
+        },
         version = version,
         createdAt = createdAt,
         updatedAt = updatedAt,

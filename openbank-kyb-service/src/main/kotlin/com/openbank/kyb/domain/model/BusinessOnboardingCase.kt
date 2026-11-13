@@ -53,6 +53,13 @@ data class Signer(
 class CaseTransitionException(message: String) : IllegalStateException(message)
 
 /**
+ * An approved case that ongoing monitoring sent back to review (ADR-0376 D6, ADR-0256 D2).
+ * [from] is the status the case held when the first finding arrived, and it is what the applicant
+ * keeps seeing: that a review is running after approval must not be readable from outside.
+ */
+data class MonitoringReview(val openedAt: Instant, val from: CaseStatus)
+
+/**
  * The multi-party business onboarding aggregate (ADR-0284 D1). Every transition is a pure function
  * returning a new copy; the use case persists it together with the event it produced.
  */
@@ -83,6 +90,8 @@ data class BusinessOnboardingCase(
     val agreement: AgreementRecord? = null,
     /** Sanctions / PEP screening of the entity and its related parties; null until first attempted. */
     val screening: CaseScreening? = null,
+    /** Set while an approved case is under review because of a monitoring finding; null otherwise. */
+    val monitoringReview: MonitoringReview? = null,
     /**
      * The row version this copy was read at. The repository refuses to write a copy whose version
      * is no longer the stored one, so a decision made in between is never overwritten.
@@ -97,6 +106,61 @@ data class BusinessOnboardingCase(
     val signedCount: Int get() = signers.count { it.status == SignerStatus.SIGNED }
 
     private val signedSigners: List<Signer> get() = signers.filter { it.status == SignerStatus.SIGNED }
+
+    /**
+     * The case was approved and has not ended: the bank has, or is about to have, a relationship
+     * with the entity, so the entity and its related parties are under ongoing monitoring. True
+     * for SIGNED and ACTIVE, and for an approved case a monitoring finding sent back to review.
+     */
+    val monitored: Boolean
+        get() = status == CaseStatus.SIGNED ||
+            status == CaseStatus.ACTIVE ||
+            (status == CaseStatus.MANUAL_REVIEW && monitoringReview != null)
+
+    /**
+     * Who must be registered for ongoing monitoring right now: every current screened subject of a
+     * [monitored] case, and nobody for any other case. The registration store is brought to this
+     * set in the transaction of every write of the case, so it is the single definition of both
+     * "register" and "withdraw".
+     */
+    val monitoredSubjects: List<ScreeningSubject>
+        get() = if (monitored) screening?.monitorable.orEmpty() else emptyList()
+
+    /** The status the applicant and every signer read. A monitoring review is invisible to them. */
+    val applicantStatus: CaseStatus
+        get() = monitoringReview?.from?.takeIf { status == CaseStatus.MANUAL_REVIEW } ?: status
+
+    /** Gives the screened subjects their opaque references; see [CaseScreening.withRefs]. */
+    fun withMonitoringRefs(mint: () -> String, at: Instant): BusinessOnboardingCase {
+        val current = screening ?: return this
+        val next = current.withRefs(entityPartyId?.toString(), mint)
+        return if (next === current) this else copy(screening = next, updatedAt = at)
+    }
+
+    /**
+     * Ongoing monitoring reports that the subject registered under [subjectRef] matches a list
+     * entry. The finding is recorded on that subject and the case goes to MANUAL_REVIEW, the same
+     * state and the same operator acts as a finding raised at onboarding: decide the finding, then
+     * resolve the review or reject the case. It decides nothing about the customer by itself.
+     *
+     * Returns the SAME instance for a finding already recorded, so a redelivered event writes
+     * nothing. Refused for a case that is not [monitored] and for a reference no current subject
+     * carries; the caller counts both, it does not guess.
+     */
+    fun monitoringMatched(subjectRef: String, match: MonitoringMatch, at: Instant): BusinessOnboardingCase {
+        if (!monitored) throw CaseTransitionException("case is not under ongoing monitoring (status $status)")
+        val current = screening ?: throw CaseTransitionException("this case has no screening")
+        val next = current.monitoringMatched(subjectRef, match)
+            ?: throw CaseTransitionException("no current subject of this case is registered under that reference")
+        if (next === current) return this
+        return copy(
+            screening = next,
+            status = CaseStatus.MANUAL_REVIEW,
+            reviewReason = MONITORING_REVIEW,
+            monitoringReview = monitoringReview ?: MonitoringReview(at, status),
+            updatedAt = at,
+        )
+    }
 
     /**
      * The register record has been fetched. Decides between the automatic path and manual review.
@@ -355,7 +419,7 @@ data class BusinessOnboardingCase(
      */
     fun cosignersInvited(representativeIndexes: List<Int>, tokens: List<String>, at: Instant): BusinessOnboardingCase {
         require(status == CaseStatus.INITIATOR_MATCHED || status == CaseStatus.AWAITING_COSIGNERS) {
-            "co-signers can only be invited after the initiator is matched (status $status)"
+            "co-signers can only be invited after the initiator is matched (status $applicantStatus)"
         }
         val ex = requireNotNull(extract)
         val required = requireNotNull(requiredSignatures)
@@ -419,7 +483,7 @@ data class BusinessOnboardingCase(
     @Suppress("ThrowsCount") // one distinct, client-visible refusal per precondition
     fun requireSignable(partyId: UUID, signatureRef: String): Signer {
         require(status == CaseStatus.READY_TO_SIGN || status == CaseStatus.AWAITING_COSIGNERS) {
-            "signing is not open in status $status"
+            "signing is not open in status $applicantStatus"
         }
         val signer = signers.firstOrNull { it.partyId == partyId }
             ?: throw CaseTransitionException("party $partyId is not a signer on this case")
@@ -515,7 +579,10 @@ data class BusinessOnboardingCase(
      * and [screening].
      */
     val applicantReviewReason: String?
-        get() = reviewReason?.let { if (it.startsWith(AML_REVIEW)) AML_REVIEW else it }
+        get() = reviewReason
+            // A review opened by ongoing monitoring has no reason an applicant may read at all.
+            ?.takeIf { monitoringReview == null }
+            ?.let { if (it.startsWith(AML_REVIEW)) AML_REVIEW else it }
 
     /** The related-party screening as it stands now — answers obtained, and subjects still pending. */
     fun screeningRecorded(screening: CaseScreening, at: Instant): BusinessOnboardingCase =
@@ -568,7 +635,7 @@ data class BusinessOnboardingCase(
             status != CaseStatus.READY_TO_SIGN &&
             status != CaseStatus.AWAITING_COSIGNERS
         ) {
-            throw CaseTransitionException("$what cannot be changed in status $status")
+            throw CaseTransitionException("$what cannot be changed in status $applicantStatus")
         }
         if (signedCount > 0) throw CaseTransitionException("$what cannot be changed after a signature was given")
     }
@@ -612,7 +679,7 @@ data class BusinessOnboardingCase(
         }
         if (status != CaseStatus.READY_TO_SIGN) {
             throw CaseTransitionException(
-                "the agreement can be prepared once every required signer is identified (status $status)",
+                "the agreement can be prepared once every required signer is identified (status $applicantStatus)",
             )
         }
     }
@@ -688,6 +755,9 @@ data class BusinessOnboardingCase(
 
     fun abandoned(at: Instant): BusinessOnboardingCase {
         require(!status.isTerminal) { "case is already $status" }
+        // Neither the applicant nor an idle timer ends a relationship that is under a monitoring
+        // review: only an operator's rejection does. The wording is the terminal one on purpose.
+        require(monitoringReview == null) { "case is already $applicantStatus" }
         return copy(status = CaseStatus.ABANDONED, updatedAt = at)
     }
 
@@ -700,6 +770,7 @@ data class BusinessOnboardingCase(
     ): BusinessOnboardingCase {
         require(status == CaseStatus.MANUAL_REVIEW) { "not under review" }
         require(requiredSignatures >= 1) { "at least one signature is required" }
+        if (monitoringReview != null) return monitoringReviewResolved(at, screeningRequired)
         requireFindingsDecided(screeningRequired)
         val next = copy(
             requiredSignatures = requiredSignatures,
@@ -730,6 +801,25 @@ data class BusinessOnboardingCase(
             }
         }
         return next.copy(status = CaseStatus.INITIATOR_MATCHED).recomputeReadiness(at)
+    }
+
+    /**
+     * The review a monitoring finding opened is over: every finding has a disposition and none is a
+     * confirmed sanctions match, so the case returns to where an approved case stands. Nothing
+     * about the approval itself is revisited — the signatures, the quorum and the offices are as
+     * they were — which is why the operator's `requiredSignatures` is not applied here. Findings
+     * are required to be decided whatever the screening switch says: the finding exists.
+     */
+    private fun monitoringReviewResolved(at: Instant, screeningRequired: Boolean): BusinessOnboardingCase {
+        requireFindingsDecided(true)
+        // The subject list was rebuilt before this call; a party who joined since has to be screened.
+        requireScreened(screeningRequired)
+        return copy(
+            status = if (entityPartyActive) CaseStatus.ACTIVE else CaseStatus.SIGNED,
+            reviewReason = null,
+            monitoringReview = null,
+            updatedAt = at,
+        )
     }
 
     private fun recomputeReadiness(at: Instant): BusinessOnboardingCase {
@@ -773,6 +863,9 @@ data class BusinessOnboardingCase(
 
     companion object {
         const val AML_REVIEW = "AML risk review before activation"
+
+        /** Operators only: [applicantReviewReason] is null for a review that carries this reason. */
+        const val MONITORING_REVIEW = "ongoing monitoring finding on an approved case"
 
         /**
          * The feminine spellings the register uses, mapped to the masculine stem — applied to both

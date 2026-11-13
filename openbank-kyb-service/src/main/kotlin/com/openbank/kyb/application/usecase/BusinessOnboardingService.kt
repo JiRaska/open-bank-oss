@@ -314,6 +314,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     override suspend fun resolveReview(cmd: ResolveReviewCommand): BusinessOnboardingCase {
         val case = screenedBeforeApproval(get(cmd.caseId))
         val now = Instant.now(clock)
+        if (case.monitoringReview != null) return resolveMonitoringReview(case, cmd, now)
         var resolved = case.reviewResolved(cmd.requiredSignatures, now, cmd.requiredSignerRoles, screening.required)
         if (resolved.entityPartyId == null && resolved.extract != null) {
             resolved =
@@ -341,6 +342,24 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
             return saved.also(::armTimers)
         }
         return cases.update(resolved, KybEvents.registryVerified(resolved, now)).also(::armTimers)
+    }
+
+    /**
+     * The review a monitoring finding opened on an APPROVED case is over. Nothing of the approval
+     * is repeated: the mandates were granted and `AGREEMENT_SIGNED` was published when the case was
+     * approved. The one thing that may still be owed is completion — an entity party that became
+     * active while the review held the case — and that is published here, once.
+     */
+    private suspend fun resolveMonitoringReview(
+        case: BusinessOnboardingCase,
+        cmd: ResolveReviewCommand,
+        now: Instant,
+    ): BusinessOnboardingCase {
+        val heldFrom = requireNotNull(case.monitoringReview).from
+        val resolved = case.reviewResolved(cmd.requiredSignatures, now, cmd.requiredSignerRoles, screening.required)
+        log.infof("kyb case %s monitoring review resolved by %s: back to %s", cmd.caseId, cmd.operator, resolved.status)
+        val completes = heldFrom != CaseStatus.ACTIVE && resolved.status == CaseStatus.ACTIVE
+        return cases.update(resolved, if (completes) KybEvents.completed(resolved, now) else null).also(::armTimers)
     }
 
     override suspend fun reject(cmd: RejectCaseCommand): BusinessOnboardingCase {
@@ -392,6 +411,8 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     override suspend fun abandonIfInState(caseId: UUID, expectedState: String, actor: String): Boolean {
         val case = cases.findById(caseId) ?: return false
         if (case.status.name != expectedState || case.status.isTerminal) return false
+        // An idle timer never ends an approved relationship that is under a monitoring review.
+        if (case.monitoringReview != null) return false
         val now = Instant.now(clock)
         val abandoned = case.abandoned(now)
         cases.update(abandoned, KybEvents.abandoned(abandoned, now, actor))
@@ -405,7 +426,10 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
      * so an answer obtained on an attempt the aggregate then refuses is not asked for again.
      */
     private suspend fun screenedBeforeApproval(case: BusinessOnboardingCase): BusinessOnboardingCase {
+        // Whoever is screened carries a reference by now; this covers a screening recorded before
+        // references existed, so the approval that follows has someone to register for monitoring.
         val screened = screening.screened(case)
+            .withMonitoringRefs(MonitoringRegistrationService::newSubjectRef, Instant.now(clock))
         return if (screened === case) case else cases.update(screened, null)
     }
 

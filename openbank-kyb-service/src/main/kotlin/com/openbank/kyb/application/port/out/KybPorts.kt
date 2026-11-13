@@ -74,6 +74,10 @@ interface BusinessOnboardingCaseRepository {
      * Writes [case] only if the stored row is still at [BusinessOnboardingCase.version], and
      * returns the case at its NEW version — a caller that writes twice must write the returned copy.
      *
+     * The same transaction brings the ongoing-monitoring registration store to
+     * [BusinessOnboardingCase.monitoredSubjects], so no path that approves, ends or changes a case
+     * can do so without its registrations following ([MonitoringRegistrationStore]).
+     *
      * @throws ConcurrentCaseUpdateException when the row has moved on
      */
     suspend fun update(case: BusinessOnboardingCase, event: KybEvent?): BusinessOnboardingCase

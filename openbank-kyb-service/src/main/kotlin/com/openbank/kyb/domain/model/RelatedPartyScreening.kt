@@ -6,6 +6,7 @@ package com.openbank.kyb.domain.model
 
 import java.security.MessageDigest
 import java.time.Instant
+import java.util.UUID
 
 /** Why a subject is on the case. A person who is both keeps the first role found; see [CaseScreening.subjectsOf]. */
 enum class ScreeningSubjectKind {
@@ -53,6 +54,17 @@ data class ScreeningSubject(
     val disposedBy: String? = null,
     val dispositionReason: String? = null,
     val disposedAt: Instant? = null,
+    /**
+     * The opaque reference this subject is screened and monitored under: what the screen sends as
+     * `subjectId` and what the monitored-subject registry is keyed by (ADR-0376 D1). A random
+     * UUID, or the entity's party id — never derived from the name, because it travels in a URL
+     * path and comes back on an event. Null on a subject screened before references existed.
+     */
+    val ref: String? = null,
+    /** What ongoing monitoring reported about this subject after approval. Operators only. */
+    val monitoringFindings: List<MonitoringMatch> = emptyList(),
+    /** Decisions that a later monitoring finding reopened; kept because a decision is evidence. */
+    val pastDispositions: List<PastDisposition> = emptyList(),
 ) {
     val sanctionsHit: Boolean
         get() = sanctions == ScreeningVerdict.HIT || sanctions == ScreeningVerdict.POTENTIAL_HIT
@@ -71,7 +83,72 @@ data class ScreeningSubject(
         val next = copy(sanctions = verdict, pep = pep, matchedName = matchedName, screenedAt = at)
         return if (next.finding) next.copy(disposition = FindingDisposition.OPEN) else next
     }
+
+    /**
+     * Ongoing monitoring matched this subject against a list entry. The finding is recorded once
+     * per [MonitoringMatch.findingId] — a redelivered event returns the SAME instance — and it
+     * always opens a decision: an earlier disposition was about an earlier match and is moved to
+     * [pastDispositions], never reused. A PEP match sets the PEP fact and leaves the sanctions
+     * verdict alone; every other kind, including one this service does not know, is read as a
+     * sanctions-list match, which is the direction that cannot approve by mistake.
+     */
+    fun monitoringMatched(match: MonitoringMatch): ScreeningSubject {
+        if (monitoringFindings.any { it.findingId == match.findingId }) return this
+        val decided = disposition?.takeIf { it != FindingDisposition.OPEN }?.let {
+            PastDisposition(it, disposedBy, dispositionReason, disposedAt)
+        }
+        return copy(
+            sanctions = if (match.pep) sanctions else worseOf(sanctions, match.verdict),
+            pep = pep || match.pep,
+            monitoringFindings = monitoringFindings + match,
+            pastDispositions = pastDispositions + listOfNotNull(decided),
+            disposition = FindingDisposition.OPEN,
+            disposedBy = null,
+            dispositionReason = null,
+            disposedAt = null,
+        )
+    }
+
+    private fun worseOf(a: ScreeningVerdict, b: ScreeningVerdict): ScreeningVerdict =
+        if (a == ScreeningVerdict.HIT || b == ScreeningVerdict.HIT) ScreeningVerdict.HIT else b
 }
+
+/**
+ * One finding of ongoing monitoring (ADR-0376 D6) as kyb keeps it: which list entry, how strongly,
+ * and how it was detected. It carries no name. [matchKind], [listType] and [detection] are the
+ * producer's vocabulary kept verbatim as text: a value added upstream must still open a review
+ * here, so nothing in this service enumerates them.
+ */
+data class MonitoringMatch(
+    val findingId: UUID,
+    val matchKind: String,
+    val listType: String,
+    val listEntryRef: String,
+    val listEntryVersion: String,
+    val matchScore: Double,
+    val matchStatus: String,
+    val detection: String,
+    val receivedAt: Instant,
+) {
+    val pep: Boolean get() = matchKind == PEP_KIND
+
+    /** Only an explicit `HIT` is a hit; anything else, known or not, is a potential one. */
+    val verdict: ScreeningVerdict
+        get() = if (matchStatus == HIT_STATUS) ScreeningVerdict.HIT else ScreeningVerdict.POTENTIAL_HIT
+
+    private companion object {
+        const val PEP_KIND = "PEP"
+        const val HIT_STATUS = "HIT"
+    }
+}
+
+/** A disposition that a later monitoring finding reopened. */
+data class PastDisposition(
+    val disposition: FindingDisposition,
+    val disposedBy: String?,
+    val reason: String?,
+    val disposedAt: Instant?,
+)
 
 /**
  * What an operator decided about one finding. There is no implicit way out of [OPEN]: resolving a
@@ -164,6 +241,40 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
         val now = fresh.map { known[it.key]?.copy(kind = it.kind, name = it.name, current = true) ?: it }
         val leftWithFinding = subjects.filter { it.key !in freshKeys && it.finding }.map { it.copy(current = false) }
         return CaseScreening(now + leftWithFinding, ownerSource)
+    }
+
+    /** The current subjects that carry a reference: the set ongoing monitoring is registered for. */
+    val monitorable: List<ScreeningSubject> get() = subjects.filter { it.current && it.ref != null }
+
+    /**
+     * Gives every current subject that has none its opaque reference. The entity takes
+     * [entityRef] (its party id, so an analyst's clearance follows the party) when there is one;
+     * everyone else takes a value from [mint], which must be random and must not be derived from
+     * anything about the person. A reference is never changed once given.
+     */
+    fun withRefs(entityRef: String?, mint: () -> String): CaseScreening {
+        if (subjects.none { it.current && it.ref == null }) return this
+        return copy(
+            subjects = subjects.map {
+                when {
+                    !it.current || it.ref != null -> it
+                    it.kind == ScreeningSubjectKind.ENTITY && entityRef != null -> it.copy(ref = entityRef)
+                    else -> it.copy(ref = mint())
+                }
+            },
+        )
+    }
+
+    /**
+     * Records a monitoring finding on the subject registered under [subjectRef]. Returns the SAME
+     * instance when that finding is already recorded, and null when no current subject carries the
+     * reference — the caller must tell the two apart.
+     */
+    fun monitoringMatched(subjectRef: String, match: MonitoringMatch): CaseScreening? {
+        val subject = subjects.firstOrNull { it.current && it.ref == subjectRef } ?: return null
+        val next = subject.monitoringMatched(match)
+        if (next === subject) return this
+        return copy(subjects = subjects.map { if (it === subject) next else it })
     }
 
     /**
