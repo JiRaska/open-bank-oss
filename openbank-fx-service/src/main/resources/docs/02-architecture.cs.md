@@ -90,15 +90,17 @@ Rozhodnutí o konverzi je srdcem služby. `FxService.convert` zjistí a ověří
 sequenceDiagram
   participant C as Volající
   participant FX as FxService
+  participant P as party-service
   participant S as sanctions-service
   participant A as aml-service
   participant DB as PostgreSQL
 
-  C->>FX: POST /convert (partyName, Idempotency-Key)
+  C->>FX: POST /convert (partyId, Idempotency-Key)
   FX->>DB: findByIdempotencyKey → vrať, pokud existuje
   FX->>FX: resolve SPOT kurz, ověř platnost, spočítej částky + poplatek
-  FX->>S: screen(partyName, DEBTOR)
-  alt screening nedostupný
+  FX->>P: GET party podle id (evidovaná jména a typ)
+  FX->>S: screen(evidovaná jména, DEBTOR)
+  alt jméno klienta nebo screening nedostupný
     FX->>DB: ulož PENDING
     FX-->>A: otevři AML případ (MEDIUM, SCREENING_UNAVAILABLE)
   else CLEAR
