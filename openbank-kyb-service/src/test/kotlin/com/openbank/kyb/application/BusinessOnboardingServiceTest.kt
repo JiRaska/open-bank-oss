@@ -7,10 +7,12 @@ package com.openbank.kyb.application
 import com.openbank.kyb.application.port.`in`.AcceptDisclosuresCommand
 import com.openbank.kyb.application.port.`in`.AnswerQuestionnaireCommand
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
+import com.openbank.kyb.application.port.`in`.DisposeFindingCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.MakeDeclarationsCommand
 import com.openbank.kyb.application.port.`in`.MatchInitiatorCommand
 import com.openbank.kyb.application.port.`in`.PrepareAgreementCommand
+import com.openbank.kyb.application.port.`in`.RejectCaseCommand
 import com.openbank.kyb.application.port.`in`.ResolveReviewCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
@@ -34,22 +36,30 @@ import com.openbank.kyb.application.port.out.MandateRequest
 import com.openbank.kyb.application.port.out.PartyGateway
 import com.openbank.kyb.application.port.out.PepProfile
 import com.openbank.kyb.application.port.out.RegistryExtractCache
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningPort
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningRequest
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningResult
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningUnavailableException
 import com.openbank.kyb.application.port.out.RepresentationAttestationRepository
 import com.openbank.kyb.application.usecase.BusinessOnboardingService
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.application.usecase.RegistryLookupService
+import com.openbank.kyb.application.usecase.RelatedPartyScreeningService
 import com.openbank.kyb.application.usecase.RepresentationAttestationService
 import com.openbank.kyb.domain.model.AcceptedDisclosure
 import com.openbank.kyb.domain.model.AgreementConflictException
 import com.openbank.kyb.domain.model.BeneficialOwner
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
+import com.openbank.kyb.domain.model.BusinessOnboardingReviewRequired
 import com.openbank.kyb.domain.model.CaseStatus
+import com.openbank.kyb.domain.model.CaseTransitionException
 import com.openbank.kyb.domain.model.CrsStatus
 import com.openbank.kyb.domain.model.Declarations
 import com.openbank.kyb.domain.model.EntityStatus
 import com.openbank.kyb.domain.model.ExpectedTurnover
 import com.openbank.kyb.domain.model.ExtractVerification
 import com.openbank.kyb.domain.model.FatcaStatus
+import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.InitiatorIdentityMismatchException
@@ -68,11 +78,16 @@ import com.openbank.kyb.domain.model.RepresentationDecision
 import com.openbank.kyb.domain.model.RepresentationMode
 import com.openbank.kyb.domain.model.RepresentationRule
 import com.openbank.kyb.domain.model.Representative
+import com.openbank.kyb.domain.model.ScreeningFindingException
+import com.openbank.kyb.domain.model.ScreeningPendingException
+import com.openbank.kyb.domain.model.ScreeningSubjectKind
+import com.openbank.kyb.domain.model.ScreeningVerdict
 import com.openbank.kyb.domain.model.SignerStatus
 import com.openbank.kyb.domain.model.SourceOfFunds
 import com.openbank.kyb.domain.model.UboFinding
 import com.openbank.kyb.domain.model.UboSource
 import com.openbank.kyb.infrastructure.registry.DemoEntity
+import com.openbank.kyb.infrastructure.rest.dto.CaseResponse
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -91,6 +106,9 @@ import java.time.ZoneOffset
 import java.util.Optional
 import java.util.UUID
 
+// The screening tests share this class's in-memory repository, document double and journey helpers;
+// splitting them out would mean duplicating or abstracting ~250 lines of fixture for no gain in clarity.
+@Suppress("LargeClass")
 class BusinessOnboardingServiceTest {
 
     private val now = Instant.parse("2026-09-05T10:00:00Z")
@@ -180,17 +198,14 @@ class BusinessOnboardingServiceTest {
                 override fun legalFormLabel(country: String?, legalFormCode: String?, lang: String) =
                     "společnost s ručením omezeným"
             }
-            this.ubo = object : BeneficialOwnershipPort {
-                override suspend fun lookup(identifier: LegalEntityIdentifier) = UboFinding(
-                    identifier,
-                    UboSource.REGISTER,
-                    uboOwners.toList(),
-                    emptyList(),
-                    0.25,
-                    null,
-                    null,
-                    now,
-                )
+            this.ubo = uboPort
+            this.screening = RelatedPartyScreeningService().apply {
+                port = screeningPort
+                ubo = uboPort
+                this.metrics = this@BusinessOnboardingServiceTest.metrics
+                this.clock = clock
+                // Off, as shipped: every test above the screening section runs without the control.
+                enabled = Optional.of(false)
             }
         }
         coEvery { parties.pepProfile(any()) } answers { PepProfile(pepOnFile[firstArg()], null) }
@@ -199,6 +214,41 @@ class BusinessOnboardingServiceTest {
     // --- business agreement plumbing ----------------------------------------------------------
 
     private val uboOwners = mutableListOf<BeneficialOwner>()
+    private var uboSource = UboSource.REGISTER
+    private val uboPort = object : BeneficialOwnershipPort {
+        override suspend fun lookup(identifier: LegalEntityIdentifier) = UboFinding(
+            identifier,
+            uboSource,
+            uboOwners.toList(),
+            emptyList(),
+            0.25,
+            null,
+            null,
+            now,
+        )
+    }
+
+    /** sanctions-service double: answers by NAME, records every request, and can be taken down. */
+    private inner class FakeScreening : RelatedPartyScreeningPort {
+        val answers = mutableMapOf<String, RelatedPartyScreeningResult>()
+        val requests = mutableListOf<RelatedPartyScreeningRequest>()
+        var down = false
+        val downFor = mutableSetOf<String>()
+
+        override suspend fun screen(request: RelatedPartyScreeningRequest): RelatedPartyScreeningResult {
+            requests += request
+            if (down || request.name in downFor) {
+                throw RelatedPartyScreeningUnavailableException(IllegalStateException("sanctions-service down"))
+            }
+            return answers[request.name] ?: RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, false, null)
+        }
+    }
+
+    private val screeningPort = FakeScreening()
+
+    private fun screeningOn() {
+        service.screening.enabled = Optional.of(true)
+    }
     private val pepOnFile = mutableMapOf<UUID, Boolean>()
 
     /** document-service double: one agreement per case, SIGNED only for parties a test signs for. */
@@ -274,7 +324,10 @@ class BusinessOnboardingServiceTest {
 
     private suspend fun cleanDeclarations(caseId: UUID) = Declarations(
         uboConfirmed = true,
-        peps = (service.get(caseId).extract!!.representatives.map { it.fullName } + uboOwners.map { it.fullName })
+        peps = (
+            service.get(caseId).extract!!.representatives.map { it.fullName } +
+                uboOwners.filter { !it.corporate }.map { it.fullName }
+            )
             .map { PepEntry(it, false) },
         truthful = true,
     )
@@ -816,4 +869,503 @@ class BusinessOnboardingServiceTest {
         assertThat(started.status).isNotEqualTo(CaseStatus.REGISTRY_VERIFIED)
         assertThat(started.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
     }
+
+    // --- related-party sanctions / PEP screening (#15723) --------------------------------------
+
+    @Test
+    fun `switched off, no screen is attempted and nothing is recorded as screened`(): Unit = runBlocking {
+        val id = soleCaseReadyToSign()
+        val signed = signs(id, initiator, readyToSign(id, initiator))
+        assertThat(signed.status).isEqualTo(CaseStatus.SIGNED)
+        assertThat(signed.screening).describedAs("an unscreened case must not read as a screened one").isNull()
+        assertThat(screeningPort.requests).isEmpty()
+    }
+
+    @Test
+    fun `the entity and a corporate owner are screened as organisations, people as individuals`(): Unit = runBlocking {
+        screeningOn()
+        uboOwners += owner("Karel Vlastník", corporate = false)
+        uboOwners += owner("Holding Alfa a.s.", corporate = true)
+        val id = soleCaseReadyToSign()
+        readyToSign(id, initiator)
+
+        val byName = screeningPort.requests.associateBy { it.name }
+        assertThat(byName.keys)
+            .containsExactlyInAnyOrder("Příklad s.r.o.", "Jana Nováková", "Karel Vlastník", "Holding Alfa a.s.")
+        assertThat(byName.getValue("Příklad s.r.o.").organisation).isTrue()
+        assertThat(byName.getValue("Příklad s.r.o.").subjectId).isEqualTo(entityParty.toString())
+        assertThat(byName.getValue("Jana Nováková").organisation).isFalse()
+        assertThat(byName.getValue("Karel Vlastník").organisation).isFalse()
+        assertThat(byName.getValue("Holding Alfa a.s.").organisation).isTrue()
+        // One idempotency key per (case, subject): four subjects, four keys, all scoped to the case.
+        assertThat(screeningPort.requests.map { it.idempotencyKey }.toSet()).hasSize(4)
+        assertThat(screeningPort.requests).allMatch { it.idempotencyKey.startsWith("kyb-screen:$id:") }
+        assertThat(service.get(id).screening!!.complete).isTrue()
+    }
+
+    @Test
+    fun `everyone clear lets the completing signature through`(): Unit = runBlocking {
+        screeningOn()
+        val id = soleCaseReadyToSign()
+        val signed = signs(id, initiator, readyToSign(id, initiator))
+        assertThat(signed.status).isEqualTo(CaseStatus.SIGNED)
+        assertThat(signed.screening!!.subjects).allMatch { it.sanctions == ScreeningVerdict.CLEAR && !it.pep }
+    }
+
+    @Test
+    fun `a potential hit on a beneficial owner blocks activation and reviews without naming anyone`(): Unit =
+        runBlocking {
+            screeningOn()
+            val mandates = mutableListOf<MandateRequest>()
+            uboOwners += owner("Karel Vlastník", corporate = false)
+            screeningPort.answers["Karel Vlastník"] =
+                RelatedPartyScreeningResult(ScreeningVerdict.POTENTIAL_HIT, false, "VLASTNIK Karel")
+            val id = soleCaseReadyToSign()
+            coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+            val signed = signs(id, initiator, readyToSign(id, initiator))
+
+            assertThat(signed.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+            assertThat(mandates).describedAs("nobody is authorised for the entity before a human decides").isEmpty()
+            assertThat(events.last().eventType).isEqualTo(KybEvents.REVIEW_REQUIRED)
+            // Not even the operator-facing reason says what a list found; that is in `screening`.
+            assertThat(signed.reviewReason).isEqualTo(BusinessOnboardingCase.AML_REVIEW)
+            val hit = signed.screening!!.sanctionsHits.single()
+            assertThat(hit.name).isEqualTo("Karel Vlastník")
+            assertThat(hit.kind).isEqualTo(ScreeningSubjectKind.BENEFICIAL_OWNER)
+            assertThat(hit.matchedName).isEqualTo("VLASTNIK Karel")
+
+            // Resolving the review is not a decision about the finding…
+            assertThatThrownBy { runBlocking { service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna")) } }
+                .isInstanceOf(ScreeningFindingException::class.java)
+                .extracting { (it as ScreeningFindingException).code }.isEqualTo(ScreeningFindingException.OPEN)
+            assertThat(mandates).isEmpty()
+
+            // …the operator decides it by its own action, and is recorded as having done so.
+            val cleared = service.disposeFinding(
+                DisposeFindingCommand(
+                    id,
+                    hit.key,
+                    FindingDisposition.CLEARED_FALSE_POSITIVE,
+                    "different date of birth",
+                    "operator-anna",
+                ),
+            )
+            assertThat(
+                cleared.status,
+            ).describedAs("a disposition never moves the case").isEqualTo(CaseStatus.MANUAL_REVIEW)
+            val decided = cleared.screening!!.subjects.single { it.key == hit.key }
+            assertThat(decided.disposedBy).isEqualTo("operator-anna")
+            assertThat(decided.dispositionReason).isEqualTo("different date of birth")
+            assertThat(decided.disposedAt).isEqualTo(now)
+
+            val resolved = service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna"))
+            assertThat(resolved.status).isEqualTo(CaseStatus.SIGNED)
+            assertThat(mandates).hasSize(1)
+        }
+
+    @Test
+    fun `a PEP match is recorded on that person and reviews, but is not a sanctions hit`(): Unit = runBlocking {
+        screeningOn()
+        screeningPort.answers["Jana Nováková"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, true, "NOVAKOVA Jana")
+        val id = soleCaseReadyToSign()
+        val signed = signs(id, initiator, readyToSign(id, initiator))
+
+        assertThat(signed.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(signed.screening!!.sanctionsHits).isEmpty()
+        assertThat(signed.screening!!.peps.map { it.name }).containsExactly("Jana Nováková")
+        assertThat(signed.screening!!.subjects.first { it.kind == ScreeningSubjectKind.ENTITY }.pep).isFalse()
+    }
+
+    @Test
+    fun `while sanctions-service is down the last signature is refused, not recorded, and the retry replays`(): Unit =
+        runBlocking {
+            screeningOn()
+            val mandates = mutableListOf<MandateRequest>()
+            val id = soleCaseReadyToSign()
+            coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+            screeningPort.down = true
+            // The customer's own step does not fail on the outage…
+            val ceremony = readyToSign(id, initiator)
+            assertThat(service.get(id).screening!!.subjects).allMatch { it.sanctions == ScreeningVerdict.PENDING }
+            val firstKeys = screeningPort.requests.map { it.idempotencyKey }.toSet()
+
+            // …but the approval does, and leaves nothing behind that reads as approved.
+            assertThatThrownBy { runBlocking { signs(id, initiator, ceremony) } }
+                .isInstanceOf(ScreeningPendingException::class.java)
+            val refused = service.get(id)
+            assertThat(refused.status).isEqualTo(CaseStatus.READY_TO_SIGN)
+            assertThat(refused.signedCount).isZero()
+            assertThat(refused.screening!!.complete).isFalse()
+            assertThat(mandates).isEmpty()
+
+            screeningPort.down = false
+            val signed = service.sign(SignCommand(id, initiator, ceremony))
+            assertThat(signed.status).isEqualTo(CaseStatus.SIGNED)
+            assertThat(signed.screening!!.complete).isTrue()
+            assertThat(screeningPort.requests.map { it.idempotencyKey }.toSet())
+                .describedAs("a retry must replay the screen of the same (case, subject), not open a new one")
+                .isEqualTo(firstKeys)
+        }
+
+    @Test
+    fun `an operator cannot resolve a review to completion past a screening that has no answer`(): Unit = runBlocking {
+        screeningOn()
+        val mandates = mutableListOf<MandateRequest>()
+        val id = soleCaseReadyToSign()
+        coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+        // In review for an unrelated reason (a high-risk country), fully signed.
+        val signed = signs(id, initiator, readyToSign(id, initiator, questionnaire(countries = listOf("CZ", "IR"))))
+        assertThat(signed.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        // The answers are lost (the rollback the migration documents) and sanctions-service is down.
+        store[id] = signed.copy(screening = null)
+        screeningPort.down = true
+
+        assertThatThrownBy { runBlocking { service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna")) } }
+            .isInstanceOf(ScreeningPendingException::class.java)
+        assertThat(service.get(id).status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(mandates).isEmpty()
+
+        screeningPort.down = false
+        assertThat(service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna")).status)
+            .isEqualTo(CaseStatus.SIGNED)
+        assertThat(mandates).hasSize(1)
+    }
+
+    /**
+     * Tipping off. What an applicant reads and what goes on the event bus must be the same words
+     * for a case a list matched as for a case in an ordinary AML review.
+     */
+    @Test
+    fun `a sanctions hit reads to the applicant and on the event exactly like an ordinary review`(): Unit =
+        runBlocking {
+            screeningOn()
+            // Ordinary review: the customer's own answer (cash-intensive) raises it, nobody matched.
+            val ordinaryId = soleCaseReadyToSign()
+            val ordinary = signs(ordinaryId, initiator, readyToSign(ordinaryId, initiator, questionnaire(cash = true)))
+            assertThat(ordinary.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+            val ordinaryEvent = (events.last().payload as BusinessOnboardingReviewRequired).reviewReason
+            store.clear()
+
+            // Same company, clean answers, and its representative is on a list.
+            screeningPort.answers["Jana Nováková"] =
+                RelatedPartyScreeningResult(ScreeningVerdict.HIT, false, "NOVAKOVA Jana")
+            val hitId = soleCaseReadyToSign()
+            val hit = signs(hitId, initiator, readyToSign(hitId, initiator))
+            assertThat(hit.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+            val hitEvent = (events.last().payload as BusinessOnboardingReviewRequired).reviewReason
+
+            assertThat(CaseResponse.from(hit, initiator).reviewReason)
+                .isEqualTo(CaseResponse.from(ordinary, initiator).reviewReason)
+            assertThat(hitEvent).isEqualTo(ordinaryEvent)
+            assertThat(CaseResponse.from(hit, initiator).screening).isNull()
+        }
+
+    /** Completeness is about who is on the case NOW, not who was on it when the screen ran. */
+    @Test
+    fun `an owner who appears after the screening must be screened before approval`(): Unit = runBlocking {
+        screeningOn()
+        uboOwners += owner("Karel Vlastník", corporate = false)
+        val id = soleCaseReadyToSign()
+        val ceremony = readyToSign(id, initiator)
+        assertThat(service.get(id).screening!!.complete).isTrue()
+
+        // The register now reports a second owner, and that person cannot be screened yet.
+        uboOwners += owner("Nový Majitel", corporate = false)
+        screeningPort.downFor += "Nový Majitel"
+        assertThatThrownBy { runBlocking { signs(id, initiator, ceremony) } }
+            .isInstanceOf(ScreeningPendingException::class.java)
+        assertThat(service.get(id).status).isEqualTo(CaseStatus.READY_TO_SIGN)
+
+        screeningPort.downFor.clear()
+        val signed = service.sign(SignCommand(id, initiator, ceremony))
+        assertThat(signed.status).isEqualTo(CaseStatus.SIGNED)
+        assertThat(signed.screening!!.subjects.map { it.name }).contains("Karel Vlastník", "Nový Majitel")
+        assertThat(screeningPort.requests.map { it.name }).contains("Nový Majitel")
+    }
+
+    @Test
+    fun `approval is refused while the beneficial-owner lookup is unavailable`(): Unit = runBlocking {
+        screeningOn()
+        val id = soleCaseReadyToSign()
+        val ceremony = readyToSign(id, initiator)
+        assertThat(service.get(id).screening!!.complete).isTrue()
+
+        // Nobody can say who owns the company right now, so nobody can say everyone was screened.
+        uboSource = UboSource.UNAVAILABLE
+        assertThatThrownBy { runBlocking { signs(id, initiator, ceremony) } }
+            .isInstanceOf(ScreeningPendingException::class.java)
+        assertThat(service.get(id).status).isEqualTo(CaseStatus.READY_TO_SIGN)
+        assertThat(service.get(id).signedCount).isZero()
+
+        uboSource = UboSource.REGISTER
+        assertThat(service.sign(SignCommand(id, initiator, ceremony)).status).isEqualTo(CaseStatus.SIGNED)
+    }
+
+    /** No public ownership register: the people the customer names are the only owners anyone knows. */
+    @Test
+    fun `a self-declared person who is on no register is screened too`(): Unit = runBlocking {
+        screeningOn()
+        uboSource = UboSource.SELF_DECLARATION
+        val id = soleCaseReadyToSign()
+        service.answerQuestionnaire(AnswerQuestionnaireCommand(id, initiator, questionnaire()))
+        val declared = cleanDeclarations(id).let { it.copy(peps = it.peps + PepEntry("Tichý Společník", false)) }
+        service.makeDeclarations(MakeDeclarationsCommand(id, initiator, declared))
+
+        val screening = service.get(id).screening!!
+        assertThat(screening.ownerSource).isEqualTo(UboSource.SELF_DECLARATION)
+        assertThat(screening.subjects.single { it.kind == ScreeningSubjectKind.DECLARED_PERSON }.name)
+            .isEqualTo("Tichý Společník")
+        assertThat(screeningPort.requests.map { it.name }).contains("Tichý Společník")
+    }
+
+    // --- findings need an explicit operator disposition ------------------------------------------
+
+    @Test
+    fun `a finding can be decided only while the case is under review`(): Unit = runBlocking {
+        screeningOn()
+        uboOwners += owner("Karel Vlastník", corporate = false)
+        screeningPort.answers["Karel Vlastník"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.POTENTIAL_HIT, false, "VLASTNIK Karel")
+        val id = soleCaseReadyToSign()
+        readyToSign(id, initiator)
+        val before = service.get(id)
+        assertThat(before.status).isEqualTo(CaseStatus.READY_TO_SIGN)
+        val key = before.screening!!.openFindings.single().key
+
+        // Cleared here, the last signature would approve the case with no review step at all.
+        assertThatThrownBy {
+            runBlocking {
+                service.disposeFinding(
+                    DisposeFindingCommand(
+                        id,
+                        key,
+                        FindingDisposition.CLEARED_FALSE_POSITIVE,
+                        "different date of birth",
+                        "operator-anna",
+                    ),
+                )
+            }
+        }.isInstanceOf(RuntimeException::class.java)
+        assertThat(service.get(id).screening!!.openFindings).hasSize(1)
+    }
+
+    @Test
+    fun `a case that ever had a finding is never approved by the last signature alone`(): Unit = runBlocking {
+        screeningOn()
+        val mandates = mutableListOf<MandateRequest>()
+        uboOwners += owner("Karel Vlastník", corporate = false)
+        screeningPort.answers["Karel Vlastník"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.POTENTIAL_HIT, false, "VLASTNIK Karel")
+        val id = soleCaseReadyToSign()
+        coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+        val ceremony = readyToSign(id, initiator)
+        // However the finding came to be cleared, the case has had one.
+        val case = service.get(id)
+        val key = case.screening!!.openFindings.single().key
+        store[id] = case.copy(
+            screening = case.screening!!.disposed(
+                key,
+                FindingDisposition.CLEARED_FALSE_POSITIVE,
+                "operator-anna",
+                "different date of birth",
+                now,
+            ),
+        )
+
+        val signed = signs(id, initiator, ceremony)
+        assertThat(signed.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(mandates).isEmpty()
+        // The operator review path is the one way through.
+        assertThat(
+            service.resolveReview(ResolveReviewCommand(id, 1, "operator-bob")).status,
+        ).isEqualTo(CaseStatus.SIGNED)
+    }
+
+    @Test
+    fun `a confirmed sanctions finding leaves only rejection`(): Unit = runBlocking {
+        screeningOn()
+        val mandates = mutableListOf<MandateRequest>()
+        screeningPort.answers["Jana Nováková"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.HIT, false, "NOVAKOVA Jana")
+        val id = soleCaseReadyToSign()
+        coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+        val signed = signs(id, initiator, readyToSign(id, initiator))
+        val key = signed.screening!!.openFindings.single().key
+        service.disposeFinding(
+            DisposeFindingCommand(
+                id,
+                key,
+                FindingDisposition.CONFIRMED,
+                "identifiers match the list entry",
+                "operator-anna",
+            ),
+        )
+
+        assertThatThrownBy { runBlocking { service.resolveReview(ResolveReviewCommand(id, 1, "operator-bob")) } }
+            .isInstanceOf(ScreeningFindingException::class.java)
+            .extracting { (it as ScreeningFindingException).code }.isEqualTo(ScreeningFindingException.CONFIRMED)
+        // A decision is not revised by deciding again.
+        assertThatThrownBy {
+            runBlocking {
+                service.disposeFinding(
+                    DisposeFindingCommand(
+                        id,
+                        key,
+                        FindingDisposition.CLEARED_FALSE_POSITIVE,
+                        "changed my mind about it",
+                        "operator-bob",
+                    ),
+                )
+            }
+        }.isInstanceOf(CaseTransitionException::class.java)
+        assertThat(mandates).isEmpty()
+        assertThat(service.reject(RejectCaseCommand(id, "confirmed sanctions match", "operator-bob")).status)
+            .isEqualTo(CaseStatus.REJECTED)
+    }
+
+    @Test
+    fun `a PEP confirmed by an operator no longer blocks, and a disposition needs an operator and a reason`(): Unit =
+        runBlocking {
+            screeningOn()
+            coEvery { parties.grantMandate(any()) } returns Unit
+            screeningPort.answers["Jana Nováková"] = RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, true, null)
+            val id = soleCaseReadyToSign()
+            val signed = signs(id, initiator, readyToSign(id, initiator))
+            val key = signed.screening!!.openFindings.single().key
+
+            assertThatThrownBy {
+                runBlocking {
+                    service.disposeFinding(
+                        DisposeFindingCommand(id, key, FindingDisposition.CONFIRMED, "ok", "operator-anna"),
+                    )
+                }
+            }.isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy {
+                runBlocking {
+                    service.disposeFinding(
+                        DisposeFindingCommand(id, key, FindingDisposition.CONFIRMED, "is a member of parliament", " "),
+                    )
+                }
+            }.isInstanceOf(IllegalArgumentException::class.java)
+
+            service.disposeFinding(
+                DisposeFindingCommand(
+                    id,
+                    key,
+                    FindingDisposition.CONFIRMED,
+                    "is a member of parliament",
+                    "operator-anna",
+                ),
+            )
+            assertThat(
+                service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna")).status,
+            ).isEqualTo(CaseStatus.SIGNED)
+        }
+
+    /** Chair + ordinary member signed; the rule wants chair + vice. Fully signed, in review for the office. */
+    private suspend fun fullySignedOfficeShortfall(): UUID {
+        coEvery { registry.lookup(ico, null) } returns
+            extract(
+                RepresentationRule(
+                    RepresentationMode.JOINT_N,
+                    2,
+                    "předseda spolu s místopředsedou",
+                    requiredRoles = listOf("predseda", "mistopredseda"),
+                ),
+                listOf("Jana Chairová", "Viktor Vice", "Milan Member"),
+                roles = listOf("předseda představenstva", "místopředseda představenstva", "člen představenstva"),
+            )
+        coEvery { parties.createEntityParty(any()) } returns entityParty
+        val started = service.start(StartCaseCommand(IdentifierScheme.CZ_ICO, "45274649", initiator))
+        coEvery { parties.initiatorIdentity(any()) } returns InitiatorIdentity("Jana Chairová", null, verified = true)
+        service.matchInitiator(MatchInitiatorCommand(started.id, initiator, 0, "Jana Chairová", null))
+        val invited = service.inviteCosigners(InviteCosignersCommand(started.id, initiator, listOf(1, 2)))
+        invited.signers.filter { !it.isInitiator }.forEach {
+            service.claimInvitation(ClaimInvitationCommand(it.invitationToken!!, UUID.randomUUID()))
+        }
+        val member = service.get(started.id).signers.first { it.fullName == "Milan Member" }.partyId!!
+        val ceremony = readyToSign(started.id, initiator)
+        signs(started.id, initiator, ceremony)
+        assertThat(signs(started.id, member, ceremony).status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        return started.id
+    }
+
+    private val json = com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().findAndRegisterModules()
+
+    @Test
+    fun `resolving a review cannot approve a hit that the same call discovered`(): Unit = runBlocking {
+        screeningOn()
+        val mandates = mutableListOf<MandateRequest>()
+        coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+        val id = fullySignedOfficeShortfall()
+        // Since the screening, the register reports a new owner — and that person is on a list.
+        uboOwners += owner("Karel Vlastník", corporate = false)
+        screeningPort.answers["Karel Vlastník"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.HIT, false, "VLASTNIK Karel")
+
+        // The operator means to settle the OFFICE question. No operator has seen the hit.
+        assertThatThrownBy { runBlocking { service.resolveReview(ResolveReviewCommand(id, 2, "operator-anna")) } }
+            .isInstanceOf(ScreeningFindingException::class.java)
+        val after = service.get(id)
+        assertThat(after.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(mandates).isEmpty()
+        assertThat(after.screening!!.sanctionsHits.map { it.name }).containsExactly("Karel Vlastník")
+    }
+
+    @Test
+    fun `the operator view names an open finding whichever branch set the review reason`(): Unit = runBlocking {
+        screeningOn()
+        coEvery { parties.grantMandate(any()) } returns Unit
+        uboOwners += owner("Karel Vlastník", corporate = false)
+        screeningPort.answers["Karel Vlastník"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.POTENTIAL_HIT, false, "VLASTNIK Karel")
+        // The office shortfall sets the reason; the hit must not be lost behind it.
+        val case = service.get(fullySignedOfficeShortfall())
+        assertThat(case.reviewReason).contains("offices")
+
+        val operatorView = json.writeValueAsString(CaseResponse.from(case, null))
+        assertThat(operatorView).contains("\"openFindings\":1")
+        val applicantView = json.writeValueAsString(CaseResponse.from(case, initiator))
+        assertThat(applicantView).doesNotContain("openFindings", "VLASTNIK", "POTENTIAL_HIT")
+    }
+
+    @Test
+    fun `a hit does not disappear when its subject leaves the case`(): Unit = runBlocking {
+        screeningOn()
+        val mandates = mutableListOf<MandateRequest>()
+        uboOwners += owner("Karel Vlastník", corporate = false)
+        screeningPort.answers["Karel Vlastník"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.HIT, false, "VLASTNIK Karel")
+        val id = soleCaseReadyToSign()
+        coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+        service.answerQuestionnaire(AnswerQuestionnaireCommand(id, initiator, questionnaire()))
+        service.makeDeclarations(MakeDeclarationsCommand(id, initiator, cleanDeclarations(id)))
+        assertThat(service.get(id).screening!!.sanctionsHits).hasSize(1)
+
+        // The listed owner is taken off the register and off the declarations.
+        uboOwners.clear()
+        val ceremony = readyToSign(id, initiator)
+        val signed = signs(id, initiator, ceremony)
+
+        assertThat(signed.status).describedAs("removing the person must not approve the case")
+            .isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(signed.screening!!.sanctionsHits.map { it.name }).containsExactly("Karel Vlastník")
+        assertThat(mandates).isEmpty()
+        // Kept, marked as no longer on the case, and still standing in the way of a resolution.
+        assertThat(signed.screening!!.openFindings.single().current).isFalse()
+        assertThatThrownBy { runBlocking { service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna")) } }
+            .isInstanceOf(ScreeningFindingException::class.java)
+    }
+
+    private fun owner(name: String, corporate: Boolean) = BeneficialOwner(
+        fullName = name,
+        dateOfBirth = null,
+        nationality = null,
+        countryOfResidence = null,
+        band = OwnershipBand.PCT_25_TO_50,
+        natureOfControl = emptyList(),
+        notifiedOn = null,
+        corporate = corporate,
+    )
 }

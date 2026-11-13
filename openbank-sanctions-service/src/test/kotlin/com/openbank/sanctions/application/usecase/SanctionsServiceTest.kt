@@ -29,7 +29,7 @@ class SanctionsServiceTest {
     private val entryRepo = mockk<SanctionsEntryRepository>()
     private val importer = mockk<SanctionsImportService>()
     private val clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
-    private val service = SanctionsService(repo, entryRepo, importer, clock)
+    private val service = SanctionsService(repo, entryRepo, importer, clock, ScreeningProfileEvaluator(NoJurisdictions))
 
     // Sensible default: normalize returns lowercased input; search returns no results
     init {

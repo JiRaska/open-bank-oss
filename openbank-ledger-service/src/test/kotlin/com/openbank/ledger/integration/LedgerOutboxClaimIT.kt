@@ -22,6 +22,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -57,6 +59,58 @@ class LedgerOutboxClaimIT {
             onEventLoop { Panache.withTransaction { repository.persistInTransaction(msg) }.awaitSuspending() }
         }
         return messages
+    }
+
+    @ParameterizedTest(name = "expanded schema: {0}")
+    @ValueSource(booleans = [false, true])
+    fun `v1 claims and acknowledges rows before and after an additive schema change`(expanded: Boolean) {
+        clearOutbox()
+        if (expanded) {
+            changeTestSchema("ADD COLUMN next_attempt_at TIMESTAMPTZ, ADD COLUMN claim_token UUID")
+        }
+        try {
+            val (sent, failed) = seedPending(2)
+            val claims = onEventLoop { repository.claimProcessable(2) }
+
+            assertThat(claims.map { it.eventId }).containsExactlyInAnyOrder(sent.eventId, failed.eventId)
+            assertThat(claims).allSatisfy { claim ->
+                val source = if (claim.eventId == sent.eventId) sent else failed
+                assertThat(claim.aggregateId).isEqualTo(source.aggregateId)
+                assertThat(claim.eventType).isEqualTo(source.eventType)
+                assertThat(claim.payload).isEqualTo(source.payload)
+                assertThat(claim.status).isEqualTo(OutboxStatus.DISPATCHING)
+            }
+            onEventLoop { repository.markSent(sent.eventId) }
+            assertThat(onEventLoop { repository.markFailed(failed.eventId, "synthetic failure") })
+                .isEqualTo(OutboxStatus.FAILED)
+
+            val sentRow = requireNotNull(
+                onEventLoop {
+                    Panache.withSession { repository.find("eventId", sent.eventId).firstResult() }.awaitSuspending()
+                },
+            )
+            assertThat(sentRow.status).isEqualTo(OutboxStatus.SENT.name)
+            assertThat(sentRow.attemptCount).isOne()
+            assertThat(sentRow.sentAt).isNotNull
+            val retry = onEventLoop { repository.claimProcessable(2) }.single()
+            assertThat(retry.eventId).isEqualTo(failed.eventId)
+            assertThat(retry.attemptCount).isOne()
+            assertThat(retry.lastError).isEqualTo("synthetic failure")
+        } finally {
+            if (expanded) {
+                changeTestSchema("DROP COLUMN next_attempt_at, DROP COLUMN claim_token")
+            }
+        }
+    }
+
+    private fun changeTestSchema(clauses: String) {
+        onEventLoop {
+            Panache.withTransaction {
+                Panache.getSession().chain { session ->
+                    session.createNativeQuery<Int>("ALTER TABLE ledger_outbox $clauses").executeUpdate()
+                }
+            }.awaitSuspending()
+        }
     }
 
     @Test

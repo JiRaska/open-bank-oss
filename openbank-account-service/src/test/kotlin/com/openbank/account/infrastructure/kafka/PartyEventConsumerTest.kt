@@ -11,6 +11,7 @@ import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.NotificationRequestPort
 import com.openbank.account.application.port.out.PartyMandateProjectionRepository
 import com.openbank.account.application.port.out.WelcomeBonusPort
+import com.openbank.account.application.usecase.PartyStandingService
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
@@ -39,6 +40,7 @@ class PartyEventConsumerTest {
     private val notificationRequestPort: NotificationRequestPort = mockk(relaxed = true)
     private val partyMandateRepository: PartyMandateProjectionRepository = mockk(relaxed = true)
     private val objectMapper = ObjectMapper()
+    private val partyStanding: PartyStandingService = mockk(relaxed = true)
 
     private fun consumer(bonusEnabled: Boolean, openBusiness: Boolean = false) = PartyEventConsumer(
         accountUseCase = accountUseCase,
@@ -57,6 +59,7 @@ class PartyEventConsumerTest {
         openBusinessAccounts = openBusiness,
         businessProductId = BUSINESS_PRODUCT.toString(),
         businessCurrency = "EUR",
+        partyStanding = partyStanding,
     )
 
     private fun pendingAccount(
@@ -492,4 +495,53 @@ class PartyEventConsumerTest {
 
     private fun erasedEvent(partyId: UUID) =
         """{"eventType":"PARTY_ERASED","partyId":"$partyId","occurredAt":"2026-06-28T10:00:00Z"}"""
+
+    private fun statusEvent(partyId: UUID, status: String, eventType: String = "KYC_STATUS_CHANGED") =
+        """{"eventType":"$eventType","partyId":"$partyId","partyType":"INDIVIDUAL","status":"$status",""" +
+            """"legalName":"Jan Novák","occurredAt":"2026-11-11T08:00:00Z"}"""
+
+    @Test
+    fun `a party that loses its standing has its accounts frozen, on either status envelope`(): Unit = runBlocking {
+        val suspended = UUID.randomUUID()
+        val closed = UUID.randomUUID()
+
+        consumer(bonusEnabled = false).consume(statusEvent(suspended, "SUSPENDED"))
+        consumer(bonusEnabled = false).consume(statusEvent(closed, "CLOSED", eventType = "PARTY_UPDATED"))
+
+        coVerify(exactly = 1) { partyStanding.freezeAccountsOf(suspended, "SUSPENDED") }
+        coVerify(exactly = 1) { partyStanding.freezeAccountsOf(closed, "CLOSED") }
+        coVerify(exactly = 0) { partyStanding.restoreAccountsOf(any()) }
+    }
+
+    @Test
+    fun `a party that is ACTIVE again has its party freezes lifted`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { accountRepository.findByPartyId(partyId, any(), any()) } returns emptyList()
+
+        consumer(bonusEnabled = false).consume(statusEvent(partyId, "ACTIVE"))
+
+        coVerify(exactly = 1) { partyStanding.restoreAccountsOf(partyId) }
+        coVerify(exactly = 0) { partyStanding.freezeAccountsOf(any(), any()) }
+    }
+
+    @Test
+    fun `a status that says nothing about standing touches no account`(): Unit = runBlocking {
+        listOf("PENDING_KYC", "MERGED", "", "SOMETHING_NEW").forEach { status ->
+            consumer(bonusEnabled = false).consume(statusEvent(UUID.randomUUID(), status))
+        }
+
+        coVerify(exactly = 0) { partyStanding.freezeAccountsOf(any(), any()) }
+        coVerify(exactly = 0) { partyStanding.restoreAccountsOf(any()) }
+    }
+
+    @Test
+    fun `a freeze that cannot be written is not swallowed`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { partyStanding.freezeAccountsOf(partyId, any()) } throws TransientDownstreamFailure()
+
+        val suspension = statusEvent(partyId, "SUSPENDED")
+
+        assertThatThrownBy { runBlocking { consumer(bonusEnabled = false).consume(suspension) } }
+            .isInstanceOf(TransientDownstreamFailure::class.java)
+    }
 }

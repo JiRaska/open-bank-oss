@@ -8,6 +8,7 @@ import com.openbank.lending.application.port.out.CreditAssessment
 import com.openbank.lending.application.port.out.CreditBureauPort
 import com.openbank.lending.application.port.out.CreditPolicyPort
 import com.openbank.lending.application.port.out.LendingOutboxMessage
+import com.openbank.lending.application.port.out.isCzConsumerCredit
 import com.openbank.lending.domain.model.AffordabilityRatios
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
@@ -18,6 +19,7 @@ import com.openbank.libs.decision.PolicyDecision
 import com.openbank.libs.decision.PolicyEvaluator
 import com.openbank.libs.decision.PolicyTableKind
 import com.openbank.libs.decision.PolicyValue
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.lending.Amortization
 import com.openbank.libs.lending.compliance.CompliancePackEvaluator
 import io.smallrye.mutiny.Uni
@@ -62,10 +64,15 @@ class OriginationDecisionService(
 
     fun evaluate(application: LoanApplication): Uni<DecisionOutcome> =
         bureau.assess(application.partyId, application.requestedAmount).flatMap { assessment ->
-            creditPolicy.activeBundle(LocalDate.now(clock)).map { bundle ->
+            val asOf = if (isCzConsumerCredit(application.jurisdiction, application.productType)) {
+                AccountingClock.bank(clock).today()
+            } else {
+                LocalDate.now(clock)
+            }
+            creditPolicy.forApplication(asOf, application.jurisdiction, application.productType).map { bundle ->
                 val withPackChecks = mergePackChecks(application, bundle)
                 val decision = PolicyEvaluator.evaluate(
-                    PolicyApplication(attributes(application, assessment), LocalDate.now(clock)),
+                    PolicyApplication(attributes(application, assessment), asOf),
                     withPackChecks,
                 )
                 val ratios = affordabilityRatios(application)

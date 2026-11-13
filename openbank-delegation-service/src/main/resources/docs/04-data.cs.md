@@ -11,3 +11,27 @@ Tato stránka zatím popisuje jen životní cyklus outboxu; zbytek datového mod
 - Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
 - Signály: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total` a workflow liveness `outbox-sent-retention`.
 - Vypnutí: `openbank.outbox.retention.enabled=false` (při startu zaloguje WARN). Nesnižujte `sent-days` pod potřebu kteréhokoli čtenáře SENT řádků.
+
+## Čtení vlastnictví zdroje podle typu (ADR-0375 D5)
+
+Grant je sám o sobě autorita, jakmile si ho produktová služba promítne, takže před vystavením
+nabídky se tato služba zeptá služby, která zdroj **vlastní**, jestli ho poskytovatel grantu opravdu
+vlastní. Odpověď je fail-closed v obou chybových směrech: `NOT_OWNED` odmítá a `UNVERIFIABLE` taky —
+dohledání, které se nepovedlo provést, není povolení.
+
+| typ zdroje | kdo odpovídá | stav |
+|---|---|---|
+| `ACCOUNT`, `SAVINGS_GOAL` | account-service (spořicí cíl je klíčovaný vlastnícím účtem, ADR-0153) | vyřešeno |
+| `CARD` | card-issuance-service | vyřešeno |
+| `DOCUMENT` | document-service `GET /api/v1/documents/{id}/owner`, akce `document.verifyOwnership` | vyřešeno (ADR-0375 D5) |
+| `PAYMENT`, `STATEMENT` | nikdo — viz níže | vždy `UNVERIFIABLE`, takže každá taková nabídka je odmítnuta |
+
+Čtení dokumentu používá POJMENOVANÉHO OIDC klienta `m2m`, takže se autentizuje jako
+`service-account-openbank-delegation` (jen ROLE_API), ne jako sdílená identita `openbank-services`,
+kterou document-service pro tuto akci odmítá. `M2mOidcClientIdentityWiringTest` výběr klienta pojišťuje.
+
+`PAYMENT` a `STATEMENT` jsou odmítané na základě měření, ne proto, že by práce nebyla dokončená.
+statement-service je adresovaná `accountId` a nemá objekt výpisu s vlastním id, takže id zdroje typu
+`STATEMENT` neodkazuje na nic, co by vlastnící služba uměla dohledat. Id platby se neresolvuje v
+žádné jedné službě: platby vlastní šest railů a nic nemapuje id na rail. Ani jeden typ nemá koho se
+zeptat, takže oba zůstávají odmítané, dokud ty páry neodejdou z matice capabilities.

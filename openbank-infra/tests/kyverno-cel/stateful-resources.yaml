@@ -1,6 +1,6 @@
 # Fixtures for stateful-on-demand-cel (gitops/components/kyverno/stateful-on-demand-cel.yaml),
 # evaluated by .github/scripts/check-stateful-not-on-spot.py through the Kyverno CLI.
-# Each pod's `openbank.io/expect` annotation says whether the policy must route it to
+# Each pod's `open-bank.tech/expect` annotation says whether the policy must route it to
 # on-demand ("on-demand") or leave it alone ("untouched"). In scope (2026-09-30): only CNPG
 # clusters in the policy's generated `targets` list (money-path DBs + temporal-db).
 apiVersion: v1
@@ -12,7 +12,7 @@ metadata:
     cnpg.io/cluster: transaction-db
     cnpg.io/podRole: instance
   annotations:
-    openbank.io/expect: on-demand
+    open-bank.tech/expect: on-demand
 spec:
   containers:
     - name: postgres
@@ -27,7 +27,7 @@ metadata:
     cnpg.io/cluster: ledger-db
     cnpg.io/podRole: instance
   annotations:
-    openbank.io/expect: on-demand
+    open-bank.tech/expect: on-demand
 spec:
   # The real CNPG shape: affinity with podAntiAffinity only, plus the tolerations the
   # DefaultTolerationSeconds admission plugin adds before any webhook runs.
@@ -58,7 +58,7 @@ metadata:
     strimzi.io/controller: strimzipodset
     strimzi.io/kind: Kafka
   annotations:
-    openbank.io/expect: untouched
+    open-bank.tech/expect: untouched
 spec:
   containers:
     - name: kafka
@@ -73,7 +73,7 @@ metadata:
     app.kubernetes.io/name: temporal
     app.kubernetes.io/component: history
   annotations:
-    openbank.io/expect: untouched
+    open-bank.tech/expect: untouched
 spec:
   containers:
     - name: temporal
@@ -88,7 +88,7 @@ metadata:
     app.kubernetes.io/name: temporal
     app.kubernetes.io/component: admintools
   annotations:
-    openbank.io/expect: untouched
+    open-bank.tech/expect: untouched
 spec:
   containers:
     - name: admintools
@@ -102,7 +102,7 @@ metadata:
   labels:
     strimzi.io/kind: Kafka
   annotations:
-    openbank.io/expect: untouched
+    open-bank.tech/expect: untouched
 spec:
   containers:
     - name: topic-operator
@@ -116,7 +116,7 @@ metadata:
   labels:
     app: ledger-service
   annotations:
-    openbank.io/expect: untouched
+    open-bank.tech/expect: untouched
 spec:
   containers:
     - name: app
@@ -131,7 +131,7 @@ metadata:
     cnpg.io/cluster: temporal-db
     cnpg.io/podRole: instance
   annotations:
-    openbank.io/expect: on-demand
+    open-bank.tech/expect: on-demand
 spec:
   containers:
     - name: postgres
@@ -147,7 +147,7 @@ metadata:
     cnpg.io/cluster: aml-db
     cnpg.io/podRole: instance
   annotations:
-    openbank.io/expect: untouched
+    open-bank.tech/expect: untouched
 spec:
   containers:
     - name: postgres
@@ -163,7 +163,7 @@ metadata:
     cnpg.io/cluster: ledger-db
     cnpg.io/podRole: instance
   annotations:
-    openbank.io/expect: untouched
+    open-bank.tech/expect: untouched
 spec:
   containers:
     - name: postgres
