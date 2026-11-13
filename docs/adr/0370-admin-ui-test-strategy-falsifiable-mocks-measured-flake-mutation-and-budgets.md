@@ -2,7 +2,7 @@
 date: 2026-11-11
 decision-status: proposed
 delivery-status: partial
-followup: "#15685 — U1 mock contract, U2 flake quarantine, U3 coverage ratchet and U4 property tests are built; U5–U8 are not"
+followup: "#15685 — U1–U5 are built (U5 mutation run advisory until a full-scope baseline); U6–U8 are not"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []

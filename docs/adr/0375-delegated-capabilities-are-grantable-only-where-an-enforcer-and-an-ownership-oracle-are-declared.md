@@ -123,6 +123,24 @@ rule, and a payment that must be refused costs no remote call. It returns the sa
 verdict from Limits: a delegate inside their ceiling with no grant is REJECT, and a
 delegate with a grant over their ceiling is the Limits step's answer, not this one's.
 
+**D1 delivery note (2026-11-12).** The ADR-0374 chain kernel landed in #15735 while this ADR
+was in review, so D1 is now buildable and its first half is built: `AdmissionStep` gains
+`AUTHORITY` as its **first** member, and `DelegatedDebitAuthority` in `openbank-libs-fincrime`
+is the pure decision behind it — owner, or an ACTIVE grant over this account carrying the
+capability the action names.
+
+Two things about the sequencing are worth recording. The step was inserted while **no rail binds
+the chain yet**, so the order change has zero blast radius today and would not after the first
+rail adopts it. And the kernel's `Builder.build` refuses a chain with an unbound step, which makes
+this the D4 discipline applied to the chain itself: a rail cannot silently forget authority, it can
+only bind a check or declare the step unbound with a reason. That is the structural answer to the
+defect D1 exists for — ADR-0232 D3 assigned the check to each product service, and one payment
+rail of six performed it.
+
+What is NOT delivered: no rail binds it, because ADR-0374 slice A shipped the kernel only. The
+step is therefore declared and unbound everywhere until the first rail adopts the chain, which is
+visible rather than silent — the opposite of the `403` a delegate gets today.
+
 **D2 — One event-fed projection, shared, not one per rail — and it splits across two
 modules, not one.** This amends ADR-0232 D3. The
 `delegation.granted|suspended|revoked|expired` projection becomes shared code so a rail

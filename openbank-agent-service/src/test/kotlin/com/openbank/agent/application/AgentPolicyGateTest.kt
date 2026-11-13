@@ -11,6 +11,10 @@ import com.openbank.agent.domain.policy.EnforcementMode
 import com.openbank.agent.domain.policy.GateResult
 import com.openbank.agent.domain.policy.PolicyDecision
 import com.openbank.agent.domain.policy.PolicyQuery
+import com.openbank.agent.infrastructure.policy.OpaClient
+import com.openbank.agent.infrastructure.policy.OpaDecision
+import com.openbank.agent.infrastructure.policy.OpaPolicyDecisionPoint
+import com.openbank.agent.infrastructure.policy.OpaResponse
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
@@ -264,8 +268,24 @@ class AgentPolicyGateTest {
     }
 
     @Test
-    fun `unknown enforcement mode falls back to advisory`() {
-        gate.enforcementMode = "nonsense"
+    fun `a SET but unrecognised enforcement mode fails closed to BLOCK instead of silently disabling enforcement`() {
+        gate.enforcementMode = "blok"
+        every3Deny()
+
+        val outcome = gate.authorize(
+            agent,
+            tool = "get_account",
+            capability = "query.ledger.readonly",
+            resource = "acc-1",
+        )
+
+        assertThat(outcome.mode).isEqualTo(EnforcementMode.BLOCK)
+        assertThat(outcome.proceed).isFalse()
+    }
+
+    @Test
+    fun `a blank enforcement mode keeps the documented advisory default`() {
+        gate.enforcementMode = "  "
         every3Deny()
 
         val outcome = gate.authorize(
@@ -277,6 +297,54 @@ class AgentPolicyGateTest {
 
         assertThat(outcome.mode).isEqualTo(EnforcementMode.ADVISORY)
         assertThat(outcome.proceed).isTrue()
+    }
+
+    private fun gateWithRealOpaAdapter(client: OpaClient) {
+        val adapter = OpaPolicyDecisionPoint().apply { opa = client }
+        gate.pdp = adapter
+        gate.enforcementMode = "block"
+    }
+
+    @Test
+    fun `real OPA adapter - a failing sidecar in BLOCK mode denies and counts pdp_unavailable_denied`() {
+        val registry = SimpleMeterRegistry()
+        gate.meterRegistry = registry
+        gateWithRealOpaAdapter(mockk { every { decision(any()) } throws java.io.IOException("connection refused") })
+
+        val outcome = gate.authorize(agent, tool = "draft_ticket", capability = "draft.ticket", resource = null)
+
+        assertThat(outcome.proceed).isFalse()
+        assertThat(outcome.result).isEqualTo(GateResult.PDP_UNAVAILABLE_DENIED)
+        assertThat(outcomeCount(registry, "pdp_unavailable_denied")).isEqualTo(1.0)
+        assertThat(outcomeCount(registry, "policy_denied")).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `real OPA adapter - an empty OPA answer in BLOCK mode is a PDP error not a policy deny`() {
+        val registry = SimpleMeterRegistry()
+        gate.meterRegistry = registry
+        gateWithRealOpaAdapter(mockk { every { decision(any()) } returns OpaResponse(result = null) })
+
+        val outcome = gate.authorize(agent, tool = "draft_ticket", capability = "draft.ticket", resource = null)
+
+        assertThat(outcome.proceed).isFalse()
+        assertThat(outcome.result).isEqualTo(GateResult.PDP_UNAVAILABLE_DENIED)
+        assertThat(outcomeCount(registry, "pdp_unavailable_denied")).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `real OPA adapter - a healthy OPA deny stays policy_denied (negative case for the outage outcome)`() {
+        val registry = SimpleMeterRegistry()
+        gate.meterRegistry = registry
+        gateWithRealOpaAdapter(
+            mockk { every { decision(any()) } returns OpaResponse(OpaDecision(allow = false, reason = "nope")) },
+        )
+
+        val outcome = gate.authorize(agent, tool = "draft_ticket", capability = "draft.ticket", resource = null)
+
+        assertThat(outcome.proceed).isFalse()
+        assertThat(outcome.result).isEqualTo(GateResult.POLICY_DENIED)
+        assertThat(outcomeCount(registry, "pdp_unavailable_denied")).isEqualTo(0.0)
     }
 
     @Test
