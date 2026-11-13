@@ -4,4 +4,4 @@ metadata:
   name: finops-agent
   labels:
     app.kubernetes.io/part-of: openbank
-    openbank.io/component: finops-agent
+    open-bank.tech/component: finops-agent

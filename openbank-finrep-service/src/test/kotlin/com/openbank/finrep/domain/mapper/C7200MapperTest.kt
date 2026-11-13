@@ -60,21 +60,21 @@ class C7200MapperTest {
         assertThat(t.at("r0020", "c0010").value).isEqualByComparingTo("1250")
         assertThat(t.at("r0020", "c0040").value).isEqualByComparingTo("1250")
         assertThat(t.at("r0030", "c0040").value).isEqualByComparingTo("1250")
-        assertThat(t.at("r0240", "c0010").value).isEqualByComparingTo("200")
-        assertThat(t.at("r0240", "c0040").value).isEqualByComparingTo("170")
+        assertThat(t.at("r0230", "c0010").value).isEqualByComparingTo("200")
+        assertThat(t.at("r0230", "c0040").value).isEqualByComparingTo("170")
         assertThat(t.at("r0310", "c0010").value).isEqualByComparingTo("160")
         assertThat(t.at("r0310", "c0040").value).isEqualByComparingTo("105")
-        assertThat(t.at("r0230", "c0040").value).isEqualByComparingTo("275")
+        assertThat(t.at("r0220", "c0040").value).isEqualByComparingTo("275")
         assertThat(t.at("r0010", "c0010").value).isEqualByComparingTo("1610")
         assertThat(t.at("r0010", "c0040").value).isEqualByComparingTo("1525")
-        // Totals tie in both columns: r0010 = r0020 + r0230, r0230 = r0240 + r0310.
+        // Totals tie in both columns: r0010 = r0020 + r0220, r0220 = r0230 + r0310.
         listOf("c0010", "c0040").forEach { col ->
             assertThat(t.at("r0010", col).value)
-                .isEqualByComparingTo(t.at("r0020", col).value.add(t.at("r0230", col).value))
-            assertThat(t.at("r0230", col).value)
-                .isEqualByComparingTo(t.at("r0240", col).value.add(t.at("r0310", col).value))
+                .isEqualByComparingTo(t.at("r0020", col).value.add(t.at("r0220", col).value))
+            assertThat(t.at("r0220", col).value)
+                .isEqualByComparingTo(t.at("r0230", col).value.add(t.at("r0310", col).value))
         }
-        val valueRows = listOf("r0010", "r0020", "r0030", "r0230", "r0240", "r0310")
+        val valueRows = listOf("r0010", "r0020", "r0030", "r0220", "r0230", "r0310")
         assertThat(t.cells.filter { it.rowRef in valueRows }).allMatch { !it.isDataGap && it.currency == "CZK" }
     }
 
@@ -89,15 +89,6 @@ class C7200MapperTest {
                 assertThat(c.gapReason).isEqualTo(C7200Mapper.NOT_SPLIT_REASON)
             }
         }
-    }
-
-    @Test
-    fun `rows whose code is unverified say so on the wire`() {
-        val t = C7200Mapper.map(RiskLiquidityLookup.found(result()), asOf)
-        assertThat(t.cells.filter { it.rowRef in C7200Mapper.UNVERIFIED_ROWS }).isNotEmpty
-            .allMatch { it.label.endsWith("[row code UNVERIFIED]") }
-        assertThat(t.cells.filter { it.rowRef !in C7200Mapper.UNVERIFIED_ROWS })
-            .noneMatch { it.label.contains("UNVERIFIED") }
     }
 
     @Test
@@ -155,11 +146,11 @@ class C7200MapperTest {
             RiskLiquidityLookup.found(result(lines = odd, level1 = "1000", level2a = "160", level2b = "0")),
             asOf,
         )
-        assertThat(t.at("r0240", "c0040").isDataGap).isTrue()
-        assertThat(t.at("r0240", "c0040").gapReason).contains("L2A haircut of 0.20", "'eu-2015-61-crr2'")
+        assertThat(t.at("r0230", "c0040").isDataGap).isTrue()
+        assertThat(t.at("r0230", "c0040").gapReason).contains("L2A haircut of 0.20", "'eu-2015-61-crr2'")
             .doesNotContain("d238")
         assertThat(t.at("r0010", "c0040").isDataGap).isTrue()
-        assertThat(t.at("r0240", "c0010").isDataGap).isFalse()
+        assertThat(t.at("r0230", "c0010").isDataGap).isFalse()
         assertThat(t.at("r0020", "c0040").isDataGap).isFalse()
     }
 
@@ -194,15 +185,15 @@ class C7200MapperTest {
             RiskLiquidityLookup.found(result(lines = l2a, level1 = "0", level2a = "25.58", level2b = "0")),
             asOf,
         )
-        assertThat(t.at("r0240", "c0040").value).isEqualByComparingTo("25.58")
-        assertThat(t.at("r0240", "c0010").value).isEqualByComparingTo("30.09")
-        assertThat(t.at("r0240", "c0040").isDataGap).isFalse()
+        assertThat(t.at("r0230", "c0040").value).isEqualByComparingTo("25.58")
+        assertThat(t.at("r0230", "c0010").value).isEqualByComparingTo("30.09")
+        assertThat(t.at("r0230", "c0040").isDataGap).isFalse()
     }
 
     @Test
     fun `a run on a non-EU parameter set blanks every 2015-61 value cell and names the set`() {
         val t = C7200Mapper.map(RiskLiquidityLookup.found(result(parameterSet = "bcbs-d238-d295")), asOf)
-        val values = listOf("r0010", "r0020", "r0030", "r0230", "r0240", "r0310")
+        val values = listOf("r0010", "r0020", "r0030", "r0220", "r0230", "r0310")
         values.forEach { row ->
             val c = t.at(row, "c0040")
             assertThat(c.isDataGap).isTrue()
@@ -231,7 +222,7 @@ class C7200MapperTest {
             "it is not modelled: pledged assets are encumbered and would not count as HQLA, so the HQLA stock " +
             "and the LCR may be overstated, and the RSF of the pledged assets understated."
         val t = C7200Mapper.map(RiskLiquidityLookup.found(result(notes = listOf(note))), asOf)
-        listOf("r0010", "r0020", "r0030", "r0230", "r0240", "r0310").forEach { row ->
+        listOf("r0010", "r0020", "r0030", "r0220", "r0230", "r0310").forEach { row ->
             listOf("c0010", "c0040").forEach { col ->
                 val c = t.at(row, col)
                 assertThat(c.isDataGap).describedAs("$row/$col").isTrue()

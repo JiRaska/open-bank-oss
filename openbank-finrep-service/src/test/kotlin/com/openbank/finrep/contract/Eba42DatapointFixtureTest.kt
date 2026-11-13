@@ -71,6 +71,7 @@ class Eba42DatapointFixtureTest {
         assertThat(ids[Triple("F01.01", "r0030", "c0010")]).isEqualTo(32237)
         assertThat(ids[Triple("F01.02", "r0130", "c0010")]).isEqualTo(11437)
         assertThat(ids[Triple("F01.02", "r0150", "c0010")]).isEqualTo(11485)
+        assertThat(ids[Triple("F01.03", "r0310", "c0010")]).isEqualTo(32654)
         assertThat(EbaReportingFramework42.UNVERIFIED_DATAPOINT_CELLS).isEmpty()
     }
 

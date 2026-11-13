@@ -6,7 +6,7 @@
 // real page, its client-side state transitions and its rendered operator copy,
 // without pretending a local Playwright run is a regulator, Tempo or Temporal.
 
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 import { APPROVAL_DOMAINS } from '../src/lib/approvals/evidence'
 

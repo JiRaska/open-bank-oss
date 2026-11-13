@@ -338,7 +338,7 @@ def self_test() -> int:
         source.parent.mkdir(parents=True)
         source.write_text(
             "kind: ExternalSecret\nmetadata:\n  name: fixture-credential\n  namespace: fixture\n"
-            "  annotations:\n    openbank.io/rotation-deadline: soon\n"
+            "  annotations:\n    open-bank.tech/rotation-deadline: soon\n"
             "spec:\n  target:\n    name: fixture-credential\n  data:\n"
             "    - secretKey: password\n      remoteRef:\n        key: fixture/reference\n")
         malformed = run_json([sys.executable, str(Path(__file__).with_name("credential-inventory.py")),

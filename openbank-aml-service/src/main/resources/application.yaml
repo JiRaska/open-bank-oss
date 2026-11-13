@@ -131,6 +131,47 @@ mp:
         # rebuild projections, flip it via the msg-override ConfigMap in an announced replay window.
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # ADR-0371 slice 1: booked money movement, after the fact. The ledger's AccountBookedChanged
+      # is the proof of booking; nothing here sits in a payment path. The consumer rethrows what it
+      # cannot record, so the dead-letter queue is wired in the same change (#5745) — explicit
+      # per-service topic, NESTED form (#686), exactly as party-events-in above.
+      ledger-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.aml.ledger-events-in
+          # Park the original String payload byte for byte; without this the dead-letter
+          # producer JSON-encodes it and a replay would deliver a quoted string.
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+        connector: smallrye-kafka
+        topic: openbank.ledger.journal.posted
+        # NESTED, like the dead-letter topic: a dotted leaf (`group.id:`, `value.deserializer:`) is
+        # registered quoted and the connector never reads it (#686).
+        group:
+          id: openbank-aml-service
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # The originating domain event names the rail of a transaction; the ledger event does not.
+      transaction-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.aml.transaction-events-in
+          # Park the original String payload byte for byte; without this the dead-letter
+          # producer JSON-encodes it and a replay would deliver a quoted string.
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+        connector: smallrye-kafka
+        topic: openbank.transactions.transaction.initiated
+        # NESTED, like the dead-letter topic: a dotted leaf (`group.id:`, `value.deserializer:`) is
+        # registered quoted and the connector never reads it (#686).
+        group:
+          id: openbank-aml-service
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%prod":
   quarkus:
     http:
@@ -153,7 +194,7 @@ mp:
       auth:
         permission:
           bearer-only:
-            paths: /api/v1/aml/cases,/api/v1/aml/cases/*
+            paths: /api/v1/aml/cases,/api/v1/aml/cases/*,/api/v1/aml/reports,/api/v1/aml/reports/*,/api/v1/aml/monitoring/*
             policy: authenticated
             auth-mechanism: bearer
     # The onboarding screening reconciler reads party-service's party list. Production uses a named
@@ -250,6 +291,37 @@ openbank:
       cron: "0 7/15 * * * ?"
       page-size: 100
       max-pages: 20
+    # ADR-0371 slice 1: post-booking transaction monitoring intake. The counter scheme (bucket
+    # width, amount bands) is DATA; the file named here is synthetic and its bands mean nothing.
+    monitoring:
+      counter-scheme:
+        resource: aml/monitoring-counter-scheme.synthetic.json
+      # Joins a recorded movement to its party (account authority) and rail (originating event),
+      # then increments the counters. Sweep-only, so intake never waits on another service.
+      attribution:
+        enabled: ${AML_MONITORING_ATTRIBUTION_ENABLED:true}
+        interval: 1m
+        initial-delay: 1m
+        batch-limit: 200
+        # How long a booked movement waits for its originating event before it is counted without a rail.
+        origin-grace: PT5M
+      # ADR-0371 slice 2: the ADR-0354 count pack evaluated over the counters. The pack, its
+      # vocabularies and its features are DATA; the files named here are synthetic.
+      pack:
+        resource: aml/monitoring-pack.synthetic.json
+        reasons-resource: aml/monitoring-reasons.synthetic.json
+        severities-resource: aml/monitoring-severities.synthetic.json
+        features-resource: aml/monitoring-count-features.synthetic.json
+      # ADR-0371 §10: the vocabulary every closing decision takes its structured outcome from.
+      decision-outcomes:
+        resource: aml/decision-outcomes.provisional.json
+      evaluation:
+        enabled: ${AML_MONITORING_EVALUATION_ENABLED:true}
+        cron: "0 3/15 * * * ?"
+        page-size: 200
+        # SHADOW unless true: a hit is recorded and nothing else happens. Turning this on is a
+        # rollout decision (ADR-0371 §9), not a tuning knob.
+        open-cases: ${AML_MONITORING_OPEN_CASES:false}
   outbox:
     dispatch-enabled: true
   rate-limit:
