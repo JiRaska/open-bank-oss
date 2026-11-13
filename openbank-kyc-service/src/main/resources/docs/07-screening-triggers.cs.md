@@ -43,6 +43,25 @@ Kandidátní množina **není** rozsahovaná per položka diffu: kyc-service neu
 - Selhávací cesta consumeru rethrowuje do connectoru, takže infrastrukturní selhání dead-letteruje; selhání volání coordinatoru je práce řádku + outbox události, ne Kafky.
 - Tabulka `kyc_screening_triggers` (Flyway V12) je append-audited: přechody `state` jsou updaty, diff sloupce se zapisují jednou.
 
+## Metriky a alerty backlogu
+
+Issue #15961. Backlog tvoří řádky `kyc_screening_triggers` ve stavu PENDING nebo OPEN_FAILED: změny seznamů, které se k zákazníkovi ještě nedostaly jako otevřený případ. `RescreenBacklogGauge` jej jednou za minutu vzorkuje z databáze (`openbank.kyc.screening-triggers.backlog-sample-interval`, výchozí `1m`) jedním agregátem nad úvodním sloupcem `state` indexu `ix_kyc_screening_triggers_retry`, takže každý pod publikuje stejnou hodnotu a restart nic neztratí.
+
+| Metrika | Význam | Studený pod |
+|---|---|---|
+| `openbank_kyc_rescreen_backlog_pending{service="kyc"}` | Řádky PENDING nebo OPEN_FAILED (rozpracované, opakované nebo odstavené). | NaN do prvního vzorku |
+| `openbank_kyc_rescreen_backlog_oldest_age_seconds{service="kyc"}` | `now() - created_at` nejstaršího takového řádku podle hodin databáze, od zařazení do fronty. `0` jen při prázdném backlogu. Nikdy z `next_attempt_at`, který každý pokus posouvá dopředu. | NaN do prvního vzorku |
+| `openbank_kyc_rescreen_loop_disabled_with_pending{service="kyc"}` | `1`, když je `enabled` nebo `retry-enabled` false a backlog není prázdný, jinak `0`. Samostatná řada, aby „vypnuto a prázdno“ a „vypnuto se zbylou prací“ nikdy nesdílely hodnotu. | NaN do prvního vzorku |
+
+NaN, ne 0 a ne stáří odvozené od epochy: studený pod netvrdí prázdnou zdravou frontu, kterou nikdo neměřil, ani nehlásí desetiletí. Neúspěšný vzorek ponechá předchozí hodnoty, takže výpadek databáze nemůže zrušit spuštěný alert; místo toho zestárne heartbeat `kyc-rescreen-backlog-sample`.
+
+**Lhůta: 24 hodin.** ADR-0256 slibuje, že se změna seznamu k zákazníkovi dostane v rámci cyklu obnovy, a seznamy se obnovují denně. Zdravý nejhorší případ je asi hodina (pět pokusů s backoffem 5 minut krát pokus), takže řádek starší než den předběhne další změna seznamu.
+
+- `KycRescreenBacklogOverdue` (critical): nejstarší stáří nad 86400 s po dobu 15 minut, pokud smyčka není vypnutá se zbylou prací.
+- `KycRescreenLoopDisabledWithPending` (warning): řada vypnuto-se-zbylou-prací je 1 po dobu 30 minut.
+
+Ani jeden nemůže vystřelit ve výchozím nasazení (smyčka vypnutá, tabulka prázdná: stáří 0, vypnuto-se-zbylou-prací 0). Testy: `openbank-infra/tests/promtool/kyc_rescreen_backlog_alerts_test.yaml`. Runbook: [05-operations](05-operations.cs.md#backlog-opětovného-prověření).
+
 ## Obnova práce a rozsah ochrany proti duplicitám
 
 Nový řádek PENDING má desetiminutový pronájem a číslo pokusu. Worker atomicky přebírá pouze vypršelý pronájem; zápis výsledku porovnává převzaté číslo pokusu i pronájem ve stejné transakci jako případný outbox záznam selhání. Starý worker nemůže přepsat novější výsledek. Historické PENDING řádky bez pronájmu lze převzít deset minut po vzniku; nové vložení bez pronájmu se odmítá. Terminální OPEN_FAILED řádky bez času dalšího pokusu se automaticky neopakují.

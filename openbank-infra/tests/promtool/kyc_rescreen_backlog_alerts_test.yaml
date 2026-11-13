@@ -1,0 +1,136 @@
+# SPDX-License-Identifier: Apache-2.0
+# KycRescreenBacklogOverdue / KycRescreenLoopDisabledWithPending against the SHIPPED rules
+# (issue #15961). RescreenBacklogGauge publishes NaN until its first database sample, so the cold
+# pod is modelled as absent-then-NaN. Five readings: cold pod (quiet), stalled queue (overdue
+# fires), draining queue that crosses 24h for less than `for:` (quiet), loop off with a backlog
+# (disabled fires, overdue suppressed), loop off and empty, the shipped default (quiet).
+evaluation_interval: 1m
+rule_files:
+  - prometheus-rules-onboarding.yaml
+tests:
+  - name: cold pod - series absent, then NaN until the first sample, then an empty queue
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyc_rescreen_backlog_oldest_age_seconds{namespace="kyc",pod="kyc-test",service="kyc"}'
+        values: '_x10 NaN NaN 0x120'
+      - series: 'openbank_kyc_rescreen_loop_disabled_with_pending{namespace="kyc",pod="kyc-test",service="kyc"}'
+        values: '_x10 NaN NaN 0x120'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: KycRescreenBacklogOverdue
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: KycRescreenLoopDisabledWithPending
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: KycRescreenBacklogOverdue
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: KycRescreenLoopDisabledWithPending
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: KycRescreenBacklogOverdue
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: KycRescreenLoopDisabledWithPending
+        exp_alerts: []
+  - name: stalled queue - the oldest trigger ages past 24h and keeps ageing
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyc_rescreen_backlog_oldest_age_seconds{namespace="kyc",pod="kyc-test",service="kyc"}'
+        values: '86000+60x90'
+      - series: 'openbank_kyc_rescreen_loop_disabled_with_pending{namespace="kyc",pod="kyc-test",service="kyc"}'
+        values: '0x90'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: KycRescreenBacklogOverdue
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: KycRescreenLoopDisabledWithPending
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: KycRescreenBacklogOverdue
+        exp_alerts:
+          - exp_labels:
+              namespace: kyc
+              severity: critical
+            exp_annotations:
+              subject_period: continuous
+              summary: "A sanctions list change has not reached a customer as a re-screening case within 24h"
+              description: "openbank_kyc_rescreen_backlog_oldest_age_seconds is over 86400: the oldest kyc_screening_triggers row still PENDING or OPEN_FAILED was enqueued more than 24 hours ago, so a customer the list change could match has had no re-screening case opened. openbank_kyc_rescreen_backlog_pending says how many are waiting. Check the case coordinator (OPEN_FAILED rows carry failed_reason), the kyc.screening-trigger.retry heartbeat, and KYC_COORDINATOR_OPEN_FAILED outbox events for parked rows, which need an operator to open the case and reconcile the row. Runbook: kyc-service docs 05-operations, Re-screening backlog."
+      - eval_time: 30m
+        alertname: KycRescreenLoopDisabledWithPending
+        exp_alerts: []
+  - name: draining queue - crosses 24h for under 15m, then the head is opened
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyc_rescreen_backlog_oldest_age_seconds{namespace="kyc",pod="kyc-test",service="kyc"}'
+        values: '86300+60x10 600+60x80'
+      - series: 'openbank_kyc_rescreen_loop_disabled_with_pending{namespace="kyc",pod="kyc-test",service="kyc"}'
+        values: '0x90'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: KycRescreenBacklogOverdue
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: KycRescreenLoopDisabledWithPending
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: KycRescreenBacklogOverdue
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: KycRescreenLoopDisabledWithPending
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: KycRescreenBacklogOverdue
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: KycRescreenLoopDisabledWithPending
+        exp_alerts: []
+  - name: loop disabled with a backlog - the disabled alert fires, the overdue one stands aside
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyc_rescreen_backlog_oldest_age_seconds{namespace="kyc",pod="kyc-test",service="kyc"}'
+        values: '90000+60x90'
+      - series: 'openbank_kyc_rescreen_loop_disabled_with_pending{namespace="kyc",pod="kyc-test",service="kyc"}'
+        values: '1x90'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: KycRescreenBacklogOverdue
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: KycRescreenLoopDisabledWithPending
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: KycRescreenLoopDisabledWithPending
+        exp_alerts:
+          - exp_labels:
+              namespace: kyc
+              severity: warning
+            exp_annotations:
+              subject_period: continuous
+              summary: "KYC re-screening loop is switched off with list changes still pending"
+              description: "openbank_kyc_rescreen_loop_disabled_with_pending is 1: kyc-service's ADR-0256 trigger loop is disabled but kyc_screening_triggers still holds PENDING or OPEN_FAILED rows (openbank_kyc_rescreen_backlog_pending), so those customers will not be re-screened. Either re-enable the loop (KYC_SCREENING_TRIGGERS_ENABLED and KYC_SCREENING_TRIGGERS_RETRY_ENABLED) or reconcile each row by hand. While the loop is off, list changes arriving now are acked and counted as openbank_kyc_sanctions_list_change_events_total{outcome=\"disabled\"}, not queued. Runbook: kyc-service docs 05-operations, Re-screening backlog."
+      - eval_time: 40m
+        alertname: KycRescreenBacklogOverdue
+        exp_alerts: []
+  - name: loop disabled and empty - the shipped default stays quiet
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyc_rescreen_backlog_oldest_age_seconds{namespace="kyc",pod="kyc-test",service="kyc"}'
+        values: '0x180'
+      - series: 'openbank_kyc_rescreen_loop_disabled_with_pending{namespace="kyc",pod="kyc-test",service="kyc"}'
+        values: '0x180'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: KycRescreenBacklogOverdue
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: KycRescreenLoopDisabledWithPending
+        exp_alerts: []
+      - eval_time: 180m
+        alertname: KycRescreenBacklogOverdue
+        exp_alerts: []
+      - eval_time: 180m
+        alertname: KycRescreenLoopDisabledWithPending
+        exp_alerts: []
