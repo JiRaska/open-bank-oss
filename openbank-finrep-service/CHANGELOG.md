@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.19.0...finrep-service-v0.19.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **finrep:** align COREP liquidity previews with EBA 4.2 ([#15671](https://github.com/JiRaska/open-bank-oss/issues/15671)) ([e27b7ab](https://github.com/JiRaska/open-bank-oss/commit/e27b7ab312d784fd1d3f1dc48ac390ff023344c2))
+* **finrep:** verify offline XBRL evidence and reject unsourced facts ([#15657](https://github.com/JiRaska/open-bank-oss/issues/15657)) ([f973fb4](https://github.com/JiRaska/open-bank-oss/commit/f973fb4b91a315158a511104b063139c769a51d5))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.18.0...finrep-service-v0.19.0) (2026-11-12)
 
 
