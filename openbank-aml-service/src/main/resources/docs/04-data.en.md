@@ -78,7 +78,7 @@ Flyway, immutable historical scripts, forward-only (`migrate-at-start=true`):
 
 ## Count-pack SHADOW epoch evidence
 
-`V14__aml_count_shadow_epoch.sql` records immutable, signed count-pack epochs for the AML
+`V15__aml_count_shadow_epoch.sql` records immutable, signed count-pack epochs for the AML
 domain. The epoch key serializes concurrent inserts of the same epoch. Each successor
 references its immutable predecessor and advances the effective time. Retrying an identical
 envelope replays the existing row. Rollback creates a new verified epoch referring to the
