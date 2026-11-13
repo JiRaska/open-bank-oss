@@ -9958,8 +9958,9 @@ def run_mode(gh, args, ap) -> int:
             if not (re.fullmatch(r"[0-9]+", args.stack_pr) and SHA_RE.fullmatch(args.stack_head)):
                 ap.error("--stack-pr must be a PR number and --stack-head a full sha")
             stack = (int(args.stack_pr), args.stack_head)
-        log(f"publish: {mode_publish(gh, git, args.repo, args.bundle, args.run_id, args.attempt, args.batch_size, stack,
-                                     expedite_arg(args, ap), args.expedite_cap)}")
+        result = mode_publish(gh, git, args.repo, args.bundle, args.run_id, args.attempt, args.batch_size, stack,
+                              expedite_arg(args, ap), args.expedite_cap)
+        log(f"publish: {result}")
         return 0
     s = mode_settle(gh, git, args.repo, args.shadow, run_id=args.run_id, attempt=args.attempt,
                     strict_cap=args.strict_batch_cap, stack=args.speculative_stack == "true",
