@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.19.0...sanctions-service-v0.19.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **sanctions:** record the authenticated principal as reviewer, not a body field ([#15812](https://github.com/JiRaska/open-bank-oss/issues/15812)) ([416a88c](https://github.com/JiRaska/open-bank-oss/commit/416a88c0721936881d0ffaab274739ff1aac86b0)), closes [#15748](https://github.com/JiRaska/open-bank-oss/issues/15748)
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.6...sanctions-service-v0.19.0) (2026-11-12)
 
 
