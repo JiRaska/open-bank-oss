@@ -6,7 +6,8 @@ info:
   # 2.4.0 -> 2.5.0 (#13179): additive minimal oversight-trigger channel and payload.
   # 2.5.0 -> 2.6.0 (#10760): additive CZ_TERRORISTS value on sanctions list enums.
   # 2.7.0 -> 2.8.0 (#15723): additive optional screening-profile fields on sanctions check events.
-  version: 2.8.0
+  # 2.8.0 -> 2.9.0 (ADR-0376): additive MONITORED_SUBJECT_MATCHED message on the sanctions channel.
+  version: 2.9.0
   description: |
     Kafka event streams across OpenBank services.
 
@@ -491,6 +492,7 @@ channels:
         - `SanctionReviewed` — a human analyst manually dispositioned an existing check.
         - `SANCTIONS_LIST_CHANGED` — one bounded chunk of committed list-entry changes.
         - `SANCTIONS_LIST_CHANGE_STORM` — targeted publication was withheld; evidence remains pending.
+        - `MONITORED_SUBJECT_MATCHED` — a subject registered for ongoing monitoring matches a list entry.
       Until #1035 both paths emitted `SanctionChecked`, so the two facts were indistinguishable
       and no consumer could route them apart.
 
@@ -516,6 +518,8 @@ channels:
         $ref: '#/components/messages/SanctionsListChanged'
       SanctionsListChangeStorm:
         $ref: '#/components/messages/SanctionsListChangeStorm'
+      MonitoredSubjectMatched:
+        $ref: '#/components/messages/MonitoredSubjectMatched'
 
 operations:
   publishFraudShadowVelocity:
@@ -1067,6 +1071,17 @@ components:
       payload:
         $ref: '#/components/schemas/SanctionsListChangeStormPayload'
 
+    MonitoredSubjectMatched:
+      name: MonitoredSubjectMatched
+      title: Ongoing-Monitoring Finding
+      description: >-
+        `ce-type` header = `MONITORED_SUBJECT_MATCHED` (ADR-0376). One finding per subject, list
+        entry and version of the entry's names. The subject is named by the owning service's
+        reference only; the body carries no customer name. Never route it to a customer surface.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/MonitoredSubjectMatchedPayload'
+
   schemas:
     FraudShadowVelocityPayload:
       type: object
@@ -1154,6 +1169,57 @@ components:
           type: string
           format: date-time
           description: Time the publisher recorded this chunk, not an upstream feed timestamp.
+
+    MonitoredSubjectMatchedPayload:
+      type: object
+      required: [schemaVersion, aggregateId, aggregateType, findingId, ownerService, subjectRef, entityType, matchKind, listType, listEntryRef, listEntryVersion, matchScore, matchStatus, detection, occurredAt, sourceService]
+      properties:
+        schemaVersion:
+          type: integer
+          enum: [1]
+        aggregateId:
+          type: string
+          format: uuid
+          description: Identity of the finding, also used as the Kafka key.
+        aggregateType:
+          type: string
+          enum: [MonitoringFinding]
+        findingId:
+          type: string
+          format: uuid
+          description: Deduplicate on this.
+        ownerService:
+          type: string
+          description: The client id of the service that registered the subject (taken from its token); only it acts on the finding.
+        subjectRef:
+          type: string
+          description: The owning service's reference for the subject. No customer name is carried.
+        entityType:
+          type: string
+          enum: [INDIVIDUAL, ORGANIZATION, VESSEL, AIRCRAFT]
+        matchKind:
+          type: string
+          enum: [SANCTIONS, TERRORIST, PEP, JURISDICTION]
+        listType:
+          type: string
+        listEntryRef:
+          type: string
+        listEntryVersion:
+          type: string
+        matchScore:
+          type: number
+        matchStatus:
+          type: string
+          enum: [POTENTIAL_HIT, HIT]
+        detection:
+          type: string
+          enum: [LIST_DELTA, BASELINE_SWEEP, PERIODIC_SWEEP]
+        occurredAt:
+          type: string
+          format: date-time
+        sourceService:
+          type: string
+          enum: [sanctions-service]
 
     SanctionsListChangeStormPayload:
       type: object

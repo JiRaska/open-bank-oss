@@ -103,3 +103,13 @@ The compliance team is responsible for:
 3. Escalating `HIT` records to the MLRO (Money Laundering Reporting Officer) within 4 hours.
 4. Filing a SAR (Suspicious Activity Report) with the Czech FIU (FAÚ) within 24 hours of a confirmed hit on a domestic transaction.
 5. Triggering `POST /api/v1/sanctions/lists/refresh-all` after any major regulatory update (e.g., new EU sanctions package).
+
+## Ongoing monitoring (ADR-0376)
+
+Ongoing monitoring serves the AMLD duty to keep monitoring the business relationship, not only to screen at its start. It is off by default.
+
+- **Purpose and minimisation.** The registry holds the attributes the `CUSTOMER` screening profile reads and nothing else. The lawful basis is the legal obligation (Art. 6(1)(c)); no new data is collected from the customer.
+- **Erasure.** The registry and its findings are not the statutory AML record (the owning service keeps that), so Art. 17 applies. Deregistration deletes the subject's row and its findings; the owning service calls it on offboarding and on erasure.
+- **Tipping-off.** A finding is never visible to the customer. It is not returned by any REST operation; it is published to the internal screening topic for the owning service, which opens a review case. No service facing a customer consumes that topic.
+- **No automated decision.** A finding changes nothing about a customer: it does not block, restrict or close anything. A human decides the case the owning service opens (ADR-0256 D2).
+- **Data flows out.** `MONITORED_SUBJECT_MATCHED` carries the subject's reference, not its name; `audit-service` archives the topic.
