@@ -388,3 +388,12 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+### Count-pack SHADOW epoch ledger
+
+Publishers submit signed exact replay evidence with independent approval. The ledger records the
+bounded envelope and artifact lineage in an append-only PostgreSQL table: the epoch primary key
+admits one writer per epoch, a predecessor foreign key with an `epoch - 1` check forbids gaps, a
+unique proposal id forbids reuse, and a trigger rejects every UPDATE and DELETE. Readers verify
+their selected envelope again and pin it for one evaluation. A rollback is a new approved signed
+epoch. The live threshold rules read their existing table.
