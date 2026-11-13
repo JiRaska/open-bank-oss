@@ -59,7 +59,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kyc-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyc-service:sandbox-548fa683@sha256:3e0637335d01137df59752e4de186c6bd784107e93e7f3d8917413d0bf75cc7e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyc-service:sandbox-5f71ca9b@sha256:2f905bb746ca363e84bd50e6401af904796552a95c9a45e293e18660f8f77a57
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
