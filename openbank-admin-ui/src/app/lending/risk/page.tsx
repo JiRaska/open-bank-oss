@@ -17,7 +17,7 @@
 //   - Thresholds on the charts are READ from `/risk/policy`. The page never hard-codes 0.45.
 //   - `codeSeeded` policy, placeholder PD/LGD (model version), no bureau feed: all said on the page,
 //     because a chart that hides its provenance is what a risk committee later gets blamed for.
-//   - No mutation. Disposal stays in the approval inbox (ADR-0227 D4).
+//   - Application disposal stays in the approval inbox (ADR-0227 D4). Policy revisions have their own queue.
 
 'use client'
 
@@ -40,6 +40,7 @@ import { decisionSchema, outcomeSchema, portfolioSchema, policySchema, portfolio
 import type { PortfolioSummary } from '@/components/lending/risk/contracts'
 import type { z } from 'zod'
 import { PolicyTables } from '@/components/lending/risk/PolicyTables'
+import { PolicyRevisions } from '@/components/lending/risk/PolicyRevisions'
 import { C_STAGE } from '@/components/lending/risk/palette'
 
 // The console can prove loading, denial and partial-service states without a chart engine. Load
@@ -241,8 +242,8 @@ function CreditRiskConsole() {
           <AlertTriangle size={14} style={{ color: policy.data.codeSeeded ? 'var(--warning)' : 'var(--success)' }} aria-hidden="true" />
           <span>
             {policy.data.codeSeeded
-              ? t(`Politika je zadrátovaná v kódu (${policy.data.source}, ADR-0213 D3). Změna = PR + release, ne four-eyes aktivace v UI (D4 table store není postaven).`,
-                  `Policy is code-seeded (${policy.data.source}, ADR-0213 D3). Changing it is a PR + release, not a four-eyes activation here (the D4 table store is not built).`)
+              ? t(`Platí výchozí politika z kódu (${policy.data.source}). Nová verze české politiky vyžaduje schválení druhým pracovníkem.`,
+                  `The code-seeded policy (${policy.data.source}) is effective. A new Czech policy revision requires approval by a second staff member.`)
               : t(`Politika z governovaného úložiště: ${policy.data.source}.`, `Policy from the governed store: ${policy.data.source}.`)}
           </span>
           <span style={{ color: 'var(--text-tertiary)' }}>
@@ -375,9 +376,12 @@ function CreditRiskConsole() {
       )}
 
       {tab === 'policy' && (
-        policy?.data
-          ? <PolicyTables policy={policy.data} hits={hits} sample={visible.length} />
-          : <div className="card" style={{ padding: 20, color: 'var(--text-tertiary)', fontSize: 13 }}>{t('Politika nenačtena', 'Policy not loaded')}</div>
+        <div style={{ display: 'grid', gap: 16 }}>
+          {policy?.data
+            ? <PolicyTables policy={policy.data} hits={hits} sample={visible.length} />
+            : <div className="card" style={{ padding: 20, color: 'var(--text-tertiary)', fontSize: 13 }}>{t('Politika nenačtena', 'Policy not loaded')}</div>}
+          <PolicyRevisions />
+        </div>
       )}
 
       {tab === 'portfolio' && (

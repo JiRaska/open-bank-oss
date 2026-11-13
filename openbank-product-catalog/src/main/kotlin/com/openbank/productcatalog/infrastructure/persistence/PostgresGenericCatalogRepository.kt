@@ -10,6 +10,8 @@ import com.openbank.productcatalog.application.CatalogConflictException
 import com.openbank.productcatalog.application.CatalogForbiddenException
 import com.openbank.productcatalog.application.CatalogPreconditionFailedException
 import com.openbank.productcatalog.application.port.out.GenericCatalogRepository
+import com.openbank.productcatalog.application.requireApprovable
+import com.openbank.productcatalog.application.requireVerifiedActor
 import com.openbank.productcatalog.domain.catalog.CatalogChangeEvent
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.MarketContext
@@ -21,6 +23,7 @@ import com.openbank.productcatalog.domain.catalog.RevisionApprovalPolicy
 import com.openbank.productcatalog.domain.catalog.RevisionIrSignature
 import com.openbank.productcatalog.domain.catalog.RevisionState
 import com.openbank.productcatalog.domain.catalog.SchemaRef
+import com.openbank.productcatalog.domain.catalog.catalogPrincipalKey
 import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -245,6 +248,7 @@ class PostgresGenericCatalogRepository(
                         .flatMap { offering ->
                             checkNotNull(offering) { "offering ${draft.offeringId} disappeared during publication" }
                             approvalPolicy(session, SchemaRef(draft.schemaId, draft.schemaVersion)).flatMap { policy ->
+                                policy?.requireVerifiedActor(checkerId, "checker")
                                 requireRoleApprovals(session, draft, policy).flatMap {
                                     preparePublication(session, draft, at, checkerId)
                                 }.map { policy }
@@ -292,8 +296,8 @@ class PostgresGenericCatalogRepository(
                         if (draft.state != RevisionState.DRAFT.name || policy?.role(role) == null) {
                             throw CatalogConflictException("only draft revisions accept declared role approvals")
                         }
-                        requireApprovable(draft, policy)
-                        if (draft.makerId == subject || draft.makerId == actorName) {
+                        policy.requireApprovable(draft.toDomain())
+                        if (draft.makerId in setOf(subject, actorName, catalogPrincipalKey(issuer, subject))) {
                             throw CatalogForbiddenException("maker cannot approve their own revision")
                         }
                         draft
@@ -348,18 +352,6 @@ class PostgresGenericCatalogRepository(
         RevisionRoleApprovalEntity::class.java,
     ).setParameter("id", revisionId).setParameter("digest", digest).resultList
 
-    private fun requireApprovable(draft: CatalogRevisionEntity, policy: RevisionApprovalPolicy) {
-        if (policy.requireEffectiveFrom && draft.effectiveFrom == null) {
-            throw CatalogConflictException("approval requires an explicit effectiveFrom")
-        }
-        val attributes = draft.toDomain().content.attributes.values
-        policy.requiredAttributes.forEach { (name, expected) ->
-            if (attributes[name] != com.openbank.productcatalog.domain.catalog.CatalogValue.TextValue(expected)) {
-                throw CatalogConflictException("approval requires attribute $name = $expected")
-            }
-        }
-    }
-
     /**
      * Publication gate for a schema whose pack declared an approval policy: every declared role has
      * approved the exact current digest, each by a different principal, none by the maker.
@@ -370,14 +362,17 @@ class PostgresGenericCatalogRepository(
         policy: RevisionApprovalPolicy?,
     ): Uni<Void> {
         if (policy == null) return Uni.createFrom().voidItem()
-        requireApprovable(draft, policy)
-        val digest = catalogJson.approvalDigest(draft.toDomain())
+        val revision = draft.toDomain()
+        policy.requireApprovable(revision)
+        val digest = catalogJson.approvalDigest(revision)
         return currentApprovals(session, draft.id, digest).invoke { rows ->
             val byRole = policy.roles.map { spec -> rows.singleOrNull { it.role == spec.code } }
             val complete = byRole.all { it != null }
             val principals = byRole.filterNotNull().map { it.issuer to it.subject }
             val distinct = principals.toSet().size == principals.size
-            val makerExcluded = rows.none { it.subject == draft.makerId }
+            val makerExcluded = rows.none {
+                it.subject == draft.makerId || catalogPrincipalKey(it.issuer, it.subject) == draft.makerId
+            }
             if (!complete || !distinct || !makerExcluded) {
                 throw CatalogConflictException(
                     "revision requires independent approvals by ${policy.roles.joinToString { it.code }}",

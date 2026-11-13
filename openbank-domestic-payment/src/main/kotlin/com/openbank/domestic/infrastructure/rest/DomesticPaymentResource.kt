@@ -9,15 +9,18 @@ import com.openbank.domestic.application.port.`in`.ListDomesticPaymentsQuery
 import com.openbank.domestic.application.port.`in`.PaymentConfirmationUseCase
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.infrastructure.rest.dto.CreateDomesticPaymentRequest
+import com.openbank.domestic.infrastructure.rest.dto.DomesticPaymentSubmissionLookup
 import com.openbank.domestic.infrastructure.rest.dto.TransitionDomesticPaymentStatusRequest
 import com.openbank.domestic.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.PATCH
@@ -85,6 +88,10 @@ class DomesticPaymentResource(
         // hid it further, since Kotlin emits no checkNotNullParameter intrinsic for a suspend
         // function — the null reached the first dereference instead of failing at the boundary.
         require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        val customerScope = request.customerSubmissionScope?.let {
+            requireCustomerEdge()
+            validatedCustomerScope(it)
+        }
 
         // SyntheticTaintRequestFilter accepts this flag only after authenticating a configured
         // canary principal. Read its request property, never the caller's header or coroutine MDC,
@@ -95,7 +102,10 @@ class DomesticPaymentResource(
                 actorId,
                 actorScope,
                 requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
-            ).copy(initiatorScope = initiatorScopes.of(identity)),
+            ).copy(
+                initiatorScope = initiatorScopes.of(identity),
+                customerSubmissionScope = customerScope,
+            ),
         )
         val responseBody = result.payment.toResponse()
 
@@ -103,6 +113,42 @@ class DomesticPaymentResource(
             .entity(responseBody)
         if (result.replayed) response.header("X-Idempotency-Replayed", "true")
         return response.build()
+    }
+
+    @POST
+    @Path("/submissions/lookup")
+    @RolesAllowed("ROLE_OPERATOR")
+    @Authorize(action = "domestic-payment.read")
+    @Operation(summary = "Reconcile a customer submission by its original idempotency key")
+    suspend fun lookupDomesticPaymentSubmission(
+        request: DomesticPaymentSubmissionLookup?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        requireCustomerEdge()
+        require(!idempotencyKey.isNullOrBlank() && idempotencyKey.length <= IDEMPOTENCY_KEY_MAX_LENGTH) {
+            "Idempotency-Key must be between 1 and 128 characters"
+        }
+        val lookup = requireNotNull(request) { "A submission lookup is required" }
+        val accountId = requireNotNull(lookup.debtorAccountId) { "debtorAccountId is required" }
+        val scope = validatedCustomerScope(lookup.customerSubmissionScope)
+        val payment = paymentUseCase.findCustomerSubmission(idempotencyKey, accountId, scope)
+        val result = if (payment == null) {
+            mapOf("outcome" to "UNKNOWN")
+        } else {
+            mapOf("outcome" to "FOUND", "paymentId" to payment.id.toString(), "status" to payment.status.name)
+        }
+        return Response.ok(result).header("Cache-Control", "no-store").build()
+    }
+
+    private fun requireCustomerEdge() {
+        if (!ServiceAccountIdentity.isPrincipal(identity, CUSTOMER_EDGE)) {
+            throw ForbiddenException("Customer submission scope is restricted to customer-edge")
+        }
+    }
+
+    private fun validatedCustomerScope(scope: String?): String {
+        require(scope != null && CUSTOMER_SUBMISSION_SCOPE.matches(scope)) { "Invalid customer submission scope" }
+        return scope
     }
 
     @GET
@@ -167,5 +213,11 @@ class DomesticPaymentResource(
     ): Response {
         val payment = paymentUseCase.transitionStatus(request.toCommand(paymentId))
         return Response.ok(payment.toResponse()).build()
+    }
+
+    private companion object {
+        const val CUSTOMER_EDGE = "service-account-openbank-edge"
+        const val IDEMPOTENCY_KEY_MAX_LENGTH = 128
+        val CUSTOMER_SUBMISSION_SCOPE = Regex("[0-9a-f]{64}")
     }
 }

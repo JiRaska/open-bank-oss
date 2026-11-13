@@ -43,6 +43,12 @@ data class UpdateAmlDecisionCommand(
     val decisionReason: String?,
     val assignedAnalyst: String?,
     val decidedBy: String,
+    /**
+     * The approved four-eyes proposal this decision executes (ADR-0371 §5). A decision that closes
+     * or escalates a transaction-monitoring case is refused without one, so no single caller — an
+     * analyst, the sandbox auto-clear, a future job — can decide such a case alone.
+     */
+    val fourEyesProposalId: UUID? = null,
 )
 
 interface AmlCaseUseCase {

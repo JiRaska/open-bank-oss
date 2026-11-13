@@ -21,7 +21,7 @@ metadata:
   namespace: temporal
   labels:
     app.kubernetes.io/part-of: temporal
-    openbank.io/derived: gitops-manual
+    open-bank.tech/derived: gitops-manual
 spec:
   podSelector: {}
   policyTypes:
@@ -38,7 +38,7 @@ metadata:
   namespace: temporal
   labels:
     app.kubernetes.io/part-of: temporal
-    openbank.io/derived: gitops-manual
+    open-bank.tech/derived: gitops-manual
 spec:
   podSelector:
     matchLabels:
@@ -47,7 +47,7 @@ spec:
     - Ingress
   ingress:
     # OpenBank services calling the Temporal frontend gRPC (7233).
-    # - namespaces labelled openbank.io/plane: platform. NOTE this is a PLANE label, not the
+    # - namespaces labelled open-bank.tech/plane: platform. NOTE this is a PLANE label, not the
     #   namespace named `platform`: it is carried by argo-rollouts, external-dns, external-secrets,
     #   falco, reposilite, vault and vpa, and NOT by `platform` itself. This comment used to read
     #   "platform-plane: copilot, agent, etc.", which named workloads that live in ns `platform`
@@ -59,7 +59,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              openbank.io/plane: platform
+              open-bank.tech/plane: platform
         - namespaceSelector:
             matchExpressions:
               - key: kubernetes.io/metadata.name
@@ -101,7 +101,7 @@ metadata:
   namespace: temporal
   labels:
     app.kubernetes.io/part-of: temporal
-    openbank.io/derived: gitops-manual
+    open-bank.tech/derived: gitops-manual
 spec:
   podSelector: {}
   policyTypes:
@@ -128,7 +128,7 @@ metadata:
   namespace: temporal
   labels:
     app.kubernetes.io/part-of: temporal
-    openbank.io/derived: gitops-manual
+    open-bank.tech/derived: gitops-manual
 spec:
   # The temporal-db CNPG pods are caught by the podSelector:{} policies above, which
   # default-deny everything not explicitly allowed. The CloudNativePG operator (cnpg-system)

@@ -381,6 +381,13 @@ Outbox v2 acknowledges `transaction_outbox` rows only when a dispatcher owns the
 - **2026-09-06** — New inbound REST surface `TransactionCategoryResource`: a customer sets, clears and lists their own spend category, keyed by counterparty rather than by transaction (#8573). New trust boundary crossing, hence §4f. No money path touched and `merchantCategory` keeps its MCC meaning — the resolved value is a new additive field. Two gaps recorded rather than claimed away: the row has no actor identity, and the new action is reachable by the shared M2M service account. Rollback: revert the commit and drop the table (see the migration's Rollback note); the read path falls back to the merchant catalogue, which is what renders today.
 - **2026-09-05** — New inbound REST surface `MerchantCatalogResource` (`/api/v1/merchants`): list, an unmatched-descriptor worklist, upsert and delete, so the D5 catalogue §4c reads can actually be filled (#8573). New trust boundary crossing, hence §4d. No money path touched and no cardholder data added — the table stays keyed by acquirer descriptor. Residual gap recorded rather than papered over: the row records `updated_at` but not who edited it. Rollback: revert the commit; §4c degrades to the empty catalogue it reads today, which already renders the raw descriptor.
 
+- **2026-11-11** — Transaction initiation persists the authenticated synthetic classification before
+  starting Temporal (ADR-0252, #7284). A worker loads the stored value when selecting the ledger
+  route. Initiation, terminal and reversal events carry the same classification. An idempotency
+  replay across classifications receives HTTP 409, including a concurrent duplicate. Existing
+  rows default to ordinary origin. Trust-list activation and canary scheduling require review after
+  the transaction workers and ledger route are deployed.
+
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal balance, FX and ledger REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or transaction-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
 - **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a
@@ -688,3 +695,13 @@ Residual risk: manually deleting a retained image/Deployment can strand pinned
 executions. Require server-side drainage evidence before retirement, retain artifacts
 for recovery, and keep changes under the existing two-review money-path process.
 No new payment command, retry policy, API contract or schema is introduced.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

@@ -40,7 +40,7 @@ metadata:
   name: stateful-on-demand-cel
   labels:
     app.kubernetes.io/part-of: kyverno-policies
-    openbank.io/plane: platform
+    open-bank.tech/plane: platform
   annotations:
     policies.kyverno.io/title: "Route money-path databases (and temporal-db) to on-demand capacity"
     policies.kyverno.io/category: "Reliability"
@@ -99,10 +99,16 @@ spec:
       expression: >-
         'cnpg.io/cluster' in variables.labels &&
         (request.namespace + '/' + variables.labels['cnpg.io/cluster']) in variables.targets
+    # Node-key migration to open-bank.tech, stage 1: stateful pods tolerate BOTH taint keys,
+    # so stage 2 can switch the NodePool taint without leaving a pod unschedulable.
     - name: hasToleration
       expression: >-
         object.spec.?tolerations.orValue([]).exists(t,
           t.?key.orValue('') == 'openbank.io/stateful')
+    - name: hasNewToleration
+      expression: >-
+        object.spec.?tolerations.orValue([]).exists(t,
+          t.?key.orValue('') == 'open-bank.tech/stateful')
     - name: onDemand
       expression: >-
         Object.spec.affinity.nodeAffinity{
@@ -153,9 +159,14 @@ spec:
     - patchType: JSONPatch
       jsonPatch:
         expression: >-
-          variables.hasToleration ? [] :
+          (variables.hasToleration && variables.hasNewToleration) ? [] :
             (has(object.spec.tolerations) ? [] :
               [JSONPatch{op: "add", path: "/spec/tolerations", value: []}])
-            + [JSONPatch{op: "add", path: "/spec/tolerations/-",
+            + (variables.hasToleration ? [] :
+              [JSONPatch{op: "add", path: "/spec/tolerations/-",
                          value: Object.spec.tolerations{key: "openbank.io/stateful", operator: "Equal",
-                                                        value: "true", effect: "NoSchedule"}}]
+                                                        value: "true", effect: "NoSchedule"}}])
+            + (variables.hasNewToleration ? [] :
+              [JSONPatch{op: "add", path: "/spec/tolerations/-",
+                         value: Object.spec.tolerations{key: "open-bank.tech/stateful", operator: "Equal",
+                                                        value: "true", effect: "NoSchedule"}}])

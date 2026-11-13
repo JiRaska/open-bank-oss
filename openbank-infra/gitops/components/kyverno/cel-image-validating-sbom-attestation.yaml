@@ -60,7 +60,7 @@ metadata:
   name: verify-openbank-image-sbom-attestation-cel
   labels:
     app.kubernetes.io/part-of: kyverno-policies
-    openbank.io/plane: platform
+    open-bank.tech/plane: platform
   annotations:
     policies.kyverno.io/title: Verify OpenBank image signature + SBOM attestation (ADR-0030 D4)
     policies.kyverno.io/category: Supply Chain Security

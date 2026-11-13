@@ -31,7 +31,7 @@ metadata:
   namespace: party
   labels:
     app.kubernetes.io/part-of: party
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -57,6 +57,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: documents
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: fx
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: interest
@@ -121,7 +124,7 @@ metadata:
   namespace: party
   labels:
     app.kubernetes.io/part-of: party
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

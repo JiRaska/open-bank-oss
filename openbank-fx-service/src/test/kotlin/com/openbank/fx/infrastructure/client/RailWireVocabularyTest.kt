@@ -5,6 +5,8 @@
 package com.openbank.fx.infrastructure.client
 
 import com.openbank.fx.application.port.out.FraudScoreCommand
+import com.openbank.fx.application.port.out.ScreeningEntityType
+import com.openbank.fx.application.port.out.ScreeningSubject
 import com.openbank.libs.fincrime.FraudVerdict
 import com.openbank.libs.fincrime.ScreeningMatchStatus
 import com.openbank.libs.fincrime.ScreeningRole
@@ -29,7 +31,11 @@ class RailWireVocabularyTest {
         val invalid = listOf(null, "", "UNRECOGNISED").map { it to ScreeningMatchStatus.ESCALATED }
         for ((remote, expected) in valid + padded + invalid) {
             every { client.screen(any()) } returns Uni.createFrom().item(ScreenResponse(status = remote))
-            val actual = adapter.screen("Synthetic subject", ScreeningRole.DEBTOR, "wire-contract").status
+            val actual = adapter.screen(
+                ScreeningSubject(listOf("Synthetic subject"), ScreeningEntityType.INDIVIDUAL),
+                ScreeningRole.DEBTOR,
+                "wire-contract",
+            ).status
             assertThat(actual).describedAs("remote=%s", remote).isEqualTo(expected)
         }
     }

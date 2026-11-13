@@ -27,6 +27,20 @@ decide(principal, action) := d if {
 	}
 }
 
+test_fincrime_reviewer_can_decide_but_cannot_author_or_publish if {
+	aml := human("synthetic-aml-reviewer", ["ROLE_COMPLIANCE", "FINCRIME_AML_APPROVER"])
+	fraud := human("synthetic-fraud-reviewer", ["ROLE_RISK", "FINCRIME_FRAUD_APPROVER"])
+	decide(aml, "catalog.revisionApproval.decide").allow
+	decide(fraud, "catalog.revisionApproval.decide").allow
+	not decide(aml, "catalog.author").allow
+	not decide(fraud, "catalog.publish").allow
+}
+
+test_fincrime_review_requires_derived_human_authority if {
+	not decide(human("synthetic-risk-reviewer", ["ROLE_RISK"]), "catalog.revisionApproval.decide").allow
+	not decide(machine("service-account-openbank-fraud", ["ROLE_API", "FINCRIME_FRAUD_APPROVER"]), "catalog.revisionApproval.decide").allow
+}
+
 # Endpoint RBAC admitting ROLE_API is not an OPA grant. Preserve the shared policy's
 # named caller + scope boundary instead of restoring the original blanket API intent.
 test_api_role_alone_does_not_grant_catalog_reads if {
@@ -211,6 +225,7 @@ test_pension_fund_scope_does_not_grant_other_clients if {
 	every caller in ["service-account-openbank-services", "service-account-other"] {
 		not decide(machine(caller, ["ROLE_API", "CATALOG_SCOPE_READ"]), "catalog.read").allow
 	}
+
 	# lending is a named catalog reader in its own right (service-named-catalog-read), so it may
 	# read; what this test pins is that it never does so through the pension-fund grant.
 	not "service-pension-fund-catalog-read" in rest.allowed_reasons with input as {

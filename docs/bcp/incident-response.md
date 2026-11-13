@@ -57,6 +57,14 @@ Both declaration and resolution go through the audit chain (ADR-0086 / ADR-0133)
 identity attached — the same tamper-evident chain every other regulated event in this platform
 uses. There is no separate, unaudited incident log.
 
+**Personal data involved?** If a declared incident plausibly involves personal data (disclosure,
+alteration, loss), also start the personal-data-breach path in
+[`docs/runbooks/0035-personal-data-breach-notification.md`](../runbooks/0035-personal-data-breach-notification.md):
+GDPR Art. 33 gives 72 hours from awareness to notify the supervisory authority, and the breach is
+recorded in the breach register (kept outside this public repository; the repository holds
+only its template) whether or not it is notified. This is independent of the DORA
+major-incident clock above.
+
 ---
 
 ## 4. Escalation
@@ -91,7 +99,7 @@ pressure. Runbooks live under `docs/runbooks/key-ceremonies/`:
 - **Keycloak realm signing-key renewal**: manual. The ADR-0099 Tier 2 OIDC rotator was
   withdrawn by ADR-0177 and removed, so there is no automated cadence to coordinate with.
   Static OIDC client secrets are rotated by hand, by each ExternalSecret's
-  `openbank.io/rotation-deadline`.
+  `open-bank.tech/rotation-deadline`.
 - **cert-manager PKI rotation** — automatic; this runbook covers the manual-intervention path if
   automatic renewal fails.
 
@@ -107,6 +115,7 @@ claim.
 |----------|--------|
 | [`bcp-policy.md`](bcp-policy.md) | RTO/RPO targets per tier, technical recovery capabilities |
 | [`dr-test-log.md`](dr-test-log.md) | Record of DR test executions |
+| [`0035-personal-data-breach-notification.md`](../runbooks/0035-personal-data-breach-notification.md) | Personal data breach path (GDPR Art. 33/34) |
 | `docs/runbooks/<NNNN>-*.md` | Per-system recovery/migration procedures |
 | This document | Declaration, severity, escalation, and the register that ties detection to
   recovery to the DORA reporting obligation |

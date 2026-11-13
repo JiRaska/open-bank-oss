@@ -35,4 +35,7 @@ class SctInstPaymentEntity {
     @Column(name = "submitted_at") var submittedAt: OffsetDateTime? = null
     @Column(name = "created_at", nullable = false) var createdAt: OffsetDateTime = OffsetDateTime.MIN
     @Column(name = "updated_at", nullable = false) var updatedAt: OffsetDateTime = OffsetDateTime.MIN
+
+    @Column(name = "synthetic", updatable = false)
+    var synthetic: Boolean? = null
 }

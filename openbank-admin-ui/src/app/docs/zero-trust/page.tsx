@@ -339,8 +339,8 @@ export default async function ZeroTrustPage() {
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
               {net?.internetEgress === 'opt-in'
-                ? t('Default odepřen. Službа se musí explicitně přihlásit labelem openbank.io/allow-internet-egress=true (např. FX kurzy, import sankčních seznamů).',
-                    'Denied by default. A service must explicitly opt in via the openbank.io/allow-internet-egress=true label (e.g. FX rates, sanctions-list import).')
+                ? t('Default odepřen. Službа se musí explicitně přihlásit labelem open-bank.tech/allow-internet-egress=true (např. FX kurzy, import sankčních seznamů).',
+                    'Denied by default. A service must explicitly opt in via the open-bank.tech/allow-internet-egress=true label (e.g. FX rates, sanctions-list import).')
                 : t('Otevřený egress.', 'Open egress.')}
             </div>
           </div>
