@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.12.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.12.1...admin-ui-v4.12.2) (2026-11-13)
+
+
+### Bug Fixes
+
+* **agent:** classify a missing OPA result as a PDP error, fail closed on unknown enforcement mode, correct stale fail-open text ([#15813](https://github.com/JiRaska/open-bank-oss/issues/15813)) ([bc62fba](https://github.com/JiRaska/open-bank-oss/commit/bc62fba7201951923ff5c790898a54d57b352118)), closes [#15758](https://github.com/JiRaska/open-bank-oss/issues/15758)
+
 ## [4.12.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.12.0...admin-ui-v4.12.1) (2026-11-12)
 
 
