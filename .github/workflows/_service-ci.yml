@@ -777,59 +777,7 @@ jobs:
           BRANCH: ${{ github.head_ref || github.ref_name }}
           PACT_CONSUMER: ${{ inputs.consumer }}
           SERVICE: ${{ inputs.service }}
-        run: |
-          set -euo pipefail
-          consumer_args=()
-          if [ -n "${PACT_CONSUMER:-}" ]; then
-            [[ "$PACT_CONSUMER" =~ ^openbank-[a-z0-9-]+$ ]] || {
-              echo '::error::Consumer must be an openbank-* module name.'
-              exit 1
-            }
-            if [ -n "${HISTORICAL_PACT_URL:-}" ]; then
-              echo '::error::A consumer scope cannot be combined with a historical admin-ui proof.'
-              exit 1
-            fi
-            # P keeps its own build-logic. Validate its effective Test task after
-            # configuration, before any provider task/JVM can publish a result.
-            scope_guard="$RUNNER_TEMP/pact-consumer-scope.init.gradle"
-            cat > "$scope_guard" <<'GRADLE'
-          // Init scripts also apply to included builds (build-logic), whose root project has no
-          // service subproject; checking there failed every scoped replay before any test ran.
-          if (gradle.parent != null) {
-              return
-          }
-          gradle.projectsEvaluated {
-              def provider = gradle.rootProject.project(":" + System.getenv("SERVICE"))
-              def task = provider.tasks.named("providerPactTest").get()
-              if (!(task instanceof org.gradle.api.tasks.testing.Test) ||
-                      task.systemProperties["pact.filter.consumers"] != System.getenv("PACT_CONSUMER")) {
-                  throw new GradleException("Consumer scope is not forwarded by the checked-out provider Test task; refusing replay.")
-              }
-          }
-          GRADLE
-            # A scoped run
-            # publishes verification results only for the pacts it actually verified (pact-jvm
-            # publishes per verified consumer pact), so the broker never records a result for a
-            # consumer that was not replayed; other consumers stay unverified for this version.
-            consumer_args=("-Dpact.filter.consumers=${PACT_CONSUMER}" --init-script "$scope_guard")
-          fi
-          pact_url_arg=()
-          if [ -n "${HISTORICAL_PACT_URL:-}" ]; then
-            pact_url_arg=(-Dpact.filter.pacturl="${HISTORICAL_PACT_URL}" -Dpact.filter.consumers=openbank-admin-ui)
-          fi
-          ./gradlew :${{ inputs.service }}:providerPactTest --build-cache \
-            --console=plain --stacktrace \
-            ${consumer_args[@]+"${consumer_args[@]}"} \
-            -Dpactbroker.url="${PACT_BROKER_URL:-}" \
-            -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \
-            -Dpactbroker.auth.password="${PACT_BROKER_PASSWORD:-}" \
-            -Dpactbroker.enablePending=true \
-            -Dpactbroker.providerBranch="${BRANCH}" \
-            -Dpact.verifier.publishResults=true \
-            -Dpact.provider.version="${PACT_PROVIDER_VERSION}" \
-            -Dpact.provider.branch="${BRANCH}" \
-            -Dpact.provider.tag="${BRANCH}" \
-            ${pact_url_arg[@]+"${pact_url_arg[@]}"}
+        run: bash -e "$SERVICE_CI_HELPERS/verify-provider.sh"
 
       - name: Require historical broker verifier interactions
         if: ${{ inputs.historical_admin_ui_version != '' }}

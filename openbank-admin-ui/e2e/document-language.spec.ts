@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 test('server render and language toggle keep the document language synchronized', async ({ page, context, baseURL }) => {

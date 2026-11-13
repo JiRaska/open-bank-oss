@@ -151,7 +151,7 @@ spec:
       - ServerSideApply=true
     managedNamespaceMetadata:
       labels:
-        openbank.io/plane: platform
+        open-bank.tech/plane: platform
         pod-security.kubernetes.io/enforce: restricted
         pod-security.kubernetes.io/audit: restricted
         pod-security.kubernetes.io/warn: restricted
