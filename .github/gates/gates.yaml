@@ -2298,6 +2298,7 @@ gates:
       python3 -m unittest discover -s .github/scripts/tests -p 'test_*.py' -v
       python3 -m unittest discover -s perf/tests -p 'test_*.py' -v
       bash .github/scripts/tests/test-resolve-historical-service-ref.sh
+      bash .github/scripts/tests/test-checkout-provider-ref-shallow.sh
       python3 .github/scripts/test-admin-ui-delivery-baseline.py
       python3 .github/scripts/test-admin-ui-evidence-plan.py
       node .github/scripts/test-issue-hygiene.mjs
