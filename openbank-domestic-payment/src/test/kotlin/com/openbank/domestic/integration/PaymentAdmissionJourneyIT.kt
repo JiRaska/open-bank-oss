@@ -530,7 +530,7 @@ class PaymentAdmissionJourneyIT {
 
         val one = RestAssured.given().get("/api/v1/domestic-payments/$payment").then().statusCode(200)
             .body("status", equalTo("REJECTED"))
-            .body("rejectReason", nullValue())
+            .body("rejectReason", equalTo("DECLINED"))
             .body("rejectDetail", nullValue())
             .extract().asString()
         val listed = RestAssured.given().queryParam("debtorAccountId", account).get("/api/v1/domestic-payments")
@@ -788,23 +788,23 @@ class PaymentAdmissionJourneyIT {
     }
 
     @Test
-    fun `a review whose evidence does not say what matched is never covered by a decision`() {
+    fun `a review whose evidence does not say what matched is unavailable, not reviewed, until a named match`() {
         world.unnamedMatches += "REVIEW Unnamed"
         val payment = create(creditorName = "REVIEW Unnamed")
         awaitStatus(payment, "HELD")
-        assertThat(column(payment, "hold_case_reasons")).describedAs("nothing a decision could cover").isEqualTo("none")
 
-        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment)) }
-        await("the second review to be requested") { heldEvents(payment).size == 2 }
-        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment, 2)) }
-        await("the third review to be requested") { heldEvents(payment).size == 3 }
+        // A malformed answer: no decision could ever cover it, so no case is asked for and no review
+        // can follow review until the hold expires. The payment waits as for a control that is down.
+        assertThat(heldEvents(payment)).describedAs("a malformed review opens no case").isEmpty()
+        assertThat(world.submissions(payment)).isZero()
 
-        // However often it is cleared, it is not sent. It ends by its expiry.
+        // The control answers properly: now it is a review, with a case that can cover it.
+        world.unnamedMatches -= "REVIEW Unnamed"
+        runtime.advance(PaymentHoldPolicy.REEVALUATION_INTERVAL.plusMinutes(1))
+        await("the review to be requested once the match is named") { heldEvents(payment).size == 1 }
+        assertThat(column(payment, "hold_case_reasons")).isNotEqualTo("none")
         assertThat(status(payment)).isEqualTo("HELD")
         assertThat(world.submissions(payment)).isZero()
-        shiftHold(payment, PaymentHoldPolicy.EXPIRY.plusHours(1))
-        runtime.advance(PaymentHoldPolicy.HOLD_CHECK_INTERVAL.plusMinutes(1))
-        awaitStatus(payment, "REJECTED")
     }
 
     @Test
@@ -828,6 +828,72 @@ class PaymentAdmissionJourneyIT {
         repeat(2) { sweep() }
         assertThat(column(held, "redrive_attempts")).describedAs("a HELD payment is not re-driven").isEqualTo("0")
         assertThat(column(held, "run_checked_at")).isNotEqualTo("none")
+    }
+
+    @Test
+    fun `two conclusions of one hold overlap and exactly one of them ends it`() {
+        val payment = create(creditorName = "REVIEW Overlap")
+        awaitStatus(payment, "HELD")
+        await("the hold's case to be requested") { heldEvents(payment).size == 1 }
+        val stored = onVertx { checkNotNull(payments.findById(payment)) }
+        val before = statusTrail(payment)
+
+        // Two attempts that read the same hold, each ending it, on their own transactions at once.
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
+        val start = java.util.concurrent.CountDownLatch(1)
+        val outcomes = (1..2).map {
+            pool.submit<Boolean> {
+                start.await()
+                runCatching {
+                    onVertx {
+                        val ended = stored.transitionTo(DomesticPaymentStatus.VALIDATED, clock = Clock.systemUTC())
+                        admissionWrites.transition(ended, emptyList())
+                    }
+                }.isSuccess
+            }
+        }
+        start.countDown()
+        val results = outcomes.map { it.get(30, java.util.concurrent.TimeUnit.SECONDS) }
+        pool.shutdown()
+
+        assertThat(results.count { it }).describedAs("exactly one conclusion writes").isEqualTo(1)
+        assertThat(status(payment)).isNotEqualTo("HELD")
+        assertThat(statusTrail(payment)).describedAs("the loser wrote no event").isEqualTo(before)
+    }
+
+    @Test
+    fun `a conclusion computed on an earlier review cannot end the hold once the next review is asked`() {
+        val payment = create(creditorName = "REVIEW Stale")
+        awaitStatus(payment, "HELD")
+        await("the hold's case to be requested") { heldEvents(payment).size == 1 }
+        val stale = onVertx { checkNotNull(payments.findById(payment)) }
+
+        // Meanwhile another attempt asked for review 2: no revision bump, only the hold moved on.
+        val asked = onVertx {
+            admissionWrites.requestNextReview(
+                payment,
+                fromReview = stale.holdReview,
+                reasons = emptySet(),
+                event = com.openbank.libs.persistence.outbox.OutboxMessage(
+                    eventId = UUID.randomUUID(),
+                    aggregateId = payment,
+                    eventType = "domestic.payment.held",
+                    payload = "{}",
+                ),
+            )
+        }
+        assertThat(asked).isTrue()
+
+        val written = runCatching {
+            onVertx {
+                admissionWrites.transition(
+                    stale.transitionTo(DomesticPaymentStatus.VALIDATED, clock = Clock.systemUTC()),
+                    emptyList(),
+                )
+            }
+        }
+        assertThat(written.isFailure).describedAs("the stale release is refused under the row lock").isTrue()
+        assertThat(status(payment)).isEqualTo("HELD")
     }
 
     @Test

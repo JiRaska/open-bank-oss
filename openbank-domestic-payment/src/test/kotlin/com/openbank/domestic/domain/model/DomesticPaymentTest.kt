@@ -76,13 +76,17 @@ class DomesticPaymentTest {
         val shown = DomesticRejectReason.entries.associateWith { it.customerFacing.asRailReason }
 
         // Named one by one: a reason added later must be placed here on purpose.
-        assertThat(shown.filterValues { it == null }.keys).containsExactlyInAnyOrder(
+        // Never null: a client is given a neutral reason to render, not an empty one.
+        assertThat(shown.filterValues { it == DomesticRejectReason.DECLINED }.keys).containsExactlyInAnyOrder(
             DomesticRejectReason.AML_HOLD,
             DomesticRejectReason.SANCTIONS_HIT,
             DomesticRejectReason.FRAUD_SUSPECTED,
             DomesticRejectReason.DEBTOR_ACCOUNT_BLOCKED,
+            DomesticRejectReason.DECLINED,
         )
-        shown.filterValues { it != null }.forEach { (reason, seen) -> assertThat(seen).isEqualTo(reason) }
+        shown.filterValues {
+            it != DomesticRejectReason.DECLINED
+        }.forEach { (reason, seen) -> assertThat(seen).isEqualTo(reason) }
     }
 
     @Test

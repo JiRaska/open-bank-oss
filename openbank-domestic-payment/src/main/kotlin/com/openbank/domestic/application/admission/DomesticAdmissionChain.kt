@@ -15,6 +15,7 @@ import com.openbank.domestic.application.port.out.ScreeningUnavailableException
 import com.openbank.domestic.application.workflow.FraudGateAction
 import com.openbank.domestic.application.workflow.FraudGatePolicy
 import com.openbank.domestic.application.workflow.FraudHoldBasis
+import com.openbank.domestic.application.workflow.evidenceIdentity
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.domestic.domain.model.RecordedFraudScore
@@ -37,6 +38,7 @@ import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.withTimeoutOrNull
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.logging.Logger
 import java.time.Duration
 
 /**
@@ -74,6 +76,8 @@ class DomesticAdmissionChain(
     @ConfigProperty(name = "openbank.domestic.admission.budget", defaultValue = "PT30S")
     private val budget: Duration,
 ) {
+    private val log = Logger.getLogger(DomesticAdmissionChain::class.java)
+
     /** One evaluation: the payment, and where the fraud step reports a score it obtained afresh. */
     private class Evaluation(val payment: DomesticPayment, val onFreshFraudScore: (RecordedFraudScore) -> Unit)
 
@@ -82,9 +86,13 @@ class DomesticAdmissionChain(
             .unbound(AdmissionStep.AUTHORITY, AUTHORITY_DECIDED_AT_SUBMISSION)
             .check(AdmissionStep.STANDING) { evaluation, remaining -> standingWithin(evaluation.payment, remaining) }
             .unbound(AdmissionStep.LIMITS, LIMITS_NOT_DELIVERED)
-            .check(AdmissionStep.SANCTIONS) { evaluation, remaining -> sanctions(evaluation.payment, remaining) }
+            .check(AdmissionStep.SANCTIONS) { evaluation, remaining ->
+                wellFormed(AdmissionStep.SANCTIONS, sanctions(evaluation.payment, remaining))
+            }
             .unbound(AdmissionStep.AML_DESTINATION_RISK, AML_DESTINATION_RISK_NOT_DELIVERED)
-            .check(AdmissionStep.FRAUD) { evaluation, remaining -> fraud(evaluation, remaining) }
+            .check(AdmissionStep.FRAUD) { evaluation, remaining ->
+                wellFormed(AdmissionStep.FRAUD, fraud(evaluation, remaining))
+            }
             .unbound(AdmissionStep.PAYEE_VERIFICATION, PAYEE_VERIFICATION_NOT_REQUIRED)
             .build()
 
@@ -97,6 +105,24 @@ class DomesticAdmissionChain(
      */
     suspend fun admit(payment: DomesticPayment, onFreshFraudScore: (RecordedFraudScore) -> Unit): AdmissionResult =
         chain.admit(Evaluation(payment, onFreshFraudScore))
+
+    /**
+     * The one place a control's answer is checked for shape. A "a human must look" answer whose
+     * evidence does not say WHAT was found (a sanctions review naming no matched entry, a fraud
+     * review without verdict, score and rule version) is malformed: no case decision could ever
+     * cover it, so holding it for review would request review after review until the hold expires.
+     * It is answered as UNAVAILABLE instead, which holds without a case, is counted and alerted on
+     * the unavailable path, and is asked again on the next evaluation.
+     */
+    private fun wellFormed(step: AdmissionStep, outcome: StepOutcome): StepOutcome {
+        val wantsHuman = outcome is StepOutcome.Decided &&
+            (outcome.decision == AdmissionDecision.HOLD || outcome.decision == AdmissionDecision.CHALLENGE)
+        if (!wantsHuman || evidenceIdentity(step, (outcome as StepOutcome.Decided).evidence.attributes) != null) {
+            return outcome
+        }
+        log.warnf("[admission] %s asked for a review with no evidence identity; treated as unavailable", step)
+        return StepOutcome.Unavailable(UnavailableCause.MISSING_DATA)
+    }
 
     private suspend fun standingWithin(payment: DomesticPayment, remaining: Duration): StepOutcome {
         val lookup = withTimeoutOrNull(remaining.toMillis()) { standingPort.debtorStanding(payment.debtorAccountId) }

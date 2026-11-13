@@ -48,6 +48,7 @@ class DomesticAdmissionChainTest {
     private var standing: AccountStandingLookup = AccountStandingLookup.Known(owner, mayDebit = true, reason = null)
     private var creditorStatus = ScreeningMatchStatus.CLEAR
     private var screeningDown = false
+    private var matchedEntity: String? = "Listed Entity 7"
     private var fraud = FraudScoreOutcome(FraudVerdict.ALLOW, 3, "rules-1", emptyList())
     private val calls = mutableListOf<String>()
 
@@ -62,7 +63,7 @@ class DomesticAdmissionChainTest {
             calls += "sanctions:$role"
             if (screeningDown) throw ScreeningUnavailableException(IllegalStateException("down"))
             val status = if (role == ScreeningRole.CREDITOR) creditorStatus else ScreeningMatchStatus.CLEAR
-            val matched = if (status == ScreeningMatchStatus.CLEAR) null else "Listed Entity 7"
+            val matched = if (status == ScreeningMatchStatus.CLEAR) null else matchedEntity
             // Below the policy's block threshold, so a POTENTIAL_HIT is a review and not a block.
             return ScreeningResult(name, role, status, if (matched == null) 0.0 else 0.8, matched)
         }
@@ -123,6 +124,29 @@ class DomesticAdmissionChainTest {
         assertThat(result.degraded).isTrue()
         assertThat(result[AdmissionStep.STANDING].outcome)
             .isEqualTo(StepOutcome.Unavailable(UnavailableCause.DEPENDENCY_DOWN))
+    }
+
+    @Test
+    fun `a sanctions review naming no matched entry is unavailable, not a review, until a well-formed answer`() {
+        creditorStatus = ScreeningMatchStatus.POTENTIAL_HIT
+        matchedEntity = null
+
+        val malformed = admit()
+
+        // Held, but as a control that could not answer: no case is asked for, so no review can
+        // follow review until the hold expires.
+        assertThat(malformed.decision).isEqualTo(AdmissionDecision.HOLD)
+        assertThat(malformed.degraded).isTrue()
+        assertThat(malformed[AdmissionStep.SANCTIONS].outcome)
+            .isEqualTo(StepOutcome.Unavailable(UnavailableCause.MISSING_DATA))
+        assertThat(malformed.reasons).doesNotContain(DomesticAdmissionChain.SANCTIONS_POTENTIAL_MATCH)
+
+        matchedEntity = "Listed Entity 7"
+        val wellFormed = admit()
+
+        assertThat(wellFormed.decision).isEqualTo(AdmissionDecision.HOLD)
+        assertThat(wellFormed.degraded).isFalse()
+        assertThat(wellFormed.reasons).containsExactly(DomesticAdmissionChain.SANCTIONS_POTENTIAL_MATCH)
     }
 
     @Test

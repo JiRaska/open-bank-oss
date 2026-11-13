@@ -177,6 +177,16 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
     override suspend fun findRedrivable(maxAttempts: Int, minAge: Instant, limit: Int): List<UUID> =
         Panache.withSession {
             find(
+                "status = ?1 and redriveAttempts < ?2 and createdAt < ?3 order by createdAt asc",
+                DomesticPaymentStatus.RECEIVED.name,
+                maxAttempts,
+                minAge,
+            ).range(0, limit - 1).list()
+        }.awaitSuspending().map { it.paymentId }
+
+    override suspend fun findRedrivableLeastRecentlyChecked(maxAttempts: Int, minAge: Instant, limit: Int): List<UUID> =
+        Panache.withSession {
+            find(
                 "status = ?1 and redriveAttempts < ?2 and createdAt < ?3 " +
                     "order by runCheckedAt asc nulls first, createdAt asc",
                 DomesticPaymentStatus.RECEIVED.name,
@@ -361,6 +371,19 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
                     check(payment.aggregateRevision == entity.aggregateRevision + 1) {
                         "Stale domestic payment revision ${payment.aggregateRevision}; " +
                             "current revision is ${entity.aggregateRevision}"
+                    }
+                    // A hold's review and decision are written without a revision bump (by the decision
+                    // consumer and by a request for the next review), so a write that ends a hold also
+                    // proves, under this lock, that the hold is still the one it evaluated. Otherwise a
+                    // release computed on review N could land after review N+1 was requested.
+                    if (entity.status == DomesticPaymentStatus.HELD.name) {
+                        check(
+                            (entity.holdReview ?: 1) == payment.holdReview &&
+                                entity.holdDecision == payment.holdDecision?.name,
+                        ) {
+                            "Hold of domestic payment ${payment.id} changed since it was evaluated " +
+                                "(review ${entity.holdReview}, decision ${entity.holdDecision})"
+                        }
                     }
                     entity.applyBookingTransition(payment, acceptedBooking, provenTransactionId)
                     entity.status = payment.status.name

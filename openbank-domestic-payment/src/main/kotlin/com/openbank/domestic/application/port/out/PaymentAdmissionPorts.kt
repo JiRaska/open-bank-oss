@@ -126,6 +126,13 @@ enum class PaymentHoldEnd {
     CLEARED_BY_REEVALUATION,
     RELEASED,
 
+    /**
+     * Released by the case, and a control the case was opened for no longer applies (its
+     * enforcement was switched off during the hold). An operator-controlled release: the evidence
+     * that control raised was never decided on.
+     */
+    RELEASED_CONTROL_NOT_APPLICABLE,
+
     /** Released by the case, refused by the standing re-run at release (ADR-0374 D13, funds). */
     RELEASE_REFUSED,
     REVIEW_REJECTED,

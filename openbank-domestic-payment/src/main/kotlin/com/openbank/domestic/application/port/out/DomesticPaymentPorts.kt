@@ -98,7 +98,17 @@ interface DomesticPaymentRepository {
      */
     suspend fun findRedrivable(maxAttempts: Int, minAge: Instant, limit: Int): List<UUID>
 
-    /** Count one re-drive against [paymentId]: a run was started for it. */
+    /**
+     * [findRedrivable] for the admission chain: the same rows, least recently offered a run first
+     * ([markRunChecked]). Only the chain-on sweep reads it; with the chain off the sweep is main's.
+     */
+    suspend fun findRedrivableLeastRecentlyChecked(maxAttempts: Int, minAge: Instant, limit: Int): List<UUID> =
+        findRedrivable(maxAttempts, minAge, limit)
+
+    /**
+     * Count one re-drive against [paymentId]. With the chain off it is counted before the attempt,
+     * as on main; with it on, only for a run that was actually started.
+     */
     suspend fun recordRedriveAttempt(paymentId: UUID)
 
     /**

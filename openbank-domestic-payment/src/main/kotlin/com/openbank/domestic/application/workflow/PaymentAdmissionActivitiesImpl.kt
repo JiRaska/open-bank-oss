@@ -227,8 +227,7 @@ open class PaymentAdmissionActivitiesImpl(
         val result = chain.admit(payment) { freshFraudScore = it }
         freshFraudScore?.let { writes.rememberFraudScore(payment.id, it) }
         val unanswered = result.steps.filter { it.outcome is StepOutcome.Unavailable }
-        // A review whose evidence has no identity is never covered, whatever the row says.
-        val uncovered = result.reviewed().filter { it.identity == null || it.covered() !in payment.holdCaseReasons }
+        val uncovered = result.reviewed().filter { it.covered() !in payment.holdCaseReasons }
             .map { it.reason }
         return when {
             result.decision == AdmissionDecision.REJECT -> {
@@ -268,8 +267,24 @@ open class PaymentAdmissionActivitiesImpl(
             else -> {
                 val updated = payment.transitionTo(DomesticPaymentStatus.VALIDATED, clock = clock)
                 writes.transition(updated, listOf(eventPublisher.statusChanged(payment, updated)))
-                metrics.recordHoldEnd(PaymentHoldEnd.RELEASED)
-                log.infof("Held payment %s released by its case", payment.id)
+                // A control the case was opened for that reports NotApplicable now was switched off
+                // during the hold (fraud enforcement, say). Configuration decides that, and it is
+                // made visible: the evidence it raised was never decided on.
+                val lapsed = payment.holdCaseReasons.map { it.substringBefore(':') }.distinct()
+                    .mapNotNull { name -> AdmissionStep.entries.firstOrNull { it.name == name } }
+                    .filter { result[it].outcome is StepOutcome.NotApplicable }
+                if (lapsed.isEmpty()) {
+                    metrics.recordHoldEnd(PaymentHoldEnd.RELEASED)
+                    log.infof("Held payment %s released by its case", payment.id)
+                } else {
+                    metrics.recordHoldEnd(PaymentHoldEnd.RELEASED_CONTROL_NOT_APPLICABLE)
+                    log.warnf(
+                        "Held payment %s released by its case while %s, which the case was opened for, no longer " +
+                            "applies; operator-controlled release",
+                        payment.id,
+                        lapsed,
+                    )
+                }
                 HoldState.RELEASED
             }
         }
@@ -334,8 +349,8 @@ private fun DomesticPaymentEventPublisher.statusChanged(previous: DomesticPaymen
     )
 
 /** One control that answered "a human must look", with the identity of the evidence it showed. */
-private class Reviewed(val step: AdmissionStep, val reason: String, val identity: String?) {
-    /** What a decision on this review covers, as recorded on the row. Only meaningful with an identity. */
+private class Reviewed(val step: AdmissionStep, val reason: String, val identity: String) {
+    /** What a decision on this review covers, as recorded on the row. */
     fun covered(): String = "${step.name}:$reason:$identity"
 }
 
@@ -343,7 +358,14 @@ private fun AdmissionResult.reviewed(): List<Reviewed> = steps.mapNotNull { reco
     val outcome = record.outcome as? StepOutcome.Decided
     val wantsHuman = outcome?.decision == AdmissionDecision.HOLD || outcome?.decision == AdmissionDecision.CHALLENGE
     if (outcome != null && wantsHuman) {
-        Reviewed(record.step, outcome.reason.value, evidenceIdentity(record.step, outcome.evidence.attributes))
+        // Never null here: the chain answers a review with no evidence identity as UNAVAILABLE.
+        Reviewed(
+            record.step,
+            outcome.reason.value,
+            checkNotNull(evidenceIdentity(record.step, outcome.evidence.attributes)) {
+                "a ${record.step} review reached the hold with no evidence identity"
+            },
+        )
     } else {
         null
     }
@@ -351,12 +373,10 @@ private fun AdmissionResult.reviewed(): List<Reviewed> = steps.mapNotNull { reco
 
 /**
  * What the case of this result is asked to decide, and so what its decision will cover: step,
- * reason and evidence identity of every control that wants a human. A control whose evidence has no
- * identity contributes nothing, so no decision ever covers it. A control that could not answer is
- * not in it either; nobody can decide for a control that did not speak.
+ * reason and evidence identity of every control that wants a human. A control that could not answer
+ * is not in it; nobody can decide for a control that did not speak.
  */
-private fun AdmissionResult.coveredByCase(): Set<String> =
-    reviewed().filter { it.identity != null }.map { it.covered() }.toSet()
+private fun AdmissionResult.coveredByCase(): Set<String> = reviewed().map { it.covered() }.toSet()
 
 /**
  * A fingerprint of the evidence a control showed, from what the control itself returned, or null
@@ -370,7 +390,7 @@ private fun AdmissionResult.coveredByCase(): Set<String> =
  *  - Fraud: verdict, score and rule version.
  *  - Any other step has no identity until someone says here what its evidence is.
  */
-private fun evidenceIdentity(step: AdmissionStep, evidence: Map<String, String>): String? {
+fun evidenceIdentity(step: AdmissionStep, evidence: Map<String, String>): String? {
     val identified = when (step) {
         AdmissionStep.SANCTIONS -> evidence.keys.filter { it.endsWith("_status") }.let { statuses ->
             statuses.isNotEmpty() &&

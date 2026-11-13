@@ -125,6 +125,26 @@ The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit ma
   accounts still report `mayDebit`, because the rail reads account standing and not party standing.
   Each is a precondition of switching the chain on in production, not of merging it off. A hold that
   outlives its expiry (a lost workflow run) is alerted on: `DomesticPaymentHeldPastExpiry`.
+- **No tipping-off on the customer edge, whatever the admission switch says.** A reject reason that
+  names a control (`SANCTIONS_HIT`, `FRAUD_SUSPECTED`, `AML_HOLD`, `DEBTOR_ACCOUNT_BLOCKED`) reads as
+  the neutral `DECLINED` to the customer edge, with its detail withheld; staff and service callers see
+  the real reason. Strictly narrowing against main, where the first two were readable, and deliberate:
+  telling a customer a payment was stopped for a sanctions hit or a fraud suspicion is tipping-off.
+  The reason is never null, so a client does not render an empty one.
+- **A malformed review answer is not reviewable.** A control that asks for a human but names no
+  evidence (a sanctions review with no matched entry) is answered as UNAVAILABLE in one place
+  (`DomesticAdmissionChain.wellFormed`): no case decision could ever cover it, and holding it for
+  review would request review after review until the hold expires.
+- **Switching fraud enforcement off during a hold releases a fraud-held payment without a decision
+  on its fraud evidence.** That is operator-controlled by configuration and is not changed here; it
+  is made auditable: such a release is counted as `RELEASED_CONTROL_NOT_APPLICABLE` on the hold-end
+  metric and logged at WARN with the lapsed control.
+- **Ending a hold re-checks the hold under the row lock.** A release or reject of a HELD payment is
+  written only if the review number and decision on the row are still the ones it evaluated, so a
+  conclusion computed on an earlier review cannot land after the next review was requested.
+- **Rollback of the image after switch-on** is allowed only with admission off and
+  `openbank_domestic_payments_non_terminal{status="HELD"}` at 0: the previous image has no HELD status
+  and does not poll the admission queue.
 - SCA (sca-service) must gate customer-initiated transfers.
 - **Four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent audit
   trail** (ADR-0155) — a durable-audit requirement for "who approved what, forever" would

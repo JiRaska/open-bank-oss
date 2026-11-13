@@ -68,7 +68,8 @@ enum class CustomerFacingPaymentStatus {
  *
  * A reason is shown only when it is the customer's to act on. A reason that names a control (a
  * sanctions hit, a fraud decline, an AML hold, a blocked account, which may itself be an AML
- * block) is not the customer's to learn (ADR-0374 D13), and reads as [NOT_STATED]. Its own type,
+ * block) is not the customer's to learn (ADR-0374 D13, tipping-off), and reads as [DECLINED],
+ * whatever the admission switch says. Its own type,
  * with an exhaustive mapping from [DomesticRejectReason], so a reason added there cannot reach a
  * customer until someone decides here what the customer sees for it.
  */
@@ -80,13 +81,17 @@ enum class CustomerFacingRejectReason {
     AMOUNT_LIMIT_EXCEEDED,
     TECHNICAL_ERROR,
 
-    /** Rejected, and the reason is not given. On the wire: no reason and no detail. */
-    NOT_STATED,
+    /**
+     * Rejected, and which control refused it is not the customer's to learn: telling a customer that
+     * a payment was stopped for a sanctions hit or a fraud suspicion is tipping-off. A neutral reason
+     * rather than none, so a client never renders an empty one. The detail is withheld with it.
+     */
+    DECLINED,
     ;
 
-    /** The same-named rail reason for a response typed as the rail's; null for [NOT_STATED]. */
-    val asRailReason: DomesticRejectReason?
-        get() = if (this == NOT_STATED) null else DomesticRejectReason.valueOf(name)
+    /** The same-named rail reason, for a response typed as the rail's. */
+    val asRailReason: DomesticRejectReason
+        get() = DomesticRejectReason.valueOf(name)
 }
 
 enum class DomesticPaymentPriority { STANDARD, URGENT, INSTANT }
@@ -106,6 +111,12 @@ enum class DomesticRejectReason {
     /** The debtor account may not be debited: frozen, closed, dormant or not yet active (ADR-0374 D4). */
     DEBTOR_ACCOUNT_BLOCKED,
     TECHNICAL_ERROR,
+
+    /**
+     * The neutral reason a customer channel is shown in place of one that names a control
+     * ([CustomerFacingRejectReason.DECLINED]). The rail never rejects a payment with it.
+     */
+    DECLINED,
     ;
 
     /** What a customer channel is shown for this reason; see [CustomerFacingRejectReason]. */
@@ -117,7 +128,8 @@ enum class DomesticRejectReason {
             INSUFFICIENT_FUNDS -> CustomerFacingRejectReason.INSUFFICIENT_FUNDS
             AMOUNT_LIMIT_EXCEEDED -> CustomerFacingRejectReason.AMOUNT_LIMIT_EXCEEDED
             TECHNICAL_ERROR -> CustomerFacingRejectReason.TECHNICAL_ERROR
-            AML_HOLD, SANCTIONS_HIT, FRAUD_SUSPECTED, DEBTOR_ACCOUNT_BLOCKED -> CustomerFacingRejectReason.NOT_STATED
+            AML_HOLD, SANCTIONS_HIT, FRAUD_SUSPECTED, DEBTOR_ACCOUNT_BLOCKED, DECLINED ->
+                CustomerFacingRejectReason.DECLINED
         }
 }
 

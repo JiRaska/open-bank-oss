@@ -7,6 +7,7 @@ package com.openbank.domestic.infrastructure.rest
 import com.openbank.domestic.application.port.`in`.DomesticPaymentUseCase
 import com.openbank.domestic.application.port.`in`.ListDomesticPaymentsQuery
 import com.openbank.domestic.application.port.`in`.PaymentConfirmationUseCase
+import com.openbank.domestic.domain.model.CustomerFacingRejectReason
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.infrastructure.rest.dto.CreateDomesticPaymentRequest
@@ -151,19 +152,19 @@ class DomesticPaymentResource(
      * The payment as this caller may see it. The customer edge serves the customer, who is not
      * shown that a payment is held (ADR-0374 D13): it reads a hold as RECEIVED on every read of this
      * resource, as on the submission lookup. Nor is the customer told which control rejected a
-     * payment: a reason that names one reads as no reason, and its detail is withheld with it
+     * payment: a reason that names one reads as the neutral DECLINED, its detail withheld
      * ([com.openbank.domestic.domain.model.CustomerFacingRejectReason]). Every other caller reads
      * the real status, reason and detail.
      */
     private fun DomesticPayment.forCaller(): DomesticPaymentResponse {
         val response = toResponse()
         return if (ServiceAccountIdentity.isPrincipal(identity, CUSTOMER_EDGE)) {
-            val shownReason = rejectReason?.customerFacing?.asRailReason
+            val shown = rejectReason?.customerFacing
             response.copy(
                 status = status.customerFacing.asRailStatus,
-                rejectReason = shownReason,
-                // The detail explains the reason; without the reason it would give it away.
-                rejectDetail = rejectDetail.takeIf { shownReason != null },
+                rejectReason = shown?.asRailReason,
+                // The detail explains the real reason; next to a neutral one it would give it away.
+                rejectDetail = rejectDetail.takeIf { shown != null && shown != CustomerFacingRejectReason.DECLINED },
             )
         } else {
             response

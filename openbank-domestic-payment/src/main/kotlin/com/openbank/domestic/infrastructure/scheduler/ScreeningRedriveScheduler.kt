@@ -119,28 +119,13 @@ class ScreeningRedriveScheduler {
             return
         }
         val minAge = Instant.now(clock).minus(Duration.ofMinutes(minAgeMinutes))
-        val stuck = paymentRepository.findRedrivable(maxAttempts, minAge, batchLimit)
-        val held = paymentRepository.findHeldToReconcile(minAge, HELD_BATCH_LIMIT)
-        if (stuck.isNotEmpty()) {
-            log.infof("[screening-redrive] re-screening %d payment(s) held in RECEIVED", stuck.size)
-        }
         val runs = DomesticPaymentRuns(workflowClient, temporalTaskQueue)
         // Read here, on the scheduler's own thread, and not inside the blocking call below.
+        // The one boundary: with the chain off, re-driving RECEIVED payments reads, writes and counts
+        // exactly as main does. Only the chain-on path and HELD payments use `run_checked_at`.
         val chainOn = admission.enabled
-        var hadFailure = false
-        for (paymentId in stuck) {
-            val started = offerRun(paymentId) { runs.redrive(paymentId, chainOn) }
-            when (started) {
-                // The budget counts re-drives, and a re-drive is a run that was started. An offer
-                // Temporal refused because a run is still open spends nothing.
-                true -> {
-                    paymentRepository.recordRedriveAttempt(paymentId)
-                    log.infof("[screening-redrive] re-drove payment %s", paymentId)
-                }
-                false -> log.infof("[screening-redrive] payment %s still has an open run; not re-driven", paymentId)
-                null -> hadFailure = true
-            }
-        }
+        var hadFailure = if (chainOn) redriveChainOn(runs, minAge) else redriveAsMain(runs, minAge)
+        val held = paymentRepository.findHeldToReconcile(minAge, HELD_BATCH_LIMIT)
         // ADR-0374: a HELD payment lives only as long as its workflow run does. The run is what
         // re-evaluates it, applies its case's decision and expires it, so a HELD payment whose run
         // is gone (failed, terminated, timed out) would stay HELD for good. Every tick offers a run
@@ -159,6 +144,56 @@ class ScreeningRedriveScheduler {
         if (!hadFailure) {
             liveness?.recordSuccess()
         }
+    }
+
+    /**
+     * Main's re-drive, unchanged: the attempt is counted BEFORE it is made, so a payment whose
+     * re-drive keeps failing (Temporal unreachable, a run stuck open) spends its budget and becomes
+     * visible as exhausted (`countRedriveExhausted`) instead of being retried forever.
+     */
+    private suspend fun redriveAsMain(runs: DomesticPaymentRuns, minAge: Instant): Boolean {
+        val stuck = paymentRepository.findRedrivable(maxAttempts, minAge, batchLimit)
+        if (stuck.isNotEmpty()) {
+            log.infof("[screening-redrive] re-screening %d payment(s) held in RECEIVED", stuck.size)
+        }
+        var hadFailure = false
+        for (paymentId in stuck) {
+            paymentRepository.recordRedriveAttempt(paymentId)
+            try {
+                val started = withContext(Dispatchers.IO) { runs.redrive(paymentId, chainOn = false) }
+                if (started) {
+                    log.infof("[screening-redrive] re-drove payment %s", paymentId)
+                } else {
+                    log.infof("[screening-redrive] payment %s still has an open run; not re-driven", paymentId)
+                }
+            } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
+                hadFailure = true
+                log.warnf(ex, "[screening-redrive] could not re-drive payment %s", paymentId)
+            }
+        }
+        return hadFailure
+    }
+
+    /** The chain-on re-drive: payments least recently offered a run first; only a started run counts. */
+    private suspend fun redriveChainOn(runs: DomesticPaymentRuns, minAge: Instant): Boolean {
+        val stuck = paymentRepository.findRedrivableLeastRecentlyChecked(maxAttempts, minAge, batchLimit)
+        if (stuck.isNotEmpty()) {
+            log.infof("[screening-redrive] re-screening %d payment(s) held in RECEIVED", stuck.size)
+        }
+        var hadFailure = false
+        for (paymentId in stuck) {
+            when (offerRun(paymentId) { runs.redrive(paymentId, chainOn = true) }) {
+                // The budget counts re-drives, and a re-drive is a run that was started. An offer
+                // Temporal refused because a run is still open spends nothing.
+                true -> {
+                    paymentRepository.recordRedriveAttempt(paymentId)
+                    log.infof("[screening-redrive] re-drove payment %s", paymentId)
+                }
+                false -> log.infof("[screening-redrive] payment %s still has an open run; not re-driven", paymentId)
+                null -> hadFailure = true
+            }
+        }
+        return hadFailure
     }
 
     /**
