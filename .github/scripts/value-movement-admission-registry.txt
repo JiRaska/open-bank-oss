@@ -1,0 +1,42 @@
+# Value-movement admission registry — read by check-value-movement-admission.py (ADR-0377 D2).
+#
+# THIS IS NOT A SCOPE LIST. The set of value-moving modules is DERIVED from src/main (a module
+# reaches a value sink: the transactions API, a ledger journal, a balance debit/credit, a clearing
+# submission). This file only CLASSIFIES what the scan derives, and it is checked both ways: a
+# derived module with no line here fails, and a line for a module that no longer derives fails.
+#
+# Format, one module per line:
+#
+#   <module>  <class>[  <pending-state>]  # <reason>
+#
+#   class          instructed   value moves on a customer / third-party / delegate / standing
+#                               instruction — the module must bind PaymentAdmissionChain with a
+#                               real FRAUD check.
+#                  bank-own     the bank's own bookkeeping, no instructing party — exempt. The
+#                               reason is REQUIRED (20+ characters): say what the module books.
+#   pending-state  (instructed only; absent = fully bound; shrink-only — each fails when stale)
+#                  pending-chain   does not bind the admission chain yet
+#                  pending-fraud   binds the chain, but its FRAUD step is not a real check
+#
+# See what derives, and from which file:line:  check-value-movement-admission.py --list
+# Emit lines for modules not classified yet:   check-value-movement-admission.py --print-registry
+
+# --- instructed -------------------------------------------------------------------------------
+openbank-sepa-payment  instructed  pending-chain  # books customer SEPA credit transfers and their reversals; submits them to clearing
+openbank-sepa-instant  instructed  pending-chain  # books customer SEPA instant credit transfers; submits them to clearing
+openbank-domestic-payment  instructed  pending-chain  # books customer domestic credit transfers; submits them to clearing
+openbank-swift-service  instructed  pending-chain  # books customer cross-border transfers; submits customer and FI credit transfers to clearing
+openbank-card-processing-service  instructed  pending-chain  # books cardholder-initiated card clearing postings to the cardholder account
+openbank-sdd-service  instructed  pending-chain  # books direct-debit collections against the debtor account on a creditor's instruction under a mandate
+openbank-standing-order-service  instructed  pending-chain  # books each due execution of a customer's standing order
+openbank-lending-service  instructed  pending-chain  # credits the loan disbursement to the borrower's account (and debits the cooling-off unwind)
+openbank-customer-edge  instructed  pending-chain  # posts customer own-account and pocket transfers straight to the transactions API, outside every payment rail
+
+# --- bank-own ---------------------------------------------------------------------------------
+openbank-account-service  bank-own  # credits the account-opening welcome bonus; the bank is the payer and no customer instructs it
+openbank-interest-service  bank-own  # posts interest capitalisation journals and remits withheld tax; computed by the bank, not instructed
+openbank-billing-service  bank-own  # posts fee journals for charges the bank levies under the tariff; no instructing party
+openbank-clearing-service  bank-own  # posts net settlement journals for clearing cycles between the bank's own GL accounts
+openbank-treasury-service  bank-own  # posts journals for the bank's own treasury deals and their reversals
+openbank-settlement-service  bank-own  # debits and credits settlement legs originated by bank operations under operator approval
+openbank-pension-fund-service  bank-own  # posts pension-fund management-fee accruals to the pension book
