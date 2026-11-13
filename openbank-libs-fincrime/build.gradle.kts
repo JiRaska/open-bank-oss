@@ -40,6 +40,11 @@ dependencies {
     testImplementation("com.networknt:json-schema-validator:1.5.9") {
         exclude(group = "com.fasterxml.jackson.dataformat", module = "jackson-dataformat-yaml")
     }
+    // Property tests over the admission chain (ADR-0374): order, severity algebra, fail-closed.
+    // Kotest needs reflection and its checkAll is suspending; tests own both, main gains nothing.
+    testImplementation(libs.kotlin.reflect)
+    testImplementation(libs.kotlinx.coroutines.core)
+    testImplementation("io.kotest:kotest-property:5.9.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

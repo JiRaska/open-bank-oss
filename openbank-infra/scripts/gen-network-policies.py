@@ -24,13 +24,13 @@ per directory rather than one for the namespace):
     monitor is reachable by Prometheus the moment its monitor is declared,
   - admin-ui allowed on every service HTTP port (the BFF discovers services
     dynamically via the k8s API, ADR-0051/0056 — its edges are not in env),
-  - workloads opting into `openbank.io/port-scoped-ingress: "true"` admit a
+  - workloads opting into `open-bank.tech/port-scoped-ingress: "true"` admit a
     declared caller only on its explicit URL port; portless/secret dependencies
     retain all HTTP ports until their actual destination can be resolved,
     EXCEPT ports named for a datastore wire protocol (INTERNAL_ONLY_PORT_NAMES,
     e.g. "redis") — those are same-namespace-only, since admin-ui never speaks
     the raw wire protocol directly,
-  - named ports in `openbank.io/workload-scoped-ingress-ports` admit only
+  - named ports in `open-bank.tech/workload-scoped-ingress-ports` admit only
     workload pods whose manifests declare an explicit URL to that port,
   - ingress-nginx allowed where an Ingress backend declares it,
   - envoy-gateway-system (the shared Gateway's Envoy proxy, ADR-0324) allowed
@@ -416,7 +416,7 @@ kind: Deployment
 metadata:
   name: fixture-service
   namespace: fixture
-  annotations: {openbank.io/port-scoped-ingress: 'true'}
+  annotations: {open-bank.tech/port-scoped-ingress: 'true'}
 spec:
   template:
     metadata:
@@ -467,7 +467,7 @@ kind: Deployment
 metadata:
   name: unknown-port
   namespace: legacy
-  annotations: {openbank.io/service-dependencies: fixture/fixture-service}
+  annotations: {open-bank.tech/service-dependencies: fixture/fixture-service}
 spec:
   template:
     spec:
@@ -496,8 +496,8 @@ spec:
         source = component / "workloads.yaml"
         original_fixture = source.read_text(encoding="utf-8")
         source.write_text(original_fixture.replace(
-            "annotations: {openbank.io/port-scoped-ingress: 'true'}",
-            "annotations: {openbank.io/port-scoped-ingress: 'true', openbank.io/workload-scoped-ingress-ports: https}",
+            "annotations: {open-bank.tech/port-scoped-ingress: 'true'}",
+            "annotations: {open-bank.tech/port-scoped-ingress: 'true', open-bank.tech/workload-scoped-ingress-ports: https}",
         ), encoding="utf-8")
         try:
             globals()["COMPONENTS"] = temp_dir
@@ -533,7 +533,7 @@ spec:
         case("HTTP 8080 BFF discovery excludes both OPA ports", allowed("admin-ui"), [8080, 8443])
         source.write_text(original_fixture, encoding="utf-8")
         source.write_text(source.read_text(encoding="utf-8").replace(
-            "  annotations: {openbank.io/port-scoped-ingress: 'true'}\n", ""), encoding="utf-8")
+            "  annotations: {open-bank.tech/port-scoped-ingress: 'true'}\n", ""), encoding="utf-8")
         try:
             globals()["COMPONENTS"] = temp_dir
             sys.argv = [sys.argv[0]]
@@ -602,7 +602,7 @@ def main():
         if kind in ("Deployment", "StatefulSet", "Rollout") and ns:
             # A URL injected from a runtime Secret cannot be parsed from a tracked
             # manifest. Declare its service identity without recording the hostname.
-            for dependency in (meta.get("annotations", {}) or {}).get("openbank.io/service-dependencies", "").split(","):
+            for dependency in (meta.get("annotations", {}) or {}).get("open-bank.tech/service-dependencies", "").split(","):
                 dependency = dependency.strip()
                 if not dependency:
                     continue
@@ -626,7 +626,7 @@ def main():
                     if isinstance(v, str):
                         blob_parts.append(v)
             annotations = meta.get("annotations", {}) or {}
-            scoped_names = annotations.get("openbank.io/workload-scoped-ingress-ports", "").split(",")
+            scoped_names = annotations.get("open-bank.tech/workload-scoped-ingress-ports", "").split(",")
             scoped_names = {port_name.strip() for port_name in scoped_names if port_name.strip()}
             unknown_ports = scoped_names - ports.keys()
             if unknown_ports:
@@ -637,7 +637,7 @@ def main():
                 "dir": os.path.dirname(path),
                 # Roll out per-caller port scoping service by service. Other multi-port
                 # workloads may have callers hidden in Secrets or runtime discovery.
-                "port_scoped": annotations.get("openbank.io/port-scoped-ingress") == "true",
+                "port_scoped": annotations.get("open-bank.tech/port-scoped-ingress") == "true",
             }
             ns_dir.setdefault(ns, os.path.dirname(path))
             blob = "\n".join(blob_parts)
@@ -969,7 +969,7 @@ def main():
                 "namespace": ns,
                 "labels": {
                     "app.kubernetes.io/part-of": ns,
-                    "openbank.io/derived": "gen-network-policies",
+                    "open-bank.tech/derived": "gen-network-policies",
                 },
             },
             "spec": {
@@ -1000,7 +1000,7 @@ def main():
                 "namespace": MESSAGING_NS,
                 "labels": {
                     "app.kubernetes.io/part-of": MESSAGING_NS,
-                    "openbank.io/derived": "gen-network-policies",
+                    "open-bank.tech/derived": "gen-network-policies",
                 },
             },
             "spec": {
@@ -1045,7 +1045,7 @@ def main():
             continue
         with open(path, encoding="utf-8") as fh:
             if marker not in fh.read():
-                continue  # hand-authored (openbank.io/derived: gitops-manual)
+                continue  # hand-authored (open-bank.tech/derived: gitops-manual)
         os.remove(path)
         print(f"removed stale {os.path.relpath(path, ROOT)}")
 

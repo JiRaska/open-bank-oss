@@ -127,13 +127,13 @@ function deriveNetwork() {
         ingress.push({ policy: p.metadata?.name ?? null, namespace: ns, ports })
       }
     }
-    // openbank.io/allow-internet-egress is a pod-template label (the Deployment/
+    // open-bank.tech/allow-internet-egress is a pod-template label (the Deployment/
     // Rollout side of the opt-in), not a NetworkPolicy selector — track which
     // apps actually carry it, then check below whether it's backed by a real
     // egress-restricting policy for that SAME app (not just present somewhere).
     for (const d of docs) {
       if (!WORKLOAD_KINDS.has(d?.kind)) continue
-      if (d?.spec?.template?.metadata?.labels?.['openbank.io/allow-internet-egress'] === 'true') {
+      if (d?.spec?.template?.metadata?.labels?.['open-bank.tech/allow-internet-egress'] === 'true') {
         const name = appName(d)
         if (name) optInLabeledApps.add(name)
       }

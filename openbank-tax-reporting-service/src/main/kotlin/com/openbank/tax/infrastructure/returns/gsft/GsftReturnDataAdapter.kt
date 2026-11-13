@@ -70,7 +70,11 @@ class GsftReturnDataAdapter(
             snapshot.accounts,
             rates,
             snapshot.qualifyingCredits,
-        )
+        ).let { claims ->
+            claims.copy(
+                droppedSyntheticAccounts = claims.droppedSyntheticAccounts + snapshot.syntheticAccountsDroppedAtSource,
+            )
+        }
         val createdAt = clock.instant().truncatedTo(ChronoUnit.SECONDS)
         val header = BatchHeader(
             bankCode = bank,
