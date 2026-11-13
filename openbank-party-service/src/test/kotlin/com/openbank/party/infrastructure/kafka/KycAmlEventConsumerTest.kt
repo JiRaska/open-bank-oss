@@ -102,4 +102,35 @@ class KycAmlEventConsumerTest {
 
         coVerify(exactly = 0) { partyUseCase.updateKycStatus(any(), any()) }
     }
+
+    /**
+     * aml-service can decide a case before it knows whose it is (a held payment whose rail could not
+     * name the debtor). That decision is published for the rail and carries `partyId: null`, never
+     * a stand-in, so there is nothing here to apply and nothing to fail on. The decision reaches the
+     * party in the restatement aml-service publishes once it has resolved the party. Both payloads
+     * are literals of the published shape, not built from aml-service's classes.
+     */
+    @Test
+    fun `a decision on a case with no established party is neither applied nor failed`(): Unit = runBlocking {
+        consumer.consumeAml(
+            """{"caseId":"${UUID.randomUUID()}","partyId":null,"previousStatus":"UNDER_REVIEW",""" +
+                """"newStatus":"BLOCKED","alertCode":"PAYMENT_HELD","idempotencyKey":"payment-hold:domestic:x"}""",
+        )
+
+        coVerify(exactly = 0) { partyUseCase.updateAmlStatus(any(), any()) }
+    }
+
+    @Test
+    fun `the restatement published when the party is resolved applies a BLOCK to the real party`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { partyUseCase.updateAmlStatus(partyId, AmlStatus.BLOCKED) } returns mockk()
+
+        // previousStatus == newStatus, no case key and no alert code: a restatement, not a new decision.
+        consumer.consumeAml(
+            """{"caseId":"${UUID.randomUUID()}","partyId":"$partyId","previousStatus":"BLOCKED",""" +
+                """"newStatus":"BLOCKED","alertCode":null,"idempotencyKey":null,"transactionId":null}""",
+        )
+
+        coVerify(exactly = 1) { partyUseCase.updateAmlStatus(partyId, AmlStatus.BLOCKED) }
+    }
 }
