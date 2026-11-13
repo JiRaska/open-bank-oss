@@ -139,7 +139,7 @@ class DomesticPaymentResource(
                 originalSubmissionKeyDigest = originalDigest,
             ),
         )
-        val responseBody = result.payment.forCaller()
+        val responseBody = result.payment.forCaller(identity)
 
         val response = Response.created(URI.create("/api/v1/domestic-payments/${result.payment.id}"))
             .entity(responseBody)
@@ -181,29 +181,6 @@ class DomesticPaymentResource(
         return Response.ok(result).header("Cache-Control", "no-store").build()
     }
 
-    /**
-     * The payment as this caller may see it. The customer edge serves the customer, who is not
-     * shown that a payment is held (ADR-0374 D13): it reads a hold as RECEIVED on every read of this
-     * resource, as on the submission lookup. Nor is the customer told which control rejected a
-     * payment: a reason that names one reads as the neutral DECLINED, its detail withheld
-     * ([com.openbank.domestic.domain.model.CustomerFacingRejectReason]). Every other caller reads
-     * the real status, reason and detail.
-     */
-    private fun DomesticPayment.forCaller(): DomesticPaymentResponse {
-        val response = toResponse()
-        return if (ServiceAccountIdentity.isPrincipal(identity, CUSTOMER_EDGE)) {
-            val shown = rejectReason?.customerFacing
-            response.copy(
-                status = status.customerFacing.asRailStatus,
-                rejectReason = shown?.asRailReason,
-                // The detail explains the real reason; next to a neutral one it would give it away.
-                rejectDetail = rejectDetail.takeIf { shown != null && shown != CustomerFacingRejectReason.DECLINED },
-            )
-        } else {
-            response
-        }
-    }
-
     private fun requireCustomerEdge() {
         if (!ServiceAccountIdentity.isPrincipal(identity, CUSTOMER_EDGE)) {
             throw ForbiddenException("Customer submission scope is restricted to customer-edge")
@@ -221,7 +198,7 @@ class DomesticPaymentResource(
     @Authorize(action = "domestic-payment.read", resource = "#paymentId")
     @Operation(summary = "Get a domestic payment by ID")
     suspend fun getPayment(@PathParam("paymentId") paymentId: UUID): Response =
-        Response.ok(paymentUseCase.getPayment(paymentId).forCaller()).build()
+        Response.ok(paymentUseCase.getPayment(paymentId).forCaller(identity)).build()
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
@@ -241,7 +218,7 @@ class DomesticPaymentResource(
                 offset = offset,
             ),
         )
-        return Response.ok(payments.map { it.forCaller() }).build()
+        return Response.ok(payments.map { it.forCaller(identity) }).build()
     }
 
     /**
@@ -280,9 +257,35 @@ class DomesticPaymentResource(
     }
 
     private companion object {
-        const val CUSTOMER_EDGE = "service-account-openbank-edge"
+        const val CUSTOMER_EDGE = CUSTOMER_EDGE_PRINCIPAL
         const val ORIGINAL_SUBMISSION_KEY_DIGEST_HEADER = "X-OpenBank-Original-Submission-Key-Digest"
         const val IDEMPOTENCY_KEY_MAX_LENGTH = 128
         val SUBMISSION_DIGEST = Regex("[0-9a-f]{64}")
     }
 }
+
+/**
+ * The payment as this caller may see it. The customer edge serves the customer, who is not
+ * shown that a payment is held (ADR-0374 D13): it reads a hold as RECEIVED on every read of this
+ * resource, as on the submission lookup. Nor is the customer told which control rejected a
+ * payment: a reason that names one reads as the neutral DECLINED, its detail withheld
+ * ([com.openbank.domestic.domain.model.CustomerFacingRejectReason]). Every other caller reads
+ * the real status, reason and detail.
+ */
+private fun DomesticPayment.forCaller(identity: SecurityIdentity): DomesticPaymentResponse {
+    val response = toResponse()
+    return if (ServiceAccountIdentity.isPrincipal(identity, CUSTOMER_EDGE_PRINCIPAL)) {
+        val shown = rejectReason?.customerFacing
+        response.copy(
+            status = status.customerFacing.asRailStatus,
+            rejectReason = shown?.asRailReason,
+            // The detail explains the real reason; next to a neutral one it would give it away.
+            rejectDetail = rejectDetail.takeIf { shown != null && shown != CustomerFacingRejectReason.DECLINED },
+        )
+    } else {
+        response
+    }
+}
+
+/** The customer edge's service account, the one caller shown the customer view of a payment. */
+private const val CUSTOMER_EDGE_PRINCIPAL = "service-account-openbank-edge"
