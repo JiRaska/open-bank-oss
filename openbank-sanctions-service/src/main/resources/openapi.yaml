@@ -21,7 +21,7 @@ info:
   # them behaves and answers exactly as before. /api/v1 is frozen and rejects the new inputs (400);
   # its request schema names the three fields only to say so, because the shared request type
   # parses them and a parsed field that is not published is a contract gap.
-  version: 3.2.0
+  version: 3.3.0
   # 1.4.0 -> 2.0.0 (#9048, ADR-0048): POST /lists/refresh-all could not keep answering 200 — that
   # required the whole external-feed fan-out to finish inside the request, which was the defect.
   # oasdiff classifies 200 -> 202 as breaking, and a breaking change here means a new URL major:
@@ -754,13 +754,17 @@ components:
 
     ReviewCommand:
       type: object
-      required: [checkId, reviewedBy, note, newStatus]
+      required: [checkId, note, newStatus]
       properties:
         checkId:
           type: string
           format: uuid
         reviewedBy:
           type: string
+          deprecated: true
+          description: >-
+            Ignored. The reviewer recorded on the decision is the authenticated principal; a
+            value supplied here is never stored. Accepted only so existing callers keep working.
         note:
           type: string
         newStatus:
