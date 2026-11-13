@@ -95,6 +95,15 @@ isolation from transport/persistence.
   read-only re-verify endpoint (`GET /close/{year}/verify`) is the **detective** control that proves a
   sealed period is still hash-identical (or surfaces drift) without flipping state. Corrections to a
   closed year must be booked as an adjustment in the current open period.
+- **Refusal codes (period lock, year lock):** the 409 for a posting into a FROZEN period carries
+  `code=ACCOUNTING_PERIOD_FROZEN` and the ATTESTED-year 409 carries `code=ACCOUNTING_YEAR_CLOSED`, the
+  same body field the day lock already uses. The change is additive and does not alter any decision:
+  the lock still refuses exactly the same postings, the `error` text is unchanged, and the codes
+  disclose nothing beyond the period label the message already contained. The risk it addresses is
+  availability and integrity at the callers: an uncoded 409 is indistinguishable from an idempotency
+  conflict, so a caller may retry a deterministic refusal forever or fail a whole job on it. A code is
+  a classification aid, never an authorization signal; callers must not treat it as permission to
+  re-date into another period.
 - **Four-eyes year-close attestation (#869):** the attestor (checker) MUST differ from the draft
   author (maker, `YearCloseRecord.draftedBy` — recorded as the verified JWT subject on every
   create/refresh of the DRAFT). Enforced **fail-closed** in both `YearCloseService.attest` (409) and
