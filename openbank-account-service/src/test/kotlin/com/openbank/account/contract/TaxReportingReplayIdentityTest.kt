@@ -21,15 +21,19 @@ class TaxReportingReplayIdentityTest {
     @Test
     fun `every authorised tax-reporting interaction is replayed as its service account, no refused one is`() {
         val interactions = ObjectMapper().readTree(pact).path("interactions").toList()
-        assertThat(interactions).isNotEmpty
+        assertThat(interactions).isNotEmpty()
 
         val (authorised, refused) = interactions.partition { it.path("response").path("status").asInt() != 401 }
-        assertThat(authorised).isNotEmpty
-        assertThat(refused).isNotEmpty
+        assertThat(authorised).isNotEmpty()
+        assertThat(refused).isNotEmpty()
 
         assertThat(authorised.map { it.path("description").asText() })
             .allMatch { TaxReportingReplayIdentity.appliesTo(it) }
         assertThat(refused.map { it.path("description").asText() })
             .noneMatch { TaxReportingReplayIdentity.appliesTo(it) }
+        // The broker twin clears the identity by provider STATE, while this test splits by STATUS.
+        // Hold the two to each other, so that a refused replay can never reach the tax branch.
+        assertThat(refused.map { i -> i.path("providerStates").map { it.path("name").asText() } })
+            .allMatch { NEGATIVE_AUTH_STATE in it }
     }
 }
