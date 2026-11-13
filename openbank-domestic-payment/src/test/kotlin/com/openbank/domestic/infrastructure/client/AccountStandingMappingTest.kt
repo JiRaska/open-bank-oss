@@ -30,12 +30,15 @@ class AccountStandingMappingTest {
         assertThat(lookup("""{"id":"$ACCOUNT_ID",$party,"standing":{}}""")).isEqualTo(unavailable)
         assertThat(lookup("""{"id":"$ACCOUNT_ID",$party,"standing":{"mayCredit":true}}""")).isEqualTo(unavailable)
         assertThat(
-            lookup("""{"id":"$ACCOUNT_ID",$party,"standing":{"mayDebit":false,"mayCredit":true,"reason":"ACCOUNT_FROZEN"}}"""),
+            lookup(
+                """{"id":"$ACCOUNT_ID",$party,"standing":{"mayDebit":false,"mayCredit":true,"reason":"ACCOUNT_FROZEN"}}""",
+            ),
         ).isEqualTo(AccountStandingLookup.Known(UUID.fromString(OWNER_PARTY_ID), false, "ACCOUNT_FROZEN"))
-        assertThat(lookup("""{"id":"$ACCOUNT_ID",$party,"standing":{"mayDebit":true,"mayCredit":true,"reason":null}}"""))
+        assertThat(
+            lookup("""{"id":"$ACCOUNT_ID",$party,"standing":{"mayDebit":true,"mayCredit":true,"reason":null}}"""),
+        )
             .isEqualTo(AccountStandingLookup.Known(UUID.fromString(OWNER_PARTY_ID), true, null))
     }
-
 
     private companion object {
         const val ACCOUNT_ID = "11111111-2222-4333-8444-555555555555"

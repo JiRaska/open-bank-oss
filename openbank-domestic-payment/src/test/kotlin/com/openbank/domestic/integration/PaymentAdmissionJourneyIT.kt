@@ -140,7 +140,9 @@ class PaymentAdmissionJourneyIT {
         awaitStatus(payment, "SETTLED")
 
         assertThat(world.submissions(payment)).isEqualTo(1)
-        assertThat(statusTrail(payment)).containsExactly("RECEIVED>VALIDATED", "VALIDATED>SENT_TO_CLEARING", "SENT_TO_CLEARING>SETTLED")
+        assertThat(
+            statusTrail(payment),
+        ).containsExactly("RECEIVED>VALIDATED", "VALIDATED>SENT_TO_CLEARING", "SENT_TO_CLEARING>SETTLED")
         assertThat(heldEvents(payment)).isEmpty()
     }
 
@@ -160,7 +162,7 @@ class PaymentAdmissionJourneyIT {
     }
 
     @Test
-    fun `a sanctions review holds the payment with one case request in the same transaction, and its case releases it once`() {
+    fun `a sanctions review holds with one case request in the same transaction, and its case releases it once`() {
         val payment = create(creditorName = "REVIEW Trading")
 
         awaitStatus(payment, "HELD")
@@ -176,7 +178,11 @@ class PaymentAdmissionJourneyIT {
             .isEqualTo(Instant.parse(event.path("heldAt").asText()).plus(PaymentHoldPolicy.EXPIRY))
         // One transaction wrote the HELD row, its status event and the case request: same xmin.
         val writers = writersOfHold(payment)
-        assertThat(writers.map { it.eventType }).containsExactlyInAnyOrder("domestic.payment.status-changed", "domestic.payment.held")
+        assertThat(
+            writers.map {
+                it.eventType
+            },
+        ).containsExactlyInAnyOrder("domestic.payment.status-changed", "domestic.payment.held")
         assertThat(writers.map { it.outboxXmin }.toSet()).containsExactly(writers.first().paymentXmin)
         assertThat(world.submissions(payment)).isZero()
 
@@ -211,7 +217,11 @@ class PaymentAdmissionJourneyIT {
         val payment = create(amount = FakeFraud.REVIEW_AMOUNT)
 
         awaitStatus(payment, "HELD")
-        assertThat(heldEvents(payment).single().payload.path("reasons").map { it.asText() }).containsExactly("FRAUD_REVIEW")
+        assertThat(
+            heldEvents(payment).single().payload.path("reasons").map {
+                it.asText()
+            },
+        ).containsExactly("FRAUD_REVIEW")
 
         kafkaProducer().use { it.decide(payment, "BLOCKED", PaymentHoldPolicy.caseKey(payment)) }
 
@@ -336,7 +346,9 @@ class PaymentAdmissionJourneyIT {
         dataSource.connection.use { connection ->
             connection.prepareStatement(sql).use { statement ->
                 statement.setObject(1, id)
-                statement.executeQuery().use { rows -> generateSequence { if (rows.next()) read(rows) else null }.toList() }
+                statement.executeQuery().use { rows ->
+                    generateSequence { if (rows.next()) read(rows) else null }.toList()
+                }
             }
         }
 
@@ -344,7 +356,9 @@ class PaymentAdmissionJourneyIT {
         query("SELECT status FROM domestic_payments WHERE payment_id = ?", paymentId) { it.getString(1) }.singleOrNull()
 
     private fun rejectReason(paymentId: UUID): String? =
-        query("SELECT reject_reason FROM domestic_payments WHERE payment_id = ?", paymentId) { it.getString(1) }.single()
+        query("SELECT reject_reason FROM domestic_payments WHERE payment_id = ?", paymentId) {
+            it.getString(1)
+        }.single()
 
     private data class Outbox(val eventType: String, val payload: JsonNode)
 
@@ -449,7 +463,11 @@ class AdmissionWorld {
 class FakeStanding(private val world: AdmissionWorld) : AccountStandingPort {
     override suspend fun debtorStanding(accountId: UUID): AccountStandingLookup = when {
         world.standingDown.get() -> AccountStandingLookup.Unavailable(UnavailableCause.DEPENDENCY_DOWN)
-        accountId in world.frozen -> AccountStandingLookup.Known(world.owner, mayDebit = false, reason = "ACCOUNT_FROZEN")
+        accountId in world.frozen -> AccountStandingLookup.Known(
+            world.owner,
+            mayDebit = false,
+            reason = "ACCOUNT_FROZEN",
+        )
         else -> AccountStandingLookup.Known(world.owner, mayDebit = true, reason = null)
     }
 }
@@ -491,7 +509,8 @@ class FakeScheme(private val world: AdmissionWorld) : SchemeGatewayPort {
 @Alternative
 @ApplicationScoped
 class FakeSettlement : SettlementPort {
-    override suspend fun settle(payment: DomesticPayment) = SettlementOutcome(settled = true, transactionId = UUID.randomUUID())
+    override suspend fun settle(payment: DomesticPayment) =
+        SettlementOutcome(settled = true, transactionId = UUID.randomUUID())
 }
 
 @Alternative

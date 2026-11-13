@@ -53,15 +53,7 @@ class PaymentHeldConsumer(
 
     @Incoming(CHANNEL)
     suspend fun consume(payload: String) {
-        val held = try {
-            parse(objectMapper.readTree(payload))
-        } catch (e: IllegalArgumentException) {
-            meters.counter(METRIC, "outcome", "rejected").increment()
-            throw e
-        } catch (e: com.fasterxml.jackson.core.JsonProcessingException) {
-            meters.counter(METRIC, "outcome", "rejected").increment()
-            throw IllegalArgumentException("payment event is not JSON", e)
-        }
+        val held = read(payload)
         if (held == null) {
             meters.counter(METRIC, "outcome", "ignored").increment()
             return
@@ -72,13 +64,10 @@ class PaymentHeldConsumer(
             held.paymentId,
             isRetryable = EventRetry.RETRY_UNLESS_DETERMINISTIC,
         ) {
-            val partyId = held.debtorPartyId
-                ?: accountParty.findPartyByAccountId(held.debtorAccountId)
-                ?: throw HeldPaymentPartyUnresolvedException(held.debtorAccountId)
             cases.createCase(
                 CreateAmlCaseCommand(
                     idempotencyKey = held.caseKey,
-                    partyId = partyId,
+                    partyId = debtorParty(held),
                     accountId = held.debtorAccountId,
                     transactionId = held.paymentId,
                     customerReference = held.customerReference,
@@ -94,6 +83,21 @@ class PaymentHeldConsumer(
         meters.counter(METRIC, "outcome", "case_opened").increment()
         log.infof("Held %s payment %s: case %s (%s)", held.rail, held.paymentId, case.id, case.status)
     }
+
+    private fun read(payload: String): HeldPayment? = try {
+        parse(objectMapper.readTree(payload))
+    } catch (e: IllegalArgumentException) {
+        meters.counter(METRIC, "outcome", "rejected").increment()
+        throw e
+    } catch (e: com.fasterxml.jackson.core.JsonProcessingException) {
+        meters.counter(METRIC, "outcome", "rejected").increment()
+        throw IllegalArgumentException("payment event is not JSON", e)
+    }
+
+    /** The party the rail named, or the account authority's answer when standing could not be read. */
+    private suspend fun debtorParty(held: HeldPayment): UUID = held.debtorPartyId
+        ?: accountParty.findPartyByAccountId(held.debtorAccountId)
+        ?: throw HeldPaymentPartyUnresolvedException(held.debtorAccountId)
 
     /** A `PAYMENT_HELD` event, reduced to what a case needs. */
     data class HeldPayment(

@@ -45,11 +45,14 @@ enum class PaymentHoldDecision { RELEASE, REJECT }
 
 /** The fixed terms of a hold. Constants, so a workflow replay and the event agree on them. */
 object PaymentHoldPolicy {
+    private const val EXPIRY_HOURS = 48L
+    private const val REEVALUATION_MINUTES = 15L
+
     /** A hold nobody decided ends in rejection, never in a release (ADR-0374 D3). */
-    val EXPIRY: Duration = Duration.ofHours(48)
+    val EXPIRY: Duration = Duration.ofHours(EXPIRY_HOURS)
 
     /** How long the workflow waits before asking an unavailable control again (ADR-0374 D13). */
-    val REEVALUATION_INTERVAL: Duration = Duration.ofMinutes(15)
+    val REEVALUATION_INTERVAL: Duration = Duration.ofMinutes(REEVALUATION_MINUTES)
 
     /** Re-evaluations before an outage becomes a case. With the interval: 75 minutes. */
     const val MAX_REEVALUATIONS = 5

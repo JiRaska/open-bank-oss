@@ -62,7 +62,13 @@ class PaymentHeldCaseIntakeIT {
     @Alternative
     @ApplicationScoped
     class StubHeldAccountParty : AccountPartyPort {
-        override suspend fun findPartyByAccountId(accountId: UUID): UUID? = if (accountId == RESOLVED_ACCOUNT) PARTY else null
+        override suspend fun findPartyByAccountId(accountId: UUID): UUID? = if (accountId ==
+            RESOLVED_ACCOUNT
+        ) {
+            PARTY
+        } else {
+            null
+        }
     }
 
     @Inject

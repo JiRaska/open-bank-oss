@@ -198,7 +198,13 @@ class DomesticAdmissionChain(
                 // A CHALLENGE keeps its own decision; this rail has no step-up inside an accepted
                 // payment, so the activity parks it for review like any other hold.
                 val decision =
-                    if (outcome.verdict == FraudVerdict.CHALLENGE) AdmissionDecision.CHALLENGE else AdmissionDecision.HOLD
+                    if (outcome.verdict ==
+                        FraudVerdict.CHALLENGE
+                    ) {
+                        AdmissionDecision.CHALLENGE
+                    } else {
+                        AdmissionDecision.HOLD
+                    }
                 StepOutcome.Decided(decision, FRAUD_REVIEW, evidence)
             }
         }

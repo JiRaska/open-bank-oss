@@ -100,18 +100,18 @@ open class PaymentAdmissionActivitiesImpl(
             result.degraded,
         )
         return when (result.decision) {
-            AdmissionDecision.ALLOW -> admitted(payment)
+            AdmissionDecision.ALLOW -> {
+                val updated = payment.transitionTo(DomesticPaymentStatus.VALIDATED, clock = clock)
+                writes.transition(updated, listOf(eventPublisher.statusChanged(payment, updated)))
+                if (payment.status == DomesticPaymentStatus.HELD) {
+                    metrics.recordHoldEnd(PaymentHoldEnd.CLEARED_BY_REEVALUATION)
+                }
+                AdmissionAction.ADMITTED
+            }
             AdmissionDecision.REJECT -> rejected(payment, result)
             // No step-up exists inside an accepted domestic payment, so a CHALLENGE is a hold.
             AdmissionDecision.CHALLENGE, AdmissionDecision.HOLD -> held(payment, result, lastAttempt)
         }
-    }
-
-    private suspend fun admitted(payment: DomesticPayment): AdmissionAction {
-        val updated = payment.transitionTo(DomesticPaymentStatus.VALIDATED, clock = clock)
-        writes.transition(updated, listOf(statusChanged(payment, updated)))
-        if (payment.status == DomesticPaymentStatus.HELD) metrics.recordHoldEnd(PaymentHoldEnd.CLEARED_BY_REEVALUATION)
-        return AdmissionAction.ADMITTED
     }
 
     private suspend fun rejected(payment: DomesticPayment, result: AdmissionResult): AdmissionAction {
@@ -121,7 +121,7 @@ open class PaymentAdmissionActivitiesImpl(
             reason = rejectReasonFor(rejecting),
             clock = clock,
         )
-        writes.transition(updated, listOf(statusChanged(payment, updated)))
+        writes.transition(updated, listOf(eventPublisher.statusChanged(payment, updated)))
         if (payment.status == DomesticPaymentStatus.HELD) metrics.recordHoldEnd(PaymentHoldEnd.REJECTED_BY_REEVALUATION)
         if (rejecting == AdmissionStep.SANCTIONS) recordSanctionsHit(payment, result[AdmissionStep.SANCTIONS])
         // No customer notification: every reason this chain rejects for is one the customer is not
@@ -135,13 +135,15 @@ open class PaymentAdmissionActivitiesImpl(
      * flood the review queue (ADR-0374 D13).
      */
     private suspend fun held(payment: DomesticPayment, result: AdmissionResult, lastAttempt: Boolean): AdmissionAction {
-        val wantsReview = lastAttempt || result.steps.any { record ->
-            record.outcome is StepOutcome.Decided && (record.effective ?: AdmissionDecision.ALLOW) > AdmissionDecision.ALLOW
-        }
+        val wantsReview = lastAttempt ||
+            result.steps.any { record ->
+                record.outcome is StepOutcome.Decided &&
+                    (record.effective ?: AdmissionDecision.ALLOW) > AdmissionDecision.ALLOW
+            }
         if (payment.status == DomesticPaymentStatus.RECEIVED) {
             val updated = payment.transitionTo(DomesticPaymentStatus.HELD, clock = clock)
             val events = buildList {
-                add(statusChanged(payment, updated))
+                add(eventPublisher.statusChanged(payment, updated))
                 if (wantsReview) add(heldEvent(updated, result))
             }
             writes.transition(updated, events)
@@ -186,7 +188,7 @@ open class PaymentAdmissionActivitiesImpl(
                 clock = clock,
             )
         }
-        writes.transition(updated, listOf(statusChanged(payment, updated)))
+        writes.transition(updated, listOf(eventPublisher.statusChanged(payment, updated)))
         metrics.recordHoldEnd(if (mayDebit) PaymentHoldEnd.RELEASED else PaymentHoldEnd.RELEASE_REFUSED)
         log.infof("Held payment %s released by its case: %s (standing=%s)", payment.id, updated.status, standing)
         return mayDebit
@@ -201,7 +203,7 @@ open class PaymentAdmissionActivitiesImpl(
             reason = DomesticRejectReason.AML_HOLD,
             clock = clock,
         )
-        writes.transition(updated, listOf(statusChanged(payment, updated)))
+        writes.transition(updated, listOf(eventPublisher.statusChanged(payment, updated)))
         metrics.recordHoldEnd(
             when (cause) {
                 HoldRejectCause.REVIEW_REJECTED -> PaymentHoldEnd.REVIEW_REJECTED
@@ -211,58 +213,11 @@ open class PaymentAdmissionActivitiesImpl(
         log.infof("Held payment %s REJECTED (cause=%s)", paymentId, cause)
     }
 
-    private fun statusChanged(previous: DomesticPayment, current: DomesticPayment) = OutboxMessage(
-        aggregateId = current.id,
-        eventType = PAYMENT_STATUS_CHANGED_EVENT,
-        payload = eventPublisher.statusChangedPayload(previous, current),
+    private fun heldEvent(held: DomesticPayment, result: AdmissionResult) = OutboxMessage(
+        aggregateId = held.id,
+        eventType = PaymentHeldEvent.OUTBOX_EVENT_TYPE,
+        payload = eventPublisher.paymentHeldPayload(paymentHeldEvent(held, result, Instant.now(clock))),
     )
-
-    private fun heldEvent(held: DomesticPayment, result: AdmissionResult): OutboxMessage {
-        val standing = result[AdmissionStep.STANDING].outcome
-        val debtorPartyId = (standing as? StepOutcome.Decided)
-            ?.evidence?.attributes?.get(DomesticAdmissionChain.EVIDENCE_DEBTOR_PARTY)
-            ?.let(UUID::fromString)
-        val event = PaymentHeldEvent(
-            paymentId = held.id,
-            rail = PaymentHeldEvent.RAIL,
-            caseKey = PaymentHoldPolicy.caseKey(held.id),
-            debtorAccountId = held.debtorAccountId,
-            debtorPartyId = debtorPartyId,
-            customerReference = "${held.debtorAccountNumber}/${held.debtorBankCode}",
-            reasons = result.reasons.map { it.value },
-            steps = result.steps.map(::heldStep),
-            // The move to HELD is the last write to a held payment, so this is when the hold began.
-            heldAt = held.updatedAt,
-            expiresAt = held.updatedAt.plus(PaymentHoldPolicy.EXPIRY),
-            occurredAt = Instant.now(clock),
-            aggregateRevision = held.aggregateRevision,
-        )
-        return OutboxMessage(
-            aggregateId = held.id,
-            eventType = PaymentHeldEvent.OUTBOX_EVENT_TYPE,
-            payload = eventPublisher.paymentHeldPayload(event),
-        )
-    }
-
-    private fun heldStep(record: StepRecord): PaymentHeldEvent.HeldStep = when (val outcome = record.outcome) {
-        is StepOutcome.Decided -> PaymentHeldEvent.HeldStep(
-            step = record.step.name,
-            outcome = "DECIDED",
-            decision = outcome.decision.name,
-            reason = outcome.reason.value,
-            evidence = outcome.evidence.attributes,
-        )
-        is StepOutcome.Unavailable -> PaymentHeldEvent.HeldStep(
-            step = record.step.name,
-            outcome = "UNAVAILABLE",
-            decision = record.effective?.name,
-            reason = outcome.cause.name,
-            evidence = outcome.evidence.attributes,
-        )
-        is StepOutcome.NotApplicable ->
-            PaymentHeldEvent.HeldStep(record.step.name, "NOT_APPLICABLE", null, outcome.reason.value, emptyMap())
-        StepOutcome.NotReached -> PaymentHeldEvent.HeldStep(record.step.name, "NOT_REACHED", null, null, emptyMap())
-    }
 
     /**
      * The record of a confirmed sanctions hit, as the screening activity kept before the chain. It
@@ -292,6 +247,13 @@ open class PaymentAdmissionActivitiesImpl(
     }
 }
 
+private fun DomesticPaymentEventPublisher.statusChanged(previous: DomesticPayment, current: DomesticPayment) =
+    OutboxMessage(
+        aggregateId = current.id,
+        eventType = PAYMENT_STATUS_CHANGED_EVENT,
+        payload = statusChangedPayload(previous, current),
+    )
+
 /** The reject reason a refusing step maps to. Top-level, after the class, for detekt's function count. */
 private fun rejectReasonFor(step: AdmissionStep): DomesticRejectReason = when (step) {
     AdmissionStep.STANDING -> DomesticRejectReason.DEBTOR_ACCOUNT_BLOCKED
@@ -301,4 +263,47 @@ private fun rejectReasonFor(step: AdmissionStep): DomesticRejectReason = when (s
     AdmissionStep.AML_DESTINATION_RISK -> DomesticRejectReason.AML_HOLD
     // Unbound on this rail today; named so a step bound later cannot reject without a reason.
     AdmissionStep.AUTHORITY, AdmissionStep.PAYEE_VERIFICATION -> DomesticRejectReason.TECHNICAL_ERROR
+}
+
+/** The case request of a hold: who, why and until when, with what each control answered. */
+private fun paymentHeldEvent(held: DomesticPayment, result: AdmissionResult, now: Instant): PaymentHeldEvent {
+    val standing = result[AdmissionStep.STANDING].outcome
+    val debtorPartyId = (standing as? StepOutcome.Decided)
+        ?.evidence?.attributes?.get(DomesticAdmissionChain.EVIDENCE_DEBTOR_PARTY)
+        ?.let(UUID::fromString)
+    return PaymentHeldEvent(
+        paymentId = held.id,
+        rail = PaymentHeldEvent.RAIL,
+        caseKey = PaymentHoldPolicy.caseKey(held.id),
+        debtorAccountId = held.debtorAccountId,
+        debtorPartyId = debtorPartyId,
+        customerReference = "${held.debtorAccountNumber}/${held.debtorBankCode}",
+        reasons = result.reasons.map { it.value },
+        steps = result.steps.map(::heldStep),
+        // The move to HELD is the last write to a held payment, so this is when the hold began.
+        heldAt = held.updatedAt,
+        expiresAt = held.updatedAt.plus(PaymentHoldPolicy.EXPIRY),
+        occurredAt = now,
+        aggregateRevision = held.aggregateRevision,
+    )
+}
+
+private fun heldStep(record: StepRecord): PaymentHeldEvent.HeldStep = when (val outcome = record.outcome) {
+    is StepOutcome.Decided -> PaymentHeldEvent.HeldStep(
+        step = record.step.name,
+        outcome = "DECIDED",
+        decision = outcome.decision.name,
+        reason = outcome.reason.value,
+        evidence = outcome.evidence.attributes,
+    )
+    is StepOutcome.Unavailable -> PaymentHeldEvent.HeldStep(
+        step = record.step.name,
+        outcome = "UNAVAILABLE",
+        decision = record.effective?.name,
+        reason = outcome.cause.name,
+        evidence = outcome.evidence.attributes,
+    )
+    is StepOutcome.NotApplicable ->
+        PaymentHeldEvent.HeldStep(record.step.name, "NOT_APPLICABLE", null, outcome.reason.value, emptyMap())
+    StepOutcome.NotReached -> PaymentHeldEvent.HeldStep(record.step.name, "NOT_REACHED", null, null, emptyMap())
 }

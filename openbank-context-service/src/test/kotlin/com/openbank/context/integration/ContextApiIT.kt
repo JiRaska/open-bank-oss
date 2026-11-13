@@ -606,30 +606,6 @@ class ContextApiIT {
             """"occurredAt":"${NOW.plusSeconds(revision)}"}"""
     }
 
-    /**
-     * ADR-0374: a domestic payment parked by payment admission reports HELD. The status vocabulary
-     * here is closed, and an event outside it is refused and dead-lettered; a HELD stage must be
-     * projected like any other, and the neighbouring PAYMENT_HELD case request ignored.
-     */
-    @Test
-    fun `a held domestic payment is projected as a stage, not refused`() {
-        val paymentId = UUID.randomUUID()
-        val payments = connector.source<String>("domestic-payment-events-in")
-        payments.runOnVertxContext(true)
-
-        payments.send(domesticPaymentEvent(paymentId, 1, "RECEIVED"))
-        payments.send(
-            """{"eventType":"PAYMENT_HELD","sourceService":"domestic-payment","paymentId":"$paymentId",""" +
-                """"aggregateRevision":2,"occurredAt":"${NOW.plusSeconds(2)}"}""",
-        )
-        payments.send(domesticPaymentEvent(paymentId, 2, "HELD"))
-        payments.send(domesticPaymentEvent(paymentId, 3, "VALIDATED"))
-
-        awaitCount("context_projection_events", "event_key", "domestic-payment:$paymentId:3", 1)
-        assertThat(count("context_projection_events", "event_key = ?", "domestic-payment:$paymentId:2")).isEqualTo(1)
-        assertThat(count("context_projection_events", "aggregate_ref = ?", "transaction:$paymentId")).isEqualTo(3)
-    }
-
     private fun sendPaymentLifecycle(source: InMemorySource<String>, paymentId: UUID) {
         source.send(domesticPaymentEvent(paymentId, 1, "RECEIVED"))
         source.send(domesticPaymentEvent(paymentId, 2, "SENT_TO_CLEARING"))

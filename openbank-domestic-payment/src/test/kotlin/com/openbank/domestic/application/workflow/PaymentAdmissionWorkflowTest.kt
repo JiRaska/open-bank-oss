@@ -218,7 +218,9 @@ class PaymentAdmissionWorkflowTest {
         val reevaluation = PaymentHoldPolicy.REEVALUATION_INTERVAL
         assertThat(timers.dropLast(1)).containsOnly(reevaluation).hasSize(PaymentHoldPolicy.MAX_REEVALUATIONS)
         val waited = reevaluation.multipliedBy(PaymentHoldPolicy.MAX_REEVALUATIONS.toLong())
-        assertThat(timers.last()).isBetween(PaymentHoldPolicy.EXPIRY.minus(waited).minusSeconds(5), PaymentHoldPolicy.EXPIRY.minus(waited))
+        assertThat(
+            timers.last(),
+        ).isBetween(PaymentHoldPolicy.EXPIRY.minus(waited).minusSeconds(5), PaymentHoldPolicy.EXPIRY.minus(waited))
     }
 
     @Test

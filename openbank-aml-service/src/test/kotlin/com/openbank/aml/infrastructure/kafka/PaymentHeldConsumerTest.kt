@@ -84,7 +84,9 @@ class PaymentHeldConsumerTest {
             assertThat(riskLevel).isEqualTo(AmlRiskLevel.HIGH)
             assertThat(customerReference).isEqualTo("1234567890/0800")
             assertThat(matchedEntity).isEqualTo("Listed 7")
-            assertThat(alertDetail).contains("SANCTIONS_POTENTIAL_MATCH", "creditor_status=POTENTIAL_HIT", "2026-11-15T10:00:00Z")
+            assertThat(
+                alertDetail,
+            ).contains("SANCTIONS_POTENTIAL_MATCH", "creditor_status=POTENTIAL_HIT", "2026-11-15T10:00:00Z")
                 .doesNotContain("LIMITS")
         }
         assertThat(outcome("case_opened")).isEqualTo(1.0)
@@ -106,7 +108,9 @@ class PaymentHeldConsumerTest {
 
     @Test
     fun `every other event on a rail's topic is ignored without a case`(): Unit = runBlocking {
-        consumer.consume("""{"eventType":"DOMESTIC_PAYMENT_STATUS_CHANGED","paymentId":"$paymentId","newStatus":"HELD"}""")
+        consumer.consume(
+            """{"eventType":"DOMESTIC_PAYMENT_STATUS_CHANGED","paymentId":"$paymentId","newStatus":"HELD"}""",
+        )
         consumer.consume("""{"eventType":"DOMESTIC_PAYMENT_CREATED","paymentId":"$paymentId"}""")
         consumer.consume("""{"paymentId":"$paymentId"}""")
 
@@ -116,7 +120,12 @@ class PaymentHeldConsumerTest {
 
     @Test
     fun `a producer does not choose the case key`() {
-        for (key in listOf("tm:${UUID.randomUUID()}", "payment-hold:domestic:${UUID.randomUUID()}", "payment-hold:sepa:$paymentId", "")) {
+        for (key in listOf(
+            "tm:${UUID.randomUUID()}",
+            "payment-hold:domestic:${UUID.randomUUID()}",
+            "payment-hold:sepa:$paymentId",
+            "",
+        )) {
             assertThatThrownBy { runBlocking { consumer.consume(held(mapOf("caseKey" to key))) } }
                 .describedAs("caseKey '%s'", key)
                 .isInstanceOf(IllegalArgumentException::class.java)
