@@ -387,3 +387,6 @@ reports/
 
 # SDLC guide evidence derived from workflow and GitOps declarations at build time.
 openbank-admin-ui/sdlc-evidence.json
+
+# ADR-0370 U5: StrykerJS working directory (inPlace backups, incremental state)
+.stryker-tmp/

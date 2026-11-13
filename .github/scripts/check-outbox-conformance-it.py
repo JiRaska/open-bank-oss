@@ -38,7 +38,6 @@ BASELINE_UNCOVERED: set[str] = {
     "openbank-consent-service",
     "openbank-delegation-service",
     "openbank-domestic-payment",
-    "openbank-fraud-service",
     "openbank-fx-service",
     "openbank-incentive-service",
     "openbank-interest-service",

@@ -4,4 +4,4 @@ metadata:
   name: flaky-test-hunter
   labels:
     app.kubernetes.io/part-of: openbank
-    openbank.io/component: flaky-test-hunter
+    open-bank.tech/component: flaky-test-hunter

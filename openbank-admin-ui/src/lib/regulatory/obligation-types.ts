@@ -5,7 +5,7 @@
 // Types of the baked regulatory obligations register (ADR-0367). Imports nothing, so a client
 // component can use them without pulling `fs` into the browser bundle.
 
-export type CoverageStatus = 'filed-return' | 'bff-only' | 'data-only' | 'missing' | 'external' | 'conditional'
+export type CoverageStatus = 'filed-return' | 'computed-preview' | 'bff-only' | 'data-only' | 'missing' | 'external' | 'conditional'
 export type CadenceConfidence = 'verified' | 'known-eu' | 'unverified'
 
 export interface Bilingual { cs: string; en: string }
@@ -34,4 +34,4 @@ export interface ObligationRegister {
   obligations: RegulatoryObligation[]
 }
 
-export const COVERAGE_ORDER: CoverageStatus[] = ['missing', 'data-only', 'bff-only', 'filed-return', 'conditional', 'external']
+export const COVERAGE_ORDER: CoverageStatus[] = ['missing', 'data-only', 'bff-only', 'computed-preview', 'filed-return', 'conditional', 'external']

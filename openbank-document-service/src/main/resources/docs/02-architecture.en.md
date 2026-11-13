@@ -94,3 +94,23 @@ The product read (`ProductCatalogClient.getById`) is sent with the named OIDC cl
 shared client on ROLE_API alone. If the Keycloak client lacks the `catalog:read` scope, the read is
 denied once product-catalog enforces authorization. `M2mOidcClientIdentityWiringTest` pins the
 client selection.
+
+## Ownership projection (ADR-0375 D5)
+
+`GET /api/v1/documents/{id}/owner` answers one question — which party owns this document — and
+returns `{id, partyId}` and nothing else. delegation-service calls it before it mints an
+`OBJECT_READ` delegation over a document.
+
+It carries its own authorization action, `document.verifyOwnership`, rather than reusing
+`document.read`. `document.read` returns the whole metadata record (template, storage key, sha256,
+case and product refs) and is granted to other subjects; the authority needed to **mint** a
+delegation over a document must not also be able to read it. The OPA extension pins the new action
+to `service-account-openbank-delegation` and vetoes every other caller explicitly — the veto
+matters because base `rest.rego` grants the customer edge the whole `document.` family.
+
+A 404 covers both an unknown document and one with no `partyRef` recorded. A caller treats the two
+identically, and distinguishing them would tell someone enumerating ids which documents exist.
+
+What this unblocked: before it, delegation-service answered `UNVERIFIABLE` for every object
+resource type, its offer path refuses on that, and so no document could be shared at all — while
+customer-edge's reader for a shared document was already deployed.

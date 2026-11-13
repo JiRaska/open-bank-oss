@@ -40,6 +40,11 @@ class PepScreeningServiceTest {
             it.screeningPort = screeningPort
             it.kycService = kycService
         }
+        // A case whose PEP check has no recorded result yet: the key carries no replaced-result
+        // component. PepRescreenIdempotencyKeyTest covers the cases where it does.
+        coEvery { kycService.getCase(any()) } answers {
+            caseWithPepCheck(firstArg(), CheckStatus.PENDING, RiskLevel.MEDIUM, performedAt = null)
+        }
     }
 
     @Test
@@ -90,7 +95,12 @@ class PepScreeningServiceTest {
         }
     }
 
-    private fun caseWithPepCheck(caseId: UUID, checkStatus: CheckStatus, riskLevel: RiskLevel) = KycCase(
+    private fun caseWithPepCheck(
+        caseId: UUID,
+        checkStatus: CheckStatus,
+        riskLevel: RiskLevel,
+        performedAt: Instant? = Instant.parse("2026-07-01T00:00:00Z"),
+    ) = KycCase(
         id = caseId,
         partyId = UUID.randomUUID(),
         status = KycCaseStatus.OPEN,
@@ -104,7 +114,7 @@ class PepScreeningServiceTest {
                 status = checkStatus,
                 result = null,
                 provider = "openbank-sanctions-service:PEP_GLOBAL",
-                performedAt = Instant.parse("2026-07-01T00:00:00Z"),
+                performedAt = performedAt,
                 createdAt = Instant.parse("2026-07-01T00:00:00Z"),
             ),
         ),

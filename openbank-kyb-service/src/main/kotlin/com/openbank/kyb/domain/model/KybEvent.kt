@@ -120,7 +120,7 @@ object KybEvents {
                 actorId = actor,
                 actorType = actorType(actor),
                 sourceService = SOURCE_SERVICE,
-                reviewReason = case.reviewReason,
+                reviewReason = case.applicantReviewReason,
             ),
         )
     }
@@ -150,7 +150,7 @@ object KybEvents {
                 actorId = actor,
                 actorType = actorType(actor),
                 sourceService = SOURCE_SERVICE,
-                reviewReason = case.reviewReason,
+                reviewReason = case.applicantReviewReason,
             ),
         )
     }

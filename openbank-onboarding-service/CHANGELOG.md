@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.10.3...onboarding-service-v0.11.0) (2026-11-11)
+
+
+### Features
+
+* **onboarding:** wire @Authorize and an advisory OPA sidecar (ADR-0034 Phase 5) ([#15547](https://github.com/JiRaska/open-bank-oss/issues/15547)) ([2a47358](https://github.com/JiRaska/open-bank-oss/commit/2a47358023908e426bc42649a67db5f7c8e8a20d))
+
 ## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.10.2...onboarding-service-v0.10.3) (2026-10-14)
 
 

@@ -697,3 +697,13 @@ No new payment command, retry policy, API contract or schema is introduced.
 ## Synthetic transfer admission (#7284)
 
 Synthetic own-account transfers require a verified edge client and trusted taint on a dedicated route. The route fixes the amount and currency and derives the daily idempotency key. A retry preserves the original transaction and its journal classification.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

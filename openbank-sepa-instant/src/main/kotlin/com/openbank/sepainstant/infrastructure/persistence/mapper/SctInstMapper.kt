@@ -22,6 +22,7 @@ class SctInstMapper {
         settledAt = e.settledAt, recalledAt = e.recalledAt, recallReason = e.recallReason,
         rejectReason = e.rejectReason, rejectDetail = e.rejectDetail,
         submittedAt = e.submittedAt, createdAt = e.createdAt, updatedAt = e.updatedAt,
+        synthetic = e.synthetic == true,
     )
 
     fun toEntity(d: SctInstPayment) = SctInstPaymentEntity().also { e ->
@@ -48,6 +49,7 @@ class SctInstMapper {
         e.submittedAt = d.submittedAt
         e.createdAt = d.createdAt
         e.updatedAt = d.updatedAt
+        e.synthetic = d.synthetic
     }
 
     /**
