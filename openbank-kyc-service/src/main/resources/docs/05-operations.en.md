@@ -89,3 +89,14 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Outbound service identity
+
+The service holds two Keycloak clients for its own outbound calls.
+
+| Edge | Client | Role | Why |
+|---|---|---|---|
+| `sanctions-service` (screening), `party-service` (party read) | `openbank-kyc` (named oidc-client `m2m`) | `ROLE_API` | A caller-bound identity: the callee sees `service-account-openbank-kyc`, so a rule or a registry can tell this service from any other. |
+| `case-coordinator-agent` | shared `openbank-services` (default oidc-client) | as granted to the shared account | Not migrated; the callee requires a role the service's own client deliberately does not hold. |
+
+The secret for `openbank-kyc` arrives as `OIDC_M2M_CLIENT_SECRET` from the `kyc-service-m2m-oidc` external secret and is required at start. If the client or its secret is missing, token requests fail and screening fails closed: a case stays unscreened rather than reading as clear. Rollout order (client, role, secret, then the pod) is in runbook 0009.

@@ -89,3 +89,14 @@ Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTT
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Odchozí identita služby
+
+Služba má pro vlastní odchozí volání dva klienty v Keycloaku.
+
+| Hrana | Klient | Role | Proč |
+|---|---|---|---|
+| `sanctions-service` (screening), `party-service` (čtení party) | `openbank-kyc` (pojmenovaný oidc-client `m2m`) | `ROLE_API` | Identita vázaná na volajícího: volaný vidí `service-account-openbank-kyc`, takže pravidlo nebo registr tuto službu odliší od ostatních. |
+| `case-coordinator-agent` | sdílený `openbank-services` (výchozí oidc-client) | podle sdíleného účtu | Nepřevedeno; volaný vyžaduje roli, kterou vlastní klient služby záměrně nemá. |
+
+Tajemství klienta `openbank-kyc` přichází jako `OIDC_M2M_CLIENT_SECRET` z externího tajemství `kyc-service-m2m-oidc` a je při startu povinné. Chybí-li klient nebo tajemství, žádosti o token selžou a screening selže uzavřeně: případ zůstane neprověřený, nečte se jako čistý. Pořadí nasazení (klient, role, tajemství, potom pod) je v runbooku 0009.
