@@ -111,3 +111,16 @@ Volání vyžaduje hlavičku `Idempotency-Key` (1–128 znaků `[A-Za-z0-9._:-]`
 Záznam uchovává digest požadavku a rozsahu, druh výsledku a neprůhledný odkaz na zdroj, nikoli samostatnou finanční odpověď v Redis. U prázdného výsledku uchová pouze původní identifikátor, okamžik pozorování a metadata databázového pohledu. Vypršelé záznamy se mažou při přístupu a minutovou údržbou; fyzický úklid může při vypnuté službě zaostávat. Hashe ani neprůhledné identifikátory se nepovažují za anonymní data. Tyto mechanismy neprodlužují uchovávání zdrojových dat ani neobcházejí právní blokace mazání.
 
 Pokrytí zahrnuje jen připojené účetní zápisy, nikoli úplnou historii účtu či ověřenou ekonomickou klasifikaci. Přímé změny zůstatku, odpojené partition a chybějící původ zůstávají omezením. Volitelné `origin` je neověřené tvrzení již oprávněného odesílatele; jeho identitu doplňuje ledger ze svého bezpečnostního kontextu. Nejde o EventKind ani nové oprávnění účtovat.
+
+## Odmítnutí zápisu se strojovým kódem
+
+Zápis nebo storno datované do uzamčeného období vrací `409`. Existují tři zámky a tělo každého nese stabilní pole `code` vedle nezměněného textu `error`, takže volající je rozliší od jiného 409 (konflikt idempotence, nesouhlasící opakování) bez parsování textu:
+
+| Zámek | `code` | Náprava |
+|---|---|---|
+| Účetní den již není OPEN (ADR-0207 D3) | `ACCOUNTING_DAY_CLOSED` | Přeúčtovat do aktuálního otevřeného dne. |
+| Zákonné období FROZEN (ADR-0096 D1; odmítá jen při `openbank.ledger.period-lock.mode=enforce`) | `ACCOUNTING_PERIOD_FROZEN` | Opravu zaúčtovat do aktuálního otevřeného období. |
+| Fiskální rok ATTESTED (#869) | `ACCOUNTING_YEAR_CLOSED` | Zaúčtovat opravný zápis do aktuálního otevřeného období. |
+
+Pole `code` je aditivní, `error` se nemění. Odmítnutí je pro stejné datum zápisu deterministické, proto volající nesmí opakovat stejný požadavek beze změny. Žádný volající zatím oba kódy období neobsluhuje zvlášť; dnes je bere jako běžné 409.
+

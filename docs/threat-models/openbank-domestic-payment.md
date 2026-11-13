@@ -89,6 +89,8 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 5. Residual risks / assumptions
 
+The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit mapped-column projection. This keeps the existing dispatcher available across additive schema expansion. The claim and acknowledgement semantics stay the same.
+
 - **Idempotency-key required** — only an exact, actor-bound retry may replay the durable payment;
   changed or unverifiable legacy requests are rejected with 409.
 - **Global-key collision remains fail-closed:** V1's existing `UNIQUE(idempotency_key)` is intentionally
