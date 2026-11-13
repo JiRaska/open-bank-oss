@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.19.0...kyc-service-v0.19.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **kyc:** one master switch for the re-screening loop; record list changes while off ([#16032](https://github.com/JiRaska/open-bank-oss/issues/16032)) ([5f71ca9](https://github.com/JiRaska/open-bank-oss/commit/5f71ca9b0bd5720f9408f4d9ef4a2a5c1babf2ee))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.18.1...kyc-service-v0.19.0) (2026-11-13)
 
 
