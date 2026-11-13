@@ -9,6 +9,7 @@ import com.openbank.swift.domain.model.SwiftMessage
 import com.openbank.swift.infrastructure.persistence.entity.SwiftMessageEntity
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
@@ -23,4 +24,9 @@ class SwiftBookingWritesImpl(private val outbox: SwiftOutboxRepositoryImpl, priv
         transactionId: UUID,
         outbox: SwiftOutboxMessage,
     ): SwiftMessage = writeBooking(message, outbox, transactionId, this.outbox, objectMapper)
+    override suspend fun recordLateBookingProof(
+        attempt: SwiftMessage,
+        transactionId: UUID,
+        provenAt: Instant,
+    ): SwiftMessage = writeLateBookingProof(attempt, transactionId, provenAt)
 }

@@ -9,8 +9,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useSession } from 'next-auth/react'
+import { hasPermission } from '@/lib/auth/roles'
 import {
-  ArrowRight, Bot, CircleAlert, Coins, FileText, Gift, Landmark, Leaf, Scale, Search, ShieldCheck, Sparkles,
+  ArrowRight, Bot, CircleAlert, Coins, FileText, Gamepad2, Gift, Landmark, Leaf, Scale, Search, ShieldCheck, Sparkles,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
@@ -39,6 +41,7 @@ function unavailableKind(state: LoyaltyState): UnavailableKind | null {
 
 export default function LoyaltyPage() {
   const { t, language } = useLanguage()
+  const { data: session } = useSession()
   const [tab, setTab] = useState<Tab>('overview')
   const [catalogue, setCatalogue] = useState<LoyaltyCatalogueResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -131,6 +134,13 @@ export default function LoyaltyPage() {
               {tabLabel[id]}
             </button>
           ))}
+          {hasPermission(session?.user?.roles ?? [], 'game:view') && (
+            <Link href="/loyalty/game" className={styles.primaryButton}>
+              <Gamepad2 aria-hidden="true" size={18} />
+              {t('Lví stezka — správa hry', 'Lion Quest — game management')}
+              <ArrowRight aria-hidden="true" size={16} />
+            </Link>
+          )}
         </nav>
 
         {tab === 'overview' && (

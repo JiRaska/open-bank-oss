@@ -67,6 +67,11 @@ spec:
           operator: Equal
           value: "true"
           effect: NoSchedule
+        # Node-key migration to open-bank.tech, stage 1: tolerate both taint keys.
+        - key: open-bank.tech/stateful
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
       securityContext:
         runAsNonRoot: true
         runAsUser: 999
@@ -76,7 +81,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: redis
-          image: docker.io/valkey/valkey:8.1.10-alpine
+          image: docker.io/valkey/valkey:9.1.3-alpine
           # AOF is what makes the credential keyspace survive a restart; `everysec` bounds the
           # worst-case loss to ~1s of writes without the per-write fsync cost of `always`.
           # RDB snapshots stay off (`--save ""`): the AOF is replayed on boot and is strictly

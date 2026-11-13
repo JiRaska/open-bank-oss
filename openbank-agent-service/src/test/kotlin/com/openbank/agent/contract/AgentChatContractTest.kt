@@ -51,6 +51,12 @@ class AgentChatContractTest {
     }
 
     @Test
+    fun `tool-free chat documents an unavailable completion without changing its success shape`() {
+        val operation = openapi.substringAfter("  /agent/chat:").substringBefore("  /agent/models:")
+        assertThat(operation).contains("\"200\":", "\"503\":", "no partial explanation is returned")
+    }
+
+    @Test
     fun `the assistant endpoints are documented`() {
         assertThat(openapi)
             .contains("/agent/chat:")
@@ -94,5 +100,29 @@ class AgentChatContractTest {
             .contains("provider:")
             .contains("HOSTED")
             .contains("SELF_HOSTED")
+    }
+
+    @Test
+    fun `merge provenance preserves the original human input and adds a separate App contract`() {
+        val human = openapi.substringAfter("    MergeRecordIngestRequest:")
+            .substringBefore("    AppMergeRecordIngestRequest:")
+        assertThat(human).doesNotContain("mergedByType:", "authorization:", "headSha:")
+        val app = openapi.substringAfter("    AppMergeRecordIngestRequest:").substringBefore("    MergeRecordDto:")
+        assertThat(app).contains("enum: [GITHUB_APP]")
+            .contains("headSha:", "mergeCommitSha:", "mergedById:", "authorization:")
+        assertThat(openapi).contains("/api/v1/agent-merge-records/app:")
+            .contains("/api/v1/agent-merge-records/capabilities:")
+            .contains("/api/v1/agent-merge-records/{prNumber}:")
+            .contains("required: [approvedBy, approvedById, approvedAt, evidenceUrl]")
+    }
+
+    @Test
+    fun `tool restriction is additive and preserves ordinary chat defaults`() {
+        val request = openapi.substringAfter("    ChatRequest:").substringBefore("    ToolCallRecord:")
+        assertThat(request).contains("allowTools:", "default: true")
+        assertThat(openapi.substringAfter("    ChatResponse:").substringBefore("    ModelInfo:"))
+            .contains("toolsRestricted:")
+        assertThat(openapi.substringAfter("    ModelsResponse:").substringBefore("    CatalogReviewCapability:"))
+            .contains("toolFreeChat:")
     }
 }

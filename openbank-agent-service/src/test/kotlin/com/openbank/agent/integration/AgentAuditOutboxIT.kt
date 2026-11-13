@@ -4,8 +4,9 @@
 package com.openbank.agent.integration
 
 import com.openbank.agent.infrastructure.audit.AgentAuditOutbox
-import com.openbank.agent.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
@@ -20,7 +21,11 @@ import javax.sql.DataSource
 // sharing the same test JVM whose own @TestProfile expects a different value (e.g.
 // ModelGatewayRoutingOverrideTest), the same defect class ProposalApiIT and
 // McpEndpointRoutingIT already guard against.
-@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    restrictToAnnotatedClass = true,
+    initArgs = [ResourceArg(name = "db", value = "openbank_agent_it")],
+)
 class AgentAuditOutboxIT {
     @Inject lateinit var outbox: AgentAuditOutbox
 

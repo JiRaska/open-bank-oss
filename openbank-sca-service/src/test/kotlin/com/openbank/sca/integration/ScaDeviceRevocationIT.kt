@@ -60,6 +60,7 @@ class ScaDeviceRevocationIT {
         revoke(fixture, 204)
         given().get("/api/v1/sca/challenges/${fixture.challenge}").then().statusCode(200)
             .body("status", equalTo("CANCELLED"))
+        decide(fixture, 409)
         given().contentType("application/json").body(mapOf("partyId" to fixture.party))
             .post("/api/v1/sca/challenges/${fixture.challenge}/consume").then().statusCode(400)
         assertThat(count("sca_device_decisions", "challenge_id = '${fixture.challenge}'")).isEqualTo(1)
@@ -135,7 +136,13 @@ class ScaDeviceRevocationIT {
                 "c.id = '${fixture.challenge}' AND c.consumed_at IS NULL AND c.status IN ('PENDING', 'COMPLETED')",
             ),
         ).isZero()
-        decide(fixture, 403)
+        assertThat(count("sca_enrolled_devices", "id = '${fixture.device}' AND revoked_at IS NOT NULL"))
+            .isEqualTo(1)
+        val decisions = count("sca_device_decisions", "challenge_id = '${fixture.challenge}'")
+        // Decision-first leaves a closed challenge (409); revoke-first rejects the device (403).
+        // Both must remain denied, with no new decision persisted by the rejected request.
+        assertThat(decide(fixture)).isIn(403, 409)
+        assertThat(count("sca_device_decisions", "challenge_id = '${fixture.challenge}'")).isEqualTo(decisions)
     }
 
     private fun fixture(party: UUID = UUID.randomUUID()): RevocationFixture {

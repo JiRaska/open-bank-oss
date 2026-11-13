@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""Regression tests for the `modules` Pact scope selection."""
+
+import importlib.util
+from pathlib import Path
+import unittest
+
+SCRIPT = Path(__file__).with_name("select-pact-module-args.py")
+SPEC = importlib.util.spec_from_file_location("select_pact_module_args", SCRIPT)
+assert SPEC and SPEC.loader
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
+
+GROUP = ["--rerun", "--tests", "*.contract.*PactConsumerTest"]
+ALL = [":openbank-a-service:consumerPactTest", *GROUP, ":openbank-b-service:consumerPactTest", *GROUP, ":openbank-c-service:consumerPactTest", *GROUP]
+
+
+class SelectTest(unittest.TestCase):
+    def test_selects_only_listed_modules_in_derived_order(self):
+        self.assertEqual(MODULE.select_args(ALL, ["openbank-c-service", "openbank-a-service"]),
+                         [":openbank-a-service:consumerPactTest", *GROUP, ":openbank-c-service:consumerPactTest", *GROUP])
+
+    def test_module_without_consumer_test_selects_nothing(self):
+        self.assertEqual(MODULE.select_args(ALL, ["openbank-z-service"]), [])
+
+    def test_rejects_malformed_scope_and_names(self):
+        with self.assertRaises(ValueError):
+            MODULE.select_args(ALL[:-1], ["openbank-a-service"])
+        with self.assertRaises(ValueError):
+            MODULE.select_args(ALL + ALL[:4], ["openbank-a-service"])
+        with self.assertRaises(ValueError):
+            MODULE.select_args(ALL, ["openbank-a-service; rm -rf /"])
+        with self.assertRaises(ValueError):
+            MODULE.select_args([], ["openbank-a-service"])
+
+    def test_rejects_unknown_task_name(self):
+        # Must-fail negative: the retired `:test` task and arbitrary tasks stay rejected.
+        for bad in (":openbank-a-service:test", ":openbank-a-service:build", "openbank-a-service:consumerPactTest"):
+            with self.assertRaises(ValueError):
+                MODULE.select_args([bad, *GROUP], ["openbank-a-service"])
+
+    def test_derive_output_shape_is_accepted(self):
+        self.assertEqual(MODULE.select_args(ALL, ["openbank-b-service"]),
+                         [":openbank-b-service:consumerPactTest", *GROUP])
+
+
+if __name__ == "__main__":
+    unittest.main()

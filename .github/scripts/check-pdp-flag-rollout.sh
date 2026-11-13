@@ -35,6 +35,12 @@
 # History: with full history the ancestry test is `git merge-base --is-ancestor`. In a shallow
 # clone (the CI gates shard checks out at fetch-depth: 1) it asks the GitHub compare API instead,
 # which needs `gh` and GH_TOKEN; without them a shallow clone is refused, never read as clean.
+# #15483: a shallow run first fetches main's history WITHOUT blobs (`--filter=blob:none`,
+# ~28 MB, ~15 s, git transport: no REST quota) and answers both the marker lookup and ancestry
+# with git there; the pickaxe lazily fetches only the blobs of commits touching MARKER_FILE.
+# Measured on main 2026-11-11: 18 gh calls -> 0, same verdict. That keeps the gate off the shared
+# GITHUB_TOKEN bucket, whose exhaustion had turned main red as NOT_EVALUATED. If the fetch
+# fails the API path runs as before; a commit outside main's graph (exit 128) still asks compare.
 set -euo pipefail
 
 MARKER_FILE="openbank-libs-runtime/src/main/kotlin/com/openbank/libs/authz/OpaSidecarPolicyDecisionPoint.kt"
@@ -45,10 +51,17 @@ cd "$(git rev-parse --show-toplevel)"
 
 REPO="${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
 API=0
+GRAPH_DIR=""
 
 # Follow canonical main: a stacked PR can retain a parallel pre-squash introduction.
 # Local callers must fetch origin/main before checking rollout.
 marker_commit() {
+  if [ -n "$GRAPH_DIR" ]; then
+    GIT_TERMINAL_PROMPT=0 git --git-dir="$GRAPH_DIR" log --first-parent --format=%H --reverse \
+      -S"$MARKER_TEXT" main -- "$MARKER_FILE" | head -1
+    [ "${PIPESTATUS[0]}" -eq 0 ] || return 2
+    return 0
+  fi
   if [ "$API" -eq 0 ]; then
     git rev-parse --verify refs/remotes/origin/main >/dev/null 2>&1 || {
       echo "::error::origin/main is unavailable; fetch main before checking rollout." >&2
@@ -58,10 +71,15 @@ marker_commit() {
     return
   fi
   # Commits touching the file, newest first; the marker is the oldest whose content has the text.
-  local found="" sha
-  for sha in $(gh api "repos/${REPO}/commits?path=${MARKER_FILE}&sha=main&per_page=100" --jq '.[].sha'); do
-    if gh api -H 'Accept: application/vnd.github.raw' "repos/${REPO}/contents/${MARKER_FILE}?ref=${sha}" \
-        | grep -qF "$MARKER_TEXT"; then
+  # An API failure (rate limit, transport) is exit 2, never an empty answer: an empty marker reads
+  # as "Phase 1 is not on main", a FINDING the gate cannot have established (2026-11-09: the CI
+  # installation token ran dry and #15443 went red on that false finding).
+  local found="" sha shas content
+  shas="$(gh api "repos/${REPO}/commits?path=${MARKER_FILE}&sha=main&per_page=100" --jq '.[].sha')" || return 2
+  [ -n "$shas" ] || return 2
+  for sha in $shas; do
+    content="$(gh api -H 'Accept: application/vnd.github.raw' "repos/${REPO}/contents/${MARKER_FILE}?ref=${sha}")" || return 2
+    if grep -qF "$MARKER_TEXT" <<< "$content"; then
       found="$sha"
     else
       break
@@ -76,9 +94,49 @@ is_ancestor() {
     git merge-base --is-ancestor "$1" "$2"
     return
   fi
-  local status
-  status="$(gh api "repos/${REPO}/compare/${1}...${2}" --jq .status 2>/dev/null)" || return 1
-  [ "$status" = "ahead" ] || [ "$status" = "identical" ]
+  if [ -n "$GRAPH_DIR" ]; then
+    local grc=0
+    GIT_TERMINAL_PROMPT=0 git --git-dir="$GRAPH_DIR" merge-base --is-ancestor "$1" "$2" 2>/dev/null || grc=$?
+    case "$grc" in
+      0) return 0 ;;
+      1) return 1 ;;
+    esac
+    # 128: a commit outside main's graph. Ask the compare API, as before the graph existed.
+  fi
+  local status cache="" attempt=1 max="${PDP_ROLLOUT_API_ATTEMPTS:-4}"
+  # #14011: one GitOps invocation compares the same immutable (marker, source) pair once per
+  # consumer pin, ~70 calls for ~9 distinct pairs. Commits are immutable, so a DEFINITIVE answer
+  # is reused, keyed by the exact inputs (a short and a full SHA are different keys). Unknown,
+  # malformed and transport-error answers are never cached: they stay failures, and a later
+  # success re-asks rather than overwriting a failure already counted for an earlier pin.
+  # A file per key, not an associative array: macOS ships Bash 3.2.
+  if [ -n "${COMPARE_CACHE_DIR:-}" ]; then
+    cache="${COMPARE_CACHE_DIR}/${1}_${2}"
+    if [ -f "$cache" ]; then
+      status="$(cat "$cache")"
+      [ "$status" = "ahead" ] || [ "$status" = "identical" ]
+      return
+    fi
+  fi
+  # Only a definitive verdict ends the loop. A transport error, rate limit or malformed answer
+  # is "could not look": retried, then still LAGGING (fail-closed), never read as current. The
+  # old single attempt turned one transient API failure into a red main (sca-service 2026-10-31,
+  # the same pin had passed 70/0 twice in the preceding 30 minutes).
+  while :; do
+    if status="$(gh api "repos/${REPO}/compare/${1}...${2}" --jq .status 2>/dev/null)"; then
+      case "$status" in
+        ahead|identical|behind|diverged)
+          [ -z "$cache" ] || printf '%s\n' "$status" > "$cache"
+          [ "$status" = "ahead" ] || [ "$status" = "identical" ]
+          return ;;
+      esac
+    fi
+    [ "$attempt" -ge "$max" ] && break
+    sleep "$(( attempt * ${PDP_ROLLOUT_RETRY_SLEEP:-3} ))"
+    attempt=$((attempt + 1))
+  done
+  echo "::warning::compare ${1:0:10}...${2:0:10} unresolved after ${max} attempts; counting as LAGGING" >&2
+  return 1
 }
 
 # Services whose image embeds libs-runtime: the same derivation Auto deploy uses to rebuild them.
@@ -122,7 +180,32 @@ run() {
       return 2
     fi
   fi
-  marker="$(marker_commit)"
+  # Fresh compare cache per GitOps invocation (#14011); live mode reads stay uncached.
+  COMPARE_CACHE_DIR=""
+  if [ "$API" -eq 1 ]; then
+    local work
+    work="$(mktemp -d)"
+    # shellcheck disable=SC2064 # expand now: the path is fixed for this invocation
+    trap "rm -rf '$work'" EXIT
+    if [ "$source" = gitops ]; then
+      COMPARE_CACHE_DIR="$work/cache"
+      mkdir -p "$COMPARE_CACHE_DIR"
+    fi
+    if [ "${PDP_ROLLOUT_COMMIT_GRAPH:-1}" = 1 ] && GIT_TERMINAL_PROMPT=0 git clone -q --bare --filter=blob:none \
+        --single-branch --branch main --no-tags "${GITHUB_SERVER_URL:-https://github.com}/${REPO}.git" "$work/graph.git" 2>/dev/null; then
+      GRAPH_DIR="$work/graph.git"
+      echo "main history fetched (no blobs): marker and ancestry via git; compare API only for commits outside it"
+    else
+      echo "::warning::could not fetch main's history; marker and ancestry fall back to the GitHub API" >&2
+    fi
+  fi
+  local marker_rc=0
+  marker="$(marker_commit)" || marker_rc=$?
+  if [ "$marker_rc" -eq 2 ]; then
+    echo "::error::could not read ${MARKER_FILE} history from the GitHub API (rate limit or transport) — rollout not evaluated" >&2
+    echo "GATE_VERDICT=NOT_EVALUATED"
+    return 1
+  fi
   if [ -z "$marker" ]; then
     echo "::error::Phase 1 (libs-runtime sending service_account) is not on canonical main: no commit adds '${MARKER_TEXT}' to ${MARKER_FILE}." >&2
     return 1
@@ -221,6 +304,112 @@ selftest() {
     API=1
     marker="$(marker_commit)"
     [ "$marker" = "$shipped" ] || { echo "selftest FAIL: API marker does not follow canonical main" >&2; f=1; }
+    # An API that cannot answer is "could not look" (exit 2), never "no marker": the empty answer
+    # is what the gate reports as a Phase-1 finding.
+    gh() { echo "gh: API rate limit exceeded for installation" >&2; return 1; }
+    mrc=0; marker="$(marker_commit)" || mrc=$?
+    [ "$mrc" -eq 2 ] || { echo "selftest FAIL: an unreachable API read as a definitive marker answer (rc=$mrc, marker='$marker')" >&2; f=1; }
+    gh() {
+      case "$*" in
+        *"commits?path="*) printf '%s\n' "$shipped" ;;
+        *) echo "gh: API rate limit exceeded" >&2; return 1 ;;
+      esac
+    }
+    mrc=0; marker="$(marker_commit)" || mrc=$?
+    [ "$mrc" -eq 2 ] || { echo "selftest FAIL: a failed contents read was taken as 'no marker text' (rc=$mrc)" >&2; f=1; }
+    unset -f gh
+    # Compare cache (#14011) is exercised with a single attempt so a scripted transport error is observable.
+    export PDP_ROLLOUT_API_ATTEMPTS=1
+    # Compare cache (#14011): count compare requests against a scripted API. Removing the
+    # cache makes the repeated-verdict counts 2 instead of 1, so these cases fail without it.
+    calls="$tmp/compare-calls"; flaky="$tmp/flaky-once"; : > "$calls"; : > "$flaky"
+    gh() {
+      case "$*" in
+        *"compare/"*)
+          echo x >> "$calls"
+          case "$*" in
+            *"compare/mk1...aaaaaaaa "*|*"compare/mk1...aaaaaaaaaaaa "*|*"compare/mk2...aaaaaaaa "*) echo ahead ;;
+            *"compare/mk1...bbbbbbbb "*) echo behind ;;
+            *"compare/mk1...cccccccc "*)
+              if [ -s "$flaky" ]; then echo ahead; else echo x > "$flaky"; return 1; fi ;;
+            *) echo surprising-status ;;
+          esac ;;
+        *) return 1 ;;
+      esac
+    }
+    ncalls() { wc -l < "$calls" | tr -d '[:space:]'; }
+    COMPARE_CACHE_DIR="$tmp/cache1"; mkdir -p "$COMPARE_CACHE_DIR"
+    { is_ancestor mk1 aaaaaaaa && is_ancestor mk1 aaaaaaaa; } \
+      || { echo "selftest FAIL: repeated positive verdict not current" >&2; f=1; }
+    [ "$(ncalls)" = 1 ] || { echo "selftest FAIL: repeated positive compare not reused ($(ncalls) calls)" >&2; f=1; }
+    : > "$calls"
+    if is_ancestor mk1 bbbbbbbb || is_ancestor mk1 bbbbbbbb; then echo "selftest FAIL: behind read as current" >&2; f=1; fi
+    [ "$(ncalls)" = 1 ] || { echo "selftest FAIL: repeated negative compare not reused ($(ncalls) calls)" >&2; f=1; }
+    : > "$calls"
+    { is_ancestor mk2 aaaaaaaa && is_ancestor mk1 aaaaaaaaaaaa; } \
+      || { echo "selftest FAIL: distinct marker / longer short SHA not current" >&2; f=1; }
+    [ "$(ncalls)" = 2 ] || { echo "selftest FAIL: distinct marker or SHA length shared a cache key" >&2; f=1; }
+    : > "$calls"
+    if is_ancestor mk1 cccccccc; then echo "selftest FAIL: transport error read as current" >&2; f=1; fi
+    is_ancestor mk1 cccccccc || { echo "selftest FAIL: success after an uncached error rejected" >&2; f=1; }
+    [ "$(ncalls)" = 2 ] || { echo "selftest FAIL: a transport error was cached" >&2; f=1; }
+    : > "$calls"
+    if is_ancestor mk1 dddddddd || is_ancestor mk1 dddddddd; then echo "selftest FAIL: unknown status read as current" >&2; f=1; fi
+    [ "$(ncalls)" = 2 ] || { echo "selftest FAIL: an unknown status was cached" >&2; f=1; }
+    : > "$calls"
+    COMPARE_CACHE_DIR="$tmp/cache2"; mkdir -p "$COMPARE_CACHE_DIR"
+    is_ancestor mk1 aaaaaaaa || { echo "selftest FAIL: fresh cache verdict" >&2; f=1; }
+    [ "$(ncalls)" = 1 ] || { echo "selftest FAIL: a new invocation reused an old cache" >&2; f=1; }
+    : > "$calls"
+    COMPARE_CACHE_DIR=""
+    { is_ancestor mk1 aaaaaaaa && is_ancestor mk1 aaaaaaaa; } || { echo "selftest FAIL: uncached verdict" >&2; f=1; }
+    [ "$(ncalls)" = 2 ] || { echo "selftest FAIL: live/uncached mode reused a verdict" >&2; f=1; }
+    unset -f gh ncalls
+    unset PDP_ROLLOUT_API_ATTEMPTS
+
+    # Commit graph (#15483): ancestry inside main's graph spends no compare call at all, and a
+    # commit outside it still asks the API. Without the GRAPH_DIR branch in is_ancestor the
+    # first two cases make 2 calls instead of 0, so they fail.
+    calls="$tmp/graph-calls"; : > "$calls"
+    gh() { echo x >> "$calls"; case "$*" in *compare/*) echo ahead ;; *) return 1 ;; esac; }
+    GRAPH_DIR="$GIT_DIR"
+    is_ancestor "$before_phase1" "$shipped" || { echo "selftest FAIL: graph ancestor not current" >&2; f=1; }
+    if is_ancestor "$shipped" "$before_phase1"; then echo "selftest FAIL: graph read a descendant as an ancestor" >&2; f=1; fi
+    [ "$(wc -l < "$calls" | tr -d '[:space:]')" = 0 ] || { echo "selftest FAIL: ancestry inside the graph still asked the compare API" >&2; f=1; }
+    PDP_ROLLOUT_API_ATTEMPTS=1 is_ancestor "$shipped" deadbeefdeadbeefdeadbeefdeadbeefdeadbeef \
+      || { echo "selftest FAIL: a commit outside the graph did not fall back to compare" >&2; f=1; }
+    [ "$(wc -l < "$calls" | tr -d '[:space:]')" = 1 ] || { echo "selftest FAIL: outside-graph fallback call count" >&2; f=1; }
+    # The marker is read from the graph too: with a dead API it is still the squash commit.
+    gh() { echo x >> "$calls"; return 1; }
+    : > "$calls"
+    git update-ref refs/heads/main "$shipped"
+    marker="$(marker_commit)" || { echo "selftest FAIL: graph marker lookup failed" >&2; f=1; }
+    [ "$marker" = "$shipped" ] || { echo "selftest FAIL: graph marker '$marker' != squash commit" >&2; f=1; }
+    [ "$(wc -l < "$calls" | tr -d '[:space:]')" = 0 ] || { echo "selftest FAIL: graph marker lookup asked the API" >&2; f=1; }
+    GRAPH_DIR=""
+    unset -f gh
+
+    # Transient compare-API failures: retried, but a never-answering API stays LAGGING.
+    export PDP_ROLLOUT_RETRY_SLEEP=0
+    calls="$tmp/calls"; : > "$calls"
+    gh() {
+      echo x >> "$calls"
+      case "$MOCK" in
+        flaky) [ "$(wc -l < "$calls")" -ge 3 ] && echo ahead || return 1 ;;
+        down) return 1 ;;
+        junk) echo "" ;;
+        behind) echo behind ;;
+      esac
+    }
+    MOCK=flaky; is_ancestor aaa bbb || { echo "selftest FAIL: transient API errors not retried" >&2; f=1; }
+    : > "$calls"; MOCK=down
+    if is_ancestor aaa bbb 2>/dev/null; then echo "selftest FAIL: dead API read as current" >&2; f=1; fi
+    [ "$(wc -l < "$calls")" -eq 4 ] || { echo "selftest FAIL: retry bound not honoured" >&2; f=1; }
+    : > "$calls"; MOCK=junk
+    if is_ancestor aaa bbb 2>/dev/null; then echo "selftest FAIL: empty verdict read as current" >&2; f=1; fi
+    : > "$calls"; MOCK=behind
+    if is_ancestor aaa bbb; then echo "selftest FAIL: behind read as current" >&2; f=1; fi
+    [ "$(wc -l < "$calls")" -eq 1 ] || { echo "selftest FAIL: definitive verdict was retried" >&2; f=1; }
     unset -f gh
     API=0
     exit "$f"

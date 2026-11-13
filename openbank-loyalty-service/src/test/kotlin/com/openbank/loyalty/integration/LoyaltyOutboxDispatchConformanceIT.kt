@@ -5,13 +5,14 @@ package com.openbank.loyalty.integration
 
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.outbox.OutboxDispatchConformanceIT
 import com.openbank.loyalty.infrastructure.outbox.LoyaltyOutboxDispatcher
 import com.openbank.loyalty.infrastructure.persistence.repository.LoyaltyOutboxRepositoryImpl
-import com.openbank.loyalty.it.LoyaltyPostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -32,7 +33,7 @@ import java.util.UUID
     value = LoyaltyOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
     restrictToAnnotatedClass = true,
 )
-@QuarkusTestResource(LoyaltyPostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class, initArgs = [ResourceArg(name = "db", value = "openbank_loyalty_it")])
 class LoyaltyOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
 
     // The test config leaves the dispatcher off so other ITs own their rows; this suite drives

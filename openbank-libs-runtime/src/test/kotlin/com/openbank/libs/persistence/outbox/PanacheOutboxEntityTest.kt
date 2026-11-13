@@ -106,6 +106,8 @@ class PanacheOutboxEntityTest {
 
         entity.claimedAt = Instant.parse("2026-10-14T12:01:00Z")
         entity.nextAttemptAt = Instant.parse("2026-10-14T12:02:00Z")
+        assertThat(entity.claimedAt).isEqualTo(Instant.parse("2026-10-14T12:01:00Z"))
+        assertThat(entity.nextAttemptAt).isEqualTo(Instant.parse("2026-10-14T12:02:00Z"))
         assertThat(entity.toEntry().claimedAt).isEqualTo(Instant.parse("2026-10-14T12:01:00Z"))
         assertThat(entity.toEntry().nextAttemptAt).isEqualTo(Instant.parse("2026-10-14T12:02:00Z"))
     }

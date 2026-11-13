@@ -3,7 +3,7 @@
   <ManuallySuppressedIssues/>
     <CurrentIssues>
     <ID>LongParameterList:FxService.kt$FxService$( cmd: ConvertCommand, rate: FxRate, toAmountMinorUnits: Long, feeMinorUnits: Long, conversionId: UUID, detail: String?, matchedEntity: String? )</ID>
-    <ID>LongParameterList:FxService.kt$FxService$( cmd: ConvertCommand, rate: FxRate, toAmountMinorUnits: Long, feeMinorUnits: Long, conversionId: UUID, riskLevel: AmlCaseRiskLevel, alertCode: String, detail: String?, matchedEntity: String? )</ID>
+    <ID>LongParameterList:FxService.kt$FxService$( cmd: ConvertCommand, rate: FxRate, toAmountMinorUnits: Long, feeMinorUnits: Long, conversionId: UUID, riskLevel: AmlCaseSeverity, alertCode: String, detail: String?, matchedEntity: String? )</ID>
     <ID>LongParameterList:FxService.kt$FxService$( cmd: ConvertCommand, rate: FxRate, toAmountMinorUnits: Long, feeMinorUnits: Long, conversionId: UUID, status: FxConversionStatus, createdAt: Instant, settledAt: Instant? )</ID>
     <ID>LoopWithTooManyJumpStatements:CnbRateIngestionService.kt$CnbRateIngestionService$for</ID>
     <ID>MagicNumber:AmlCaseAdapter.kt$AmlCaseAdapter$5_000</ID>

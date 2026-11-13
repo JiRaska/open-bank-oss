@@ -80,6 +80,9 @@ openbank:
     provisioning-cron: "0 30 2 * * ?"
 
 "%test":
+  openbank:
+    outbox:
+      dispatch-enabled: false
   quarkus:
     datasource:
       username: openbank

@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.7...delegation-service-v0.24.0) (2026-11-12)
+
+
+### Features
+
+* **document:** ownership projection for delegated object grants, with ADR-0375 and its D4 gate ([#15824](https://github.com/JiRaska/open-bank-oss/issues/15824)) ([f15f8c1](https://github.com/JiRaska/open-bank-oss/commit/f15f8c133d3afbabd9bc34b65749559c1bc8eaf3))
+
+## [0.23.7](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.6...delegation-service-v0.23.7) (2026-11-12)
+
+
+### Bug Fixes
+
+* **delegation:** bind approval replay to the frozen payment payload ([#15716](https://github.com/JiRaska/open-bank-oss/issues/15716)) ([ad63d63](https://github.com/JiRaska/open-bank-oss/commit/ad63d6306340cfff8c9be9350bfd6e3c399034f5))
+
+## [0.23.6](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.5...delegation-service-v0.23.6) (2026-11-12)
+
+
+### Bug Fixes
+
+* **delegation:** require explicit sole authority for offers ([#15639](https://github.com/JiRaska/open-bank-oss/issues/15639)) ([25b2de9](https://github.com/JiRaska/open-bank-oss/commit/25b2de9c4040af4f3b22ac6f988834f894f6cb79))
+
+## [0.23.5](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.4...delegation-service-v0.23.5) (2026-11-06)
+
+
+### Bug Fixes
+
+* **delegation:** answer 503, not 500, when acting-for cannot be read ([#14773](https://github.com/JiRaska/open-bank-oss/issues/14773)) ([317407f](https://github.com/JiRaska/open-bank-oss/commit/317407fc60fc98b454f6efc80048c2ad32093de5))
+
+## [0.23.4](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.3...delegation-service-v0.23.4) (2026-10-30)
+
+
+### Bug Fixes
+
+* **delegation:** align owner portfolio OpenAPI path parameter ([#14235](https://github.com/JiRaska/open-bank-oss/issues/14235)) ([c33021d](https://github.com/JiRaska/open-bank-oss/commit/c33021d3a183784d89b104b006496fc7022be9a5))
+
 ## [0.23.3](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.2...delegation-service-v0.23.3) (2026-10-19)
 
 

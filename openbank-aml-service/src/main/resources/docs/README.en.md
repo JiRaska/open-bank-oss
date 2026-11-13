@@ -25,3 +25,9 @@ This documentation is published directly by the service at the management endpoi
 - **Idempotency:** `Idempotency-Key` header → Redis (Valkey); also a unique `idempotency_key` per case row
 - **Auth:** Keycloak OIDC; mutations require `ROLE_OPERATOR`, `ROLE_ADMIN` or `ROLE_COMPLIANCE`; OPA sidecar authz (ADR-0034, advisory by default)
 - **Money-path:** **No** — not listed in `rules.yaml: money_path_services` (1 approval, no mandatory threat model). It is a compliance-screening service in the FinOps `compliance-screening` group.
+
+## Account ownership consumer contract
+
+`AmlAccountOwnershipPactConsumerTest` covers account ownership resolution after a case is recorded: a 200 account response supplies the owning `partyId`, while 404 resolves to `null`. It invokes the production `AccountServiceClient` wrapper through an anonymous test implementation bound to a Pact mock server. It does not exercise the production REST-client path annotations, OIDC/mTLS filters, the real scheduled sweep, case persistence or live authorization. The two interactions require separate provider replay; a mock response alone is not deployed compatibility proof.
+
+The account provider's existing known-party fixture supplies the positive account. Folder and broker twins declare the same no-seed unknown-account state for the 404 interaction. Synthetic identifiers are used; no production customer data is required. The test-only Pact consumer dependency uses the existing version catalog. Missing or skipped replays must not be counted as passed contracts.

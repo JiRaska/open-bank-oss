@@ -183,9 +183,17 @@ sr_actions := {
 	"tax.statutory-return.assemble",
 	"tax.statutory-return.approve",
 	"tax.statutory-return.submit",
+	"tax.statutory-return.acknowledge",
+	"tax.statutory-return.deliver",
 }
 
-sr_lifecycle := {"tax.statutory-return.assemble", "tax.statutory-return.approve", "tax.statutory-return.submit"}
+sr_lifecycle := {
+	"tax.statutory-return.assemble",
+	"tax.statutory-return.approve",
+	"tax.statutory-return.submit",
+	"tax.statutory-return.acknowledge",
+	"tax.statutory-return.deliver",
+}
 
 test_human_operator_may_do_every_statutory_return_action if {
 	every action in sr_actions {
@@ -301,4 +309,18 @@ test_missing_machine_flag_denied_every_corporate_register_action if {
 			"action": action,
 		}
 	}
+}
+
+# --- GSFT delivery (#15356) -----------------------------------------------------------------
+
+test_human_operator_may_deliver_a_gsft_batch if {
+	rest.allow with input as {"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"], "service_account": false}, "action": "tax.statutory-return.deliver"}
+}
+
+test_gsft_delivery_denied_to_oversight_roles_and_machines if {
+	every role in ["ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE", "ROLE_API"] {
+		not rest.allow with input as {"principal": {"type": "HUMAN", "id": "audrey", "roles": [role], "service_account": false}, "action": "tax.statutory-return.deliver"}
+	}
+	not rest.allow with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"], "service_account": true}, "action": "tax.statutory-return.deliver"}
+	not rest.allow with input as {"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]}, "action": "tax.statutory-return.deliver"}
 }

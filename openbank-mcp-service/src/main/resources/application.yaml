@@ -147,3 +147,11 @@ openbank:
     oidc-client:
       tls:
         verification: none
+
+"%test":
+  quarkus:
+    # No Keycloak in @QuarkusTest: OIDC resource-server and the outbound oidc-client stay off.
+    oidc:
+      tenant-enabled: false
+    oidc-client:
+      enabled: false

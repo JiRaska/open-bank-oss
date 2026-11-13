@@ -5,23 +5,21 @@
 # CI runner pool governance (ADR-0053; rules.yaml: ci_runners; issue #6458).
 #
 # WHY THIS EXISTS
-#   `rules.yaml: ci_runners` declares three ARC scale sets — build, batch, deploy —
+#   `rules.yaml: ci_runners` declares four ARC scale sets — build, batch, DR,
+#   deploy —
 #   with a trust split (build/batch carry no cloud credentials; deploy pushes to ECR
 #   and syncs ArgoCD) and a capacity split. Until this gate, NOTHING compared that
-#   declaration to anything:
+#   declaration to the OpenTofu resources and workflow labels:
 #
-#     * `openbank-batch` is declared, with an `isolation_rationale` explaining the
-#       capacity split it provides, and it is provisioned NOWHERE. The OpenTofu
-#       creates exactly two scale sets. A job routed to it would sit `queued`
-#       forever — the failure mode with no error message, because "no runner has
-#       picked this up yet" and "no runner will ever exist" are the same state to
-#       every observer. `rules.yaml: infra_apply.runner_routing` still routes the
-#       tofu PLAN lane there on paper.
+#     * A declared pool without an OpenTofu scale set can leave a routed job
+#       queued indefinitely. Build, batch, DR, and deploy now each have a
+#       matching resource. The batch and DR scale sets and their listeners were
+#       observed Ready in a read-only cluster check for #6458; this source gate
+#       cannot prove job pickup, DR execution, or restore success.
 #
 #     * `pr_jobs_allowed_pools: [build, batch]` says a pull_request job must never
 #       target the credential-carrying deploy pool. That was the literal content of
-#       `ci_runners.blocked_on` ("a CI lint enforcing pr_jobs_allowed_pools ... has
-#       not landed"), with `target_enforce_date: 2026-08-31`. This is that lint.
+#       `ci_runners.blocked_on` before this lint landed. This is that lint.
 #
 #   The declaration reads as governance either way: an unprovisioned pool and a
 #   provisioned one are the same three lines of YAML.
@@ -44,12 +42,11 @@
 #      not two, and #8388 is why this class exists. "Declared in rules.yaml", "written in
 #      OpenTofu" and "running in the cluster" are different facts, and `load_provisioned`
 #      can only ever read the middle one — CI has no cluster credentials. So when #8388
-#      added helm_release.arc_batch/arc_dr, this gate immediately reported both pools as
-#      provisioned, while the merge commit's Platform OpenTofu run did a PLAN only
-#      (`tofu apply (manual dispatch)` skipped) and no apply has run since 2026-08-31.
-#      The capacity does not exist; the gate built to see that gap could no longer see it.
-#      A scale set in KNOWN_UNAPPLIED is therefore subtracted from `provisioned`, so the
-#      other four classes reason about capacity that actually exists.
+#      added helm_release.arc_batch/arc_dr, this gate saw resources in source
+#      control before live readiness was established. A scale set in KNOWN_UNAPPLIED
+#      is therefore subtracted from `provisioned` until a read-only check confirms
+#      its scale set and listener are Ready. An empty baseline records the completed
+#      check; it does not turn this source gate into a live capacity monitor.
 #
 # EXIT CODES
 #   0 — clean
@@ -71,41 +68,15 @@ import yaml
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gatelib  # noqa: E402  (path must be set first)
 
-# Declared in rules.yaml: ci_runners.pools, provisioned by no OpenTofu scale set.
-# Removing an entry requires either provisioning the pool or deleting its declaration.
-# Both entries here are also in KNOWN_UNAPPLIED: their OpenTofu exists but has never
-# been applied, so they are declared capacity that does not exist (#6458).
-KNOWN_UNPROVISIONED: dict[str, str] = {
-    "openbank-batch": "#6458 — OpenTofu added by #8388, never applied",
-    "openbank-dr": "#6458 — OpenTofu added by #8388, never applied",
-}
+# Declared pools without a matching OpenTofu scale set are an explicit baseline.
+# Remove an entry when the pool is provisioned or its declaration is deleted.
+KNOWN_UNPROVISIONED: dict[str, str] = {}
 
-# Scale sets whose OpenTofu resource EXISTS but which no `tofu apply` has ever created.
-# This map is the only way CI can tell "written" from "running": the gate has no cluster
-# credentials, so `load_provisioned` reads *.tf and would otherwise call a resource that
-# has never been applied "provisioned".
-#
-# EVIDENCE for the two entries below, measured 2026-09-03 against the live sandbox
-# cluster (read-only) and the workflow history — three independent reads agreeing:
-#   * `kubectl get autoscalingrunnersets -n arc-runners` lists exactly openbank-build
-#     and openbank-deploy. No openbank-batch, no openbank-dr.
-#   * The helm release secrets in that namespace are sh.helm.release.v1.openbank-build.*
-#     and .openbank-deploy.* only — arc_batch/arc_dr have never been installed.
-#   * `kubectl get sa -n arc-runners` has no openbank-dr service account, which the same
-#     OpenTofu creates, so the apply cannot have run even partially.
-#   * Platform OpenTofu run 33728996592 (push of #8388's merge commit b547afe8c) shows
-#     `tofu plan (preview)` success and `tofu apply (manual dispatch)` SKIPPED; the last
-#     real apply was the 2026-08-31 workflow_dispatch, before #8388 merged.
-#
-# REMOVING AN ENTRY is a human act after a cluster read — this gate cannot detect the
-# apply, so it will not tell you when the debt is paid. Verify with the first command
-# above, then delete the entry here and in KNOWN_UNPROVISIONED. The ratchet still fails
-# if the OpenTofu resource disappears while the entry remains (STALE-UNAPPLIED), and any
-# NEW job routed at an unapplied pool is reported, so the set cannot silently grow.
-KNOWN_UNAPPLIED: dict[str, str] = {
-    "openbank-batch": "#6458 — helm_release.arc_batch (arc-runners.tf) added by #8388, never applied",
-    "openbank-dr": "#6458 — helm_release.arc_dr (arc-runners.tf) added by #8388, never applied",
-}
+# An OpenTofu resource does not prove that the scale set has been applied. Add a pool
+# here while its declared resource is still absent from the cluster; remove it only
+# after a read-only cluster check confirms the scale set and its listener are ready.
+# The CI gate cannot perform that check because it has no cluster credentials.
+KNOWN_UNAPPLIED: dict[str, str] = {}
 
 SCALE_SET_RE = re.compile(r'runnerScaleSetName\s*=\s*"([^"]+)"')
 PR_EVENTS = {"pull_request", "pull_request_target"}

@@ -132,6 +132,8 @@ export interface EvidenceSource {
 
 export interface ComponentTestPosture {
   component: string
+  /** Canonical governance domain; absent in older retained reports. */
+  domain?: string
   /** Added by the route at request time; absent in the on-disk/CI file. */
   running?: RunningCommitObservation
   /** Present only on a posture served by the commit-addressed evidence store (#13201). */
@@ -350,6 +352,23 @@ export interface ClientExperienceEvidence {
   blocker: string | null
 }
 
+export interface TestLayerCoverage {
+  kind: 'e2e' | 'trace' | 'simulation'
+  rule: string | null
+  applicable: number
+  notApplicable: number
+  present: number
+  unproven: number
+  missing: number
+  components: Array<{
+    component: string
+    moneyPath: boolean
+    applicable: boolean
+    status: 'present' | 'unproven' | 'missing' | 'not-applicable'
+    reason: string | null
+  }>
+}
+
 export interface TestIntelligenceReport {
   schemaVersion: 1
   /** Added by the route at request time; absent in the on-disk/CI file. */
@@ -365,6 +384,8 @@ export interface TestIntelligenceReport {
   clientExperiences: ClientExperienceEvidence[]
   requiredControls?: RequiredTestControl[]
   platformCapabilities?: TestPlatformCapability[]
+  /** Per-layer denominator from openbank-libs/governance/test-layer-applicability.yaml. */
+  layerCoverage?: TestLayerCoverage[]
   /**
    * Build-time derived ADR-0148 record/replay posture. This is deliberately neither a CI
    * test result nor a runtime agent-health signal: it says which registered charters have a
@@ -453,6 +474,10 @@ export interface TestCaseHistory {
   wastedDurationMs: number
   sameCommitTransitions: number
   lastObservedAt: string
+  /** Exact testcase execution, distinct from a component-level aggregate. */
+  lastRun?: TestRunProvenance & { observedAt: string }
+  /** Bounded immutable observations; no failure messages, input values or stack traces. */
+  recentRuns?: Array<{ state: 'passed' | 'failed' | 'skipped'; durationMs: number; run: TestRunProvenance & { observedAt: string } }>
   /** Direct evidence that a passed Playwright testcase needed retry attempts. */
   retryFlaky?: true
   /** Latest typed retry observation; failure text and stack output are never retained. */

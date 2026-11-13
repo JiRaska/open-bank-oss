@@ -46,12 +46,13 @@ class RealAccountReadPort(
     // accounts, balances, transactions, mapper) — adding a 6th constructor parameter here would
     // break every one of those call sites for a refactor that changes no behaviour.
     private val gate = ConsentGate(consent)
+    private val directory = AccountDirectory(accounts)
 
     override fun listAccounts(consentContext: ConsentContext): JsonNode {
         val validated = gate.validate(consentContext, ConsentScopes.ACCOUNTS_READ, accountIban = null)
         val ibans = validated.grantedAccounts.orEmpty()
         val result = mapper.createArrayNode()
-        ibans.forEach { iban -> result.add(accounts.getAccountByIban(iban)) }
+        ibans.forEach { iban -> result.add(mapper.valueToTree<JsonNode>(directory.byIban(iban))) }
         return result
     }
 
@@ -76,5 +77,5 @@ class RealAccountReadPort(
         return mapper.createArrayNode().add(mapper.valueToTree(validated))
     }
 
-    private fun resolveAccountId(iban: String): String = accounts.getAccountByIban(iban).path("id").asText()
+    private fun resolveAccountId(iban: String): String = directory.idByIban(iban).toString()
 }

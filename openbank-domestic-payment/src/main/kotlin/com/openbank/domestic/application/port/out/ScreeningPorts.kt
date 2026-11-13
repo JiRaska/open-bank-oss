@@ -4,8 +4,9 @@
 
 package com.openbank.domestic.application.port.out
 
-import com.openbank.domestic.domain.screening.ScreeningResult
-import com.openbank.domestic.domain.screening.ScreeningRole
+import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
 import java.util.UUID
 
 /** Raised when the sanctions service cannot be reached — the gate fails closed (ADR-0032 §C). */
@@ -23,15 +24,13 @@ interface SanctionsScreeningPort {
 }
 
 /** Risk grading of an opened AML case, mirrors aml-service `AmlRiskLevel`. */
-enum class AmlCaseRiskLevel { LOW, MEDIUM, HIGH, CRITICAL }
-
 /** Everything the use-case knows at the payment boundary to open an AML case. */
 data class OpenAmlCaseCommand(
     val idempotencyKey: String,
     val paymentId: UUID,
     val debtorAccountId: UUID,
     val customerReference: String,
-    val riskLevel: AmlCaseRiskLevel,
+    val riskLevel: AmlCaseSeverity,
     val alertCode: String,
     val alertDetail: String?,
     val matchedEntity: String?,

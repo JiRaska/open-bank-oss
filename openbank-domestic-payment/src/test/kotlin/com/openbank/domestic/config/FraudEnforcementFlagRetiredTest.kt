@@ -18,6 +18,11 @@ import java.io.File
  * `openbank.domestic.*` config key is named, by its full dotted path, in some Kotlin source) rather than the specific
  * absence, so it also covers the next key that loses its reader. A key that legitimately needs no
  * Kotlin reader — one consumed by a Quarkus extension — belongs in [FRAMEWORK_READ].
+ *
+ * #4403 brought the flag back with a reader: `DomesticPaymentActivitiesImpl.fraudGate` reads it via
+ * `@ConfigProperty(defaultValue = "false")`, and the workflow branches on the decision it returns.
+ * It is still deliberately absent from `application.yaml` (the default lives on the annotation), so
+ * the YAML assertion below keeps holding and `FraudGateActivityTest` proves the flag changes the outcome.
  */
 class FraudEnforcementFlagRetiredTest {
 

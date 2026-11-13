@@ -20,6 +20,6 @@ import jakarta.enterprise.context.ApplicationScoped
 @Mock
 @ApplicationScoped
 class TestSanctionsScreeningPort : AccountSanctionsScreeningPort {
-    override suspend fun screen(name: String, idempotencyKey: String): SanctionsScreenResult =
+    override suspend fun screen(name: String, idempotencyKey: String, subjectId: String): SanctionsScreenResult =
         SanctionsScreenResult(status = "CLEAR", matchScore = 0.0, matchedName = null)
 }

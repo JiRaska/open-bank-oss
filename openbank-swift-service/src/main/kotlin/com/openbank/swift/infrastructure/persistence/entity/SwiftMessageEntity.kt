@@ -97,6 +97,14 @@ class SwiftMessageEntity {
     @field:Column(name = "booking_clock_covered")
     var bookingClockCovered: Boolean? = null
 
+    /** #13686 four-eyes waive, set only by the runbook; read-only here so no merge can write or clear it. */
+    @field:Column(name = "booking_waived_at", insertable = false, updatable = false)
+    var bookingWaivedAt: Instant? = null
+
+    /** Native re-drive bookkeeping is never written by a generic aggregate merge. */
+    @field:Column(name = "booking_redrive_stopped_at", insertable = false, updatable = false)
+    var bookingRedriveStoppedAt: Instant? = null
+
     @field:Version
     var version: Long = 0
 

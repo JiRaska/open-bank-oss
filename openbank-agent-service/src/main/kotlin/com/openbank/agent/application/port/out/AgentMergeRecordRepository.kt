@@ -26,5 +26,7 @@ interface AgentMergeRecordRepository {
     /** Merge records newest first; [agentId] filters on `agent_id`. */
     fun list(agentId: String?): List<AgentMergeRecord>
 
+    fun findByPrNumber(prNumber: Long): AgentMergeRecord?
+
     data class InsertResult(val record: AgentMergeRecord, val inserted: Boolean)
 }

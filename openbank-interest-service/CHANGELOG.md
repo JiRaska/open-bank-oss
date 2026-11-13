@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.28.0...interest-service-v0.29.0) (2026-11-09)
+
+
+### Features
+
+* **interest:** deliver exercised close job evidence ([#14180](https://github.com/JiRaska/open-bank-oss/issues/14180)) ([9a84ff2](https://github.com/JiRaska/open-bank-oss/commit/9a84ff2915aa0bc9e1d21f27b952651b2a7ab542))
+
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.27.0...interest-service-v0.28.0) (2026-11-08)
+
+
+### Features
+
+* **infra:** provision OpenBao TLS listener and Transit key for product-IR signing ([#15117](https://github.com/JiRaska/open-bank-oss/issues/15117)) ([35f7501](https://github.com/JiRaska/open-bank-oss/commit/35f7501ca1e47759e8a2df550dafeec1bdec5632))
+
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.26.1...interest-service-v0.27.0) (2026-10-30)
+
+
+### Features
+
+* **interest:** product-IR shadow comparator, shadow mode only (ADR-0352 phase 3) ([#14174](https://github.com/JiRaska/open-bank-oss/issues/14174)) ([b0ad31a](https://github.com/JiRaska/open-bank-oss/commit/b0ad31a4250e8a9ca79d99105ead97a9fa7694f4))
+
+## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.26.0...interest-service-v0.26.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **ledger:** capture source-linked journal history snapshots with idempotent capture ([#13763](https://github.com/JiRaska/open-bank-oss/issues/13763)) ([c7d103c](https://github.com/JiRaska/open-bank-oss/commit/c7d103c9f9482c8725af567a770a2ad1cf5f5cad))
+
 ## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.25.0...interest-service-v0.26.0) (2026-10-22)
 
 

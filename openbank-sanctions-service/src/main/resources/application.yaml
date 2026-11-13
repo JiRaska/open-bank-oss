@@ -87,6 +87,30 @@ quarkus:
       outgoing:
         sanctions-events-out:
           connector: smallrye-in-memory
+"%prod":
+  quarkus:
+    http:
+      # East-west mTLS listener (8443) beside the plain port (#15723). `client-auth` is a
+      # BUILD-TIME property: the container env QUARKUS_HTTP_SSL_CLIENT_AUTH cannot set it, so it
+      # lives in the file the image is built from. Under `%prod` only: at the top level every dev
+      # run and @QuarkusTest would see TLS intended with no certificate and refuse to start.
+      ssl:
+        client-auth: required
+      # Keep the plain-HTTP port. With client-auth required Quarkus defaults `insecure-requests`
+      # to `disabled` and drops the HTTP listener, so the readiness probe and every existing
+      # plaintext caller would get connection refused (#10441). mTLS applies to 8443 only.
+      insecure-requests: enabled
+      # Listener parity (#12511): with client-auth on, Quarkus also registers its mTLS
+      # authentication mechanism, which makes any trusted client certificate an authenticated
+      # identity on 8443. The API accepts the bearer mechanism ONLY, on both listeners; the
+      # certificate stays transport authentication. SanctionsListenerAuthParityIT holds both
+      # listeners to it with the production listener shape.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
 
 kafka:
   bootstrap:
@@ -115,6 +139,15 @@ mp:
         topic: openbank.sanctions.screening.event
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Durable fan-out for high-risk screening hits (ADR-0031 D9). The trigger body carries only
+      # sourceService + occurredAt; ce-id/ce-type headers retain correlation to the outbox event.
+      oversight-events-out:
+        connector: smallrye-kafka
+        client:
+          id: sanctions-oversight-${quarkus.uuid}
+        topic: openbank.oversight-triggers
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"
@@ -131,6 +164,9 @@ authz:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
 openbank:
+  api:
+    version: "3"
+    sunset-date: "Sat, 01 May 2027 00:00:00 GMT"
   # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
   # RedisApprovalStoreProducer, which replaced this service's own ApprovalConfig. Removing it
   # removes the ApprovalStore bean, and with it four-eyes.
@@ -162,3 +198,7 @@ openbank:
       source: ${SANCTIONS_EU_SOURCE:eu-fsf}
     eu-fsf:
       url: ${SANCTIONS_EU_FSF_URL:https://webgate.ec.europa.eu/fsd/fsf/public/files/xmlFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw}
+    # Ongoing monitoring of registered subjects (ADR-0376). OFF by default: while it is off no
+    # subject can be registered, nothing is matched and no finding is published.
+    monitoring:
+      enabled: ${SANCTIONS_MONITORING_ENABLED:false}

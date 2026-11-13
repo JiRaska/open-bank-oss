@@ -153,6 +153,10 @@ spec:
               args:
                 - run
                 - --quiet
+                - -o
+                - experimental-prometheus-rw
+                - --tag
+                - journey=product-catalog-read
                 - /scripts/journey.js
               env:
                 # Optional on purpose (#7324): an unseeded KV entry must yield a red run with
@@ -163,6 +167,14 @@ spec:
                       name: journey-product-catalog-read-oidc
                       key: CATALOG_READ_CLIENT_SECRET
                       optional: true
+                # Runtime perf evidence for the test-intelligence matrix (mirrors
+                # cronjob-journey-public-edge.yaml). A remote-write failure does NOT fail
+                # the run — k6 still exits 0 — so the kube-state-metrics Job verdict stays
+                # authoritative for alerting (prometheus-rules-journey.yaml).
+                - name: K6_PROMETHEUS_RW_SERVER_URL
+                  value: http://kube-prometheus-stack-prometheus.observability.svc:9090/api/v1/write
+                - name: K6_PROMETHEUS_RW_TREND_STATS
+                  value: "p(95),p(99),avg,max"
               volumeMounts:
                 - name: script
                   mountPath: /scripts

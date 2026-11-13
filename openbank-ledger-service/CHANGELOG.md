@@ -1,5 +1,94 @@
 # Changelog
 
+## [1.45.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.45.0...ledger-service-v1.45.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **ledger:** give frozen-period and closed-year 409s a machine code ([#15811](https://github.com/JiRaska/open-bank-oss/issues/15811)) ([0f6fe9f](https://github.com/JiRaska/open-bank-oss/commit/0f6fe9facbb1f9484f2d5250875f8826cd3f5d97)), closes [#15760](https://github.com/JiRaska/open-bank-oss/issues/15760)
+
+## [1.45.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.44.1...ledger-service-v1.45.0) (2026-11-12)
+
+
+### Features
+
+* **ledger:** enforce journal balance and append-only in the database (ADR-0372) ([#15733](https://github.com/JiRaska/open-bank-oss/issues/15733)) ([f4e1b6c](https://github.com/JiRaska/open-bank-oss/commit/f4e1b6c39999187b4b64076bab5f3299830de4dd))
+
+## [1.44.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.44.0...ledger-service-v1.44.1) (2026-11-12)
+
+
+### Performance
+
+* **ledger:** page journal history in PostgreSQL ([#15618](https://github.com/JiRaska/open-bank-oss/issues/15618)) ([ffa69d0](https://github.com/JiRaska/open-bank-oss/commit/ffa69d093f4083242e5a19b60a68ada789cc1e11))
+
+## [1.44.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.43.0...ledger-service-v1.44.0) (2026-11-12)
+
+
+### Features
+
+* **transaction,ledger:** preserve synthetic origin across transfer booking ([#15651](https://github.com/JiRaska/open-bank-oss/issues/15651)) ([598e95a](https://github.com/JiRaska/open-bank-oss/commit/598e95a8b82d024258202d5bd176b57b089c7913))
+
+
+### Bug Fixes
+
+* **ledger:** keep outbox claims compatible with additive schema changes ([#15634](https://github.com/JiRaska/open-bank-oss/issues/15634)) ([706cf7d](https://github.com/JiRaska/open-bank-oss/commit/706cf7daf4c73fafebc56684a2e0bca324a84b98))
+
+## [1.43.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.42.0...ledger-service-v1.43.0) (2026-11-11)
+
+
+### Features
+
+* **ledger:** allocate the fiscal-year result to retained earnings (ADR-0096 D3) ([#15548](https://github.com/JiRaska/open-bank-oss/issues/15548)) ([51115c7](https://github.com/JiRaska/open-bank-oss/commit/51115c7d62374060125157f942f553a5206e42e7))
+
+## [1.42.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.41.0...ledger-service-v1.42.0) (2026-11-09)
+
+
+### Features
+
+* **ledger:** add segregated pension fee accounting and close evidence ([#15210](https://github.com/JiRaska/open-bank-oss/issues/15210)) ([7bfb640](https://github.com/JiRaska/open-bank-oss/commit/7bfb640b41dfb2a75e7f32c120341b42c286cb9d))
+
+## [1.41.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.40.0...ledger-service-v1.41.0) (2026-11-09)
+
+
+### Features
+
+* **ledger:** prove daily close completeness before enforcement ([#14179](https://github.com/JiRaska/open-bank-oss/issues/14179)) ([6107f91](https://github.com/JiRaska/open-bank-oss/commit/6107f91a8055fdf46f82b5b5eff701079fe1fdf5))
+
+## [1.40.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.39.1...ledger-service-v1.40.0) (2026-10-29)
+
+
+### Features
+
+* **treasury:** day-close participant - report the hourly accrual and the day's deal journals (ADR-0342) ([#13882](https://github.com/JiRaska/open-bank-oss/issues/13882)) ([8408b38](https://github.com/JiRaska/open-bank-oss/commit/8408b38cd8954afb0a55c623b18d933bc836eae8))
+
+## [1.39.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.39.0...ledger-service-v1.39.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **ledger:** carry the synthetic taint on the CDI request context into suspended resources ([#14059](https://github.com/JiRaska/open-bank-oss/issues/14059)) ([df3ce04](https://github.com/JiRaska/open-bank-oss/commit/df3ce048f294d17a912ddbdda45f90ff41ce0fe7))
+
+## [1.39.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.38.0...ledger-service-v1.39.0) (2026-10-26)
+
+
+### Features
+
+* **customer-edge:** add measured runtime resilience pilots ([#13891](https://github.com/JiRaska/open-bank-oss/issues/13891)) ([c0c19be](https://github.com/JiRaska/open-bank-oss/commit/c0c19be26b70b4d06433138e1f5f5016db31888b))
+
+
+### Bug Fixes
+
+* **ledger:** capture source-linked journal history snapshots with idempotent capture ([#13763](https://github.com/JiRaska/open-bank-oss/issues/13763)) ([c7d103c](https://github.com/JiRaska/open-bank-oss/commit/c7d103c9f9482c8725af567a770a2ad1cf5f5cad))
+
+## [1.38.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.37.2...ledger-service-v1.38.0) (2026-10-26)
+
+
+### Features
+
+* **billing:** day-close participant — report the monthly cycle and its fee postings (ADR-0342) ([#13709](https://github.com/JiRaska/open-bank-oss/issues/13709)) ([3290e47](https://github.com/JiRaska/open-bank-oss/commit/3290e47c6af59538d1ccc4da355630bb67343a48))
+* **ledger:** treasury instrument accounts and accounting-class roles; shared schedule and rail vocabularies ([#13697](https://github.com/JiRaska/open-bank-oss/issues/13697)) ([0e044c8](https://github.com/JiRaska/open-bank-oss/commit/0e044c83945eb9d5d46e7860fed4f1c8d9bd9b83))
+* **lending:** day-close participant — report accrual and provisioning per accounting day (ADR-0342) ([#13708](https://github.com/JiRaska/open-bank-oss/issues/13708)) ([bde7d38](https://github.com/JiRaska/open-bank-oss/commit/bde7d3842a8e2272b0d2ce15ea726b7927a5645b))
+
 ## [1.37.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.37.1...ledger-service-v1.37.2) (2026-10-23)
 
 

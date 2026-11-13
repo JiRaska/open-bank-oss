@@ -48,6 +48,14 @@ ENV_NAME = "OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS"
 # The one principal a downstream service may trust: customer-edge's M2M identity, which
 # forwards the taint only after its own trusted-principal decision (UpstreamClient, #12050).
 RELAY_PRINCIPALS = {"service-account-openbank-edge"}
+# #14058 — ledger-service's deterministic fixture seed (ADR-0252): the account-overview k6
+# journey is seeded by ONE posting from this dedicated machine identity, admitted by OPA to
+# exactly ledger.create (ledger_rest_ext.rego: synthetic-ledger-seed-post). Unlike the relay
+# path, ledger trusts the seed DIRECTLY — the taint travels on the x-openbank-synthetic header
+# and postJournal checks the caller principal against this env (#14059). This allowlist is
+# deliberately one name long and lives next to the ledger manifest it guards.
+LEDGER_MANIFEST = "openbank-infra/gitops/components/ledger/ledger-service.yaml"
+LEDGER_SEED_PRINCIPALS = {"service-account-openbank-synthetic-ledger-seed"}
 FLOWS_OFF = ("standardFlowEnabled", "implicitFlowEnabled", "directAccessGrantsEnabled")
 
 
@@ -152,8 +160,16 @@ def check(root: pathlib.Path) -> tuple[list[str], int]:
     decls = trusted_declarations(root)
     for rel, principals in decls:
         in_edge = rel.startswith(EDGE_MANIFEST_DIR + "/")
-        allowed = canaries if in_edge else RELAY_PRINCIPALS
-        role = "a declared openbank-synthetic-* client" if in_edge else "customer-edge's relay identity"
+        in_ledger = rel == LEDGER_MANIFEST
+        if in_edge:
+            allowed = canaries
+            role = "a declared openbank-synthetic-* client"
+        elif in_ledger:
+            allowed = RELAY_PRINCIPALS | LEDGER_SEED_PRINCIPALS
+            role = "customer-edge's relay identity or the ledger fixture-seed identity (#14058)"
+        else:
+            allowed = RELAY_PRINCIPALS
+            role = "customer-edge's relay identity"
         for p in principals:
             if p not in allowed:
                 findings.append(f"{rel}: {ENV_NAME} trusts {p!r}, which is not {role} — that caller could taint real activity")
@@ -186,15 +202,15 @@ GOOD_USER = {
 }
 
 
-def _tree(tmp: pathlib.Path, client: dict, user: dict | None, edge_env: str | None, other_env: str | None) -> pathlib.Path:
+def _tree(tmp: pathlib.Path, client: dict, user: dict | None, edge_env: str | None, other_env: str | None, ledger_env: str | None = None) -> pathlib.Path:
     realm = {"clients": [client], "users": [user] if user else []}
     (tmp / REALM).parent.mkdir(parents=True, exist_ok=True)
     (tmp / REALM).write_text(json.dumps(realm))
-    for d, val in ((EDGE_MANIFEST_DIR, edge_env), (f"{GITOPS}/components/wealth", other_env)):
+    for d, val in ((EDGE_MANIFEST_DIR, edge_env), (f"{GITOPS}/components/wealth", other_env), ("openbank-infra/gitops/components/ledger", ledger_env)):
         if val is None:
             continue
         (tmp / d).mkdir(parents=True, exist_ok=True)
-        (tmp / d / "deploy.yaml").write_text(
+        (tmp / d / ("ledger-service.yaml" if d.endswith("/ledger") else "deploy.yaml")).write_text(
             "spec:\n  template:\n    spec:\n      containers:\n        - env:\n"
             f"            - name: {ENV_NAME}\n              value: \"{val}\"\n"
         )
@@ -219,10 +235,23 @@ def self_test() -> int:
         ("edge trusts the relay identity", GOOD_CLIENT, GOOD_USER, relay_ok, None, 1),
         ("downstream trusts the canary directly", GOOD_CLIENT, GOOD_USER, None, edge_ok, 1),
     ]
+    ledger_cases = [
+        ("ledger trusts the seed identity", "service-account-openbank-synthetic-ledger-seed", 0),
+        ("ledger trusts a non-seed principal", "service-account-openbank-mcp-service", 1),
+        ("downstream (wealth) trusts the seed identity", "service-account-openbank-synthetic-ledger-seed", 1),
+    ]
     failed = 0
     for name, client, user, edge_env, other_env, want in cases:
         with tempfile.TemporaryDirectory() as d:
             findings, _ = check(_tree(pathlib.Path(d), client, user, edge_env, other_env))
+        got = 1 if findings else 0
+        ok = got == want
+        failed += 0 if ok else 1
+        print(f"  {'ok  ' if ok else 'FAIL'} {name}: {'finding' if got else 'clean'} (want {'finding' if want else 'clean'})")
+    for name, ledger_env, want in ledger_cases:
+        other_env = ledger_env if name.startswith("downstream") else None
+        with tempfile.TemporaryDirectory() as d:
+            findings, _ = check(_tree(pathlib.Path(d), GOOD_CLIENT, GOOD_USER, None, other_env, ledger_env))
         got = 1 if findings else 0
         ok = got == want
         failed += 0 if ok else 1

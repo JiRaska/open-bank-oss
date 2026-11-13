@@ -4,6 +4,13 @@
 
 plugins {
     id("openbank.quarkus-service")
+    // Inline version (not the shared catalog) so enabling mutation testing stays path-scoped to
+    // this service and does not trigger a fleet-wide rebuild. 1.19.0 supports Gradle 9.
+    id("info.solidsoft.pitest") version "1.19.0"
+}
+
+kotlin.sourceSets.named("consumerPactTest") {
+    kotlin.include("com/openbank/pension/infrastructure/fund/InMemoryFundOrderPlans.kt")
 }
 
 dependencies {
@@ -133,3 +140,19 @@ val dipCrossServiceIT = tasks.register<Test>("dipCrossServiceIT") {
 }
 
 tasks.named("check") { dependsOn(dipCrossServiceIT) }
+
+// Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3). Weekly + manual via
+// pitest.yml, advisory, never a per-PR gate. Why this service: it is money-path and its domain is
+// substantive by the pitest.yml measure, 392 branch sites across 31 domain files, so a surviving mutant is a contribution, annuity or exit amount nobody asserted.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.pension.domain.*")
+    targetTests = setOf("com.openbank.pension.domain.*", "com.openbank.pension.application.*")
+    // Advisory (ADR-0063): pitest.yml reports the score and warns below 70%; the Gradle task itself
+    // must not fail the run, so the threshold is 0 until the score is measured and sustained.
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    excludedClasses = setOf("com.openbank.pension.domain.*Kt")
+}

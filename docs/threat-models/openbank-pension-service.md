@@ -200,6 +200,22 @@ pre-contractual documents are not yet attached to offers (docs/compliance/pensio
 legal review pending). Withholding tax already remitted on a premium returned to the contract is
 not reversed automatically.
 
+The reference adapter closes non-success response bodies without collecting or draining them;
+HTTP status rejection retains the existing exception contract. Coroutine cancellation, including
+the quote deadline, requests cancellation of the original JDK HTTP exchange and propagates the
+cancellation to the caller. It does not retry a purchase or cancellation command. Request-local
+status handling does not convert a successful-status transport failure into a status rejection.
+`ReferenceAnnuityResponseLifecycleTest` verifies these properties against synthetic loopback
+peers, including held bodies, exchange closure and concurrent responses; it is not deployment
+proof. Existing protocol tests retain request and idempotency contracts.
+
+Successful response parsing remains compatible with the published partner protocol. This change
+does not establish a maximum successful-response size, number of offers or aggregate fan-out
+memory budget. Those bounds require an explicit partner-protocol envelope; the inbound request
+limit is not a partner-response limit. Rollback restores the previous response lifecycle while
+leaving registry authorization, credential sourcing, timeouts and financial state transitions
+unchanged.
+
 ## 4e. Reporting read model (#12425)
 
 `GET /api/v2/pension/reporting/participant-aggregates` serves the participant aggregates
@@ -366,3 +382,13 @@ log redaction or runtime enforcement. Rollback: revert the search parameter/resp
 changes together; no migration or stored-data rewrite is introduced.
 
 - **2026-10-17** — **OPA PolicyDecisionPoint now comes from libs-runtime (#13136).** The per-service AuthzProducer is removed and the service opts into the shared `OpaPolicyDecisionPointProducer` with `openbank.authz.opa-pdp-producer.enabled: true` (a build-time switch). `opa.url` and `opa.path` keep their keys and defaults. The timeout key is renamed from `opa.timeout` (`PT0.5S`) to `opa.timeout-ms` (`500`); no manifest or environment sets either, so the effective OPA timeout stays 500 ms. No change to policy, actions, roles, the sidecar edge or fail-closed behaviour; the PDP object is the same `OpaSidecarPolicyDecisionPoint`. Rollback: revert the PR.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

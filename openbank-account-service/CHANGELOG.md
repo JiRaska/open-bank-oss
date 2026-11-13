@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.37.0...account-service-v0.38.0) (2026-11-13)
+
+
+### Features
+
+* **account:** expose account standing and freeze a party's accounts when it loses standing (ADR-0374 step A2) ([#15745](https://github.com/JiRaska/open-bank-oss/issues/15745)) ([bc2ad95](https://github.com/JiRaska/open-bank-oss/commit/bc2ad959361d552dc856c7f06be71f436c66caeb))
+
+## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.36.1...account-service-v0.37.0) (2026-11-12)
+
+
+### Features
+
+* **account:** serve the GSFT deposit roster as of a Czech date ([#15652](https://github.com/JiRaska/open-bank-oss/issues/15652)) ([c68575d](https://github.com/JiRaska/open-bank-oss/commit/c68575daf7fe2e346e97951c22e2ac4fdbc04340))
+
+## [0.36.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.36.0...account-service-v0.36.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **account:** preserve cursor order across account types ([#14233](https://github.com/JiRaska/open-bank-oss/issues/14233)) ([ce83d41](https://github.com/JiRaska/open-bank-oss/commit/ce83d41d60edf8991e2f88318738aee2c1e44e7f))
+
+
+### Security
+
+* **account:** enforce bearer while preserving public metadata ([#14262](https://github.com/JiRaska/open-bank-oss/issues/14262)) ([3a3a2ce](https://github.com/JiRaska/open-bank-oss/commit/3a3a2ced5b4aaf19ca84430f6c5481b4ba7e378c))
+
+## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.35.1...account-service-v0.36.0) (2026-10-29)
+
+
+### Features
+
+* **account:** pin the published product revision at account opening (ADR-0341, ADR-0352 phase 3) ([#13869](https://github.com/JiRaska/open-bank-oss/issues/13869)) ([9e34827](https://github.com/JiRaska/open-bank-oss/commit/9e348271857e1b6c63942c46496c7630ab71de37))
+
 ## [0.35.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.35.0...account-service-v0.35.1) (2026-10-19)
 
 

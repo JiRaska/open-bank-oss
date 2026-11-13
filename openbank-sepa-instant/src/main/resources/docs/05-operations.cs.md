@@ -94,3 +94,12 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 ## Volání vypořádání do transaction-service
 
 Vypořádání se vyžaduje přes sdílenou fasádu `TransactionClient` z generovaného modulu `openbank-client-transaction` (ADR-0319), která je nově jediným místem interpretujícím HTTP odpověď transaction-service. Stav 2xx se prokazuje ze stavového řádku dříve, než se čte tělo; přijme se jen HTTP 201 s čitelným tělem odpovídajícím požadavku (typ, zdrojový účet, částka, měna, platební schéma, typ instrukce), přičemž `COMPLETED` znamená vypořádáno a `PENDING`/`PROCESSING` fasáda vyhodí jako nejisté a platba se zopakuje. Vše ostatní - 409, 400/422, jiné kódy 2xx, nečitelné nebo neodpovídající tělo i jakékoli 3xx/401/403/404/5xx nebo selhání spojení - končí jako `SettlementUnavailableException`, takže se platba zopakuje se stejným idempotentním klíčem (`sct-inst-settlement-<paymentId>`) a opakování přehraje stejné zaúčtování místo vytvoření druhého. Konfigurace se nezměnila.
+
+## Typ platby v pacs.008 (#13663)
+
+Tato větev sestavuje zprávy SCT Inst s `PmtTpInf/SvcLvl/Cd=SEPA` a
+`PmtTpInf/LclInstrm/Cd=INST`. Sdílený builder vkládá blok za `PmtId`; stávající kontrola proti
+XML schématu ověří výslednou zprávu před voláním brány.
+Mění se odchozí zpráva schématu, nikoli platební API, účetní klíče či pravidla opakování.
+Použijte běžný revidovaný release a znovu sestavte konzumenty sdílené knihovny; zdrojový kód
+a lokální testy simulátoru nedokládají přijetí zprávy nasazenou externí bránou schématu.

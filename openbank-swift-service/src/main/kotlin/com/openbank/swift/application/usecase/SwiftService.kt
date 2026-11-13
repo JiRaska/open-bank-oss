@@ -5,6 +5,7 @@
 package com.openbank.swift.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.swift.application.port.`in`.SendSwiftCommand
 import com.openbank.swift.application.port.`in`.SwiftUseCase
@@ -13,10 +14,12 @@ import com.openbank.swift.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.swift.application.port.out.SettlementPort
 import com.openbank.swift.application.port.out.SettlementUnavailableException
 import com.openbank.swift.application.port.out.SwiftRepository
+import com.openbank.swift.application.port.out.SwiftSettlementRedrivePort
 import com.openbank.swift.domain.model.SwiftMessage
 import com.openbank.swift.domain.model.SwiftMessageType
 import com.openbank.swift.domain.model.SwiftStatus
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -30,13 +33,12 @@ class SwiftService(
     private val settlementPort: SettlementPort,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
+    private val redrive: SwiftSettlementRedrivePort,
     @ConfigProperty(name = "openbank.swift.scheme-submission.enabled", defaultValue = "false")
     private val schemeSubmissionEnabled: Boolean,
 ) : SwiftUseCase {
 
     companion object {
-        private const val SWIFT_MESSAGE_STATUS_CHANGED = "swift.message.status-changed"
-
         /**
          * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
          * (EVENT-sourced) attribution (#3994/#5256). Matches the fleet's audit convention — the
@@ -67,7 +69,8 @@ class SwiftService(
      */
     private fun statusChangedEvent(message: SwiftMessage) = OutboxMessage(
         aggregateId = message.id,
-        eventType = SWIFT_MESSAGE_STATUS_CHANGED,
+        // Literal, not the constant: the event-contract agreement gate reads it off this call.
+        eventType = "swift.message.status-changed",
         payload = objectMapper.writeValueAsString(
             mapOf(
                 "sourceService" to SOURCE_SERVICE,
@@ -135,7 +138,9 @@ class SwiftService(
                 repo.saveWithOutbox(updated, statusChangedEvent(updated))
             }
             // ADR-0108: book the funds in transaction-service after scheme ACSC.
-            if (persisted.status == SwiftStatus.SENT) settle(persisted) else persisted
+            if (persisted.status == SwiftStatus.SENT) settleDetailed(persisted).message else persisted
+        } catch (ex: CancellationException) {
+            throw ex
         } catch (ex: SchemeGatewayUnavailableException) {
             log.warnf(ex, "Scheme gateway unavailable for SWIFT message %s; holding in VALIDATED", message.id)
             message
@@ -146,28 +151,55 @@ class SwiftService(
     }
 
     /**
+     * #13686 re-drive entry: settle an already scheme-accepted MT103 again, under the SAME
+     * `swift-settlement-<messageId>` key and with the request built from the stored message alone (the 32A
+     * value date, never today's date). It never calls the scheme gateway. The caller
+     * ([SwiftSettlementRedriveService]) holds the durable claim and has checked the open booking clock;
+     * this refuses anything that is not SENT so a stale caller cannot complete another state.
+     */
+    suspend fun settleAccepted(message: SwiftMessage): SettleAttempt {
+        if (message.status != SwiftStatus.SENT || message.messageType != SwiftMessageType.MT103) {
+            return SettleAttempt(message, permanent = false)
+        }
+        return settleDetailed(message)
+    }
+
+    /** One settlement attempt: the resulting message, and whether no retry can ever change the answer. */
+    data class SettleAttempt(val message: SwiftMessage, val permanent: Boolean, val bookingProven: Boolean = false)
+
+    /**
      * ADR-0108: call transaction-service to book the funds and advance to COMPLETED.
-     * Fails closed: settlement unavailable → message stays SENT (will be retried externally).
+     * Fails closed: settlement unavailable → message stays SENT; the #13686 re-drive sweep retries it.
      */
     @Suppress("TooGenericExceptionCaught")
-    private suspend fun settle(message: SwiftMessage): SwiftMessage = try {
+    private suspend fun settleDetailed(message: SwiftMessage): SettleAttempt = try {
         val outcome = settlementPort.settle(message)
         if (outcome.settled && outcome.transactionId != null) {
             val completed = message.copy(status = SwiftStatus.COMPLETED, updatedAt = Instant.now(clock))
-            repo.completeBooking(completed, outcome.transactionId, statusChangedEvent(completed))
+            val recorded = try {
+                repo.completeBooking(completed, outcome.transactionId, statusChangedEvent(completed))
+            } catch (ex: ResourceConflictException) {
+                log.debug("Normal booking completion conflicted; checking the strict late-proof boundary", ex)
+                // Only the separate boundary may retain proof after an operator status/version change.
+                // It rechecks the immutable request and durable stop under a short row lock.
+                repo.recordLateBookingProof(message, outcome.transactionId, Instant.now(clock))
+            }
+            SettleAttempt(recorded, permanent = false, bookingProven = true)
         } else {
             log.warnf(
                 "Settlement unproven for SWIFT message %s; message stays SENT",
                 message.id,
             )
-            message
+            SettleAttempt(message, outcome.permanent)
         }
+    } catch (ex: CancellationException) {
+        throw ex
     } catch (ex: SettlementUnavailableException) {
         log.warnf(ex, "transaction-service unavailable for SWIFT message %s; holding in SENT", message.id)
-        message
+        SettleAttempt(message, permanent = false)
     } catch (ex: Exception) {
         log.warnf(ex, "Unexpected error during settlement for SWIFT message %s; holding in SENT", message.id)
-        message
+        SettleAttempt(message, permanent = false)
     }
 
     override suspend fun getById(id: UUID) = repo.findById(id)
@@ -187,6 +219,7 @@ class SwiftService(
     override suspend fun acknowledge(id: UUID, ackRef: String): SwiftMessage {
         val msg = repo.findById(id) ?: error("SWIFT message not found: $id")
         val now = Instant.now(clock)
+        redrive.stopForOperator(id, "operator-ack", now)
         val acknowledged = msg.copy(
             status = SwiftStatus.ACKNOWLEDGED,
             ackReceivedAt = now,
@@ -198,11 +231,29 @@ class SwiftService(
     /** #8718: see [acknowledge] — an operator rejection publishes on the same terms. */
     override suspend fun reject(id: UUID, reason: String): SwiftMessage {
         val msg = repo.findById(id) ?: error("SWIFT message not found: $id")
+        redrive.stopForOperator(id, "operator-reject", Instant.now(clock))
         val rejected = msg.copy(
             status = SwiftStatus.REJECTED,
             rejectionReason = reason,
             updatedAt = Instant.now(clock),
         )
         return repo.saveWithOutbox(rejected, statusChangedEvent(rejected))
+    }
+}
+
+/**
+ * #13686: an operator decision takes the message out of the settlement re-drive for good, and is refused
+ * while a re-drive holds a live claim (an in-flight transaction-service call). The booking clock is NOT
+ * closed: it can only close on a proven booking, so the unsettled alert keeps naming an unbooked debit.
+ *
+ * The stop commits in its OWN transaction, before the status write. That fails safe: if the status write then
+ * fails, the message is stopped but keeps its old status, so the only effect is that the sweep no longer
+ * books it (the alert keeps firing); it can never leave a message re-drivable that an operator decided on.
+ * A re-drive that stalled past its lease can still complete after the stop: that booking is under the same
+ * `swift-settlement-<messageId>` key, its proof is recorded, and it is counted as a late completion.
+ */
+private suspend fun SwiftSettlementRedrivePort.stopForOperator(id: UUID, reason: String, now: Instant) {
+    if (!stop(id, reason, now)) {
+        throw ResourceConflictException("SWIFT message $id is being re-driven for settlement; retry shortly")
     }
 }

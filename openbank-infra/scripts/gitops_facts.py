@@ -293,6 +293,47 @@ def podmonitor_namespaces(gitops: Path) -> set[str]:
     return out
 
 
+def _has_management_port(doc: str) -> bool:
+    # Keep the bare-runner helper stdlib-only. Recognize block port entries and
+    # single-line flow mappings, but only inside a ports list, never env/comments.
+    lines = []
+    scalar_indent = None
+    for raw in doc.splitlines():
+        depth = len(raw) - len(raw.lstrip())
+        if scalar_indent is not None:
+            if not raw.strip() or depth > scalar_indent:
+                continue
+            scalar_indent = None
+        scalar = re.match(r"^(\s*)(-\s+)?[\w.-]+:\s*[|>][0-9+-]*\s*(?:#.*)?$", raw)
+        if scalar:
+            scalar_indent = len(scalar.group(1)) + len(scalar.group(2) or "")
+        lines.append(raw)
+    for index, line in enumerate(lines):
+        ports = re.fullmatch(r"(\s*)ports:\s*(?:#.*)?", line)
+        if not ports:
+            continue
+        indent = len(ports.group(1))
+        entries = []
+        for candidate in lines[index + 1:]:
+            stripped = candidate.lstrip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            depth = len(candidate) - len(stripped)
+            if depth < indent or (depth == indent and not stripped.startswith("- ")):
+                break
+            entries.append(candidate)
+        body = "\n".join(entries)
+        if re.search(r"^\s*-\s+name:\s*management\s*$", body, re.M):
+            return True
+        if re.search(
+            r"^\s*-\s*\{(?=(?:[^{}\n]*,)?\s*containerPort:\s*\d+\s*[,}])"
+            r"(?:[^{}\n]*,)?\s*name:\s*management(?=\s*[,}])[^{}\n]*\}\s*(?:#.*)?$",
+            body, re.M,
+        ):
+            return True
+    return False
+
+
 def management_port_workloads(gitops: Path) -> dict[str, set[str]]:
     """{namespace: {workload names}} for every workload declaring a container port `management`.
 
@@ -320,8 +361,7 @@ def management_port_workloads(gitops: Path) -> dict[str, set[str]]:
             kind = re.search(r"^kind:\s*(\S+)", doc, re.M)
             if not kind or kind.group(1) not in ("Deployment", "Rollout", "StatefulSet"):
                 continue
-            # The port entry itself, not a mere mention: `- name: management` inside `ports:`.
-            if not re.search(r"^\s+-\s+name:\s*management\s*$", doc, re.M):
+            if not _has_management_port(doc):
                 continue
             name = re.search(r"^\s{2}name:\s*(\S+)", doc, re.M)
             explicit = re.search(r"^\s{2}namespace:\s*(\S+)", doc, re.M)

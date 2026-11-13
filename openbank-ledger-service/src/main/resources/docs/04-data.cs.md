@@ -13,7 +13,20 @@ Dedikovaná PostgreSQL databáze **`openbank_ledger`** (reaktivní PG klient pro
 | `journal_lines` | debetní/kreditní řádky | `gl_account_id`, `side` (D/C), `amount` NUMERIC(20,6) (>0), `currency_code`, `fx_rate` NUMERIC(20,10), `base_amount`, `base_currency`, `sequence`, `sub_account_id` (nullable, jen deposit-control) |
 | `ledger_outbox` | transakční outbox | `event_id` (unique), `aggregate_id`, `event_type`, `payload`, `status`, `attempt_count`, `sent_at`, `last_error` |
 | `ledger_idempotency` | dedup zaúčtování | `idempotency_key` (PK), `journal_id`, `journal_entry_date` |
+| `ledger_repair_audit` | append-only log deklarovaných oprav zaúčtovaných dokladů (ADR-0372) | `reason`, `table_name`, `operation` (UPDATE/DELETE/TRUNCATE), `journal_id`, `entry_date`, `line_id`, `changed_columns`, `database_role`, `transaction_xid`, `recorded_at` |
 | `partition_lifecycle_audit` | neměnný log akcí partitionů | `parent_table`, `partition_name`, `action` (CREATE/DETACH/DROP/DEFAULT_NONEMPTY/NOOP), `reason`, `dry_run`, `executed_at` |
+
+### Invarianty deníku vynucené databází (ADR-0372, V44)
+
+Databáze vynucuje dva invarianty, které už drží doménový model, a to pro každého zapisovatele na spojení, nejen pro službu:
+
+- **Vyrovnanost při commitu.** Odložené constraint triggery odmítnou COMMIT transakce, po které by zaúčtovaný doklad (status `POSTED` nebo `REVERSED`) měl méně než dva řádky, neměl stranu MD i D, nebo nebyl vyrovnaný v každé `base_currency` (`side` D/C nad `base_amount`). SQLSTATE `23514`. Výjimka neexistuje.
+- **Po zaúčtování jen přidávat.** Řádek zaúčtovaného dokladu přijme jedinou změnu, `POSTED → REVERSED` s `version + 1` a bez změny jiného sloupce (označení storna). Řádek `journal_lines` zaúčtovaného dokladu nelze změnit ani smazat a žádnou z obou tabulek nelze TRUNCATEnout. Řádek lze VLOŽIT jen do dokladu ve stavu `PENDING` nebo do dokladu, který zapsala tatáž transakce; řádek pro doklad, který ještě neexistuje, je odmítnut. SQLSTATE `55000`. Doklady ve stavu `PENDING` a jejich řádky zůstávají editovatelné.
+- **Deklarovaná oprava.** Schválená oprava dat zavolá `SELECT ledger_declare_repair('důvod')` ve stejné transakci jako přepis. Deklarace je vázaná na tuto transakci (nastavení na úrovni session nic neotevře) a každý přepsaný řádek se zapíše do `ledger_repair_audit`, která sama odmítá UPDATE, DELETE i TRUNCATE. Ani oprava nesmí commitnout nevyrovnaný doklad.
+
+Důsledky pro každého, kdo do těchto tabulek zapisuje přímo (migrace, fixtures, ruční session): nejdřív vlož doklad a všechny jeho řádky v **jedné transakci**, protože autocommit po jednotlivých příkazech selže; nespoléhej na `INSERT ... ON CONFLICT DO NOTHING` pro opakované vložení řádků (ochrana se spustí dřív, než se konflikt vyhodnotí), idempotentní seed řiď řádkem dokladu; zaúčtovaný doklad opravuj stornem, ne updatem.
+
+Limity: jde o ochranu proti chybám a nerevidovanému kódu. Superuser nebo vlastník tabulky může trigger vypnout či zrušit; `DETACH`/`DROP` partitionu a `TRUNCATE` jednoho partitionu trigger nespustí; runtime role může opravu deklarovat sama (je zalogována, ne nezávisle schválena). Cena je jedno dohledání dokladu na doklad a jedna odložená kontrola na každý zapsaný řádek při commitu: lineární v počtu dokladů, kvadratická v počtu řádků jednoho dokladu, a proto smí mít zaúčtovaný doklad nejvýše `ledger_max_journal_lines()` řádků (500), pokud není deklarována oprava. Posting API tento limit zatím neuvádí; širší zápis je odmítnut při COMMITu.
 
 ### Partitioning
 
@@ -36,6 +49,7 @@ V1 seeduje hotovostní/vkladové/úrokové/poplatkové účty (1000, 1001, 2000,
 | `V6__fx_revaluation_counter_value_accounts` | CZK counter-value účty 1995–1997 (ADR-0046) | smazat naseedované řádky |
 | `V7__add_sub_account_id_to_journal_lines` | nullable `sub_account_id` + partial index (ADR-0039 fáze B) | dokumentováno v souboru: drop indexu + sloupce (zpětně kompatibilní) |
 | `V8__journal_partition_lifecycle` | pre-create partitionů 2027/2028, tabulka `partition_lifecycle_audit` | drop partitionů/tabulky |
+| `V44__storage_enforced_journal_invariants` | constraint triggery vyrovnanosti při commitu, append-only ochrany `journal_entries`/`journal_lines`, `ledger_declare_repair()`, `ledger_repair_audit` (ADR-0372); žádný existující řádek se nepřepisuje, již nevyrovnané doklady jsou hlášeny jako varování | zrušit triggery a funkce vyjmenované v souboru; `ledger_repair_audit` ponechat |
 | `V34__per_currency_fee_income_accounts` | výnosy z poplatků 4004 EUR / 4005 USD / 4006 GBP + řádky mapy `FEE_INCOME_ACCOUNT`; selže, pokud se měny výnosů z poplatků a deposit-control liší (#13226) | smazat řádky mapy a účty, jen před prvním odkazem z účetního řádku |
 
 **Nikdy needituj migraci po aplikaci na živou DB** — Flyway checksum mismatch shodí startup (dočasná náprava `QUARKUS_FLYWAY_REPAIR_AT_START=true`, poté odstranit).
@@ -69,3 +83,9 @@ Re-identifikace (spojení `sub_account_id`/`transaction_id` zpět na zákazníka
 - Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
 - Signály: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total` a workflow liveness `outbox-sent-retention`.
 - Vypnutí: `openbank.outbox.retention.enabled=false` (při startu zaloguje WARN). Nesnižujte `sent-days` pod potřebu kteréhokoli čtenáře SENT řádků.
+
+## Životní cyklus mezipaměti historie
+
+V36 přidává volitelné údaje o původu a neměnné manifesty, řádky a provenienci snímků. Jedna transakce repeatable-read kopíruje potvrzená data z jednoho SQL/MVCC pohledu; maximum sekvence není důkazem potvrzení transakcí. Provenience zahrnuje i zdroje počátečního součtu. Smazání zdrojového zápisu či řádku a změna údajů o původu transakčně zneplatní odvozené kopie. Čtení odmítá nedostupné připojené zdroje; stávající údržba partition takové kopie fyzicky odstraní. Prázdný výsledek bez zdrojů se neukládá. Nevzniká nová samostatná retenční lhůta, mazání zdrojů ani změna právního pozastavení výmazu; dostupnost kopie následuje všechny původní zdroje. Nejde o nový zákonný doklad uzávěrky.
+
+V37 přidává atomický záznam o zachycení historie poté, co V36 vytvoří odkazované snímky. V35 zůstává stávající migrací nástrojových účtů treasury beze změny. Rozšíření může souběžně existovat s předchozí aplikací, která nový endpoint ani tabulky nepoužívá. Při návratu nejprve nasaďte předchozí aplikaci a vypněte nový endpoint; zachycená data a záznamy uchovejte do posouzení retence před případným zvlášť schváleným destruktivním návratem schématu. Součástí nasazení není Flyway repair ani přepis kontrolních součtů.

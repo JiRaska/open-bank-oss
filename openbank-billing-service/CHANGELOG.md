@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.18.0...billing-service-v0.19.0) (2026-11-09)
+
+
+### Features
+
+* **lending:** deliver lending, billing and treasury close evidence ([#14181](https://github.com/JiRaska/open-bank-oss/issues/14181)) ([458d4dd](https://github.com/JiRaska/open-bank-oss/commit/458d4dd972dfe37baf3f4da4fed608a8924fa3a1))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.17.4...billing-service-v0.18.0) (2026-11-08)
+
+
+### Features
+
+* **infra:** provision OpenBao TLS listener and Transit key for product-IR signing ([#15117](https://github.com/JiRaska/open-bank-oss/issues/15117)) ([35f7501](https://github.com/JiRaska/open-bank-oss/commit/35f7501ca1e47759e8a2df550dafeec1bdec5632))
+
+## [0.17.4](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.17.3...billing-service-v0.17.4) (2026-11-06)
+
+
+### Bug Fixes
+
+* **billing:** read the product catalog as openbank-billing, not the shared client ([#14827](https://github.com/JiRaska/open-bank-oss/issues/14827)) ([a6d0948](https://github.com/JiRaska/open-bank-oss/commit/a6d0948f59d06341a60283da0fd15ba2daefbf6b))
+
+## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.17.2...billing-service-v0.17.3) (2026-10-29)
+
+
+### Bug Fixes
+
+* **billing:** bound how long the product-IR shadow keeps frozen account facts ([#13769](https://github.com/JiRaska/open-bank-oss/issues/13769)) ([2dbb081](https://github.com/JiRaska/open-bank-oss/commit/2dbb081b0da6953dfc0b58dfe09c1cf0bae9cbf7))
+
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.17.1...billing-service-v0.17.2) (2026-10-26)
+
+
+### Security
+
+* **libs:** bind product revision signatures to the full revision identity ([#13749](https://github.com/JiRaska/open-bank-oss/issues/13749)) ([8171dfd](https://github.com/JiRaska/open-bank-oss/commit/8171dfdbf44a06ac48c058f662acdb6c26cc7b98))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.17.0...billing-service-v0.17.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **billing:** harden the product-IR shadow against poison rows and false agreement ([#13765](https://github.com/JiRaska/open-bank-oss/issues/13765)) ([cc37724](https://github.com/JiRaska/open-bank-oss/commit/cc377246b1072f4ee5cfeff18025f5f067b455ac))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.3...billing-service-v0.17.0) (2026-10-26)
+
+
+### Features
+
+* **billing:** day-close participant — report the monthly cycle and its fee postings (ADR-0342) ([#13709](https://github.com/JiRaska/open-bank-oss/issues/13709)) ([3290e47](https://github.com/JiRaska/open-bank-oss/commit/3290e47c6af59538d1ccc4da355630bb67343a48))
+* **billing:** product-IR shadow comparator, shadow mode only (ADR-0352 phase 3) ([#13741](https://github.com/JiRaska/open-bank-oss/issues/13741)) ([2947705](https://github.com/JiRaska/open-bank-oss/commit/2947705e724626ea6811a43fc66d40780cdcc8f7))
+
 ## [0.16.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.2...billing-service-v0.16.3) (2026-10-23)
 
 

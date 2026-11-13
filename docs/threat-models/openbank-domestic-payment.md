@@ -89,6 +89,8 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 5. Residual risks / assumptions
 
+The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit mapped-column projection. This keeps the existing dispatcher available across additive schema expansion. The claim and acknowledgement semantics stay the same.
+
 - **Idempotency-key required** — only an exact, actor-bound retry may replay the durable payment;
   changed or unverifiable legacy requests are rejected with 409.
 - **Global-key collision remains fail-closed:** V1's existing `UNIQUE(idempotency_key)` is intentionally
@@ -119,6 +121,67 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-11-08** — **Fraud hold enforced in SANDBOX (#4403).** The sandbox deployment sets
+  `OPENBANK_DOMESTIC_FRAUD_ENFORCEMENT_ENABLED` and `DOMESTIC_FRAUD_HOLD_RESOLUTION_CONSUMER_ENABLED`
+  together; application defaults stay `false`. New availability exposure, not a new trust boundary: while
+  fraud-service is unreachable every payment is held (synthetic verdict) and, absent an analyst decision,
+  rejected after 48 h — fail closed, never a pass. Watch `openbank_fraud_scoring_degraded{service="domestic"}`
+  and `FraudHoldScoringUnavailable`. New metric `openbank_domestic_fraud_hold_duration_seconds{outcome}`
+  (workflow time from HOLD to decision or timeout) carries no payment data. Rollback: both flags `false`.
+- **2026-11-06** — **Fraud holds get a release path (#4403, still default off).** New consumer
+  `fraud-hold-resolution-in` reads `openbank.aml.events`; `aml.case.status_changed.v1` gains additive
+  `transactionId` and `alertCode`. For a `FRAUD_REVIEW` case CLEARED signals RELEASE and BLOCKED signals
+  REJECT; every other status, code or a missing transaction id does nothing, so the hold still times
+  out into rejection. **STRIDE**: new elevation path, since whoever may write the AML case decision or
+  produce to that topic can release a held payment. Writes to the topic are limited to aml-service by
+  ACL; `PUT /api/v1/aml/cases/{id}/decision` needs ROLE_OPERATOR, ROLE_ADMIN or ROLE_COMPLIANCE and has
+  no separate four-eyes check on a release, an accepted gap while the flag is sandbox only. **Who can
+  create a case**: any caller of `POST /api/v1/aml/cases` (the same three roles, plus internal
+  producers such as the onboarding consumer and every payment rail), and `alertCode` and
+  `transactionId` are free text it chooses. So neither proves which case a decision belongs to.
+  **Binding enforced**: `aml.case.status_changed.v1` also carries the case's `idempotencyKey`; the
+  consumer acts only when it equals `aml-<paymentId>-FRAUD_REVIEW`, the key the rail opens its case
+  with, and the workflow checks that key again. The workflow also accepts a decision only while it is
+  actually holding: a signal before the hold, after it ended, already decided, or for another case is
+  ignored and counted (`openbank_domestic_fraud_hold_signal_ignored{reason}`), so a RELEASE cannot be
+  pre-armed. **Residual**: a case creator who learns a payment id before the hold opens could create
+  a case under that exact key first; the rail's own create then fails on the key and is swallowed, so
+  that case is the one an analyst decides. Bounded by the decision itself needing the decision roles,
+  and the payment id being server-generated. Tampering is bounded because a signal can only choose
+  between the two outcomes of a waiting run, first answer wins, and sanctions screening has already
+  passed. Routing (#15198 review fix): every run of a payment, including a screening re-drive, carries the
+  one workflow id `domestic-payment-<paymentId>` (explicit ALLOW_DUPLICATE reuse, FAIL on conflict), and
+  the decision is signalled to that id with no run id, so it reaches the current run and never a stale
+  one. The re-drive previously used a suffixed id, so an analyst CLEAR on a re-driven hold missed it and
+  the hold timed out into a false REJECT; it also started a parallel second run while the first was
+  still holding, which Temporal now refuses. `delivery="NOT_WAITING"` remains only for a decision
+  arriving after the hold ended; it is returned, counted and logged at WARN, and no hold is left
+  pending behind it.
+
+- **2026-10-30** — **Fraud enforcement restored as a workflow decision, default off (#4403, ADR-0084 §4.2).**
+  New runs of `DomesticPaymentWorkflow` (behind the `fraud-enforcement` `Workflow.getVersion` marker;
+  runs started earlier replay the shadow-only step) call a `fraudGate` activity that returns
+  `PROCEED|HOLD|REJECT`. The flag `openbank.domestic.fraud.enforcement-enabled` is read by that
+  activity and defaults to `false`; while false every payment proceeds exactly as before and the
+  would-be decision is only counted (`openbank_fraud_enforcement_decisions_total{decision,mode="shadow"}`).
+  With it on: a real ALLOW proceeds; DECLINE rejects with `FRAUD_SUSPECTED` (not `SANCTIONS_HIT`);
+  CHALLENGE, REVIEW, UNKNOWN and **any synthetic verdict, ALLOW included,** hold the payment before
+  scheme submission and open a `FRAUD_REVIEW` case in the existing AML case store. A hold is released
+  only by the `resolveFraudHold(RELEASE)` workflow signal; `REJECT`, or no signal within 48 h, rejects
+  the payment. **Fail closed**: a hold never expires into a pass, and a case that fails to open still
+  ends in rejection on timeout. **Tipping-off**: the fraud reject path sends no customer notification and
+  writes no `rejectDetail`; the cause is in the log and in
+  `openbank_fraud_enforcement_rejections_total{cause}` only. **STRIDE**: integrity/availability risk of
+  a miscalibrated verdict holding or rejecting a legitimate payment (mitigated by the default-off flag and
+  shadow calibration on the decision metric first); elevation risk on the release signal, which only a
+  Temporal client can send (no HTTP surface added). No new trust boundary, endpoint, DB change or event
+  schema change. **Residual**: nothing yet sends the signal when an analyst closes the case, so with
+  the flag on every held payment is rejected at 48 h; wiring case resolution to the signal is a
+  follow-up before the flag is turned on. Rollback: set the flag to `false` (new holds stop at once;
+  payments already waiting keep waiting for their signal or timeout) or revert the PR.
+
+- **2026-10-24** — **Screening, AML case severity and fraud verdict types come from `openbank-libs-fincrime` (ADR-0353, #13435/#13439).** The local copies of `ScreeningPolicy`, `ScreeningMatchStatus`, `ScreeningDecision`, `ScreeningRole`, `ScreeningResult`, the AML case risk level enum (now `AmlCaseSeverity`) and `FraudVerdict` are deleted; the rail uses the one shared definition its producers (sanctions, aml, fraud) also use. Decision logic, the 0.85 block threshold and both fail-closed wire mappings (unknown sanctions status ⇒ ESCALATED ⇒ BLOCK; unknown fraud verdict ⇒ UNKNOWN, never ALLOW) are unchanged — the adapters now call the shared parsers. No wire, DB or Pact change. Rollback: revert the PR.
+- **2026-10-24** — **No `PmtTpInf` on the domestic pacs.008, by decision (#13663).** `openbank-libs-iso20022` gained an optional payment-type block; `SchemeGatewayAdapter` passes `paymentTypeInformation = null` explicitly instead of inheriting it. The EPC service level `SEPA` applies to EUR SEPA schemes, not to a domestic clearing transfer, so sending it would misdescribe the payment. The emitted XML is byte-identical to before. **Residual:** the domestic scheme's own priority or instant code (`DomesticPaymentPriority.INSTANT`) is still not stated on the wire; adding it needs the domestic scheme's code list, not an EPC code.
 - **2026-10-15** — **Outbound account-service edge: request-derived values no longer reach logs** (CodeQL
   505/506, PR #12717). `AccountServiceClient` — the outbound client edge to account-service — logged the
   IBAN or account id, plus the full throwable, whenever a party/account lookup failed. The warn lines now
@@ -795,3 +858,57 @@ cutover, revert caller URLs and policies before removing the listener.
 
 - **2026-10-23** — **Unsettled-booking alert and operator re-drive (#13623).** `DomesticPaymentBookingUnsettled` pages when the oldest open booking clock passes 1h (≈12 capped Temporal retries), so a deterministic transaction-service answer (replayed mismatch, FAILED, 409) no longer waits out the 7-day schedule-to-close unseen. Runbook `docs/runbooks/0032-payment-rail-unsettled-booking.md`: read the row under `domestic-settlement-<paymentId>` in transaction-db (read-only), then reconcile, reverse (four-eyes `transaction.reverse`) or re-drive by Temporal reset to just before the `settlePayment` activity, which is re-entrant for `SENT_TO_CLEARING` and never resubmits to clearing. **Threats addressed:** silent loss (an unbooked outbound payment now pages); double booking stays impossible because the key never changes. **Residual:** no in-band reconciliation marker after an out-of-band correction; such a payment is silenced with a ticket. Alert labels carry no identifiers. No code, authorization or retry-policy change in this service.
 
+
+- **2026-11-04** — **The TLS listener no longer accepts a client certificate as a login (#12511).** `client-auth: required` also registers Quarkus's mTLS authentication mechanism, so any certificate the private CA signed became an authenticated `SecurityIdentity` with no bearer. `%prod` now restricts `/api/*` to `auth-mechanism: bearer` with `policy: authenticated` (GET `/api/v1/info` and `/api/v1/config` stay public metadata), so the certificate is transport authentication only and the OIDC bearer is the only identity a route or OPA sees, identically on both listeners. **STRIDE-S/E:** closes a spoofing / elevation path; callers are unaffected because every caller already sends its own bearer. Proven by `DomesticPaymentListenerAuthParityIT` (production listener shape, real HTTP) and gated by `mtls-bearer-only`. **Rollback:** revert the commit (re-opens the path).
+
+
+### Reserved fraud-review case identity (#15066)
+
+The AML create boundary reserves `aml-*-FRAUD_REVIEW` keys for the domestic-payment
+service's own authenticated service account. It checks the existing verified client identity
+before looking up or reserving an idempotent response; a staff role or another otherwise
+permitted payment/FX machine identity does not grant this namespace. The guard uses the
+same unmodified key that reaches Redis and the durable case store. It changes neither the
+rail's case key nor the fraud hold/decision workflow.
+
+The boundary is implemented in
+`openbank-aml-service/src/main/kotlin/com/openbank/aml/infrastructure/rest/AmlCaseResource.kt`.
+Regression scenarios in
+`openbank-aml-service/src/test/kotlin/com/openbank/aml/it/AmlCaseCreateIdempotencyFingerprintIT.kt`
+exercise real HTTP, PostgreSQL and Redis: refused creation without a row or idempotency marker,
+refused stored replay, and the domestic-payment caller's create/retry path. Ordinary-key
+fingerprint and retry scenarios remain in the same suite. Execution results belong to the
+exact-head AML Services CI evidence, not the domestic-payment test envelope or this prose.
+This prevents new squatting through this boundary; it does not attest historical case ownership,
+perform remediation or enable fraud enforcement. Hold timeout remains fail closed.
+
+### Customer submission lookup (issue #12317)
+
+- **Spoofing and disclosure.** Only the verified customer-edge service account may assert the
+  submission scope or query it. Customer-edge derives the digest from the authenticated human,
+  effective party, debit account and the actual delegation grant. It revalidates the business
+  context and owner/grant for each lookup. The provider checks the account, key and scope in one
+  query and returns only the identifier and lifecycle state. Key stays in the request header, and
+  the response is non-cacheable. Missing, legacy, foreign and unverifiable submissions all yield
+  `UNKNOWN` on the customer route.
+- **Integrity and replay.** The new scope is immutable and written in the original payment
+  transaction. Both the initial key lookup and unique-constraint race winner compare the existing
+  payload fingerprint and scope. A mismatch, including scoped versus unscoped, cannot replay or
+  create a second payment. No status read changes the payment or consumes SCA.
+- **Deployment and rollback.** Deploy domestic-payment (including the additive nullable column)
+  ahead of customer-edge. Legacy submissions have no proven customer binding. For rollback,
+  revert customer-edge first and preserve the new column. Existing scoped rows stay protected
+  against unscoped replay even with older provider code, because the persisted request fingerprint
+  includes the scope. Co-signature approval requests use a
+  different rail key, and a pre-persistence refusal has no durable receipt. Lookup leaves both
+  outcomes unresolved for the original key.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

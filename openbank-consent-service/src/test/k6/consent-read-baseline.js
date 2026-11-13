@@ -34,6 +34,8 @@ const BASE_URL = __ENV.BASE_URL || "http://localhost:8140";
 const readHeaders = { Authorization: `Bearer ${__ENV.PERF_READ_TOKEN || ""}` };
 const PARTY_ID = __ENV.PERF_PARTY_ID || "00000000-0000-0000-0000-000000000001";
 const GRANTEE_ID = __ENV.PERF_GRANTEE_ID || "tpp-perf-baseline";
+// The active-consent resolve requires `scope` (400 without it), so the probe names one.
+const SCOPE = __ENV.PERF_CONSENT_SCOPE || "ACCOUNTS_READ";
 
 const byPartyMs = new Trend("consent_by_party_ms", true);
 const byGranteeMs = new Trend("consent_by_grantee_ms", true);
@@ -80,7 +82,7 @@ export default function () {
   byGranteeMs.add(g.timings.duration);
   check(g, { "consents by grantee 200": (res) => res.status === 200 });
 
-  const a = http.get(`${BASE_URL}/api/v1/consents/party/${PARTY_ID}/grantee/${GRANTEE_ID}/active`, {
+  const a = http.get(`${BASE_URL}/api/v1/consents/party/${PARTY_ID}/grantee/${GRANTEE_ID}/active?scope=${SCOPE}`, {
     headers: readHeaders,
     tags: { name: "consent_active" },
   });

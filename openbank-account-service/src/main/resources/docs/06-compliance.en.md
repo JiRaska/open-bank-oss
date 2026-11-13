@@ -72,6 +72,15 @@ TPP → consent-service (validate consent)
 
 account-service sees a standard bearer token; **role `ROLE_SERVICE_PSD2`** authorises read-only access.
 
+## AML — account-opening screening retry
+
+Account opening sends `partyId` as sanctions-service `subjectId`, separately from the per-attempt
+`account-open:<partyId>:<idempotencyKey>` replay key. Every new key causes a fresh list screen;
+an old `CLEAR` is never reused for a new attempt. An unexpired analyst `WHITELISTED` decision may
+permit the attempt for 90 days only when the subject attributes and current match identities are
+exactly covered by that review. New uncovered hits, changed subjects and expired clearances remain
+blocking. Legacy checks without `subjectId` require a fresh screen and review (#11694).
+
 ## AML — freeze workflow
 
 ```mermaid

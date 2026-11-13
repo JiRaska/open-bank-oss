@@ -2,9 +2,26 @@
 
 ## Base path
 
-- **Production base:** `http://openbank-sanctions-service:8123/api/v1` (in-cluster)
+- **Production base for checks:** `http://openbank-sanctions-service:8123/api/v3` (in-cluster)
+- **List administration and approvals:** remain under `/api/v1` and `/api/v2` as documented below
 - **OpenAPI spec:** [`/q/openapi`](http://localhost:8123/q/openapi)
 - **Swagger UI (dev):** [`/q/swagger-ui`](http://localhost:8123/q/swagger-ui)
+
+### Migrating checks from v1 to v3
+
+`CZ_TERRORISTS` is a new value in screening requests and responses, so the six operations that
+return `SanctionsCheck` have parallel `/api/v3` contracts: list checks, screen, review, hits,
+pending and get by ID. Migrate those calls to v3; list administration, refresh and approval URLs
+are not affected.
+
+The superseded v1 operations return `Deprecation: true`, an RFC 8594 `Sunset` header and a v3
+`Link` with `rel="successor-version"`. Their contract remains fixed during the migration window:
+
+- omitted, null or empty `listTypes` means the original seven lists, excluding `CZ_TERRORISTS`;
+  v3 means all eight lists;
+- v1 rejects an explicit `CZ_TERRORISTS` request and a cross-major idempotent replay with 400;
+- checks containing the new list are hidden from v1 collections, and v1 get/review answers 404
+  before changing them. Use the same operation under v3 to read or review them.
 
 ## Authentication
 
@@ -38,7 +55,7 @@ Rules:
 ### Screen an entity
 
 ```http
-POST /api/v1/sanctions/screen
+POST /api/v3/sanctions/screen
 Content-Type: application/json
 Authorization: Bearer <token>
 
@@ -82,7 +99,7 @@ Content-Type: application/json
       "programs": ["UKRAINE-EO13685"]
     }
   ],
-  "checkedLists": ["OFAC_SDN", "EU_CONSOLIDATED", "UN_CONSOLIDATED", "HM_TREASURY", "FATF_HIGH_RISK", "CNB_DOMESTIC"],
+  "checkedLists": ["OFAC_SDN", "EU_CONSOLIDATED", "UN_CONSOLIDATED", "HM_TREASURY", "FATF_HIGH_RISK", "PEP_GLOBAL", "CNB_DOMESTIC", "CZ_TERRORISTS"],
   "checkedAt": "2026-06-05T10:42:13Z"
 }
 ```
@@ -92,16 +109,68 @@ Content-Type: application/json
 - `POTENTIAL_HIT` → block pending manual compliance review
 - `HIT` or `ESCALATED` → block; do not proceed
 
+**Subject-bound clearance (#11694):**
+- Send the stable party identifier as optional `subjectId`, separately from the per-attempt
+  `idempotencyKey`. A new account-opening attempt uses a new key and is screened against the
+  current lists; only an identical key replays the original result.
+- A `WHITELISTED` review is valid for 90 days (`clearanceExpiresAt`) and only for exactly the same
+  `subjectId`, entity type, name, aliases, date of birth, nationality and identifiers.
+- The clearance covers only the reviewed match identities: `(listType, matchedId)`, or
+  `(listType, matchedName)` when the entry has no external id. A new uncovered hit, changed subject
+  or expired clearance keeps the fresh blocking result.
+- Legacy checks without `subjectId` cannot newly receive `WHITELISTED`. Screen the subject again
+  with its explicit id and review that new check instead.
+
+### Screening profiles, country and bank identifier (v3)
+
+`POST /api/v3/sanctions/screen` accepts three optional inputs. A request carrying none of them
+behaves and answers exactly as before.
+
+| Field | Meaning |
+|---|---|
+| `profile` | `PAYMENT` or `CUSTOMER`. Fixes the list set; cannot be combined with `listTypes` (400). |
+| `country` | ISO 3166-1 alpha-2 country of the counterparty. |
+| `bankIdentifier` | BIC (8 or 11 characters) of the counterparty's bank; its country code is checked like `country`. |
+
+| Profile | Lists consulted | PEP |
+|---|---|---|
+| `PAYMENT` | `OFAC_SDN`, `EU_CONSOLIDATED`, `UN_CONSOLIDATED`, `HM_TREASURY`, `CNB_DOMESTIC`, `CZ_TERRORISTS`, jurisdiction data | not consulted — a PEP name cannot stop a payment |
+| `CUSTOMER` | the `PAYMENT` set plus `PEP_GLOBAL` | reported apart: `matchKind: PEP` and `pepStatus`; never raises `status` or `overallScore` |
+| *(none)* | `listTypes`, or every enabled list | counts toward `status`, as before |
+
+On a profiled check every match carries `matchKind` (`SANCTIONS`, `TERRORIST`, `PEP`,
+`JURISDICTION`).
+
+**Jurisdictions.** A `country` (or the country inside `bankIdentifier`) present in the
+jurisdiction reference data matches whatever the name is: an `EMBARGO` entry yields `HIT`, a
+`HIGH_RISK` entry `POTENTIAL_HIT` scored 0.65, which callers applying the shared screening policy
+route to manual review. The match's `programs` carry the measure with the data version and the
+publication the row comes from (for example `HIGH_RISK:v1`, `EU_HIGH_RISK_THIRD_COUNTRIES`).
+`matchedId` is `country:<code>:<source list>:<measure>:v<version>`. An analyst's clearance
+(`WHITELISTED`) never covers a jurisdiction match: it can clear the name matches of the same
+check, and the status is then the one the jurisdiction match alone gives.
+This data has **no automated feed** — see `04-data` for what is loaded — and a country that is
+not in it never matches. The BIC is not matched against listed entities, because the imported
+sources carry no bank identifiers.
+
+**Fuzzy names.** A name scoring at least 0.85 against a list entry is a `HIT` under every
+profile. Only the `CUSTOMER` profile also returns names scoring 0.65–0.85, as `POTENTIAL_HIT`
+(or `pepStatus: POTENTIAL_HIT` for a PEP entry): onboarding has a reviewer to send a near-miss
+spelling to. `PAYMENT` and profile-less screens do not search below 0.85, so such a name screens
+`CLEAR` there — a payment has no held state to wait for a review in yet (#15724).
+
+`/api/v1` is frozen: it rejects all three inputs with 400, and a check created with them is not
+readable through `/api/v1`.
+
 ### Submit a manual review decision
 
 ```http
-POST /api/v1/sanctions/review
+POST /api/v3/sanctions/review
 Content-Type: application/json
 Authorization: Bearer <token>
 
 {
   "checkId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "reviewedBy": "compliance@openbank.example",
   "note": "Different person confirmed by passport check — cleared.",
   "newStatus": "CLEAR"
 }
@@ -109,24 +178,26 @@ Authorization: Bearer <token>
 
 `newStatus` ∈ `CLEAR | HIT | POTENTIAL_HIT | WHITELISTED | ESCALATED`
 
+The reviewer recorded on the decision is the authenticated principal (the token's `preferred_username`). Do not send a reviewer in the body: a `reviewedBy` field is accepted for compatibility but ignored.
+
 ### Get a specific check
 
 ```http
-GET /api/v1/sanctions/{id}
+GET /api/v3/sanctions/{id}
 Authorization: Bearer <token>
 ```
 
 ### List all confirmed hits
 
 ```http
-GET /api/v1/sanctions/hits
+GET /api/v3/sanctions/hits
 Authorization: Bearer <token>
 ```
 
 ### List pending reviews
 
 ```http
-GET /api/v1/sanctions/pending
+GET /api/v3/sanctions/pending
 Authorization: Bearer <token>
 ```
 
@@ -160,7 +231,23 @@ POST /api/v1/sanctions/lists/{listType}/refresh
 Authorization: Bearer <token>
 ```
 
-`listType` ∈ `OFAC_SDN | EU_CONSOLIDATED | UN_CONSOLIDATED | HM_TREASURY | FATF_HIGH_RISK | CNB_DOMESTIC`
+`listType` ∈ `OFAC_SDN | EU_CONSOLIDATED | UN_CONSOLIDATED | HM_TREASURY | FATF_HIGH_RISK | CNB_DOMESTIC | CZ_TERRORISTS`
+
+v1 imports the list inside the request and answers 200 with the refreshed list. If a refresh of the
+same list is already running (another request or the scheduler), it does not queue a second import:
+it answers **409** with `Retry-After: 30` at once.
+
+```http
+POST /api/v2/sanctions/lists/{listType}/refresh
+Authorization: Bearer <token>
+Idempotency-Key: <uuid>
+```
+
+v2 only flags the list and answers **202** `{"requested": "<listType>"}` without downloading
+anything; the import runs on the next scheduler tick, through the same fenced refresh. Progress
+shows as the list's `lastUpdatedAt` on `GET /api/v1/sanctions/lists`. A missing `Idempotency-Key`
+is 400, an unknown list 404, and a disabled list 422. Same roles (`ROLE_OPERATOR`, `ROLE_ADMIN`)
+and OPA action (`sanctions.trigger`) as v1. Prefer v2 for large feeds such as `PEP_GLOBAL`.
 
 ### Refresh all enabled lists
 
@@ -186,8 +273,9 @@ Authorization: Bearer <token>
 | `EU_CONSOLIDATED` | EU Council | Consolidated EU sanctions list |
 | `UN_CONSOLIDATED` | UN Security Council | UN consolidated list |
 | `HM_TREASURY` | UK HM Treasury | UK Financial Sanctions |
-| `FATF_HIGH_RISK` | FATF | High-risk and monitored jurisdictions |
+| `FATF_HIGH_RISK` | FATF | High-risk and monitored jurisdictions — no entity feed; countries are held as jurisdiction reference data |
 | `CNB_DOMESTIC` | Czech Ministry of Foreign Affairs (MZV) | Czech national sanctions list (Act No. 1/2023 Coll.) |
+| `CZ_TERRORISTS` | Czech e-Sbírka | Anti-terrorism designations (Regulation No. 210/2008 Coll.), imported from official SPARQL open data |
 
 ## Error model
 
@@ -221,5 +309,40 @@ Events are append-only; a subsequent review creates a new `sanctions.review.subm
 
 ## Backward compatibility
 
-- API version in URL (`/api/v1/...`). Breaking changes = `/api/v2/...`, v1 runs in parallel for 6 months.
+- API version in URL. A breaking contract change gets a new parallel major; the six v1 check
+  operations are superseded by `/api/v3/...` and remain available for the documented sunset window.
 - Event version in type name (`...v1`). Schema evolution: additive only; breaking = new type + version suffix.
+
+## Ongoing monitoring (ADR-0376)
+
+Available from API contract 3.4.0. Protected like `POST /api/v3/sanctions/screen`: roles `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` and the `sanctions.create` action.
+
+### Register or update a monitored subject
+
+```
+PUT /api/v3/sanctions/monitored-subjects/{subjectRef}
+```
+
+The owner of the registration is the calling service, identified by the client its service-account token was issued to (for example `openbank-kyb`); no request value names it, so a service registers, replaces and deletes only its own subjects. A service that still authenticates through the fleet's shared client `openbank-services` is refused and needs its own client first; kyc-service is in that position today. `subjectRef` is the value that service sends as `subjectId` when it screens the subject, and is scoped to the caller: the same reference under two callers is two subjects. The body carries `entityType`, `name` and optionally `aliases`, `dateOfBirth`, `nationality`, `country`: the same values as on the subject's live screen, and no document identifiers.
+
+| Status | Meaning |
+|---|---|
+| 201 | The subject is now monitored |
+| 200 | It was already registered; identical attributes change nothing, different ones replace the stored ones |
+| 400 | Invalid path value or body (blank name, `null` alias, unknown country format, NUL character) |
+| 403 | The caller is not a service under its own service account: a person's token, the fleet's shared client, or no verified token |
+| 503 | Monitoring is not enabled in this environment; nothing was stored |
+
+The response describes the registration (`ownerService`, `subjectRef`, `registeredAt`, `updatedAt`). It never says whether the subject matches anything.
+
+### Deregister a monitored subject
+
+```
+DELETE /api/v3/sanctions/monitored-subjects/{subjectRef}
+```
+
+Deletes the caller's registry row and its findings. 204 whether or not the caller had registered the subject, and it works while monitoring is disabled; 403 as for registration. A subject another service registered under the same reference is not touched. Call it on offboarding and on erasure.
+
+### Finding event
+
+`MONITORED_SUBJECT_MATCHED` on `openbank.sanctions.screening.event` (type in the `ce-type` header), schema version 1: `findingId`, `ownerService`, `subjectRef`, `entityType`, `matchKind` (`SANCTIONS`, `TERRORIST`, `PEP`, `JURISDICTION`), `listType`, `listEntryRef`, `listEntryVersion`, `matchScore`, `matchStatus`, `detection` (`LIST_DELTA`, `BASELINE_SWEEP`, `PERIODIC_SWEEP`), `occurredAt`, `sourceService`. No customer name is carried. There is no REST operation that returns findings.

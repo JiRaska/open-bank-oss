@@ -6,12 +6,14 @@ package com.openbank.sanctions.infrastructure.persistence.entity
 
 import com.openbank.sanctions.domain.model.EntityType
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
+import com.openbank.sanctions.domain.model.ScreeningProfile
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import org.hibernate.annotations.ColumnTransformer
 import java.time.Instant
 import java.util.UUID
 
@@ -32,6 +34,7 @@ class SanctionsCheckEntity {
     var name: String = ""
 
     @field:Column(name = "aliases", columnDefinition = "jsonb")
+    @field:ColumnTransformer(read = "aliases::text", write = "?::text::jsonb")
     var aliasesJson: String = "[]"
 
     @field:Column(name = "date_of_birth")
@@ -41,6 +44,7 @@ class SanctionsCheckEntity {
     var nationality: String? = null
 
     @field:Column(name = "identifiers", columnDefinition = "jsonb")
+    @field:ColumnTransformer(read = "identifiers::text", write = "?::text::jsonb")
     var identifiersJson: String = "{}"
 
     @field:Column(name = "status")
@@ -48,12 +52,14 @@ class SanctionsCheckEntity {
     var status: SanctionsCheckStatus = SanctionsCheckStatus.CLEAR
 
     @field:Column(name = "matches", columnDefinition = "jsonb")
+    @field:ColumnTransformer(read = "matches::text", write = "?::text::jsonb")
     var matchesJson: String = "[]"
 
     @field:Column(name = "overall_score")
     var overallScore: Double = 0.0
 
     @field:Column(name = "checked_lists", columnDefinition = "jsonb")
+    @field:ColumnTransformer(read = "checked_lists::text", write = "?::text::jsonb")
     var checkedListsJson: String = "[]"
 
     @field:Column(name = "reviewed_by")
@@ -67,4 +73,24 @@ class SanctionsCheckEntity {
 
     @field:Column(name = "reviewed_at")
     var reviewedAt: Instant? = null
+
+    @field:Column(name = "subject_id")
+    var subjectId: String? = null
+
+    @field:Column(name = "clearance_expires_at")
+    var clearanceExpiresAt: Instant? = null
+
+    @field:Column(name = "profile")
+    @field:Enumerated(EnumType.STRING)
+    var profile: ScreeningProfile? = null
+
+    @field:Column(name = "country")
+    var country: String? = null
+
+    @field:Column(name = "bank_identifier")
+    var bankIdentifier: String? = null
+
+    @field:Column(name = "pep_status")
+    @field:Enumerated(EnumType.STRING)
+    var pepStatus: SanctionsCheckStatus? = null
 }

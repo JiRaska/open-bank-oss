@@ -4,8 +4,10 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.mcp
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.mcp.infrastructure.persistence.AgentSessionRepository
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
@@ -30,7 +32,7 @@ import java.util.UUID
  * spot where a mocked repository hides the fleet's persist-vs-merge footgun (#1521).
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class, initArgs = [ResourceArg(name = "db", value = "openbank_mcp_it")])
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class McpSessionLifecycleIT {

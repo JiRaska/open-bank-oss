@@ -6,6 +6,7 @@ package com.openbank.engagement.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.engagement.application.port.out.AdverseStateRepository
+import com.openbank.engagement.application.port.out.GameStore
 import com.openbank.engagement.domain.model.AdverseState
 import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
@@ -28,7 +29,11 @@ import java.util.UUID
  * that was acked without happening leaves the party permanently targetable with nothing to notice.
  */
 @ApplicationScoped
-class PartyErasureConsumer(private val adverseState: AdverseStateRepository, private val objectMapper: ObjectMapper) {
+class PartyErasureConsumer(
+    private val adverseState: AdverseStateRepository,
+    private val objectMapper: ObjectMapper,
+    private val games: GameStore,
+) {
     private val log = Logger.getLogger(PartyErasureConsumer::class.java)
 
     @Incoming("party-events-in")
@@ -36,6 +41,7 @@ class PartyErasureConsumer(private val adverseState: AdverseStateRepository, pri
         val partyId = parse(payload) ?: return
         EventRetry.withRetry(log, "erasure exclusion for party $partyId", null) {
             adverseState.setActive(partyId, AdverseState.ERASURE_REQUESTED, Instant.now())
+            games.erase(partyId)
             log.infof("ADR-0220 D3.5: excluded party %s from targeting (PARTY_ERASED)", partyId)
         }
     }

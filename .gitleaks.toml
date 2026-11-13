@@ -63,6 +63,15 @@ paths = [
   # (A scoped regexTarget="line" allowlist does not apply under [extend] useDefault in gitleaks 8.x.)
   '''(^|/)openbank-infra/gitops/components/[a-z0-9-]+/[a-z0-9._-]+\.yaml$''',
   '''(^|/)openbank-admin-ui/(cluster-topology|infra-lifecycle)\.json$''',
+  # GENERATED JMH allocation baseline (check-bench-alloc-baseline.py --write-baseline): bytes/op
+  # figures only. A 10-digit B/op such as 5423543997.3 trips the rod-cislo heuristic exactly as
+  # numeric image tags do above; the file holds no free text, so a whole-file allowlist is safe.
+  '''(^|/)openbank-libs-benchmarks/alloc-baseline\.json$''',
+  # GENERATED main-red-watch state (one JSON per workflow, written by github-actions[bot]): workflow
+  # and run ids only. 10-digit run ids such as 41998724247 trip the rod-cislo heuristic exactly as
+  # numeric image tags do; the files hold no free text. The scheduled full-history scan (`--all`)
+  # reaches them on the bot's state branch and reddened main with 267 such findings (2026-11-09).
+  '''(^|/)\.main-red-watch/[0-9]+\.json$''',
   # Build/cache directories — these are gitignored, but `--no-git` scans the FS directly.
   # Skipping them prevents thousands of false positives from minified JS / compiled artifacts.
   '''(^|/)node_modules/''',
@@ -145,6 +154,11 @@ regexes = [
   '''5555[ -]?5555[ -]?5555[ -]?4444''',
   '''4242[ -]?4242[ -]?4242[ -]?4242''',
   '''CZ6508000000192000145\d{3}''',
+  # The fleet's fictitious "somebody else's account" fixture: pension's dev ParticipantAccountAdapters
+  # stub and its consumer pact use it, and so do ~10 test classes (already path-allowlisted as tests).
+  '''CZ5508000000001234567899''',
+  # Its all-zero-account sibling in the same pact (pacts/openbank-pension-service-openbank-account-service.json).
+  '''CZ0708000000000000000099''',
   '''CZ0{20,22}''',
   '''123456-1234567890/0800''',
   # Sequential digit placeholder in UI demos (not a real rodné číslo)

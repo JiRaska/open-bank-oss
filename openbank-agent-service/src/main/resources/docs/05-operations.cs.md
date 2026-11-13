@@ -74,7 +74,7 @@ Gateway degradovala s grácií při chybě modelu. Zkontrolujte: `AGENT_DEFAULT_
 Celé kolo nástrojů chybovalo (auth/konektivita). Ověřte: secret klienta OIDC `openbank-services`, URL downstream služeb (`quarkus.rest-client.*.url`) a že downstream služby běží. Smyčka po neúspěšném kole přestane nabízet nástroje a odpoví textem — to je záměr, ne pád.
 
 ### Každé volání nástroje je DENIED
-Očekávané pod `advisory` jen pokud je nástroj nenamapovaný (deny-by-default) nebo na `/mcp` nebyl deklarován `X-Agent-Id`. Pod `block`: zkontrolujte, že OPA sidecar (8181) je dosažitelný a charter bundle z `agents.yaml` je načten. Pokud je **nedosažitelný sám PDP**, brána degraduje na advisory + WARN (asistenta **nezamkne**) — opravte OPA sidecar, abyste obnovili vynucení.
+Očekávané pod `advisory` jen pokud je nástroj nenamapovaný (deny-by-default) nebo na `/mcp` nebyl deklarován `X-Agent-Id`. Pod `block`: zkontrolujte, že OPA sidecar (8181) je dosažitelný a charter bundle z `agents.yaml` je načten. Pokud je **nedosažitelný sám PDP**, režim `block` nyní selže uzavřeně: každé volání nástroje je zamítnuto s výsledkem `pdp_unavailable_denied` (čítač `openbank.agent.policy.gate.decisions{outcome}`, ERROR log), včetně plánovaného oversight sweepu. Pod `advisory` volání nadále projde. Nastavte alert na tento výsledek a opravte OPA sidecar, aby se obnovila volání nástrojů.
 
 ### Zapnutí vynucení
 Nastavte `AGENT_POLICY_ENFORCEMENT=block` v env deploye, jakmile je v cíli přítomen OPA sidecar. Není třeba redeploy kódu; kill-switch / charter změny žijí v `agents.yaml` + OPA bundle.
@@ -101,3 +101,16 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 ## Přepsání consumer group pro Kafka
 
 Consumer group id a offset reset pro Kafka kanály této služby nejsou v `application.yaml` nastaveny jako YAML klíče, protože SmallRye Config uvozuje klíče s tečkou a konektor je nikdy nenačte. Dodává je ConfigMap s přepsáním ve formě properties souboru, načítaný přes `QUARKUS_CONFIG_LOCATIONS`. Referenčním vzorem je kanál `party-events-in` ve službě card-issuance-service; komentáře v `application.yaml` na něj odkazují. Jde pouze o změnu dokumentace a komentářů. Žádná hodnota konfigurace ani chování za běhu se nemění.
+
+## Rekonstrukce důkazů podle pravidel pro PR
+
+Pro `codex/` zůstává povinné schválení přesného HEAD. U ostatních sloučení App lze doložit
+pozorovanou lidskou žádost pro PR jen podle výslovně prověřeného neměnného blobu pravidel z prvního
+rodiče merge commitu. Neznámý blob vyžaduje review zdroje a běžné PR, nikoli provozní výjimku.
+Důkaz má rozsah PR; nedokládá schválení SHA ani splnění všech historických kontrol. Producer před
+zápisem do `/api/v1/agent-merge-records/app-policy` vyžaduje číselnou verzi schématu 2 a příznak
+`policyPrAuthorization: true`, poté nezávisle přečte `policyAuthorization`. Staré pole
+`authorization` je pro tento důkaz null. Před doplněním historie ověřte skutečně nasazený backend,
+migraci V8 a nové UI. Zachovejte původní čas pozorování, prošetřete konflikty 409 a při rollbacku
+uchovejte důkazy. Deployment holdy uvolňujte samostatným governance PR až po doložení všech
+podmínek. Zelený běh recorderu sám neprokazuje opravu historických chybějících řádků.

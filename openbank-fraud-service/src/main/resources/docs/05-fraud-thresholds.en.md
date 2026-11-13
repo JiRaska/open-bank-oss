@@ -11,6 +11,7 @@ Version 1 is seeded by `V9__fraud_threshold_set.sql`. It holds exactly the figur
 ## Changing a threshold (four-eyes)
 
 1. A risk or compliance user (`ROLE_RISK`, `ROLE_COMPLIANCE`) sends `POST /api/v1/fraud/thresholds/proposals` with the complete new version: all three rules, decimal strings, a version above every live one, and optionally `effectiveFrom`. This changes no verdict.
+   Every rule must carry its map of currency amounts. A rule given as `null` (for example `"thresholds": {"amount": null}`) is a malformed proposal and is answered 400, like a missing or non-decimal amount; nothing is stored.
 2. A different user calls `POST /api/v1/fraud/thresholds/proposals/{id}/decide`. The proposer cannot approve their own proposal: the service returns 422, and a database CHECK constraint refuses it too.
 3. On approval the set applies from the later of `effectiveFrom` and the approval time. A set cannot be back-dated.
 

@@ -4,9 +4,11 @@
 
 package com.openbank.productcatalog.contract
 
+import au.com.dius.pact.core.model.UrlPactSource
 import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
+import au.com.dius.pact.provider.junitsupport.AllowOverridePactUrl
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
@@ -58,6 +60,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR", "CATALOG_SCOPE_READ"])
 @Provider("openbank-product-catalog")
 @PactBroker
+@AllowOverridePactUrl
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class ProductCatalogPactBrokerProviderVerificationTest {
@@ -73,6 +76,20 @@ class ProductCatalogPactBrokerProviderVerificationTest {
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
+        System.getenv("HISTORICAL_PACT_URL")?.let { expectedUrl ->
+            check(System.getProperty("pact.filter.pacturl") == expectedUrl) {
+                "Historical Pact URL was not forwarded to the test JVM"
+            }
+            check(System.getProperty("pact.filter.consumers") == "openbank-admin-ui") {
+                "Historical Pact consumer filter was not forwarded to the test JVM"
+            }
+            val pact = requireNotNull(context?.pact) { "Historical Pact verification has no Pact context" }
+            val source = requireNotNull(pact.source as? UrlPactSource) {
+                "Historical Pact verification did not load a URL source"
+            }
+            check(source.url == expectedUrl) { "Historical Pact verification loaded an unexpected URL" }
+            check(pact.consumer.name == "openbank-admin-ui") { "Historical Pact has an unexpected consumer" }
+        }
         context?.target = HttpTestTarget("localhost", testPort.toInt())
     }
 
@@ -134,6 +151,37 @@ class ProductCatalogPactBrokerProviderVerificationTest {
         // Intentionally empty — see the KDoc above.
     }
 
+    /**
+     * Keep-in-sync with the folder twin: `ProductCatalogSeeder` persists the whole canonical
+     * catalogue from `ProductSeed` on first boot, so the assistant consumer's `list_products`
+     * state is satisfied by every boot. The list is a global array — the pact pins per-row
+     * shape, never count or order.
+     */
+    @State("the canonical catalog products are seeded")
+    fun canonicalCatalogProductsAreSeeded() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * Keep-in-sync with the folder twin: `prod-001` is `SAVINGS_STANDARD` in `ProductSeed` on
+     * every boot — ACTIVE, with two seeded fees (the assistant consumer's `get_product` /
+     * `get_product_fees` states).
+     */
+    @State("a product exists with id prod-001")
+    fun pactProductIsSeeded() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * Keep-in-sync with the folder twin: the pact-pinned UUID is deliberately absent from
+     * `ProductSeed`; the seeded catalogue already satisfies the assistant consumer's negative
+     * `get_product` state.
+     */
+    @State("no product exists with id 00000000-0000-0000-0000-000000000eee")
+    fun agentUnknownProductIdNotFound() {
+        // Intentionally empty — see the KDoc above.
+    }
+
     @State("trusted insurance term-life schema version 1 is installed")
     fun trustedInsuranceSchemaIsInstalled() {
         // CatalogPackSeeder installs the trusted test pack before provider verification.
@@ -162,4 +210,7 @@ class ProductCatalogPactBrokerProviderVerificationTest {
 
     @State("a published DIP strategy revision has separate legal and product approvals")
     fun publishedPensionStrategyApprovalsExist() = catalogFixtures.publishedPensionStrategyApprovalsExist()
+
+    @State("a published pension-savings revision with a 0.80 percent management fee exists")
+    fun publishedPensionFundFeeRevisionExists() = catalogFixtures.publishedPensionFundFeeRevisionExists()
 }

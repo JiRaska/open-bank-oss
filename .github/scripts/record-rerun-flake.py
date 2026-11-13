@@ -39,7 +39,9 @@ AND a machine-readable JSON payload in an HTML comment, so `list-recorded-flakes
 the population back out without re-parsing markdown prose.
 
 USAGE (invoked from the workflow; every subcommand is offline and side-effect-free)
-    record-rerun-flake.py classify   --jobs-file prev-jobs.json
+    record-rerun-flake.py flatten-jobs --pages-file prev-job-pages.json
+    record-rerun-flake.py classify --jobs-file prev-jobs.json \
+        --changes-log changes.log --all-green-log all-green.log
     record-rerun-flake.py parse-junit --path <dir-or-file>
     record-rerun-flake.py render     --record run.json --tests tests.json --job job.json
     record-rerun-flake.py --self-test
@@ -77,17 +79,154 @@ def has_spot_kill_signature(job: dict) -> bool:
     return cancelled > 0 and failed == 0
 
 
-def find_flake_candidates(prev_jobs: list[dict]) -> list[dict]:
+def flatten_job_pages(pages: list[dict]) -> list[dict]:
+    """Require a complete, unique attempt-scoped Jobs API inventory before classification."""
+    if not pages or not isinstance(pages[0], dict):
+        raise ValueError("no Jobs API pages")
+    expected = pages[0].get("total_count")
+    if type(expected) is not int or expected < 0:
+        raise ValueError("invalid Jobs API total_count")
+    jobs: list[dict] = []
+    for page in pages:
+        if (not isinstance(page, dict) or type(page.get("total_count")) is not int
+                or page["total_count"] != expected):
+            raise ValueError("inconsistent Jobs API page total_count")
+        batch = page.get("jobs")
+        if not isinstance(batch, list) or not all(isinstance(job, dict) for job in batch):
+            raise ValueError("malformed Jobs API page")
+        jobs.extend(batch)
+    ids = [job.get("id") for job in jobs]
+    if (len(jobs) != expected or any(type(id_) is not int or id_ <= 0 for id_ in ids)
+            or len(set(ids)) != len(ids)):
+        raise ValueError("incomplete or duplicate Jobs API inventory")
+    return jobs
+
+
+LOG_PREFIX = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z "
+ADMISSION_REFUSAL = re.compile(
+    LOG_PREFIX + r"Agent PRs: (\d+)/(\d+); finish existing work before opening another PR\r?$",
+    re.MULTILINE,
+)
+ALL_GREEN_REFUSAL = "Agent PR admission refused or failed; service builds did not run."
+ALL_GREEN_REFUSAL_LINE = re.compile(LOG_PREFIX + re.escape(ALL_GREEN_REFUSAL) + r"\r?$", re.MULTILINE)
+CI_ADMISSION_REFUSAL_LINE = ADMISSION_REFUSAL
+CI_VALIDATE_REFUSAL_LINE = re.compile(
+    LOG_PREFIX + r"(?:##\[error\]|::error::)?Agent PR admission refused or failed "
+    r"\(success, proceed=false\)\.\r?$",
+    re.MULTILINE,
+)
+CI_ADMIN_UI_REFUSAL_LINE = re.compile(
+    LOG_PREFIX + re.escape("Admin UI change detection did not succeed (skipped).") + r"\r?$",
+    re.MULTILINE,
+)
+
+
+def is_policy_admission_refusal(prev_jobs: list[dict], changes_log: str, all_green_log: str) -> bool:
+    """Exclude an aggregate only when job states and both prior-attempt logs prove refusal."""
+    changes = [job for job in prev_jobs if job.get("name") == "Detect changed services"]
+    aggregate = [job for job in prev_jobs if job.get("name") == "all-green"]
+    if len(changes) != 1 or len(aggregate) != 1:
+        return False
+    if changes[0].get("conclusion") != "success" or aggregate[0].get("conclusion") != "failure":
+        return False
+    if not any(step.get("name") == "Verify no service failed" and step.get("conclusion") == "failure"
+               for step in aggregate[0].get("steps") or []):
+        return False
+    # Actions prints the whole shell step before execution. Match the emitted line,
+    # not an `echo` command in an unexecuted branch of that script.
+    if not ALL_GREEN_REFUSAL_LINE.search(all_green_log):
+        return False
+    return any(int(count) > int(limit) for count, limit in ADMISSION_REFUSAL.findall(changes_log))
+
+
+def is_ci_policy_admission_refusal(
+    prev_jobs: list[dict], admission_log: str, validate_manifests_log: str,
+) -> bool:
+    """Exclude the CI aggregate only when prior-attempt logs prove a WIP refusal.
+
+    CI has a different job shape from Services CI: admission succeeds with `proceed=false`,
+    then Validate manifests fails its `Verify agent PR admission` check. Require unique job and
+    step identities plus both executed output lines so an API failure, a missing log, or an
+    unexecuted shell echo remains visible as a real failed job.
+    """
+    admission = [job for job in prev_jobs if job.get("name") == "Agent PR admission"]
+    aggregate = [job for job in prev_jobs if job.get("name") == "Validate manifests"]
+    if len(admission) != 1 or len(aggregate) != 1:
+        return False
+    if admission[0].get("conclusion") != "success" or aggregate[0].get("conclusion") != "failure":
+        return False
+    verify_steps = [step for step in aggregate[0].get("steps") or []
+                    if step.get("name") == "Verify agent PR admission"]
+    failed_steps = [step for step in aggregate[0].get("steps") or []
+                    if step.get("conclusion") == "failure"]
+    if (len(verify_steps) != 1 or verify_steps[0].get("conclusion") != "failure"
+            or len(failed_steps) != 1 or failed_steps[0] != verify_steps[0]):
+        return False
+
+    # Match the timestamped output lines, not the shell source Actions prints before execution.
+    counts = CI_ADMISSION_REFUSAL_LINE.findall(admission_log)
+    validation_lines = CI_VALIDATE_REFUSAL_LINE.findall(validate_manifests_log)
+    if len(counts) != 1 or len(validation_lines) != 1:
+        return False
+    count, limit = counts[0]
+    return int(count) > int(limit)
+
+
+def is_ci_admin_ui_admission_refusal(
+    prev_jobs: list[dict], admission_log: str, validate_manifests_log: str, admin_ui_log: str,
+) -> bool:
+    """Exclude Admin UI's propagated failure only for a fully evidenced CI WIP refusal."""
+    if not is_ci_policy_admission_refusal(prev_jobs, admission_log, validate_manifests_log):
+        return False
+
+    expected = {
+        "Detect UI or governance changes": "skipped",
+        "Admin UI build": "skipped",
+        "Admin UI cross-package guards": "skipped",
+        "Admin UI": "failure",
+    }
+    matched: dict[str, dict] = {}
+    for name, conclusion in expected.items():
+        jobs = [job for job in prev_jobs if job.get("name") == name]
+        if len(jobs) != 1 or jobs[0].get("conclusion") != conclusion:
+            return False
+        matched[name] = jobs[0]
+
+    result_steps = [step for step in matched["Admin UI"].get("steps") or []
+                    if step.get("name") == "Check build result"]
+    failed_steps = [step for step in matched["Admin UI"].get("steps") or []
+                    if step.get("conclusion") == "failure"]
+    if (len(result_steps) != 1 or result_steps[0].get("conclusion") != "failure"
+            or len(failed_steps) != 1 or failed_steps[0] != result_steps[0]):
+        return False
+    return len(CI_ADMIN_UI_REFUSAL_LINE.findall(admin_ui_log)) == 1
+
+
+def find_flake_candidates(
+    prev_jobs: list[dict], changes_log: str = "", all_green_log: str = "",
+    admission_log: str = "", validate_manifests_log: str = "", admin_ui_log: str = "",
+) -> list[dict]:
     """Jobs from the PRIOR attempt that failed for a real reason (not a spot kill).
 
     Called once the run's FINAL attempt has concluded `success` -- by construction, every job
     returned here went from a genuine failure to a green run. That transition is the flake
     signal; this function only identifies which prior-attempt jobs qualify.
     """
+    admission_refusal = is_policy_admission_refusal(prev_jobs, changes_log, all_green_log)
+    ci_admission_refusal = is_ci_policy_admission_refusal(
+        prev_jobs, admission_log, validate_manifests_log,
+    )
+    ci_admin_ui_refusal = is_ci_admin_ui_admission_refusal(
+        prev_jobs, admission_log, validate_manifests_log, admin_ui_log,
+    )
     return [
         j
         for j in prev_jobs
-        if (j.get("conclusion") or "").lower() == "failure" and not has_spot_kill_signature(j)
+        if (j.get("conclusion") or "").lower() == "failure"
+        and not has_spot_kill_signature(j)
+        and not (admission_refusal and j.get("name") == "all-green")
+        and not (ci_admission_refusal and j.get("name") == "Validate manifests")
+        and not (ci_admin_ui_refusal and j.get("name") == "Admin UI")
     ]
 
 
@@ -97,12 +236,16 @@ SERVICE_RE = re.compile(r"build \(([^)]+)\)")
 def extract_service(job_name: str) -> str | None:
     """`build (openbank-transaction-service)` -> `openbank-transaction-service`.
 
-    Only Services CI job names carry this shape (the JUnit-XML-producing lane from #4983); a
-    Security-scan or Dependency-submission job name returns None, and the caller records the
-    flake at job granularity without a per-test breakdown rather than guessing.
+    Services CI build jobs and explicit reusable provider contract jobs carry a service.
+    Security-scan or Dependency-submission jobs return None; the caller records the flake
+    at job granularity without guessing a per-test breakdown.
     """
     m = SERVICE_RE.search(job_name or "")
-    return m.group(1) if m else None
+    if m:
+        return m.group(1)
+    # Direct provider verification uses a reusable contract job without build(...).
+    contract = re.search(r"(?:^| / )(openbank-[a-z0-9-]+) \(contract\)$", job_name or "")
+    return contract.group(1) if contract else None
 
 
 # --------------------------------------------------------------------------------------------
@@ -238,6 +381,14 @@ def main(argv: list[str]) -> int:
 
     p_classify = sub.add_parser("classify")
     p_classify.add_argument("--jobs-file", required=True, type=Path)
+    p_classify.add_argument("--changes-log", type=Path)
+    p_classify.add_argument("--all-green-log", type=Path)
+    p_classify.add_argument("--admission-log", type=Path)
+    p_classify.add_argument("--validate-manifests-log", type=Path)
+    p_classify.add_argument("--admin-ui-log", type=Path)
+
+    p_flatten = sub.add_parser("flatten-jobs")
+    p_flatten.add_argument("--pages-file", required=True, type=Path)
 
     p_junit = sub.add_parser("parse-junit")
     p_junit.add_argument("--path", required=True, type=Path)
@@ -261,7 +412,22 @@ def main(argv: list[str]) -> int:
 
     if args.cmd == "classify":
         jobs = json.loads(args.jobs_file.read_text(encoding="utf-8"))
-        print(json.dumps(find_flake_candidates(jobs), indent=2))
+        changes_log = args.changes_log.read_text(errors="replace") if args.changes_log and args.changes_log.exists() else ""
+        all_green_log = args.all_green_log.read_text(errors="replace") if args.all_green_log and args.all_green_log.exists() else ""
+        admission_log = args.admission_log.read_text(errors="replace") if args.admission_log and args.admission_log.exists() else ""
+        validate_manifests_log = (
+            args.validate_manifests_log.read_text(errors="replace")
+            if args.validate_manifests_log and args.validate_manifests_log.exists() else ""
+        )
+        admin_ui_log = args.admin_ui_log.read_text(errors="replace") if args.admin_ui_log and args.admin_ui_log.exists() else ""
+        print(json.dumps(find_flake_candidates(
+            jobs, changes_log, all_green_log, admission_log, validate_manifests_log, admin_ui_log,
+        ), indent=2))
+        return 0
+
+    if args.cmd == "flatten-jobs":
+        pages = json.loads(args.pages_file.read_text(encoding="utf-8"))
+        print(json.dumps(flatten_job_pages(pages), indent=2))
         return 0
 
     if args.cmd == "parse-junit":
@@ -307,6 +473,28 @@ def self_test() -> int:
         print(f"  [{'ok ' if cond else 'FAIL'}] {label}")
 
     print("has_spot_kill_signature / find_flake_candidates")
+    pages = [
+        {"total_count": 158, "jobs": [{"id": i} for i in range(1, 101)]},
+        {"total_count": 158, "jobs": [{"id": i} for i in range(101, 159)]},
+    ]
+    check("all 158 jobs survive both API pages", len(flatten_job_pages(pages)) == 158)
+    for label, invalid in [
+        ("missing page", pages[:1]),
+        ("duplicate job", [pages[0], {"total_count": 158, "jobs": [{"id": 1} for _ in range(58)]}]),
+        ("inconsistent total", [pages[0], {"total_count": 159, "jobs": pages[1]["jobs"]}]),
+        ("boolean first-page total", [{"total_count": True, "jobs": []}]),
+        ("boolean later-page total", [{"total_count": 1, "jobs": []}, {"total_count": True, "jobs": [{"id": 1}]}]),
+        ("boolean job ID", [{"total_count": 1, "jobs": [{"id": True}]}]),
+        ("zero job ID", [{"total_count": 1, "jobs": [{"id": 0}]}]),
+        ("negative job ID", [{"total_count": 1, "jobs": [{"id": -1}]}]),
+    ]:
+        try:
+            flatten_job_pages(invalid)
+        except ValueError:
+            check(f"{label} fails closed", True)
+        else:
+            check(f"{label} fails closed", False)
+    check("zero-job inventory remains valid", flatten_job_pages([{"total_count": 0, "jobs": []}]) == [])
     spot_killed = _job(
         "build (openbank-billing-service)",
         "failure",
@@ -337,6 +525,194 @@ def self_test() -> int:
         "the green job",
         names == {genuine["name"], mixed_but_still_genuine["name"]},
     )
+    changes = _job("Detect changed services", "success", [("Detect", "success")])
+    aggregate = _job("all-green", "failure", [("Verify no service failed", "failure")])
+    refusal = "2026-10-07T11:31:14.599Z Agent PRs: 4/3; finish existing work before opening another PR"
+    gate_refusal = "2026-10-07T11:31:21.009Z " + ALL_GREEN_REFUSAL
+    check("4/3 refusal excludes only proven aggregate",
+          find_flake_candidates([changes, aggregate, genuine], refusal, gate_refusal) == [genuine])
+    check("missing either log retains the aggregate",
+          find_flake_candidates([changes, aggregate], "", gate_refusal) == [aggregate]
+          and find_flake_candidates([changes, aggregate], refusal, "") == [aggregate])
+    check("unexecuted echo and PR-body text do not prove refusal",
+          find_flake_candidates([changes, aggregate], refusal,
+                                '2026-10-07T11:31:20.834Z echo "' + ALL_GREEN_REFUSAL + '"') == [aggregate]
+          and find_flake_candidates([changes, aggregate],
+                                    '2026-10-07T11:31:14.599Z PR_BODY: Agent PRs: 4/3; '
+                                    'finish existing work before opening another PR', gate_refusal) == [aggregate])
+    check("3/3 capacity does not prove refusal",
+          find_flake_candidates([changes, aggregate], "2026-10-07T11:31:14.599Z Agent PRs: 3/3; capacity available",
+                                gate_refusal) == [aggregate])
+    check("genuine failed build and unrelated aggregate remain visible",
+          find_flake_candidates([changes, aggregate, genuine], refusal,
+                                "2026-10-07T11:31:21.009Z One or more service builds failed.")
+          == [aggregate, genuine])
+
+    ci_admission = _job("Agent PR admission", "success", [("Run admission", "success")])
+    ci_validate = _job("Validate manifests", "failure", [
+        ("Verify agent PR admission", "failure"),
+        ("Verify no gate shard failed", "skipped"),
+    ])
+    ci_queue_refusal = (
+        "2026-10-07T11:31:14.599Z Agent PRs: 4/3; finish existing work before opening another PR"
+    )
+    ci_aggregate_refusal = (
+        "2026-10-07T11:31:21.009Z ##[error]"
+        "Agent PR admission refused or failed (success, proceed=false)."
+    )
+    ci_jobs = [ci_admission, ci_validate]
+    check("CI proven WIP refusal excludes Validate manifests",
+          find_flake_candidates(
+              ci_jobs, admission_log=ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [])
+    check("CI admission evidence excludes only aggregate, preserving genuine sibling failures",
+          find_flake_candidates(
+              [ci_admission, ci_validate, genuine], admission_log=ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [genuine])
+    check("CI missing either log retains Validate manifests",
+          find_flake_candidates(
+              ci_jobs, admission_log="", validate_manifests_log=ci_aggregate_refusal,
+          ) == [ci_validate] and find_flake_candidates(
+              ci_jobs, admission_log=ci_queue_refusal, validate_manifests_log="",
+          ) == [ci_validate])
+    check("CI echo-only, capacity-available, and non-refusal output retain aggregate",
+          find_flake_candidates(
+              ci_jobs, admission_log='2026-10-07T11:31:14.599Z echo "' + ci_queue_refusal.split("Z ", 1)[1] + '"',
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [ci_validate] and find_flake_candidates(
+              ci_jobs,
+              admission_log="2026-10-07T11:31:14.599Z Agent PRs: 3/3; capacity available",
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [ci_validate])
+    check("CI malformed or duplicate WIP refusal lines retain aggregate",
+          find_flake_candidates(
+              ci_jobs, admission_log="2026-10-07T11:31:14.599Z Agent PRs: many/3; finish existing work before opening another PR",
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [ci_validate] and find_flake_candidates(
+              ci_jobs, admission_log=ci_queue_refusal + "\n" + ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [ci_validate])
+    check("CI aggregate error echo without executed marker retains aggregate",
+          find_flake_candidates(
+              ci_jobs, admission_log=ci_queue_refusal,
+              validate_manifests_log=(
+                  '2026-10-07T11:31:21.009Z echo "::error::'
+                  "Agent PR admission refused or failed (success, proceed=false).\""
+              ),
+          ) == [ci_validate])
+    check("CI duplicate aggregate refusal lines retain aggregate",
+          find_flake_candidates(
+              ci_jobs, admission_log=ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal + "\n" + ci_aggregate_refusal,
+          ) == [ci_validate])
+    check("CI API failure or mismatched step evidence retains aggregate",
+          {job["name"] for job in find_flake_candidates(
+              [_job("Agent PR admission", "failure", [("Run admission", "failure")]), ci_validate],
+              admission_log=ci_queue_refusal, validate_manifests_log=ci_aggregate_refusal,
+          )} == {"Agent PR admission", "Validate manifests"} and find_flake_candidates(
+              [ci_admission, _job("Validate manifests", "failure", [
+                  ("Verify agent PR admission", "skipped"),
+              ])], admission_log=ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [_job("Validate manifests", "failure", [
+              ("Verify agent PR admission", "skipped"),
+          ])])
+    check("CI second failed aggregate step retains Validate manifests",
+          find_flake_candidates(
+              [ci_admission, _job("Validate manifests", "failure", [
+                  ("Verify agent PR admission", "failure"),
+                  ("Verify no gate shard failed", "failure"),
+              ])], admission_log=ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal,
+          )[0]["name"] == "Validate manifests")
+    check("duplicate CI job or admission-step identities fail closed",
+          find_flake_candidates(
+              [ci_admission, ci_admission, ci_validate], admission_log=ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [ci_validate] and find_flake_candidates(
+              [ci_admission, _job("Validate manifests", "failure", [
+                  ("Verify agent PR admission", "failure"),
+                  ("Verify agent PR admission", "failure"),
+              ])], admission_log=ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal,
+          )[0]["name"] == "Validate manifests")
+
+    ci_ui_jobs = ci_jobs + [
+        _job("Detect UI or governance changes", "skipped", []),
+        _job("Admin UI build", "skipped", []),
+        _job("Admin UI cross-package guards", "skipped", []),
+        _job("Admin UI", "failure", [("Check build result", "failure")]),
+    ]
+    ci_admin_ui_refusal = (
+        "2026-10-07T11:31:22.009Z Admin UI change detection did not succeed (skipped)."
+    )
+    ui_admission_args = {
+        "admission_log": ci_queue_refusal,
+        "validate_manifests_log": ci_aggregate_refusal,
+        "admin_ui_log": ci_admin_ui_refusal,
+    }
+    check("CI proven WIP refusal excludes only the propagated Admin UI aggregate",
+          find_flake_candidates(ci_ui_jobs, **ui_admission_args) == [])
+    check("CI propagated refusal preserves genuine sibling failures",
+          find_flake_candidates(ci_ui_jobs + [genuine], **ui_admission_args) == [genuine])
+    check("CI missing, duplicate, or echo-only Admin UI evidence retains aggregate",
+          find_flake_candidates(
+              ci_ui_jobs, **{**ui_admission_args, "admin_ui_log": ""},
+          ) == [ci_ui_jobs[-1]] and find_flake_candidates(
+              ci_ui_jobs, **{**ui_admission_args, "admin_ui_log": ci_admin_ui_refusal * 2},
+          ) == [ci_ui_jobs[-1]] and find_flake_candidates(
+              ci_ui_jobs,
+              **{**ui_admission_args, "admin_ui_log": (
+                  '2026-10-07T11:31:22.009Z echo "'
+                  "Admin UI change detection did not succeed (skipped).\""
+              )},
+          ) == [ci_ui_jobs[-1]])
+    ui_build_failure_jobs = [
+        *ci_jobs,
+        _job("Detect UI or governance changes", "success", [("Detect", "success")]),
+        _job("Admin UI build", "failure", [("Build", "failure")]),
+        _job("Admin UI cross-package guards", "skipped", []),
+        _job("Admin UI", "failure", [("Check build result", "failure")]),
+    ]
+    ui_guard_failure_jobs = [
+        *ci_jobs,
+        _job("Detect UI or governance changes", "success", [("Detect", "success")]),
+        _job("Admin UI build", "skipped", []),
+        _job("Admin UI cross-package guards", "failure", [("Verify affected cross-package guards", "failure")]),
+        _job("Admin UI", "failure", [("Check build result", "failure")]),
+    ]
+    check("CI Admin UI negative fixtures have unique job names",
+          all(len([job for job in fixture if job["name"] == name]) == 1
+              for fixture in (ui_build_failure_jobs, ui_guard_failure_jobs)
+              for name in (
+                  "Agent PR admission", "Validate manifests", "Detect UI or governance changes",
+                  "Admin UI build", "Admin UI cross-package guards", "Admin UI",
+              )))
+    check("CI Admin UI build and guard failures remain candidates",
+          {job["name"] for job in find_flake_candidates(
+              ui_build_failure_jobs, **ui_admission_args,
+          )} == {"Admin UI build", "Admin UI"} and {job["name"] for job in find_flake_candidates(
+              ui_guard_failure_jobs, **ui_admission_args,
+          )} == {"Admin UI cross-package guards", "Admin UI"})
+    ui_multiple_aggregate_failures = [
+        *ci_jobs,
+        _job("Detect UI or governance changes", "skipped", []),
+        _job("Admin UI build", "skipped", []),
+        _job("Admin UI cross-package guards", "skipped", []),
+        _job("Admin UI", "failure", [
+            ("Check build result", "failure"),
+            ("Unexpected second failure", "failure"),
+        ]),
+    ]
+    check("CI second failed Admin UI aggregate step retains aggregate",
+          {job["name"] for job in find_flake_candidates(
+              ui_multiple_aggregate_failures, **ui_admission_args,
+          )} == {"Admin UI"})
+    check("CI duplicate UI aggregate identity fails closed",
+          find_flake_candidates(ci_ui_jobs + [ci_ui_jobs[-1]], **ui_admission_args)[-2:]
+          == [ci_ui_jobs[-1], ci_ui_jobs[-1]])
 
     print("extract_service")
     check(

@@ -36,8 +36,8 @@ Služba dodržuje hexagonální uspořádání OpenBank (ADR-0002): doménu bez 
 ### Klíčové porty (`application.port.out`)
 
 - `KycCaseRepository` — `save`, `update`, `findById`, `findByPartyId`, `listAll`/`listByStatus`, `countAll`/`countByStatus`.
-- `KycOutboxPort` / `KycOutboxRepository` — zápis a vyprazdňování řádků outboxu.
-- `KycOutboxEventPublisher` — publikace payloadu outboxu do Kafky.
+- `KycOutboxRepository` — zápis a vyprazdňování řádků outboxu.
+- `OutboxEventPublisher` (sdílený, `openbank-libs`) — publikace payloadu outboxu do Kafky.
 
 ## Tok outbox → Kafka
 

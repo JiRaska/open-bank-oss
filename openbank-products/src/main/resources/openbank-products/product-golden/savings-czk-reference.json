@@ -1,0 +1,201 @@
+{
+  "name": "savings-czk-reference",
+  "description": "SAVINGS-CZK on 250000.00 CZK across the 2028 leap-year February month end: 3.00 % ACT/365 Fixed accrues 20.547950 a day (daily rate 0.0000821918 at scale 10, then scale 6), the leap day 29 February accrues the same 1/365, month-end capitalisation posts the rounded 41.10 gross, and 1 March accrues on the capitalised balance. Withholding tax is outside IR v1 and is not part of this vector.",
+  "revision": {
+    "currency": "CZK",
+    "fees": [],
+    "hooks": {
+      "onOpen": [
+        {
+          "action": {
+            "cadence": "DAILY",
+            "hook": "scheduled",
+            "tag": "ACCRUAL",
+            "type": "SCHEDULE"
+          },
+          "ruleId": "open.schedule-accrual"
+        },
+        {
+          "action": {
+            "cadence": "MONTHLY",
+            "hook": "scheduled",
+            "tag": "CAPITALISATION",
+            "type": "SCHEDULE"
+          },
+          "ruleId": "open.schedule-capitalisation"
+        }
+      ],
+      "scheduled": [
+        {
+          "action": {
+            "type": "ACCRUE_INTEREST"
+          },
+          "ruleId": "scheduled.accrue",
+          "trigger": "ACCRUAL"
+        },
+        {
+          "action": {
+            "type": "CAPITALISE_INTEREST"
+          },
+          "ruleId": "scheduled.capitalise",
+          "trigger": "CAPITALISATION"
+        }
+      ]
+    },
+    "interest": {
+      "accrualCadence": "DAILY",
+      "accrualRounding": "INTEREST_ACCRUAL",
+      "capitalisationCadence": "MONTHLY",
+      "dayCount": "ACT_365_FIXED",
+      "postingRounding": "LEDGER_POSTING",
+      "rate": "0.0300000000",
+      "rateType": "FIXED",
+      "ruleId": "interest.base"
+    },
+    "irVersion": 1,
+    "productCode": "SAVINGS-CZK"
+  },
+  "clock": {
+    "zone": "UTC"
+  },
+  "state": {
+    "currency": "CZK",
+    "balance": "250000.00",
+    "accruedInterest": "0.000000",
+    "openedOn": "2028-02-01"
+  },
+  "steps": [
+    {
+      "at": "2028-02-01T00:00:00Z",
+      "hook": "onOpen",
+      "expected": [
+        {
+          "type": "SCHEDULE",
+          "ruleId": "open.schedule-accrual",
+          "irVersion": 1,
+          "hook": "scheduled",
+          "tag": "ACCRUAL",
+          "cadence": "DAILY",
+          "at": null
+        },
+        {
+          "type": "SCHEDULE",
+          "ruleId": "open.schedule-capitalisation",
+          "irVersion": 1,
+          "hook": "scheduled",
+          "tag": "CAPITALISATION",
+          "cadence": "MONTHLY",
+          "at": null
+        }
+      ]
+    },
+    {
+      "at": "2028-02-28T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "ACCRUAL",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "interest.base",
+          "irVersion": 1,
+          "narrative": "interest accrual",
+          "lines": [
+            {
+              "accountingClass": "INTEREST_EXPENSE",
+              "direction": "DEBIT",
+              "amount": "20.547950",
+              "currency": "CZK"
+            },
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "CREDIT",
+              "amount": "20.547950",
+              "currency": "CZK"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2028-02-29T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "ACCRUAL",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "interest.base",
+          "irVersion": 1,
+          "narrative": "interest accrual",
+          "lines": [
+            {
+              "accountingClass": "INTEREST_EXPENSE",
+              "direction": "DEBIT",
+              "amount": "20.547950",
+              "currency": "CZK"
+            },
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "CREDIT",
+              "amount": "20.547950",
+              "currency": "CZK"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2028-02-29T23:30:00Z",
+      "hook": "scheduled",
+      "tag": "CAPITALISATION",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "scheduled.capitalise",
+          "irVersion": 1,
+          "narrative": "interest capitalisation",
+          "lines": [
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "DEBIT",
+              "amount": "41.10",
+              "currency": "CZK"
+            },
+            {
+              "accountingClass": "CUSTOMER_DEPOSIT",
+              "direction": "CREDIT",
+              "amount": "41.10",
+              "currency": "CZK"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2028-03-01T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "ACCRUAL",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "interest.base",
+          "irVersion": 1,
+          "narrative": "interest accrual",
+          "lines": [
+            {
+              "accountingClass": "INTEREST_EXPENSE",
+              "direction": "DEBIT",
+              "amount": "20.551328",
+              "currency": "CZK"
+            },
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "CREDIT",
+              "amount": "20.551328",
+              "currency": "CZK"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

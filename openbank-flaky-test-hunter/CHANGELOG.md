@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.15.6](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.5...flaky-test-hunter-v0.15.6) (2026-11-11)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** deduplicate proposals across issue labels ([#15605](https://github.com/JiRaska/open-bank-oss/issues/15605)) ([34b6022](https://github.com/JiRaska/open-bank-oss/commit/34b6022c0f3fb1adc45c278472cf529e03eec0b2))
+
+## [0.15.5](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.4...flaky-test-hunter-v0.15.5) (2026-11-08)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** preserve asynchronous proposal delivery ([#15251](https://github.com/JiRaska/open-bank-oss/issues/15251)) ([a58917f](https://github.com/JiRaska/open-bank-oss/commit/a58917f6cc70433d7fc50fb6aec1e95f91628bbc))
+
+## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.3...flaky-test-hunter-v0.15.4) (2026-11-01)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** retire expired schedule allowlist and move dated gate deadlines ([#14445](https://github.com/JiRaska/open-bank-oss/issues/14445)) ([318e35f](https://github.com/JiRaska/open-bank-oss/commit/318e35f86c52bd4d3b2dedddaa1a041a6da685db))
+
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.2...flaky-test-hunter-v0.15.3) (2026-11-01)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** clear CI cliffs and recognize recorder policy sources ([#14373](https://github.com/JiRaska/open-bank-oss/issues/14373)) ([9e0192e](https://github.com/JiRaska/open-bank-oss/commit/9e0192e0c3e4a36fcb5dbe97bad54c0eb0ba019b))
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.1...flaky-test-hunter-v0.15.2) (2026-10-19)
 
 

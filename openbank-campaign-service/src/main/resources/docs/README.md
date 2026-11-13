@@ -4,6 +4,16 @@ Campaign management (ADR-0200 / ADR-0209 D3 / ADR-0333): deterministic, versione
 per-enrolment Temporal journeys; consent-gated delivery through notification-service; and bounded,
 resumable audience admission.
 
+## Authorization
+
+Every endpoint carries `@Authorize`. The build sets `openbank.authz.opa-pdp-producer.enabled: true`,
+so decisions go to the OPA sidecar in the pod (`opa.url`, default `http://localhost:8181`; `opa.path`
+`/v1/data/openbank/rest/allow`; `opa.timeout-ms` 500), which serves `campaign-opa-bundle`. Without
+that switch no decision bean exists and every call takes the interceptor's "no PolicyDecisionPoint
+bean" branch, so the sidecar is never asked. `AUTHZ_ENFORCE` in the deployment decides whether a
+deny blocks the request or is only logged as an advisory `would DENY`; the service is deployed
+advisory until that log is clean. Tests run with `authz.enforce: false` under `%test`.
+
 ## Bulk admission
 
 `POST /api/v1/campaigns/{id}/bulk-runs` creates a durable run for an active campaign. The scheduler
@@ -45,6 +55,10 @@ failure keeps the intent available for later reconciliation, with no age-based e
 rolling back this migration, stop campaign sends, reconcile every remaining intent, and retain the
 resulting send history under the campaign retention policy.
 
+## Authorization
+
+The deployed OPA sidecar is connected to the shared `PolicyDecisionPoint` producer. `@Authorize` evaluates policy in advisory mode while `AUTHZ_ENFORCE` remains false; enabling enforcement requires reviewing live would-deny evidence (issue #9105). The `%test` profile disables the producer because HTTP contract tests run without a sidecar.
+
 ## Interface
 
 The committed `src/main/resources/openapi.yaml` defines the API contract. Read `/q/openapi` on the running service for the exact paths, request bodies, responses, and contract version of its image.
@@ -64,3 +78,7 @@ This service's `application.yaml` does not declare the management interface (`qu
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Datasource password default
+
+The deployed default for `quarkus.datasource.password` is a non-working sentinel, so a pod whose database Secret failed to mount fails authentication instead of booting on a credential baked into the image. The local-only password used by the dev compose stack and the test containers is set in the `%dev,test` profile block. The `appyaml-secret-literals` gate enforces this shape.

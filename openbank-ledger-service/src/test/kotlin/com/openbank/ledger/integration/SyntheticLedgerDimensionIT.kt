@@ -5,6 +5,8 @@
 package com.openbank.ledger.integration
 
 import com.openbank.libs.synthetic.SyntheticTaint
+import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
+import com.openbank.libs.web.SyntheticTaintContext
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -16,14 +18,27 @@ import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import io.restassured.path.json.JsonPath
+import io.smallrye.mutiny.Uni
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
+import jakarta.ws.rs.Priorities
+import jakarta.ws.rs.container.ContainerRequestContext
+import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.data.Offset
 import org.eclipse.microprofile.config.ConfigProvider
+import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.resteasy.reactive.server.ServerRequestFilter
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
 import java.time.Clock
 import java.time.LocalDate
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * ADR-0252 phase 1 (#8615): the synthetic taint must reach the ledger's own state, and the trial
@@ -57,6 +72,9 @@ import java.util.UUID
 @TestProfile(SyntheticLedgerDimensionIT.TrustedCanaryProfile::class)
 class SyntheticLedgerDimensionIT {
 
+    @Inject
+    lateinit var propertyLoss: SyntheticPropertyLossFixture
+
     /**
      * Names the canary principal as trusted. The filter's list is empty by default and an untrusted
      * caller's header is ignored, so without this override the "synthetic" posting below would be
@@ -67,6 +85,11 @@ class SyntheticLedgerDimensionIT {
     class TrustedCanaryProfile : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "openbank.synthetic.trusted-principals" to CANARY_PRINCIPAL,
+            "quarkus.otel.sdk.disabled" to "true",
+            "quarkus.scheduler.enabled" to "false",
+            // Force the missing-property condition only in this HTTP test profile. The real
+            // authentication/filter decision remains the sole writer of the CDI holder.
+            "openbank.test.synthetic-taint.drop-request-property" to "true",
         )
     }
 
@@ -160,11 +183,115 @@ class SyntheticLedgerDimensionIT {
             .isFalse()
     }
 
+    @Test
+    @TestSecurity(user = CANARY_PRINCIPAL, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-synthetic-canary"),
+            Claim(key = "preferred_username", value = CANARY_PRINCIPAL),
+            Claim(key = "sub", value = "synthetic-canary-subject"),
+        ],
+    )
+    fun `concurrent trusted and ordinary postings keep separate CDI decisions after property loss`() {
+        // Initialize the HTTP request reader before starting the timed two-request barrier.
+        postJournal(TODAY, REAL_AMOUNT, tainted = false)
+        val held = propertyLoss.beginPair()
+        val clients = Executors.newFixedThreadPool(2)
+        val posts = mutableListOf<Future<UUID>>()
+        try {
+            val synthetic = clients.submit<UUID> { postJournal(TODAY, SYNTHETIC_AMOUNT, tainted = true) }
+            posts += synthetic
+            // Only the test thread waits. The server has assigned TRUE and returns an incomplete Uni.
+            held.syntheticAssigned.get(10, TimeUnit.SECONDS)
+            val real = clients.submit<UUID> { postJournal(TODAY, REAL_AMOUNT, tainted = false) }
+            posts += real
+            held.realAssigned.get(10, TimeUnit.SECONDS)
+            // FALSE was assigned while the TRUE request was still alive, before either ledger read.
+            // A shared holder would now turn the first journal REAL, even if both requests return 201.
+            held.resume.complete(null)
+
+            assertThat(syntheticColumnOf(synthetic.get(10, TimeUnit.SECONDS)))
+                .`as`("concurrent synthetic journal retains its own CDI decision").isTrue()
+            assertThat(syntheticColumnOf(real.get(10, TimeUnit.SECONDS)))
+                .`as`("concurrent ordinary journal retains its own CDI decision").isFalse()
+        } finally {
+            propertyLoss.endPair(held)
+            posts.forEach { it.cancel(true) }
+            clients.shutdownNow()
+            check(clients.awaitTermination(10, TimeUnit.SECONDS)) { "HTTP test clients did not terminate" }
+        }
+        val followUp = postJournal(TODAY, REAL_AMOUNT, tainted = false)
+        assertThat(syntheticColumnOf(followUp)).`as`("fresh ordinary request remains REAL").isFalse()
+    }
+
+    @Test
+    @TestSecurity(user = "untrusted-operator", roles = ["ROLE_OPERATOR"])
+    fun `synthetic journal route refuses an untrusted origin before posting`() {
+        val transactionId = UUID.randomUUID()
+        val response = postJournalRequest(
+            date = TODAY,
+            amount = SYNTHETIC_AMOUNT,
+            tainted = true,
+            path = SYNTHETIC_JOURNALS_PATH,
+            transactionId = transactionId,
+        )
+        assertThat(response.statusCode).isEqualTo(403)
+        val journals = Given { accept("application/json") } When { get("/api/v1/journals/transaction/$transactionId") }
+        assertThat(journals.statusCode).isEqualTo(200)
+        assertThat(journals.jsonPath().getList<Any>("$")).isEmpty()
+    }
+
+    @Test
+    @TestSecurity(user = CANARY_PRINCIPAL, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-synthetic-canary"),
+            Claim(key = "preferred_username", value = CANARY_PRINCIPAL),
+            Claim(key = "sub", value = "synthetic-canary-subject"),
+        ],
+    )
+    fun `journal idempotency preserves synthetic origin in both directions`() {
+        val key = UUID.randomUUID()
+        val transactionId = UUID.randomUUID()
+        val first = postJournalRequest(TODAY, SYNTHETIC_AMOUNT, true, SYNTHETIC_JOURNALS_PATH, key, transactionId)
+        assertThat(first.statusCode).isEqualTo(201)
+        assertThat(first.jsonPath().getBoolean("synthetic")).isTrue()
+        val id = first.jsonPath().getUUID("id")
+        assertThat(syntheticColumnOf(id)).isTrue()
+
+        val replay = postJournalRequest(TODAY, SYNTHETIC_AMOUNT, true, SYNTHETIC_JOURNALS_PATH, key, transactionId)
+        assertThat(replay.statusCode).isEqualTo(201)
+        assertThat(replay.getHeader("Idempotent-Replayed")).isEqualTo("true")
+        assertThat(replay.jsonPath().getUUID("id")).isEqualTo(id)
+        assertThat(postJournalRequest(TODAY, SYNTHETIC_AMOUNT, false, key = key).statusCode).isEqualTo(409)
+
+        val realKey = UUID.randomUUID()
+        assertThat(postJournalRequest(TODAY, REAL_AMOUNT, false, key = realKey).statusCode).isEqualTo(201)
+        val conflicting = postJournalRequest(TODAY, SYNTHETIC_AMOUNT, true, SYNTHETIC_JOURNALS_PATH, realKey)
+        assertThat(conflicting.statusCode).isEqualTo(409)
+        val journals = Given { accept("application/json") } When { get("/api/v1/journals/transaction/$transactionId") }
+        assertThat(journals.statusCode).isEqualTo(200)
+        assertThat(journals.jsonPath().getList<Any>("$")).hasSize(1)
+    }
+
     private fun postJournal(date: String, amount: Double, tainted: Boolean): UUID {
+        val response = postJournalRequest(date, amount, tainted)
+        response.then().statusCode(201)
+        return response.jsonPath().getUUID("id")
+    }
+
+    private fun postJournalRequest(
+        date: String,
+        amount: Double,
+        tainted: Boolean,
+        path: String = "/api/v1/journals",
+        key: UUID = UUID.randomUUID(),
+        transactionId: UUID = UUID.randomUUID(),
+    ): io.restassured.response.Response {
         val payload = """
             {
-              "idempotencyKey": "${UUID.randomUUID()}",
-              "transactionId": "${UUID.randomUUID()}",
+              "idempotencyKey": "$key",
+              "transactionId": "$transactionId",
               "entryDate": "$date",
               "valueDate": "$date",
               "description": "ADR-0252 dimension IT (tainted=$tainted)",
@@ -190,19 +317,13 @@ class SyntheticLedgerDimensionIT {
             }
         """.trimIndent()
 
-        val response = (
-            Given {
-                contentType("application/json")
-                body(payload)
-                if (tainted) header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE) else this
-            } When {
-                post("/api/v1/journals")
-            } Then {
-                statusCode(201)
-            }
-            ).extract().jsonPath()
-
-        return UUID.fromString(response.getString("id"))
+        return Given {
+            contentType("application/json")
+            body(payload)
+            if (tainted) header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE) else this
+        } When {
+            post(path)
+        }
     }
 
     private fun trialBalance(scope: String?): JsonPath = (
@@ -244,6 +365,7 @@ class SyntheticLedgerDimensionIT {
     companion object {
         /** The canary service account. Trusted only because [TrustedCanaryProfile] names it. */
         const val CANARY_PRINCIPAL = "service-account-openbank-synthetic-canary"
+        const val SYNTHETIC_JOURNALS_PATH = "/api/v1/journals/synthetic"
 
         // The journal author is a UUID; the authenticated service-account name is not.
         const val CANARY_ACTOR_ID = "00000000-0000-0000-0000-000000000252"
@@ -261,5 +383,56 @@ class SyntheticLedgerDimensionIT {
 
         /** The service books and aggregates on a UTC clock; so does this test, on both sides. */
         private val TODAY: String = LocalDate.now(Clock.systemUTC()).toString()
+    }
+}
+
+/**
+ * Test-only fault injection after the real inbound trust filter. It removes only the legacy
+ * property, never writes the holder or grants identity, and defaults off outside this profile.
+ * This models property loss; it does not reproduce the dispatch of an older deployed image.
+ */
+@ApplicationScoped
+class SyntheticPropertyLossFixture {
+    @ConfigProperty(name = "openbank.test.synthetic-taint.drop-request-property", defaultValue = "false")
+    var enabled: Boolean = false
+
+    @Inject
+    lateinit var holder: SyntheticTaintContext
+
+    private val active = AtomicReference<HeldRequests?>()
+
+    fun beginPair(): HeldRequests = HeldRequests().also {
+        check(active.compareAndSet(null, it)) { "another HTTP pair is already armed" }
+    }
+
+    fun endPair(held: HeldRequests) {
+        check(active.compareAndSet(held, null)) { "the HTTP pair changed unexpectedly" }
+        // A failed assertion must also release server requests. Completion is a no-op after success.
+        held.resume.completeExceptionally(IllegalStateException("HTTP pair ended before release"))
+    }
+
+    // The original ContainerRequestFilter has the default USER priority. The Uni suspends the
+    // filter chain without blocking its event loop; null resumes the actual ledger resource.
+    @ServerRequestFilter(priority = Priorities.USER + 1)
+    fun filter(ctx: ContainerRequestContext): Uni<Response?> {
+        if (!enabled || ctx.method != "POST" || ctx.uriInfo.path.trim('/') != "api/v1/journals") {
+            return Uni.createFrom().nullItem()
+        }
+        val decision = ctx.getProperty(SYNTHETIC_TAINT_PROPERTY) as? Boolean
+            ?: error("the real synthetic trust filter must execute before the loss fixture")
+        check(holder.tainted == decision) { "both trusted carriers must agree before fault injection" }
+        ctx.removeProperty(SYNTHETIC_TAINT_PROPERTY)
+        val held = active.get() ?: return Uni.createFrom().nullItem()
+        val assigned = if (decision) held.syntheticAssigned else held.realAssigned
+        check(assigned.complete(null)) { "the HTTP pair received a duplicate taint decision" }
+        return Uni.createFrom().completionStage(held.resume)
+    }
+
+    class HeldRequests {
+        val syntheticAssigned = CompletableFuture<Void>()
+        val realAssigned = CompletableFuture<Void>()
+
+        // Bound the server-side pause as well as the test's waits, including failure/cleanup paths.
+        val resume: CompletableFuture<Response?> = CompletableFuture<Response?>().orTimeout(10, TimeUnit.SECONDS)
     }
 }

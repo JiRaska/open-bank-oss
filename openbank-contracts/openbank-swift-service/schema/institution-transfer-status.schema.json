@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openbank.example/contracts/swift/institution-transfer-status.schema.json",
+  "title": "swift.institution-transfer.status.v1",
+  "x-openbank-event-type": "swift.institution-transfer.status.v1",
+  "description": "Contract 9.2: bank-own transfer status on openbank.swift.institution-transfers, produced by swift-service, read by treasury-service.",
+  "type": "object",
+  "required": ["paymentId", "status", "messageType", "at", "synthetic"],
+  "properties": {
+    "paymentId": { "type": "string", "format": "uuid" },
+    "idempotencyKey": { "type": ["string", "null"], "maxLength": 255 },
+    "status": { "type": "string", "enum": ["ACCEPTED", "SENT", "SETTLED", "REJECTED"] },
+    "messageType": { "type": "string", "enum": ["pacs.009", "MT202"] },
+    "schemeReference": { "type": ["string", "null"] },
+    "reasonCode": { "type": ["string", "null"], "pattern": "^[A-Z0-9]{4}$" },
+    "reason": { "type": ["string", "null"] },
+    "at": { "type": "string", "format": "date-time" },
+    "synthetic": { "type": "boolean" },
+    "ssiVersion": { "type": ["integer", "null"], "minimum": 1 }
+  },
+  "additionalProperties": true
+}

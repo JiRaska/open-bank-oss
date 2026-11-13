@@ -27,7 +27,11 @@
    client-credentials, behind a `LedgerCallGuard` resilience boundary. This is the money-path crossing.
 3. **Service → event stream (transactional outbox).** Loan state changes flow to the analytics/downstream
    plane through the outbox (ADR-0003) — one local transaction, single extraction path, no second read
-   path into the lending DB.
+   path into the lending DB. The versioned `loan.exposure_fact` envelope (#9890) carries
+   the loan, application and party identifiers, native amounts, recorded status and effective
+   time. The same lending topic ACL controls producer access. Repayment and final-state facts
+   commit with their local source changes. The cash confirmation fact follows both completed
+   disbursement postings and commits with the existing disbursement event.
 4. **Service → credit bureau / risk-parameter / valuation feeds (ports).** `@Default` no-op today; real
    integrations land later as build-time-gated `@Alternative` adapters — each a future trust boundary.
 5. **Service → its own Postgres schema.** Intra-service tables only; no cross-schema reads.
@@ -375,6 +379,24 @@ make the in-memory registry shared. A pack approved on one replica still reaches
 by the convergence path, so the at-most-once guarantee here is about the durable decision, not about
 every pod agreeing at the same instant (#3467, and see the replica-convergence work tracked there).
 
+## 8a. Czech consumer credit policy revisions (issue #8896)
+
+The risk console submits complete policy bundles to Lending through the existing session relay.
+Only `ROLE_CREDIT_RISK` with a verified interactive staff JWT can read pending versions or write
+proposals and decisions. Lending records the token subject as the actor. Database constraints
+reject a checker equal to the maker and prevent two approvals with the same version or effective
+day. Each decision locks its proposal and checks the prior state. The database permits only the
+transition from a proposed row to a terminal decision and preserves the payload, SHA-256 digest,
+actors, timestamps and reason. The UI presents the exact proposed rules before deciding. A receipt
+bound to the staff subject, idempotency key and request fingerprint commits with each mutation.
+A concurrent or interrupted retry can recover the original response from the same evidence.
+
+Approval schedules a future revision for Czech consumer credit. PostgreSQL checks its Prague
+business day at commit so a delay acquiring locks cannot backdate approval. Origination still
+applies compliance pack checks and requires adverse bureau, DSTI and DTI evidence. Earlier dates resolve
+to the revision that was effective then. Storage or evaluation errors propagate to the existing
+assessment failure path. Proposal text is for rule and decision rationale only.
+
 ## 9. Customer self-service origination intake (ADR-0211) — STRIDE supplement
 
 `CustomerIntakeResource` (`POST /api/v1/lending/intake/applications`) is the first path by which a
@@ -564,8 +586,99 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
 | **D**oS / availability | A snapshot storm loads lending's database | Snapshots are operator-triggered and idempotent on their input; each read is three indexed queries. Not rate-limited beyond the fleet limiter — accepted for a single internal caller, revisit if the engine gains a scheduler. |
 | **R**epudiation | Which book did a risk run see | The risk engine hashes this response into its run's input hash (ADR-0314 D2), so a figure is tied to the exact book read. |
 
+## 9g. Customer-requested human review of an engine decline — STRIDE supplement
+
+A decision-engine decline is terminal (`DECLINED`, ADR-0211 D1). GDPR Art. 22(3), EU AI Act Art. 86
+and EBA/GL/2020/06 par. 54 require a route to a human, so the applicant can request one
+(`POST /api/v1/lending/intake/applications/{id}/decline-review`, customer-edge principal only) and
+staff decide it (`/api/v1/lending/decline-reviews`). The declined application never leaves its
+terminal state and the shared origination graph is untouched: the review is its own record
+(`loan_decline_review`), and an overturn opens a *successor* application in `FOUR_EYES`, so the
+credit decision itself is still the existing four-eyes decision.
+
+**What it is not.** It cannot approve credit. An overturn creates an application waiting for a
+second, different human; no money moves and no loan exists until the existing decision and
+disbursement controls (§7) are passed.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **S**poofing | A caller asks for a review of someone else's decline | Customer route is the named customer-edge principal only (the §9 check); the party is `X-Customer-Party-Id`, never a body field, and the application is read filtered by owner, so a foreign id answers 404, indistinguishable from an absent one. |
+| **S**poofing | A service account decides reviews | `@RolesAllowed` is `ROLE_CREDIT_RISK`/`ROLE_ADMIN`; the actions `lending.declineReview.*` are deliberately NOT in `rules.yaml: role_action_matrix` (a matrix line is a grant to any HUMAN-typed principal, machines included), and `lending_rest_ext.rego` carries an explicit machine veto, proved by a negative OPA test. |
+| **T**ampering | A decline made by a person is re-opened, or an engine decline is re-reviewed in a loop | Reviewable only when `DECLINED` with a stored engine outcome and no recorded human decider; a human decision records `decidedBy`, which ends it. One review per application (unique constraint), repeats are idempotent. |
+| **T**ampering | Two reviewers decide the same review, or an overturn leaves a half-written state | The decision is one conditional UPDATE (`where status = REQUESTED`); the loser gets 409 and writes no successor or event. Claim, successor and events commit in one transaction under the application row lock. |
+| **T**ampering | An overturn opens an application intake would refuse today | Before anything is written, the overturn re-runs intake's refusal gates against today — origination allowed for the product (compliance pack, when enforced), the FLOATING-rate switch, rate terms against the new first due date — and answers 409 `SUCCESSOR_NOT_ORIGINABLE`, leaving the review `REQUESTED`. The successor's first due date is recomputed with intake's own rule (`FirstDueDate`) and its compliance pack is the one active today. |
+| **R**epudiation | A reviewer overturns a decline without a recorded reason | Impossible: the request type rejects a reason under 10 characters, the schema CHECK rejects a decided row without reviewer and reason, and the reviewer is the JWT subject, never client-supplied. The reason is kept on the review row and never published. |
+| **R**epudiation | "What did the engine say that the reviewer saw?" | The engine's reason codes, policy versions and decision time are snapshotted on the review at request time; events carry ids and machine codes only. |
+| **I**nformation disclosure | The customer reads an officer's note or the reviewer's reason | The customer DTO carries status and timestamps only; the engine's own reason codes are already on the journey projection. Events carry no free-text personal data. |
+| **D**oS | Review requests flood the staff queue | Bounded by construction to one review per application and by the window (`lending.decline-review.window-days`, default 30); a request needs an engine-declined application of the caller. The edge's rate limiting sits in front. |
+| **E**oP | A reviewer approves the credit they overturned | The successor's proposer is the reviewer, and the existing four-eyes `decide` refuses an approver equal to the proposer (`SEGREGATION_OF_DUTIES`). |
+| **E**oP | A member of staff reviews their own decline | **Only partly mitigated.** `SELF_REVIEW` refuses a reviewer whose principal name equals the applicant's party id, and nothing more: staff principals are not party ids, and the platform has no staff-to-party identity mapping (the `party_id` claim exists only in the customers realm), so an employee reviewing their own decline is not detected. The four-eyes approval by a second person is the remaining control. |
+
+**Residual risks / gaps:**
+
+- **Not yet reachable by a customer**: no customer-edge proxy route or admin-ui screen exists in
+  this change, so the control is not live end to end until both land.
+- **No staff-to-party conflict-of-interest check** (see the EoP row): needs an identity mapping the
+  platform does not have. Follow-up.
+- **The successor is not re-priced and not re-evaluated.** It keeps the declined application's
+  nominal rate and catalog snapshot (up to the review window old), and there is no fresh engine
+  evaluation: its engine fields are null and `predecessorApplicationId` names the declined row,
+  which is what the four-eyes approver sees. Re-pricing needs the intake pricing path (catalog
+  profile resolution, or the intake-configured rate) reachable from a non-request context; that is a
+  restructuring of intake, not part of this change. Follow-up.
+- **No SLA timer on a pending review**; only the successor's four-eyes wait has the 5-day escalation.
+
 ## 10. Change log
 
+- **2026-11-12** — **Staff decision on a decline review (#15751).** `loan_application.predecessor_application_id`
+  (V34), events `credit.decline_review.confirmed|overturned`, endpoints `GET /api/v1/lending/decline-reviews`
+  and `POST /api/v1/lending/decline-reviews/{id}/decision`, actions `lending.declineReview.read|decide`
+  (human-only, OPA machine veto). See §9g.
+- **2026-11-12** — **Customer request for human review of an engine decline (#15751).** New table
+  `loan_decline_review` (V32), outbox event `credit.decline_review.requested`, endpoint
+  `POST /api/v1/lending/intake/applications/{id}/decline-review` (customer-edge only, action
+  `lending.intake`). See §9g.
+- **2026-10-23** — **Lending is a day-close participant (ADR-0342, #13167).** New outbound edge:
+  `PUT /api/v1/ledger/accounting-days/{date}/participants/lending` to ledger-service, over the same
+  `ledger-service` base URL and named oidc-client `m2m` (Keycloak `openbank-lending`) as the existing
+  journal POST — no new credential, client or port. The ledger authorizes it as its OWN action
+  `ledger.close.participate` (rule `service-close-participation`, which binds each account to its one
+  participant name), never the generic `ledger.create`. New table
+  `lending_close_job_run` (V28) recording, per Prague accounting day, that the accrual and
+  provisioning passes ran and what they did; a new hourly `LendingCloseParticipationScheduler`
+  folds those rows into the report. **STRIDE-S:** the ledger accepts a `lending` report only from
+  `service-account-openbank-lending`. **STRIDE-T/R:** the report is derived from the service's own
+  persisted runs, never caller input; a due pass with no recorded run produces NO report, so a late
+  or crashed pass holds the ledger's close. An accrual the ledger refuses with `409
+  ACCOUNTING_DAY_CLOSED` (D4) is recorded REFUSED with that category; any other failed pass, and a
+  provisioning pass that leaves exposures unprovisioned or cannot count coverage, is REFUSED with a
+  fixed category, never RAN. An accrual pass the batch cap cut short (the use case reads one row
+  past the batch as a probe) is REFUSED `due installment(s) left unaccrued`, so a capped pass cannot
+  report a complete day. Both passes now take their as-of date from the Prague accounting day
+  (`AccountingClock.bank`) once at the start and file their evidence under that same date, so a pass
+  crossing midnight, or a UTC pod, cannot accrue for one day and report another. Reasons carry categories and counts only — no loan id, party id or
+  exception text leaves the service. **STRIDE-D:** a ledger outage only delays the report (re-offered
+  every tick, the day waits and pages). **Review hardening:** (1) provisioning's allowance journals
+  are dispatched by the outbox, so the day is not reported while any `lending.allowance.posting` row
+  for it (payload `accountingDate`, indexed in V28) is still PENDING/DISPATCHING/FAILED; SENT rows
+  are its journals and DEAD rows (the outbox gave up, a closed-day 409 included) make the day
+  REFUSED. (2) Each pass marks itself in flight before working; the day is not reported while the
+  marker stands (a pass running across midnight cannot be overtaken by an earlier RAN row), and a
+  marker older than the derived stale threshold (`LendingCloseJobs.staleAfter`, see (5)) is reported REFUSED `pass started and never
+  completed`, so a crash cannot hold the day unresolvably. (3) The accrual drains truncated batches
+  within `drain-budget` / `max-drain-rounds`, and each pass first re-drains every earlier day in the
+  lookback still REFUSED as truncated, as of that day, re-recording it RAN once nothing is left. (4) A
+  report the ledger receives after it TIED_OUT or LOCKED the day is stored `late = true` and never
+  moves the day (`DayCloseParticipantsIT`: a later REFUSED is stored late). (5) Final review: a pass that crashed mid-way is healed — its stale in-flight marker joins the
+  catch-up set, so the next pass re-runs that day and re-records it. The stale threshold is DERIVED,
+  `drain-budget × (lookback + 1) + 30m`, so it can never be configured below the longest live pass, and
+  the drain deadline is checked per installment inside a batch. The ledger refuses postings into a
+  day past cutoff (only OPEN accepts; `409 ACCOUNTING_DAY_CLOSED` under enforce), so accrual journals
+  are dated in the CURRENT Prague day: a catch-up for D books D's remainder in the open day, D's row
+  records the installments covered and today's row the journals. The V28 partial index is a plain,
+  boot-time CREATE INDEX (rationale and out-of-band CONCURRENTLY recipe in its header). The ledger keeps the check in `shadow`; flipping
+  to enforce is an owner step. Rollback: revert the application while preserving additive V28 run
+  evidence; schema removal needs a separate reviewed retention plan.
 - **2026-10-14** — **Explicit origination commands: withdraw / submit-documents / sign, KYC-validity expiry, four-eyes SLA escalation** (ADR-0211 D3 slice; refs #12748). Four new endpoints: desk `POST /api/v1/lending/applications/{id}/withdraw|submit-documents|sign` under new actions `lending.withdraw` / `lending.submitDocuments` / `lending.sign` (desk-role sets in `lending_rest_ext.rego` plus the edge `prohibited` veto, 37 rego tests), and the customer edge `POST /api/v1/lending/intake/applications/{id}/withdraw` reusing the existing `lending.intake` action. **Elevation of privilege / spoofing:** the actor is the JWT subject on the desk endpoints and the vouched edge principal on intake; the intake endpoint looks the application up owner-filtered so a customer touching another party's id gets the same 404 as a missing one — existence is not disclosed across the trust boundary. **Tampering / repudiation:** `sign` persists the signature-artefact hash (V27 adds nullable `loan_application.signature_artefact_hash`, additive, rollback = `DROP COLUMN`) via a same-claim compare-and-set (`compareAndSetSignature`, mirroring `claimDecision`), so the row either carries the hash the decision claimed or the sign fails closed; the hash corroborates the signature evidence without storing the artefact itself. **Withdrawal boundary (ADR-0211, not ADR-0215):** application withdrawal is available only pre-disbursement — `SIGNED` and every terminal state refuse with 422 through the state machine, which remains the single authority on lawful transitions; the statutory post-disbursement cooling-off unwind stays a live-loan path (ADR-0215). **Four-eyes SLA:** a new `FOUR_EYES` timer branch escalates after 5 days — it emits a `credit.application.four_eyes_sla_escalation` evidence event and increments `openbank.lending.origination.four_eyes_sla_escalation`; it NEVER auto-approves (no human edge leaves the graph) and is idempotent by aggregate re-read, so replay cannot double-escalate. **KYC validity:** a new `KYC_PENDING` branch expires the application via the existing `expireIfInState` after 30 days to `EXPIRED`. Timer constants live in the workflow source because `run`/`stateEntered` signatures are frozen by in-flight histories — replay safety, not config. The state machine gained property tests (jqwik) over lawful walks and human-only edges. No new caller, topic, network-policy edge or machine privilege. Money-path: the PR needs two approvals. Rollback: revert; V27 is additive.
 - **2026-10-03** — **Evidence bundle reads the audit chain; `lending_outbox` joins SENT retention** (#11900, ADR-0214 D3, ADR-0329). `GET /applications/{id}/evidence` now calls audit-service's `GET /api/v1/audit/evidence/{id}` with the caller's own bearer (`CallerTokenClientHeadersFactory`), never the m2m client: no service identity is granted the audit trail, and audit-service's rule refuses service accounts outright. **STRIDE-T/R:** the bundle is now the tamper-evident chain, each event with its recomputed hash status, instead of a mutable delivery buffer — an edited row shows as `MISMATCH`. **STRIDE-I:** the residual recorded on the entry below is closed in code: nothing reads a SENT `lending_outbox` row any more, and the repository implements `SentOutboxRetention`. The purge itself stays switched OFF (`LENDING_OUTBOX_RETENTION_ENABLED=false`) until the outbox↔chain parity check in 05-operations passes, because events sent before audit-service subscribed (2026-07-31) may exist only here. **STRIDE-D:** audit-service unreachable makes the evidence read 503 — deliberately no fallback to a partial local bundle. New egress lending→audit over audit-service's private-CA mTLS listener (8443, `audit-authority`, client identity `lending-internal-tls`) — the request carries a bearer token, so never plaintext (ASVS V9.1); NetworkPolicy regenerated.
 - **2026-10-03** — **`lending_outbox` is EXEMPT from fleet SENT-row retention** (ADR-0329). Every other outbox now purges SENT rows after 7 days; this one does not, because its SENT rows are the ADR-0214 evidence bundle (`GET /applications/{id}/evidence` reads them through `findByAggregateId`) and purging them would empty that bundle. Residual risk, recorded rather than fixed here: loan-event payloads (applicant and credit data) stay in this table for the life of the database. Closing it needs the evidence moved to a store with its own retention; the exemption sits in `check-outbox-sent-retention.py` and fails CI once lending opts in.
@@ -955,3 +1068,60 @@ historical-replay / reconciliation policy is tracked in #10275.
 The customer self-service intake, quote, credit-journey and financial-health endpoints admit only customer-edge. That caller is recognised by `ServiceAccountIdentity` (openbank-libs-runtime): a verified JWT whose `azp` is the configured client and whose `preferred_username` is that client's own `service-account-<azp>`. It is never recognised by the principal name, which Quarkus takes from a username claim. A token carrying the edge's username but issued to another client, or a human token issued through the edge client, is refused with 403.
 
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+
+### Durable accrual evidence and retry boundary (#13708)
+
+The accrual loop commits a complete immutable dated journal request before the remote money call.
+It accepts only a POSTED, nonzero journal identity with the persisted deterministic transaction ID
+and matching provider entry date. Current time, a successful transport, a batch's returned count,
+or a missing response date cannot substitute for that receipt. Retries replay the same request;
+a closed-day refusal never silently changes its date or idempotency identity.
+
+The progress row, installment mark, existing accrual outbox event and per-day item/journal counters
+complete in one local transaction. A conditional completion and unique journal identity prevent
+recounting or assigning one journal to different intents. A committed prefix survives a later batch
+failure. A remote acknowledgement followed by local failure leaves a pending intent, which blocks
+RAN until an exact idempotent retry reconciles it. Completion re-locks the persisted installment and
+intent, validates their economic facts, and builds the event from persisted facts rather than a
+caller-supplied snapshot. Day rows are acquired in date order.
+
+Intent metadata follows installment erasure through its foreign key; no new personal-data retention
+period or permanent identity tombstone is introduced. Deleting unresolved evidence leaves only a
+scoped, non-identifying aggregate reconciliation refusal for the affected work/requested dates.
+Ordinary successful runs cannot clear this uncertainty. Existing controlled ledger reconciliation
+or waiver is required for disposition. Rollback retains additive V28 evidence and pending intents.
+
+- **2026-11-04** — **Product-catalog read moves to this service's own M2M identity.** `ProductCatalogLoanClient` (published loan revision read) now authenticates with the named OIDC client `m2m` (`openbank-lending`, ROLE_API plus the narrow `catalog:read` scope) instead of the shared `openbank-services` principal. product-catalog admits it by name on `catalog.read` only (`service-named-catalog-read`); `catalog.list` and all writes stay closed. **STRIDE-S/E:** narrows the shared principal's reach and attributes catalog reads to this service. The edge, its payload and the credential source (this service's existing client secret) are unchanged. **Residual:** if the live client lacks `catalog:read`, the read is denied once product-catalog enforces authorization (it is advisory today). **Rollback:** revert.
+
+The close producer refreshes completed days in the configured recovery window and the current /
+immediately preceding calendar month. Incomplete source work emits an attributable, retry-stable
+REFUSED receipt, revoking an earlier RAN even before any new journal exists. Recent closed days
+remain observable; later receipts invalidate monthly readiness and never rewrite at-close facts.
+The wider bounded scan requires production-volume timing before activation.
+
+Allowance delivery acknowledgements are retained independently of the disposable SENT outbox.
+V30 records them atomically with SENT, archives only surviving acknowledgements and retains an
+explicit coverage boundary. An existing database's earlier unverified dates remain REFUSED;
+purged delivery history is never inferred from current loan balances or a successful sweep.
+The migration briefly excludes writers/retention while establishing this boundary; schedule it
+under the retained deployment hold. Rollback retains receipts, coverage and financial history.
+
+- **2026-11-09 — Missing-job obligation review correction (#13167).** A missing run cannot be erased by disabling its scheduler after REFUSED: observed `(business_date, job)` obligations are insert-only and retained independently of real run receipts. The observation transaction reads the retained union and all legacy run keys before reporting. It creates no completion, journal, or new authorization. Run completion or an attributable ledger waiver is still required; never infer unobserved historical schedules. Rollback retains both evidence tables. Existing holds and shadow/off defaults remain.
+
+### Recorded signature receipt
+
+The explicit signature command persists the artefact hash, receipt timestamp, `SIGNED` state and
+matching outbox evidence in the application transaction (#9890). A competing sign cannot replace
+the recorded value. Earlier rows have unknown receipt time. Lending retains the existing
+application-based access boundary for the timestamp.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

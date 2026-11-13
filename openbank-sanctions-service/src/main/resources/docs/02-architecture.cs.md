@@ -147,6 +147,8 @@ KafkaSanctionsOutboxEventPublisher odesílá do openbank.sanctions.screening.eve
 audit-service + aml-service konzumují event
 ```
 
+Událost `SanctionChecked`, která odpovídá `SanctionsCheck.isHighRisk()`, se ze stejného trvalého outbox řádku publikuje také do `openbank.oversight-triggers` (ADR-0031 D9). Tělo triggeru obsahuje pouze `sourceService` a `occurredAt`; původní hlavičky `ce-id`/`ce-type` slouží ke korelaci. Screenovaná jména, identifikátory, detaily shod ani data listin se do oversight topicu nekopírují. Výsledky CLEAR, potenciální shody s nižším skóre, přezkumy a události změn listin zůstávají pouze v doménovém topicu.
+
 ## Komponenty z `openbank-libs`
 
 | Modul | Použití zde |
@@ -169,3 +171,19 @@ audit-service + aml-service konzumují event
 ## Heartbeat naplánované úlohy
 
 Úloha (60sekundový tick obnovy sankčních seznamů) registruje celoflotilový heartbeat `sanctions-list-refresh` (`DomainMetrics.registerWorkflowLiveness`, nasazený při startu) a úspěch zapisuje jen na cestě úspěchu: tick se počítá jako úspěšný, jen pokud v něm žádný seznam neselhal; feed, který selhává každou minutu, tak zestárne místo aby vypadal zdravě. `WorkflowLivenessStale` upozorní, když stáří překročí dvojnásobek očekávaného intervalu.
+
+## Sdílený stav kontroly a práh blokace (ADR-0353)
+
+`SanctionsCheckStatus` je typealias `ScreeningMatchStatus` z `openbank-libs-fincrime`, typu, který platební kanály čtou z drátu. `isHighRisk` čte sdílený práh `ScreeningPolicy.POTENTIAL_HIT_BLOCK_THRESHOLD` (0,85), stejný, podle kterého kanály blokují. Ukládané hodnoty (`@Enumerated(STRING)`) ani zápis v API se nemění.
+
+## Průběžný monitoring (ADR-0376)
+
+Ve výchozím stavu vypnuto (`openbank.sanctions.monitoring.enabled=false`). Kontrola odpovídá za okamžik, kdy proběhla; průběžný monitoring pokrývá to, co se se seznamy stane potom.
+
+- **Registr.** Služba zaregistruje subjekt, který přijala (`sanctions_monitored_subjects`), s atributy, které čte profil `CUSTOMER`, pod stejnou referencí, jakou posílá jako `subjectId` při kontrole. Vlastníkem registrace je volající služba, přečtená z jejího service-account tokenu (`MonitoringCallerIdentity`), nikdy z požadavku: služba dosáhne jen na své vlastní subjekty.
+- **Delta.** Žurnál změn, který už zaznamenává každou potvrzenou změnu položky seznamu, plní také `sanctions_monitoring_pending` (trigger; dokud je registr prázdný, nic nezapisuje). `SanctionsMonitoringService.runDelta` vezme omezenou dávku změněných položek a každou porovná s registrem stejnou funkcí `word_similarity(jméno subjektu, text položky)` a stejným prahem profilu `CUSTOMER` jako živá kontrola. Je to kontrola obráceně: jedna položka, všechny subjekty. Tento směr pg_trgm přímo indexovat neumí, proto je každé jméno pro hledání uloženo také jako řádek `sanctions_monitored_subject_names` ve velikostní třídě podle počtu trigramů a delta každou třídu prohledá přes její částečný trigramový index výrazem `search_name % položka` s prahem odvozeným pro tuto třídu (`MonitoringNameIndex`). Index kandidáty jen zužuje; rozhoduje přesné skóre, takže výsledek je stejný jako při úplném průchodu.
+- **Sweep.** `runSweep` znovu vyhodnotí omezenou dávku celých subjektů přes `SanctionsService.uncoveredMatches`, tedy funkci, na které stojí samotný `screen`. Nejdřív subjekty, které ještě vyhodnoceny nebyly, potom ty nejdéle nevyhodnocené; každý subjekt je znovu na řadě po `sweep.interval` (výchozí hodnota 30 dní). Je to pojistka pro zmeškanou deltu a jediná cesta, která vidí referenční data jurisdikcí.
+- **Záložní cesta.** Fronta delší než `delta.max-pending` nebo položka odpovídající více než `delta.max-candidates-per-entry` subjektům se neporovnává po položkách: fronta se zahodí a všechny subjekty se v jedné transakci označí k novému vyhodnocení.
+- **Nálezy.** Jeden řádek na subjekt, položku seznamu a verzi jmen položky, zapsaný v jedné transakci s outbox událostí `MONITORED_SUBJECT_MATCHED`. Verze nezávisí na pořadí jmen, takže zdroj, který jen přeskládá aliasy, nic nevyvolá. Analytikovo vyjasnění se uplatní stejným pravidlem jako v živé kontrole; shodu PEP ani shodu jurisdikce nekryje nikdy.
+
+Obě plánované metody jsou `suspend` funkce a heartbeaty `sanctions-monitoring-delta` a `sanctions-monitoring-sweep` registrují jen při zapnutém monitoringu; vypnutá úloha s registrovaným heartbeatem by vyvolala `WorkflowLivenessStale` v každém prostředí, které funkci nezapnulo.

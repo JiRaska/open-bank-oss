@@ -22,6 +22,7 @@ import com.openbank.party.application.port.`in`.PartyAmlProfileUseCase
 import com.openbank.party.application.port.`in`.PartyUseCase
 import com.openbank.party.application.port.out.PartyRepository
 import com.openbank.party.domain.model.AccountPurpose
+import com.openbank.party.domain.model.Address
 import com.openbank.party.domain.model.AmlProfileDeclaration
 import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.ExpectedMonthlyTurnover
@@ -190,7 +191,10 @@ class PartyPactFolderProviderVerificationTest {
         // (JWT with azp bound to the service-account username, ROLE_API) instead of the class-level
         // pact-verifier identity.
         if (context.interaction.providerStates.any { it.name == TAX_FACTS_STATE }) {
-            testIdentityAssociation.setTestIdentity(taxReportingIdentity())
+            testIdentityAssociation.setTestIdentity(verifiedApiIdentity("openbank-tax-reporting"))
+        } else if (context.interaction.providerStates.any { it.name == DOCUMENT_PARTY_STATE }) {
+            // Match Document's real OIDC client-credentials read for the unmasked legal address.
+            testIdentityAssociation.setTestIdentity(verifiedApiIdentity("openbank-services"))
         }
         context.verifyInteraction()
     }
@@ -434,6 +438,47 @@ class PartyPactFolderProviderVerificationTest {
         )
     }
 
+    /**
+     * The document-service render leg: RAMCOVA_SMLOUVA's `{{party.address}}` placeholder is filled
+     * from this response, so the pact requires a full postal address (line1, city, postalCode,
+     * countryCode). Seeded as a COMPANY — a legal-entity counterparty is the realistic contract
+     * render, and it keeps the row clear of the individuals the KYC-expiry and tax-profile states
+     * insert. A dedicated id: adding an address to [VOP_NAME_PARTY_ID] would leak a new field into
+     * vop's replayed response, which its matchers do not forbid but also did not ask for.
+     */
+    @State(DOCUMENT_PARTY_STATE)
+    fun partyExistsWithRegisteredAddress() = runOnVertxContext {
+        // Idempotent for the same reason as the states above: pact-jvm 4.7.3 invokes each @State
+        // setup callback twice per interaction, and this one inserts with a fixed id.
+        if (partyRepository.findById(DOCUMENT_ADDRESS_PARTY_ID) != null) return@runOnVertxContext
+        partyRepository.save(
+            Party(
+                id = DOCUMENT_ADDRESS_PARTY_ID,
+                partyType = PartyType.COMPANY,
+                status = PartyStatus.ACTIVE,
+                legalName = "Pact Verify Address Company a.s.",
+                tradingName = null,
+                dateOfBirth = null,
+                nationality = null,
+                taxId = null,
+                registrationNumber = null,
+                email = "pact-verify-address@example.com",
+                phone = null,
+                address = Address(
+                    line1 = "Pact Avenue 12",
+                    line2 = null,
+                    city = "Prague",
+                    postalCode = "110 00",
+                    countryCode = "CZ",
+                ),
+                kycStatus = KycStatus.APPROVED,
+                createdAt = Instant.now(),
+                updatedAt = Instant.now(),
+                amlStatus = AmlStatus.NOT_SCREENED,
+            ),
+        )
+    }
+
     @State("an active human mandate exists for an active company")
     fun activeHumanMandateExistsForActiveCompany() {
         partyExistsWithLegalAndTradingName()
@@ -479,6 +524,9 @@ class PartyPactFolderProviderVerificationTest {
 
         /** Must equal `PartyNameLookupPactConsumerTest.PACT_PARTY_ID` (openbank-vop-service). */
         private val VOP_NAME_PARTY_ID = UUID.fromString("b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9")
+
+        /** Must equal `DocumentPartyPactConsumerTest.PACT_PARTY_ID` (openbank-document-service). */
+        private val DOCUMENT_ADDRESS_PARTY_ID = UUID.fromString("e2e2e2e2-f3f3-4a4a-9b5b-c6c6c6c6c6c6")
         private val DELEGATION_ACTOR_ID = UUID.fromString("d1d1d1d1-e2e2-4f4f-8a8a-b3b3b3b3b3b3")
         private val KYB_MANDATE_PRINCIPAL_ID = UUID.fromString("c1c1c1c1-d2d2-4e4e-8f8f-a1a1a1a1a1a1")
         private val KYB_MANDATE_AGENT_ID = UUID.fromString("d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1")
@@ -490,6 +538,7 @@ class PartyPactFolderProviderVerificationTest {
         private const val NEGATIVE_AUTH_STATE = "no valid caller identity is presented"
 
         /** Must match TaxReportingPartyPactConsumerTest.STATE (ADR-0340 B1, the TIN boundary). */
+        private const val DOCUMENT_PARTY_STATE = "a party exists with a registered address"
         private const val TAX_FACTS_STATE = "a reportable party has declared a tax-residency profile with a TIN"
 
         /** Must match TaxReportingPartyPactConsumerTest.PARTY_ID. */
@@ -652,13 +701,13 @@ class PartyPactFolderProviderVerificationTest {
      * The replay identity for the TIN-boundary interaction: the verified service-account JWT the
      * in-code guard admits (#12448 — azp bound to the service-account username, subject present).
      */
-    private fun taxReportingIdentity(): QuarkusSecurityIdentity {
-        val name = "service-account-openbank-tax-reporting"
+    private fun verifiedApiIdentity(clientId: String): QuarkusSecurityIdentity {
+        val name = "service-account-$clientId"
         val jwt = object : JsonWebToken {
             private val claims = mapOf(
-                "azp" to "openbank-tax-reporting",
+                "azp" to clientId,
                 "preferred_username" to name,
-                "sub" to "tax-reporting-sa-subject",
+                "sub" to "pact-$clientId-subject",
             )
 
             override fun getName(): String = name

@@ -15,6 +15,6 @@
  *
  * Kept in its own module with no OpenTelemetry SDK imports so a Node-only route
  * (`api/test-intelligence/route.ts`) can read the value without pulling in
- * `@opentelemetry/sdk-trace-web`.
+ * `@opentelemetry/sdk-trace`.
  */
 export const RUM_SERVICE_NAME = 'openbank-admin-ui-browser'

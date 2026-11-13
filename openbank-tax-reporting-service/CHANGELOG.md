@@ -1,5 +1,90 @@
 # Changelog
 
+## [0.54.1](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.54.0...tax-reporting-service-v0.54.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **tax-reporting:** exclude synthetic GSFT accounts before balance reads ([#15700](https://github.com/JiRaska/open-bank-oss/issues/15700)) ([68ff8dc](https://github.com/JiRaska/open-bank-oss/commit/68ff8dc10c18976da254f2c7ccf755965217dc6e))
+
+## [0.54.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.53.0...tax-reporting-service-v0.54.0) (2026-11-12)
+
+
+### Features
+
+* **account:** serve the GSFT deposit roster as of a Czech date ([#15652](https://github.com/JiRaska/open-bank-oss/issues/15652)) ([c68575d](https://github.com/JiRaska/open-bank-oss/commit/c68575daf7fe2e346e97951c22e2ac4fdbc04340))
+
+## [0.53.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.52.0...tax-reporting-service-v0.53.0) (2026-11-11)
+
+
+### Features
+
+* **tax-reporting:** file the GSFT depositor batch on the statutory-return lifecycle ([#15563](https://github.com/JiRaska/open-bank-oss/issues/15563)) ([45a7c95](https://github.com/JiRaska/open-bank-oss/commit/45a7c951a22d943d69c5265a05038d42431617f2))
+
+## [0.52.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.51.0...tax-reporting-service-v0.52.0) (2026-11-11)
+
+
+### Features
+
+* **tax-reporting:** source the GSFT depositor snapshot from admitted read models ([#15524](https://github.com/JiRaska/open-bank-oss/issues/15524)) ([850e9a8](https://github.com/JiRaska/open-bank-oss/commit/850e9a8e3b52ec79ac95cdc2599d41ff4328509d))
+
+## [0.51.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.50.0...tax-reporting-service-v0.51.0) (2026-11-11)
+
+
+### Features
+
+* **tax-reporting:** package the GSFT batch as one ZIP encrypted with PGP ([#15546](https://github.com/JiRaska/open-bank-oss/issues/15546)) ([27e19a1](https://github.com/JiRaska/open-bank-oss/commit/27e19a170bad72e55c2684d2734b6478d8b1d666))
+
+## [0.50.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.49.0...tax-reporting-service-v0.50.0) (2026-11-10)
+
+
+### Features
+
+* **tax-reporting:** render the GSFT DII file for special-regime accounts ([#15518](https://github.com/JiRaska/open-bank-oss/issues/15518)) ([5a99a15](https://github.com/JiRaska/open-bank-oss/commit/5a99a15c6f382377e2dced97b9ad81d59e198cd4))
+
+## [0.49.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.48.0...tax-reporting-service-v0.49.0) (2026-11-10)
+
+
+### Features
+
+* **tax-reporting:** CEU daily overview filing on the statutory lifecycle ([#15308](https://github.com/JiRaska/open-bank-oss/issues/15308)) ([0829d98](https://github.com/JiRaska/open-bank-oss/commit/0829d98e12e6de53a5e1ca51d653e045875542a4))
+
+## [0.48.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.3...tax-reporting-service-v0.48.0) (2026-11-10)
+
+
+### Features
+
+* **tax-reporting:** CEU register projection and ceu-daily return spec ([#15299](https://github.com/JiRaska/open-bank-oss/issues/15299)) ([26ed627](https://github.com/JiRaska/open-bank-oss/commit/26ed627882f322fd0bf1e67c9f397d3dfda5dc33))
+* **tax-reporting:** compute GSFT insured claims per depositor for a relevant day ([#15362](https://github.com/JiRaska/open-bank-oss/issues/15362)) ([ff22e43](https://github.com/JiRaska/open-bank-oss/commit/ff22e435c805f6e323421fc1ef52267f2968ca75))
+
+## [0.47.3](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.2...tax-reporting-service-v0.47.3) (2026-11-09)
+
+
+### Bug Fixes
+
+* **tax-reporting:** bind the OPA policy decision point so @Authorize routes answer ([#15344](https://github.com/JiRaska/open-bank-oss/issues/15344)) ([c419dd1](https://github.com/JiRaska/open-bank-oss/commit/c419dd1a98dcc72d5509d227379df410bf17d824))
+
+## [0.47.2](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.1...tax-reporting-service-v0.47.2) (2026-11-09)
+
+
+### Bug Fixes
+
+* **pension:** migrate retained fund clients to pension-fund v2 ([#15300](https://github.com/JiRaska/open-bank-oss/issues/15300)) ([db1dfdc](https://github.com/JiRaska/open-bank-oss/commit/db1dfdc1ba8cb1c5c5a08845eb3702c6f59c198d))
+
+## [0.47.1](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.0...tax-reporting-service-v0.47.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **tax-reporting:** report an unconfigured deadline check apart from a dead scheduler ([#14822](https://github.com/JiRaska/open-bank-oss/issues/14822)) ([681689f](https://github.com/JiRaska/open-bank-oss/commit/681689f20b0cb51a2f6041e6e5e0852b242e9954))
+
+## [0.47.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.46.0...tax-reporting-service-v0.47.0) (2026-10-28)
+
+
+### Features
+
+* **treasury:** custodian portfolio statements and the period-end portfolio for tax reporting ([#13992](https://github.com/JiRaska/open-bank-oss/issues/13992)) ([c82147c](https://github.com/JiRaska/open-bank-oss/commit/c82147c20901a6fe7c6f5d6639f0f8cb54e82c4e))
+
 ## [0.46.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.45.1...tax-reporting-service-v0.46.0) (2026-10-16)
 
 

@@ -24,7 +24,7 @@ Pure Kotlin, no Quarkus.
 
 - `model/SctInstPayment` — the aggregate (data class) and `SctInstStatus` enum (`PENDING, PROCESSING, SETTLED, REJECTED, TIMEOUT, RECALLED`).
 - `event/SctInstEvents` — sealed `SctInstEvent` hierarchy: `SctInstPaymentSubmitted`, `SctInstPaymentSettled`, `SctInstPaymentRejected`, `SctInstPaymentTimeout`, `SctInstPaymentRecalled`.
-- `screening/ScreeningPolicy` — the pure decision object. `decide(results)` returns `BLOCK > REVIEW > CLEAR`:
+- `ScreeningPolicy` (openbank-libs-fincrime, ADR-0353) — the pure decision object. `decide(results)` returns `BLOCK > REVIEW > CLEAR`:
   - **BLOCK** — any `HIT`, any `ESCALATED`, or a `POTENTIAL_HIT` strictly above `POTENTIAL_HIT_BLOCK_THRESHOLD = 0.85`.
   - **REVIEW** — any sub-threshold `POTENTIAL_HIT` (false-positive candidate → human review).
   - **CLEAR** — everything else (`CLEAR` / `WHITELISTED`, including an empty result set).
@@ -34,7 +34,7 @@ Pure Kotlin, no Quarkus.
 Use-cases and ports.
 
 - **Inbound ports** (`port/in`): `SubmitSctInstPaymentUseCase`, `GetSctInstPaymentUseCase`, `RecallSctInstPaymentUseCase` + `SubmitSctInstCommand`.
-- **Outbound ports** (`port/out`): `SctInstPaymentRepository`, `SctInstOutboxRepository`, `SanctionsScreeningPort` (+ `ScreeningUnavailableException`), `AmlCasePort` (+ `OpenAmlCaseCommand`, `AmlCaseRiskLevel`).
+- **Outbound ports** (`port/out`): `SctInstPaymentRepository`, `SctInstOutboxRepository`, `SanctionsScreeningPort` (+ `ScreeningUnavailableException`), `AmlCasePort` (+ `OpenAmlCaseCommand`, `AmlCaseSeverity`).
 - `usecase/SctInstPaymentService` — orchestrates the screening gate (see flow below).
 
 ### Adapters (`infrastructure/`)
@@ -75,6 +75,8 @@ The #12181 source candidate writes each event-producing payment transition and i
 | New payment held at `PENDING` | No payment-domain event in the established schema | The payment row is durable, while opening the separate AML case remains best effort. No payment event delivery is claimed. |
 
 An idempotent repeat of an existing submission returns the existing payment without creating a second event. Historical transitions are not reconstructed by this migration; any missing audit fact needs separate approved reconciliation.
+
+A trusted synthetic service account may assert the marker through the shared ingress filter. The submission stores the filter's decision on the payment. Each event-producing transition copies that persisted marker to its outbox row and then to the Kafka header. Payment responses and Kafka payloads keep their existing schemas. Legacy payments keep unknown provenance in PostgreSQL and remain unmarked when an event is sent.
 
 ## Resilience & rate limiting
 

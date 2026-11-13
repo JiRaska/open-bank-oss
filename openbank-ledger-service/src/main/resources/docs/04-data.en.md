@@ -13,7 +13,20 @@ Dedicated PostgreSQL database **`openbank_ledger`** (reactive PG client for the 
 | `journal_lines` | debit/credit legs | `gl_account_id`, `side` (D/C), `amount` NUMERIC(20,6) (>0), `currency_code`, `fx_rate` NUMERIC(20,10), `base_amount`, `base_currency`, `sequence`, `sub_account_id` (nullable, deposit-control only) |
 | `ledger_outbox` | transactional outbox | `event_id` (unique), `aggregate_id`, `event_type`, `payload`, `status`, `attempt_count`, `sent_at`, `last_error` |
 | `ledger_idempotency` | post-journal dedup | `idempotency_key` (PK), `journal_id`, `journal_entry_date` |
+| `ledger_repair_audit` | append-only log of declared repairs to posted journal rows (ADR-0372) | `reason`, `table_name`, `operation` (UPDATE/DELETE/TRUNCATE), `journal_id`, `entry_date`, `line_id`, `changed_columns`, `database_role`, `transaction_xid`, `recorded_at` |
 | `partition_lifecycle_audit` | immutable partition-action log | `parent_table`, `partition_name`, `action` (CREATE/DETACH/DROP/DEFAULT_NONEMPTY/NOOP), `reason`, `dry_run`, `executed_at` |
+
+### Storage-enforced journal invariants (ADR-0372, V44)
+
+The database enforces the two invariants the domain model already holds, for every writer on the connection, not only the service:
+
+- **Balance at commit.** Deferred constraint triggers refuse the COMMIT of a transaction that leaves a posted journal (status `POSTED` or `REVERSED`) with fewer than two lines, without both a debit and a credit line, or not netting to zero per `base_currency` (`side` D/C over `base_amount`). SQLSTATE `23514`. There is no override.
+- **Append-only once posted.** A posted journal row accepts exactly one update, `POSTED → REVERSED` with `version + 1` and no other column changed (the reversal marking). A line of a posted journal accepts neither UPDATE nor DELETE, and neither table accepts TRUNCATE. A line can be INSERTED only into a `PENDING` journal or a journal the same transaction wrote; a line for a journal that does not exist yet is refused. SQLSTATE `55000`. `PENDING` journals and their lines stay editable.
+- **Declared repair.** A reviewed data repair calls `SELECT ledger_declare_repair('reason')` in the same transaction as the rewrite. The declaration is bound to that transaction (a session-level setting opens nothing) and every rewritten row is logged in `ledger_repair_audit`, which itself refuses UPDATE, DELETE and TRUNCATE. A repair still cannot commit an unbalanced journal.
+
+Consequences for anyone writing these tables directly (migrations, fixtures, operator sessions): insert the journal row first and all of its lines in **one transaction**, because statement-by-statement autocommit fails; do not rely on `INSERT ... ON CONFLICT DO NOTHING` to replay lines (the guard fires before the conflict is resolved), key an idempotent seed on the journal row; and correct a posted journal with a reversal, not an update.
+
+Limits: this guards against mistakes and unreviewed code. A superuser or the table owner can disable or drop a trigger; partition `DETACH`/`DROP` and a `TRUNCATE` of a single partition do not fire it; the runtime role can itself declare a repair (logged, not independently approved). The cost is one journal lookup per journal and one deferred check per written row at commit: linear in journals, quadratic in the lines of one journal, which is why a posted journal may hold at most `ledger_max_journal_lines()` lines (500) unless a repair is declared. The posting API does not state that cap yet; a wider posting is refused at COMMIT.
 
 ### Partitioning
 
@@ -36,6 +49,7 @@ V1 seeds cash/deposit/interest/fee accounts (1000, 1001, 2000, 2001, 2002, 3000,
 | `V6__fx_revaluation_counter_value_accounts` | CZK counter-value accounts 1995–1997 (ADR-0046) | delete seeded rows |
 | `V7__add_sub_account_id_to_journal_lines` | nullable `sub_account_id` + partial index (ADR-0039 Phase B) | documented in-file: drop index + column (backward-compatible) |
 | `V8__journal_partition_lifecycle` | pre-create 2027/2028 partitions, `partition_lifecycle_audit` table | drop partitions/table |
+| `V44__storage_enforced_journal_invariants` | balance-at-commit constraint triggers, append-only guards on `journal_entries`/`journal_lines`, `ledger_declare_repair()`, `ledger_repair_audit` (ADR-0372); no existing row rewritten, already-unbalanced journals reported as a warning | drop the triggers and functions listed in the file; keep `ledger_repair_audit` |
 | `V34__per_currency_fee_income_accounts` | fee income 4004 EUR / 4005 USD / 4006 GBP + `FEE_INCOME_ACCOUNT` map rows; aborts if fee-income and deposit-control currencies differ (#13226) | delete the map rows and accounts, only before any journal line references them |
 
 **Never edit a migration after it is applied to a live DB** — Flyway checksum mismatch crashes startup (use `QUARKUS_FLYWAY_REPAIR_AT_START=true` as a temporary remedy, then remove).
@@ -69,3 +83,9 @@ Re-identification (joining `sub_account_id`/`transaction_id` back to a customer)
 - Replaying an event older than the window comes from the Kafka topic or audit-service, not from this table.
 - Signals: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total`, and workflow liveness `outbox-sent-retention`.
 - Opt-out: `openbank.outbox.retention.enabled=false` (logs a WARN at boot). Don't lower `sent-days` below what any reader of SENT rows needs.
+
+## Raw history read-cache lifecycle
+
+V36 adds optional raw origin columns and immutable snapshot manifests, records and provenance. One repeatable-read transaction copies facts from one SQL/MVCC view; source sequence maxima are not commit watermarks. Provenance includes every opening-balance contributor. Source-row or source-line erasure and origin-evidence changes invalidate derived caches transactionally. Every snapshot read rejects missing attached sources; the existing partition-maintenance tick physically purges those unavailable caches after lifecycle actions and on later ticks. A source-free manifest is returned inline and never stored. No new independent TTL, source deletion, legal-hold release or financial retention duration is introduced. Cache retention follows availability of all its original sources; snapshots are read-caches, not new statutory close evidence.
+
+V37 adds the atomic history-capture receipt after V36 creates its referenced snapshots. V35 remains the existing treasury-instrument migration, unchanged. These additions coexist with the preceding application, which does not use the snapshot endpoint or receipt tables. Roll back the application and disable the new endpoint first; preserve captured data and receipts pending retention review before any separately approved destructive schema rollback. No Flyway repair or checksum rewrite is part of this rollout.

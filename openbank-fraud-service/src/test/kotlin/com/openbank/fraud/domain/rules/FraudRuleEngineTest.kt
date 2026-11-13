@@ -7,6 +7,7 @@ package com.openbank.fraud.domain.rules
 import com.openbank.fraud.domain.model.FraudVerdict
 import com.openbank.fraud.domain.model.ScoreRequest
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.util.UUID
@@ -66,8 +67,9 @@ class FraudRuleEngineTest {
 
     @Test
     fun `verdict mapping picks the most severe verdict across rule hits`() {
-        // Engine takes max severity ALLOW < CHALLENGE < REVIEW < DECLINE.
-        assertThat(FraudVerdict.entries).containsExactly(
+        // Engine takes max severity ALLOW < CHALLENGE < REVIEW < DECLINE. UNKNOWN is the shared
+        // type's consumer-only value (ADR-0353) and is never produced here.
+        assertThat(FraudVerdict.entries - FraudVerdict.UNKNOWN).containsExactly(
             FraudVerdict.ALLOW,
             FraudVerdict.CHALLENGE,
             FraudVerdict.REVIEW,
@@ -586,5 +588,11 @@ class FraudRuleEngineTest {
             .contains("large-single-transaction-unmapped-currency")
         assertThat(FraudRuleEngine.score(request(amount = BigDecimal("1.00"), currency = "CZK"), noEur).verdict)
             .isEqualTo(FraudVerdict.ALLOW)
+    }
+
+    @Test
+    fun `a rule hit cannot carry the consumer-only UNKNOWN verdict`() {
+        assertThatThrownBy { RuleHit(0, FraudVerdict.UNKNOWN, "x") }
+            .isInstanceOf(IllegalArgumentException::class.java)
     }
 }

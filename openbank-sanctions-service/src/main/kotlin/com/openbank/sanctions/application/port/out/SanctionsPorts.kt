@@ -6,6 +6,8 @@ package com.openbank.sanctions.application.port.out
 
 import com.openbank.sanctions.domain.model.SanctionsCheck
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
+import com.openbank.sanctions.domain.model.SanctionsJurisdiction
+import com.openbank.sanctions.domain.model.SanctionsListType
 import java.util.UUID
 
 /** Outbound persistence port for the sanctions-check aggregate. */
@@ -36,7 +38,16 @@ interface SanctionsRepository {
 
     suspend fun findByIdempotencyKey(key: String): SanctionsCheck?
 
+    /** Analyst-reviewed WHITELISTED checks for an explicit subject; freshness is checked by the use case. */
+    suspend fun findWhitelistsForSubject(subjectId: String): List<SanctionsCheck>
+
     suspend fun findByStatus(status: SanctionsCheckStatus): List<SanctionsCheck>
 
     suspend fun listChecks(): List<SanctionsCheck>
+}
+
+/** Read side of the versioned jurisdiction reference data (embargoed and high-risk countries). */
+interface SanctionsJurisdictionRepository {
+    /** Active rows for any of [countryCodes] on any of [listTypes]; empty input returns nothing. */
+    suspend fun findActive(countryCodes: Set<String>, listTypes: List<SanctionsListType>): List<SanctionsJurisdiction>
 }

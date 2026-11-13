@@ -164,7 +164,43 @@ b6_grants := {
 b6_all_card_actions := {
 	"card.create", "card.read", "card.list", "card.details.read", "card.activate", "card.block",
 	"card.cancel", "card.suspend", "card.resume", "card.limits.update", "card.controls.update",
-	"card.outbox.requeue",
+	"card.outbox.requeue", "card.authorization.decide", "card.category-limits.update",
+}
+
+test_card_processing_can_read_and_decide_only if {
+	every action in {"card.read", "card.authorization.decide"} {
+		d := rest.allow with input as {"principal": b6_sa("card-processing"), "action": action}
+			with data.rules as b6_rules
+		d.allow == true
+	}
+	every action in b6_all_card_actions - {"card.read", "card.authorization.decide"} {
+		rest.allow == false with input as {"principal": b6_sa("card-processing"), "action": action}
+			with data.rules as b6_rules
+	}
+}
+
+test_shared_machine_cannot_decide_or_update_card_controls if {
+	every roles in [["ROLE_API"], ["ROLE_OPERATOR"]] {
+		principal := object.union(b6_sa("services"), {"roles": roles})
+		every action in {"card.authorization.decide", "card.cancel", "card.limits.update", "card.controls.update", "card.category-limits.update"} {
+			rest.allow == false with input as {"principal": principal, "action": action} with data.rules as b6_rules
+		}
+	}
+}
+
+test_staff_and_edge_receive_only_their_control_actions if {
+	staff := {"type": "HUMAN", "id": "staff-operator", "service_account": false, "roles": ["ROLE_OPERATOR"]}
+	edge := object.union(b6_sa("edge"), {"roles": ["ROLE_OPERATOR"]})
+	every action in {"card.cancel", "card.limits.update", "card.controls.update"} {
+		staff_decision := rest.allow with input as {"principal": staff, "action": action} with data.rules as b6_rules
+		edge_decision := rest.allow with input as {"principal": edge, "action": action} with data.rules as b6_rules
+		staff_decision.allow == true
+		edge_decision.allow == true
+	}
+	staff_category := rest.allow with input as {"principal": staff, "action": "card.category-limits.update"}
+		with data.rules as b6_rules
+	staff_category.allow == true
+	rest.allow == false with input as {"principal": edge, "action": "card.category-limits.update"} with data.rules as b6_rules
 }
 
 test_b6_each_identity_may_perform_its_granted_read if {
@@ -274,5 +310,56 @@ test_pan_read_denied_when_verified_client_does_not_match_edge if {
 	] {
 		rest.allow == false with input as {"principal": principal, "action": "card.details.read"}
 			with data.rules as pan_rules
+	}
+}
+
+# Customer-facing masked card reads retain verified client binding.
+test_customer_edge_may_list_and_read_cards if {
+	every action in {"card.read", "card.list"} {
+		d := rest.allow with input as {"principal": b6_sa("edge"), "action": action}
+			with data.rules as b6_rules
+		d.allow == true
+	}
+}
+
+test_customer_edge_read_grants_do_not_allow_card_writes if {
+	every action in b6_all_card_actions - {"card.read", "card.list", "card.details.read"} {
+		rest.allow == false with input as {"principal": b6_sa("edge"), "action": action}
+			with data.rules as b6_rules
+	}
+}
+
+test_customer_edge_spoofed_name_cannot_list_or_read if {
+	every action in {"card.read", "card.list"} {
+		rest.allow == false with input as {
+			"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"], "service_account": true, "client_id": "openbank-unrelated"},
+			"action": action,
+		}
+			with data.rules as b6_rules
+	}
+}
+
+# --- card-read-staff-viewer: viewers see the list/detail, never the PAN, machines never ---
+
+test_viewer_lists_and_reads_cards if {
+	every a in ["card.list", "card.read"] {
+		"card-read-staff-viewer" in rest.allowed_reasons with input as {
+			"principal": {"type": "HUMAN", "id": "u-view", "service_account": false, "roles": ["ROLE_VIEWER"]},
+			"action": a,
+		}
+	}
+}
+
+test_viewer_still_cannot_read_pan if {
+	not "card-read-staff-viewer" in rest.allowed_reasons with input as {
+		"principal": {"type": "HUMAN", "id": "u-view", "service_account": false, "roles": ["ROLE_VIEWER"]},
+		"action": "card.details.read",
+	}
+}
+
+test_machine_viewer_not_granted_card_read if {
+	not "card-read-staff-viewer" in rest.allowed_reasons with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-x", "service_account": true, "roles": ["ROLE_VIEWER"]},
+		"action": "card.list",
 	}
 }

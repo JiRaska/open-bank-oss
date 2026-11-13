@@ -25,6 +25,14 @@ data class ScreenEntityCommand(
      * turned exactly that into an NPE-driven 500.
      */
     val listTypes: List<String?>? = null,
+    /** Explicit stable subject identity used to bind analyst clearance across fresh attempts. */
+    val subjectId: String? = null,
+    /** Explicit screening purpose (`PAYMENT` or `CUSTOMER`); null keeps the legacy list default. */
+    val profile: String? = null,
+    /** ISO 3166-1 alpha-2 country of the counterparty; a listed jurisdiction matches without a name match. */
+    val country: String? = null,
+    /** BIC of the counterparty's bank; its country code is checked against the jurisdiction data. */
+    val bankIdentifier: String? = null,
 )
 
 data class ReviewCommand(

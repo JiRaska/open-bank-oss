@@ -101,7 +101,7 @@ class DomesticPaymentTransactionServicePactConsumerTest {
 
     /**
      * Missing credentials are an actual refusal contract. The shared provider state routes this
-     * interaction to TransactionNegativeAuthPactVerificationTest, which has no @TestSecurity;
+     * interaction to TransactionNegativeAuthProviderVerificationTest, which has no @TestSecurity;
      * the authenticated positive verifier excludes that state and cannot stand in for this proof.
      */
     @Pact(consumer = "openbank-domestic-payment", provider = "openbank-transaction-service")

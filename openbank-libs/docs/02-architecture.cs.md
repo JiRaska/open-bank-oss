@@ -7,6 +7,7 @@ flowchart LR
   Service[Quarkus služba] --> Runtime[openbank-libs-runtime]
   Runtime --> Domain[openbank-libs-domain]
   Finance[openbank-libs-finance] --> Domain
+  Fincrime[openbank-libs-fincrime]
   Legacy[openbank-libs kompatibilitní zastřešení] --> Runtime
   Legacy --> Domain
   Runtime --> DocsResource[DocsResource /q/openbank/docs]
@@ -15,6 +16,8 @@ flowchart LR
 ```
 
 `openbank-libs-domain` obsahuje sdílené doménové primitivy a porty. Jeho build definuje hranici bez frameworku; modul nesmí importovat Quarkus ani CDI. `openbank-libs-runtime` obsahuje frameworkové adaptéry, HTTP resource a CDI zapojení. Konzumentům exportuje doménové typy. Kořenový `openbank-libs` zůstává kompatibilitním zastřešením starších závislostí; zdrojové kódy knihovny již nevlastní.
+
+Doménový runtime ponechává pouze Jackson anotace existujících identifikátorů; JSON engine a Kotlin reflection vlastní explicitně `openbank-libs-runtime`. Tvar identifikátorů na drátě se nemění. Testy používající serializaci nebo reflection deklarují tyto závislosti ve vlastním testovacím scope. Samostatný konzument domény, který tyto nástroje používá, je musí deklarovat sám; konzumenti runtime a kompatibilitního zastřešení je nadále získávají z runtime. Úloha `:openbank-libs-domain:verifyDomainRuntimeDependencies`, zapojená do `check`, ověřuje skutečně vyřešené tranzitivní artefakty a odmítá návrat enginu či reflection do doménového runtime.
 
 `openbank-libs-finance` používá z doménového jádra `BusinessCalendar` a `BusinessDayConvention` pro finanční harmonogramy. Vlastní enum pro to nemá; pravidla harmonogramu berou přímo enum z jádra. `UNADJUSTED` ponechá datum beze změny i o svátku; pořadí a chování čtyř dosavadních konvencí zůstává stejné. Zavírací dny kalendáře a případné mimořádné svátky vstupují do otisku harmonogramu, takže jejich změna může změnit jeho verzi.
 
@@ -25,6 +28,8 @@ Samotný `openbank-libs` nemá běžící endpoint. Jeho kořenová složka `doc
 ## Build a kompatibilita
 
 Kořenový build používá Gradle subprojekty. Služby zpravidla deklarují `implementation(project(":openbank-libs-runtime"))`, starší konzumenti mohou používat zastřešující modul. Autoritativní verze závislostí jsou v `openbank-libs/gradle/libs.versions.toml`; Gradle konvence v `build-logic/src/main/kotlin/`. Release verze každé služby je v jejím `version.txt`.
+
+Sdílené knihovny a služby používají Quarkus **3.40.1.1 LTS** ze stejného katalogu. Frameworkové závislosti runtime, testovacích a Temporal adaptérů zachovávají dosavadní rozsah závislostí; doménové jádro zůstává bez frameworku. Sdílená Micrometer API používají platformní verzi **1.17.1**. Bezpečnostní přepisy verzí musí zachovat alespoň opravené verze platformy. [Postup upgradu a rollbacku](../../docs/runbooks/quarkus-lts-upgrade.md) popisuje kontroly kompatibility a podmínky nasazení.
 
 ## Čtyři oči: shrnutí schvalované operace
 
@@ -40,6 +45,8 @@ Kořenový build používá Gradle subprojekty. Služby zpravidla deklarují `im
 
 `openbank-libs-domain` mapuje `openbank.fx.cnb-policy-rate.published` na `fx-service` v `TopicProducers`. Tím zaznamenává producenta pro sdílenou analytiku a kontroly správy; knihovna událost sama nepublikuje ani neodebírá. Producentem je cesta příjmu sazeb ve FX, zatímco risk engine a audit-service odebírají fakta a auditní stopu. Při přejmenování topicu nebo změně vlastníka aktualizujte i mapování.
 
+`TopicProducers` mapuje sdílený topik `openbank.oversight-triggers` na `multiple-producers`, protože do něj aml-service i sanctions-service publikují nezávislé požadavky na kontrolu. Audit-service odebírá stejný topik, aby se tyto požadavky staly součástí auditní stopy. Sdílené mapování eviduje vlastnictví; samo události nepublikuje ani neodebírá.
+
 ## Producenti zapínaní při buildu
 
 `RedisApprovalStoreProducer` (`ApprovalStore` pro čtyři oči, zapíná `openbank.approval.store: redis`) a `OpaPolicyDecisionPointProducer` (PDP pro OPA sidecar, zapíná `openbank.authz.opa-pdp-producer.enabled: true`) jsou podmíněné `@IfBuildProperty` a bez vlastnosti vypnuté. Ani jeden není `@DefaultBean`: služba, která je zapne a zároveň si ponechá vlastního producenta, neprojde `quarkusBuild` kvůli nejednoznačné závislosti. Na přítomnosti beanu záleží, protože `AuthorizeInterceptor` zapíná čtyři oči, jakmile `ApprovalStore` existuje.
@@ -47,3 +54,16 @@ Kořenový build používá Gradle subprojekty. Služby zpravidla deklarují `im
 ## Trace kontext outboxu
 
 `PanacheOutboxEntityTraced` (libs-runtime) rozšiřuje entitu outboxu v2 o nullable sloupec `trace_context` s W3C `traceparent`, který při zápisu řádku zachytí `TraceparentCapture`. `OutboxEntry.traceparent` ho přenese do dispatcheru a `OutboxKafkaHeaders` ho vydá jako Kafka hlavičku `traceparent`. Služba ho přebírá dobrovolně spolu s migrací `ALTER TABLE ... ADD COLUMN trace_context TEXT`; základy v1 a v2 se nemění, protože namapovaný sloupec, který tabulka nemá, shodí každý SELECT.
+
+## Slovník kanálu vlastních převodů banky (ADR-0344, fáze 1b)
+
+`openbank-libs-iso20022` drží slovník kanálu vlastních převodů banky, aby jej swift-service i treasury pojmenovávaly stejně:
+- `InstitutionTransferRail` je CERTIS, TARGET2 nebo SWIFT, každý se svou měnou a kódem clearingového systému pro pacs.009.
+- `InstitutionTransferStatus` je životní cyklus převodu. Publikují se jen ACCEPTED, SENT, SETTLED a REJECTED (kontrakt 9.2).
+- Builder a reader pro pacs.009 validují proti přiloženému XSD `pacs.009.001.08`.
+
+Sdílená tabulka `TopicProducers` v `openbank-libs-domain` přiřazuje topik `openbank.swift.institution-transfers` službě swift-service. Podle ní audit-service označuje záznamy, které z tohoto topiku čte.
+
+`TopicProducers` přiřazuje `openbank.accounts.account.status-changed` a `openbank.accounts.savings-withdrawal.approved` službě account-service (#9073); audit-service a analytics-sink je odebírají dřív, než producent přepne.
+
+`TopicProducers` také přiřazuje topik `openbank.tpp.registry.event` službě tpp-registry-service, takže audit-service může označit změny registru TPP (registrace, zařazení na blacklist), které zapisuje do auditní stopy.

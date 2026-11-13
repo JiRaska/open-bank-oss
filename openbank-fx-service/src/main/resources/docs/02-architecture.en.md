@@ -62,12 +62,12 @@ com.openbank.fx/
 ├── domain/                    ◄── core — no framework dependencies
 │   ├── model/                 FxRate, FxConversion, RateType, RateSource, FxConversionStatus
 │   ├── cnb/                   CnbFixing, CnbFixingRate, CnbFixingParser (pure parser)
-│   ├── screening/             ScreeningPolicy (pure decide()), ScreeningResult/Decision
+│   ├── screening/             (moved to openbank-libs-fincrime, ADR-0353)
 │   └── event/                 FxRatePublished, FxConversionExecuted
 │
 ├── application/               ◄── use-case orchestration
 │   ├── port/in/               FxUseCase, CnbRateIngestionUseCase + commands/queries
-│   ├── port/out/              FxRateRepository, FxConversionRepository, FxEventPublisher,
+│   ├── port/out/              FxRateRepository, FxConversionRepository, FraudScoringPort,
 │   │                          SanctionsScreeningPort, AmlCasePort, FxOutbox*, CnbRateProvider
 │   └── usecase/               FxService, CnbRateIngestionService
 │
@@ -90,15 +90,17 @@ The conversion decision is the heart of the service. `FxService.convert` resolve
 sequenceDiagram
   participant C as Caller
   participant FX as FxService
+  participant P as party-service
   participant S as sanctions-service
   participant A as aml-service
   participant DB as PostgreSQL
 
-  C->>FX: POST /convert (partyName, Idempotency-Key)
+  C->>FX: POST /convert (partyId, Idempotency-Key)
   FX->>DB: findByIdempotencyKey → return if present
   FX->>FX: resolve SPOT rate, assert valid, compute amounts + fee
-  FX->>S: screen(partyName, DEBTOR)
-  alt screening unavailable
+  FX->>P: GET party by id (held names and party type)
+  FX->>S: screen(held names, DEBTOR)
+  alt party name or screening unavailable
     FX->>DB: save PENDING
     FX-->>A: open AML case (MEDIUM, SCREENING_UNAVAILABLE)
   else CLEAR
@@ -136,7 +138,7 @@ sequenceDiagram
 
 The dispatcher wraps the Kafka publish with MicroProfile Fault Tolerance: `@Bulkhead(1)`, `@CircuitBreaker(volume=10, ratio=0.5, delay=5s)`, `@Retry(max=2)`, `@Timeout(3000ms)`. A publish failure is recorded on the row (`status`, `last_error`, `attempt_count`) and retried on the next poll — at-least-once delivery, idempotent consumers expected.
 
-> **Note (current code):** `KafkaFxEventPublisher` (the `FxEventPublisher` domain-event adapter invoked directly by `settle`) is presently a no-op stub; the *outbox* dispatcher (`KafkaFxOutboxEventPublisher` on channel `fx-events-out`) is the live Kafka path. Wiring the two is a known follow-up.
+> **Note (current code):** `settle()` writes the conversion event to the transactional outbox (`FxOutboxRepository`) in the same transaction as the state change; `FxOutboxDispatcher` publishes it through `KafkaFxOutboxEventPublisher` (shared `OutboxEventPublisher` port) on channel `fx-events-out`. The former direct domain-event publisher (`KafkaFxEventPublisher`, a no-op stub) was removed (#1033).
 
 ## ČNB ingestion (ADR-0046)
 

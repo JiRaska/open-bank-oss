@@ -18,6 +18,7 @@ import java.net.InetSocketAddress
 import java.net.URI
 import java.time.Duration
 import java.util.Base64
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Stub Transit: `sign` returns `vault:v1:<base64(input)>`, `verify` compares; rejects a wrong token with 403. */
@@ -86,36 +87,36 @@ class OpenBaoTransitIrSignerTest {
         OpenBaoTransitIrSigner(transport(timeout), "product-ir", tokens)
 
     @Test
-    fun `sign produces a transit signature over the hash bytes and verify accepts it`() {
+    fun `sign produces a transit signature over the identity envelope and verify accepts it`() {
         val s = signer()
-        val sig = s.sign(HASH)
+        val sig = s.sign(ID)
         assertThat(sig.algorithm).isEqualTo(OpenBaoTransitIrSigner.ALGORITHM)
         assertThat(sig.keyId).isEqualTo("product-ir")
-        assertThat(sig.signature).isEqualTo("vault:v1:" + Base64.getEncoder().encodeToString(HASH.toByteArray()))
+        assertThat(sig.signature).isEqualTo("vault:v1:" + Base64.getEncoder().encodeToString(ID.signingInput()))
         assertThat(requests.single()).contains("/v1/transit/sign/product-ir", "\"hash_algorithm\":\"sha2-256\"")
-        assertThat(s.verify(HASH, sig)).isTrue()
+        assertThat(s.verify(ID, sig)).isTrue()
     }
 
     @Test
     fun `verify is false for another hash, key id or algorithm, and never calls Transit for a malformed signature`() {
         val s = signer()
-        val sig = s.sign(HASH)
-        assertThat(s.verify("b".repeat(64), sig)).isFalse()
+        val sig = s.sign(ID)
+        assertThat(s.verify(ID.copy(revisionHash = "b".repeat(64)), sig)).isFalse()
         requests.clear()
-        assertThat(s.verify(HASH, sig.copy(keyId = "other"))).isFalse()
-        assertThat(s.verify(HASH, sig.copy(algorithm = HmacIrSigner.ALGORITHM))).isFalse()
-        assertThat(s.verify(HASH, sig.copy(signature = "garbage"))).isFalse()
+        assertThat(s.verify(ID, sig.copy(keyId = "other"))).isFalse()
+        assertThat(s.verify(ID, sig.copy(algorithm = HmacIrSigner.ALGORITHM))).isFalse()
+        assertThat(s.verify(ID, sig.copy(signature = "garbage"))).isFalse()
         assertThat(requests).isEmpty()
     }
 
     @Test
     fun `a 403 invalidates the token and retries once, a second 403 fails closed`() {
         val tokens = Tokens("stale", GOOD_TOKEN)
-        assertThat(signer(tokens).sign(HASH).signature).startsWith("vault:v1:")
+        assertThat(signer(tokens).sign(ID).signature).startsWith("vault:v1:")
         assertThat(tokens.invalidated).containsExactly("stale")
         assertThat(forbidden.get()).isEqualTo(1)
 
-        assertThatThrownBy { signer(Tokens("bad", "worse", "worst")).sign(HASH) }
+        assertThatThrownBy { signer(Tokens("bad", "worse", "worst")).sign(ID) }
             .isInstanceOf(IrSigningException::class.java)
             .hasMessageContaining("HTTP 403")
     }
@@ -123,27 +124,32 @@ class OpenBaoTransitIrSignerTest {
     @Test
     fun `a 5xx, a timeout and a verdict-less response are unavailability, not a false verdict`() {
         val s = signer()
-        val sig = s.sign(HASH)
+        val sig = s.sign(ID)
         status = 500
         assertThatThrownBy {
-            s.verify(HASH, sig)
+            s.verify(ID, sig)
         }.isInstanceOf(IrSigningException::class.java).hasMessageContaining("HTTP 500")
-        assertThatThrownBy { s.sign(HASH) }.isInstanceOf(IrSigningException::class.java)
+        assertThatThrownBy { s.sign(ID) }.isInstanceOf(IrSigningException::class.java)
         status = 200
         delayMs = 400
-        assertThatThrownBy { signer(timeout = Duration.ofMillis(50)).sign(HASH) }
+        assertThatThrownBy { signer(timeout = Duration.ofMillis(50)).sign(ID) }
             .isInstanceOf(IrSigningException::class.java)
             .hasMessageContaining("HttpTimeoutException")
     }
 
     @Test
-    fun `refuses a non-hash input before any network call`() {
-        assertThatThrownBy { signer().sign("hello") }.isInstanceOf(IrSigningException::class.java)
-        assertThat(requests).isEmpty()
+    fun `a signature for one revision does not verify for another revision of the same IR`() {
+        val s = signer()
+        val sig = s.sign(ID)
+        assertThat(s.verify(ID.copy(revisionId = UUID.randomUUID()), sig)).isFalse()
+        assertThat(s.verify(ID.copy(revisionNumber = 2), sig)).isFalse()
+        assertThat(s.verify(ID.copy(productCode = "SAV-OTHER"), sig)).isFalse()
     }
 
     companion object {
         private const val GOOD_TOKEN = "s.good"
         private const val HASH = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        private val ID =
+            RevisionIdentity("SAV-FIXED", UUID.fromString("00000000-0000-0000-0000-0000000000a1"), 1, 1, HASH)
     }
 }

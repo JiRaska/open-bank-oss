@@ -183,7 +183,7 @@ object NostroBreakBook {
                 side = BreakSide.LEDGER,
                 ourSide = l.side,
                 amount = l.amount,
-                bookingDate = l.entryDate,
+                bookingDate = l.reconciledDate,
                 reference = l.description,
                 statementUuid = statementUuid,
                 statementSequence = null,

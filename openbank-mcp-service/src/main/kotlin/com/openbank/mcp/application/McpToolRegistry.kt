@@ -59,7 +59,6 @@ class McpToolRegistry(
             description = "List the accounts the presented PSD2 consent grants access to.",
             inputSchema = obj(mapOf<String, Any>(), required = emptyList()),
             service = "openbank-account-service",
-            domain = "accounts",
         ),
         ToolDefinition(
             name = "get_balance",
@@ -69,7 +68,6 @@ class McpToolRegistry(
                 listOf("accountId"),
             ),
             service = "openbank-balance-service",
-            domain = "accounts",
         ),
         ToolDefinition(
             name = "list_transactions",
@@ -82,14 +80,12 @@ class McpToolRegistry(
                 listOf("accountId"),
             ),
             service = "openbank-transaction-service",
-            domain = "transactions",
         ),
         ToolDefinition(
             name = "list_consents",
             description = "List the PSD2 consents the acting agent holds.",
             inputSchema = obj(mapOf<String, Any>(), required = emptyList()),
             service = "openbank-consent-service",
-            domain = "consent",
         ),
         ToolDefinition(
             name = "get_statement",
@@ -115,7 +111,6 @@ class McpToolRegistry(
                 listOf("accountId"),
             ),
             service = "openbank-statement-service",
-            domain = "statements",
         ),
         ToolDefinition(
             name = "get_payment_confirmation",
@@ -135,7 +130,6 @@ class McpToolRegistry(
             // openbank-domestic-payment actually holds [paymentId] (see the port KDoc) — a single
             // string here would misrepresent the other rail rather than describe both accurately.
             service = null,
-            domain = "payments",
         ),
         ToolDefinition(
             name = "count_marketing_consents",
@@ -145,7 +139,6 @@ class McpToolRegistry(
                 "campaign-service under consent-gated delivery, not here.",
             inputSchema = obj(mapOf<String, Any>(), required = emptyList()),
             service = "openbank-consent-service",
-            domain = "consent",
         ),
         ToolDefinition(
             name = "propose_payment",
@@ -167,9 +160,19 @@ class McpToolRegistry(
                 listOf("fromAccountId", "toIban", "amount", "currency"),
             ),
             service = "openbank-mcp-service",
-            domain = "payments",
         ),
-    )
+    ).map { tool ->
+        tool.copy(
+            domain = when (val service = tool.service) {
+                null -> if (tool.name == "get_payment_confirmation") {
+                    BusinessDomainCatalog.forServices("openbank-sepa-payment", "openbank-domestic-payment")
+                } else {
+                    "Unclassified"
+                }
+                else -> BusinessDomainCatalog.forServices(service)
+            },
+        )
+    }
 
     /** Execute one tool. The caller (McpEndpoint) has already OPA-authorized [toolName]. */
     fun call(toolName: String, arguments: JsonNode, ctx: ConsentContext): ToolCallResult {

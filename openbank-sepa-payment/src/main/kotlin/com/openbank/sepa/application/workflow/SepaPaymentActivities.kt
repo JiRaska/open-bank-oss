@@ -4,8 +4,8 @@
 
 package com.openbank.sepa.application.workflow
 
+import com.openbank.libs.fincrime.ScreeningDecision
 import com.openbank.sepa.domain.model.SepaPaymentStatus
-import com.openbank.sepa.domain.screening.ScreeningDecision
 import io.temporal.activity.ActivityInterface
 import java.util.UUID
 

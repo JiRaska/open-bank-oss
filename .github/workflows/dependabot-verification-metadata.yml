@@ -1,22 +1,31 @@
-# Dependency-verification metadata refresh for Dependabot PRs.
+# Dependency-verification metadata refresh for Dependabot PRs: the UNPRIVILEGED half.
 #
 # gradle/verification-metadata.xml pins a SHA-256 checksum for every resolved
-# artifact (supply-chain integrity: a repository-level tamper or dependency-
-# confusion swap of an existing version no longer resolves). Dependabot bumps a
-# version but does NOT know how to regenerate the metadata — without this
-# workflow every Dependabot PR would fail verification and the weekly
-# auto-merge flow (dependabot-auto-merge.yml) would be dead on arrival.
+# artifact, and CI enforces it, so a Dependabot bump that resolves anything new is
+# red until the metadata is regenerated. Dependabot cannot do that itself.
 #
-# So: on a Dependabot PR that touches Gradle files, re-run
-# `--write-verification-metadata sha256` and push the metadata diff back to the
-# PR branch. Trust model: checksums are computed from what Maven Central/the
-# Gradle Plugin Portal actually serve at PR time, i.e. this pins
-# "what Dependabot proposed", the same artifact a human reviewer would inspect.
+# Why two workflows. This used to regenerate AND push in one pull_request job, keyed
+# on a METADATA_REFRESH_PAT secret. A Dependabot-triggered run only receives
+# Dependabot secrets, and that PAT existed only as an Actions secret, so every run
+# took the "secret absent" branch, printed a notice and exited green. The refresh
+# never ran, while the comment justifying the skip ("stale metadata only warns")
+# stopped being true when verification became enforced. Moving a write credential
+# into the Dependabot store would hand it to a job that runs the bump's own Gradle
+# plugins. So:
 #
-# Security: pull_request event only (no pull_request_target), actor-gated to
-# dependabot[bot], same-repo branches only — the same trust boundary as
-# dependabot-auto-merge.yml. contents:write is scoped to pushing the metadata
-# file to the PR's own head branch.
+#   this workflow  pull_request, no secrets, contents: read. Resolves the bumped graph,
+#                  writes the metadata, uploads the file as an artifact. Nothing here
+#                  can push.
+#   dependabot-verification-metadata-push.yml
+#                  workflow_run, runs from main with the GitHub App. Treats the
+#                  artifact as untrusted data: accepts it only if it is purely additive
+#                  against the PR head (check-verification-metadata-additive.py) and
+#                  commits it through the Git Data API onto exactly the head that was
+#                  resolved. It never checks out or runs PR code.
+#
+# Trust model is unchanged: checksums are what Maven Central / the Plugin Portal serve
+# at PR time, i.e. "what Dependabot proposed". That is not a defence against a poisoned
+# upstream release; human review of minors is (dependabot-auto-merge.yml).
 name: Dependabot verification metadata
 
 on:
@@ -36,79 +45,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  refresh-metadata:
-    name: Refresh verification metadata
-    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+  regenerate:
+    name: Regenerate verification metadata
+    # Both the triggering actor AND the PR author must be Dependabot: a human pushing to a
+    # dependabot/* branch changes github.actor, and a same-repo PR authored by anyone else
+    # is excluded by the author check.
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: write
+    timeout-minutes: 60
     steps:
-      # A push made with the default GITHUB_TOKEN does NOT re-trigger workflow runs
-      # (GitHub's recursion guard), so required checks would sit "expected" on the new head
-      # SHA and native auto-merge (dependabot-auto-merge.yml) would deadlock forever. To push
-      # a commit that DOES re-trigger checks we need a bot PAT / app token. If the
-      # METADATA_REFRESH_PAT secret is absent we SKIP the push (safe: verification is lenient,
-      # so stale metadata is a warning, not a merge blocker) rather than create the deadlock.
-      - name: Detect refresh token
-        id: tok
-        run: |
-          if [ -n "${{ secrets.METADATA_REFRESH_PAT }}" ]; then
-            echo "have=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::METADATA_REFRESH_PAT not set — skipping metadata refresh (lenient verification means stale metadata only warns; a GITHUB_TOKEN push would deadlock auto-merge)."
-            echo "have=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Checkout PR branch
-        if: steps.tok.outputs.have == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          token: ${{ secrets.METADATA_REFRESH_PAT }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
-      # No `cache: gradle`. That input produced `setup-java-Linux-x64-gradle`, a single 1181 MB
-      # entry — 12% of the repo's 10 GB Actions-cache ceiling — for a job that runs only on a
-      # Dependabot PR that also has METADATA_REFRESH_PAT set, i.e. rarely (#3299). The cache was
-      # over the ceiling, so GitHub was evicting least-recently-used entries continuously and
-      # silently; every eviction is some other job re-resolving from scratch.
-      #
-      # It is also the wrong job to warm. This step REGENERATES verification metadata by resolving
-      # the dependency graph and hashing what it finds, so what is already on disk is exactly what
-      # it must not take for granted. The cost is a slower resolve on a job nobody waits on.
-      - if: steps.tok.outputs.have == 'true'
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      # No `cache: gradle`: this step regenerates checksums from what it resolves, so a
+      # warmed cache is exactly what it must not take for granted, and the entry was 12%
+      # of the repo's Actions-cache ceiling (#3299).
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           java-version: "25"
           distribution: temurin
 
       - name: Regenerate verification metadata
-        if: steps.tok.outputs.have == 'true'
         run: |
           set -euo pipefail
-          # testClasses alone resolves only the TEST graph. The prod runtime classpath and
-          # its platform BOMs (quarkusProdRuntimeClasspathConfigurationPlatform) are never
-          # touched by it, so artifacts that exist only there were never hashed — measured
-          # as 38 missing for one service (#3028). quarkusDependenciesBuild resolves the
-          # Quarkus application model without running a full quarkusBuild. cyclonedxBom
-          # resolves each component's .pom, which auto-deploy's SBOM step then verifies.
+          # testClasses resolves the test graph, quarkusDependenciesBuild the prod runtime
+          # graph and its platform BOMs (#3028), cyclonedxBom each component's .pom.
+          # The default heap dies with `Java heap space` on this (#4907).
           ./gradlew --write-verification-metadata sha256 \
-            testClasses quarkusDependenciesBuild cyclonedxBom --no-daemon -q
-        env:
-          GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+            testClasses quarkusDependenciesBuild cyclonedxBom \
+            --no-daemon -q -Dorg.gradle.jvmargs=-Xmx8g
 
-      - name: Push metadata diff back to the PR branch
-        if: steps.tok.outputs.have == 'true'
-        env:
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      - name: Stage the regenerated file
+        id: stage
         run: |
           set -euo pipefail
-          if git diff --quiet gradle/verification-metadata.xml; then
-            echo "verification metadata unchanged — nothing to push."
+          mkdir -p "$RUNNER_TEMP/metadata"
+          if git diff --quiet -- gradle/verification-metadata.xml; then
+            echo "verification metadata unchanged; nothing to hand over"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add gradle/verification-metadata.xml
-          git commit -m "chore(deps): refresh dependency-verification metadata for this bump"
-          git push origin "HEAD:${HEAD_REF}"
+          cp gradle/verification-metadata.xml "$RUNNER_TEMP/metadata/verification-metadata.xml"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload for the privileged push
+        if: steps.stage.outputs.changed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verification-metadata
+          path: ${{ runner.temp }}/metadata/verification-metadata.xml
+          retention-days: 3
+          if-no-files-found: error

@@ -5,6 +5,7 @@
 package com.openbank.domestic.application.workflow
 
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
+import io.temporal.workflow.SignalMethod
 import io.temporal.workflow.WorkflowInterface
 import io.temporal.workflow.WorkflowMethod
 import java.util.UUID
@@ -13,4 +14,25 @@ import java.util.UUID
 interface DomesticPaymentWorkflow {
     @WorkflowMethod
     fun process(paymentId: UUID): DomesticPaymentStatus
+
+    /**
+     * #4403: release or reject a payment held by the fraud gate. With no signal before the hold
+     * timeout the payment is REJECTED; a hold never expires into a pass.
+     *
+     * Accepted only while the run is actually holding, and only for the case the rail itself opened:
+     * [caseIdempotencyKey] must equal [fraudReviewCaseKey] for this payment. A signal that arrives
+     * before the hold, after it ended, or names another case is ignored and counted, so a decision
+     * cannot be pre-armed and a case someone else created cannot release the payment.
+     */
+    @SignalMethod
+    fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?)
 }
+
+/**
+ * The ONE workflow id every run for [paymentId] carries: the first start and every screening re-drive.
+ * A fraud-hold decision is signalled to this id with no run id, which Temporal routes to the CURRENT
+ * run, so it reaches a re-driven hold exactly as it reaches the first one. A per-attempt id left the
+ * decision addressed to a closed run while the live one timed out into REJECTED. One id also means
+ * at most one open run per payment: a re-drive while a run is still open is refused by Temporal.
+ */
+fun domesticPaymentWorkflowId(paymentId: UUID): String = "domestic-payment-$paymentId"

@@ -92,11 +92,8 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
     /**
      * The default disposition: a GitHub issue carrying the finding and its diagnosis for the HITL
      * queue. Same fail-closed shape as [openProposalPr] — no token, no write — and idempotent per
-     * finding KEY (check type, component, file; see [GitHubTicketWriter.findingKey]): an open
-     * `flaky-test` issue carrying the same hidden key marker is returned instead of a duplicate, so
-     * a re-run cannot flood the tracker while distinct findings of one type stay distinct. Until 2026-10-17 this
-     * method only logged, so every "ticket-only" disposition recorded `proposalUrl = null` and the
-     * human queue never saw it.
+     * finding key (check type, component, file; see [FindingKeys]). An open issue carrying the same
+     * hidden marker is reused regardless of its labels.
      */
     @Suppress("TooGenericExceptionCaught")
     override suspend fun openTicket(finding: FlakyTestFinding, diagnosis: String): String? {
@@ -190,6 +187,7 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
             url = "${config.githubApiUrl().trimEnd('/')}/repos/${config.githubRepo()}$path",
             headers = mapOf(
                 "Authorization" to "Bearer ${config.githubToken().orElse("")}",
+                "User-Agent" to "openbank-flaky-test-hunter",
                 "Accept" to "application/vnd.github+json",
                 "X-GitHub-Api-Version" to "2022-11-28",
                 "Content-Type" to "application/json",
@@ -210,9 +208,8 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
 }
 
 /**
- * The ticket half of the GitHub writer: list open `flaky-test` issues, reuse one with the same
- * title, else create one. Separate from [GitHubProposalAdapter] so the adapter stays under the
- * detekt function budget; it shares the adapter's allow-listed, token-bearing `send`.
+ * Reuses an open issue with the same finding marker or creates a labelled tracking issue.
+ * Shares [GitHubProposalAdapter]'s allow-listed, token-bearing HTTP transport.
  */
 internal class GitHubTicketWriter(
     private val objectMapper: ObjectMapper,
@@ -234,20 +231,24 @@ internal class GitHubTicketWriter(
     }
 
     /**
-     * Walks EVERY page of open `flaky-test` issues (a first-page-only read hid an existing issue once
-     * the tracker held more than 100, and the finding was re-opened) and matches on the hidden body
-     * marker, never on the title. An unreadable page, or a tracker deeper than [MAX_PAGES], is
-     * [Lookup.Unreadable]: absence is only claimed after the whole list was read.
+     * Looks for the hidden marker across open issues, including unlabelled and relabelled issues.
+     * A new issue requires an exhaustive read within [MAX_PAGES].
      */
     private fun lookup(key: String): Lookup {
         val marker = FindingKeys.marker(key)
         for (page in 1..MAX_PAGES) {
-            val response = send("GET", "/issues?state=open&labels=$TICKET_LABEL&per_page=$PAGE_SIZE&page=$page", null)
+            val response = send("GET", "/issues?state=open&per_page=$PAGE_SIZE&page=$page", null)
             if (response == null || response.status !in OK_RANGE) return Lookup.Unreadable
             val issues = objectMapper.readTree(response.bodyAsString())
-            val hit = issues.firstOrNull { !it.has("pull_request") && it.path("body").asText().contains(marker) }
-            val url = hit?.path("html_url")?.asText().orEmpty()
-            if (url.isNotBlank()) return Lookup.Found(url)
+            if (issues == null || !issues.isArray) return Lookup.Unreadable
+            for (issue in issues.asSequence().filterNot { it.has("pull_request") }) {
+                val body = issue.path("body")
+                if (!body.isTextual && !body.isNull) return Lookup.Unreadable
+                if (body.textValue()?.contains(marker) != true) continue
+                val url = issue.path("html_url").textValue()
+                if (url.isNullOrBlank()) return Lookup.Unreadable
+                return Lookup.Found(url)
+            }
             if (issues.size() < PAGE_SIZE) return Lookup.Absent
         }
         return Lookup.Unreadable

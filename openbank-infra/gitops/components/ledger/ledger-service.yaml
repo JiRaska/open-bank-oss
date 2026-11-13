@@ -38,7 +38,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-ledger-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "cd07c0fe46cb925f"
+        openbank.tech/policy-checksum: "73539513109a5011"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -49,7 +49,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ledger-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ledger-service:sandbox-9e765663
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ledger-service:sandbox-bc3e5960@sha256:24c7beccd36c6759bb5747fd75bc8539ca79c08810d8a6704ddd13fea0371f18
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -95,6 +95,14 @@ spec:
             # Redis for the four-eyes ApprovalStore (ADR-0155).
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.ledger.svc:6379
+            # #14058 — trusted synthetic principals: the account-overview k6 journey fixture is
+            # seeded by a deterministic ledger posting from Keycloak client
+            # openbank-synthetic-ledger-seed (ADR-0252). The taint arrives on the
+            # x-openbank-synthetic header and survives the CDI suspend boundary (#14059);
+            # OPA admits exactly ledger.create for this principal (ledger_rest_ext.rego:
+            # synthetic-ledger-seed-post).
+            - name: OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS
+              value: "service-account-openbank-synthetic-ledger-seed"
             # Flyway checksum mismatch on V7/V9/V11 (2026-07-11 bootstrap redeploy, #880):
             # ledger-service hadn't been redeployed since 2026-07-06, so a repo-wide
             # migration-file touch-up landed while it sat un-deployed. Repair-at-start
@@ -164,6 +172,14 @@ spec:
             # is no posting shape in this environment that enforce would refuse.
             # Rollback is this value alone: set back to "shadow".
             - name: LEDGER_DAY_LOCK_MODE
+              value: "enforce"
+            # Period freeze lock (ADR-0096 D1) shadow -> enforce. Shadow only counts a
+            # journal dated into a FROZEN month, so the ledger could diverge from figures
+            # already reported. Readout of openbank_ledger_period_lock_decisions_total over
+            # the last 30 days (2026-11-11): 13 decisions, all outcome=allowed, zero
+            # would_refuse, so enforce refuses no posting seen in that window.
+            # Rollback is this line alone: remove it (the code default is shadow).
+            - name: LEDGER_PERIOD_LOCK_MODE
               value: "enforce"
           startupProbe:
             tcpSocket:

@@ -2,7 +2,8 @@
 
 import { workloadHealthIdentity } from '@/lib/health/workloadHealth'
 
-export const FLEET_GROUPS = ['core', 'payments', 'compliance', 'identity', 'open-banking', 'platform'] as const
+import { DOMAIN_GROUPS } from '@/lib/governance/domains'
+export const FLEET_GROUPS = DOMAIN_GROUPS
 export type FleetGroup = typeof FLEET_GROUPS[number]
 
 export type GovernanceFleetMember = { name: string; group: FleetGroup }

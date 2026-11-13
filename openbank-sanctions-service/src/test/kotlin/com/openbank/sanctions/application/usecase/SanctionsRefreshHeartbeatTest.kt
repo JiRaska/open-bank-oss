@@ -168,8 +168,8 @@ class SanctionsRefreshHeartbeatTest {
         val list = dueList()
         val fence = mockk<SanctionsImportPublicationFence>()
         val permit = SanctionsPublicationPermit(SanctionsListType.OFAC_SDN, 1, inheritedIncomplete)
-        coEvery { fence.duringRefresh<SanctionsList>(SanctionsListType.OFAC_SDN, any()) } coAnswers {
-            secondArg<suspend (SanctionsPublicationPermit) -> SanctionsList>().invoke(permit)
+        coEvery { fence.duringRefresh<SanctionsList>(SanctionsListType.OFAC_SDN, any(), any()) } coAnswers {
+            thirdArg<suspend (SanctionsPublicationPermit) -> SanctionsList>().invoke(permit)
         }
         coEvery { repo.listSanctionsLists() } returns listOf(list)
         coEvery { repo.findByListType("OFAC_SDN") } returns list

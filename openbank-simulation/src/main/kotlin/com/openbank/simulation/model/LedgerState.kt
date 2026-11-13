@@ -51,6 +51,9 @@ class LedgerState {
         return reversal
     }
 
+    /** Actual posted versions, including compensations; no scenario-reported amount is used. */
+    fun entriesByTransaction(): Map<UUID, List<JournalEntry>> = posted.groupBy { it.transactionId }
+
     fun postedCount(): Int = posted.size
 
     /** Net credit-positive customer movement per `(account, currency)` — real `bookedDeltas()`. */

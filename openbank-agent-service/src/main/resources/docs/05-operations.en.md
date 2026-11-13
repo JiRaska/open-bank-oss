@@ -74,7 +74,7 @@ The gateway degraded gracefully on a model error. Check: `AGENT_DEFAULT_MODEL`, 
 A whole tool round errored (auth/connectivity). Verify: OIDC `openbank-services` client secret, the downstream service URLs (`quarkus.rest-client.*.url`), and that the downstream services are up. The loop stops offering tools after a failed round and answers in text — that is by design, not a crash.
 
 ### Every tool call is DENIED
-Expected under `advisory` only if a tool is unmapped (deny-by-default) or no `X-Agent-Id` was asserted on `/mcp`. Under `block`: check the OPA sidecar (8181) is reachable and the `agents.yaml` charter bundle is loaded. If the **PDP itself is unreachable**, the gate degrades to advisory + WARN (it does **not** lock the assistant out) — fix the OPA sidecar to restore enforcement.
+Expected under `advisory` only if a tool is unmapped (deny-by-default) or no `X-Agent-Id` was asserted on `/mcp`. Under `block`: check the OPA sidecar (8181) is reachable and the `agents.yaml` charter bundle is loaded. If the **PDP itself is unreachable**, `block` mode now fails closed: every tool call is denied with the outcome `pdp_unavailable_denied` (counter `openbank.agent.policy.gate.decisions{outcome}`, ERROR log), including the scheduled oversight sweep. Under `advisory` the call still proceeds. Alert on that outcome and fix the OPA sidecar to restore agent tool calls.
 
 ### Flip enforcement on
 Set `AGENT_POLICY_ENFORCEMENT=block` in the deployment env once an OPA sidecar is present in the target. No redeploy of code needed; the kill-switch / charter changes live in `agents.yaml` + OPA bundle.
@@ -101,3 +101,16 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## Kafka consumer group override
 
 The consumer group id and offset reset for this service's Kafka channels are not set as YAML keys in `application.yaml`, because SmallRye Config quotes dotted leaf keys and the connector never reads them. They are supplied by a properties-file override ConfigMap loaded through `QUARKUS_CONFIG_LOCATIONS`. The reference pattern for this is card-issuance-service's `party-events-in` channel; the `application.yaml` comments point at it. This is a documentation and comment change only. No configuration value or runtime behaviour changes.
+
+## PR policy evidence reconstruction
+
+Exact-head approval remains required for `codex/`. Other App merges can carry observed owner PR
+intent only under an explicitly reviewed immutable first-parent policy blob; an unknown blob
+requires source review and a normal PR, never a runtime exception. This is PR scope, not SHA
+approval or certification of all historical controls. The producer checks integer schema version
+2 plus `policyPrAuthorization: true` before using `/api/v1/agent-merge-records/app-policy` and
+independently reads `policyAuthorization` back. The old `authorization` slot stays null for this
+proof. Confirm the deployed backend, V8 migration and new UI before backfill; preserve original
+observation times, investigate 409 conflicts, and retain policy evidence during rollback. Release
+deployment holds only through their separately reviewed governance procedure after all conditions
+are evidenced. Do not treat a green recorder workflow as proof that old missing rows were repaired.

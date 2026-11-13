@@ -26,6 +26,8 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
+    // ADR-0353: screening, AML case severity and fraud verdict, shared with aml/sanctions/fraud.
+    implementation(project(":openbank-libs-fincrime"))
     implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
     // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
@@ -38,12 +40,15 @@ dependencies {
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.testcontainers.redpanda)
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(project(":openbank-libs-testing"))
     // In-memory reactive-messaging connector: SctInstBootSmokeIT swaps the Kafka outgoing
     // channel to InMemoryConnector so the boot smoke-test needs no broker (ADR-0104 D4 / #578).
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // Consumer-driven contract for the transaction-service settlement call (ADR-0063, issue #468).
     testImplementation(libs.pact.consumer)
+    // Provider-side pact verification for the agent's read tools over this service's API.
+    testImplementation(libs.pact.provider)
 }
 
 kover {

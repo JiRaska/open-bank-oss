@@ -10,8 +10,9 @@
 | **Rezoluce Rady bezpečnosti OSN** | Konsolidované sankce OSN | Seznam `UN_CONSOLIDATED` vždy povolen |
 | **AMLD 6 (EU 2018/1673)** | Rozšířené AML povinnosti; 10letá archivace záznamů | Všechny záznamy `SanctionsCheck` uchovány 10 let; výmaz dle GDPR přepsán |
 | **PSD2 (EU 2015/2366)** | Provádění platebních transakcí | Sankční kontrola je povinnou bránou před provedením platby (ADR-0032) |
-| **Doporučení FATF** | Posílená due diligence pro vysoce rizikové jurisdikce | Seznam `FATF_HIGH_RISK` označuje převody do/z vysoce rizikových zemí |
+| **Doporučení FATF** | Posílená due diligence pro vysoce rizikové jurisdikce | Prověření s `country` nebo `bankIdentifier` se porovnává s referenčními daty jurisdikcí (verzovaná, udržovaná revidovanou migrací; načten je seznam vysoce rizikových třetích zemí EU, nařízení v přenesené pravomoci (EU) 2016/1675 — samotné seznamy FATF zatím načteny nejsou; stáří každého seznamu je metrika s alertem) |
 | **Zákon č. 1/2023 Sb.** | Vnitrostátní sankční seznam vedený MZV | Seznam `CNB_DOMESTIC` (import z `cz_national_sanctions`) |
+| **Nařízení vlády č. 210/2008 Sb.** | Česká protiteroristická označení; samostatný právní režim vedle vnitrostátního sankčního seznamu | Seznam `CZ_TERRORISTS` z oficiálních SPARQL otevřených dat e-Sbírky, nikdy z komerčně licencovaného mirroru OpenSanctions |
 | **GDPR (EU 2016/679)** | PII v screeningových požadavcích (jméno, datum narození, identifikátory) | PII maskováno v logu; základ čl. 6 odst. 1 písm. c) – právní povinnost; výmaz přepsán AML směrnicí |
 | **DORA (EU 2022/2554)** | Operační odolnost finančních služeb | Health probes, audit eventy, záruka outboxu, SLO, runbooky |
 
@@ -101,3 +102,13 @@ Compliance tým je odpovědný za:
 3. Eskalaci záznamů `HIT` na MLRO (Money Laundering Reporting Officer) do 4 hodin.
 4. Podání hlášení o podezřelé transakci (SAR) na český FAÚ do 24 hodin od potvrzeného hitu na domácí transakci.
 5. Spuštění `POST /api/v1/sanctions/lists/refresh-all` po každé větší regulatorní aktualizaci (např. nový sankční balíček EU).
+
+## Průběžný monitoring (ADR-0376)
+
+Průběžný monitoring plní povinnost AMLD sledovat obchodní vztah po celou dobu jeho trvání, nikoli jen prověřit klienta na začátku. Ve výchozím stavu je vypnutý.
+
+- **Účel a minimalizace.** Registr obsahuje atributy, které čte profil `CUSTOMER`, a nic dalšího. Právním základem je právní povinnost (čl. 6 odst. 1 písm. c)); od klienta se nesbírají žádné nové údaje.
+- **Výmaz.** Registr a jeho nálezy nejsou zákonným AML záznamem (ten vede vlastnící služba), takže se uplatní čl. 17. Odregistrace smaže řádek subjektu i jeho nálezy; vlastnící služba ji volá při ukončení vztahu a při výmazu.
+- **Zákaz vyzrazení.** Nález klient nikdy nevidí. Nevrací ho žádná REST operace; publikuje se na interní topic pro vlastnící službu, která otevře případ k posouzení. Žádná služba obsluhující klienta tento topic nekonzumuje.
+- **Žádné automatizované rozhodnutí.** Nález na klientovi nic nemění: nic neblokuje, neomezuje ani neuzavírá. O případu, který vlastnící služba otevře, rozhoduje člověk (ADR-0256 D2).
+- **Datové toky ven.** `MONITORED_SUBJECT_MATCHED` nese referenci subjektu, nikoli jeho jméno; topic archivuje `audit-service`.

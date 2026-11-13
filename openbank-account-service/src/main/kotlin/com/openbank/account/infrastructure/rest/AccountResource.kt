@@ -24,12 +24,14 @@ import com.openbank.account.application.port.`in`.UnfreezeAccountCommand
 import com.openbank.account.application.port.`in`.UpdateSavingsGoalCommand
 import com.openbank.account.infrastructure.rest.dto.AccountBalanceResponse
 import com.openbank.account.infrastructure.rest.dto.AccountResponse
+import com.openbank.account.infrastructure.rest.dto.AccountStandingResponse
 import com.openbank.account.infrastructure.rest.dto.AddPocketRequest
 import com.openbank.account.infrastructure.rest.dto.CloseAccountRequest
 import com.openbank.account.infrastructure.rest.dto.FreezeAccountRequest
 import com.openbank.account.infrastructure.rest.dto.OpenAccountRequest
 import com.openbank.account.infrastructure.rest.dto.PocketResolutionResponse
 import com.openbank.account.infrastructure.rest.dto.PocketResponse
+import com.openbank.account.infrastructure.rest.dto.ProductRevisionPinResponse
 import com.openbank.account.infrastructure.rest.dto.RenameAccountRequest
 import com.openbank.account.infrastructure.rest.dto.SavingsGoalRequest
 import com.openbank.libs.api.pagination.CursorPage
@@ -576,6 +578,19 @@ private fun com.openbank.account.domain.model.Account.toResponse() = AccountResp
     termsVersion = termsVersion,
     termsUrl = termsUrl,
     termsEffectiveFrom = termsEffectiveFrom,
+    productRevision = productRevisionPin?.let {
+        ProductRevisionPinResponse(
+            offeringId = it.offeringId,
+            productCode = it.productCode,
+            revisionId = it.revisionId,
+            revisionNumber = it.revisionNumber,
+            contentHash = it.contentHash,
+            irRevisionHash = it.irRevisionHash,
+            irVersion = it.irVersion,
+            pinnedAt = it.pinnedAt,
+        )
+    },
+    standing = standing.let { AccountStandingResponse(it.mayDebit, it.mayCredit, it.reason) },
 )
 
 private fun CursorPage<com.openbank.account.domain.model.Account>.toResponse() =

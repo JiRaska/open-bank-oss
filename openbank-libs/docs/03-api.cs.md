@@ -4,6 +4,15 @@ Sdílená doménová API jsou v `openbank-libs-domain`; adaptéry Quarkus a HTTP
 
 Jak služby konzumují každý balíček libs. Příklady jsou zkrácené ale spustitelné.
 
+## Původ zadavatele při schvalování čtyř očí
+
+Čekající schválení rozlišuje ověřené agenty a konkrétní servisní účty od osob.
+`HUMAN` a `CUSTOMER_PARTY` vyžadují ověřený token osoby; příznaky klientských přihlašovacích
+údajů, chybějící nebo nečitelné údaje osoby a identity bez JWT se zaznamenají jako `UNKNOWN`.
+Zobrazované jméno ani zákaznická role samy původ osoby neprokazují. Klasifikace mění pouze
+záznam schválení; stávající typy principálů a vyhodnocení rolí v politikách zůstávají stejné.
+
+
 ## domain/money — Money + CurrencyCode
 
 ```kotlin
@@ -287,18 +296,29 @@ Factory automaticky doplní:
 | `GET /api/v1/info` | Service name, version, **`stack`** (Kotlin/Quarkus/JDK/Gradle/libs) — používá admin UI Tech Inventory |
 | `GET /api/v1/config` | Live snapshot rate-limit + circuit-breaker + retry + timeout config |
 
+## api.error — useknutá multipart těla
+
+Sdílený `GenericExceptionMapper` klasifikuje multipart tělo požadavku, které skončí před uzavírací
+hranicí, jako chybu klienta: 400 `VALIDATION_ERROR`, ne 500. Parser RESTEasy Reactive to hlásí jako
+obyčejnou `java.io.IOException` se zprávou "Connection terminated reading multipart data", proto ji
+mapper rozpozná jen tehdy, když se shoduje ZÁROVEŇ přesná zpráva i rámec, který ji vyhodil (balíček
+parseru `org.jboss.resteasy.reactive.server.core.multipart.`), kdekoli v prvních osmi článcích řetězu
+příčin. Každá jiná `IOException`, včetně chyb dočasného souboru nebo disku v samotném parseru, zůstává
+500. Dědí to každá služba s multipart uploadem; `PartyTruncatedMultipartIT` v party-service to ověřuje
+přes skutečné HTTP.
+
 ## util — BuildInfo
 
 ```kotlin
 import com.openbank.libs.util.BuildInfo
 
-BuildInfo.kotlinVersion       // "2.3.20"
-BuildInfo.quarkusVersion      // "3.33.2"
+BuildInfo.kotlinVersion       // "2.4.10"
+BuildInfo.quarkusVersion      // "3.40.1.1"
 BuildInfo.quarkusLts          // true
-BuildInfo.quarkusSupportUntil // "2027-03-25"
-BuildInfo.gradleVersion       // "9.5.1"
-BuildInfo.buildTime           // "2026-05-29T17:34:46Z"
-BuildInfo.gitCommit           // "62b312b" (or "unknown" v Docker build bez .git)
+BuildInfo.quarkusSupportUntil // "2027-09-30"
+BuildInfo.gradleVersion       // "9.8.2"
+BuildInfo.buildTime           // "unknown" (not stamped)
+BuildInfo.gitCommit           // service commit from openbank-service-build.properties, else "unknown"
 BuildInfo.libsVersion         // "0.1.0-SNAPSHOT"
 BuildInfo.javaVersion         // "25.0.3+9-LTS"
 BuildInfo.javaVendor          // "Eclipse Adoptium"
@@ -308,5 +328,7 @@ BuildInfo.maxHeapMib          // 3994
 
 BuildInfo.toStack()  // returns LinkedHashMap suitable for JSON serialization
 ```
+
+`openbank-build-info.properties` generuje `openbank-libs-domain` (vedle `BuildInfo`, který ho čte) z version catalogu. Dřív žil v umbrella JARu `openbank-libs`, který služby závislé přímo na domain/runtime nemají, a `/api/v1/info` proto hlásilo Quarkus/Gradle/libs jako `unknown`. Git commit ani čas buildu se do `libs-domain` nerazítkují (JAR zůstává mezi commity stejný); `buildTime` je proto `unknown` a commit běžící služby pochází z `openbank-service-build.properties`. `BuildInfoTest` porovnává hodnoty s catalogem, takže chybějící resource build shodí.
 
 `ServiceInfoResource` automaticky vrací `toStack()` v `/api/v1/info` response.

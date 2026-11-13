@@ -245,11 +245,15 @@ locals {
   # check-stateful-not-on-spot.py fails when the requests those 26 Clusters declare
   # in gitops outgrow this table, so the limit below cannot silently fall behind.
   stateful_load_by_zone = {
-    "eu-north-1a" = { cpu = 0.75, memory_gib = 1.875, pods = 5 }
+    # 1a and 1c each include ONE third ledger-class instance (ADR-0373 step 1: ledger-db and
+    # ledger-pension-co-db, 100m / 256Mi each) as DECLARED, not measured -- the pods do not exist
+    # yet and their AZ is unknown until the volumes bind; split over 1a and 1c as the zone spread
+    # constraint prefers. Re-measure after the first deploy. Node counts below are unchanged.
+    "eu-north-1a" = { cpu = 0.85, memory_gib = 2.125, pods = 6 }
     # 1b includes pension-fund-db (ADR-0334, 2 x 100m / 256Mi) as DECLARED, not measured: it is
     # not deployed yet, and its AZ is unknown until its volumes bind. Re-measure after first deploy.
     "eu-north-1b" = { cpu = 4.45, memory_gib = 12.0, pods = 43 }
-    "eu-north-1c" = { cpu = 1.20, memory_gib = 2.875, pods = 8 }
+    "eu-north-1c" = { cpu = 1.30, memory_gib = 3.125, pods = 9 }
   }
   # One xlarge m-family node as the sizing unit (2xlarge is also admitted and is
   # exactly two units, so the limit below bounds both). USABLE = kubelet allocatable
@@ -730,6 +734,24 @@ resource "helm_release" "argocd" {
       name  = "controller.tolerations[0].operator"
       value = "Equal"
     },
+    # Node-key migration to open-bank.tech, stage 1: tolerate both taint keys.
+    {
+      name  = "controller.tolerations[1].key"
+      value = "open-bank.tech/stateful"
+    },
+    {
+      name  = "controller.tolerations[1].operator"
+      value = "Equal"
+    },
+    {
+      name  = "controller.tolerations[1].value"
+      value = "true"
+      type  = "string"
+    },
+    {
+      name  = "controller.tolerations[1].effect"
+      value = "NoSchedule"
+    },
     {
       name  = "controller.tolerations[0].value"
       value = "true"
@@ -866,6 +888,18 @@ resource "helm_release" "cnpg" {
     {
       name  = "config.data.ENABLE_INSTANCE_MANAGER_INPLACE_UPDATES"
       value = "true"
+      type  = "string"
+    },
+    # Default operand image for a Cluster that names none. The admission webhook
+    # writes it into spec.imageName at CREATION, so it only governs new clusters
+    # rendered by third-party charts that expose no image value (GlitchTip's
+    # chart is one). Left unset it is whatever the operator release ships, which
+    # put glitchtip-pg on 18.3 while every cluster we pin runs 18.6. Keep this
+    # equal to the fleet's pinned PostgreSQL image.
+    {
+      name = "config.data.POSTGRES_IMAGE_NAME"
+      # Pull-through path, as the fleet's pinned clusters use (and Kyverno would rewrite to).
+      value = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.region}.amazonaws.com/${aws_ecr_pull_through_cache_rule.ghcr.ecr_repository_prefix}/cloudnative-pg/postgresql:18.6"
       type  = "string"
     },
   ]

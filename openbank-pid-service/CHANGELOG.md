@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.11...pid-service-v0.11.0) (2026-11-12)
+
+
+### Features
+
+* **pid:** erase identity data when a party is erased ([#15781](https://github.com/JiRaska/open-bank-oss/issues/15781)) ([b8bec8b](https://github.com/JiRaska/open-bank-oss/commit/b8bec8b6ba614ea7b625b1af842b4b6b27219130))
+
+
+### Bug Fixes
+
+* **pid:** erase the unlinked verification cases of an erased party ([#15817](https://github.com/JiRaska/open-bank-oss/issues/15817)) ([bf9ec44](https://github.com/JiRaska/open-bank-oss/commit/bf9ec449dbcb432e1861eeb42c553c66555334d6))
+
+## [0.10.11](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.10...pid-service-v0.10.11) (2026-10-26)
+
+
+### Bug Fixes
+
+* **pid:** stop asserting a defaulted AML risk score; deprecate amlRiskScore ([#13772](https://github.com/JiRaska/open-bank-oss/issues/13772)) ([17ca912](https://github.com/JiRaska/open-bank-oss/commit/17ca9124e98a69da3d7c49689b48b4573359b915))
+
 ## [0.10.10](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.9...pid-service-v0.10.10) (2026-10-19)
 
 

@@ -20,6 +20,7 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 import { FLEET_GROUPS, parseDashboardHealth, parseGovernanceFleet } from '@/lib/dashboard/clientContract'
+import { domainColor, domainLabel } from '@/lib/governance/domains'
 import { aggregateHealthStatuses } from '@/lib/health/workloadHealth'
 
 // Deployment is tri-state: false is confirmed planned, null means discovery was
@@ -37,11 +38,6 @@ interface SvcStatus { name: string; label: string; group: string; deployed: bool
 // that discovery hasn't enriched with a label (i.e. not-deployed services).
 function titleCase(name: string): string {
   return name.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-}
-
-const GROUP_COLORS: Record<string, string> = {
-  core: 'var(--accent)', payments: 'var(--success)', compliance: 'var(--warning)',
-  identity: 'var(--info)', 'open-banking': 'var(--accent)', platform: 'var(--text-tertiary)'
 }
 
 const WORKSPACE_ICONS: Record<string, ElementType> = {
@@ -112,12 +108,11 @@ export default function DashboardPage() {
       const results: SvcStatus[] = fleet.map(f => {
         const instances = discovered.get(f.name) ?? []
         const labels = new Set(instances.map(entry => entry.label))
-        const groups = new Set(instances.map(entry => entry.group))
         const latencies = instances.flatMap(entry => entry.latencyMs == null ? [] : [entry.latencyMs])
         return {
           name: f.name,
           label: labels.size === 1 ? [...labels][0] : titleCase(f.name),
-          group: groups.size === 1 ? [...groups][0] : f.group,
+          group: f.group,
           deployed: instances.length > 0 ? true : inventoryComplete ? false : null,
           health: aggregateHealthStatuses(instances.map(entry => entry.status)),
           latencyMs: latencies.length > 0 ? Math.max(...latencies) : null,
@@ -315,11 +310,11 @@ export default function DashboardPage() {
             const hasDeployed = deployedInGroup.length > 0
             const hasObserved = observedInGroup.length > 0
             const pct = hasObserved ? Math.round((upInGroup / observedInGroup.length) * 100) : 0
-            const color = GROUP_COLORS[group] ?? 'var(--text-tertiary)'
+            const color = domainColor(group)
             return (
               <div key={`health-${group}`} className={styles.healthGroup}>
                 <div className={styles.healthGroupHeader}>
-                  <span className={styles.groupName}>{group.replace('-', ' ')}</span>
+                  <span className={styles.groupName}>{domainLabel(group, personaLanguage)}</span>
                   <span className={styles.groupSummary}>
                     {hasObserved
                       ? `${upInGroup}/${observedInGroup.length} ${t('zdravé', 'healthy')}${deployedInGroup.length + unknownDeploymentInGroup.length > observedInGroup.length ? ` · ${deployedInGroup.length + unknownDeploymentInGroup.length - observedInGroup.length} ${t('neznámé', 'unknown')}` : ''}`
@@ -348,7 +343,7 @@ export default function DashboardPage() {
           const plannedInGroup = groupSvcs.filter(s => s.deployed === false).length
           const unknownInGroup = deployedInGroup.length - observedInGroup.length + unknownDeploymentInGroup
           const allHealthy = observedInGroup.length > 0 && downInGroup === 0 && unknownInGroup === 0
-          const color = GROUP_COLORS[group] ?? 'var(--text-tertiary)'
+          const color = domainColor(group)
           const deploymentSummary = `${upInGroup}/${observedInGroup.length} ${t('zdravé', 'healthy')}${unknownInGroup > 0 ? ` · ${unknownInGroup} ${t('neznámé', 'unknown')}` : ''}${plannedInGroup > 0 ? ` · ${plannedInGroup} ${t('plán', 'planned')}` : ''}`
           // Sort deployed members first so the live ones lead each group card.
           const ordered = [...groupSvcs].sort((a, b) => Number(b.deployed === true) - Number(a.deployed === true))
@@ -358,7 +353,7 @@ export default function DashboardPage() {
                 <div className={styles.serviceGroupTitle}>
                   <span className={styles.groupDot} style={{ background: color }} aria-hidden="true" />
                   <h2 className={styles.sectionLabel}>
-                    {group.replace('-', ' ')}
+                    {domainLabel(group, personaLanguage)}
                   </h2>
                 </div>
                 <StatusBadge

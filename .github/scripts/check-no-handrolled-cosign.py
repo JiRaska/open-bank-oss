@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import shlex
 import sys
 
 import yaml
@@ -85,6 +86,29 @@ def signing_command(script: str) -> re.Match[str] | None:
     return None
 
 
+
+def library_command(script: str, name: str) -> bool:
+    """Recognize a direct library call, including shell environment assignments.
+
+    This remains a convention check: output strings and another command do not
+    become calls merely because they contain the function name.
+    """
+    for line in script.splitlines():
+        try:
+            lexer = shlex.shlex(line, posix=True, punctuation_chars=";&|()")
+            lexer.whitespace_split = True
+            words = list(lexer)
+        except ValueError:
+            continue
+        if words[:2] == ["if", "!"]:
+            words = words[2:]
+        while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
+            words = words[1:]
+        if words and words[0] == name:
+            return True
+    return False
+
+
 def violations(root: pathlib.Path) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     for path in sorted((root / WORKFLOW_DIR).glob("*.y*ml")):
@@ -111,12 +135,12 @@ def violations(root: pathlib.Path) -> list[tuple[str, str]]:
             # cannot supply evidence for this one. Only command lines count,
             # not comments or echo strings naming the library.
             sourced = re.search(r"(?m)^\s*(?:source|\.)\s+[^\n]*cosign-attest\.sh(?:[\s\"']|$)", executable)
-            called = re.search(r"(?m)^\s*cosign_sign_and_attest(?:\s|$)", executable)
+            called = library_command(executable, LIB_CALL)
             # The deploy job signs before its vulnerability scan, then invokes
             # both attestation primitives for the deployable set. Preserve that
             # split pipeline without granting an exemption to unrelated jobs.
-            sbom = re.search(r"(?m)^\s*(?:if\s+!\s+)?cosign_attest_sbom(?:\s|$)", executable)
-            provenance = re.search(r"(?m)^\s*(?:if\s+!\s+)?cosign_attest_slsa_provenance(?:\s|$)", executable)
+            sbom = library_command(executable, "cosign_attest_sbom")
+            provenance = library_command(executable, "cosign_attest_slsa_provenance")
             if sourced and (called or (sbom and provenance)):
                 continue
             matching_line = next((i for i, line in enumerate(text.splitlines(), 1)
@@ -166,6 +190,22 @@ def self_test() -> int:
          f'run: |\n  source {lib}\n  bin=/tmp/cosign\n  "$bin" sign --key key "$IMAGE"\n'
          "  if ! cosign_attest_sbom $IMAGE linux/arm64; then exit 1; fi\n"
          "  if ! cosign_attest_slsa_provenance $IMAGE; then exit 1; fi\n", 0),
+        ("split shared provenance accepts a scoped source assignment",
+         f'run: |\n  source {lib}\n  cosign sign --key x $IMAGE\n'
+         '  if ! cosign_attest_sbom $IMAGE linux/arm64; then exit 1; fi\n'
+         '  if ! ARTIFACT_SOURCE_SHA="$SOURCE_COMMIT" cosign_attest_slsa_provenance $IMAGE; then exit 1; fi\n', 0),
+        ("assignments do not turn echo into provenance",
+         f'run: |\n  source {lib}\n  cosign sign --key x $IMAGE\n'
+         '  cosign_attest_sbom $IMAGE linux/arm64\n'
+         '  ARTIFACT_SOURCE_SHA="$SOURCE_COMMIT" echo cosign_attest_slsa_provenance $IMAGE\n', 1),
+        ("function names in assignment values are not calls",
+         f'run: |\n  source {lib}\n  cosign sign --key x $IMAGE\n'
+         '  cosign_attest_sbom $IMAGE linux/arm64\n'
+         '  NOTE="cosign_attest_slsa_provenance" echo ready\n', 1),
+        ("assignment and output chain do not call provenance",
+         f'run: |\n  source {lib}\n  cosign sign --key x $IMAGE\n'
+         '  cosign_attest_sbom $IMAGE linux/arm64\n'
+         '  NOTE=value; echo cosign_attest_slsa_provenance $IMAGE\n', 1),
         ("a split pipeline missing provenance still fails",
          f"run: |\n  source {lib}\n  cosign sign --key x $IMAGE\n"
          "  cosign_attest_sbom $IMAGE linux/arm64\n", 1),

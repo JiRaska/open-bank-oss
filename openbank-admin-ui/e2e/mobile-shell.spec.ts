@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 async function holdClientSession(page: Page, replacement?: object) {
@@ -49,7 +49,7 @@ test('keeps the mobile navigation keyboard-complete and removes it from focus wh
 
   const menu = page.locator('button[aria-controls="admin-sidebar"]:visible')
   const sidebar = page.locator('#admin-sidebar:visible')
-  const sidebarControls = sidebar.locator('a, button:not([disabled])')
+  const sidebarControls = sidebar.locator('a, button:not([disabled]), input:not([disabled])')
   await expect(menu).toBeVisible()
   await expect(sidebar).toBeHidden()
 
@@ -58,7 +58,7 @@ test('keeps the mobile navigation keyboard-complete and removes it from focus wh
   await expect(sidebar).toBeFocused()
   await expect(sidebar).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
   releaseSession()
-  await expect(sidebarControls.first()).toHaveAttribute('href', '/system/tests')
+  await expect(sidebarControls.first()).toHaveAccessibleName(/Workspace area|Pracovní oblast/)
   await expect(sidebarControls.first()).toBeFocused()
 
   await page.keyboard.press('Shift+Tab')
@@ -89,7 +89,10 @@ test('keeps the desktop sidebar focusable across viewport changes', async ({ pag
 
   await page.setViewportSize({ width: 1280, height: 844 })
   await expect(sidebar).toHaveJSProperty('inert', false)
-  const dashboard = sidebar.locator('a[href="/dashboard"]').first()
+  // The workspace can change as permissions resolve. Exercise the unique active-route
+  // link in the core navigation, rather than an arbitrary first workspace shortcut.
+  const dashboard = sidebar.locator('a[href="/dashboard"][aria-current="page"]')
+  await expect(dashboard).toHaveCount(1)
   await dashboard.focus()
   await expect(dashboard).toBeFocused()
 
@@ -108,22 +111,25 @@ test('does not steal focus when an operator moves inside the drawer while permis
 
   const menu = page.locator('button[aria-controls="admin-sidebar"]:visible')
   const sidebar = page.locator('#admin-sidebar:visible')
-  const sidebarControls = sidebar.locator('a, button:not([disabled])')
+  const sidebarControls = sidebar.locator('a, button:not([disabled]), input:not([disabled])')
 
   await menu.click()
   await expect(sidebar).toBeFocused()
   await expect(sidebar).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
   await page.waitForTimeout(250)
-  const initiallyChosenControl = sidebarControls.first()
+  const initiallyChosenControl = sidebar.locator('a[href="/system/tests"]').first()
   await initiallyChosenControl.focus()
   await expect(initiallyChosenControl).toBeFocused()
   const chosenHref = await initiallyChosenControl.getAttribute('href')
   expect(chosenHref).not.toBeNull()
-  const chosenControl = page.locator(`#admin-sidebar:visible a[href="${chosenHref}"]`)
+  // The workspace shortcuts duplicate nav hrefs ("Test Intelligence" nav link vs the
+  // "… LIVE" workspace link), so the href locator matches 2 elements — .first() pins
+  // the core-navigation link, which is the focused one and the first control in DOM order.
+  const chosenControl = page.locator(`#admin-sidebar:visible a[href="${chosenHref}"]`).first()
   await expect(chosenControl).toBeFocused()
 
   releaseSession()
-  await expect(sidebarControls.first()).toHaveAttribute('href', '/system/tests')
+  await expect(sidebarControls.first()).toHaveAccessibleName(/Workspace area|Pracovní oblast/)
   await page.evaluate(() => new Promise<void>(resolve => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   }))

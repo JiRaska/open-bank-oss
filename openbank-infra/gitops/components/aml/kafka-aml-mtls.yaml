@@ -36,6 +36,13 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # Oversight wake-up: HIGH/CRITICAL outbox events fan out a minimal, non-PII trigger (ADR-0031 D9)
+      - resource:
+          type: topic
+          name: openbank.oversight-triggers
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       # Onboarding trigger: consume PARTY_CREATED to auto-open screenings (ADR-0267 §2)
       - resource:
           type: topic
@@ -57,6 +64,32 @@ spec:
       - resource:
           type: topic
           name: openbank.dlq.aml.party-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # ADR-0371: booked money movement for post-booking transaction monitoring. Same consumer
+      # group as above. Each channel rethrows, so each has its own dead-letter topic to write to.
+      - resource:
+          type: topic
+          name: openbank.ledger.journal.posted
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.aml.ledger-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.transactions.transaction.initiated
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.aml.transaction-events-in
           patternType: literal
         operations: [Write, Describe]
         host: "*"

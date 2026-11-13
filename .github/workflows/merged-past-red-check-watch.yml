@@ -51,6 +51,7 @@ on:
     paths:
       - ".github/workflows/merged-past-red-check-watch.yml"
       - ".github/scripts/check-merged-past-red-check.py"
+      - ".github/scripts/test-merged-red-publisher.cjs"
       - ".github/gates/gates.yaml"
   workflow_dispatch:
     inputs:
@@ -79,7 +80,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Self-test the classifier
-        run: python3 .github/scripts/check-merged-past-red-check.py --self-test
+        run: |
+          python3 .github/scripts/check-merged-past-red-check.py --self-test
+          node .github/scripts/test-merged-red-publisher.cjs
 
       - name: The watch still satisfies D1-D7
         run: python3 .github/scripts/check-merged-past-red-check.py --check-declaration
@@ -117,7 +120,9 @@ jobs:
       # A verdict that has only ever said "clean" is indistinguishable from a
       # classifier that finds nothing. This step failing voids the run.
       - name: Self-test the classifier
-        run: python3 .github/scripts/check-merged-past-red-check.py --self-test
+        run: |
+          python3 .github/scripts/check-merged-past-red-check.py --self-test
+          node .github/scripts/test-merged-red-publisher.cjs
 
       - name: Scan the ruleset bypass log
         id: verdict
@@ -168,14 +173,53 @@ jobs:
             const blindMarker = '<!-- merged-past-red-check-blind -->'
             const REOPEN_WINDOW_DAYS = 14
 
-            // Find by MARKER, not by title: the title carries a count and moves.
+            // Search a distinctive body phrase instead of walking every historical fleet-health
+            // issue. The list grows over time and can consume the installation's shared core API
+            // quota, particularly when a closed marker issue must be found again (#8690).
             const findByMarker = async (state, m) => {
-              const issues = await github.paginate(github.rest.issues.listForRepo, {
-                ...context.repo, state, labels: LABEL, per_page: 100,
-                sort: 'updated', direction: 'desc',
-              })
-              return issues.find(i => (i.body || '').includes(m))
+              const phrase = m === blindMarker
+                ? '"This watch could not read the ruleset bypass log"'
+                : '"A PR was merged while a required check was FAILING"'
+              const query = [
+                `repo:${context.repo.owner}/${context.repo.repo}`,
+                'is:issue', `is:${state}`, `label:${LABEL}`, 'in:body', phrase,
+              ].join(' ')
+              // Search API caps accessible results at 1,000. Walk only as far as the exact
+              // marker, and fail closed at that cap rather than risk creating a duplicate.
+              let newestClosed
+              for (let page = 1; page <= 10; page += 1) {
+                const { data } = await github.rest.search.issuesAndPullRequests({
+                  q: query, per_page: 100, page, sort: 'updated', order: 'desc',
+                })
+                if (data.incomplete_results) {
+                  throw new Error(`Issue marker search returned incomplete results for ${m}; refusing to create a duplicate`)
+                }
+                for (const issue of data.items.filter(i => (i.body || '').includes(m))) {
+                  if (state === 'open') return issue
+                  // Search is ordered by updated_at, which can change long after an issue
+                  // closes. Reuse the newest closure, not the most recently edited issue.
+                  if (!issue.closed_at || !Number.isFinite(Date.parse(issue.closed_at))) {
+                    throw new Error(`Closed marker issue #${issue.number} has no valid closed_at; refusing to create a duplicate`)
+                  }
+                  if (!newestClosed || Date.parse(issue.closed_at) > Date.parse(newestClosed.closed_at)) {
+                    newestClosed = issue
+                  }
+                }
+                if (data.items.length < 100 || page * 100 >= data.total_count) return newestClosed
+              }
+              throw new Error(`Issue marker search exceeded the 1,000-result cap for ${m}; refusing to create a duplicate`)
             }
+            const withoutAutomationFooter = body => (body || '').replace(
+              /\n?_Automated(?::| by) `[^`]+`(?: run \d+)? \(issue #\d+\)\._\s*$/,
+              '',
+            )
+            // Older bodies included a count of benign suites. Ignore that diagnostic count
+            // during migration too; only the offending merges change the issue verdict.
+            const stableBody = body => withoutAutomationFooter(body).replace(
+              /(Window `(?:day|week|month)`), \d+ bypass suites examined\./g, '$1.',
+            )
+            const matchesRenderedIssue = (issue, title, body) =>
+              issue.title === title && stableBody(issue.body) === stableBody(body)
 
             // ── the watch could not answer (#4791) ────────────────────────────────────────
             // Escalated, not merely logged. "Could not answer" is NOT "nothing was bypassed",
@@ -208,15 +252,17 @@ jobs:
                 'This issue is refreshed while the watch stays blind and is closed by the watch',
                 'itself on the first run that produces a verdict.',
                 '',
-                `_Automated: \`${context.workflow}\` run ${context.runId} (issue #4791)._`,
+                `_Automated by \`${context.workflow}\` (issue #4791)._`,
               ].join('\n')
 
               const openBlind = await findByMarker('open', blindMarker)
-              if (openBlind) {
+              if (openBlind && !matchesRenderedIssue(openBlind, bTitle, bBody)) {
                 await github.rest.issues.update({
                   ...context.repo, issue_number: openBlind.number, title: bTitle, body: bBody,
                 })
                 core.info(`refreshed blind #${openBlind.number}`)
+              } else if (openBlind) {
+                core.info(`blind #${openBlind.number} unchanged; no issue write needed`)
               } else {
                 const created = await github.rest.issues.create({
                   ...context.repo, title: bTitle, body: bBody, labels: [LABEL],
@@ -258,6 +304,7 @@ jobs:
               return
             }
 
+            core.info(`Examined ${v.suites_examined} bypass suites in ${v.period}`)
             const n = v.offenders.length
             const title = `${n} merge${n === 1 ? '' : 's'} past an actively failing required check (last ${v.period})`
             const body = [
@@ -273,7 +320,7 @@ jobs:
               ...v.offenders.map(o =>
                 `| \`${o.pushed_at}\` | ${o.pr ? '#' + o.pr : '_none_'} | \`${String(o.head_sha).slice(0, 9)}\` | ${o.details.map(d => d.replace(/\|/g, '\\|')).join('<br>')} |`),
               '',
-              `Window \`${v.period}\`, ${v.suites_examined} bypass suites examined. The window is`,
+              `Window \`${v.period}\`. The window is`,
               'explicit on purpose: `rule-suites` defaults to `time_period=day`, which returns one',
               'row and reads exactly like confirmation that an incident was isolated.',
               '',
@@ -284,13 +331,17 @@ jobs:
               'closed by the watch itself when the window comes back clean. Each row ages out on its',
               'own; closing it by hand does not.',
               '',
-              `_Automated: \`${context.workflow}\` run ${context.runId} (issue #4240)._`,
+              `_Automated by \`${context.workflow}\` (issue #4240)._`,
             ].join('\n')
 
             const open = await findByMarker('open', marker)
             if (open) {
-              await github.rest.issues.update({ ...context.repo, issue_number: open.number, title, body })
-              core.info(`refreshed #${open.number}`)
+              if (!matchesRenderedIssue(open, title, body)) {
+                await github.rest.issues.update({ ...context.repo, issue_number: open.number, title, body })
+                core.info(`refreshed #${open.number}`)
+              } else {
+                core.info(`#${open.number} unchanged; no issue write needed`)
+              }
               return
             }
             const closed = await findByMarker('closed', marker)

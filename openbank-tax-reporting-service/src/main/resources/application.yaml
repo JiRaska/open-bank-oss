@@ -83,6 +83,13 @@ kafka:
       url: ${PENSION_COMPANY_LEDGER_URL:http://localhost:8099}
       connect-timeout: 2000
       read-timeout: 10000
+    # ADR-0337: the PENSION COMPANY's own treasury-service instance (PSP 34-12 PS, its own
+    # portfolio). No default on purpose: unset = PSP 34-12 PS is refused (503, "not configured")
+    # rather than read from whichever treasury happens to answer on a default port.
+    treasury-service:
+      url: ${PENSION_COMPANY_TREASURY_URL:}
+      connect-timeout: 2000
+      read-timeout: 10000
 
     # ADR-0340 B: the CRS/FATCA assembly's three read models, all under tax-reporting-service's
     # OWN machine identity (Keycloak client `openbank-tax-reporting`, ROLE_API only). party-service
@@ -133,6 +140,47 @@ mp:
         topic: openbank.interest.accrual.event
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # ADR-0367 / #15292: the CEÚ register projection (CeuRegisterEventConsumer). Same consumer
+      # group as above (quarkus.application.name), same DLQ shape; the topic CRs and ACLs are in
+      # openbank-infra/gitops/components/{kafka,tax-reporting}/. auto.offset.reset stays `latest`:
+      # the register's starting state is an explicit initial full load, never a topic replay whose
+      # completeness depends on retention.
+      ceu-account-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.tax-reporting.ceu-account-events-in
+          key:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+        connector: smallrye-kafka
+        topic: openbank.accounts.account.created
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      ceu-delegation-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.tax-reporting.ceu-delegation-events-in
+          key:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+        connector: smallrye-kafka
+        topic: openbank.delegation.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      ceu-party-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.tax-reporting.ceu-party-events-in
+          key:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+        connector: smallrye-kafka
+        topic: openbank.party.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"
@@ -145,15 +193,36 @@ authz:
 openbank:
   api:
     version: "1"
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (build-time property).
+  # Without it no PolicyDecisionPoint bean exists, AuthorizeInterceptor fails closed and every
+  # @Authorize endpoint answers 503 "policy decision point not configured".
+  authz:
+    opa-pdp-producer:
+      enabled: true
   # ADR-0336: catalogue-defined statutory returns. Until the reporting start and fund roster are
   # configured, deadline checks fail closed and workflow liveness cannot report success.
   statutory-returns:
-    catalogues: statutory-returns/cz/pension-cnb.v1.json,statutory-returns/cz/tax-information-exchange.v1.json
+    catalogues: statutory-returns/cz/pension-cnb.v1.json,statutory-returns/cz/tax-information-exchange.v1.json,statutory-returns/cz/ceu.v1.json,statutory-returns/cz/gsft.v1.json
     company-id: company
     deadline-check-every: 1h
     # ADR-0337: the first day of the pension company's books. Unset = every company-books return
     # is refused (503), because a balance summed from an unknown start cannot be shown complete.
     # company-books.opened: 2025-01-01
+  # ADR-0367 / #15292: the CEÚ daily change overview. reporting-start is the first window end
+  # (yyyy-MM-dd) this deployment reports; unset = the feed is not live: no overview is assembled,
+  # none is counted overdue, and openbank_workflow_unconfigured{workflow="ceu-daily-overview"}
+  # reads 1. Its value comes from the gitops env (OPENBANK_CEU_REPORTING_START).
+  ceu:
+    tick-every: 15m
+    # reporting-start: 2026-11-09
+  # #15356: GSFT depositor data delivery (catalogue cz-gsft). Both keys are unset by default and
+  # read as Optional: without bank-code no batch is assembled (503, named), without
+  # pgp-public-key (GSFT's ASCII-armoured public key ring, supplied by the gitops env and never
+  # committed) no batch is delivered. The service boots either way.
+  # gsft:
+  #   bank-code: "0000"
+  #   branch-country: ""
+  #   pgp-public-key: <armoured key ring>
   build:
     time: "${BUILD_TIME:unknown}"
   git:
@@ -206,3 +275,14 @@ openbank:
     rest-client:
       ledger-service:
         tls-configuration-name: internal-authority
+      # The pension company's own treasury-service instance (PSP 34-12 PS, ADR-0337): 8443, client
+      # auth REQUIRED; the call carries a bearer token and the cluster has no mesh, so plaintext 8160
+      # is not an option.
+      treasury-service:
+        tls-configuration-name: internal-authority
+  openbank:
+    statutory-returns:
+      # ADR-0336: the first period the pension company reports for, declared by the owner. Deadline
+      # obligations are derived from here; returns before it are not expected. Deployed profile only:
+      # tests choose their own (StatutoryReturnDeadlineUnconfiguredIT relies on it being unset).
+      reporting-start: 2025-01-01

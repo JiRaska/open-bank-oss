@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.40.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.40.1...notification-service-v0.40.2) (2026-11-12)
+
+
+### Bug Fixes
+
+* **notification:** close abandoned PENDING rows and count retired channels ([#15542](https://github.com/JiRaska/open-bank-oss/issues/15542)) ([6db6df3](https://github.com/JiRaska/open-bank-oss/commit/6db6df3d3cffb1334d4b44a7c6eae713f2a9204d))
+
+## [0.40.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.40.0...notification-service-v0.40.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **notification:** attribute stale PENDING notifications to their channel ([#14767](https://github.com/JiRaska/open-bank-oss/issues/14767)) ([d2b9562](https://github.com/JiRaska/open-bank-oss/commit/d2b9562d0dd34b928370c3512d3e2dce914d4f5d))
+
+## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.39.1...notification-service-v0.40.0) (2026-11-05)
+
+
+### Features
+
+* **notification:** keyset-page party history with exact unread counts ([#14621](https://github.com/JiRaska/open-bank-oss/issues/14621)) ([f2ba664](https://github.com/JiRaska/open-bank-oss/commit/f2ba664b02f8d51529787dd65d2c24b083154b97)), closes [#12216](https://github.com/JiRaska/open-bank-oss/issues/12216)
+
 ## [0.39.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.39.0...notification-service-v0.39.1) (2026-10-18)
 
 

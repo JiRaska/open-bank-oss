@@ -71,7 +71,7 @@ Flyway, neměnné historické skripty, forward-only (`migrate-at-start: true`):
 | `V3__create_sepa_payment_outbox.sql` | Tabulka `sepa_payment_outbox` (transakční outbox) + indexy | `DROP TABLE sepa_payment_outbox` |
 | `V4__hibernate_sequences.sql` | `sepa_payments_seq`, `sepa_payment_outbox_seq` (INCREMENT BY 50) — vyžadováno Hibernate Reactive + Panache (generování schématu `none`) | `DROP SEQUENCE sepa_payments_seq, sepa_payment_outbox_seq` |
 
-> V4 opravuje runtime defekt: BIGSERIAL vytvoří jen `<table>_id_seq`, ale Hibernate alokuje id ze `<table>_seq`. Hlídáno `HibernateSequenceGuardTest`. Nikdy nepřepisuj již aplikovanou migraci (checksum mismatch → pád při startu; použij `QUARKUS_FLYWAY_REPAIR_AT_START`, pokud je zasažena živá DB).
+> V4 opravuje runtime defekt: BIGSERIAL vytvoří jen `<table>_id_seq`, ale Hibernate alokuje id ze `<table>_seq`. Hlídáno CI gate `hibernate-sequence-guard`. Nikdy nepřepisuj již aplikovanou migraci (checksum mismatch → pád při startu; použij `QUARKUS_FLYWAY_REPAIR_AT_START`, pokud je zasažena živá DB).
 
 ## Indexy
 

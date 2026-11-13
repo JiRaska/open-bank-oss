@@ -5,6 +5,7 @@
 package com.openbank.swift.infrastructure.client
 
 import com.openbank.clients.transaction.TransactionCompletionUncertainException
+import com.openbank.clients.transaction.UnsettledOutcome
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.swift.application.port.out.SettlementUnavailableException
@@ -50,7 +51,7 @@ class SettlementAdapterTest {
 
     private fun assertAllUnsettledZero() {
         val counters = registry.find(SwiftSettlementMetrics.METRIC).counters()
-        assertThat(counters).hasSize(SwiftSettlementMetrics.Outcome.entries.size)
+        assertThat(counters).hasSize(SwiftSettlementMetrics.ALL_OUTCOMES.size)
         assertThat(counters.sumOf { it.count() }).isZero()
     }
 
@@ -60,7 +61,7 @@ class SettlementAdapterTest {
         assertThat(registry.scrape()).contains(
             """openbank_payment_unsettled_total{outcome="mismatch",rail="SWIFT",} 0.0""",
         )
-        metrics.unsettled(SwiftSettlementMetrics.Outcome.MISMATCH)
+        metrics.unsettled(UnsettledOutcome.MISMATCH)
         assertSingleUnsettled("mismatch")
         assertThat(registry.scrape()).contains(
             """openbank_payment_unsettled_total{outcome="mismatch",rail="SWIFT",} 1.0""",
@@ -68,8 +69,26 @@ class SettlementAdapterTest {
         registry.meters.forEach { meter ->
             assertThat(meter.id.tags.map { it.key }).containsExactlyInAnyOrder("rail", "outcome")
             assertThat(meter.id.getTag("rail")).isEqualTo("SWIFT")
-            assertThat(meter.id.getTag("outcome")).isIn(SwiftSettlementMetrics.Outcome.entries.map { it.label })
+            assertThat(meter.id.getTag("outcome")).isIn(SwiftSettlementMetrics.ALL_OUTCOMES.map { it.label })
         }
+    }
+
+    @Test
+    fun `scraped outcome labels are byte-identical to the series the alerts select on`() {
+        // Literal on purpose (#13669): the shared core moved to openbank-client-transaction and the
+        // SWIFT-only values became an extension; neither may rename or drop a Prometheus series.
+        val scraped = registry.find(SwiftSettlementMetrics.METRIC).counters().map { it.id.getTag("outcome") }
+        assertThat(scraped).containsExactlyInAnyOrder(
+            "mismatch",
+            "failed-replay",
+            "conflict",
+            "unexpected-status",
+            "transport-error",
+            "redrive-exhausted",
+            "bad-data",
+            "redrive-error",
+            "late-completion",
+        )
     }
 
     private fun created(id: UUID, status: Int = 201): Response =
@@ -100,6 +119,21 @@ class SettlementAdapterTest {
     fun `settle returns settled=true with transactionId on HTTP 201`(): Unit = runBlocking {
         val txId = UUID.randomUUID()
         answer { matching(it, txId) }
+
+        val outcome = adapter.settle(message())
+
+        assertThat(outcome.settled).isTrue()
+        assertThat(outcome.transactionId).isEqualTo(txId)
+        assertAllUnsettledZero()
+    }
+
+    @Test
+    fun `a matching COMPLETED 201 with an explicit null target account still settles`(): Unit = runBlocking {
+        val txId = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc")
+        answer { request ->
+            assertThat(request.targetAccountId).isNull()
+            matching(request, txId).copy(targetAccountId = null)
+        }
 
         val outcome = adapter.settle(message())
 
@@ -172,13 +206,17 @@ class SettlementAdapterTest {
     }
 
     @ParameterizedTest(name = "mismatched {0}")
-    @CsvSource("type", "account", "amount", "currency", "rail", "instructionType")
+    @CsvSource("type", "account", "targetAccount", "amount", "currency", "rail", "instructionType")
     fun `a COMPLETED 201 for a different booking never settles the SWIFT message`(field: String): Unit = runBlocking {
         answer { request ->
             val tx = matching(request)
             when (field) {
                 "type" -> tx.copy(type = "CREDIT")
                 "account" -> tx.copy(sourceAccountId = UUID.randomUUID())
+                "targetAccount" -> {
+                    assertThat(request.targetAccountId).isNull()
+                    tx.copy(targetAccountId = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
+                }
                 "amount" -> tx.copy(amount = request.amount.add(BigDecimal.ONE))
                 "currency" -> tx.copy(currencyCode = "USD")
                 "rail" -> tx.copy(rail = "SEPA_CT")
@@ -321,6 +359,9 @@ class SettlementAdapterTest {
         val outcome = adapter.settle(message(valueDate = "2026-06-22"))
 
         assertThat(outcome.settled).isFalse()
+        // #13686: it can never heal, so it is permanent (the re-drive stops) and counted as bad-data.
+        assertThat(outcome.permanent).isTrue()
+        assertSingleUnsettled("bad-data")
         verify(exactly = 0) { client.initiateTransaction(any()) }
     }
 

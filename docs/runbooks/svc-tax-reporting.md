@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-tax-reporting-service
 
-> Operational runbook for the `tax-reporting` service. Data domain **platform**,
+> Operational runbook for the `tax-reporting` service. Data domain **reporting**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-tax-reporting-service` |
 | HTTP port | `8152` |
-| Data domain | platform |
+| Data domain | reporting |
 | Datastore | PostgreSQL (database `openbank_tax_reporting`) |
 | Classification | confidential |
 | Retention | 10 years |

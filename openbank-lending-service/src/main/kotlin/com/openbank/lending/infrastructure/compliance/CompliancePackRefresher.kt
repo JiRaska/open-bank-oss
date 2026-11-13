@@ -71,7 +71,7 @@ class CompliancePackRefresher(
 
     @Scheduled(
         every = "{lending.compliance.refresh-interval}",
-        delayed = "10s",
+        delayed = "{lending.compliance.refresh-initial-delay:10s}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     suspend fun refresh() {

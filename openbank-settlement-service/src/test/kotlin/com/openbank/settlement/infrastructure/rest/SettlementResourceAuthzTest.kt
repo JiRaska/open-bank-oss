@@ -4,8 +4,9 @@
 
 package com.openbank.settlement.infrastructure.rest
 
-import com.openbank.settlement.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -23,7 +24,10 @@ import org.junit.jupiter.api.Test
  * openbank-infra/gitops/components/payments/gen-settlement-opa-bundle.sh).
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_settlement_it")],
+)
 class SettlementResourceAuthzTest {
 
     @Test

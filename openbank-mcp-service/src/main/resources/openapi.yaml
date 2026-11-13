@@ -1,11 +1,13 @@
 openapi: 3.0.3
 info:
   title: OpenBank MCP Server
-  version: 1.1.0
+  version: 1.1.1
   description: >
     Model Context Protocol (JSON-RPC 2.0 over HTTP POST) exposing curated consent-scoped read tools
     and a HITL payment proposal to governed AI agents (ADR-0181). Every tools/call is authorized by
-    the ADR-0034 OPA PDP as an AI_AGENT principal.
+    the ADR-0034 OPA PDP as an AI_AGENT principal. In tools/list, domain is the canonical
+    English business-domain label derived from packaged governance declarations. Shared tools
+    report a domain only when their source owners agree; otherwise they report Unclassified.
 paths:
   /api/v1/mcp/sessions:
     post:

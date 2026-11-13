@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.14.0...swift-service-v0.14.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **swift:** preserve institution transfer safeguards on current main ([#13838](https://github.com/JiRaska/open-bank-oss/issues/13838)) ([a9d9549](https://github.com/JiRaska/open-bank-oss/commit/a9d954930bf32a32340faece398777838ded4992))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.4...swift-service-v0.14.0) (2026-10-26)
+
+
+### Features
+
+* **swift:** bank-own institution transfers over the clearing rails ([#13904](https://github.com/JiRaska/open-bank-oss/issues/13904)) ([71a4532](https://github.com/JiRaska/open-bank-oss/commit/71a4532011239330fd12f6387777b5f2a6657864))
+
+## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.3...swift-service-v0.13.4) (2026-10-24)
+
+
+### Bug Fixes
+
+* **swift:** re-drive an accepted MT103 whose settlement booking is unproven ([#13696](https://github.com/JiRaska/open-bank-oss/issues/13696)) ([2bf26c9](https://github.com/JiRaska/open-bank-oss/commit/2bf26c915898e624056fec3d0f471968de5783e3))
+
 ## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.2...swift-service-v0.13.3) (2026-10-23)
 
 

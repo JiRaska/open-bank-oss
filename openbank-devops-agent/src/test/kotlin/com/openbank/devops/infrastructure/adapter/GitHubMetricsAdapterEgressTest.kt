@@ -6,9 +6,11 @@
 package com.openbank.devops.infrastructure.adapter
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.devops.application.port.out.GitHubReadBudget
 import com.openbank.libs.security.EgressDeniedException
 import com.openbank.libs.security.EgressResolver
 import com.sun.net.httpserver.HttpServer
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.time.Clock
 import java.util.concurrent.atomic.AtomicInteger
 
 /** ADR-0320 P1: GitHub egress is allow-listed — the listed host is reached, any other is refused unsent. */
@@ -47,6 +50,8 @@ class GitHubMetricsAdapterEgressTest {
             every { githubOwner() } returns "o"
             every { githubRepo() } returns "r"
         },
+        mockk<GitHubReadBudget> { coEvery { reserve(any()) } returns true },
+        Clock.systemUTC(),
     ).also {
         it.objectMapper = ObjectMapper()
         it.allowedHosts = listOf("stub.test:${server.address.port};http;private")

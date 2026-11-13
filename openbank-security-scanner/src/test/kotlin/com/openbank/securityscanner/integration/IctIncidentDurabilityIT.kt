@@ -4,7 +4,7 @@
 
 package com.openbank.securityscanner.integration
 
-import com.openbank.securityscanner.it.SecurityScannerPostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -48,7 +48,7 @@ import javax.sql.DataSource
  */
 @QuarkusTest
 @QuarkusTestResource(IctIncidentDurabilityIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(SecurityScannerPostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class IctIncidentDurabilityIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {

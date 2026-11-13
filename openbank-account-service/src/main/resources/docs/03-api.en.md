@@ -89,6 +89,30 @@ Idempotency-Key: ...
 
 Reasons: `AML_HOLD`, `COURT_ORDER`, `FRAUD_INVESTIGATION`, `CUSTOMER_REQUEST`.
 
+### Account standing
+
+Every response that returns an account carries `standing`, the answer to "may money leave or
+enter this account now" (ADR-0374 D4). Payment rails read it with the account instead of
+interpreting `status`.
+
+```json
+"standing": { "mayDebit": false, "mayCredit": false, "reason": "ACCOUNT_FROZEN" }
+```
+
+| `status` | `mayDebit` | `mayCredit` | `reason` |
+|---|---|---|---|
+| `ACTIVE` | true | true | null |
+| `DORMANT` | false | true | `ACCOUNT_DORMANT` |
+| `PENDING_ACTIVATION` | false | false | `ACCOUNT_PENDING_ACTIVATION` |
+| `FROZEN` | false | false | `ACCOUNT_FROZEN` |
+| `CLOSED` | false | false | `ACCOUNT_CLOSED` |
+
+**Party standing.** When party-service reports a party as `SUSPENDED` or `CLOSED`, every `ACTIVE`
+account the party owns is frozen. When the party is `ACTIVE` again those freezes are lifted. A
+freeze placed through `POST .../freeze` is never lifted by a party event, and freezing an account
+that is frozen because of its party makes the freeze the operator's. `reason` is `ACCOUNT_FROZEN`
+in both cases. No customer notification is sent for a party-standing freeze.
+
 ### Authorizations
 
 ```http
@@ -126,6 +150,8 @@ Unified via `openbank-libs.api.ApiError`:
 | 409 | `account-already-closed` | close has already happened |
 | 422 | `account-frozen` | mutation on a frozen account |
 | 422 | `insufficient-authorization` | not OWNER for this operation |
+| 422 | `PRODUCT_REVISION_NOT_PUBLISHED` | opening a product with no published catalog revision to pin (ADR-0341 D1) |
+| 503 | `PRODUCT_CATALOG_UNAVAILABLE` | product catalog unreachable at opening; nothing persisted, retry after `Retry-After` |
 | 429 | `rate-limited` | per-token quota |
 | 500 | `internal-error` | unexpected error (with correlationId for support) |
 
@@ -149,3 +175,20 @@ Events are **append-only**; corrections are made through a compensating event (e
 - **API version in URL** (`/api/v1/...`). Breaking changes = `/api/v2/...`, v1 runs in parallel for 6 months.
 - **Event version in topic name** (`...v1`). Schema evolution: only additive (adding optional fields), breaking = new topic.
 - **OpenAPI diff** in CI against `main` — fail when a removed endpoint or a required-added field appears without a version bump.
+
+## Listener authentication
+
+Under `/api/*` the bearer mechanism is the only accepted authentication on both listeners, and the permission now requires an authenticated caller rather than permitting everyone. A trusted client certificate on the mTLS listener is transport authentication only. A route that carries no security annotation of its own is therefore refused without a bearer. The public metadata routes `GET /api/v1/info` and `GET /api/v1/config` are explicitly permitted without one.
+
+## Account list cursor pagination
+
+`GET /api/v1/accounts?partyId=...` returns a party's accounts ordered by account type first (current, then savings, then other types) and by id within a type. The cursor is still the opaque encoding of the last returned account id. To continue a page the service reads that account back, restricted to the same party, takes its account type, and returns the rows that sort strictly after it in that same ordering. Comparing the id alone would skip savings accounts whose id is lower than the last current account's id. A cursor that is malformed, names no account, or names an account owned by a different party is rejected with `400`, so a cursor cannot be used to probe another party's accounts.
+
+
+### Deposit account roster for GSFT
+
+`GET /api/v1/accounts/reporting/deposits?asOf=YYYY-MM-DD` returns the account number, account type,
+currency and holder ID for deposit accounts that existed at the end of the Czech calendar day.
+Frozen and dormant accounts are included. A closure at or after the next midnight leaves the
+account in the roster for the requested day. The cursor is scoped to that date. Account service
+accepts this request only from the verified tax-reporting service identity.

@@ -119,6 +119,11 @@ data class BillingAssessment(
     val skipped: Boolean,
     val skipReason: String?,
     val assessedFees: List<AssessedFee>,
+    /**
+     * Inputs and legacy decision queued for the product-IR shadow comparator (ADR-0352 phase 3).
+     * Null for a skipped assessment: nothing was decided, so there is nothing to compare.
+     */
+    val shadowInput: ProductShadowInput? = null,
 ) {
     /** Balanced fee journals to post — only the chargeable (non-waived, non-zero) fees. */
     fun journalCommands(): List<FeeJournalCommand> = assessedFees

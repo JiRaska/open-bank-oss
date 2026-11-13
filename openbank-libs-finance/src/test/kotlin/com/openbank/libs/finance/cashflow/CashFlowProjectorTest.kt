@@ -4,6 +4,7 @@
 
 package com.openbank.libs.finance.cashflow
 
+import com.openbank.libs.domain.calendar.DayCount
 import com.openbank.libs.finance.CERTIS
 import com.openbank.libs.finance.TARGET2
 import com.openbank.libs.finance.bd
@@ -184,6 +185,7 @@ class CashFlowProjectorTest {
             "2027-01-15",
             rate = RateSpec.Fixed(bd("0.04")),
             notional = NotionalSpec(bd("1000000"), AmortisationSpec.Annuity),
+            dayCount = DayCount.THIRTY_360_BOND_BASIS,
         )
         val flows = CashFlowProjector.project(ScheduleGenerator.generate(leg)).requireComplete()
         val principal = flows.filter { it.kind == CashFlowKind.PRINCIPAL }
@@ -194,6 +196,8 @@ class CashFlowProjectorTest {
         // Level to the cent except the last, which absorbs every rounding residual.
         assertThat(payments.dropLast(1).distinct()).hasSize(1)
         assertThat((payments.last() - payments.first()).abs()).isLessThanOrEqualTo(bd("0.05"))
+        // The installment is the contract's: N·i/(1−(1+i)^−n), i = 4%/4 — 256,281.09 for 4 quarters.
+        assertThat(payments.first()).isEqualByComparingTo("256281.09")
         assertThatThrownBy {
             ScheduleGenerator.generate(
                 leg.copy(
@@ -205,6 +209,21 @@ class CashFlowProjectorTest {
                 ),
             )
         }.hasMessageContaining("annuity needs a fixed rate")
+    }
+
+    @Test
+    fun `an annuity installment is the nominal-rate formula whatever the day count or holidays`() {
+        // ACT/360 periods of 90..92 days would change a day-count-derived level payment; the
+        // contractual installment does not move — only the interest/principal split does.
+        val leg = fixedLeg(
+            "2026-01-15",
+            "2027-01-15",
+            rate = RateSpec.Fixed(bd("0.04")),
+            notional = NotionalSpec(bd("1000000"), AmortisationSpec.Annuity),
+        )
+        val flows = CashFlowProjector.project(ScheduleGenerator.generate(leg)).requireComplete()
+        val first = flows.filter { it.periodIndex == 0 }.fold(BigDecimal.ZERO) { a, f -> a + f.amount }
+        assertThat(first).isEqualByComparingTo("256281.09")
     }
 
     @Test

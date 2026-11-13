@@ -19,7 +19,7 @@ infrastructure/
   rest/VopResource.kt             POST /api/v1/vop/verify
   rest/dto/VopDtos.kt             mapování na drát + explicitní validace
   ratelimit/                      VopRateLimiter, VopRateLimitFilter
-  client/                         AccountServiceClient, PartyServiceClient (lokální zrcadla)
+  client/                         AccountServiceClient (generovaný, openbank-client-account), PartyServiceClient (lokální zrcadlo)
   adapter/                        AccountHolderNameLookupAdapter, NoSchemeRoutingAdapter
   persistence/                    VopVerificationEntity, VopVerificationRecordAdapter
   authz/AuthzProducer.kt          OPA sidecar PDP

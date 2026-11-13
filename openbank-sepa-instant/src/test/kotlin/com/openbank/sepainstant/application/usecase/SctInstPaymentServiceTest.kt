@@ -5,13 +5,16 @@
 package com.openbank.sepainstant.application.usecase
 
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepainstant.application.port.`in`.SubmitSctInstCommand
 import com.openbank.sepainstant.application.port.out.AmlCasePort
-import com.openbank.sepainstant.application.port.out.AmlCaseRiskLevel
 import com.openbank.sepainstant.application.port.out.FraudScoreOutcome
 import com.openbank.sepainstant.application.port.out.FraudScoringPort
-import com.openbank.sepainstant.application.port.out.FraudVerdict
 import com.openbank.sepainstant.application.port.out.OpenAmlCaseCommand
 import com.openbank.sepainstant.application.port.out.SanctionsScreeningPort
 import com.openbank.sepainstant.application.port.out.SchemeGatewayPort
@@ -27,9 +30,6 @@ import com.openbank.sepainstant.domain.event.SctInstPaymentRejected
 import com.openbank.sepainstant.domain.event.SctInstPaymentSubmitted
 import com.openbank.sepainstant.domain.model.SctInstPayment
 import com.openbank.sepainstant.domain.model.SctInstStatus
-import com.openbank.sepainstant.domain.screening.ScreeningMatchStatus
-import com.openbank.sepainstant.domain.screening.ScreeningResult
-import com.openbank.sepainstant.domain.screening.ScreeningRole
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -264,7 +264,7 @@ class SctInstPaymentServiceTest {
         verify {
             amlCasePort.openCase(
                 match<OpenAmlCaseCommand> {
-                    it.riskLevel == AmlCaseRiskLevel.CRITICAL &&
+                    it.riskLevel == AmlCaseSeverity.CRITICAL &&
                         it.alertCode == "SANCTIONS_HIT" &&
                         it.matchedEntity == "BOB CREDITOR / OFAC"
                 },
@@ -304,7 +304,7 @@ class SctInstPaymentServiceTest {
         verify {
             amlCasePort.openCase(
                 match<OpenAmlCaseCommand> {
-                    it.riskLevel == AmlCaseRiskLevel.HIGH && it.alertCode == "AML_HOLD"
+                    it.riskLevel == AmlCaseSeverity.HIGH && it.alertCode == "AML_HOLD"
                 },
             )
         }
@@ -328,7 +328,7 @@ class SctInstPaymentServiceTest {
         verify {
             amlCasePort.openCase(
                 match<OpenAmlCaseCommand> {
-                    it.riskLevel == AmlCaseRiskLevel.MEDIUM && it.alertCode == "SCREENING_UNAVAILABLE"
+                    it.riskLevel == AmlCaseSeverity.MEDIUM && it.alertCode == "SCREENING_UNAVAILABLE"
                 },
             )
         }

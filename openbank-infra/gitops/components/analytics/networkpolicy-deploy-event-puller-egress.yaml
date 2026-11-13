@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Egress allow-list for deploy-event-puller, the sibling of
+# networkpolicy-gate-health-puller-egress.yaml with NO internet rule: it needs DNS,
+# ClickHouse HTTP and the Kubernetes API server, nothing else. The API server's endpoints
+# are ENIs inside the VPC (`kubectl get endpointslices -l kubernetes.io/service-name=kubernetes`),
+# so the rule is the VPC CIDR (sandbox-substrate main.tf) on 443, not 0.0.0.0/0.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deploy-event-puller-egress-allow-list
+  namespace: analytics
+  labels:
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/component: ci-gate-observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: deploy-event-puller
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: clickhouse
+      ports:
+        - protocol: TCP
+          port: 8123
+    - to:
+        - ipBlock:
+            cidr: 10.80.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

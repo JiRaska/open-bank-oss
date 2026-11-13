@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { DomainGroup } from '@/lib/governance/domains'
+
 export interface ServiceHealthEntry {
   name: string
   namespace?: string
   port: number
   label: string
-  group: 'core' | 'payments' | 'compliance' | 'identity' | 'open-banking' | 'platform'
+  group: DomainGroup
   container: string
   healthPath: string
   status: 'UP' | 'DOWN' | 'UNKNOWN'

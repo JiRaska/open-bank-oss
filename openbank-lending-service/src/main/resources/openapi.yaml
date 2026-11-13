@@ -34,7 +34,19 @@ info:
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
   # 1.39.0: re-bump — 1.38.0 was taken on main by #12769 (ADR-0211) after this branch
   # was cut; the api-contract gate requires a fresh MINOR on live main.
-  version: 1.39.0
+  # 1.39.0 -> 1.40.0 (#10558): correct the documented existing Money response shape;
+  # requests retain their accepted forms and runtime serialization is unchanged.
+  # 1.40.0 -> 1.41.0: additive — customer-requested human review of an engine decline (GDPR Art.
+  # 22(3), EU AI Act Art. 86): POST /intake/applications/{id}/decline-review (customer-edge only) and
+  # the DeclineReview schema. 1.40.0 is what live origin/main holds.
+  # 1.41.0 -> 1.42.0 (#15656): effective-dated Czech credit policy versions; 1.41.0 was taken on
+  # main by #15786 after this branch was cut.
+  # 1.42.0 -> 1.43.0: additive — the staff side of the decline review: GET /decline-reviews and
+  # POST /decline-reviews/{id}/decision, and the StaffDeclineReview and DeclineReviewDecision schemas.
+  # 1.42.0 was taken on main by #15656 after this branch was cut.
+  # 1.43.0 -> 1.44.0: additive — signatureRecordedAt, the bank-recorded signature receipt time, on
+  # the application response (#9890). 1.42.0 was taken on main by #15656 after this branch was cut.
+  version: 1.44.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -85,6 +97,9 @@ paths:
       responses:
         '201':
           description: Application accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -108,6 +123,11 @@ paths:
       responses:
         '200':
           description: Applications for the party
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/intake/applications:
@@ -154,6 +174,9 @@ paths:
       responses:
         '201':
           description: Application accepted into the origination graph
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -240,6 +263,117 @@ paths:
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '422': { description: The current state no longer permits withdrawal }
+
+  /api/v1/lending/intake/applications/{id}/decline-review:
+    post:
+      tags: [Lending]
+      operationId: requestCustomerDeclineReview
+      summary: Request human review of an engine decline of one of the caller's applications (customer-edge only)
+      description: >-
+        GDPR Art. 22(3) / EU AI Act Art. 86. The party id is taken from the X-Customer-Party-Id
+        header set by customer-edge from the customer JWT; an application belonging to another
+        party answers 404. Only an application DECLINED by the decision engine is reviewable (a
+        decline already made by a human is not looped back) and only within
+        `lending.decline-review.window-days` (default 30) of the engine decision. One review per
+        application: the first request answers 201, a repeat answers 200 with the same review. The
+        Idempotency-Key is required (a keyed retry replays the stored answer).
+        409 carries a stable code in `error`: NOT_ENGINE_DECLINE or REVIEW_WINDOW_ELAPSED.
+        Only the configured customer-edge service principal may call it; any other caller is 403.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The review that already exists for this application
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeclineReview'
+        '201':
+          description: Review requested
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeclineReview'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404': { description: No such application for this caller }
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/lending/decline-reviews:
+    get:
+      tags: [Lending]
+      operationId: listPendingDeclineReviews
+      summary: Pending decline reviews, oldest first, with the engine's recorded reasons
+      description: Humans only (ROLE_CREDIT_RISK or ROLE_ADMIN); never grantable to a service account.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Pending reviews
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StaffDeclineReview'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/lending/decline-reviews/{id}/decision:
+    post:
+      tags: [Lending]
+      operationId: decideDeclineReview
+      summary: Confirm the engine decline or overturn it
+      description: >-
+        The reviewer (the JWT subject, never client-supplied) is not bound by the engine outcome. A
+        reviewer whose principal name equals the applicant's party id is refused (SELF_REVIEW); this is
+        not a staff conflict-of-interest check, which would need a staff-to-party mapping. A reason of at least 10 characters is mandatory for both outcomes.
+        CONFIRMED records the human decision; the declined application is unchanged. OVERTURNED does
+        not resurrect the declined application: it opens a successor application (linked in
+        `successorApplicationId`) in FOUR_EYES with the reviewer as proposer, so the existing
+        four-eyes decision (POST /applications/{id}/decision, approver different from proposer)
+        still makes the credit decision. The successor gets a first due date recomputed by the intake
+        rule and today's compliance pack, but keeps the declined application's rate (no re-pricing) and
+        has no engine evaluation of its own. An overturn intake would refuse today (origination not
+        allowed for the product, FLOATING rate while floating origination is off, invalid rate terms)
+        answers 409 SUCCESSOR_NOT_ORIGINABLE and the review stays REQUESTED. The Idempotency-Key is required; the decision is replay-safe by a
+        conditional claim, so a retry answers 409. 409 codes: REVIEW_ALREADY_DECIDED, SELF_REVIEW,
+        SUCCESSOR_NOT_ORIGINABLE.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeclineReviewDecision'
+      responses:
+        '200':
+          description: The decided review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffDeclineReview'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404': { description: No such review }
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/lending/intake/financial-health:
     get:
@@ -347,7 +481,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: The application }
+        '200':
+          description: The application
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: Not found }
@@ -517,15 +655,14 @@ paths:
       summary: The credit policy bundle the engine evaluates as of a date
       description: >-
         Every decision table (exclusion, eligibility, affordability, pricing band) with its rules,
-        version and effective window (ADR-0213 D1). codeSeeded is true while the ADR-0213 D3
-        starter policy is the binding — i.e. before the four-eyes table store D4 describes exists —
-        so a risk committee reading the table knows whether anyone can change it and how.
+        version and effective window for Czech consumer credit. codeSeeded is true when no
+        approved Czech revision was effective on the requested day.
       parameters:
         - name: asOf
           in: query
           required: false
           schema: { type: string, format: date }
-          description: ISO-8601 date; defaults to today. A malformed value is a 400.
+          description: ISO-8601 date. Defaults to today's date in Europe/Prague. A malformed value is a 400.
       responses:
         '200':
           description: The active bundle
@@ -536,6 +673,92 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/risk/policy/proposals:
+    get:
+      tags: [Lending]
+      operationId: listCzCreditPolicyProposals
+      summary: List Czech consumer credit policy revisions awaiting a checker
+      responses:
+        '200':
+          description: Pending immutable proposals
+          headers:
+            Cache-Control:
+              schema: { type: string, example: no-store }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CzCreditPolicyProposal' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Lending]
+      operationId: proposeCzCreditPolicy
+      summary: Propose an immutable Czech consumer credit policy revision
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CzCreditPolicyBundle' }
+      responses:
+        '201':
+          description: Stored revision proposal, including the original response on exact retry
+          headers:
+            X-Idempotency-Replayed:
+              description: True when the original command response is replayed.
+              schema: { type: string, enum: ['true'] }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CzCreditPolicyProposal' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The key was used for a different request or identical content is already pending or approved
+  /api/v1/lending/risk/policy/proposals/{id}/decide:
+    post:
+      tags: [Lending]
+      operationId: decideCzCreditPolicy
+      summary: Approve or reject an exact policy revision as a different staff actor
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve: { type: boolean }
+                reason: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Recorded policy decision, including the original response on exact retry
+          headers:
+            X-Idempotency-Replayed:
+              description: True when the original command response is replayed.
+              schema: { type: string, enum: ['true'] }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CzCreditPolicyProposal' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The policy proposal does not exist
+        '409':
+          description: The key was used for a different request, the proposal was decided, or the version or date is in use
+        '422':
+          description: The checker must differ from the maker
   /api/v1/lending/applications/recent:
     get:
       tags: [Lending]
@@ -557,7 +780,13 @@ paths:
           description: Clamped server-side into 1..100.
           schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
       responses:
-        '200': { description: Recent applications }
+        '200':
+          description: Recent applications
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '400': { description: Unknown status value }
         '403':
           $ref: '#/components/responses/Forbidden'
@@ -569,7 +798,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '201': { description: Quote issued and persisted with its validity window }
+        '201':
+          description: Quote issued and persisted with its validity window
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettlementQuote' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: Loan not in a quotable state }
   /api/v1/lending/loans/{id}/settle:
@@ -580,7 +813,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Loan settled and closed }
+        '200':
+          description: Loan settled and closed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: No valid quote or invalid state }
   /api/v1/lending/loans/{id}/withdrawal:
@@ -591,7 +828,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Contract unwound with statutory day interest }
+        '200':
+          description: Contract unwound with statutory day interest
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: Cooling-off window closed or no pack }
   /api/v1/lending/loans/{id}/mark-delinquent:
@@ -602,7 +843,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Loan marked DELINQUENT }
+        '200':
+          description: Loan marked DELINQUENT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: No past-due installment }
   /api/v1/lending/loans/{id}/mark-defaulted:
@@ -613,7 +858,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Loan marked DEFAULTED }
+        '200':
+          description: Loan marked DEFAULTED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: DPD below threshold }
   /api/v1/lending/loans/{id}/forbearance:
@@ -624,7 +873,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Assessment recorded (FORBEARANCE_ASSESSED) }
+        '200':
+          description: Assessment recorded (FORBEARANCE_ASSESSED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: Not in DEFAULTED state }
   /api/v1/lending/loans/{id}/termination/propose:
@@ -635,7 +888,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Termination proposed }
+        '200':
+          description: Termination proposed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: Ground not permitted by the pinned pack }
   /api/v1/lending/loans/{id}/termination/decide:
@@ -646,7 +903,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: TERMINATION_NOTICED with the pack notice period }
+        '200':
+          description: TERMINATION_NOTICED with the pack notice period
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: Four-eyes violation }
   /api/v1/lending/loans/{id}/accelerate:
@@ -657,7 +918,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Loan ACCELERATED — full balance due }
+        '200':
+          description: Loan ACCELERATED — full balance due
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: Notice period not yet elapsed }
   /api/v1/lending/applications/{id}/evidence:
@@ -703,7 +968,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Application advanced to the next state }
+        '200':
+          description: Application advanced to the next state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '404': { description: Application not found }
         '409':
           description: >-
@@ -736,7 +1005,11 @@ paths:
             schema:
               $ref: '#/components/schemas/DecisionRequest'
       responses:
-        '200': { description: Decision applied }
+        '200':
+          description: Decision applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -810,11 +1083,9 @@ paths:
       summary: Record the customer's signature on the offered contract
       description: >-
         ADR-0211 D1 + ADR-0214: the explicit AWAITING_SIGNATURE → SIGNED step, persisting the
-        signature artefact hash on the application row in the same conditional claim as the
-        transition (V27). The hash is the evidence anchor of the signature artefact and is never
-        a validate-and-discard. A SYSTEM actor can never drive this transition — the state
-        machine refuses non-human signers. Only an application actually in AWAITING_SIGNATURE
-        moves; anything else answers 422.
+        signature artefact hash and its bank-recorded receipt time in the same transaction as the
+        application state and SIGNED audit evidence. A SYSTEM actor cannot drive this transition.
+        Only an application in AWAITING_SIGNATURE can move. Other states return 422.
       parameters:
         - $ref: '#/components/parameters/IdPath'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -825,7 +1096,11 @@ paths:
             schema:
               $ref: '#/components/schemas/SignApplicationRequest'
       responses:
-        '200': { description: Application signed; artefact hash persisted }
+        '200':
+          description: Application signed and receipt evidence stored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -846,7 +1121,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '201': { description: Loan disbursed and booked }
+        '201':
+          description: Loan disbursed and booked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -918,7 +1197,13 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: The repayment schedule }
+        '200':
+          description: The repayment schedule
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LoanInstallment' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/loans/{id}/installments/{installmentId}/repay:
@@ -933,7 +1218,11 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        '200': { description: Repayment recorded }
+        '200':
+          description: Repayment recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanInstallment' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -953,7 +1242,11 @@ paths:
             schema:
               $ref: '#/components/schemas/WriteOffRequest'
       responses:
-        '200': { description: Loan written off }
+        '200':
+          description: Loan written off
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -976,7 +1269,11 @@ paths:
             schema:
               $ref: '#/components/schemas/RescheduleRequest'
       responses:
-        '200': { description: Loan rescheduled }
+        '200':
+          description: Loan rescheduled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -1005,7 +1302,11 @@ paths:
             schema:
               $ref: '#/components/schemas/CollateralRequest'
       responses:
-        '201': { description: Collateral registered (PENDING) }
+        '201':
+          description: Collateral registered (PENDING)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collateral' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -1017,7 +1318,13 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Collateral for the loan }
+        '200':
+          description: Collateral for the loan
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Collateral' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/collateral/{id}/decision:
@@ -1035,7 +1342,11 @@ paths:
             schema:
               $ref: '#/components/schemas/CollateralDecisionRequest'
       responses:
-        '200': { description: Decision applied }
+        '200':
+          description: Decision applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collateral' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -1818,7 +2129,7 @@ components:
         loanId: { type: string, format: uuid }
         asOf: { type: string, format: date }
         outstandingBalance:
-          $ref: '#/components/schemas/Money'
+          $ref: '#/components/schemas/MoneyResponse'
         daysPastDue: { type: integer }
         bucket:
           type: string
@@ -1830,7 +2141,7 @@ components:
           type: string
           enum: [TWELVE_MONTH, LIFETIME]
         expectedCreditLoss:
-          $ref: '#/components/schemas/Money'
+          $ref: '#/components/schemas/MoneyResponse'
         modelVersion:
           type: string
           description: >-
@@ -1843,6 +2154,22 @@ components:
       properties:
         amount: { type: number }
         currency: { type: string, description: ISO-4217 currency code }
+    MoneyResponse:
+      type: object
+      required: [amount, currency, isNonNegative, isZero, isNegative, isPositive]
+      description: Existing lending response form; the wire shape is pinned while readers use nested currency codes.
+      properties:
+        amount: { type: number }
+        currency:
+          type: object
+          required: [code, defaultFractionDigits]
+          properties:
+            code: { type: string, description: ISO-4217 currency code }
+            defaultFractionDigits: { type: integer, minimum: 0 }
+        isNonNegative: { type: boolean }
+        isZero: { type: boolean }
+        isNegative: { type: boolean }
+        isPositive: { type: boolean }
     MoneyTotal:
       type: object
       required: [currency, amount]
@@ -2016,6 +2343,30 @@ components:
         rules:
           type: array
           items: { $ref: '#/components/schemas/PolicyRuleView' }
+    CzCreditPolicyBundle:
+      type: object
+      required: [tables]
+      properties:
+        tables:
+          type: array
+          items: { $ref: '#/components/schemas/PolicyTableView' }
+    CzCreditPolicyProposal:
+      type: object
+      required: [id, revision, effectiveFrom, contentHash, state, proposedBy, proposedAt, policyJson]
+      properties:
+        id: { type: string, format: uuid }
+        revision: { type: integer, minimum: 3 }
+        effectiveFrom: { type: string, format: date }
+        contentHash: { type: string }
+        state: { type: string, enum: [PROPOSED, EXECUTED, REJECTED] }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        decisionReason: { type: string, nullable: true }
+        policyJson:
+          type: string
+          description: Exact stored UTF-8 policy JSON covered by contentHash.
     CreditPolicyView:
       type: object
       required: [asOf, source, codeSeeded, tables]
@@ -2162,12 +2513,83 @@ components:
           description: >-
             Optional published catalog offering. When supplied, its immutable revision sets the
             rate, currency, tenor and amortization constraints and is retained with the application.
+    LoanApplicationResponse:
+      type: object
+      required: [requestedAmount]
+      description: The application carries other workflow fields; Money values use the existing response form.
+      properties:
+        requestedAmount: { $ref: '#/components/schemas/MoneyResponse' }
+        verifiedIncomeMonthly:
+          anyOf:
+            - { $ref: '#/components/schemas/MoneyResponse' }
+            - { type: 'null' }
+        existingDebtServiceMonthly:
+          anyOf:
+            - { $ref: '#/components/schemas/MoneyResponse' }
+            - { type: 'null' }
+        existingDebtOutstanding:
+          anyOf:
+            - { $ref: '#/components/schemas/MoneyResponse' }
+            - { type: 'null' }
+        signatureRecordedAt:
+          description: Bank-recorded signature receipt time from the explicit sign command. Unknown on legacy rows.
+          anyOf:
+            - { type: string, format: date-time }
+            - { type: 'null' }
     DecisionRequest:
       type: object
       required: [approve]
       properties:
         approve: { type: boolean }
         reason: { type: string, nullable: true }
+    DeclineReview:
+      type: object
+      description: >-
+        What the customer sees of a review: where it stands. The engine's reason codes are already
+        on the application journey; the reviewer's reason is an internal note and is not exposed.
+      required: [id, applicationId, status, requestedAt]
+      properties:
+        id: { type: string, format: uuid }
+        applicationId: { type: string, format: uuid }
+        status: { type: string, enum: [REQUESTED, CONFIRMED, OVERTURNED] }
+        requestedAt: { type: string, format: date-time }
+    StaffDeclineReview:
+      type: object
+      required: [id, applicationId, partyId, status, requestedAt, engineOutcome, engineDecidedAt]
+      properties:
+        id: { type: string, format: uuid }
+        applicationId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        status: { type: string, enum: [REQUESTED, CONFIRMED, OVERTURNED] }
+        requestedAt: { type: string, format: date-time }
+        engineOutcome: { type: string, description: The engine's outcome as recorded (always DECLINE here). }
+        engineReasons:
+          type: string
+          nullable: true
+          description: The engine's machine-readable reasons, comma-separated CODE:ruleId pairs.
+        policyVersions:
+          type: string
+          nullable: true
+          description: The pinned policy table versions the engine used, comma-separated TABLE=version pairs.
+        engineDecidedAt: { type: string, format: date-time }
+        reviewedBy: { type: string, nullable: true }
+        reviewedAt: { type: string, format: date-time, nullable: true }
+        reviewReason: { type: string, nullable: true }
+        successorApplicationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set only when OVERTURNED; the application that entered the four-eyes decision.
+    DeclineReviewDecision:
+      type: object
+      required: [outcome, reason]
+      properties:
+        outcome: { type: string, enum: [CONFIRMED, OVERTURNED] }
+        reason:
+          type: string
+          minLength: 10
+          maxLength: 512
+          description: Why; recorded on the review and never published in events.
     WithdrawApplicationRequest:
       type: object
       required: [reason]
@@ -2293,6 +2715,7 @@ components:
         A booked loan. Only the fields this contract pins are listed; the response carries the
         loan's other terms as well.
       properties:
+        principal: { $ref: '#/components/schemas/MoneyResponse' }
         contractNumber:
           type: string
           pattern: '^UV-[0-9]{4}-[0-9]{6,}$'
@@ -2300,6 +2723,53 @@ components:
             Human contract number (#11107): UV-<origination year (UTC)>-<per-year sequence,
             zero-padded to at least six digits>. Unique, assigned at creation, immutable; the
             sequence is gap-tolerant (a rolled-back creation may leave a hole).
+    LoanInstallment:
+      type: object
+      description: One persisted contractual installment; all five monetary fields use the lending Money response form.
+      required: [id, loanId, number, dueDate, openingBalance, principal, interest, payment, closingBalance, paid, interestAccrued]
+      properties:
+        id: { type: string, format: uuid }
+        loanId: { type: string, format: uuid }
+        number: { type: integer }
+        dueDate: { type: string, format: date }
+        openingBalance: { $ref: '#/components/schemas/MoneyResponse' }
+        principal: { $ref: '#/components/schemas/MoneyResponse' }
+        interest: { $ref: '#/components/schemas/MoneyResponse' }
+        payment: { $ref: '#/components/schemas/MoneyResponse' }
+        closingBalance: { $ref: '#/components/schemas/MoneyResponse' }
+        paid: { type: boolean }
+        paidAt: { type: string, format: date-time, nullable: true }
+        interestAccrued: { type: boolean }
+        accruedAt: { type: string, format: date-time, nullable: true }
+    SettlementQuote:
+      type: object
+      required: [asOfDate, validUntil, outstandingPrincipal, accruedInterest, compensation, unappliedCredit, total, compensationCapped]
+      properties:
+        asOfDate: { type: string, format: date }
+        validUntil: { type: string, format: date }
+        outstandingPrincipal: { $ref: '#/components/schemas/MoneyResponse' }
+        accruedInterest: { $ref: '#/components/schemas/MoneyResponse' }
+        compensation: { $ref: '#/components/schemas/MoneyResponse' }
+        unappliedCredit: { $ref: '#/components/schemas/MoneyResponse' }
+        total: { $ref: '#/components/schemas/MoneyResponse' }
+        compensationCapped: { type: boolean }
+    Collateral:
+      type: object
+      required: [id, loanId, type, marketValue, haircut, valuedAt, status, registeredBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        loanId: { type: string, format: uuid }
+        type: { type: string, enum: [REAL_ESTATE, VEHICLE, SECURITIES, CASH_DEPOSIT, GUARANTEE, OTHER] }
+        description: { type: string, nullable: true }
+        marketValue: { $ref: '#/components/schemas/MoneyResponse' }
+        haircut: { type: number, minimum: 0, maximum: 1 }
+        valuedAt: { type: string, format: date-time }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        registeredBy: { type: string }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        releasedAt: { type: string, format: date-time, nullable: true }
     RemainingInstallment:
       type: object
       required: [number, dueDate, principal, interest]

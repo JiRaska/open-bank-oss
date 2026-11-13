@@ -6,7 +6,7 @@
 // real page, its client-side state transitions and its rendered operator copy,
 // without pretending a local Playwright run is a regulator, Tempo or Temporal.
 
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 import { APPROVAL_DOMAINS } from '../src/lib/approvals/evidence'
 
@@ -69,7 +69,7 @@ test('Customer 360 joins authoritative portfolio and documents to the name-selec
 })
 
 test('Test Coverage is backed by a dated CI evidence snapshot, not a static score', async ({ page }) => {
-  await json(page, '**/api/test-intelligence', {
+  await json(page, '**/api/test-intelligence?*', {
     schemaVersion: 1, collectedAt: '2026-08-22T08:00:00Z', contracts: [], mutations: [], performance: [], syntheticJourneys: [], clientExperiences: [], history: [], runHistory: [], testCases: [], warnings: [],
     totals: { components: 2, componentsWithExecutionEvidence: 1, moneyPathComponents: 1, failingEvidence: 1, missingEvidence: 1, staleEvidence: 0 },
     components: [
@@ -79,10 +79,11 @@ test('Test Coverage is backed by a dated CI evidence snapshot, not a static scor
   })
 
   await page.goto('/system/tests')
-  await expect(page.getByText(/sesbíráno|collected/)).toBeVisible()
-  await expect(page.getByText(/absence se nikdy nevykresluje jako nula|absence is never rendered as zero/)).toBeVisible()
-  await expect(page.getByText('ledger-service')).toBeVisible()
-  await expect(page.getByText('account-service')).toBeVisible()
+  await expect(page.getByText(/Report sesbírán|Report collected/)).toBeVisible()
+  await expect(page.getByText(/Chybí ověření|Unverified/, { exact: true }).first()).toBeVisible()
+  const matrix = page.getByRole('region', { name: /Matice důkazů komponent|Component evidence matrix/ })
+  await expect(matrix.getByText('ledger-service')).toBeVisible()
+  await expect(matrix.getByText('account-service')).toBeVisible()
 })
 
 test('Trace Explorer renders an OTLP waterfall after selecting a trace', async ({ page }) => {
@@ -134,7 +135,7 @@ test('regulatory preview blocks fiction: it shows real FINREP cells and no submi
     await page.waitForTimeout(250)
     return [before, await disclosure.count()]
   }).toEqual([1, 1])
-  await expect(disclosure).toHaveAccessibleName(/CNB — Finanční výkazy.*(?:Rozbalit detail|Expand details)/)
+  await expect(disclosure).toHaveAccessibleName(/CNB — (?:Finanční výkazy|Financial statements).*(?:Rozbalit detail|Expand details)/)
   await disclosure.focus()
   await page.keyboard.press('Enter')
   await expect(disclosure).toHaveAttribute('aria-expanded', 'true')

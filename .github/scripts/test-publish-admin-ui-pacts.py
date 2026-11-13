@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Exercise provenance and publication failures without contacting a broker."""
 import copy
+import io
+import tarfile
+import shutil
 import base64
 import fnmatch
 import re
@@ -15,6 +18,8 @@ import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 import urllib.error
+
+import yaml
 
 spec = importlib.util.spec_from_file_location("publisher", Path(__file__).with_name("publish-admin-ui-pacts.py"))
 publisher = importlib.util.module_from_spec(spec)
@@ -71,6 +76,159 @@ class PublicationTest(unittest.TestCase):
             cwd=self.root, env=env, text=True,
             capture_output=True, check=False,
         )
+
+    def workflow_main_fixture(self):
+        workflow = yaml.safe_load(Path(__file__).parents[1].joinpath("workflows/pact-drift-check.yml").read_text())
+        script_dir = self.root / ".github/scripts"
+        script_dir.mkdir(parents=True)
+        shutil.copyfile(Path(__file__).with_name("classify-pact-drift-scope.py"),
+                        script_dir / "classify-pact-drift-scope.py")
+        subprocess.run(["git", "add", ".github/scripts/classify-pact-drift-scope.py"],
+                       cwd=self.root, check=True)
+        subprocess.run(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+                        "-c", "commit.gpgsign=false", "commit", "-qm", "trusted classifier fixture"],
+                       cwd=self.root, check=True)
+        base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.root, text=True).strip()
+        ui = self.root / "openbank-admin-ui/src/page.tsx"
+        ui.parent.mkdir(parents=True)
+        ui.write_text("synthetic UI-only change")
+        subprocess.run(["git", "add", "openbank-admin-ui/src/page.tsx"], cwd=self.root, check=True)
+        subprocess.run(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+                        "-c", "commit.gpgsign=false", "commit", "-qm", "UI fixture"], cwd=self.root, check=True)
+        self.sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.root, text=True).strip()
+        runner = self.root / "runner"
+        runner.mkdir()
+        self.marker = runner / "pact-regen-marker"
+        self.marker.touch()
+        os.utime(self.marker, (100, 100))
+        all_pacts = sorted(self.root.joinpath("pacts").glob("*.json"))
+        jvm = [p for p in all_pacts if "case-coordinator-agent" in p.name or p.name.startswith("openbank-ledger-")]
+        selected = [p for p in jvm if p.name.startswith("openbank-admin-ui-")]
+        for pact in all_pacts:
+            os.utime(pact, (1 if pact in jvm else 200, 1 if pact in jvm else 200))
+        for name, paths in [("expected-jvm-pacts.txt", selected), ("all-jvm-pacts.txt", jvm)]:
+            (runner / name).write_text("".join(f"{p.relative_to(self.root)}\n" for p in paths))
+        (runner / "pact-uncovered.txt").write_text("")
+        (runner / "jvm-pacts").mkdir()
+        for shard in ["ui", "0", "1", "2", "3"]:
+            with tarfile.open(runner / f"jvm-pacts/jvm-pacts-{shard}.tar", "w") as archive:
+                if shard in ["ui", "0"]:
+                    for pact in selected if shard == "ui" else jvm:
+                        data = pact.read_bytes()
+                        info = tarfile.TarInfo(str(pact.relative_to(self.root)))
+                        info.size, info.mtime = len(data), 1
+                        archive.addfile(info, io.BytesIO(data))
+        return workflow, base, runner
+
+    def workflow_scope(self, workflow, base, runner, event):
+        step = next(s for s in workflow["jobs"]["pact-scope"]["steps"] if s.get("id") == "scope")
+        self.assertEqual(step["env"]["EVENT_NAME"], "${{ github.event_name }}")
+        self.assertEqual(step["env"]["PR_BASE_SHA"], "${{ github.event.pull_request.base.sha }}")
+        self.assertEqual(step["env"]["PUSH_BASE_SHA"], "${{ github.event.before }}")
+        output = runner / "scope-output"
+        output.unlink(missing_ok=True)
+        result = subprocess.run(["bash", "-c", step["run"]], cwd=self.root, capture_output=True,
+                                env=dict(os.environ, PR_BASE_SHA=base, PUSH_BASE_SHA=base,
+                                         HEAD_SHA=self.sha, RUNNER_TEMP=str(runner),
+                                         GITHUB_WORKSPACE=str(self.root), GITHUB_OUTPUT=str(output), EVENT_NAME=event),
+                                text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+        self.assertEqual(json.loads(outputs["shards"]),
+                         ["ui"] if outputs["mode"] == "ui-only" else ["0", "1", "2", "3"])
+        return outputs["mode"]
+
+    def workflow_pact_step(self, workflow, runner, mode, name):
+        step = next(s for s in workflow["jobs"]["drift-check"]["steps"] if s.get("name") == name)
+        return subprocess.run(["bash", "-c", step["run"]], cwd=self.root, capture_output=True, text=True,
+                              env=dict(os.environ, RUNNER_TEMP=str(runner), SCOPE_MODE=mode,
+                                       SCOPE_RESULT="success"), check=False)
+
+    def rewrite_js_pacts(self, runner):
+        jvm = set((runner / "all-jvm-pacts.txt").read_text().splitlines())
+        stamp = self.marker.stat().st_mtime_ns + 1_000_000_000
+        for pact in self.root.joinpath("pacts").glob("*.json"):
+            if str(pact.relative_to(self.root)) not in jvm:
+                os.utime(pact, ns=(stamp, stamp))
+
+    def test_ui_only_main_requires_selected_archive_proof_before_complete_publication(self):
+        workflow, base, runner = self.workflow_main_fixture()
+        required = self.workflow_scope(workflow, base, runner, "push")
+        self.assertEqual(required, "ui-only")
+        archive = runner / "jvm-pacts/jvm-pacts-ui.tar"
+        saved = archive.read_bytes()
+        archive.unlink()
+        missing = self.workflow_pact_step(workflow, runner, required,
+                                         "Verify shard coverage and restore regenerated JVM contracts")
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("Missing regenerated JVM Pact archive", missing.stdout)
+        self.assertFalse((runner / "verified-jvm-pacts.txt").exists())
+        archive.write_bytes(saved)
+        restored = self.workflow_pact_step(workflow, runner, required,
+                                          "Verify shard coverage and restore regenerated JVM contracts")
+        self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
+        case_pact = self.root / "pacts/openbank-admin-ui-openbank-case-coordinator-agent.json"
+        self.assertLessEqual(case_pact.stat().st_mtime_ns, self.marker.stat().st_mtime_ns)
+        self.rewrite_js_pacts(runner)
+        fresh = self.workflow_pact_step(workflow, runner, required,
+                                       "Verify every committed pact was actually regenerated")
+        self.assertEqual(fresh.returncode, 0, fresh.stdout + fresh.stderr)
+        bundle = publisher.prepare(self.root, self.sha, self.marker, runner / "verified-jvm-pacts.txt")
+        self.assertEqual(len(bundle["files"]), 5)
+        self.assertTrue(any("case-coordinator-agent" in name for name in bundle["files"]))
+
+    def test_ui_only_pr_requires_selected_jvm_proof_and_cannot_publish(self):
+        workflow, base, runner = self.workflow_main_fixture()
+        required = self.workflow_scope(workflow, base, runner, "pull_request")
+        self.assertEqual(required, "ui-only")
+        restored = self.workflow_pact_step(workflow, runner, required,
+                                          "Verify shard coverage and restore regenerated JVM contracts")
+        self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
+        stale = self.workflow_pact_step(workflow, runner, required,
+                                       "Verify every committed pact was actually regenerated")
+        self.assertNotEqual(stale.returncode, 0)
+        self.assertFalse((runner / "verified-jvm-pacts.txt").exists())
+        self.rewrite_js_pacts(runner)
+        fresh = self.workflow_pact_step(workflow, runner, required,
+                                       "Verify every committed pact was actually regenerated")
+        self.assertEqual(fresh.returncode, 0, fresh.stdout + fresh.stderr)
+        receipt = runner / "verified-jvm-pacts.txt"
+        self.assertEqual(receipt.read_text(),
+                         "pacts/openbank-admin-ui-openbank-case-coordinator-agent.json\n")
+        bundle = publisher.prepare(self.root, self.sha, self.marker, receipt)
+        self.assertEqual(len(bundle["files"]), 5)
+        receipt.write_text("")
+        with self.assertRaises(publisher.PublicationFailure) as failure:
+            publisher.prepare(self.root, self.sha, self.marker, runner / "verified-jvm-pacts.txt")
+        self.assertEqual(failure.exception.stage, "freshness")
+        with patch.object(publisher.urllib.request, "build_opener") as opener:
+            with self.assertRaises(publisher.PublicationFailure) as failure:
+                publisher.publish({}, dict(self.env, GITHUB_EVENT_NAME="pull_request"))
+            self.assertEqual(failure.exception.stage, "trusted-main")
+            opener.assert_not_called()
+
+    def test_missing_base_classifier_requires_all_four_archives(self):
+        workflow, _, runner = self.workflow_main_fixture()
+        mode = self.workflow_scope(workflow, "0" * 40, runner, "push")
+        self.assertEqual(mode, "full")
+        shutil.copyfile(runner / "all-jvm-pacts.txt", runner / "expected-jvm-pacts.txt")
+        archive = runner / "jvm-pacts/jvm-pacts-3.tar"
+        saved = archive.read_bytes()
+        archive.unlink()
+        missing = self.workflow_pact_step(workflow, runner, mode,
+                                         "Verify shard coverage and restore regenerated JVM contracts")
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("Missing regenerated JVM Pact archive", missing.stdout)
+        archive.write_bytes(saved)
+        restored = self.workflow_pact_step(workflow, runner, mode,
+                                          "Verify shard coverage and restore regenerated JVM contracts")
+        self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
+        self.rewrite_js_pacts(runner)
+        fresh = self.workflow_pact_step(workflow, runner, mode,
+                                       "Verify every committed pact was actually regenerated")
+        self.assertEqual(fresh.returncode, 0, fresh.stdout + fresh.stderr)
+        self.assertEqual((runner / "verified-jvm-pacts.txt").read_text(),
+                         (runner / "all-jvm-pacts.txt").read_text())
 
     def test_prepare_cli_classifies_bad_revision_without_local_details(self):
         result = self.run_prepare_cli("0" * 40, self.root / "bundle.json")

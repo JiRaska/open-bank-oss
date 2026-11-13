@@ -150,6 +150,9 @@ component_management:
     - component_id: client-transaction
       name: client-transaction
       flag_regexes: ["^openbank-client-transaction$"]
+    - component_id: client-account
+      name: client-account
+      flag_regexes: ["^openbank-client-account$"]
     - component_id: libs
       name: libs
       flag_regexes: ["^openbank-libs$"]
@@ -162,6 +165,9 @@ component_management:
     - component_id: libs-finance
       name: libs-finance
       flag_regexes: ["^openbank-libs-finance$"]
+    - component_id: libs-fincrime
+      name: libs-fincrime
+      flag_regexes: ["^openbank-libs-fincrime$"]
     - component_id: libs-iso20022
       name: libs-iso20022
       flag_regexes: ["^openbank-libs-iso20022$"]

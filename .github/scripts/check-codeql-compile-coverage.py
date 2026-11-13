@@ -7,7 +7,7 @@ import argparse
 import re
 from pathlib import Path
 
-TASK = re.compile(r"> Task :([^ :]+):compileKotlin(?: (FROM-CACHE|UP-TO-DATE|NO-SOURCE|SKIPPED))?$")
+TASK = re.compile(r"> Task :([^ :]+):(compileKotlin|compileJava)(?: (FROM-CACHE|UP-TO-DATE|NO-SOURCE|SKIPPED))?$")
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -21,15 +21,22 @@ def expected_modules(root: Path) -> set[str]:
 
 
 def check(root: Path, log: str) -> tuple[bool, str]:
-    expected = expected_modules(root)
+    expected = {f"{module}:compileKotlin" for module in expected_modules(root)}
+    expected.update(
+        f"{module.name}:compileJava"
+        for module in root.glob("openbank-*")
+        if (module / "build.gradle.kts").is_file()
+        and any((module / "src/main/java").rglob("*.java"))
+    )
     if not expected:
-        return False, "no production Kotlin modules found; CodeQL coverage is unknown"
+        return False, "no production Kotlin or Java modules found; CodeQL coverage is unknown"
 
     observed: dict[str, list[str]] = {}
     for line in log.splitlines():
         match = TASK.search(ANSI.sub("", line).strip())
         if match:
-            observed.setdefault(match.group(1), []).append(match.group(2) or "executed")
+            task = f"{match.group(1)}:{match.group(2)}"
+            observed.setdefault(task, []).append(match.group(3) or "executed")
 
     missing = sorted(expected - observed.keys())
     # Parallel Gradle reprints a task header when its warnings interleave, so one executed
@@ -47,8 +54,8 @@ def check(root: Path, log: str) -> tuple[bool, str]:
                 if untraced else "",
             ) if part
         )
-        return False, f"CodeQL did not trace all {len(expected)} production Kotlin modules: {detail}"
-    return True, f"CodeQL traced compileKotlin for all {len(expected)} production Kotlin modules"
+        return False, f"CodeQL did not trace all {len(expected)} production compiler tasks: {detail}"
+    return True, f"CodeQL traced all {len(expected)} production Kotlin/Java compiler tasks"
 
 
 def main() -> int:

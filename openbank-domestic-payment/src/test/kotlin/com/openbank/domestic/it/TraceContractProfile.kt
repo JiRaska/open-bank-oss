@@ -4,8 +4,6 @@
 
 package com.openbank.domestic.it
 
-import io.quarkus.test.junit.QuarkusTestProfile
-
 /**
  * Gives the trace-contract IT its own Quarkus application instance, and therefore its own
  * [com.openbank.libs.testing.trace.RecordingSpanExporter].
@@ -19,11 +17,8 @@ import io.quarkus.test.junit.QuarkusTestProfile
  * Only literals here: a profile loads in a different classloader from the test class, so a
  * computed value would not be the value the application sees.
  */
-class TraceContractProfile : QuarkusTestProfile {
-    override fun getConfigOverrides(): Map<String, String> = mapOf(
-        // Some modules switch the SDK off for tests; without it there are no spans to contract at all.
-        "quarkus.otel.sdk.disabled" to "false",
-        "openbank.outbox.dispatch-enabled" to "false",
+class TraceContractProfile : com.openbank.libs.testing.trace.TraceContractProfile() {
+    override fun extraConfigOverrides(): Map<String, String> = mapOf(
         // %test fixes this build-time property to false; without pinning it here the profiled
         // boot reads the extension default (true) and ConfigRecorder refuses to start the app
         // ("build time property cannot be changed at runtime"). Measured on sepa-payment, which

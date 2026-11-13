@@ -7,6 +7,7 @@ package com.openbank.ledger.infrastructure.rest
 import com.openbank.ledger.application.port.`in`.CloseParticipationUseCase
 import com.openbank.ledger.application.port.`in`.ReportParticipationCommand
 import com.openbank.ledger.application.port.`in`.WaiveParticipationCommand
+import com.openbank.ledger.application.usecase.CloseParticipantsConfig
 import com.openbank.ledger.domain.model.CloseParticipationRecord
 import com.openbank.ledger.domain.model.ParticipationOutcome
 import com.openbank.libs.authz.Authorize
@@ -33,8 +34,9 @@ import java.time.LocalDate
  * Day-close participation (ADR-0342).
  *
  * - `PUT …/{participant}` — a product service reports its outcome for the day. Admitted under
- *   `ledger.create`, the grant each participant already holds to post journals; the use case then
- *   narrows it to the ONE service-account declared for that participant.
+ *   its own action `ledger.close.participate` (never the generic `ledger.create`), which
+ *   `ledger_rest_ext.rego` grants each participant account for its OWN participant name only; the
+ *   use case then checks the verified caller is the ONE service-account declared for it.
  * - `PUT …/{participant}/waiver` — an operator records that a missing participant is not required
  *   for this day. `ledger.approve`, like every other day transition.
  * - `GET` — the day's completeness: every declared participant with its latest record, or MISSING.
@@ -45,6 +47,9 @@ import java.time.LocalDate
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "AccountingDay", description = "Accounting-day authority and OPEN/CUTOFF/TIED_OUT/LOCKED state")
 class CloseParticipationResource(private val useCase: CloseParticipationUseCase) {
+
+    @Inject
+    lateinit var participantsConfig: CloseParticipantsConfig
 
     @Inject
     lateinit var identity: SecurityIdentity
@@ -67,6 +72,7 @@ class CloseParticipationResource(private val useCase: CloseParticipationUseCase)
                 missing = completeness.missing.sorted(),
                 refused = completeness.refused.sorted(),
                 participants = rows,
+                participantsMode = participantsConfig.participantsMode(),
             ),
         ).build()
     }
@@ -74,7 +80,9 @@ class CloseParticipationResource(private val useCase: CloseParticipationUseCase)
     @PUT
     @Path("/{participant}")
     @RolesAllowed(Roles.API)
-    @Authorize(action = "ledger.create", resource = "#participant")
+    // Its own action (#13167 review): a participant principal may report its day without holding a
+    // generic journal-create grant. ledger_rest_ext.rego binds each account to its one participant.
+    @Authorize(action = "ledger.close.participate", resource = "#participant")
     @Operation(summary = "Report a product service's day-close outcome (RAN, SKIPPED or REFUSED)")
     suspend fun report(
         @PathParam("businessDate") businessDate: String,
@@ -93,6 +101,10 @@ class CloseParticipationResource(private val useCase: CloseParticipationUseCase)
                 itemsProcessed = request.itemsProcessed ?: 0,
                 reason = request.reason,
                 callerPrincipal = ServiceAccountIdentity.verifiedPrincipalName(identity),
+                exercisedJobs = request.exercisedJobs.orEmpty().map {
+                    requireNotNull(it) { "exercisedJobs must not contain null" }
+                }.toSet(),
+                sourceRunId = request.sourceRunId,
             ),
         )
         return Response.ok(saved.toResponse()).build()
@@ -152,6 +164,8 @@ data class ReportParticipationRequest(
     val journalsPosted: Int?,
     val itemsProcessed: Int?,
     val reason: String?,
+    val exercisedJobs: Set<String?>? = null,
+    val sourceRunId: String? = null,
 )
 
 data class WaiveParticipationRequest(val reason: String?)
@@ -189,6 +203,7 @@ data class CloseCompletenessResponse(
     val missing: List<String>,
     val refused: List<String>,
     val participants: List<ParticipationResponse>,
+    val participantsMode: String,
 )
 
 private fun CloseParticipationRecord.toResponse() = ParticipationResponse(

@@ -62,7 +62,10 @@ historie nepovažoval za provedený přechod.
 - **DecisionRequest** — `approve` (bool, povinné), `reason` (string, nullable). **Žádné `decidedBy`** — checker je JWT subjekt.
 - **CollateralRequest** — `type` (string), `description` (nullable), `marketValue` (Money), `haircut` (number, výchozí 0, validováno na `[0,1]`).
 - **WriteOffRequest** — `reason` (string, nullable). Jednající principal je JWT subjekt.
-- **Money** — `{ amount: number, currency: ISO-4217 }`.
+- **Money v požadavku** — publikované schéma zůstává `{ amount: number, currency: ISO-4217 }`. Čtečka zachovává také kompatibilitu s desetinným řetězcem a starším vnořeným tvarem měny.
+- **Money v odpovědi** — dosavadní tvar je `{ amount: number, currency: { code: "EUR", defaultFractionDigits: 2 }, isNonNegative: boolean, isZero: boolean, isNegative: boolean, isPositive: boolean }`. Schéma OpenAPI `MoneyResponse` jej popisuje samostatně, aby generovaný klient nepovažoval vstupní řetězec měny za zaručený tvar odpovědi.
+- **Splátkový kalendář a výsledek splátky** — `LoanInstallment` používá stejný tvar `MoneyResponse` pro počáteční zůstatek, jistinu, úrok, splátku a konečný zůstatek.
+- **Další peněžní odpovědi** — nabídka předčasného splacení obsahuje pět polí `MoneyResponse`; zajištění takto vrací `marketValue`. Přechody stavu úvěru vracejí `Loan` s jistinou `MoneyResponse` a postup či rozhodnutí o žádosti vrací `LoanApplicationResponse` s požadovanou částkou.
 
 Validace (aplikační služba): požadovaná částka musí být kladná, term ≥ 1 období, nominální sazba ≥ 0, identita navrhovatele neprázdná, haircut v `[0,1]`.
 
@@ -87,3 +90,20 @@ tělo neobsahuje identitu navrhovatele, schvalovatele ani čerpajícího. Mapov�
 ## Verzování
 
 URL cesta `/api/v1/...`; hlavičky `X-API-Version` / `X-Service-Version` a `/api/v1/info` poskytuje `openbank-libs`. Verze OpenAPI kontraktu (`info.version`) je osa API kontraktu (ADR-0048), nezávislá na release verzi `version.txt`.
+
+## Lidské přezkoumání zamítnutí enginem
+
+GDPR čl. 22 odst. 3, nařízení o AI čl. 86 a EBA/GL/2020/06 bod 54: zákazník, jehož žádost rozhodovací engine zamítl, může požádat o posouzení člověkem. Zamítnutá žádost zůstává `DECLINED` (koncový stav, ADR-0211 D1); přezkum je samostatný záznam.
+
+| Endpoint | Metoda | Volající | Poznámky |
+|---|---|---|---|
+| `/intake/applications/{id}/decline-review` | `POST` | pouze principál customer-edge (`lending.intake`) | Žadatel (z `X-Customer-Party-Id`) žádá; povinný `Idempotency-Key`. 201 první žádost, 200 opakování (tentýž přezkum), 404 cizí žádost, 409 `NOT_ENGINE_DECLINE` / `REVIEW_WINDOW_ELAPSED` |
+| `/decline-reviews` | `GET` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` (lidé) | Čekající přezkumy od nejstaršího, s důvody a verzemi politik zaznamenanými enginem |
+| `/decline-reviews/{id}/decision` | `POST` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` (lidé) | `{outcome: CONFIRMED\|OVERTURNED, reason}`. Důvod povinný (10-512 znaků). Povinný `Idempotency-Key` (opakování vrátí 409 `REVIEW_ALREADY_DECIDED`). 409 `REVIEW_ALREADY_DECIDED` / `SELF_REVIEW` (jen když se jméno principála rovná party id; mapování zaměstnance na party neexistuje) / `SUCCESSOR_NOT_ORIGINABLE` (převrácení, které by příjem žádostí dnes odmítl; revize zůstává otevřená). Nástupce dostane přepočtené datum první splátky a dnešní compliance balíček, ale ponechá původní sazbu a nemá vlastní vyhodnocení enginem |
+
+- **Přezkoumat lze jen zamítnutí enginem**: `DECLINED` s uloženým výsledkem enginu `DECLINE` a bez zaznamenaného lidského rozhodovatele. Zamítnutí učiněné nebo potvrzené člověkem se nevrací.
+- **Nejvýše jednou na žádost** (unikátní ve schématu); opakování vrátí existující přezkum. Lhůta je `lending.decline-review.window-days` (env `LENDING_DECLINE_REVIEW_WINDOW_DAYS`, **výchozí 30**) od času vyhodnocení enginem.
+- **Posuzovatel není vázán výsledkem enginu**, ale vidí ho: důvody a verze politik se uloží do přezkumu při podání. Posuzovatel je subjekt JWT a nesmí být žadatel.
+- **CONFIRMED** zaznamená lidské rozhodnutí, nic jiného se nemění. **OVERTURNED** zamítnutou žádost neoživí: otevře *nástupnickou* žádost ve `FOUR_EYES` (přenesená fakta, bez důkazů enginu), propojenou oběma směry (`loan_decline_review.successor_application_id`, `loan_application.predecessor_application_id`), posuzovatel je zapsán jako navrhovatel. Úvěrové rozhodnutí pak činí stávající čtyři oči, jejichž schvalovatel se musí lišit od navrhovatele, takže posuzovatel schvalovat nemůže.
+- **Události** (outbox, `schemaVersion` 1, jen identifikátory a strojové kódy, nikdy volný text posuzovatele): `credit.decline_review.requested`, `.confirmed`, `.overturned`; přehodnocení navíc vydá `credit.application.transition` pro nástupce.
+- **Zákazník zatím nedosáhne**: route v customer-edge a obrazovka v admin-ui jsou navazující práce.

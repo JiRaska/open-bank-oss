@@ -841,7 +841,7 @@ class AuthorizeInterceptorTest {
         assertThat(thrown.response.status).isEqualTo(202)
         assertThat(store.created).hasSize(1)
         assertThat(store.created[0].makerId).isEqualTo("user-42")
-        assertThat(store.created[0].makerActorKind).isEqualTo(MakerActorKind.HUMAN)
+        assertThat(store.created[0].makerActorKind).isEqualTo(MakerActorKind.UNKNOWN)
         assertThat(store.created[0].action).isEqualTo("party.read")
         assertThat(counter("openbank.authz.four_eyes", "action", "party.read", "outcome", "pending_approval"))
             .isEqualTo(1.0)
@@ -881,9 +881,10 @@ class AuthorizeInterceptorTest {
         every { identity.roles } returns setOf("ROLE_CUSTOMER")
         every { sc.userPrincipal } returns JavaPrincipal { "customer-42" }
         every { identity.principal } returns mockk<JsonWebToken> {
+            every { getClaim<Any?>(any<String>()) } returns null
             every { subject } returns "customer-subject-42"
             every { getClaim<String>("azp") } returns null
-            every { getClaim<String>("preferred_username") } returns null
+            every { getClaim<String>("preferred_username") } returns "person-user"
         }
         val store = InMemoryApprovalStore()
         wirePdpAndStore(store)
@@ -903,9 +904,10 @@ class AuthorizeInterceptorTest {
 
         every { sc.userPrincipal } returns JavaPrincipal { "agent:forged-display" }
         every { identity.principal } returns mockk<JsonWebToken> {
+            every { getClaim<Any?>(any<String>()) } returns null
             every { subject } returns "human-subject-id"
             every { getClaim<String>("azp") } returns null
-            every { getClaim<String>("preferred_username") } returns null
+            every { getClaim<String>("preferred_username") } returns "person-user"
         }
         catchThrowableOfType(WebApplicationException::class.java) {
             interceptor.authorize(makeCtx(annotatedMethod))
@@ -927,6 +929,7 @@ class AuthorizeInterceptorTest {
 
         every { sc.userPrincipal } returns JavaPrincipal { "service-account-forged-display" }
         every { identity.principal } returns mockk<JsonWebToken> {
+            every { getClaim<Any?>(any<String>()) } returns null
             every { subject } returns "human-subject-id"
             every { getClaim<String>("preferred_username") } returns "human-user"
             every { getClaim<String>("azp") } returns "openbank-test"
@@ -962,6 +965,72 @@ class AuthorizeInterceptorTest {
                 MakerActorKind.UNKNOWN,
                 MakerActorKind.UNKNOWN,
             )
+    }
+
+    @Test
+    fun `four-eyes persists unknown unless token positively proves a person`() {
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+        every { sc.userPrincipal } returns JavaPrincipal { "display-user" }
+        val cases = listOf(
+            mapOf("client_id" to "batch-client"),
+            mapOf("client_id" to "batch-client", "azp" to "batch-client", "preferred_username" to "renamed-user"),
+            mapOf("clientId" to "batch-client", "preferred_username" to "renamed-user"),
+            emptyMap(),
+            mapOf("preferred_username" to ""),
+        )
+        for (claims in cases) {
+            every { identity.roles } returns setOf("ROLE_CUSTOMER")
+            every { identity.principal } returns mockk<JsonWebToken> {
+                every { subject } returns "synthetic-subject"
+                every { getClaim<Any?>(any<String>()) } answers { claims[firstArg<String>()] }
+            }
+            val ctx = makeCtx(annotatedMethod)
+            val response = catchThrowableOfType(WebApplicationException::class.java) { interceptor.authorize(ctx) }
+            assertThat(response.response.status).isEqualTo(202)
+            assertThat(store.created.last().makerActorKind).isEqualTo(MakerActorKind.UNKNOWN)
+            io.mockk.verify(exactly = 0) { ctx.proceed() }
+        }
+        every { identity.principal } returns JavaPrincipal { "unverified-person" }
+        val ctx = makeCtx(annotatedMethod)
+        val response = catchThrowableOfType(WebApplicationException::class.java) { interceptor.authorize(ctx) }
+        assertThat(response.response.status).isEqualTo(202)
+        assertThat(store.created.last().makerActorKind).isEqualTo(MakerActorKind.UNKNOWN)
+        io.mockk.verify(exactly = 0) { ctx.proceed() }
+    }
+
+    @Test
+    fun `four-eyes persists unknown when person claims cannot be read`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "synthetic-subject"
+            every { getClaim<Any?>(any<String>()) } returns null
+            every { getClaim<Any?>("preferred_username") } throws IllegalStateException("unreadable synthetic claim")
+        }
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+        val ctx = makeCtx(annotatedMethod)
+        val response = catchThrowableOfType(WebApplicationException::class.java) { interceptor.authorize(ctx) }
+        assertThat(response.response.status).isEqualTo(202)
+        assertThat(store.created.single().makerActorKind).isEqualTo(MakerActorKind.UNKNOWN)
+        io.mockk.verify(exactly = 0) { ctx.proceed() }
+    }
+
+    @Test
+    fun `four-eyes persists human only for a verified person token`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "synthetic-person"
+            every { getClaim<Any?>(any<String>()) } returns null
+            every { getClaim<Any?>("preferred_username") } returns "person-user"
+        }
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+        val ctx = makeCtx(annotatedMethod)
+        val response = catchThrowableOfType(WebApplicationException::class.java) { interceptor.authorize(ctx) }
+        assertThat(response.response.status).isEqualTo(202)
+        assertThat(store.created.single().makerActorKind).isEqualTo(MakerActorKind.HUMAN)
+        io.mockk.verify(exactly = 0) { ctx.proceed() }
     }
 
     @Test

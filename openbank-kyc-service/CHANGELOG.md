@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.18.0...kyc-service-v0.18.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **kyc:** dispatch sanctions list-change events on the ce-type header ([#15901](https://github.com/JiRaska/open-bank-oss/issues/15901)) ([71b5570](https://github.com/JiRaska/open-bank-oss/commit/71b5570becfddffae4f53f0cebeeaf46a7bd7c25)), closes [#15900](https://github.com/JiRaska/open-bank-oss/issues/15900)
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.17.1...kyc-service-v0.18.0) (2026-11-12)
+
+
+### Features
+
+* **kyc:** screen new customers automatically and gate sandbox auto-approval on it ([#15736](https://github.com/JiRaska/open-bank-oss/issues/15736)) ([08d28df](https://github.com/JiRaska/open-bank-oss/commit/08d28df4ea0530c9c7ad6c8e66fd3a7f96551b7f))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.17.0...kyc-service-v0.17.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **kyc:** classify mapped coordinator responses inside retry boundary ([#13738](https://github.com/JiRaska/open-bank-oss/issues/13738)) ([dedeffc](https://github.com/JiRaska/open-bank-oss/commit/dedeffc307d3e972e58bb3d6d131be7d31f940a8))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.16.4...kyc-service-v0.17.0) (2026-10-14)
 
 

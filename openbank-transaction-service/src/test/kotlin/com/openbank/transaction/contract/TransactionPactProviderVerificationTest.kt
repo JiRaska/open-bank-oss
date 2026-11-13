@@ -8,6 +8,7 @@ import au.com.dius.pact.provider.PactVerifyProvider
 import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.MessageTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
+import au.com.dius.pact.provider.junit5.PactVerificationExtension
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
@@ -20,18 +21,35 @@ import com.openbank.libs.domain.payment.InstructionType
 import com.openbank.libs.domain.payment.PaymentRail
 import com.openbank.transaction.domain.event.TransactionInitiatedEvent
 import com.openbank.transaction.domain.model.TransactionType
+import com.openbank.transaction.infrastructure.persistence.entity.TransactionEntity
+import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
+import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.vertx.core.Vertx
+import io.vertx.core.impl.ContextInternal
 import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
+import org.junit.jupiter.api.extension.ExtensionContext
+import org.junit.jupiter.api.extension.TestTemplateInvocationContext
 import java.math.BigDecimal
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
+import java.util.stream.Stream
+import javax.sql.DataSource
 
 /**
  * Provider-side verification for BOTH contract kinds published against transaction-service:
@@ -58,7 +76,7 @@ import java.util.UUID
 @QuarkusTestResource(com.openbank.transaction.it.PostgresRedpandaTestResource::class)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
 @Provider("openbank-transaction-service")
-@PactBroker(enablePendingPacts = "true")
+@PactBroker(enablePendingPacts = "\${pactbroker.enablePending:true}")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class TransactionPactProviderVerificationTest {
@@ -69,6 +87,15 @@ class TransactionPactProviderVerificationTest {
     /** Cleared per interaction for the negative-auth states — see [verifyPacts]. */
     @Inject
     lateinit var testIdentityAssociation: TestIdentityAssociation
+
+    @Inject
+    lateinit var transactionRepository: PanacheTransactionRepository
+
+    @Inject
+    lateinit var dataSource: DataSource
+
+    @Inject
+    lateinit var vertx: Vertx
 
     private val objectMapper = jacksonObjectMapper()
         .registerModule(JavaTimeModule())
@@ -89,7 +116,7 @@ class TransactionPactProviderVerificationTest {
     }
 
     @TestTemplate
-    @ExtendWith(PactVerificationInvocationContextProvider::class)
+    @ExtendWith(TransactionPactConsumerScope::class)
     fun verifyPacts(context: PactVerificationContext?) {
         // The four "missing or expired token" interactions expect 401, and the class-level
         // @TestSecurity authenticates EVERY replay as pact-verifier — so without clearing the test
@@ -109,7 +136,7 @@ class TransactionPactProviderVerificationTest {
     /**
      * Serves the negative-auth interactions of the interest, sdd, sepa-payment and swift pacts.
      *
-     * On the git-pact side these live in their own class, [TransactionNegativeAuthPactVerificationTest],
+     * On the git-pact side these live in their own class, [TransactionNegativeAuthProviderVerificationTest],
      * which can simply omit `@TestSecurity`; a second `@PactBroker` class is not the equivalent move
      * here, because two broker-sourced classes for one provider each fetch every pact the broker holds
      * (this repo's "one broker-sourced @Provider test per provider" rule, and the
@@ -136,10 +163,7 @@ class TransactionPactProviderVerificationTest {
 
     @State("a valid source account exists")
     fun stateValidSourceAccountExists() {
-        // Shared by domestic-payment, sepa-payment, and sepa-instant's consumer pacts (issue
-        // #468) — previously unhandled (pact-jvm silently skips a missing state, so this was a
-        // live gap, not a failure). No setup needed: initiateTransaction doesn't require the
-        // account to pre-exist in this test's Postgres, only that sourceAccountId parses as a UUID.
+        PactTransactionSeed.resetInitiationState(dataSource)
     }
 
     /**
@@ -165,6 +189,66 @@ class TransactionPactProviderVerificationTest {
         // Intentionally empty — a fresh Testcontainer DB satisfies it by construction. Declared so
         // the state is an explicit part of the contract; pact-jvm passes silently over an
         // unhandled state name, which is how #468's missing states stayed invisible.
+    }
+
+    /**
+     * party-service's portability empty-history leg (pact: "no transactions exist for the requested
+     * account"). Deliberately no seed: the pact addresses an account id this test never creates.
+     * The handler must EXIST (with this exact name, matching PartyTransactionListPactConsumerTest)
+     * and live in BOTH provider classes, per this class's keep-in-sync header. Same handler as the
+     * folder twin.
+     */
+    @State("no transactions exist for the requested account")
+    fun stateNoTransactionsForRequestedAccount() {
+        // No seed: the requested account id is one this provider test never creates.
+    }
+
+    /**
+     * party-service's GDPR Art. 20 portability leg (ADR-0204 D2): seeds one COMPLETED CREDIT
+     * targeting the pact account. Constants must match PartyTransactionListPactConsumerTest
+     * (openbank-party-service) — and, per the folder twin's upkeep note, this class must carry
+     * the same handler.
+     */
+    @State("a posted transaction exists for the pact account")
+    fun statePostedTransactionForPactAccount() = runOnVertxContext {
+        if (transactionRepository.findById(TRANSACTION_ID) != null) return@runOnVertxContext
+        val entity = TransactionEntity()
+        entity.id = TRANSACTION_ID
+        entity.bookingDate = BOOKING_DATE
+        entity.referenceNumber = REFERENCE_NUMBER
+        entity.type = "CREDIT"
+        entity.targetAccountId = PACT_ACCOUNT_ID
+        entity.amount = BigDecimal("100.00")
+        entity.currencyCode = "CZK"
+        entity.baseAmount = BigDecimal("100.00")
+        entity.baseCurrencyCode = "CZK"
+        entity.status = "COMPLETED"
+        entity.description = DESCRIPTION
+        entity.valueDate = BOOKING_DATE
+        entity.initiatedAt = java.time.Instant.parse("2026-01-15T00:00:00Z")
+        entity.completedAt = java.time.Instant.parse("2026-01-15T00:00:01Z")
+        entity.idempotencyKey = IDEMPOTENCY_KEY
+        Panache.withTransaction {
+            transactionRepository.persist(entity)
+        }.awaitSuspending()
+        Unit
+    }
+
+    /** Same bridge as the folder twin: Pact-JVM's `@State` runs on a thread with no Vert.x context. */
+    private fun runOnVertxContext(block: suspend () -> Unit) {
+        val future = CompletableFuture<Unit>()
+        val duplicated = (vertx.orCreateContext as ContextInternal).duplicate()
+        VertxContextSafetyToggle.setContextSafe(duplicated, true)
+        val dispatcher = Executor { command -> duplicated.runOnContext { command.run() } }.asCoroutineDispatcher()
+        CoroutineScope(dispatcher).launch {
+            try {
+                block()
+                future.complete(Unit)
+            } catch (t: Throwable) {
+                future.completeExceptionally(t)
+            }
+        }
+        future.get(10, TimeUnit.SECONDS)
     }
 
     @State(PactTransactionSeed.SEEDED_STATE)
@@ -197,5 +281,32 @@ class TransactionPactProviderVerificationTest {
             occurredAt = java.time.Instant.parse("2026-01-01T00:00:00Z"),
         )
         return objectMapper.writeValueAsString(event)
+    }
+
+    companion object {
+        // Must match PartyTransactionListPactConsumerTest (openbank-party-service) and the folder twin.
+        val TRANSACTION_ID: UUID = UUID.fromString("88888888-9999-4aaa-bbbb-cccccccccccc")
+        val PACT_ACCOUNT_ID: UUID = UUID.fromString("77777777-8888-4999-aaaa-bbbbbbbbbbbb")
+        val BOOKING_DATE: java.time.LocalDate = java.time.LocalDate.parse("2026-01-15")
+        const val REFERENCE_NUMBER = "TXN-PARTY-PACT-001"
+        const val DESCRIPTION = "pact portability fixture"
+        const val IDEMPOTENCY_KEY = "pact-portability-001"
+    }
+}
+
+internal class TransactionPactConsumerScope : PactVerificationInvocationContextProvider() {
+    override fun provideTestTemplateInvocationContexts(
+        context: ExtensionContext,
+    ): Stream<TestTemplateInvocationContext> {
+        val contexts = super.provideTestTemplateInvocationContexts(context)
+        val consumer = System.getProperty("pactbroker.consumers") ?: return contexts
+        // Pact JVM publishes exceptions from an invoked test. Inspect all Pact
+        // contexts before JUnit starts any test, including against an older runtime.
+        val scoped = contexts.use { it.toList() }
+        val correctConsumer = scoped.all { it is PactVerificationExtension && it.pact.consumer.name == consumer }
+        check(scoped.isNotEmpty() && correctConsumer) {
+            "Pact Broker returned no verifiable interactions or interactions outside the requested consumer"
+        }
+        return scoped.stream()
     }
 }

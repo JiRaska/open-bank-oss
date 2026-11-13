@@ -4,6 +4,9 @@
 
 package com.openbank.delegation.integration
 
+import com.openbank.delegation.application.port.out.ActingForEntity
+import com.openbank.delegation.application.port.out.MandateDirectory
+import com.openbank.delegation.application.port.out.MandateDirectoryUnavailableException
 import com.openbank.delegation.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -65,6 +68,27 @@ class BusinessSigningApiIT {
     fun installFakes() {
         mandateSeam.delegate = register
         scaSeam.delegate = sca
+    }
+
+    @Test
+    fun `a consumed payment challenge only replays its original frozen payload`() {
+        register.joint(entity, 2, alice, bob)
+        val challenge = sca.initiator(alice)
+        val original = paymentBody(alice, challenge)
+        val created = post("/approval-requests", original).then().statusCode(HTTP_CREATED).extract().jsonPath()
+        val id = created.getString("id")
+
+        val replay = post("/approval-requests", original).then().statusCode(HTTP_CREATED).extract().jsonPath()
+        assertThat(replay.getString("id")).isEqualTo(id)
+        assertThat(replay.getString("payloadSha256")).isEqualTo(created.getString("payloadSha256"))
+
+        val changed = post("/approval-requests", paymentBody(alice, challenge, amount = "120001.00"))
+        assertThat(changed.statusCode).isEqualTo(409)
+        assertThat(changed.jsonPath().getString("code")).isEqualTo("SCA_CHALLENGE_USED")
+        assertThat(get(UUID.fromString(id)).getString("status")).isEqualTo("PENDING")
+        val ids = RestAssured.given().get("/api/v1/entities/$entity/approval-requests")
+            .then().statusCode(HTTP_OK).extract().jsonPath().getList<String>("data.id")
+        assertThat(ids).containsExactly(id)
     }
 
     // ------------------------------------------------------------------ happy path + events
@@ -397,6 +421,16 @@ class BusinessSigningApiIT {
     }
 
     @Test
+    fun `an unreadable acting-for register answers 503, not 500`() {
+        mandateSeam.delegate = object : MandateDirectory by register {
+            override suspend fun actingFor(humanPartyId: UUID): List<ActingForEntity> =
+                throw MandateDirectoryUnavailableException("acting-for could not be read")
+        }
+        RestAssured.given().get("/api/v1/parties/$bob/approval-requests/pending")
+            .then().statusCode(HTTP_UNAVAILABLE)
+    }
+
+    @Test
     fun `a SOLE register derives a one-signature policy`() {
         register.sole(entity, alice, bob)
         val policy = policy()
@@ -552,20 +586,25 @@ class BusinessSigningApiIT {
     }
 
     /** Exactly the body customer-edge (#10314) sends. */
-    private fun paymentBody(initiator: UUID, challenge: UUID, expiresInSeconds: Long? = null) = buildMap<String, Any?> {
+    private fun paymentBody(
+        initiator: UUID,
+        challenge: UUID,
+        expiresInSeconds: Long? = null,
+        amount: String = "120000.00",
+    ) = buildMap<String, Any?> {
         put("kind", "PAYMENT")
         put("initiatorSignature", mapOf("partyId" to initiator, "scaChallengeId" to challenge))
         put(
             "payload",
             mapOf(
                 "rail" to "DOMESTIC",
-                "amount" to "120000.00",
+                "amount" to amount,
                 "currency" to "CZK",
                 "creditorIban" to CREDITOR,
                 "creditorName" to "Dodavatel s.r.o.",
                 "reference" to "INV-2026-09",
                 "railRequest" to
-                    mapOf("amount" to "120000.00", "currency" to "CZK", "creditorAccount" to mapOf("iban" to CREDITOR)),
+                    mapOf("amount" to amount, "currency" to "CZK", "creditorAccount" to mapOf("iban" to CREDITOR)),
             ),
         )
         expiresInSeconds?.let { put("expiresInSeconds", it) }
@@ -653,6 +692,7 @@ class BusinessSigningApiIT {
         const val HTTP_FORBIDDEN = 403
         const val SO_MINOR = 150_000L
         const val HTTP_CONFLICT = 409
+        const val HTTP_UNAVAILABLE = 503
         const val SHA_LENGTH = 64
         const val RACERS = 8
         const val BARRIER_SECONDS = 10L

@@ -112,7 +112,13 @@ jobs:
           if [ "$PROBE" = true ]; then
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           else
-            gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
+            # REST quota exhaustion falls back to GraphQL (fetch-open-prs.py). The guard keeps the old
+            # listing for a base that predates the script; drop it once main has carried it a while.
+            if [ -f .github/scripts/fetch-open-prs.py ]; then
+              python3 .github/scripts/fetch-open-prs.py "$GITHUB_REPOSITORY" "$RUNNER_TEMP/agent-prs.json"
+            else
+              gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
+            fi
             python3 .github/scripts/agent-admission.py "$RUNNER_TEMP/agent-prs.json" >> "$GITHUB_OUTPUT"
           fi
 
@@ -153,7 +159,7 @@ jobs:
         if: env.AGENT_APP_ID != '' && !(github.event_name == 'workflow_dispatch' && inputs.mode == 'probe')
         env:
           AGENT_APP_ID: ${{ secrets.AGENT_APP_ID }}
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.AGENT_APP_ID }}
           private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}

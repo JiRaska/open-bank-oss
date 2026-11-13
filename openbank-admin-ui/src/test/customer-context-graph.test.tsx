@@ -78,12 +78,33 @@ describe('Customer context graph', () => {
     expect(screen.getByRole('button', { name: 'AML case: TRANSACTION_MONITORING' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Device: IOS' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Document: ACCOUNT_AGREEMENT' })).toBeInTheDocument()
-    expect(screen.getByText('7/7 domain feeds')).toBeInTheDocument()
+    expect(screen.getByText('7/7 data feeds')).toBeInTheDocument()
     expect(document.querySelectorAll('animateMotion').length).toBeLessThanOrEqual(16)
     fireEvent.click(screen.getByRole('button', { name: 'Pause flow' }))
     expect(document.querySelectorAll('animateMotion')).toHaveLength(0)
     expect(screen.getByRole('button', { name: 'Resume flow' })).toHaveAttribute('aria-pressed', 'false')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('identifies aggregate summaries and transaction references without inventing business domains', async () => {
+    installSources().mockResolvedValueOnce(json({
+      accounts: [], cards: [], notifications: [], lendingApplications: [], devices: [], documents: [],
+      amlCases: [{
+        id: 'case-reference', transactionId: 'transaction-reference', screeningType: 'TRANSACTION_MONITORING',
+        riskLevel: 'MEDIUM', status: 'OPEN', alertCode: 'TM01', screenedAt: '2026-09-13T10:00:00Z',
+      }],
+      unavailable: [], truncated: [],
+    }))
+    graph({ ...evidence, domains: [{ ...evidence.domains[0], aggregateType: 'transaction' }], consents: [] })
+
+    const summary = await screen.findByRole('button', { name: 'Aggregate / reference: transaction' })
+    expect(await screen.findByRole('button', { name: 'Aggregate / reference: transaction-reference' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Aggregate / reference' })).toHaveValue('domain')
+    expect(screen.queryByRole('option', { name: 'Domain', exact: true })).not.toBeInTheDocument()
+    fireEvent.click(summary)
+    const detail = screen.getByRole('complementary', { name: 'Selected node evidence' })
+    expect(within(detail).getByText('Source: analytics-sink')).toBeInTheDocument()
+    expect(within(detail).getByText('Events: 1')).toBeInTheDocument()
   })
 
   it('shows card lifecycle evidence without exposing notification destination or content', async () => {
@@ -122,7 +143,7 @@ describe('Customer context graph', () => {
     graph()
     expect(await screen.findByText(/Unavailable sources: notifications/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Card: 411111******1111' })).toBeInTheDocument()
-    expect(screen.getByText('6/7 domain feeds')).toBeInTheDocument()
+    expect(screen.getByText('6/7 data feeds')).toBeInTheDocument()
   })
 
   it('keeps interactions and other domains in the bounded overview when accounts are numerous', async () => {

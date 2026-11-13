@@ -29,7 +29,7 @@ describe('mobile operator shell accessibility contract', () => {
     expect(sidebar).toContain("event.key !== 'Tab'")
     expect(sidebar).toContain('focusable.at(-1)')
     expect(sidebar).toContain('document.activeElement === event.currentTarget')
-    expect(sidebar).toContain("querySelectorAll<HTMLElement>('a, button:not([disabled])')")
+    expect(sidebar).toContain("querySelectorAll<HTMLElement>('a, button:not([disabled]), input:not([disabled])')")
     expect(sidebar).toContain('roleSignature')
     expect(sidebar).toContain('document.activeElement !== document.body')
     expect(css).toContain('@media (max-width: 860px)')

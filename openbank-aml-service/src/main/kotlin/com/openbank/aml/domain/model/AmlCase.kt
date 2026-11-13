@@ -22,12 +22,11 @@ enum class ScreeningType {
     MANUAL_INVESTIGATION,
 }
 
-enum class AmlRiskLevel {
-    LOW,
-    MEDIUM,
-    HIGH,
-    CRITICAL,
-}
+/**
+ * aml-service's name for the shared AML case severity (ADR-0353 D3/D4): one enum, declared once in
+ * `openbank-libs-fincrime`, so the rails that open cases cannot drift from it.
+ */
+typealias AmlRiskLevel = com.openbank.libs.fincrime.AmlCaseSeverity
 
 data class AmlCase(
     val id: UUID,
@@ -52,6 +51,18 @@ data class AmlCase(
     /** Request fingerprint the case was created under (#10916); `null` for legacy rows and non-HTTP creates. */
     val requestHash: String? = null,
 ) {
+    /**
+     * A case opened by the post-booking pack evaluation (ADR-0371), as opposed to a
+     * `TRANSACTION_MONITORING` case a payment rail opened when a screening gate referred a transfer.
+     * Both share the screening type, and they are not the same thing: a rail's case is worked by
+     * operators and releases a payment hold; a pack-monitoring case is confidential and four-eyes.
+     * The evaluation job is the only writer of keys with [PACK_MONITORING_KEY_PREFIX]; the REST
+     * create endpoint refuses them.
+     */
+    val isPackMonitoringCase: Boolean
+        get() = screeningType == ScreeningType.TRANSACTION_MONITORING &&
+            idempotencyKey.startsWith(PACK_MONITORING_KEY_PREFIX)
+
     fun transitionTo(
         targetStatus: AmlCaseStatus,
         decisionReason: String?,
@@ -103,5 +114,10 @@ data class AmlCase(
         AmlCaseStatus.CLEARED,
         AmlCaseStatus.BLOCKED,
         -> false
+    }
+
+    companion object {
+        /** Reserved idempotency-key prefix of cases the pack evaluation opens. */
+        const val PACK_MONITORING_KEY_PREFIX = "tm:"
     }
 }

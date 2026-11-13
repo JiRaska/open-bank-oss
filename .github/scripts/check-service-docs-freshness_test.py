@@ -36,6 +36,7 @@ class ServiceDocsFreshnessTest(unittest.TestCase):
             cls.write(f"openbank-{name}-service/src/main/App.kt", "initial\n")
             cls.write(f"openbank-{name}-service/src/main/resources/docs/README.md", "Initial docs\n")
         cls.write("openbank-libs-runtime/src/main/Shared.kt", "initial\n")
+        cls.write("openbank-libs-iso20022/src/main/Message.kt", "initial\n")
         cls.write("openbank-libs/docs/README.md", "Initial shared docs\n")
         cls.base = cls.commit("initial fixture")
 
@@ -53,6 +54,10 @@ class ServiceDocsFreshnessTest(unittest.TestCase):
         cls.git("checkout", "-b", "undocumented-libs-pr", cls.base)
         cls.write("openbank-libs-runtime/src/main/Shared.kt", "undocumented shared behavior\n")
         cls.undocumented_libs = cls.commit("missing shared docs")
+
+        cls.git("checkout", "-b", "undocumented-iso20022-pr", cls.base)
+        cls.write("openbank-libs-iso20022/src/main/Message.kt", "changed message\n")
+        cls.undocumented_iso20022 = cls.commit("missing ISO 20022 docs")
 
         cls.git("checkout", "-b", "deleted-service-pr", cls.base)
         cls.git("rm", "openbank-alpha-service/src/main/App.kt")
@@ -122,7 +127,8 @@ class ServiceDocsFreshnessTest(unittest.TestCase):
             "openbank-beta-service/build.gradle.kts",
             "openbank-beta-service/src/main/App.kt",
             "openbank-beta-service/src/main/resources/docs/README.md",
-            "openbank-libs-runtime/src/main/Shared.kt", "openbank-libs/docs/README.md",
+            "openbank-libs-runtime/src/main/Shared.kt",
+            "openbank-libs-iso20022/src/main/Message.kt", "openbank-libs/docs/README.md",
         )
         cls.git("commit", "-m", message)
         return cls.git("rev-parse", "HEAD")
@@ -147,6 +153,11 @@ class ServiceDocsFreshnessTest(unittest.TestCase):
 
     def test_undocumented_shared_change_fails(self):
         result = self.gate("--head", self.undocumented_libs)
+        self.assertEqual(1, result.returncode)
+        self.assertIn("openbank-libs/docs/*.md", result.stderr)
+
+    def test_undocumented_iso20022_change_fails(self):
+        result = self.gate("--head", self.undocumented_iso20022)
         self.assertEqual(1, result.returncode)
         self.assertIn("openbank-libs/docs/*.md", result.stderr)
 

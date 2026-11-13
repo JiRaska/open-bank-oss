@@ -97,3 +97,78 @@ data:
     -- statements on every sync).
     ALTER TABLE openbank_analytics.ci_gate_runs
         ADD COLUMN IF NOT EXISTS selftest_seconds Float64 DEFAULT 0 AFTER seconds;
+
+    -- Workflow-run and job history (ADR-0255 Tier 2 extension, ADR-0061 Phase 2). Gate rows
+    -- above only see ci.yml. These see every workflow, so queueing, cancellation churn and
+    -- the API-quota failure cascade become a query, not a manual `gh` crawl that itself
+    -- burns the quota it is measuring. Fed by gate-health-puller's `runs` container.
+    -- No semicolons inside these comments (see the note above).
+    CREATE TABLE IF NOT EXISTS openbank_analytics.ci_workflow_runs
+    (
+        run_id         UInt64,
+        run_attempt    UInt16,
+        workflow       LowCardinality(String),   -- the workflow `name:`
+        workflow_path  LowCardinality(String),   -- .github/workflows/<file>.yml
+        event          LowCardinality(String),
+        head_branch    String,
+        head_sha       FixedString(40),
+        status         LowCardinality(String),
+        conclusion     LowCardinality(String),   -- '' while not completed
+        created_at     DateTime64(3, 'UTC'),
+        run_started_at Nullable(DateTime64(3, 'UTC')),
+        updated_at     DateTime64(3, 'UTC'),
+        inserted_at    DateTime64(3, 'UTC') DEFAULT now64(3)
+    )
+    ENGINE = ReplacingMergeTree(inserted_at)
+    ORDER BY (run_id, run_attempt)
+    PARTITION BY toYYYYMM(created_at)
+    TTL toDateTime(created_at) + INTERVAL 13 MONTH
+    SETTINGS index_granularity = 8192;
+
+    -- One row per job attempt. queue_seconds (started minus created) is the number a
+    -- developer actually waits on and the one ADR-0053 runner sizing needs. failed_step
+    -- is the first failing step name, the cheapest available grouping key for "what broke".
+    CREATE TABLE IF NOT EXISTS openbank_analytics.ci_workflow_jobs
+    (
+        job_id        UInt64,
+        run_id        UInt64,
+        run_attempt   UInt16,
+        workflow      LowCardinality(String),
+        job_name      String,
+        status        LowCardinality(String),
+        conclusion    LowCardinality(String),
+        created_at    DateTime64(3, 'UTC'),
+        started_at    Nullable(DateTime64(3, 'UTC')),
+        completed_at  Nullable(DateTime64(3, 'UTC')),
+        runner_labels Array(LowCardinality(String)),
+        runner_group  LowCardinality(String),
+        failed_step   String,
+        inserted_at   DateTime64(3, 'UTC') DEFAULT now64(3)
+    )
+    ENGINE = ReplacingMergeTree(inserted_at)
+    ORDER BY (run_id, job_id)
+    PARTITION BY toYYYYMM(created_at)
+    TTL toDateTime(created_at) + INTERVAL 13 MONTH
+    SETTINGS index_granularity = 8192;
+
+    -- Argo CD sync history, the deploy-event log ADR-0061 Phase 2 names as its missing
+    -- source. One row per Application history entry. history_id is Argo's own monotonic
+    -- per-Application id, so (app, history_id) is the natural key and a re-read of the
+    -- same 10-entry window is a no-op. revision is the GitOps commit that was applied.
+    -- Fed by deploy-event-puller, which reads the Kubernetes API only.
+    CREATE TABLE IF NOT EXISTS openbank_analytics.deploy_events
+    (
+        app               LowCardinality(String),
+        history_id        UInt64,
+        revision          String,
+        source_path       String,
+        deploy_started_at Nullable(DateTime64(3, 'UTC')),
+        deployed_at       DateTime64(3, 'UTC'),
+        automated         Bool,
+        inserted_at       DateTime64(3, 'UTC') DEFAULT now64(3)
+    )
+    ENGINE = ReplacingMergeTree(inserted_at)
+    ORDER BY (app, history_id)
+    PARTITION BY toYYYYMM(deployed_at)
+    TTL toDateTime(deployed_at) + INTERVAL 13 MONTH
+    SETTINGS index_granularity = 8192;

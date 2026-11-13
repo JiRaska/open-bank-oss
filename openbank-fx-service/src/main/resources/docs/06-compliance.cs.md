@@ -69,6 +69,7 @@ Jméno konvertujícího klienta (`partyName`) se **v `fx_conversions` neukládá
 ### Toky dat ven
 
 - → **sanctions-service** (sync REST): `partyName` k prověrce — stejný správce, intra-OpenBank.
+- → **party-service** (sync REST, jen čtení): obě prověrky konverze (synchronní `POST /convert` i workflow konverze) pošlou ID klienta a přečtou jeho právní jméno, obchodní jméno a typ klienta. Jméno zaslané volajícím se neprověřuje nikdy a uložená konverze nese pouze ID. Jména slouží k sankční prověrce a neukládají se. Pokud jméno přečíst nelze, konverze se zadrží k ručnímu posouzení a otevře se AML případ; namísto něj se neprověřuje ID ani jméno zaslané volajícím. Stejný správce.
 - → **aml-service** (sync REST, best-effort): detaily klienta/konverze + matched entity při otevření případu — stejný správce.
 - → **Kafka** (`openbank.fx.conversion.completed`): událost konverze pro downstream (transaction/audit) — stejný správce.
 - → **ČNB** (externí, jen příchozí): čte se denní fixing feed; **žádná data klientů se ČNB neposílají**.
@@ -101,4 +102,4 @@ Každá konverze je finanční záznam (`fx_conversions`) fixující `rate_id`/`
 - ✅ Tvrzení transportu: HSTS, CSP, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy (v `application.yaml`); mTLS v clusteru.
 - ✅ Tajemství: dev placeholdery musí být v prod přepsány přes Vault (ADR 0017).
 - ⚠️ Integrita zdroje kurzu je dominantní zbytkové riziko (threat model §5): manipulovaný/zastaralý kurz je tichý vektor finanční ztráty — mitigováno provenancí/časovou značkou kurzu, kontrolami platnosti (`isValid`) a fixací `rate_id`; meze/sanity limity vedeny jako follow-up.
-- ⚠️ Kafka publisher doménových událostí (`KafkaFxEventPublisher`) je aktuálně stub; živá cesta událostí je outbox dispatcher — propojení je evidovaný follow-up.
+- ✅ Události konverzí jdou přes transakční outbox (`FxOutboxRepository` → `KafkaFxOutboxEventPublisher`, kanál `fx-events-out`); dřívější stub `KafkaFxEventPublisher` byl odstraněn (#1033).

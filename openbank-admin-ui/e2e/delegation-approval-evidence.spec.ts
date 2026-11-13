@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 const approvalId = '018f4a3c-1b2d-7e00-9a11-000000000010'
@@ -44,6 +44,9 @@ test('delegation approval evidence is read-only, responsive and accessible in bo
     if (dark) {
       await page.getByRole('button', { name: 'Switch to the dark theme' }).click()
       await expect(page.locator('html')).toHaveClass(/dark/)
+      // The root class can change before inherited token colors resolve on pending rows.
+      // Scan the settled dark palette; the AA assertion below remains unchanged.
+      await expect(main.getByText('Waiting for a different person')).toHaveCSS('color', 'rgb(148, 163, 184)')
     }
     const scan = await new AxeBuilder({ page })
       .include('#main-content')

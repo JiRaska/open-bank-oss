@@ -91,6 +91,19 @@ class IdentityRegistrationServiceTest {
     }
 
     @Test
+    fun `re-registering an erased party id is refused and writes nothing`(): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        coEvery { repo.findByExternalId(any(), any()) } returns null
+        coEvery { repo.findById(id) } returns
+            indexParty(id).copy(erasedAt = OffsetDateTime.parse("2026-11-12T10:00:00Z"))
+
+        assertThatThrownBy { runBlocking { service().register(command(id)) } }
+            .isInstanceOf(PartyErasedException::class.java)
+        coVerify(exactly = 0) { repo.update(any()) }
+        coVerify(exactly = 0) { repo.save(any()) }
+    }
+
+    @Test
     fun `re-registering the same party id merges and updates instead of saving`(): Unit = runBlocking {
         val id = UUID.randomUUID()
         coEvery { repo.findByExternalId(any(), any()) } returns null
@@ -142,6 +155,35 @@ class IdentityRegistrationServiceTest {
 
         val eudi = saved.captured.externalIds.single { it.type == ExternalIdType.EUDI_PID_SUB }
         assertThat(eudi.value).isNotBlank().isNotEqualTo("sub:CZ-PID-0001") // blind-indexed, never raw
+    }
+
+    @Test
+    fun `a party registered from an EUDI PID presentation carries no pid-asserted risk rating`(): Unit = runBlocking {
+        // ADR-0353 D2: a PID proves identity, never risk. The rating comes from the kyc flow; a
+        // defaulted LOW here would be a risk claim nothing computed.
+        val id = UUID.randomUUID()
+        coEvery { repo.findByExternalId(any(), any()) } returns null
+        coEvery { repo.findById(id) } returns null
+        val saved = slot<Party>()
+        coEvery { repo.save(capture(saved)) } answers { saved.captured }
+
+        service().register(command(id, eudiSub = "sub:CZ-PID-0002"))
+
+        assertThat(saved.captured.kycAttributes.amlRiskScore).isNull()
+        assertThat(saved.captured.kycAttributes.kycLevel).isEqualTo(KycLevel.NONE)
+    }
+
+    @Test
+    fun `re-registering from a wallet presentation neither invents nor erases a stored rating`(): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        coEvery { repo.findByExternalId(any(), any()) } returns null
+        coEvery { repo.findById(id) } returns indexParty(id)
+        val updated = slot<Party>()
+        coEvery { repo.update(capture(updated)) } answers { updated.captured }
+
+        service().register(command(id, eudiSub = "sub:CZ-PID-0003"))
+
+        assertThat(updated.captured.kycAttributes).isEqualTo(indexParty(id).kycAttributes)
     }
 
     @Test

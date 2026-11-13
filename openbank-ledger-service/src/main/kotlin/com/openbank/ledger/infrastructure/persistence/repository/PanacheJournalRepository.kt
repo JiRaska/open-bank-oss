@@ -92,16 +92,29 @@ class PanacheJournalRepository(
         limit: Int,
         afterId: UUID?,
     ): List<JournalEntry> = Panache.withSession {
-        find("entryDate >= ?1 and entryDate <= ?2 order by entryDate desc, createdAt desc", from, to).list()
-            .flatMap { all ->
-                val startIdx = if (afterId != null) {
-                    val i = all.indexOfFirst { it.id == afterId }
-                    if (i >= 0) i + 1 else 0
-                } else {
-                    0
-                }
-                attachLines(all.drop(startIdx).take(limit))
+        val dateRange = "entryDate >= ?1 and entryDate <= ?2"
+        val order = "order by entryDate desc, createdAt desc, id desc"
+        val cursor = if (afterId == null) {
+            Uni.createFrom().nullItem<JournalEntryEntity>()
+        } else {
+            find("$dateRange and id = ?3 $order", from, to, afterId).firstResult()
+        }
+        cursor.flatMap { anchor ->
+            val page = if (anchor == null) {
+                // A cursor whose journal is no longer in this range still starts at page one.
+                find("$dateRange $order", from, to)
+            } else {
+                find(
+                    "$dateRange and (entryDate, createdAt, id) < (?3, ?4, ?5) $order",
+                    from,
+                    to,
+                    anchor.entryDate,
+                    anchor.createdAt,
+                    anchor.id,
+                )
             }
+            page.range(0, limit - 1).list().flatMap { entries -> attachLines(entries) }
+        }
     }.awaitSuspending()
 
     override suspend fun findByIdempotencyKey(idempotencyKey: String): JournalEntry? {
@@ -120,7 +133,8 @@ class PanacheJournalRepository(
 
     override suspend fun save(entry: JournalEntry, idempotencyKey: String?, outbox: List<OutboxMessage>): JournalEntry =
         Panache.withTransaction {
-            persist(entry.toEntity())
+            Panache.getSession().flatMap { JournalReadWatermark.lockWriter(it) }
+                .flatMap { persist(entry.toEntity()) }
                 .flatMap { persistLines(entry) }
                 .flatMap {
                     if (idempotencyKey != null) {
@@ -153,13 +167,15 @@ class PanacheJournalRepository(
         // here serialises them and the loser matches 0 rows after the winner commits — so it
         // fails BEFORE persisting a second compensation entry and its AccountBookedChanged
         // deltas (double-credit downstream). Backstop: uq_journal_entries_reversal_of (V12).
-        update(
-            "status = ?1, version = version + 1 where id = ?2 and entryDate = ?3 and status = ?4",
-            JournalStatus.REVERSED.name,
-            originalId,
-            originalEntryDate,
-            JournalStatus.POSTED.name,
-        ).flatMap { updated ->
+        Panache.getSession().flatMap { JournalReadWatermark.lockWriter(it) }.flatMap {
+            update(
+                "status = ?1, version = version + 1 where id = ?2 and entryDate = ?3 and status = ?4",
+                JournalStatus.REVERSED.name,
+                originalId,
+                originalEntryDate,
+                JournalStatus.POSTED.name,
+            )
+        }.flatMap { updated ->
             if (updated == 0) {
                 Uni.createFrom().failure(
                     JournalReversalConflictException(
@@ -355,6 +371,12 @@ class PanacheJournalRepository(
         it.version = version
         it.reversalOf = reversalOf
         it.synthetic = synthetic
+        it.originKind = origin?.kind?.name
+        it.originRecordId = origin?.sourceRecordId
+        it.originSubmitter = origin?.authenticatedSubmitter
+        it.originRail = origin?.rail?.name
+        it.originInstructionType = origin?.instructionType?.name
+        it.originReversalOfTransactionId = origin?.reversalOfTransactionId
     }
 
     private fun JournalLine.toEntity() = JournalLineEntity().also {
@@ -385,6 +407,16 @@ class PanacheJournalRepository(
         version = version,
         reversalOf = reversalOf,
         synthetic = synthetic,
+        origin = originKind?.let { kind ->
+            com.openbank.ledger.domain.model.JournalOrigin(
+                com.openbank.ledger.domain.model.JournalOriginKind.valueOf(kind),
+                checkNotNull(originRecordId),
+                checkNotNull(originSubmitter),
+                originRail?.let(com.openbank.libs.domain.payment.PaymentRail::valueOf),
+                originInstructionType?.let(com.openbank.libs.domain.payment.InstructionType::valueOf),
+                originReversalOfTransactionId,
+            )
+        },
     )
 
     private fun JournalLineEntity.toDomainLine(): JournalLine = JournalLine(

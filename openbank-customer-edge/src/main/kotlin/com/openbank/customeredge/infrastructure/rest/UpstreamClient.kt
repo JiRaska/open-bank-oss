@@ -16,6 +16,7 @@ import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import jakarta.ws.rs.core.UriBuilder
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.MDC
 import java.net.URI
@@ -290,8 +291,33 @@ class UpstreamClient {
 
     fun get(url: String, partyId: String? = null): Response = get(url, partyId, requestTimeoutMs)
 
+    /** GET with a fixed service authority and raw query values encoded independently of that authority. */
+    fun getToService(baseUrl: String, path: String, query: Map<String, String>, partyId: String?): Response = try {
+        val builder = UriBuilder.fromUri(structuredUri(baseUrl, path))
+        val values = linkedMapOf<String, Any>()
+        query.entries.forEachIndexed { index, (name, value) ->
+            val parameter = "query$index"
+            builder.queryParam(name, "{$parameter}")
+            values[parameter] = value
+        }
+        sendGet(builder.buildFromMap(values).toASCIIString(), partyId, requestTimeoutMs)
+    } catch (e: Exception) {
+        // Some request exceptions include their complete URI, which may carry opaque query values.
+        Log.error("structured upstream GET failed: ${e::class.qualifiedName}")
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
     /** Cap a single call by the caller's remaining aggregate budget. */
     fun get(url: String, partyId: String?, timeoutMs: Long): Response = try {
+        sendGet(url, partyId, timeoutMs)
+    } catch (e: Exception) {
+        Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
+    private fun sendGet(url: String, partyId: String?, timeoutMs: Long): Response {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceIn(1, requestTimeoutMs))
         val request = upstreamRequest()
             .uri(validatedUri(url))
@@ -301,11 +327,7 @@ class UpstreamClient {
             .timeout(Duration.ofMillis(remainingMillis(deadline)))
             .GET().build()
         val r = http.send(request, HttpResponse.BodyHandlers.ofString())
-        Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
-    } catch (e: Exception) {
-        Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
-        Response.status(502).entity("""{"error":"upstream unavailable"}""")
-            .type(MediaType.APPLICATION_JSON).build()
+        return Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
     }
 
     /**
@@ -551,6 +573,28 @@ class UpstreamClient {
         post(structuredUri(baseUrl, path), partyId, body, idempotencyKey)
     } catch (e: Exception) {
         // Do not log path: it may contain an opaque invitation or recovery token.
+        Log.error("upstream call to $baseUrl failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /** POST with an isolated service authority, caller-derived path and encoded query values. */
+    fun postToServiceWithQuery(
+        baseUrl: String,
+        path: String,
+        query: Map<String, String>,
+        partyId: String,
+        body: String,
+    ): Response = try {
+        val builder = UriBuilder.fromUri(structuredUri(baseUrl, path))
+        val values = linkedMapOf<String, Any>()
+        query.entries.forEachIndexed { index, (name, value) ->
+            val parameter = "query$index"
+            builder.queryParam(name, "{$parameter}")
+            values[parameter] = value
+        }
+        post(builder.buildFromMap(values), partyId, body, null)
+    } catch (e: Exception) {
         Log.error("upstream call to $baseUrl failed: ${e::class.qualifiedName}: ${e.message}", e)
         Response.status(502).entity("""{"error":"upstream unavailable"}""")
             .type(MediaType.APPLICATION_JSON).build()

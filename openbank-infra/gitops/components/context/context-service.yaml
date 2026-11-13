@@ -14,7 +14,7 @@ spec:
   selector: { matchLabels: { app.kubernetes.io/name: context-service } }
   template:
     metadata:
-      annotations: { openbank.tech/policy-checksum: "2a6b695ce0de3972" }
+      annotations: { openbank.tech/policy-checksum: "3d962cae0e3f8aea" }
       labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
     spec:
       securityContext:
@@ -25,7 +25,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: context-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-context-service:sandbox-5cc84e19
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-context-service:sandbox-548fa683@sha256:db66b4f6a046464355a90b6b00129cf1ea7432aafd0b2a162816ad92ae2cb86b
           imagePullPolicy: IfNotPresent
           ports:
             - { name: http, containerPort: 8149 }
@@ -120,10 +120,3 @@ spec:
     - { name: http, port: 8149, targetPort: http }
     - { name: https, port: 8443, targetPort: https }
     - { name: management, port: 8085, targetPort: management }
----
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
-metadata: { name: context-service, namespace: context }
-spec:
-  selector: { matchLabels: { app.kubernetes.io/name: context-service } }
-  podMetricsEndpoints: [{ port: management, path: /q/metrics, interval: 30s }]

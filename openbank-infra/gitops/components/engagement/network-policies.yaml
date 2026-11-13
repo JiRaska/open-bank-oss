@@ -31,7 +31,7 @@ metadata:
   namespace: engagement
   labels:
     app.kubernetes.io/part-of: engagement
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

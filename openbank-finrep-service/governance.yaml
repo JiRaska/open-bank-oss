@@ -2,9 +2,9 @@
 # Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
 # derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
 # openbank-libs/governance/governance.schema.json
-dataDomain: compliance
-primaryDatastore: none
-ownsNoDatabase: true
+dataDomain: reporting
+primaryDatastore: PostgreSQL
+databaseName: openbank_finrep
 dataLineageRole: consumer
 dataClassification: confidential
 retentionPolicy: 10 years

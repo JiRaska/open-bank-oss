@@ -55,6 +55,47 @@ class RestLedgerPostingAdapterTest {
     )
 
     @Test
+    fun `persisted accrual replays exact body and requires the provider POSTED dated receipt`() {
+        adapter.objectMapper = com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
+        every { config.systemActorId() } returns actor
+        val proposal = posting(
+            PostingKind.INTEREST_ACCRUAL,
+        ).copy(accountingDate = java.time.LocalDate.parse("2026-05-30"))
+        val stored = adapter.prepareAccrual(proposal)
+        val requests = mutableListOf<PostJournalRequest>()
+        val journal = UUID.randomUUID()
+        every { guard.postJournal(capture(requests)) } returns Uni.createFrom().item(
+            JournalResponse(journal, stored.transactionId, "POSTED", "2026-05-30"),
+        )
+        val first = adapter.postPreparedAccrual(stored).await().indefinitely()
+        val second = adapter.postPreparedAccrual(stored).await().indefinitely()
+        assertThat(first).isEqualTo(second)
+        assertThat(requests).hasSize(2)
+        assertThat(requests[0]).isEqualTo(requests[1])
+        assertThat(adapter.objectMapper.writeValueAsString(requests[0])).isEqualTo(stored.requestJson)
+        for (invalid in listOf(
+            JournalResponse(journal, stored.transactionId, "POSTED"),
+            JournalResponse(journal, stored.transactionId, "PENDING", "2026-05-30"),
+            JournalResponse(journal, UUID.randomUUID(), "POSTED", "2026-05-30"),
+            JournalResponse(journal, stored.transactionId, "POSTED", "2026-05-31"),
+            JournalResponse(UUID(0, 0), stored.transactionId, "POSTED", "2026-05-30"),
+        )) {
+            every { guard.postJournal(any()) } returns Uni.createFrom().item(invalid)
+            assertThatThrownBy { adapter.postPreparedAccrual(stored).await().indefinitely() }
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+        assertThatThrownBy {
+            adapter.postPreparedAccrual(
+                stored.copy(
+                    requestJson =
+                    stored.requestJson.replace("12000.00", "12001.00") + " ",
+                ),
+            )
+        }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
     fun `posts a clock-dated journal built from the loan-currency GL accounts`() {
         val requestSlot: CapturingSlot<PostJournalRequest> = slot()
         every { config.systemActorId() } returns actor

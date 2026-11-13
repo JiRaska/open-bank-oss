@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+import org.gradle.api.tasks.compile.JavaCompile
+
+// Apply to included builds too: CodeQL must observe every compiler in the classes graph.
+allprojects {
+    tasks.configureEach { task ->
+        if (task instanceof JavaCompile || task.class.name.contains('KotlinCompile')) {
+            task.outputs.upToDateWhen { false }
+            task.outputs.cacheIf { false }
+            if (task instanceof JavaCompile) {
+                task.options.incremental = false
+            } else {
+                task.incremental = false
+            }
+            task.doFirst {
+                println("CODEQL_COMPILER_POLICY ${task.path} incremental=false cache=false")
+            }
+        }
+    }
+}

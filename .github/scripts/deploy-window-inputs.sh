@@ -13,7 +13,13 @@ set -euo pipefail
 out="${1:?usage: deploy-window-inputs.sh <outdir>}"
 repo="${GITHUB_REPOSITORY:?}"
 mkdir -p "$out"
-gh api "repos/${repo}/commits?sha=main&per_page=50" \
+selected_main=$(gh api "repos/${repo}/git/ref/heads/main" --jq .object.sha)
+if [[ ! "$selected_main" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "::error::main selection did not return a full commit SHA" >&2
+  exit 1
+fi
+printf '%s\n' "$selected_main" > "$out/main.sha"
+gh api "repos/${repo}/commits?sha=${selected_main}&per_page=50" \
   --jq '[.[] | {message: .commit.message, epoch: (.commit.committer.date | fromdateiso8601)}]' \
   > "$out/commits.json"
 # Paginate the complete open inventory; a capped pr-list can silently miss a repair.
@@ -21,7 +27,8 @@ gh api "repos/${repo}/commits?sha=main&per_page=50" \
 gh api --paginate --slurp "repos/${repo}/pulls?state=open&per_page=100" > "$out/open-pr-pages.json"
 jq -e 'type == "array" and all(.[]; type == "array" and all(.[];
   (.number | type == "number") and (.state == "open") and
-  (.head.ref | type == "string") and (.head.repo.full_name | type == "string") and
+  (.head.ref | type == "string") and (.head.sha | type == "string" and test("^[0-9a-f]{40}$")) and
+  (.head.repo.full_name | type == "string") and
   (.base.repo.full_name | type == "string") and (.created_at | type == "string") and
   (.draft | type == "boolean") and has("auto_merge") and
   (.labels | type == "array" and all(.[]; .name | type == "string"))))' \
@@ -30,7 +37,17 @@ jq '[.[][] | ([.labels[].name] | index("merge-priority:repair") != null) as $rep
   | select($repair or (.head.repo.full_name == .base.repo.full_name and (.draft | not)
       and ([.labels[].name] | index("blocked") | not)
       and (.head.ref | startswith("chore/gitops-auto-deploy-") or startswith("chore/admin-ui-deploy-"))))
-  | {number, head: .head.ref, created_at: .created_at, armed: (.auto_merge != null),
+  | {number, head: .head.ref, head_sha: .head.sha, created_at: .created_at, armed: (.auto_merge != null),
      state, repair_priority: $repair}]' "$out/open-pr-pages.json" > "$out/prs.json"
+# An armed deploy PR that CANNOT merge (conflict, or a failed check on its head) would
+# otherwise freeze its whole kind: the flush defers to it and supersede lets it ride (#14498).
+# Mark it `stuck` so the flush disarms it and lets the newest PR of that kind carry its pins.
+# A query error fails loudly (set -e): guessing "not stuck" would restore the freeze silently.
+for n in $(jq -r '.[] | select(.armed) | .number' "$out/prs.json"); do
+  view=$(gh pr view "$n" --repo "$repo" --json mergeStateStatus,statusCheckRollup)
+  stuck=$(python3 .github/scripts/deploy-window.py stuck <<< "$view")
+  jq --argjson n "$n" --argjson stuck "$stuck" 'map(if .number == $n then .stuck = $stuck else . end)' \
+    "$out/prs.json" > "$out/prs.json.tmp" && mv "$out/prs.json.tmp" "$out/prs.json"
+done
 jq -e 'type == "array"' "$out/commits.json" "$out/prs.json" >/dev/null
 echo "deploy-window inputs: $(jq length "$out/commits.json") commits, $(jq length "$out/prs.json") open deploy PR(s), $(jq '[.[]|select(.armed)]|length' "$out/prs.json") armed"

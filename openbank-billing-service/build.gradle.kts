@@ -40,6 +40,9 @@ dependencies {
     // The shared fee-waiver engine (ADR-0138 phase 1b) + outbox/approval primitives (ADR-0013/0155).
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0352 phase 3: the product-IR shadow evaluates revisions with the one pure interpreter, whose
+    // interest and penalty arithmetic lives in libs-finance (FinanceProductArithmetic).
+    implementation(project(":openbank-libs-finance"))
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
@@ -52,6 +55,8 @@ dependencies {
     // Standalone Flyway upgrade tests run outside Quarkus bootstrap, which installs this plugin.
     testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
     testImplementation(project(":openbank-libs-testing"))
+    // ADR-0352 phase 3: the shadow is held to the public reference products and their golden vectors.
+    testImplementation(project(":openbank-products"))
     // Consumer-driven contract for the ledger-service postJournal call (ADR-0063, issue #468).
     testImplementation(libs.pact.consumer)
     // Admin UI pending-approval contract: generated consumer pact + live HTTP provider replay.

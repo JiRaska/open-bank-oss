@@ -3,13 +3,13 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.notification.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.notification.application.OperatorDispatchStatus
 import com.openbank.notification.application.OperatorMessageRejected
 import com.openbank.notification.application.OperatorMessageRequest
 import com.openbank.notification.application.OperatorMessageService
 import com.openbank.notification.domain.model.OperatorMessageTemplate
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
-import com.openbank.notification.it.PostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.MockMailbox
 import io.quarkus.test.common.QuarkusTestResource

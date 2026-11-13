@@ -29,6 +29,11 @@ data class PaymentStatusReport(
     val status: PaymentStatus,
     val reasonCode: String? = null,
     val additionalInfo: String? = null,
+    /** `OrgnlGrpInf/OrgnlMsgId` + `OrgnlMsgNmId` of the message reported on (optional). */
+    val originalMessageId: String? = null,
+    val originalMessageNameId: String? = null,
+    /** `OrgnlUETR` of the transaction reported on (optional, UUID v4). */
+    val originalUetr: String? = null,
 )
 
 /**
@@ -50,8 +55,14 @@ class Pacs002Builder {
         doc.text(grpHdr, "CreDtTm", report.creationDateTime.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))
 
         val txSts = doc.child(rpt, "TxInfAndSts")
+        report.originalMessageId?.let { msgId ->
+            val grp = doc.child(txSts, "OrgnlGrpInf")
+            doc.text(grp, "OrgnlMsgId", msgId)
+            doc.text(grp, "OrgnlMsgNmId", report.originalMessageNameId ?: "unknown")
+        }
         report.originalEndToEndId?.let { doc.text(txSts, "OrgnlEndToEndId", it) }
         report.originalTransactionId?.let { doc.text(txSts, "OrgnlTxId", it) }
+        report.originalUetr?.let { doc.text(txSts, "OrgnlUETR", it) }
         doc.text(txSts, "TxSts", report.status.name)
 
         report.reasonCode?.let { code ->

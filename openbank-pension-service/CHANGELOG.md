@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.1.3](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v3.1.2...pension-service-v3.1.3) (2026-11-09)
+
+
+### Bug Fixes
+
+* **pension:** migrate retained fund clients to pension-fund v2 ([#15300](https://github.com/JiRaska/open-bank-oss/issues/15300)) ([db1dfdc](https://github.com/JiRaska/open-bank-oss/commit/db1dfdc1ba8cb1c5c5a08845eb3702c6f59c198d))
+
+## [3.1.2](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v3.1.1...pension-service-v3.1.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* **pension:** let quarkusDev boot on Kafka dev services ([#14407](https://github.com/JiRaska/open-bank-oss/issues/14407)) ([b487492](https://github.com/JiRaska/open-bank-oss/commit/b487492dbaaec882fce804a0efaeb755345b0d90))
+
+## [3.1.1](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v3.1.0...pension-service-v3.1.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **pension:** bound rejected partner response lifecycles ([#14126](https://github.com/JiRaska/open-bank-oss/issues/14126)) ([167e270](https://github.com/JiRaska/open-bank-oss/commit/167e270e861dd1698f91643627fb0eb1a4193e2e))
+
 ## [3.1.0](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v3.0.0...pension-service-v3.1.0) (2026-10-21)
 
 

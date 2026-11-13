@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Clearing Simulator API
-  version: 1.1.0
+  version: 1.2.0
   description: >-
     NON-PRODUCTION scheme/clearing counterparty (ADR-0104 D2). Receives a real ISO 20022
     pacs.008 credit transfer, validates it against the XSD, decides settle/reject
@@ -44,6 +44,88 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/v1/clearing/fi-credit-transfers/{route}:
+    post:
+      tags: [Clearing simulator]
+      summary: Submit a pacs.009 on a clearing route; receive a pacs.002 status report
+      operationId: submitInstitutionCreditTransfer
+      description: >-
+        Bank-own financial-institution credit transfer (pacs.009.001.08, CORE). The route is
+        certis (CZK RTGS, ClrSys Prtry CERTIS), target2 (EUR RTGS, ClrSys Cd TGT) or swift
+        (correspondent, any currency, no clearing system). A message failing the XSD is RJCT/FF01;
+        a currency or clearing system the route does not clear is RJCT/AM03; otherwise the same
+        deterministic amount-keyed verdict as the pacs.008 route applies.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: route
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [certis, target2, swift]
+      requestBody:
+        required: true
+        description: An ISO 20022 pacs.009.001.08 financial institution credit transfer (XML).
+        content:
+          application/xml:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: ISO 20022 pacs.002.001.10 payment status report (ACSC settle / RJCT reject).
+          content:
+            application/xml:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Unknown clearing route.
+
+  /api/v1/clearing/fi-credit-transfers/status/{uetr}:
+    get:
+      tags: [Clearing simulator]
+      summary: Status of a pacs.009 by UETR; 404 when the scheme has no record
+      operationId: institutionTransferStatus
+      description: >-
+        Read-only. Returns the pacs.002 the simulator recorded for the UETR. A pacs.009 resubmitted
+        with a UETR already taken gets that same pacs.002 back and does not settle again.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: uetr
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ISO 20022 pacs.002.001.10 recorded for the UETR.
+          content:
+            application/xml:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No transfer with this UETR — always this typed body, so a client can tell it from any other 404.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, uetr]
+                properties:
+                  code:
+                    type: string
+                    enum: [UNKNOWN_UETR]
+                  uetr:
+                    type: string
 
   /api/v1/clearing/returns:
     post:

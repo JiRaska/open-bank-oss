@@ -24,7 +24,7 @@ Služba dodržuje hexagonální architekturu (porty a adaptéry) předepsanou [A
 
 - `model/SctInstPayment` — agregát (data class) a enum `SctInstStatus` (`PENDING, PROCESSING, SETTLED, REJECTED, TIMEOUT, RECALLED`).
 - `event/SctInstEvents` — zapečetěná (sealed) hierarchie `SctInstEvent`: `SctInstPaymentSubmitted`, `SctInstPaymentSettled`, `SctInstPaymentRejected`, `SctInstPaymentTimeout`, `SctInstPaymentRecalled`.
-- `screening/ScreeningPolicy` — čistý rozhodovací objekt. `decide(results)` vrací `BLOCK > REVIEW > CLEAR`:
+- `ScreeningPolicy` (openbank-libs-fincrime, ADR-0353) — čistý rozhodovací objekt. `decide(results)` vrací `BLOCK > REVIEW > CLEAR`:
   - **BLOCK** — jakýkoli `HIT`, jakýkoli `ESCALATED`, nebo `POTENTIAL_HIT` striktně nad `POTENTIAL_HIT_BLOCK_THRESHOLD = 0.85`.
   - **REVIEW** — jakýkoli podprahový `POTENTIAL_HIT` (kandidát na false-positive → lidská kontrola).
   - **CLEAR** — vše ostatní (`CLEAR` / `WHITELISTED`, včetně prázdné množiny výsledků).
@@ -34,7 +34,7 @@ Služba dodržuje hexagonální architekturu (porty a adaptéry) předepsanou [A
 Use-cases a porty.
 
 - **Vstupní porty** (`port/in`): `SubmitSctInstPaymentUseCase`, `GetSctInstPaymentUseCase`, `RecallSctInstPaymentUseCase` + `SubmitSctInstCommand`.
-- **Výstupní porty** (`port/out`): `SctInstPaymentRepository`, `SctInstOutboxRepository`, `SanctionsScreeningPort` (+ `ScreeningUnavailableException`), `AmlCasePort` (+ `OpenAmlCaseCommand`, `AmlCaseRiskLevel`).
+- **Výstupní porty** (`port/out`): `SctInstPaymentRepository`, `SctInstOutboxRepository`, `SanctionsScreeningPort` (+ `ScreeningUnavailableException`), `AmlCasePort` (+ `OpenAmlCaseCommand`, `AmlCaseSeverity`).
 - `usecase/SctInstPaymentService` — orchestruje sankční bránu (viz tok níže).
 
 ### Adaptéry (`infrastructure/`)
@@ -75,6 +75,8 @@ Zdrojový kandidát #12181 ukládá každý přechod platby s událostí a její
 | Nová platba zadržená ve `PENDING` | V dosavadním schématu není doménová událost platby | Řádek platby je trvalý, založení samostatného AML případu zůstává best effort. Doručení události platby zde není slíbeno. |
 
 Idempotentní opakování existujícího podání vrátí uloženou platbu bez druhé události. Tato migrace zpětně nevytváří historické přechody; případná chybějící auditní fakta vyžadují samostatnou schválenou rekonciliaci.
+
+Příznak syntetického původu smí nastavit důvěryhodný servisní účet prostřednictvím sdíleného vstupního filtru. Jeho rozhodnutí se při založení uloží k platbě. Každý přechod s událostí přenese uložený příznak do outboxu a následně do hlavičky Kafka. Schémata odpovědí i těl událostí zůstávají stejná. Starší platby mají v PostgreSQL původ neznámý a při odeslání zůstávají bez příznaku.
 
 ## Odolnost a rate limiting
 

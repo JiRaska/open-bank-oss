@@ -18,7 +18,7 @@
 
 ### TPP authorization (Art. 30, RTS Art. 34)
 
-TPP identity comes from an eIDAS QWAC certificate (subject DN via `SSL-CLIENT-S-DN`) or `X-TPP-ID`; the role (`AISP` for AIS/consents, `PISP` for payments) is verified against `tpp-registry-service` before any business logic runs. No identity ⇒ `401 CERTIFICATE_MISSING`; not authorized ⇒ `401 CERTIFICATE_INVALID`; registry down ⇒ `503` (fail closed).
+TPP identity comes from an eIDAS QWAC certificate (subject DN via `SSL-CLIENT-S-DN`) or `X-TPP-ID`; the role (`AISP` for AIS/consents, `PISP` for payments) is verified against `tpp-registry-service` before any business logic runs. No identity ⇒ `401 CERTIFICATE_MISSING`; not authorized ⇒ `401 CERTIFICATE_INVALID` (including a registry HTTP 403 whose body is a well-formed `authorized:false` denial for the same TPP, which is a business denial and not an outage); registry down, timing out, circuit-open, or answering anything else (401, 404, malformed 403) ⇒ `503` (fail closed).
 
 ### Consent (Art. 64–67)
 

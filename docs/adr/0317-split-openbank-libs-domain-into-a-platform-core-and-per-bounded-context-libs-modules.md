@@ -108,7 +108,8 @@ core package still pays 57.
 - **Phase 0 (this ADR)** — decision + gate design. No code moves.
 - **Phase 1 — lending + iso20022.** Zero imports from `openbank-libs-runtime`/`-temporal` today, so
   they move with no runtime change: create the module, `git mv` sources and tests, add the module to
-  consumers' `build.gradle.kts`, add it to `LIBS_MODULES` in `libs-change-dependents.sh`. Both are
+  consumers' `build.gradle.kts`, and verify the shared dependency graph discovers the module
+  and its consumers (ADR-0346; no separate library list). Both are
   money-path-adjacent (lending-service, sepa-*, swift, domestic-payment): 2 approvals.
 - **Phase 2 — agent + analytics.** Blocked on runtime coupling: `openbank-libs-runtime` imports
   `llm` (4 sites), `synthetic` (6), `domain.feature` (3), `contact` (2), `governance` (1). The
@@ -148,8 +149,9 @@ own 57-module fan-out becomes the bottleneck.
   package in core.
 
 **Negative**
-- ~5 more Gradle modules, and `LIBS_MODULES` in `libs-change-dependents.sh` must list them (a module
-  missing there is the #2983 silent-no-rebuild defect again — the gate below checks it).
+- ~5 more Gradle modules. Each needs a `build.gradle.kts` for settings and the shared dependency
+  graph to discover it. Missing modules or unsupported dependency syntax make selection conservative
+  (the full supplied buildable set), rather than silently omitting consumers (ADR-0346).
 - Phase 2 needs runtime adapters to move first; the split is not purely mechanical there.
 
 **Neutral**
@@ -158,9 +160,13 @@ own 57-module fan-out becomes the bottleneck.
 **Gate.** A new checker `check-libs-core-purity.py` (gate `libs-core-purity`, group `kotlin`,
 advisory in phase 1, enforced in phase 4) fails when (a) a file under `openbank-libs-domain/src/main`
 declares a package on the moved-out list, (b) `openbank-libs-domain` or `openbank-libs-runtime`
-`build.gradle.kts` declares `api`/`implementation(project(":openbank-libs-<context>"))`, or (c) an
-`openbank-libs-*` module with `src/main` is absent from `LIBS_MODULES`. Self-test: a fixture adding
-`package com.openbank.libs.lending` to core must fail.
+`build.gradle.kts` declares `api`/`implementation(project(":openbank-libs-<context>"))`, or (c) a
+source-bearing libs module lacks a build file or is absent from the shared dependency graph.
+An unresolved graph is reported separately: selectors conservatively select the full supplied
+buildable set, so it is not evidence that consumers would be skipped. The checker reuses
+`library_dependency_graph.py`; no replacement module list is introduced. Self-tests reject a
+lending package in core, a missing build file and an unresolved graph; a newly discovered library
+needs no list edit.
 
 ## Delivery check
 

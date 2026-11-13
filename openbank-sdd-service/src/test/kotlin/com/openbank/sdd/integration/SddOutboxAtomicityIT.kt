@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.sdd.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -66,7 +67,7 @@ import javax.sql.DataSource
 @QuarkusTest
 @TestProfile(SddOutboxAtomicityIT.NoDispatchProfile::class)
 @QuarkusTestResource(SddOutboxAtomicityIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.sdd.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class SddOutboxAtomicityIT {
 
     /**

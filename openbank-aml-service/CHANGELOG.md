@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.17.0...aml-service-v0.18.0) (2026-11-13)
+
+
+### Features
+
+* **aml:** four-eyes flag on cases and the outcome vocabulary endpoint ([#15947](https://github.com/JiRaska/open-bank-oss/issues/15947)) ([d9db9f4](https://github.com/JiRaska/open-bank-oss/commit/d9db9f466ec97ad6094b54327a373c6f44a2a7b0))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.16.0...aml-service-v0.17.0) (2026-11-13)
+
+
+### Features
+
+* **aml:** four-eyes monitoring dispositions and the suspicious-transaction report (ADR-0371 slice 3) ([#15742](https://github.com/JiRaska/open-bank-oss/issues/15742)) ([4ab7b54](https://github.com/JiRaska/open-bank-oss/commit/4ab7b54e9ed2a60e23c831cc8151ee72d55d62d0))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.15.0...aml-service-v0.16.0) (2026-11-12)
+
+
+### Features
+
+* **aml:** evaluate the monitoring count pack in shadow (ADR-0371 slice 2) ([#15741](https://github.com/JiRaska/open-bank-oss/issues/15741)) ([0ba472d](https://github.com/JiRaska/open-bank-oss/commit/0ba472d8d24a976b2c293339317c253d270248c8))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.14.1...aml-service-v0.15.0) (2026-11-12)
+
+
+### Features
+
+* **aml:** record booked movements and count them per party (ADR-0371 slice 1) ([#15740](https://github.com/JiRaska/open-bank-oss/issues/15740)) ([c521c8e](https://github.com/JiRaska/open-bank-oss/commit/c521c8e53af07ffc55a926278fcdfa9ec7cfd8a9))
+
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.14.0...aml-service-v0.14.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **aml:** reserve domestic fraud review case keys ([#15302](https://github.com/JiRaska/open-bank-oss/issues/15302)) ([dcd532d](https://github.com/JiRaska/open-bank-oss/commit/dcd532d5eb71f79b7d957036cb54518ad8337e8e))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.8...aml-service-v0.14.0) (2026-11-07)
+
+
+### Features
+
+* **domestic-payment:** release fraud holds from the analyst's AML case decision ([#15060](https://github.com/JiRaska/open-bank-oss/issues/15060)) ([4e7636d](https://github.com/JiRaska/open-bank-oss/commit/4e7636dbc48dcb1aa3df75f9d13df5b85223356e))
+
+## [0.13.8](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.7...aml-service-v0.13.8) (2026-10-29)
+
+
+### Bug Fixes
+
+* **aml:** publish high-risk oversight triggers ([#14151](https://github.com/JiRaska/open-bank-oss/issues/14151)) ([f7d1363](https://github.com/JiRaska/open-bank-oss/commit/f7d1363da164ac94e18dcc044be210b3d50a7ff5))
+
+## [0.13.7](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.6...aml-service-v0.13.7) (2026-10-26)
+
+
+### Bug Fixes
+
+* **fraud:** share the financial-crime vocabulary in openbank-libs-fincrime ([#13770](https://github.com/JiRaska/open-bank-oss/issues/13770)) ([bc45331](https://github.com/JiRaska/open-bank-oss/commit/bc4533123a2d8b52ba0b5e3bdfefaa91a712d6f2))
+
 ## [0.13.6](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.5...aml-service-v0.13.6) (2026-10-14)
 
 

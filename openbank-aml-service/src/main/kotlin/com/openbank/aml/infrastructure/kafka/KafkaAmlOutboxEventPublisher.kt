@@ -3,6 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.aml.infrastructure.kafka
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
@@ -28,8 +30,11 @@ import org.eclipse.microprofile.reactive.messaging.Message
  * policies actually fire (interceptors only apply to cross-bean calls).
  */
 @ApplicationScoped
-class KafkaAmlOutboxEventPublisher(@Channel("aml-events-out") private val emitter: MutinyEmitter<String>) :
-    OutboxEventPublisher {
+class KafkaAmlOutboxEventPublisher(
+    @Channel("aml-events-out") private val emitter: MutinyEmitter<String>,
+    @Channel("oversight-events-out") private val oversightEmitter: MutinyEmitter<String>,
+    private val objectMapper: ObjectMapper,
+) : OutboxEventPublisher {
 
     override suspend fun publish(entry: OutboxEntry) {
         val kafkaHeaders = RecordHeaders()
@@ -39,5 +44,27 @@ class KafkaAmlOutboxEventPublisher(@Channel("aml-events-out") private val emitte
             .withHeaders(kafkaHeaders)
             .build()
         emitter.sendMessage(Message.of(entry.payload).addMetadata(meta)).awaitSuspending()
+
+        if (entry.eventType != EVENT_CASE_CREATED) return
+        val payload = objectMapper.readTree(entry.payload)
+        if (payload.path("riskLevel").asText() !in ELEVATED_RISKS) return
+        // A failure here leaves the outbox row unsent and retries both sends with the same ce-id.
+        oversightEmitter.sendMessage(
+            Message.of(minimalOversightPayload(payload)).addMetadata(meta),
+        ).awaitSuspending()
+    }
+
+    /** Wake the sweep without copying customer identifiers, references or alert details to its topic. */
+    private fun minimalOversightPayload(payload: JsonNode): String {
+        val trigger = objectMapper.createObjectNode()
+            .put("sourceService", SOURCE_SERVICE)
+            .put("occurredAt", payload.required("occurredAt").asText())
+        return objectMapper.writeValueAsString(trigger)
+    }
+
+    private companion object {
+        const val EVENT_CASE_CREATED = "aml.case.created.v1"
+        const val SOURCE_SERVICE = "aml-service"
+        val ELEVATED_RISKS = setOf("HIGH", "CRITICAL")
     }
 }

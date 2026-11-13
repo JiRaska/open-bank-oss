@@ -13,7 +13,8 @@ describe('legacy operational pages use shared PageHeader', () => {
     }
 
     const tests = fs.readFileSync(path.join(process.cwd(), 'src/app/system/tests/page.tsx'), 'utf8')
-    expect(tests).toContain("const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'")
+    const workspace = fs.readFileSync(path.join(process.cwd(), 'src/components/testing/workspace/TestIntelligenceWorkspace.tsx'), 'utf8')
+    expect(workspace).toContain("language === 'cs' ? 'cs-CZ' : 'en-GB'")
     expect(tests).not.toMatch(/toLocaleTimeString\(\)/)
     expect(tests).not.toMatch(/toLocaleString\(\)/)
     expect(tests).not.toMatch(/toLocaleDateString\(\)/)

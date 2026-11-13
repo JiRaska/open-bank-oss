@@ -9,7 +9,7 @@ export type SidebarDestination = { href: string; external: boolean }
 
 /** Parse ALL_NAV rather than keeping a second, stale copy of the sidebar destinations. */
 export function readSidebarDestinations(): SidebarDestination[] {
-  const file = resolve(process.cwd(), 'src/components/layout/Sidebar.tsx')
+  const file = resolve(process.cwd(), 'src/lib/navigation/catalog.ts')
   const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const declarations = new Map<string, ts.Expression>()
 
@@ -22,7 +22,7 @@ export function readSidebarDestinations(): SidebarDestination[] {
   collectDeclarations(source)
 
   const array = declarations.get('ALL_NAV')
-  if (!array) throw new Error('Sidebar.tsx no longer declares ALL_NAV')
+  if (!array) throw new Error('navigation/catalog.ts no longer declares ALL_NAV')
 
   const destinations: SidebarDestination[] = []
   const visitArray = (expression: ts.Expression, visited: Set<string>): void => {

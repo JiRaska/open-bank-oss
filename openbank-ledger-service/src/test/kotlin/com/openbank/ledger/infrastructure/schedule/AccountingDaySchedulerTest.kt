@@ -19,6 +19,7 @@ import com.openbank.ledger.domain.model.CloseParticipationRecord
 import com.openbank.ledger.domain.model.ParticipationOutcome
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
+import com.openbank.ledger.infrastructure.persistence.repository.JournalReadWatermark
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.testing.lock.NoOpClusterLock
@@ -38,6 +39,9 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.logging.Handler
+import java.util.logging.LogRecord
+import java.util.logging.Logger as JulLogger
 
 /**
  * Behaviour of the accounting-day reconciler (ADR-0207 increment 2) against a fixed clock.
@@ -110,6 +114,9 @@ class AccountingDaySchedulerTest {
         accountsChecked = 4,
         breaks = if (status == TieOutRunStatus.BREAK) 1 else 0,
         errors = if (status == TieOutRunStatus.ERROR) 1 else 0,
+        startedAt = runAt,
+        journalCount = 0,
+        journalFingerprint = "a".repeat(64),
     )
 
     private fun noDaysInAnyStatus() {
@@ -211,6 +218,67 @@ class AccountingDaySchedulerTest {
     }
 
     @Test
+    fun `late completed product work requires a fresh tie-out before the day can advance`(): Unit = runBlocking {
+        participantsMode = CloseParticipantsConfig.MODE_ENFORCE
+        val yesterday = yesterdayEligibleForTieOut()
+        coEvery { participation.completeness(yesterday) } returns CloseCompleteness(
+            yesterday,
+            setOf("interest"),
+            mapOf(
+                "interest" to CloseParticipationRecord(
+                    yesterday, "interest", ParticipationOutcome.RAN, 2, 2, null,
+                    "service-account-openbank-interest", Instant.parse("2026-08-07T05:00:00Z"), false,
+                ),
+            ),
+        )
+
+        scheduler.reconcile()
+
+        coVerify(exactly = 1) { tieOutRunner.runTieOutFor(yesterday) }
+        coVerify(exactly = 0) { useCase.transition(any()) }
+        coEvery { tieOutRuns.findLatestFor(yesterday) } returns
+            tieOutRun(yesterday, TieOutRunStatus.OK, Instant.parse("2026-08-07T06:00:00Z"))
+        scheduler.reconcile()
+        coVerify(exactly = 1) { useCase.transition(match { it.to == AccountingDayStatus.TIED_OUT }) }
+    }
+
+    @Test
+    fun `a changed journal set with the same count requires fresh proof`(): Unit = runBlocking {
+        participantsMode = CloseParticipantsConfig.MODE_ENFORCE
+        val yesterday = yesterdayEligibleForTieOut()
+        val watermark = mockk<JournalReadWatermark>()
+        scheduler.journalWatermark = watermark
+        coEvery { watermark.populationThrough(yesterday) } returns
+            com.openbank.ledger.infrastructure.persistence.repository.JournalPopulation(0, "b".repeat(64))
+        coEvery { participation.completeness(yesterday) } returns CloseCompleteness(
+            yesterday,
+            setOf("interest"),
+            mapOf(
+                "interest" to CloseParticipationRecord(
+                    yesterday, "interest", ParticipationOutcome.RAN, 1, 1, null,
+                    "service-account-openbank-interest", Instant.parse("2026-08-07T03:00:00Z"), false,
+                ),
+            ),
+        )
+        val proof = tieOutRun(yesterday, TieOutRunStatus.OK, Instant.parse("2026-08-07T04:00:00Z"))
+        coEvery { tieOutRuns.findLatestFor(yesterday) } returns proof
+
+        scheduler.reconcile()
+
+        coVerify(exactly = 1) { tieOutRunner.runTieOutFor(yesterday) }
+        coVerify(exactly = 0) { useCase.transition(any()) }
+        coEvery { tieOutRuns.findLatestFor(yesterday) } returns
+            proof.copy(journalCount = 0L, journalFingerprint = "b".repeat(64))
+
+        scheduler.reconcile()
+
+        coVerify(exactly = 1) { tieOutRunner.runTieOutFor(yesterday) }
+        coVerify(exactly = 1) {
+            useCase.transition(match { it.businessDate == yesterday && it.to == AccountingDayStatus.TIED_OUT })
+        }
+    }
+
+    @Test
     fun `ENFORCE holds a tied-out-eligible day while a declared participant is missing`(): Unit = runBlocking {
         participantsMode = CloseParticipantsConfig.MODE_ENFORCE
         yesterdayEligibleForTieOut()
@@ -247,6 +315,32 @@ class AccountingDaySchedulerTest {
         scheduler.reconcile()
 
         coVerify(exactly = 0) { useCase.transition(any()) }
+    }
+
+    @Test
+    fun `a CR LF in a participant name cannot forge a log line in the completeness warning`(): Unit = runBlocking {
+        participantsMode = CloseParticipantsConfig.MODE_SHADOW
+        val yesterday = yesterdayEligibleForTieOut()
+        coEvery { participation.completeness(yesterday) } returns
+            CloseCompleteness(yesterday, expected = setOf("interest\r\nFORGED level=ERROR"), reported = emptyMap())
+        val lines = mutableListOf<String>()
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                lines += record.message
+            }
+            override fun flush() = Unit
+            override fun close() = Unit
+        }
+        val jul = JulLogger.getLogger(AccountingDayScheduler::class.java.name)
+        jul.addHandler(handler)
+        try {
+            scheduler.reconcile()
+        } finally {
+            jul.removeHandler(handler)
+        }
+        val rendered = lines.joinToString("\n")
+        assertThat(rendered).contains("interest__FORGED level=ERROR")
+        assertThat(rendered).doesNotContain("\r").doesNotContain("\nFORGED")
     }
 
     @Test

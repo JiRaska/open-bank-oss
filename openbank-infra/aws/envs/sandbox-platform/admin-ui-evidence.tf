@@ -1,6 +1,9 @@
 locals {
-  admin_ui_evidence_datasets  = ["gate-health", "readiness", "test-intelligence", "security-kpis", "content"]
-  admin_ui_evidence_selectors = [for dataset in local.admin_ui_evidence_datasets : "${aws_s3_bucket.test_evidence.arn}/admin-ui/${dataset}/current.json"]
+  admin_ui_evidence_datasets = ["gate-health", "readiness", "test-intelligence", "security-kpis", "content"]
+  # Keep legacy content available for older images and rollback; the new ownership
+  # contract publishes independently without replacing the old reader's selector.
+  admin_ui_evidence_prefixes  = concat(local.admin_ui_evidence_datasets, ["content/domains-v1"])
+  admin_ui_evidence_selectors = [for prefix in local.admin_ui_evidence_prefixes : "${aws_s3_bucket.test_evidence.arn}/admin-ui/${prefix}/current.json"]
 }
 
 # Admin UI evidence publication is independent of image delivery. This role cannot push
@@ -40,7 +43,7 @@ data "aws_iam_policy_document" "admin_ui_evidence" {
   statement {
     sid       = "AdminUiSnapshotsAndConditionalSelectors"
     actions   = ["s3:GetObject", "s3:PutObject"]
-    resources = concat(local.admin_ui_evidence_selectors, [for dataset in local.admin_ui_evidence_datasets : "${aws_s3_bucket.test_evidence.arn}/admin-ui/${dataset}/snapshots/*"])
+    resources = concat(local.admin_ui_evidence_selectors, [for prefix in local.admin_ui_evidence_prefixes : "${aws_s3_bucket.test_evidence.arn}/admin-ui/${prefix}/snapshots/*"])
   }
   statement {
     # The publisher lists this exact key before reading the selector, so initial
@@ -51,7 +54,7 @@ data "aws_iam_policy_document" "admin_ui_evidence" {
     condition {
       test     = "StringEquals"
       variable = "s3:prefix"
-      values   = [for dataset in local.admin_ui_evidence_datasets : "admin-ui/${dataset}/current.json"]
+      values   = [for prefix in local.admin_ui_evidence_prefixes : "admin-ui/${prefix}/current.json"]
     }
   }
 }

@@ -19,6 +19,8 @@ import java.math.RoundingMode
  */
 internal object Amortiser {
     private val WORK = MathContext.DECIMAL128
+    private const val MONTHS_IN_A_YEAR = 12
+    private val MONTHS_PER_YEAR = BigDecimal(MONTHS_IN_A_YEAR)
 
     fun apply(leg: LegSpec, raw: List<RawPeriod>): List<SchedulePeriod> {
         val n = leg.notional.amount
@@ -63,19 +65,27 @@ internal object Amortiser {
     }
 
     /**
-     * Level payment `A = N / Σₖ Πⱼ≤ₖ (1 + r·τⱼ)⁻¹`, i.e. the payment that amortises N to zero when
-     * each period's interest is `balance × r × τ`. The level payment is rounded once; each
-     * principal is `A − interest(balance)` with interest from [Accrual.interest], and the last
-     * principal is the exact remaining balance.
+     * Level payment by the annuity formula on the NOMINAL periodic rate: `A = N·i / (1 − (1+i)⁻ⁿ)`
+     * with `i = r · months / 12` — the installment a loan contract states, independent of how
+     * holidays move individual payment dates. Only a leg whose frequency is not a whole number of
+     * months uses the day-count generalisation `A = N / Σₖ Πⱼ≤ₖ (1 + r·τⱼ)⁻¹`. The level payment is
+     * rounded once; each principal is `A − interest(balance)` with interest from [Accrual.interest]
+     * (by the leg's day count), and the last principal is the exact remaining balance.
      */
     private fun annuity(leg: LegSpec, raw: List<RawPeriod>): List<BigDecimal> {
         val rate = (leg.rate as? RateSpec.Fixed)?.rate
             ?: throw IllegalArgumentException("an annuity needs a fixed rate, not ${leg.rate}")
         val n = leg.notional.amount
+        val months = (leg.schedule.paymentFrequency as? Frequency.Months)?.months
         var discount = BigDecimal.ONE
         var annuityFactor = BigDecimal.ZERO
         for (p in raw) {
-            discount = discount.divide(BigDecimal.ONE + rate.multiply(p.yearFraction.toBigDecimal(WORK), WORK), WORK)
+            val periodic = if (months != null) {
+                rate.multiply(BigDecimal(months), WORK).divide(MONTHS_PER_YEAR, WORK)
+            } else {
+                rate.multiply(p.yearFraction.toBigDecimal(WORK), WORK)
+            }
+            discount = discount.divide(BigDecimal.ONE + periodic, WORK)
             annuityFactor = annuityFactor.add(discount, WORK)
         }
         val payment = n.divide(annuityFactor, leg.rounding.scaleFor(leg.currency), leg.rounding.mode)

@@ -44,6 +44,11 @@ Pravidla:
 - Klíč je cachován v Redis. Replay se stejným klíčem vrátí cachovanou odpověď s hlavičkou `X-Idempotency-Replayed: true`.
 - Klíč je rovněž perzistován jako unikátní sloupec `idempotency_key` na řádku případu — opakovaný create znovu použije existující případ místo vytvoření duplikátu. (Onboarding konzument používá jako klíč `"<partyId>:CUSTOMER_ONBOARDING"`.)
 
+Klíče začínající `aml-` a končící `-FRAUD_REVIEW` jsou vyhrazené vlastní ověřené
+strojové identitě služby domestic-payment. Ostatní volající dostanou 403, i když jinak
+smějí zakládat AML případy nebo opakovat uloženou odpověď. Kontrola identity proběhne
+před rezervací či přehráním odpovědi v Redis; běžné klíče případů se chovají stejně jako dosud.
+
 ## Endpointy
 
 ### Založení AML případu
@@ -128,7 +133,8 @@ Content-Type: application/json
 ```
 
 - `targetStatus` musí být platný přechod z aktuálního stavu (viz stavový automat v [02 — Architektura](./02-architecture.md)).
-- `decidedBy` je povinné; `decisionReason` je povinné při `targetStatus = BLOCKED`.
+- `decidedBy` v těle se **ignoruje** (zastaralé): rozhodujícím je přihlášený volající (ADR-0371). `decisionReason` je povinné při `targetStatus = BLOCKED`.
+- Případ otevřený vyhodnocením balíčku (nikoli případ `TRANSACTION_MONITORING` otevřený platebním kanálem) lze zde pouze převést do `UNDER_REVIEW`; uzavření nebo eskalace vrací 409 a jde přes návrh dispozice (níže). Volajícímu bez `ROLE_COMPLIANCE` takový případ vrací 404 a v seznamu chybí. Každá odpověď případu nese `requiresFourEyesDisposition` (true právě u takového případu), aby klient věděl, jaký postup nabídnout, dřív než officer napíše zdůvodnění.
 - **Vedlejší efekty:** přechod + událost `aml.case.status_changed.v1` se commitují atomicky přes outbox.
 
 ## Model chyb
@@ -151,7 +157,7 @@ Odchozí topic: `openbank.aml.events` (JSON; partition key = aggregate id příp
 | Typ události | Spouštěč | Payload (klíčová pole) |
 |---|---|---|
 | `aml.case.created.v1` | `POST /aml/cases` nebo onboarding konzument | caseId, idempotencyKey, partyId, accountId, transactionId, customerReference, screeningType, riskLevel, status, alertCode, matchedEntity, occurredAt |
-| `aml.case.status_changed.v1` | `PUT .../decision` | caseId, partyId, previousStatus, newStatus, decisionReason, assignedAnalyst, decidedBy, occurredAt |
+| `aml.case.status_changed.v1` | `PUT .../decision` | caseId, partyId, previousStatus, newStatus, decisionReason, assignedAnalyst, decidedBy, occurredAt, transactionId, alertCode, idempotencyKey |
 
 Příchozí topic: `openbank.party.events` — konzumace `PARTY_CREATED` (skupina `openbank-aml-service`, `auto.offset.reset=earliest`).
 
@@ -162,3 +168,24 @@ Události jsou **append-only**; opravy se dělají následným přechodovým eve
 - **Verze API v URL** (`/api/v1/...`). Breaking změny ⇒ `/api/v2/...`. Dvě verzovací osy (release `version.txt` vs `openapi.yaml:info.version`) jsou nezávislé (ADR-0048).
 - **Verze události v příponě typu** (`...v1`). Evoluce schématu je aditivní (volitelná pole); breaking změny dostanou novou příponu verze.
 - **OpenAPI diff** v CI proti `main` — ale pozor, výše popsaný drift specifikace je nutné nejprve smířit.
+
+
+## Dispozice monitoringu a oznámení podezřelého obchodu (ADR-0371)
+
+Pouze `ROLE_COMPLIANCE`, pouze lidé. Každý aktér je přihlášený volající. Úplná schémata jsou v `openapi.yaml`.
+
+| Metoda a cesta | Akce | Poznámky |
+|---|---|---|
+| `POST /api/v1/aml/monitoring/cases/{caseId}/disposition-proposals` | `amlMonitoring.propose` | `disposition` `CLEAR` nebo `REPORT`, `outcomeCode` ze slovníku výsledků; jeden otevřený návrh na případ |
+| `POST /api/v1/aml/monitoring/disposition-proposals/{proposalId}/decision` | `amlMonitoring.decide` | druhá, jiná osoba; navrhovatel dostane 422 |
+| `GET /api/v1/aml/monitoring/disposition-proposals` | `amlMonitoring.inspect` | návrhy čekající na rozhodnutí |
+| `GET /api/v1/aml/monitoring/outcomes` | `amlMonitoring.inspect` | slovník výsledků, proti kterému se ověřuje `outcomeCode` (id, revize, hash, kód/popis/význam); klienti nabízejí tyto kódy, místo aby drželi vlastní kopii |
+| `POST /api/v1/aml/reports` | `amlReport.draft` | odkazuje na vlastní monitorovací případy a zaúčtované pohyby strany |
+| `GET /api/v1/aml/reports`, `GET /api/v1/aml/reports/{reportId}` | `amlReport.inspect` | |
+| `POST /api/v1/aml/reports/{reportId}/approval` | `amlReport.approve` | druhá, jiná osoba; autor dostane 422 |
+| `POST /api/v1/aml/reports/{reportId}/filing` | `amlReport.file` | zaznamená podání provedené **mimo** tento systém: reference, okamžik, kód výsledku |
+| `POST /api/v1/aml/reports/{reportId}/withdrawal` | `amlReport.withdraw` | pouze před podáním; vyžaduje kód výsledku |
+
+- Neznámý `outcomeCode` vrací 400. Kódy jsou data (`aml/decision-outcomes.provisional.json`), ne výčet v API.
+- Služba nic žádnému úřadu neodesílá. `FILED` znamená, že jmenovaný pracovník zaznamenal podání.
+- `aml.report.state_changed.v1` na `openbank.aml.events` nese pouze `reportId`, `state` a `occurredAt`.

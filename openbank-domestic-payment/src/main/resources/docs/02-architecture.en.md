@@ -77,7 +77,7 @@ com.openbank.domestic/
 │   ├── model/                 DomesticPayment, status / priority / scope / reject enums,
 │   │                          transitionTo() + canTransitionTo() (the state machine)
 │   ├── event/                 DomesticPaymentCreatedEvent, DomesticPaymentStatusChangedEvent
-│   └── screening/             ScreeningPolicy (pure decision), ScreeningResult, ScreeningDecision
+│   └── screening/             (moved to openbank-libs-fincrime, ADR-0353)
 │
 ├── application/               ◄── use-case orchestration
 │   ├── port/in/               DomesticPaymentUseCase + commands / queries
@@ -141,7 +141,7 @@ sequenceDiagram
 
   S->>DB: INSERT payment + INSERT outbox(status=PENDING) [same TX]
   loop @Scheduled every 5s (batch 25, SKIP concurrent)
-    D->>DB: listProcessable(25)  (PENDING, oldest first)
+    D->>DB: claimProcessable(25)  (PENDING, oldest first)
     D->>K: publishWithResilience(payload)  (CircuitBreaker+Retry+Timeout+Bulkhead)
     alt published
       D->>DB: markSent(eventId)
@@ -152,6 +152,8 @@ sequenceDiagram
 ```
 
 **Why outbox:** transactional consistency between the DB write and the Kafka publish. At-least-once delivery; consumers must be idempotent. The publish call is wrapped in MicroProfile fault-tolerance (`@CircuitBreaker`, `@Retry`, `@Timeout`, `@Bulkhead`).
+
+The dispatcher claims rows with an atomic PostgreSQL update. The claim returns the explicit fields mapped by the current outbox entity, including `synthetic`. Adding nullable columns to `domestic_payment_outbox` therefore keeps this dispatcher compatible.
 
 ## Key ports (application/port/out)
 

@@ -20,6 +20,7 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.util.UUID
 
 /**
  * [OpenBaoTransitIrSigner] against a REAL OpenBao (dev mode): the evidence the echoing stub in
@@ -77,34 +78,34 @@ class OpenBaoTransitIrSignerIT {
 
     @Test
     fun `an ed25519 signature over the revision hash verifies on the real server`() {
-        val sig = signer("product-ir").sign(HASH)
+        val sig = signer("product-ir").sign(ID)
         assertThat(sig.signature).startsWith("vault:v1:")
-        assertThat(signer("product-ir").verify(HASH, sig)).isTrue()
+        assertThat(signer("product-ir").verify(ID, sig)).isTrue()
     }
 
     @Test
     fun `an ecdsa-p256 key honours hash_algorithm and verifies too`() {
-        val sig = signer("product-ir-p256").sign(HASH)
-        assertThat(signer("product-ir-p256").verify(HASH, sig)).isTrue()
-        assertThat(signer("product-ir-p256").verify(OTHER_HASH, sig)).isFalse()
+        val sig = signer("product-ir-p256").sign(ID)
+        assertThat(signer("product-ir-p256").verify(ID, sig)).isTrue()
+        assertThat(signer("product-ir-p256").verify(ID.copy(revisionHash = OTHER_HASH), sig)).isFalse()
     }
 
     @Test
     fun `the server refuses a signature over another hash, a tampered one and one made by another key`() {
         val s = signer("product-ir")
-        val sig = s.sign(HASH)
-        assertThat(s.verify(OTHER_HASH, sig)).isFalse()
+        val sig = s.sign(ID)
+        assertThat(s.verify(ID.copy(revisionHash = OTHER_HASH), sig)).isFalse()
         val body = sig.signature.removePrefix("vault:v1:")
         val flipped = (if (body[0] == 'A') "B" else "A") + body.substring(1)
-        assertThat(s.verify(HASH, sig.copy(signature = "vault:v1:$flipped"))).isFalse()
+        assertThat(s.verify(ID, sig.copy(signature = "vault:v1:$flipped"))).isFalse()
         // Made by another key, then presented under this key's id: only the SERVER can refuse this.
-        val foreign = signer("other-ir").sign(HASH)
-        assertThat(s.verify(HASH, sig.copy(signature = foreign.signature))).isFalse()
+        val foreign = signer("other-ir").sign(ID)
+        assertThat(s.verify(ID, sig.copy(signature = foreign.signature))).isFalse()
     }
 
     @Test
     fun `signing with a key that does not exist fails closed instead of creating one`() {
-        assertThatThrownBy { signer("no-such-key").sign(HASH) }
+        assertThatThrownBy { signer("no-such-key").sign(ID) }
             .isInstanceOf(IrSigningException::class.java)
             .hasMessageContaining("no-such-key")
     }
@@ -115,5 +116,7 @@ class OpenBaoTransitIrSignerIT {
         private const val ROOT = "it-root-token"
         private const val HASH = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         private const val OTHER_HASH = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+        private val ID =
+            RevisionIdentity("SAV-FIXED", UUID.fromString("00000000-0000-0000-0000-0000000000a1"), 1, 1, HASH)
     }
 }

@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: Apache-2.0
+# KycSanctionsListChangeUnrecognised against the SHIPPED rule (issue #15908). Two readings must
+# stay quiet — a cold pod where the lazily registered counter does not exist yet, and a counter
+# sitting at zero — and two must fire: a series born already positive (the first unrecognised
+# record after a pod start, which increase() alone cannot see) and an increment on a warm pod.
+evaluation_interval: 1m
+rule_files:
+  - prometheus-rules-onboarding.yaml
+tests:
+  - name: cold pod - the unrecognised series does not exist while other outcomes are counted
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyc_sanctions_list_change_events_total{namespace="kyc",pod="kyc-test",outcome="ignored"}'
+        values: 1+1x180
+      - series: 'openbank_kyc_sanctions_list_change_events_total{namespace="kyc",pod="kyc-test",outcome="handled"}'
+        values: 1+0x180
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: KycSanctionsListChangeUnrecognised
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: KycSanctionsListChangeUnrecognised
+        exp_alerts: []
+      - eval_time: 180m
+        alertname: KycSanctionsListChangeUnrecognised
+        exp_alerts: []
+  - name: a counter resting at zero from the first scrape stays quiet
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyc_sanctions_list_change_events_total{namespace="kyc",pod="kyc-test",outcome="unrecognised"}'
+        values: 0+0x180
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: KycSanctionsListChangeUnrecognised
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: KycSanctionsListChangeUnrecognised
+        exp_alerts: []
+  - name: series born positive - the first unrecognised burst after a pod start fires, then ages out
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyc_sanctions_list_change_events_total{namespace="kyc",pod="kyc-test",outcome="unrecognised"}'
+        values: _x30 3+0x150
+    alert_rule_test:
+      - eval_time: 29m
+        alertname: KycSanctionsListChangeUnrecognised
+        exp_alerts: []
+      - eval_time: 31m
+        alertname: KycSanctionsListChangeUnrecognised
+        exp_alerts:
+          - exp_labels:
+              namespace: kyc
+              pod: kyc-test
+              severity: warning
+            exp_annotations: &annotations
+              subject_period: continuous
+              summary: "kyc-service acked a sanctions list-change record it could not recognise"
+              description: "openbank_kyc_sanctions_list_change_events_total{outcome=\"unrecognised\"} moved on kyc-test within the last hour: a record on the sanctions screening topic carried a missing or unknown `ce-type` header and was acked without opening a screening case. Either sanctions-service changed how it types its events (header value, or type moved into the body) or a new event type joined the topic. Until it is resolved, list changes do not trigger re-screening and nothing else reports it — no lag, no dead-letter, no error. kyc-service logs the offending type under `[sanctions-list-changes-in]`; compare it with the `ce-type` values in the committed kyc-service/sanctions-service pact, then replay the affected publications."
+      - eval_time: 120m
+        alertname: KycSanctionsListChangeUnrecognised
+        exp_alerts: []
+  - name: warm pod - an increment on an existing counter fires, then ages out
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyc_sanctions_list_change_events_total{namespace="kyc",pod="kyc-test",outcome="unrecognised"}'
+        values: 0+0x90 1+0x150
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: KycSanctionsListChangeUnrecognised
+        exp_alerts: []
+      - eval_time: 95m
+        alertname: KycSanctionsListChangeUnrecognised
+        exp_alerts:
+          - exp_labels:
+              namespace: kyc
+              pod: kyc-test
+              severity: warning
+            exp_annotations: *annotations
+      - eval_time: 200m
+        alertname: KycSanctionsListChangeUnrecognised
+        exp_alerts: []

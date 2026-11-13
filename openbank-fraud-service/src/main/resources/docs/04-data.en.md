@@ -4,7 +4,11 @@ This page currently documents only the outbox lifecycle; the rest of the data mo
 
 ## Outbox retention (SENT rows)
 
-`fraud_outbox` is a delivery buffer, not a record. Rows that reached the broker (`status = 'SENT'`) are deleted once their `sent_at` is older than `openbank.outbox.retention.sent-days` (default **7**), by libs-runtime's shared `OutboxSentRetentionJob` (ADR-0329, ADR-0327 D8). The repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`.
+`fraud_outbox` is a delivery buffer, not a record. Rows that reached the broker (`status = 'SENT'`) are deleted once their `sent_at` is older than `openbank.outbox.retention.sent-days` (default **7**), by libs-runtime's shared `OutboxSentRetentionJob` (ADR-0329, ADR-0327 D8). The repository is the kernel `AbstractPanacheOutboxRepository` (ADR-0327 phase 2), whose `purgeSent` the job calls.
+
+## Outbox dispatch (kernel repository)
+
+`FraudOutboxRepositoryImpl` extends libs-runtime's `AbstractPanacheOutboxRepository`. The claim takes only the oldest in-flight row of each party (`aggregate_id`), so `fraud.hold_changed` events of one party stay in order across replicas. A failed row parks that party until its retry. Retries back off exponentially via `next_attempt_at` and go DEAD after the shared attempt limit. `V11__outbox_v2.sql` adds the column and two partial indexes, `ix_fraud_outbox_claim` and `ix_fraud_outbox_inflight_aggregate`.
 
 - Runs nightly (`openbank.outbox.retention.cron`, default `0 17 3 * * ?`) on every replica; each delete is bounded (`batch-size` 5 000, at most `max-batches` 200 per run), so a long-unpurged table drains over several nights.
 - PENDING, FAILED, DISPATCHING and DEAD rows are never touched — DEAD rows are the producer-side DLQ.
@@ -15,3 +19,11 @@ This page currently documents only the outbox lifecycle; the rest of the data mo
 ## Kafka consumer group override
 
 The consumer group id, offset reset and dead-letter topic for fraud-service channels are deliberately not YAML keys in `application.yaml`; they come from `fraud-service-msg-override.yaml`, loaded through `QUARKUS_CONFIG_LOCATIONS`. The reference pattern is card-issuance-service's `party-events-in` channel, which the `application.yaml` comment now cites. This is a comment and documentation change only; no configuration value or runtime behaviour changes.
+
+## Shared verdict type (ADR-0353)
+
+`FraudVerdict` is declared once in `openbank-libs-fincrime` and shared with the payment rails. Its `UNKNOWN` value is what a consumer reads when an answer cannot be parsed; this service never produces it. A `RuleHit` rejects it, and `POST /api/v1/fraud/score` answers 500 rather than emit it. The verdicts stored in `fraud_scores.verdict` and returned on the wire remain `ALLOW`, `CHALLENGE`, `REVIEW` and `DECLINE`.
+
+## Test profile: outbox channel disabled
+
+Under the `%test` profile the `fraud-outbox-out` outgoing channel is disabled next to the already-disabled `transaction-signal` consumer and `dispatch-enabled=false`, so integration tests boot without a broker. Production and dev configuration are unchanged: the dispatcher and channel stay enabled there.

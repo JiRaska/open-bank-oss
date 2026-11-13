@@ -55,7 +55,7 @@ Stávající implementace `GET /api/v1/parties/by-external-id` aktuálně čte q
 }
 ```
 
-Při vytvoření služba nastaví `status=ACTIVE`, `kycLevel=BASIC`, `amlRiskScore=LOW`, otevře případ `PID_VERIFICATION` (`status=OPEN`) a vyšle `PartyCreated`, `case.created`, `RelationshipAdded`.
+Při vytvoření služba nastaví `status=ACTIVE`, `kycLevel=BASIC`, bez `amlRiskScore` (zastaralé, ADR-0353 — rizikový rating klienta vede kyc-service), otevře případ `PID_VERIFICATION` (`status=OPEN`) a vyšle `PartyCreated`, `case.created`, `RelationshipAdded`.
 
 ### `PartyResponse` (vracen všude)
 
@@ -64,7 +64,7 @@ Vnořený objekt s `id`, `partyType`, `status`, `externalIds[]`, `coreAttributes
 ### `UpdateKycRequest` (PUT /kyc)
 
 ```json
-{ "kycLevel": "ENHANCED", "amlRiskScore": "MEDIUM", "pepFlag": false, "sanctionsFlag": false }
+{ "kycLevel": "ENHANCED", "pepFlag": false, "sanctionsFlag": false }
 ```
 
 ### `TransitionCaseRequest` (PATCH /case)
@@ -86,9 +86,9 @@ Chyby používají jednotné tělo `ApiError` z `openbank-libs`:
 | HTTP | `code` | Kdy | Zdroj |
 |---|---|---|---|
 | `400` | `VALIDATION_ERROR` | nelegální přechod PID case | `InvalidPartyCaseTransitionMapper` |
-| `404` | `NOT_FOUND` | party / vztah / externí id nenalezeno | `PartyNotFoundMapper` |
-| `409` | `CONFLICT` | duplicitní bankID sub při vytvoření | `PartyAlreadyExistsMapper` |
-| `409` | `CONFLICT` | party už má aktivní roli | `RelationshipAlreadyExistsMapper` |
+| `404` | `NOT_FOUND` | party / vztah / externí id nenalezeno | libs `ResourceNotFoundExceptionMapper` |
+| `409` | `CONFLICT` | duplicitní bankID sub při vytvoření | libs `ResourceConflictExceptionMapper` |
+| `409` | `CONFLICT` | party už má aktivní roli | libs `ResourceConflictExceptionMapper` |
 | `401`/`403` | — | chybějící token / špatná role | Quarkus security (`@RolesAllowed`) |
 
 ## Vysílané události (Kafka topic `party.events`)

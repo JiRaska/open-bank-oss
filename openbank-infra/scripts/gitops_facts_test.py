@@ -53,6 +53,63 @@ class GitopsFactsTest(unittest.TestCase):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(body)
 
+    def management_manifest(self, ports):
+        path = self.root / "workload.yaml"
+        path.write_text("""apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-service
+  namespace: sample
+spec:
+  template:
+    spec:
+      containers:
+        - name: sample-service
+""" + ports)
+        return self.mod.management_port_workloads(self.root)
+
+    def test_management_inventory_accepts_block_port(self):
+        self.assertEqual(self.management_manifest(
+            "          ports:\n            - name: management\n              containerPort: 8085\n"
+        ), {"sample": {"sample-service"}})
+
+    def test_management_inventory_accepts_flow_ports_in_either_order(self):
+        for port in [
+            "{name: management, containerPort: 8085}",
+            "{ name: management, containerPort: 8085 }",
+            "{containerPort: 8085, name: management}",
+            "{name: management, containerPort: 8085} # canonical port",
+        ]:
+            with self.subTest(port=port):
+                self.assertEqual(self.management_manifest(
+                    "          ports:\n            - " + port + "\n"
+                ), {"sample": {"sample-service"}})
+
+    def test_management_inventory_rejects_flow_mentions_without_a_container_port(self):
+        for body in [
+            "          env:\n            - {name: management, value: enabled}\n",
+            "          ports:\n            # - {name: management, containerPort: 8085}\n",
+            "          ports:\n            - {name: management-extra, containerPort: 8085}\n",
+            "          ports:\n            - {name: management2, containerPort: 8085}\n",
+            "          ports:\n            - {name: management, containerPort: invalid}\n",
+            '          ports:\n            - "{name: management, containerPort: 8085}"\n',
+            "          env:\n            - {name: management, containerPort: 8085}\n",
+            "          ports:\n            - {other-name: management, other-containerPort: 8085}\n",
+            "          ports:\n            - {other-name: management, containerPort: 8085}\n",
+            "          ports:\n            - {name: management, other-containerPort: 8085}\n",
+            "          env:\n            - name: EXAMPLE\n              value: |\n                ports:\n                  - {name: management, containerPort: 8085}\n",
+            "          env:\n            - name: EXAMPLE\n              value: >-\n                ports:\n                  - {name: management, containerPort: 8085}\n",
+            "          ports:\n            - {name: http, containerPort: 8080}\n          env:\n            - {name: management, containerPort: 8085}\n",
+        ]:
+            with self.subTest(body=body):
+                self.assertEqual(self.management_manifest(body), {})
+
+    def test_management_inventory_resumes_after_scalar_with_indentless_ports(self):
+        self.assertEqual(self.management_manifest(
+            "          env:\n            - name: EXAMPLE\n              value: |\n                ignored text\n"
+            "          ports:\n          - {name: management, containerPort: 8085}\n"
+        ), {"sample": {"sample-service"}})
+
     # -- module_dir: both naming shapes ------------------------------------
     def test_module_dir_finds_the_service_suffixed_shape(self):
         (self.root / "openbank-ledger-service").mkdir()
@@ -160,6 +217,70 @@ class GitopsFactsTest(unittest.TestCase):
             if not self.mod.module_dir(s, repo).is_dir()
         ]
         self.assertEqual(missing, [], f"declared money-path but no module directory: {missing}")
+
+
+class ManagementScrapeConsolidationTest(unittest.TestCase):
+    """Regression corpus for the three redundant service-level management scrapes."""
+
+    @staticmethod
+    def matching_management_scrapes(workload, monitors):
+        namespace = workload["metadata"]["namespace"]
+        template = workload["spec"]["template"]
+        labels = template["metadata"]["labels"]
+        ports = {port.get("name") for container in template["spec"]["containers"]
+                 for port in container.get("ports", [])}
+        matches = []
+        for monitor in monitors:
+            spec = monitor["spec"]
+            scope = spec.get("namespaceSelector", {})
+            selected = scope.get("any") or namespace in scope.get("matchNames", [])
+            if not scope.get("any") and not scope.get("matchNames"):
+                selected = namespace == monitor["metadata"]["namespace"]
+            if not selected:
+                continue
+            selector = spec["selector"]
+            if any(key not in {"matchLabels", "matchExpressions"} for key in selector):
+                raise AssertionError("Unqualified selector shape in regression corpus")
+            if any(labels.get(key) != value for key, value in selector.get("matchLabels", {}).items()):
+                continue
+            expressions = selector.get("matchExpressions", [])
+            if any(expression["operator"] != "Exists" for expression in expressions):
+                raise AssertionError("Unqualified selector operator in regression corpus")
+            if any(expression["key"] not in labels for expression in expressions):
+                continue
+            for endpoint in spec["podMetricsEndpoints"]:
+                if (endpoint.get("port") in ports and endpoint.get("port") == "management"
+                        and endpoint.get("path", "/metrics") == "/q/metrics"
+                        and endpoint.get("scheme", "http") == "http"):
+                    matches.append((monitor["metadata"]["namespace"], monitor["metadata"]["name"]))
+        return matches
+
+    def test_consolidated_service_templates_keep_one_canonical_management_scrape(self):
+        from copy import deepcopy
+        import yaml
+
+        components = HERE.parents[1] / "openbank-infra" / "gitops" / "components"
+        fleet = yaml.safe_load((components / "observability" / "podmonitor-openbank-services.yaml").read_text())
+        canonical = [("observability", "openbank-services")]
+        # These are the three reproduced regressions, not a registry of fleet modules.
+        for namespace in ("communication", "context", "referral"):
+            with self.subTest(namespace=namespace):
+                documents = list(yaml.safe_load_all(
+                    (components / namespace / f"{namespace}-service.yaml").read_text()
+                ))
+                workload, = [doc for doc in documents if doc and doc.get("kind") == "Deployment"]
+                monitors = [fleet] + [doc for doc in documents if doc and doc.get("kind") == "PodMonitor"]
+                self.assertEqual(self.matching_management_scrapes(workload, monitors), canonical)
+
+                duplicate = deepcopy(fleet)
+                duplicate["metadata"]["name"] = "duplicate-fixture"
+                self.assertEqual(len(self.matching_management_scrapes(workload, [fleet, duplicate])), 2)
+                other_pod = deepcopy(duplicate)
+                other_pod["spec"]["selector"] = {"matchLabels": {"app.kubernetes.io/name": "another-pod"}}
+                self.assertEqual(self.matching_management_scrapes(workload, [fleet, other_pod]), canonical)
+                other_path = deepcopy(duplicate)
+                other_path["spec"]["podMetricsEndpoints"][0]["path"] = "/another/metrics"
+                self.assertEqual(self.matching_management_scrapes(workload, [fleet, other_path]), canonical)
 
 
 if __name__ == "__main__":

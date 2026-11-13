@@ -460,10 +460,10 @@ class SanctionsListServiceTest {
         val list = sampleList(lastEntryCount = 10)
         val fence = mockk<SanctionsImportPublicationFence>()
         var insideFence = false
-        coEvery { fence.duringRefresh<SanctionsList>(SanctionsListType.OFAC_SDN, any()) } coAnswers {
+        coEvery { fence.duringRefresh<SanctionsList>(SanctionsListType.OFAC_SDN, any(), any()) } coAnswers {
             insideFence = true
             try {
-                secondArg<suspend (SanctionsPublicationPermit) -> SanctionsList>()(
+                thirdArg<suspend (SanctionsPublicationPermit) -> SanctionsList>()(
                     SanctionsPublicationPermit(SanctionsListType.OFAC_SDN),
                 )
             } finally {
@@ -490,8 +490,8 @@ class SanctionsListServiceTest {
         val older = sampleList(lastEntryCount = 10)
         val current = older.copy(lastEntryCount = 42)
         val fence = mockk<SanctionsImportPublicationFence>()
-        coEvery { fence.duringRefresh<SanctionsList>(SanctionsListType.OFAC_SDN, any()) } coAnswers {
-            secondArg<suspend (SanctionsPublicationPermit) -> SanctionsList>()(
+        coEvery { fence.duringRefresh<SanctionsList>(SanctionsListType.OFAC_SDN, any(), any()) } coAnswers {
+            thirdArg<suspend (SanctionsPublicationPermit) -> SanctionsList>()(
                 SanctionsPublicationPermit(SanctionsListType.OFAC_SDN),
             )
         }
@@ -514,8 +514,8 @@ class SanctionsListServiceTest {
         )) {
             val list = sampleList(listType = type.name, lastEntryCount = 12)
             val fence = mockk<SanctionsImportPublicationFence>()
-            coEvery { fence.duringRefresh<SanctionsList>(type, any()) } coAnswers {
-                secondArg<suspend (SanctionsPublicationPermit) -> SanctionsList>()(
+            coEvery { fence.duringRefresh<SanctionsList>(type, any(), any()) } coAnswers {
+                thirdArg<suspend (SanctionsPublicationPermit) -> SanctionsList>()(
                     SanctionsPublicationPermit(type, inheritedIncomplete = true),
                 )
             }

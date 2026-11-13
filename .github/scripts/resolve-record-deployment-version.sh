@@ -35,29 +35,20 @@
 # the same source, not about a different commit. Recording is the symmetric case. This script is
 # the recording half of that decision; the two halves disagreeing is the state #3223 describes.
 #
-# WHY TREE OBJECTS AND NOT THE COMPARE API (#4673)
-# This used to ask `compare/<published>...<deployed>` for the changed-file list. That endpoint caps
-# its `files` array at 300 entries, does not paginate past it (page=2 returns an empty array,
-# measured), and returns `changed_files: null` on a large comparison — so the cap is silent in both
-# changed", which is a claim about the PROBE, not about the source.
+# WHY COMPLETE ROOT MANIFESTS (#4673)
+# A service-subtree comparison cannot see shared Gradle modules, version catalogs, build logic,
+# root build files or the canonical Dockerfile.deploy. The GitHub compare endpoint is not a safe
+# substitute: its changed-file list caps at 300 and can omit every relevant file in a large diff.
+# The helper reads both immutable commit trees recursively, validates paths/modes/types/object IDs,
+# reconstructs every advertised tree hash, and fails closed on malformed, truncated, missing or
+# over-budget proof. It classifies changes using the same Gradle build-input scope as the asking
+# resolver: own service, its transitive project dependencies, all openbank-libs modules, global
+# Gradle/config/build-logic/root build inputs, and Dockerfile.deploy. Known irrelevant paths follow
+# that policy; unknown paths refuse equivalence. This needs no local history and works in the
+# caller's fetch-depth-1 checkout.
 #
-# Measured on the real case that exposed it: document-service between ee974ea3 and 77ebab08 has
-# 16 changed build inputs (Dockerfile, build.gradle.kts, 8 under src/main). git reports 1519 changed
-# files across the comparison; the API returned 300, and ZERO of them were document-service files.
-# So the script declared equivalence, record-deployment wrote the stale version, and every consumer
-# stayed phantom-blocked. It also cannot self-heal: the staler the record, the wider the comparison,
-# the more certain the truncation.
-#
-# Tree objects answer the real question directly and are not subject to any of that. A commit's
-# top-level tree lists `<svc>` with its own subtree sha; equal subtree shas mean the directory is
-# byte-identical, which is a STRONGER proof than "no changed file was named". This still needs no
-# checkout — `git/trees` is an API call — so the constraint that motivated the compare API is
-# respected. resolve-can-i-deploy-selector.sh compares tree objects too; the two halves now agree
-# on both the question and the evidence.
-#
-# Cost: 2 calls when the subtrees match, 4 when they differ and exclude-paths have to be considered.
-# Every tree response carries a `truncated` flag, and this script treats a truncated tree as `none`
-# rather than as evidence of anything.
+# API work is bounded to 30 calls, 12 MiB per root tree, 50,000 entries per tree, 256 KiB per build
+# descriptor, 28 seconds total, and 6 seconds per call. Any limit or lookup failure produces `none`.
 #
 # WHAT COUNTS AS A RECORDED SOURCE, AND WHY IT IS NOT release-please's ANSWER (#9898)
 # Everything under `<svc>/` except that package's release-please `exclude-paths` MINUS the
@@ -85,13 +76,11 @@
 # with no pact artefacts 404s there and has already exited `none`. So there is nothing to declare
 # and no set to keep in step with the artefacts it covers.
 #
-# `openbank-admin-ui/e2e` STAYS excluded and is the one remaining exclusion: admin-ui is a
-# pacticipant (four committed pacts) but its pacts come from `src/test/*-contract.test.ts`, while
-# `e2e/` is Playwright browser specs that generate nothing. Dropping `src/test` and keeping `e2e`
-# is what makes this agree with the ASKING half — `pact-version-tree-equivalent.sh` compares the
-# service's own tree whole and carries the case verbatim: "the service's OWN test source changed"
-# → DIFFERENT, while a DEPENDENCY's `src/test` stays EQUIVALENT. Before this change the two halves
-# disagreed on exactly this path, which the header below calls the #3223 state.
+# Admin UI is deliberately unsupported for non-exact equivalence. Its Node/Pact proof includes
+# BFF handlers, package/lock/Vitest setup, and pretest generators that read cross-repository
+# inputs. The existing Gradle resolver cannot establish that closure, so it returns `none` rather
+# than applying its own-tree and e2e exceptions as a reduced proof. Exact broker records remain
+# accepted before this branch. The ordinary Admin UI publishing lane is the recovery path.
 #
 # WHAT THIS DOES NOT DO. It does not unblock a consumer. A test-only provider fix now yields
 # `none` instead of a stale version, so `can-i-deploy` reports no deployed version — honest, still
@@ -100,8 +89,8 @@
 #
 # OUTPUT — exactly one line on stdout:
 #   exact:<sha>        the broker already has this version; record it unchanged
-#   equivalent:<sha>   no version for the deployed sha, but <sha> is published and byte-identical
-#                      in every recorded source of this service; record <sha>
+#   equivalent:<sha>   no version for the deployed sha, but complete supported manifests prove
+#                      equivalence in every recorded source; record <sha>
 #   none               neither — the caller MUST record nothing and warn. Never fabricate.
 #
 # The caller decides what `none` costs. It is deliberately not an error: a service genuinely
@@ -384,10 +373,19 @@ self_test() {
 
   local got
   got="$(printf '%s' "$BLOBS_OK" | tree_blobs)"; check "blobs are listed, trees skipped" 0 $?
-  [ "$got" = "$(printf 'src/main/A.kt\taaa')" ]; check "the blob listing is path TAB sha" 0 $?
+  local listing_status=0
+  if [ "$got" != "$(printf 'src/main/A.kt\taaa')" ]; then listing_status=1; fi
+  check "the blob listing is path TAB sha" 0 "$listing_status"
   printf '%s' "$BLOBS_TRUNC" | tree_blobs >/dev/null; check "a TRUNCATED blob listing is refused" 1 $?
 
   rm -f "$A" "$B"
+  local manifest_helper
+  manifest_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check-recorded-source-manifests.py"
+  if [ -f "$manifest_helper" ]; then
+    python3 "$manifest_helper" --self-test || fails=1
+  else
+    echo "  FAIL complete recorded-source manifest helper is missing"; fails=1
+  fi
   # NOT TESTABLE HERE, and deliberately so: that this scope is pacticipant-only is a property of
   # main()'s ORDER, not of the comparison — the `/pacticipants/<svc>/latest-version` call above it
   # exits `none` for a service with no published version, so a non-pacticipant never reaches the
@@ -429,38 +427,28 @@ except Exception: print("")' <<<"$latest_json" 2>/dev/null)"
   esac
   [ "$published" != "$deployed" ] || { echo "none"; return 0; }
 
-  # Tree objects, not the compare API (#4673): equal subtree shas prove the directory is
-  # byte-identical, and nothing here is subject to a 300-entry cap.
-  local tree_pub tree_dep
-  tree_pub="$(subtree_sha "$published" "$svc")" || { echo "none"; return 0; }
-  tree_dep="$(subtree_sha "$deployed" "$svc")" || { echo "none"; return 0; }
-  [ -n "$tree_pub" ] && [ -n "$tree_dep" ] || { echo "none"; return 0; }
-
-  if [ "$tree_pub" = "$tree_dep" ]; then
-    echo "equivalent:${published}"
-    return 0
-  fi
-
-  # The directories differ. That is still equivalence if every difference sits inside an
-  # exclude-path, so list both subtrees and compare the build inputs entry by entry.
-  local excludes list_pub list_dep rc
-  excludes="$(recorded_source_excludes_for "$svc")"
-  list_pub="$(mktemp)" || { echo "none"; return 0; }
-  list_dep="$(mktemp)" || { rm -f "$list_pub"; echo "none"; return 0; }
-
-  if ! subtree_entries "$tree_pub" >"$list_pub" || ! subtree_entries "$tree_dep" >"$list_dep"; then
-    rm -f "$list_pub" "$list_dep"
+  # The recorded-side policy deliberately supports the JVM asking scope only. In particular,
+  # admin-ui's non-exact Pact proof has Node/generator inputs this resolver cannot establish.
+  # Exact broker records returned above are unchanged; never transfer a different UI version.
+  if [ "$svc" = "openbank-admin-ui" ]; then
     echo "none"
+    echo "recorded-source proof: non-exact admin-ui equivalence is unsupported without a complete Node/Pact proof" >&2
     return 0
   fi
 
-  if recorded_sources_agree "$svc" "$excludes" "$list_pub" "$list_dep"; then
-    rc="equivalent:${published}"
+  local excludes helper
+  excludes="$(recorded_source_excludes_for "$svc")"
+  helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check-recorded-source-manifests.py"
+  [ -f "$helper" ] || { echo "none"; echo "recorded-source proof: helper is missing" >&2; return 0; }
+
+  # One complete-manifest proof covers both identical-service and release-filtered cases. It
+  # reconstructs every advertised tree object from validated paths, modes, types and object IDs,
+  # so incomplete API output and unrelated-looking shared build changes cannot claim equivalence.
+  if python3 "$helper" "$svc" "$published" "$deployed" "$excludes"; then
+    echo "equivalent:${published}"
   else
-    rc="none"
+    echo "none"
   fi
-  rm -f "$list_pub" "$list_dep"
-  echo "$rc"
 }
 
 # The subtree sha of `<svc>` at <commit>, read from the commit's top-level tree. Fails (rc 1) when

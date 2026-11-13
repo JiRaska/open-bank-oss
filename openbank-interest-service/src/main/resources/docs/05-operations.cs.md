@@ -172,3 +172,25 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 Konzument odvodu srážkové daně zaúčtovává debet přes sdílenou fasádu `TransactionClient` z generovaného modulu `openbank-client-transaction` (ADR-0319). Dávku vypořádá jen čitelná transakce ve stavu COMPLETED; jakýkoli jiný stav 2xx (FAILED, probíhá, nečitelné tělo) se vyhodí jako nejistě dokončený a zopakuje se se stejným idempotentním klíčem. Odpověď 409 je idempotentní úspěch. Odmítnutí 400/422 vyhodí `WithholdingRemittanceBookingFailedException`, takže konektor událost přesměruje do DLQ. Jakákoli jiná odpověď nebo ztracené spojení se vyhodí a zopakuje se se stejným idempotentním klíčem. Datum splatnosti, které není ISO datum, se odmítne jednorázově před opakováním a skončí v DLQ. Konfigurace se nezměnila.
 
 Před logováním opakovaných pokusů se u výjimek nejistého dokončení zachová pouze řízený stav a odstraní se příčiny dekódování těla, které mohou obsahovat odpověď poskytovatele. Počty pokusů a původní idempotentní klíče se nemění. Ostatní logování výjimek a sdílený logger zavírání odpovědi nejsou součástí této omezené záruky.
+
+## Stínový komparátor produktového IR (ADR-0352, fáze 3)
+
+`InterestService` dál rozhoduje a účtuje každé časové rozlišení i kapitalizaci; stín pouze měří. `openbank.interest.product-ir.decision-mode` je `shadow` (výchozí a jediná přijímaná hodnota). `ir`, tedy přepnutí podle ADR-0352 §9, se při startu odmítne, dokud nebude postaveno. `ProductShadowScheduler` běží každých `openbank.interest.product-shadow.every` (výchozí 5 minut, ve výchozím stavu zapnutý) a vystavuje metriku živosti workflow `interest-product-shadow` (ADR-0237). Každý běh nejdřív zařadí potvrzená časová rozlišení a kapitalizace za posledních `lookback-days` (výchozí 35), které ještě nemají řádek ve frontě. Potom každé z nich znovu rozhodne produktovým IR revize připnuté k účtu podle ADR-0341. IR a jeho podpis se čtou z product-catalog jednou za revizi a uchovávají se jako lokální neměnná kopie; cesta účtování katalog nikdy nevolá.
+
+Porovnává se bit po bitu a bez tolerance: denní časové rozlišení ve scale 6 proti `Post` časového rozlišení z IR a HRUBÁ kapitalizace ve scale měny proti `Post` kapitalizace z IR. Srážková daň (ADR-0033) se neporovnává, protože IR v1 pro ni nemá konstrukci. Tyto případy se nikdy neporovnávají a počítají se jako `rule_unmapped`: časové rozlišení podle individuální sazby operátora místo připnuté sazby, TIERED IR s více než jedním pásmem (původní cesta uplatní jednu sazbu na celý zůstatek) a věrnostní bonus. Účet bez připnutí (sazba spravovaná operátorem) se počítá jako `no_ir` s výsledkem `NO_PIN`.
+
+Ověření podpisu nastavuje `openbank.interest.product-shadow.verification.mode`: `disabled` (výchozí; nic se neporovná a každý vstup s IR se počítá jako `verification_disabled`), `openbao` (Transit `verify` na klíči `product-ir-publish` s rolí služby, která má jen `verify`) nebo `hmac` (pouze dev a test; produkční spuštění s ním odmítne nastartovat). V režimu `openbao` se klient přihlašuje kubernetes-auth rolí `interest-ir-verify` (ServiceAccount `interest/interest-service`) a volá TLS listener OpenBao `https://openbao.vault.svc:8203`, přičemž důvěřuje jen privátní CA v připojeném `ca.crt` (`openbank.interest.product-shadow.verification.openbao.ca-file`). Zřízení: runbook 0027, *Product IR signing*. Každý `Post` z IR se před porovnáním kontroluje na zachování peněz. Metriky jsou sdílené řady `openbank_product_shadow_*` s `consumer="interest"`. Alerty jsou sdílené `ProductShadowStalled`, `ProductShadowComparedNothing` a `ProductShadowDiverged`. Služba smí přejít na IR až poté, co je rozdíl nulový po celou měsíční periodu v obou scale (ADR-0352 §9–§10).
+
+## Zdrojové důkazy denní uzávěrky
+
+Akruál a kapitalizace jsou samostatné požadované běhy. Chybějící dokončený běh hlásí REFUSED,
+i když tím odvolá dřívější RAN. Prázdný průchod nepotvrzuje skutečně vykonanou peněžní práci.
+Reporter obnovuje dokončené dny od dřívější z hranice nastaveného zotavení a začátku předchozího
+kalendářního měsíce. Stejný uložený výsledek zachovává zdrojovou identitu i časový mezník ledgeru.
+Nové hlášení zneplatní původní měsíční důkaz; zpětně neopraví neúplnou uzávěrku. Nasazovací hold
+a shadow pozorování zůstávají do vyhodnocení celého živého měsíce a provozní ceny tohoto čtení.
+
+Uložené vlastnictví úlohy přežívá změnu cronu: nastavení kapitalizace na `off` nepřevede existující odmítnutý běh na SKIPPED. Odmítnutí dál zadržuje uzávěrku; úspěšné opakování zachová důkaz provedené práce i při vypnutém cronu.
+
+
+Pozorované povinnosti úloh se ukládají odděleně od dokladů skutečných běhů. Vypnutí nebo přesun scheduleru po odmítnutí chybějící práce povinnost neodstraní, ani po restartu. Vyřeší ji skutečně dokončený běh nebo doložená výjimka v ledgeru. Pozorování nevyrábí dokončené běhy ani zpětně neodvozuje nikdy nepozorované plány. Rollback zachová tabulku povinností i běhů.

@@ -7,7 +7,7 @@ import com.openbank.audit.application.port.out.AnchorSigner
 import com.openbank.audit.infrastructure.signing.AnchorSignerProducer
 import com.openbank.audit.infrastructure.signing.AwsKmsAnchorSigner
 import com.openbank.audit.infrastructure.signing.LocalHmacAnchorSigner
-import com.openbank.audit.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest

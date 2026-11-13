@@ -29,6 +29,8 @@
 
 `LENDING_LEDGER_BACKEND` is **build-time** (`@IfBuildProperty`): it selects the adapter at image build, not at runtime.
 
+Compliance-pack refresh uses `lending.compliance.refresh-initial-delay` (default `10s`) before its first scheduled pass.
+
 ## Ports & probes
 
 - **App:** `8126`. **Management:** `8086`, root-path `/q` (`quarkus.management.enabled=true`).
@@ -131,3 +133,71 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Day-close participation (ADR-0342, #13167)
+
+Lending reports each completed Prague accounting day to ledger-service as participant `lending`
+(`LendingCloseParticipationScheduler`, hourly at :40; `lending.close.report-cron`, lookback
+`lending.close.lookback-days`, default 3). The evidence is `lending_close_job_run` (V28): one row per
+day and job (`accrual`, `provisioning`).
+
+| Day state | What is reported |
+|---|---|
+| both passes ran, nothing refused, allowance journals delivered | RAN (journals = accrual journals + SENT allowance rows) |
+| a pass has not run, is in flight, or allowance rows are still in the outbox | nothing yet - the ledger holds the day |
+| accrual answered `409 ACCOUNTING_DAY_CLOSED`, failed, or stayed truncated after its drain budget | REFUSED with a fixed category |
+| provisioning left exposures unprovisioned, could not count coverage, or failed; an allowance row went DEAD | REFUSED with a fixed category |
+| an in-flight marker older than drain-budget × (lookback + 1) + 30m (70m by default) | REFUSED `pass started and never completed`; the next accrual pass re-runs that day and re-records it |
+| both intervals `off` | SKIPPED |
+
+The accrual drains truncated batches within `lending.servicing.accrual.drain-budget` (PT10M) and
+`max-drain-rounds` (100), and each pass first re-drains earlier lookback days still REFUSED as
+truncated, re-recording them RAN once nothing is left. A REFUSED day stays held until a later RAN
+report or an operator waiver on the ledger. A report that reaches the ledger after the day closed is
+stored `late` and never moves the day. Metric: `openbank_close_participation_reports_total{participant="lending"}`.
+
+### Durable accrual receipts (#13708)
+
+Before contacting ledger, `lending_accrual_progress` (V28) commits the installment's complete dated
+journal request, deterministic reference and transaction identity. A retry reuses that request,
+including its original date and GL accounts. It does not rebuild it from the current clock or chart.
+Only a POSTED response with matching transaction identity and entry date confirms the intent.
+A closed-day refusal remains visible; the same idempotency key is never retargeted to another date.
+
+One local database transaction completes the intent, marks the installment, writes its existing
+`loan.interest_accrued` outbox event, and increments work-day items and actual receipt-day journals.
+A later installment failure cannot discard a committed prefix. An acknowledgement followed by a
+local rollback leaves the intent pending; retrying its exact request can reconcile it once.
+Pending intents prevent RAN. Erasing an unresolved intent follows the installment lifecycle and
+sets scoped aggregate `unreconciled` evidence for its work/requested dates; later successful passes
+cannot clear it. Use the existing controlled ledger reconciliation/waiver process for disposition.
+No per-customer tombstone or new retention period is introduced. Rollback retains V28 tables and
+pending evidence; reverting code does not prove an unresolved remote posting absent.
+
+## Daily close source evidence
+
+Completed accrual/provisioning receipts and their in-flight markers remain relevant after a
+scheduler is disabled. Missing, running or unresolved allowance work emits a stable REFUSED,
+revoking an earlier positive result. V30 retains actual allowance delivery acknowledgements
+atomically with SENT, separately from the disposable outbox. Its date index supports the bounded
+monthly audit scan. An existing database's coverage starts on the next Prague calendar day;
+earlier purged delivery history is unknown and cannot qualify. Fresh databases begin with full
+coverage of their subsequently written facts. A reviewed cutover is required for legacy history.
+Rollback retains receipts, coverage and financial history. Keep the deployment hold and require
+a full live month plus production-volume scan timing before activation.
+
+
+Observed due-job obligations are now retained separately from actual run receipts. Disabling or moving a scheduler after a missing-work refusal cannot remove that obligation, including after restart. Only a real completed run or an attributable ledger waiver can resolve it. Observations do not fabricate completed jobs or reconstruct schedules that were never observed. Rollback retains both obligation and run tables.
+
+## Dated loan lifecycle facts (#9890)
+
+Lending publishes version 1 of `loan.exposure_fact` on the existing lending events topic. The
+lending outbox records paid installments, schedule replacement and final closure, write-off or
+unwind in the local transaction that writes the corresponding source change. Disbursement facts
+carry the original booking time and a separate cash confirmation time. Lending emits them after
+both ledger credits succeed, in the same outbox transaction as the legacy disbursement event.
+A paid installment reports scheduled principal and interest applied and the remaining scheduled
+principal. Early settlement notices and acceleration can precede final closure.
+
+AnaCredit stores these facts separately. Pre-existing loans need independently verified historical
+evidence for reconciliation. See #9890 for the reporting inputs still outstanding.

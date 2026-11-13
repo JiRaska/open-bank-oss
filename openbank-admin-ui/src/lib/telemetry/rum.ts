@@ -2,10 +2,11 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import { context, trace, type Tracer } from '@opentelemetry/api'
+import { context, propagation, trace, type Tracer } from '@opentelemetry/api'
+import { CompositePropagator, W3CBaggagePropagator, W3CTraceContextPropagator } from '@opentelemetry/core'
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 import { resourceFromAttributes } from '@opentelemetry/resources'
-import { BatchSpanProcessor, WebTracerProvider, type SpanProcessor } from '@opentelemetry/sdk-trace-web'
+import { BatchSpanProcessor, StackContextManager, TracerProvider, type SpanProcessor } from '@opentelemetry/sdk-trace'
 import { ATTR_HTTP_ROUTE, ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions'
 import { RUM_SERVICE_NAME } from './rum-service-name'
 
@@ -84,24 +85,30 @@ export function buildRumResourceAttributes(input: RumResourceInput): Record<stri
   }
 }
 
-let provider: WebTracerProvider | undefined
+let provider: TracerProvider | undefined
 
 /** Creates a real browser provider; processor injection gives tests exported-span proof. */
-export function createRumProvider(input: RumResourceInput, spanProcessor?: SpanProcessor): WebTracerProvider {
-  const processor = spanProcessor ?? new BatchSpanProcessor(new OTLPTraceExporter({ url: RUM_INGEST_PATH }), {
+export function createRumProvider(input: RumResourceInput, spanProcessor?: SpanProcessor): TracerProvider {
+  const processor = spanProcessor ?? new BatchSpanProcessor({
+    exporter: new OTLPTraceExporter({ url: RUM_INGEST_PATH }),
     scheduledDelayMillis: 5_000,
     maxExportBatchSize: 64,
   })
-  return new WebTracerProvider({
+  return new TracerProvider({
     resource: resourceFromAttributes(buildRumResourceAttributes(input)),
     spanProcessors: [processor],
   })
 }
 
-export function initRum(input: RumResourceInput, spanProcessor?: SpanProcessor): WebTracerProvider {
+export function initRum(input: RumResourceInput, spanProcessor?: SpanProcessor): TracerProvider {
   if (provider) return provider
   provider = createRumProvider(input, spanProcessor)
-  provider.register()
+  // SDK 3 replaces WebTracerProvider.register with explicit, equivalent browser registration.
+  trace.setGlobalTracerProvider(provider)
+  context.setGlobalContextManager(new StackContextManager().enable())
+  propagation.setGlobalPropagator(new CompositePropagator({
+    propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
+  }))
   return provider
 }
 

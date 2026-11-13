@@ -68,13 +68,19 @@ dependencies {
     // Same version pin as openbank-ledger-service/openbank-balance-service's own property
     // suites and openbank-libs-domain's MoneyPropertyTest — kept a direct GAV like theirs.
     api("io.kotest:kotest-property:5.9.1")
+    // OpenApiWireValidator (#13210): `implementation`, NOT `api` — the validator and YAML parser are
+    // not part of this module's public API, so they reach no consumer's compile classpath. Same
+    // validator and yaml exclusion as libs-domain; snakeyaml-engine 2.7 is the pinned parser.
+    implementation("com.networknt:json-schema-validator:1.5.9") {
+        exclude(group = "com.fasterxml.jackson.dataformat", module = "jackson-dataformat-yaml")
+    }
+    implementation("org.snakeyaml:snakeyaml-engine:2.7")
     // quarkus-vertx: VertxContextSupport (reactive Panache needs a Vert.x duplicated context).
     // quarkus-messaging-kafka: OutgoingKafkaRecordMetadata (kafka-api), for reading the produced
     // record's key/headers back out of the in-memory connector's sink.
-    // No Quarkus BOM here (this module isn't a Quarkus service), so pinned directly, matching
-    // libs.versions.toml's quarkus = "3.33.2".
-    api("io.quarkus:quarkus-vertx:3.33.2")
-    api("io.quarkus:quarkus-messaging-kafka:3.33.2")
+    // This plain JVM library reads Quarkus versions from the shared platform catalog.
+    api("io.quarkus:quarkus-vertx:${libs.versions.quarkus.asProvider().get()}")
+    api("io.quarkus:quarkus-messaging-kafka:${libs.versions.quarkus.asProvider().get()}")
     // Bridges a Kotlin suspend block into the Uni VertxContextSupport.subscribeAndAwait expects
     // (io.smallrye.mutiny.coroutines.uni), matching LedgerOutboxDispatchIT's own pattern.
     api("io.smallrye.reactive:mutiny-kotlin:3.1.1")
@@ -86,14 +92,12 @@ dependencies {
     // which transitively brings quarkus-test-common) + the container types the canonical
     // Postgres*TestResource classes provision. No Quarkus BOM here either; a consuming
     // service's own enforcedPlatform(libs.quarkus.bom) aligns final resolved versions.
-    // Version pinned directly (no version.ref on this catalog alias — every other consumer
-    // relies on enforcedPlatform(libs.quarkus.bom), which this non-Quarkus module doesn't
-    // apply). Matches libs.versions.toml's quarkus = "3.33.2".
+    // Read the version from the catalog even without a service's enforced platform.
     // quarkus-test-common (not the heavier quarkus-junit5) — just enough for
     // QuarkusTestResourceLifecycleManager / ResourceArg, without quarkus-junit5's full
     // RestAssured + JUnit5-extension transitive graph, which pulled in an older docker-java
     // that shadowed this module's own constraint below.
-    api("io.quarkus:quarkus-test-common:3.33.2")
+    api("io.quarkus:quarkus-test-common:${libs.versions.quarkus.asProvider().get()}")
     api(libs.testcontainers)
     api(libs.testcontainers.postgresql)
     api(libs.testcontainers.redpanda)
@@ -128,8 +132,19 @@ dependencies {
     // SecurityIdentity for ApprovalEndpointConformance; services supply it at test runtime.
     compileOnly("io.quarkus.security:quarkus-security")
     compileOnly("io.smallrye.config:smallrye-config-source-yaml")
+    // @Produces / @Singleton on TraceContractRecorder; every consuming service has the CDI API.
+    compileOnly("io.quarkus:quarkus-arc")
+    // M2mOidcClientIdentityWiringConformance reflects over the rest-client annotations a consuming
+    // service already carries (quarkus-rest-client-oidc-filter, quarkus-rest-client) and parses its
+    // application.yaml with the snakeyaml the YAML config source brings.
+    compileOnly(libs.quarkus.oidc.client.reactive.filter)
+    compileOnly(libs.quarkus.rest.client.reactive)
     testImplementation(enforcedPlatform(libs.quarkus.bom))
     testImplementation("io.smallrye.config:smallrye-config-source-yaml")
+    testImplementation(libs.quarkus.junit5)
+    testImplementation("io.quarkus:quarkus-arc")
+    testImplementation(libs.quarkus.oidc.client.reactive.filter)
+    testImplementation(libs.quarkus.rest.client.reactive)
 
     testImplementation(libs.mockk)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

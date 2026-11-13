@@ -30,6 +30,7 @@ import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from '
 import path from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
 import { parse as parseYaml } from 'yaml'
+import { runnableModules } from './service-inventory.mjs'
 import { validateDeclaration, jsonSchema, isPlaceholder } from './governance-schema.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -183,11 +184,12 @@ function truthGaps(decl, ev, fleetDatabases) {
 // Exported (not just run as a CLI) so the gate's rules are unit-testable without
 // spawning a subprocess per case — see src/test/generate-governance.test.ts.
 export function buildManifest(REPO) {
-  // A module is a released component iff it has version.txt (admin-ui keeps it too).
+  // Govern every runnable module, including unreleased ones; release registration is independent.
+  const runnable = new Set(runnableModules(REPO).map(module => module.name))
   const modules = readdirSync(REPO)
     .filter(n => n.startsWith('openbank-'))
     .filter(n => { try { return statSync(path.join(REPO, n)).isDirectory() } catch { return false } })
-    .filter(n => existsSync(path.join(REPO, n, 'version.txt')))
+    .filter(n => existsSync(path.join(REPO, n, 'version.txt')) || existsSync(path.join(REPO, n, 'governance.yaml')) || runnable.has(n))
     .sort()
 
   const services = []
@@ -256,6 +258,7 @@ export function buildManifest(REPO) {
 
   return {
     schema: 'openbank.governance/v1',
+    domainTaxonomy: 'openbank.domain-taxonomy/v1',
     generator: 'generate-governance.mjs',
     source: 'code-derived (governance.yaml + db/migration + datasource URLs) — ADR-0071 / ADR-0196 / ADR-0029 D3',
     collectedAt: null,

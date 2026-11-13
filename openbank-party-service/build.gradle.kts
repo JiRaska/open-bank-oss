@@ -37,8 +37,8 @@ dependencies {
     testImplementation(libs.mockk)
     // Provider-side message Pact verification for the PARTY_CREATED event (ADR-0063 P1).
     testImplementation(libs.pact.provider)
-    // Consumer pact for transaction-service's GET /api/v1/transactions (ADR-0319 D3), replayed by
-    // transaction-service's @PactFolder class on every PR.
+    // Consumer contracts cover account merge and GDPR portability reads through the generated
+    // transaction client; provider folder suites replay their committed HTTP pacts.
     testImplementation(libs.pact.consumer)
     testImplementation(project(":openbank-libs-testing"))
 

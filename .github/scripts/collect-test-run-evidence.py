@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 SUITE_KINDS = {"unit", "integration", "contract", "e2e", "simulation"}
 SUITE_STATES = {"passed", "failed", "skipped", "not-run"}
-SPECIALIZED_KINDS = {"performance", "mutation", "synthetic", "trace"}
+SPECIALIZED_KINDS = {"performance", "mutation", "synthetic", "trace", "visual"}
 SPECIALIZED_STATES = SUITE_STATES | {"blocked", "unknown"}
 V1_INFRASTRUCTURE = {"postgres", "redpanda", "valkey"}
 V2_INFRASTRUCTURE = V1_INFRASTRUCTURE | {"keycloak"}
@@ -107,6 +107,42 @@ def valid_build_attestation(value) -> bool:
             and value["matched"] == matching_build_shas(value["requestedSha"], value["observedSha"]))
 
 
+RUN_FIELDS = {"id", "attempt", "commit", "branch", "workflow", "url", "observedAt"}
+TEST_TASK_OUTCOMES = {"executed", "reused"}
+
+
+def test_task_outcome(service: Path, commit: str) -> str | None:
+    """Did THIS commit execute the Gradle `test` task, or were its outputs reused?
+
+    The test task may be restored FROM-CACHE/UP-TO-DATE from a commit with identical sources
+    (openbank.test-provenance), leaving JUnit XML and Kover data that this commit never
+    produced. `openbank.test-provenance` writes `build/test-task-outcome/test.properties` only
+    when the task body actually runs, stamped with GITHUB_SHA; a missing or foreign stamp means
+    the results were reused. No test results at all claims nothing (None)."""
+    if not (service / "build/test-results/test").is_dir():
+        return None
+    marker = service / "build/test-task-outcome/test.properties"
+    try:
+        stamped = dict(line.split("=", 1) for line in marker.read_text().splitlines() if "=" in line)
+    except OSError:
+        return "reused"
+    return "executed" if stamped.get("executedCommit") == commit else "reused"
+
+
+def validate_run(run: dict) -> datetime:
+    if not RUN_FIELDS.issubset(run) or set(run) - (RUN_FIELDS | {"testTaskOutcome"}):
+        raise ValueError("run provenance fields are incomplete")
+    if "testTaskOutcome" in run and run["testTaskOutcome"] not in TEST_TASK_OUTCOMES:
+        raise ValueError("run.testTaskOutcome is invalid")
+    if (not run["id"] or run["attempt"] < 1 or len(run["commit"]) < 7 or not run["branch"]
+            or not run["workflow"] or not trusted_run_url(str(run["url"]), str(run["id"]))):
+        raise ValueError("run provenance values are invalid")
+    run_observed_at = parse_timestamp(run["observedAt"], "run.observedAt")
+    if run_observed_at - datetime.now(timezone.utc) > MAX_FUTURE_SKEW:
+        raise ValueError("run.observedAt exceeds the allowed clock skew")
+    return run_observed_at
+
+
 def validate_envelope(envelope: dict) -> None:
     """Fail closed before CI publishes an envelope that violates the v1 contract."""
     required = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
@@ -116,14 +152,7 @@ def validate_envelope(envelope: dict) -> None:
     if not str(envelope["component"]).startswith("openbank-"):
         raise ValueError("run envelope schemaVersion/component is invalid")
     run = envelope["run"]
-    if set(run) != {"id", "attempt", "commit", "branch", "workflow", "url", "observedAt"}:
-        raise ValueError("run provenance fields are incomplete")
-    if (not run["id"] or run["attempt"] < 1 or len(run["commit"]) < 7 or not run["branch"]
-            or not run["workflow"] or not trusted_run_url(str(run["url"]), str(run["id"]))):
-        raise ValueError("run provenance values are invalid")
-    run_observed_at = parse_timestamp(run["observedAt"], "run.observedAt")
-    if run_observed_at - datetime.now(timezone.utc) > MAX_FUTURE_SKEW:
-        raise ValueError("run.observedAt exceeds the allowed clock skew")
+    run_observed_at = validate_run(run)
     for suite in envelope["suites"]:
         if suite["kind"] not in SUITE_KINDS or suite["state"] not in SUITE_STATES:
             raise ValueError("suite kind/state is invalid")
@@ -709,6 +738,10 @@ def escaped_failure_recall(
 
 
 def coverage(service: Path) -> dict | None:
+    # CI supplies the actual render step outcome; interrupted/failed evidence is unknown.
+    outcome = os.environ.get("OPENBANK_COVERAGE_REPORT_OUTCOME")
+    if outcome is not None and outcome != "success":
+        return None
     report = service / "build" / "reports" / "kover" / "report.xml"
     if not report.exists():
         return None
@@ -943,6 +976,38 @@ def pitest_mutation_score(detected: int, total: int) -> int | None:
     return (detected * 100 + total // 2) // total if total else None
 
 
+def visual_evidence(report: str, diff_artifact: str | None = None) -> dict:
+    """One `visual` row from the visual lane's own JUnit file (ADR-0359).
+
+    The verdict is the screenshot comparisons, counted per testcase: a lane that ran zero
+    comparisons is `not-run`, never a pass, and an absent or unparsable report is absence,
+    not success. The report deliberately lives outside build/test-results so the same cases
+    are not ALSO counted as e2e suite evidence.
+    """
+    source = "playwright-visual:openbank-admin-ui"
+    path = Path(report)
+    try:
+        cases = ET.parse(path).getroot().iter("testcase") if path.exists() else None
+    except ET.ParseError:
+        cases = None
+    if cases is None:
+        return {"kind": "visual", "state": "not-run", "source": source, "detail": "visual JUnit report absent or unparsable"}
+    total = failed = skipped = 0
+    for case in cases:
+        total += 1
+        if case.find("skipped") is not None:
+            skipped += 1
+        elif case.find("failure") is not None or case.find("error") is not None:
+            failed += 1
+    executed = total - skipped
+    if executed == 0:
+        return {"kind": "visual", "state": "not-run", "source": source, "detail": f"0/{total} screenshot comparisons executed"}
+    detail = f"{executed - failed}/{executed} screenshots matched committed baselines"
+    if failed and diff_artifact:
+        detail += f"; diff images retained as artifact {diff_artifact}"
+    return {"kind": "visual", "state": "failed" if failed else "passed", "source": source, "detail": detail}
+
+
 def specialized_evidence(
     performance_summary: str | None,
     mutation_report: str | None,
@@ -1060,6 +1125,8 @@ def main() -> None:
     parser.add_argument("--synthetic-variant")
     parser.add_argument("--browser-vitals")
     parser.add_argument("--browser-report-dir")
+    parser.add_argument("--visual-report")
+    parser.add_argument("--visual-diff-artifact")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
@@ -1472,6 +1539,19 @@ def main() -> None:
             }]
             browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]])
             assert browser_synthetic == [{"kind": "synthetic", "state": "not-run", "source": "journey:admin-ui-sso-boundary", "detail": "browser Web Vitals sample absent or unattributable"}]
+            # Visual lane: counted per testcase from its own JUnit; zero comparisons and an
+            # absent report must never read as a pass.
+            visual = service / "visual.xml"
+            assert visual_evidence(str(visual))["state"] == "not-run"
+            visual.write_text('<testsuites><testsuite name="v"><testcase name="a"/><testcase name="b"/></testsuite></testsuites>')
+            assert visual_evidence(str(visual)) == {"kind": "visual", "state": "passed", "source": "playwright-visual:openbank-admin-ui", "detail": "2/2 screenshots matched committed baselines"}
+            visual.write_text('<testsuites><testsuite name="v"><testcase name="a"/><testcase name="b"><failure message="diff"/></testcase></testsuite></testsuites>')
+            failed_visual = visual_evidence(str(visual), "visual-diff-1-a1")
+            assert failed_visual["state"] == "failed" and failed_visual["detail"] == "1/2 screenshots matched committed baselines; diff images retained as artifact visual-diff-1-a1", failed_visual
+            visual.write_text('<testsuites><testsuite name="v"><testcase name="a"><skipped/></testcase></testsuite></testsuites>')
+            assert visual_evidence(str(visual))["state"] == "not-run"
+            visual.write_text('<testsuites')
+            assert visual_evidence(str(visual))["state"] == "not-run"
             browser_vitals = service / "browser-vitals.json"
             browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004}}')
             browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
@@ -1684,6 +1764,29 @@ def main() -> None:
             assert got == ["approvals/A1"], f"verifies: Playwright title tag not read: {got}"
             assert verifies_ids(service, "nav.spec.ts", "loads the inbox @verifies:nonsense") == [], \
                 "verifies: unscoped title id accepted"
+        # A `test` task restored FROM-CACHE/UP-TO-DATE leaves XML and Kover data produced for an
+        # EARLIER commit. Only a marker written by THIS commit's execution may claim "executed".
+        with tempfile.TemporaryDirectory() as directory:
+            service = Path(directory)
+            assert test_task_outcome(service, "a" * 40) is None, "no test results must not claim an outcome"
+            (service / "build/test-results/test").mkdir(parents=True)
+            assert test_task_outcome(service, "a" * 40) == "reused", "results without a marker were credited as executed"
+            marker = service / "build/test-task-outcome/test.properties"
+            marker.parent.mkdir(parents=True)
+            marker.write_text("executedCommit=" + "b" * 40 + "\n")
+            assert test_task_outcome(service, "a" * 40) == "reused", "a stale marker from another commit was credited"
+            marker.write_text("executedCommit=" + "a" * 40 + "\n")
+            assert test_task_outcome(service, "a" * 40) == "executed", "this commit's execution was not recognised"
+            example = {"id": "1", "attempt": 1, "commit": "a" * 40, "branch": "b", "workflow": "w", "url": "",
+                       "observedAt": "2026-01-01T00:00:00Z"}
+            for outcome in ("executed", "reused"):
+                validate_run(example | {"testTaskOutcome": outcome})
+            for bad in ({"testTaskOutcome": "cached"}, {"unknownField": 1}):
+                try:
+                    validate_run(example | bad)
+                except ValueError:
+                    continue
+                raise AssertionError(f"run provenance accepted {bad}")
         print("test-run evidence collector self-test: classification and runtime red/green paths proven")
         return
     if not args.service or not args.out:
@@ -1708,6 +1811,8 @@ def main() -> None:
         args.synthetic_variant,
     )
     specialized.extend(trace_contract_evidence(service))
+    if args.visual_report:
+        specialized.append(visual_evidence(args.visual_report, args.visual_diff_artifact))
     envelope = {
         "schemaVersion": args.schema_version,
         "run": {
@@ -1727,6 +1832,11 @@ def main() -> None:
         "specializedEvidence": specialized,
         "diagnostics": browser_diagnostics(args.browser_report_dir, run_id, run_attempt, run_url),
     }
+    # `commit`/`observedAt` describe this CI run; whether the test suite itself ran for this
+    # commit is a separate fact (a cache hit replays results from an identical-source commit).
+    outcome = test_task_outcome(service, envelope["run"]["commit"])
+    if outcome:
+        envelope["run"]["testTaskOutcome"] = outcome
     validate_envelope(envelope)
     output = Path(args.out)
     output.parent.mkdir(parents=True, exist_ok=True)

@@ -5,7 +5,7 @@
 package com.openbank.domestic.application.workflow
 
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
-import com.openbank.domestic.domain.screening.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningDecision
 import io.temporal.activity.ActivityInterface
 import java.util.UUID
 
@@ -15,6 +15,16 @@ interface DomesticPaymentActivities {
     fun validatePayment(paymentId: UUID)
     fun rejectPayment(paymentId: UUID)
     fun shadowFraudScore(paymentId: UUID)
+
+    /**
+     * #4403: score the payment and answer what the workflow must do with it. Supersedes
+     * [shadowFraudScore] for runs started after the `fraud-enforcement` version marker; with
+     * `openbank.domestic.fraud.enforcement-enabled` false it always answers PROCEED.
+     */
+    fun fraudGate(paymentId: UUID): FraudGateAction
+
+    /** #4403: REJECTED with FRAUD_SUSPECTED. Notifies nobody: telling the customer is tipping-off. */
+    fun rejectForFraud(paymentId: UUID, cause: FraudRejectCause)
 
     /** ADR-0104 D4: submit the validated payment to the scheme and advance to SENT_TO_CLEARING or REJECTED. */
     fun submitScheme(paymentId: UUID): DomesticPaymentStatus

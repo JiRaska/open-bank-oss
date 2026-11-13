@@ -17,6 +17,10 @@ import com.openbank.kyb.application.port.out.MandateRequest
 import com.openbank.kyb.application.port.out.PartyGateway
 import com.openbank.kyb.application.port.out.PepProfile
 import com.openbank.kyb.application.port.out.RegistryAdapter
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningPort
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningRequest
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningResult
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningUnavailableException
 import com.openbank.kyb.domain.model.EntityStatus
 import com.openbank.kyb.domain.model.ExtractVerification
 import com.openbank.kyb.domain.model.IdentifierScheme
@@ -31,14 +35,17 @@ import com.openbank.kyb.domain.model.RegistrySearchResult
 import com.openbank.kyb.domain.model.RepresentationMode
 import com.openbank.kyb.domain.model.RepresentationRule
 import com.openbank.kyb.domain.model.Representative
+import com.openbank.kyb.domain.model.ScreeningVerdict
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
+import kotlinx.coroutines.CompletableDeferred
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 
 /**
  * Test doubles for the two out-of-process collaborators. `@Alternative @Priority` beans in the
@@ -69,6 +76,33 @@ class StubAresAdapter : RegistryAdapter {
                 LegalFormClass.LIMITED_COMPANY,
                 RepresentationRule(RepresentationMode.JOINT_N, 2, "dva jednatelé společně"),
                 listOf("Alena Krátká", "Tomáš Dlouhý"),
+            )
+            // Three single-jednatel companies reserved for KybRelatedPartyScreeningIT, one per
+            // test, each with a representative no other test uses: the screening double answers
+            // by NAME, so a shared name would make one test's finding another test's surprise.
+            "71000011" -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf("Radim Prověřený"),
+            )
+            "71000020" -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf("Hana Čekající"),
+            )
+            "71000038" -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf("Petr Exponovaný"),
+            )
+            "71000046" -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf("Olga Souběžná"),
             )
             // 26185610 — a sole trader.
             "26185610" -> extract(identifier, LegalFormClass.SOLE_TRADER, RepresentationRule.SOLE, listOf("Jan Novák"))
@@ -146,6 +180,38 @@ class StubPartyGateway : PartyGateway {
     val pep = ConcurrentHashMap<UUID, Boolean>()
 
     override suspend fun pepProfile(partyId: UUID): PepProfile? = PepProfile(pep[partyId], null)
+}
+
+/**
+ * sanctions-service double. Everyone is clear unless a test says otherwise BY NAME — the module's
+ * ITs share one Quarkus instance, so a per-name answer cannot leak into another test's journey.
+ * [unavailable] makes the screen of that name fail the way an outage does: by throwing, never by
+ * answering.
+ */
+@Alternative
+@Priority(1)
+@ApplicationScoped
+class StubRelatedPartyScreening : RelatedPartyScreeningPort {
+    val answers = ConcurrentHashMap<String, RelatedPartyScreeningResult>()
+    val unavailable: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    val requests = CopyOnWriteArrayList<RelatedPartyScreeningRequest>()
+
+    /**
+     * Holds the screen of one name open until the test releases it, so a test can put another
+     * request BETWEEN a use case's read of the case and its write. [entered] says the screen began.
+     */
+    val held = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+    val entered = ConcurrentHashMap<String, CountDownLatch>()
+
+    override suspend fun screen(request: RelatedPartyScreeningRequest): RelatedPartyScreeningResult {
+        requests += request
+        entered[request.name]?.countDown()
+        held[request.name]?.await()
+        if (request.name in unavailable) {
+            throw RelatedPartyScreeningUnavailableException(IllegalStateException("stubbed outage"))
+        }
+        return answers[request.name] ?: RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, false, null)
+    }
 }
 
 /**

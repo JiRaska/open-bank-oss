@@ -40,7 +40,7 @@ Flyway, neměnné forward-only skripty:
 | `V1__create_psd2_outbox.sql` | Tabulka `psd2_outbox` + indexy `idx_psd2_outbox_status_created_at` (status, created_at ASC) a `idx_psd2_outbox_aggregate_id` |
 | `V2__hibernate_sequences.sql` | `CREATE SEQUENCE psd2_outbox_seq INCREMENT BY 50` — nutné, protože Panache alokuje id ze sekvence `<table>_seq`, zatímco tabulka používá `BIGSERIAL`; bez ní každý INSERT selže s `relation "psd2_outbox_seq" does not exist`. Rollback: `DROP SEQUENCE psd2_outbox_seq;` |
 
-Existuje regresní strážní test (`HibernateSequenceGuardTest`), který chrání konvenci sekvence z V2.
+Existuje CI gate (`hibernate-sequence-guard`), který chrání konvenci sekvence z V2.
 
 ## Indexy
 

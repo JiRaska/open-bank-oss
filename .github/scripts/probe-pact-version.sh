@@ -105,9 +105,10 @@ STUB
   # A throwaway repo, so the git half is REAL — the equivalence must be decided by actual tree
   # objects, not by whatever the surrounding checkout happens to look like when this runs.
   repo="$self_tmp/repo"
-  mkdir -p "$repo/openbank-demo-service/src/main"
+  mkdir -p "$repo/openbank-demo-service/src/main" "$repo/.github/workflows"
   ( cd "$repo" && git init -q . \
     && git config user.email s@e.x && git config user.name s && git config commit.gpgsign false \
+    && printf 'env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n' > .github/workflows/auto-deploy.yml \
     && printf 'x\n' > openbank-demo-service/build.gradle.kts \
     && printf 'x\n' > openbank-demo-service/src/main/A.kt \
     && git add -A && git commit -qm base ) >/dev/null 2>&1

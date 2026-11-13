@@ -7,13 +7,17 @@ package com.openbank.productcatalog.application
 import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
+import com.openbank.libs.product.ir.ProductIrCanonical
 import com.openbank.libs.product.ir.ProductIrParser
+import com.openbank.libs.product.ir.ProductIrValidationException
 import com.openbank.libs.product.ir.ProductRevisionIr
 import com.openbank.libs.productrevision.IrSignerPort
 import com.openbank.libs.productrevision.IrSigningException
+import com.openbank.libs.productrevision.RevisionIdentity
 import com.openbank.productcatalog.application.port.out.GenericCatalogRepository
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.CatalogSchemaValidator
+import com.openbank.productcatalog.domain.catalog.CatalogValue
 import com.openbank.productcatalog.domain.catalog.MarketContext
 import com.openbank.productcatalog.domain.catalog.ProductOffering
 import com.openbank.productcatalog.domain.catalog.ProductRevision
@@ -27,6 +31,7 @@ import com.openbank.productcatalog.domain.catalog.RevisionState
 import com.openbank.productcatalog.domain.catalog.SchemaRef
 import com.openbank.productcatalog.domain.catalog.SchemaValidationResult
 import com.openbank.productcatalog.domain.catalog.SchemaViolation
+import com.openbank.productcatalog.domain.catalog.catalogPrincipalKey
 import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
 import com.openbank.productcatalog.infrastructure.catalog.toPlainTree
 import jakarta.enterprise.context.ApplicationScoped
@@ -185,7 +190,8 @@ class GenericCatalogService(
 
     /**
      * Publishes an IR-bearing revision (ADR-0352 §4, §7): validates the IR, computes its canonical
-     * `revisionHash`, obtains the publish-path signature over exactly that hash and stores it next to
+     * `revisionHash`, obtains the publish-path signature over the revision identity envelope
+     * (product code, revision id and number, IR version, hash) and stores it next to
      * the revision in the same transaction. A revision without IR is refused — use [publish].
      */
     suspend fun publishIr(
@@ -199,7 +205,16 @@ class GenericCatalogService(
             ?: throw CatalogConflictException("revision carries no product IR; publish it through publish")
         // Transit `sign` is a blocking HTTP call (and may log in first); never on the event loop.
         val signature = try {
-            withContext(Dispatchers.IO) { irSigner.sign(ir.revisionHash) }
+            // ADR-0352 §4: the signature binds the whole revision identity, not the bare hash, so it
+            // cannot be presented under another product's or another revision's pin.
+            val identity = RevisionIdentity(
+                productCode = ir.productCode,
+                revisionId = draft.id,
+                revisionNumber = draft.number,
+                irVersion = ir.irVersion,
+                revisionHash = ir.revisionHash,
+            )
+            withContext(Dispatchers.IO) { irSigner.sign(identity) }
         } catch (e: IrSigningException) {
             throw CatalogConflictException("revision cannot be signed: ${e.message}", e)
         }
@@ -248,8 +263,21 @@ class GenericCatalogService(
      * `ProductIrValidationException` (an `IllegalArgumentException`, mapped to 400) for an invalid
      * document — a draft that cannot be published is refused at the write, never at publication.
      */
-    fun parseBehaviour(content: RevisionContent): ProductRevisionIr? =
-        content.behaviour?.let { ProductIrParser.fromTree(it.toPlainTree()) }
+    fun parseBehaviour(content: RevisionContent): ProductRevisionIr? = content.behaviour?.let(::parseIr)
+
+    /**
+     * ADR-0352 phase 5b: the Studio IR editor's dry run. The same [parseIr] a revision write runs, so
+     * the editor cannot accept an IR the write would refuse, nor refuse one it would accept. Stores,
+     * signs and publishes nothing.
+     */
+    fun lintIr(behaviour: CatalogValue): IrLintResult = try {
+        val ir = parseIr(behaviour)
+        IrLintResult(ir, ProductIrCanonical.canonicalJson(ir), emptyList())
+    } catch (e: ProductIrValidationException) {
+        IrLintResult(null, null, e.problems)
+    }
+
+    private fun parseIr(behaviour: CatalogValue): ProductRevisionIr = ProductIrParser.fromTree(behaviour.toPlainTree())
 
     @Suppress("ThrowsCount")
     suspend fun approveRevision(
@@ -273,11 +301,11 @@ class GenericCatalogService(
         if (policy.role(role) == null) {
             throw CatalogConflictException("approval role $role is not declared by the revision's schema")
         }
-        requireApprovable(draft, policy)
+        policy.requireApprovable(draft)
         require(issuer.isNotBlank() && subject.isNotBlank()) { "authenticated approver is required" }
         require(actorName.isNotBlank() && reason.isNotBlank()) { "approver and reason are required" }
         require(reason.length <= MAX_APPROVAL_REASON_LENGTH) { "approval reason is too long" }
-        if (draft.makerId == subject || draft.makerId == actorName) {
+        if (draft.makerId in setOf(subject, actorName, catalogPrincipalKey(issuer, subject))) {
             throw CatalogForbiddenException("maker cannot approve their own revision")
         }
         validateOrThrow(draft.schemaRef, draft.content.attributes)
@@ -299,18 +327,6 @@ class GenericCatalogService(
     /** The approval policy of the revision's exact schema version, or null when it has none. */
     suspend fun approvalPolicy(revision: ProductRevision): RevisionApprovalPolicy? =
         findSchema(revision.schemaRef).approvalPolicy
-
-    private fun requireApprovable(draft: ProductRevision, policy: RevisionApprovalPolicy) {
-        if (policy.requireEffectiveFrom && draft.effectiveFrom == null) {
-            throw CatalogConflictException("approval requires an explicit effectiveFrom")
-        }
-        val attributes = catalogJson.toContentNode(draft.content).path("attributes")
-        policy.requiredAttributes.forEach { (name, expected) ->
-            if (attributes.path(name).asText() != expected) {
-                throw CatalogConflictException("approval requires attribute $name = $expected")
-            }
-        }
-    }
 
     suspend fun findPublished(offeringId: UUID, effectiveAt: Instant): ProductRevision =
         repository.findPublished(offeringId, effectiveAt)
@@ -417,3 +433,10 @@ class GenericCatalogService(
         }
     }
 }
+
+/** Outcome of [GenericCatalogService.lintIr]: either a parsed IR with its canonical bytes, or problems. */
+data class IrLintResult(
+    val ir: ProductRevisionIr?,
+    val canonicalJson: String?,
+    val problems: List<ProductIrValidationException.Problem>,
+)

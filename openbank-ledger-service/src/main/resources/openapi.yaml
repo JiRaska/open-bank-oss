@@ -16,7 +16,12 @@ info:
   # which relaxes the request and breaks no caller.
   # 1.27.0 -> 1.28.0 (ADR-0342): additive. Day-close participants: GET/PUT
   # /ledger/accounting-days/{businessDate}/participants[/{participant}] and PUT .../{participant}/waiver.
-  version: 1.28.0
+  # 1.28.0 -> 1.29.0 (ADR-0344 D7): additive. The accounting role enum gains the treasury instrument
+  # roles (premium/discount, fair value, revaluation reserve, realised/unrealised result, memo, memo
+  # contra) that migration V35 maps for the posting-rule matrix classes.
+  # 1.29.0 -> 1.30.0: additive raw journal snapshot reads and optional unverified caller-origin evidence.
+  # 1.30.0 -> 1.31.0: additive immutable close evidence, monthly readiness and explicit participant mode.
+  version: 1.34.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -31,6 +36,242 @@ tags:
   - name: ClosedPeriod
 
 paths:
+  /api/v1/ledger/pension-accounting/identity:
+    get:
+      summary: Inspect the configured identity of this segregated ledger book
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Book identity; a BANK response cannot accept pension accounting
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionBookIdentity'}
+        '401': {description: Unauthenticated}
+        '403': {description: Missing dedicated book-inspection grant}
+  /api/v1/ledger/pension-accounting/closing-days:
+    get:
+      summary: Read bounded accounting-day states without access to journals or balances
+      description: Without dates, returns the oldest 31 OPEN or CUTOFF days through today for recovery. Supply both dates to inspect a bounded range.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: from, in: query, required: false, schema: {type: string, format: date}}
+        - {name: to, in: query, required: false, schema: {type: string, format: date}}
+      responses:
+        '200':
+          description: At most 32 date states in a range spanning at most 31 days
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 32
+                items:
+                  type: object
+                  required: [businessDate, status]
+                  properties:
+                    businessDate: {type: string, format: date}
+                    status: {type: string, enum: [OPEN, CUTOFF, TIED_OUT, LOCKED]}
+        '400': {description: Missing or invalid date range}
+        '401': {description: Unauthenticated}
+        '403': {description: Missing dedicated book-inspection grant}
+  /api/v1/ledger/pension-accounting/management-fees:
+    post:
+      summary: Accrue one approved NAV fee in this fund or company book
+      description: >
+        Requires the verified pension-fund client and a dedicated purpose grant. The bank and
+        mismatched book/fund identities refuse the request. Idempotency-Key must equal navId. A stable NAV key binds the normalized
+        payload before posting; changed replays conflict. A correction requires a completed original
+        receipt of the same fund and population. No cash moves. Posting date is assigned once from
+        the current accounting day; a later closed-day refusal remains pending for reviewed recovery.
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string}
+          description: Stable request identity; changed payload replay conflicts
+        - name: x-openbank-synthetic
+          in: header
+          required: false
+          schema: {type: string}
+          description: Honored only for an explicitly trusted verified client; rejected if trust is missing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionFeePostingRequest'}
+      responses:
+        '200':
+          description: Retained POSTED or explicit NO_POSTING receipt; replay returns the original journal
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionFeePostingResponse'}
+        '400': {description: Missing or malformed body}
+        '401': {description: Unauthenticated}
+        '403': {description: Caller is not the verified pension-fund client or lacks the purpose grant}
+        '409': {description: Wrong book, changed replay, missing original, untrusted taint, or closed posting date}
+        '422': {description: Unsupported currency, amount, date, or missing reviewed accounting map}
+  /api/v1/ledger/pension-accounting/reconciliations:
+    post:
+      summary: Propose an independent source reconciliation of the entire pension chart
+      description: A verified interactive accountant supplies opaque source evidence references and every enabled account balance. Identical retries return the original proposal id.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string}
+          description: Stable request identity; changed payload replay conflicts
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionReconciliationProposal'}
+      responses:
+        '200':
+          description: Immutable proposal id; no success verdict has been issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionReconciliationId'}
+        '400': {description: Missing or malformed body}
+        '401': {description: Unauthenticated}
+        '403': {description: A verified interactive accountant and reconciliation grant are required}
+        '409': {description: Wrong or reassigned book}
+        '422': {description: Incomplete source references or unsupported source balance}
+  /api/v1/ledger/pension-accounting/reconciliations/{id}/approve:
+    post:
+      summary: Independently verify source balances against this book and retain its read proof
+      description: >
+        A different verified interactive accountant approves once. The same checker may replay without issuing another control. The entire enabled own chart,
+        including zero balances, must match; Idempotency-Key must equal the proposal id; foreign or disabled accounts with activity refuse the
+        proof. Writers are excluded during the read and verdict commit. This is an own-book control,
+        never a bank deposit-control tie-out, and does not waive missing product completion.
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string}
+          description: Stable request identity; changed payload replay conflicts
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Approved own-book reconciliation id
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionReconciliationId'}
+        '401': {description: Unauthenticated}
+        '403': {description: A verified interactive accountant and reconciliation grant are required}
+        '409': {description: Maker is checker, different approval checker, wrong book, or source balances do not match}
+  /api/v1/ledger/close-readiness:
+    get:
+      tags: [AccountingDay]
+      summary: Whole-month evidence for reviewing close-participant enforcement
+      description: >
+        Read-only proof from immutable snapshots captured atomically at CUTOFF to TIED_OUT.
+        Late reports cannot repair earlier evidence. Missing days, waivers, refused work,
+        disabled checks, changed declarations, missing nonempty OK tie-outs after cutoff and successful participant reports and required jobs without a successful receipt block eligibility.
+        Only the immediately previous completed calendar month can qualify. This response does
+        not activate enforcement or authorize a rollout and covers only this ledger's declared books.
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: month
+          in: query
+          required: false
+          description: Completed calendar month; defaults to the preceding month in Europe/Prague.
+          schema: {type: string, pattern: '^[0-9]{4}-[0-9]{2}$'}
+      responses:
+        '200':
+          description: Observed evidence, including explicit gaps; zero observations cannot qualify.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CloseReadiness'}
+        '400': {description: Invalid month or month not yet completed}
+        '401': {description: Unauthenticated}
+        '403': {description: Caller lacks ledger.read}
+  /api/v1/journals/history-snapshots:
+    post:
+      tags: [Ledger]
+      summary: Capture an immutable raw account journal view
+      description: >
+        Uses the existing ledger.list read authorization. Copies committed attached journal facts
+        from one database view; never posts money or classifies an IR event. Coverage is explicitly
+        ATTACHED_LEDGER_VIEW_ONLY, not account lifetime or complete classified history. A source-free
+        result is returned inline with persisted=false; no financial snapshot is stored for it.
+        A caller- and operation-scoped Idempotency-Key binds the first result for 86400 seconds.
+        Snapshot creation and its replay binding commit in one database transaction. A retry
+        with the same key and body replays the original result (X-Idempotency-Replayed: true),
+        without extending expiry; a different body under the same key is 409. Replay rereads
+        the retained source-linked snapshot instead of a separately cached financial response.
+        If its source is erased or unavailable during that lifetime, replay is 410 and does not
+        create another observation. After expiry a new capture may use the key again.
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Caller-chosen key binding a retry to the first capture.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '^[A-Za-z0-9._:-]+$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/JournalHistoryRequest'}
+      responses:
+        '200':
+          description: Source-free inline manifest, not persisted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JournalHistoryManifest'}
+        '201':
+          description: Immutable manifest with stable ordinal pages
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JournalHistoryManifest'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '410':
+          description: The original captured source is no longer available; no replay or recapture under this unexpired key
+  /api/v1/journals/history-snapshots/{snapshotId}:
+    get:
+      tags: [Ledger]
+      summary: Read the immutable manifest while all source facts remain attached
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Captured manifest, unaffected by newer postings
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JournalHistoryManifest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/journals/history-snapshots/{snapshotId}/entries:
+    get:
+      tags: [Ledger]
+      summary: Read a stable page of raw immutable journal records
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: afterOrdinal, in: query, schema: {type: integer, format: int64, minimum: 0, default: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000, default: 100}}
+      responses:
+        '200':
+          description: Ordered records; nextAfterOrdinal is null only at manifest entryCount
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JournalHistoryPage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
   /api/v1/journals:
     get:
       tags: [Ledger]
@@ -132,6 +373,53 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+
+  /api/v1/journals/synthetic:
+    post:
+      tags: [Ledger]
+      summary: Post a journal that requires an authenticated synthetic origin
+      description: >
+        Applies the normal journal checks and requires a verified, trusted workload to assert
+        the synthetic origin before posting. An idempotency key can replay only within the
+        original journal's origin classification.
+      operationId: postSyntheticJournal
+      parameters:
+        - name: x-openbank-synthetic
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: ['true']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostJournalRequest'
+      responses:
+        '201':
+          description: Synthetic journal created or replayed
+          headers:
+            Location:
+              schema:
+                type: string
+            Idempotent-Replayed:
+              schema:
+                type: boolean
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalEntryResponse'
+        '400':
+          description: Malformed journal body
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Ledger create access or trusted synthetic origin is absent
+        '409':
+          description: Closed fiscal period, conflicting journal state, or mismatched replay origin
+        '422':
+          description: Unbalanced journal or GL account validation failure
 
   /api/v1/journals/{journalId}:
     get:
@@ -424,7 +712,7 @@ paths:
       operationId: resolveAccountingClass
       parameters:
         - { name: accountingClass, in: query, required: true, schema: { type: string } }
-        - { name: role, in: query, required: true, schema: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME] } }
+        - { name: role, in: query, required: true, schema: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME, PREMIUM_DISCOUNT, FAIR_VALUE, REVALUATION_RESERVE, REALISED_GAIN, REALISED_LOSS, UNREALISED_GAIN, UNREALISED_LOSS, MEMO, MEMO_CONTRA] } }
         - { name: currency, in: query, required: true, schema: { type: string } }
       responses:
         '200':
@@ -597,6 +885,61 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/ledger/close/{fiscalYear}/result-allocation:
+    get:
+      tags: [YearClose]
+      summary: Preview the year-end result allocation (read-only)
+      description: >
+        The closing legs that would zero the fiscal year's income and expense accounts into
+        retained earnings (6020), computed from the year's current trial balance. Empty legs mean
+        the result is already allocated. 409 when a non-CZK income/expense balance blocks it.
+      operationId: previewYearEndResultAllocation
+      parameters:
+        - $ref: '#/components/parameters/FiscalYearPath'
+      responses:
+        '200':
+          description: Allocation plan (posted is always false)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YearEndResultAllocationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    post:
+      tags: [YearClose]
+      summary: Allocate the fiscal year's result to retained earnings (ADR-0096 D3)
+      description: >
+        Posts the closing journal dated the last day of the fiscal year through the ordinary
+        posting path (day, period and fiscal-year locks apply). Carry-relative and idempotent: a
+        re-run over an unchanged ledger posts nothing (posted=false); a later posting into the
+        year leaves a residual that a re-run allocates. Refused (409) for a year that has not
+        ended, an ATTESTED year close, or non-CZK income/expense balances. A DRAFT year close
+        computed before the allocation must be refreshed before attestation.
+      operationId: allocateYearEndResult
+      parameters:
+        - $ref: '#/components/parameters/FiscalYearPath'
+      responses:
+        '200':
+          description: Allocation outcome
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YearEndResultAllocationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
 
@@ -1333,6 +1676,128 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    PensionBookIdentity:
+      type: object
+      required: [kind, bookId]
+      properties:
+        kind: {type: string, enum: [BANK, PENSION_COMPANY, PENSION_FUND]}
+        bookId: {type: [string, 'null'], format: uuid}
+    PensionFeePostingRequest:
+      type: object
+      required: [bookId, fundId, navId, valuationDate, amount, currency]
+      properties:
+        bookId: {type: string, format: uuid}
+        fundId: {type: string, format: uuid}
+        navId: {type: string, format: uuid}
+        valuationDate: {type: string, format: date}
+        amount: {type: number, multipleOf: 0.01}
+        currency: {type: string, enum: [CZK]}
+        correctsNavId: {type: [string, 'null'], format: uuid}
+    PensionFeePostingResponse:
+      type: object
+      required: [bookId, navId, postingDate, outcome, journalId, synthetic]
+      properties:
+        bookId: {type: string, format: uuid}
+        navId: {type: string, format: uuid}
+        postingDate: {type: string, format: date}
+        outcome: {type: string, enum: [POSTED, NO_POSTING]}
+        journalId: {type: [string, 'null'], format: uuid}
+        synthetic: {type: boolean}
+    PensionReconciliationProposal:
+      type: object
+      required: [bookId, businessDate, sourceReferences, expectedBalances]
+      properties:
+        bookId: {type: string, format: uuid}
+        businessDate: {type: string, format: date}
+        sourceReferences:
+          type: object
+          minProperties: 5
+          maxProperties: 6
+          description: Fund needs cash, units, custody, nav, fees, settlements; company needs bank, receivables, portfolio, expenses, tax
+          additionalProperties: {type: string, minLength: 1, maxLength: 256}
+        expectedBalances:
+          type: object
+          minProperties: 1
+          maxProperties: 200
+          description: Every enabled own-book CZK account, debit-positive, including zero accounts
+          additionalProperties: {type: number, multipleOf: 0.01}
+    PensionReconciliationId:
+      type: object
+      required: [id]
+      properties:
+        id: {type: string, format: uuid}
+    JournalOriginInput:
+      type: object
+      description: >
+        Unverified raw assertion by the already-authorized journal writer. Ledger assigns the
+        authenticated submitter from its security context. This does not prove economic classification,
+        confer a new origin authority or establish complete IR history. Legacy omission means unknown.
+      required: [kind, sourceRecordId]
+      properties:
+        kind: {type: string, enum: [PAYMENT_TRANSACTION, BILLING_FEE, INTEREST_CAPITALIZATION, OTHER]}
+        sourceRecordId: {type: string, format: uuid}
+        rail:
+          type: string
+          enum: [CARD, SEPA_CT, SEPA_INST, SWIFT, DOMESTIC, INTERNAL, CASH, FEE, INTEREST, UNKNOWN]
+        instructionType:
+          type: string
+          enum: [ONE_OFF, STANDING_ORDER, DIRECT_DEBIT, FUTURE_DATED, SYSTEM, UNKNOWN]
+        reversalOfTransactionId: {type: string, format: uuid}
+    JournalHistoryRequest:
+      type: object
+      required: [accountId, currency, fromDate, throughDate]
+      properties:
+        accountId: {type: string, format: uuid}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        fromDate: {type: string, format: date}
+        throughDate: {type: string, format: date}
+    JournalHistoryManifest:
+      type: object
+      required: [snapshotId, persisted, accountId, currency, fromDate, throughDate, observedAt, databaseView,
+        coverageScope, openingAnchorScope, accountLifetimeComplete, classifiedHistoryComplete, originTrust,
+        openingBooked, closingBooked, entryCount, missingOriginCount, recordsSha256, canonicalization]
+      properties:
+        snapshotId: {type: string, format: uuid}
+        persisted: {type: boolean}
+        accountId: {type: string, format: uuid}
+        currency: {type: string}
+        fromDate: {type: string, format: date}
+        throughDate: {type: string, format: date}
+        observedAt: {type: string, format: date-time}
+        databaseView: {type: string, description: PostgreSQL committed MVCC view identifier; not a sequence watermark}
+        coverageScope: {type: string, enum: [ATTACHED_LEDGER_VIEW_ONLY]}
+        openingAnchorScope: {type: string, enum: [SUM_OF_ATTACHED_BOOKED_LINES_BEFORE_FROM_DATE]}
+        accountLifetimeComplete: {type: boolean, enum: [false]}
+        classifiedHistoryComplete: {type: boolean, enum: [false]}
+        originTrust: {type: string, enum: [AUTHENTICATED_CALLER_ASSERTION_UNVERIFIED]}
+        openingBooked: {type: number}
+        closingBooked: {type: number}
+        entryCount: {type: integer, format: int64, minimum: 0}
+        missingOriginCount: {type: integer, format: int64, minimum: 0}
+        recordsSha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        canonicalization:
+          type: string
+          enum: [POSTGRES_JSONB_TEXT_LINES_V1]
+          description: SHA256 of ordered canonicalJson strings joined by one LF, with no trailing LF
+    JournalHistoryRecord:
+      type: object
+      required: [ordinal, canonicalJson]
+      properties:
+        ordinal: {type: integer, format: int64, minimum: 1}
+        canonicalJson:
+          type: string
+          description: >
+            Exact PostgreSQL JSONB text for one journal and account/currency. Contains journalId,
+            entryDate/valueDate, journalCreatedAt, transactionId, statusAtSnapshot, reversalOfJournalId,
+            synthetic, bookedDelta, customerLines and nullable unverified origin. Preserve the exact
+            string when checking the manifest digest; JSON reserialization is not equivalent bytes.
+    JournalHistoryPage:
+      type: object
+      required: [snapshotId, records, nextAfterOrdinal]
+      properties:
+        snapshotId: {type: string, format: uuid}
+        records: {type: array, items: {$ref: '#/components/schemas/JournalHistoryRecord'}}
+        nextAfterOrdinal: {type: integer, format: int64, nullable: true}
     PeriodTrialBalanceResponse:
       type: object
       description: Trial balance for one statutory period, with its attestation anchor (ADR-0096 D1).
@@ -1429,10 +1894,41 @@ components:
         balanced: { type: boolean }
         recomputedAt: { type: string, format: date-time }
 
+    CloseReadiness:
+      type: object
+      required: [month, expectedParticipants, observedDays, requiredDays, eligibleForEnforcement, blockers, days]
+      properties:
+        bookKind: {type: string, enum: [BANK, PENSION_COMPANY, PENSION_FUND]}
+        bookId: {type: [string, 'null'], format: uuid}
+        month: {type: string, pattern: '^[0-9]{4}-[0-9]{2}$'}
+        expectedParticipants:
+          type: array
+          items: {type: string}
+        observedDays: {type: integer, minimum: 0, maximum: 31}
+        requiredDays: {type: integer, minimum: 28, maximum: 31}
+        eligibleForEnforcement: {type: boolean}
+        blockers:
+          type: array
+          items: {type: string}
+        days:
+          type: array
+          maxItems: 31
+          items:
+            type: object
+            required: [businessDate, blockers]
+            properties:
+              businessDate: {type: string, format: date}
+              blockers:
+                type: array
+                items: {type: string}
     CloseCompletenessResponse:
       type: object
       required: [businessDate, complete, missing, refused, participants]
       properties:
+        participantsMode:
+          type: string
+          enum: [off, shadow, enforce]
+          description: Configured check mode; incomplete participation blocks transitions only in enforce.
         businessDate: { type: string, format: date }
         complete:
           type: boolean
@@ -1474,6 +1970,16 @@ components:
       type: object
       required: [outcome]
       properties:
+        sourceRunId:
+          type: [string, 'null']
+          pattern: '^[a-f0-9]{64}$'
+          description: Optional stable SHA-256 source receipt identity. Same receipt retries preserve work time; changed payload conflicts.
+        exercisedJobs:
+          type: array
+          uniqueItems: true
+          maxItems: 16
+          description: Optional successful job names with observed work; empty sweeps and older reports cannot qualify monthly readiness.
+          items: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}
         outcome:
           type: string
           enum: [RAN, SKIPPED, REFUSED]
@@ -1783,7 +2289,9 @@ components:
       required: [accountingClass, role, currencyCode, glAccountId, glCode]
       properties:
         accountingClass: { type: string }
-        role: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME] }
+        # x-extensible-enum, not enum: roles GROW as products are mapped (ADR-0341/ADR-0344), so a
+        # client must tolerate an unknown role in a response. Requests keep the closed enum.
+        role: { type: string, x-extensible-enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME, PREMIUM_DISCOUNT, FAIR_VALUE, REVALUATION_RESERVE, REALISED_GAIN, REALISED_LOSS, UNREALISED_GAIN, UNREALISED_LOSS, MEMO, MEMO_CONTRA] }
         currencyCode: { type: string }
         glAccountId: { type: string, format: uuid }
         glCode: { type: string }
@@ -1807,7 +2315,7 @@ components:
         accountingRole:
           type: string
           nullable: true
-          enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME]
+          enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME, PREMIUM_DISCOUNT, FAIR_VALUE, REVALUATION_RESERVE, REALISED_GAIN, REALISED_LOSS, UNREALISED_GAIN, UNREALISED_LOSS, MEMO, MEMO_CONTRA]
         side:
           type: string
           enum: [DEBIT, CREDIT]
@@ -1835,6 +2343,8 @@ components:
       type: object
       required: [idempotencyKey, transactionId, entryDate, valueDate, createdBy, lines]
       properties:
+        origin:
+          $ref: '#/components/schemas/JournalOriginInput'
         idempotencyKey:
           type: string
           description: Caller-supplied idempotency key; replaying the same key returns the original entry.
@@ -1951,6 +2461,31 @@ components:
           items:
             $ref: '#/components/schemas/TrialBalanceSectionResponse'
 
+    YearEndResultAllocationResponse:
+      type: object
+      required: [fiscalYear, netResult, legs, posted]
+      properties:
+        fiscalYear:
+          type: integer
+        netResult:
+          type: number
+          description: Debit minus credit over income and expense; negative is a profit, positive a loss.
+        legs:
+          type: array
+          items:
+            type: object
+            required: [glAccountCode, side, amount]
+            properties:
+              glAccountCode:
+                type: string
+              side:
+                type: string
+                enum: [DEBIT, CREDIT]
+              amount:
+                type: number
+        posted:
+          type: boolean
+        journalId: {type: [string, 'null'], format: uuid}
     YearCloseRecordResponse:
       type: object
       properties:

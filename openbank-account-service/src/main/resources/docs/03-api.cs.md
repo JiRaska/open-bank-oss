@@ -89,6 +89,30 @@ Idempotency-Key: ...
 
 Reasons: `AML_HOLD`, `COURT_ORDER`, `FRAUD_INVESTIGATION`, `CUSTOMER_REQUEST`.
 
+### Způsobilost účtu (standing)
+
+Každá odpověď, která vrací účet, nese `standing`: odpověď na otázku, zda z účtu smí peníze odejít
+nebo na něj přijít (ADR-0374 D4). Platební služby čtou tuto hodnotu spolu s účtem a nevykládají si
+samy `status`.
+
+```json
+"standing": { "mayDebit": false, "mayCredit": false, "reason": "ACCOUNT_FROZEN" }
+```
+
+| `status` | `mayDebit` | `mayCredit` | `reason` |
+|---|---|---|---|
+| `ACTIVE` | true | true | null |
+| `DORMANT` | false | true | `ACCOUNT_DORMANT` |
+| `PENDING_ACTIVATION` | false | false | `ACCOUNT_PENDING_ACTIVATION` |
+| `FROZEN` | false | false | `ACCOUNT_FROZEN` |
+| `CLOSED` | false | false | `ACCOUNT_CLOSED` |
+
+**Stav klienta.** Když party-service ohlásí klienta jako `SUSPENDED` nebo `CLOSED`, zmrazí se
+všechny jeho účty ve stavu `ACTIVE`. Jakmile je klient znovu `ACTIVE`, tato zmrazení se zruší.
+Zmrazení zadané přes `POST .../freeze` událost klienta nikdy nezruší a zmrazí-li operátor účet
+zmrazený kvůli klientovi, přebírá zmrazení operátor. `reason` je v obou případech
+`ACCOUNT_FROZEN`. Při zmrazení kvůli stavu klienta se zákazníkovi neposílá žádné oznámení.
+
 ### Authorizations
 
 ```http
@@ -126,6 +150,8 @@ Sjednocený přes `openbank-libs.api.ApiError`:
 | 409 | `account-already-closed` | close již proběhl |
 | 422 | `account-frozen` | mutace na frozen účtu |
 | 422 | `insufficient-authorization` | not OWNER pro tuto operaci |
+| 422 | `PRODUCT_REVISION_NOT_PUBLISHED` | otevření produktu bez publikované revize k pinu (ADR-0341 D1) |
+| 503 | `PRODUCT_CATALOG_UNAVAILABLE` | katalog při otevření nedostupný; nic se neuloží, opakovat po `Retry-After` |
 | 429 | `rate-limited` | per-token quota |
 | 500 | `internal-error` | nečekaná chyba (s correlationId pro support) |
 
@@ -149,3 +175,7 @@ Eventy jsou **append-only**; opravy se dělají kompenzačním eventem (např. `
 - **API verze v URL** (`/api/v1/...`). Breaking změny = `/api/v2/...`, v1 běží paralelně 6 měsíců.
 - **Event verze v topic name** (`...v1`). Schema evolution: jen additive (přidání optional fieldů), breaking = nový topic.
 - **OpenAPI diff** v CI proti `main` — fail pokud removed endpoint / required-added field bez verze bumpu.
+
+## Autentizace listenerů
+
+Pod `/api/*` je na obou listenerech přijímán jen mechanismus bearer a oprávnění nově vyžaduje autentizovaného volajícího místo toho, aby povolovalo všechny. Důvěryhodný klientský certifikát na mTLS listeneru je pouze transportní autentizace. Trasa bez vlastní bezpečnostní anotace je proto bez bearer tokenu odmítnuta. Veřejné trasy s metadaty `GET /api/v1/info` a `GET /api/v1/config` jsou výslovně povoleny bez něj.

@@ -8,8 +8,8 @@ import com.openbank.ledger.application.port.`in`.FxRevaluationUseCase
 import com.openbank.ledger.application.port.`in`.RevalueFxCommand
 import com.openbank.ledger.application.port.out.AccountingDayRepository
 import com.openbank.ledger.application.port.out.TieOutRunRepository
-import com.openbank.ledger.it.PostgresTestResource
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile

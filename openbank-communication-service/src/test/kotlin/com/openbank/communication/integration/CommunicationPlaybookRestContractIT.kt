@@ -5,7 +5,7 @@
 
 package com.openbank.communication.integration
 
-import com.openbank.communication.it.CommunicationPostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test
 
 /** Mirrors `CommunicationStyleRestContractIT`'s shape for the playbook surface. */
 @QuarkusTest
-@QuarkusTestResource(CommunicationPostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class CommunicationPlaybookRestContractIT {
 
     @Test

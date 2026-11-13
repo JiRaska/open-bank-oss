@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 import { APPROVAL_DOMAINS, type ApprovalSourceState } from '../src/lib/approvals/evidence'
 
@@ -190,7 +190,7 @@ test.describe('approval workbench', () => {
     await expect(rows.nth(0).getByTestId('approval-maker-kind')).toContainText(/Human|Člověk/)
     await expect(rows.nth(0).locator('time')).toHaveAttribute('datetime', billingApproval.proposedAt)
 
-    await page.getByLabel(/^(Domain|Doména)$/).selectOption('sanctions')
+    await page.getByLabel(/^(Approval area|Oblast schvalování)$/).selectOption('sanctions')
     await expect(rows).toHaveCount(1)
     await expect(rows.first()).toContainText(sanctionsApproval.action)
     await expect(rows.first().getByTestId('approval-maker-kind')).toContainText('AI agent')

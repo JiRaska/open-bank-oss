@@ -10,8 +10,9 @@
 | **UN Security Council Resolutions** | UN consolidated sanctions | `UN_CONSOLIDATED` list always enabled |
 | **AMLD 6 (EU 2018/1673)** | Enhanced AML obligations; 10-year record retention | All `SanctionsCheck` records retained 10 years; GDPR erasure overridden |
 | **PSD2 (EU 2015/2366)** | Execution of payment transactions | Sanctions check is a mandatory gate before payment execution (ADR-0032) |
-| **FATF Recommendations** | High-risk jurisdictions enhanced due diligence | `FATF_HIGH_RISK` list flags transfers to/from high-risk countries |
+| **FATF Recommendations** | High-risk jurisdictions enhanced due diligence | A screen carrying `country` or `bankIdentifier` is matched against the jurisdiction reference data (versioned, maintained by reviewed migration; loaded with the EU list of high-risk third countries, Delegated Regulation (EU) 2016/1675 — the FATF lists themselves are not loaded yet; the age of each list is a metric with an alert) |
 | **Act No. 1/2023 Coll.** | Czech national sanctions list kept by MZV | `CNB_DOMESTIC` list (imported from `cz_national_sanctions`) |
+| **Regulation No. 210/2008 Coll.** | Czech anti-terrorism designations; a separate legal regime from the national sanctions list | `CZ_TERRORISTS` list imported from official e-Sbírka SPARQL open data, never the commercially licensed OpenSanctions mirror |
 | **GDPR (EU 2016/679)** | PII in screening requests (name, DoB, identifiers) | PII masked in logs; Art. 6(1)(c) legal obligation basis; erasure overridden by AMLD |
 | **DORA (EU 2022/2554)** | Operational resilience for financial services | Health probes, audit events, outbox guarantee, SLO, runbooks |
 
@@ -102,3 +103,13 @@ The compliance team is responsible for:
 3. Escalating `HIT` records to the MLRO (Money Laundering Reporting Officer) within 4 hours.
 4. Filing a SAR (Suspicious Activity Report) with the Czech FIU (FAÚ) within 24 hours of a confirmed hit on a domestic transaction.
 5. Triggering `POST /api/v1/sanctions/lists/refresh-all` after any major regulatory update (e.g., new EU sanctions package).
+
+## Ongoing monitoring (ADR-0376)
+
+Ongoing monitoring serves the AMLD duty to keep monitoring the business relationship, not only to screen at its start. It is off by default.
+
+- **Purpose and minimisation.** The registry holds the attributes the `CUSTOMER` screening profile reads and nothing else. The lawful basis is the legal obligation (Art. 6(1)(c)); no new data is collected from the customer.
+- **Erasure.** The registry and its findings are not the statutory AML record (the owning service keeps that), so Art. 17 applies. Deregistration deletes the subject's row and its findings; the owning service calls it on offboarding and on erasure.
+- **Tipping-off.** A finding is never visible to the customer. It is not returned by any REST operation; it is published to the internal screening topic for the owning service, which opens a review case. No service facing a customer consumes that topic.
+- **No automated decision.** A finding changes nothing about a customer: it does not block, restrict or close anything. A human decides the case the owning service opens (ADR-0256 D2).
+- **Data flows out.** `MONITORED_SUBJECT_MATCHED` carries the subject's reference, not its name; `audit-service` archives the topic.

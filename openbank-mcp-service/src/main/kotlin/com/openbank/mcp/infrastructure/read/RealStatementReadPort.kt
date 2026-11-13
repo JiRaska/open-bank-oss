@@ -36,6 +36,7 @@ class RealStatementReadPort(
 ) : StatementReadPort {
 
     private val gate = ConsentGate(consent)
+    private val directory = AccountDirectory(accounts)
 
     override fun getStatementSummary(
         consentContext: ConsentContext,
@@ -44,7 +45,7 @@ class RealStatementReadPort(
         legalSequence: Long?,
     ): JsonNode {
         gate.validate(consentContext, ConsentScopes.STATEMENTS_READ, accountIban = accountId)
-        val internalId = UUID.fromString(accounts.getAccountByIban(accountId).path("id").asText())
+        val internalId = directory.idByIban(accountId)
 
         val (resolvedCurrency, resolvedSequence) = if (legalSequence != null) {
             val ccy = requireNotNull(currency) { "currency is required when legalSequence is given" }

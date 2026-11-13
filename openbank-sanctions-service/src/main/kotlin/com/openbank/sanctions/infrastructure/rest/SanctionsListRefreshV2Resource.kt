@@ -11,6 +11,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
@@ -39,5 +40,22 @@ class SanctionsListRefreshV2Resource(private val service: SanctionsListService) 
         // idempotent by construction — a replayed key converges to the same state.
         requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
         return Response.accepted(mapOf("requested" to service.requestRefreshAll())).build()
+    }
+
+    /**
+     * Single-list sibling of [refreshAll]: 202 with the flagged list type; the import runs on the
+     * next scheduler tick. Unknown list 404, disabled list 422 — never accepted and then dropped.
+     */
+    @POST
+    @Path("/{listType}/refresh")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "sanctions.trigger", resource = "#listType")
+    suspend fun refresh(
+        @PathParam("listType") listType: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
+        val list = service.requestRefresh(listType)
+        return Response.accepted(mapOf("requested" to list.listType)).build()
     }
 }

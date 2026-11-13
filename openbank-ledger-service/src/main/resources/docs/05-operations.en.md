@@ -18,6 +18,8 @@ openbank-infra/scripts/build-push-service.sh ledger-service
 
 The build uses the `openbank.quarkus-service` convention plugin (ADR-0049 D1). Kover floor is enforced at **40%** lines (`koverVerify` wired into `check`); money-path target is 70%. Provider-side Pact verification runs against the shared `pacts/` dir (ADR-0063).
 
+The standard Gradle `test` task caps its JVM heap at 3 GiB, with a 2 GiB cap for specialized test tasks.
+
 ## Endpoints
 
 | Path | Port | Purpose |
@@ -103,6 +105,10 @@ The daily run is automated by `FxRevaluationScheduler`. To re-run for a business
 
 `JournalPartitionMaintainer` rolls forward automatically. Verify partitions: `\d+ journal_entries`. Lifecycle actions are in `partition_lifecycle_audit`. A non-empty `journal_entries_default` (DEFAULT_NONEMPTY audit row) means roll-forward fell behind — investigate before it blocks new partition ATTACH.
 
+## Observability note: frozen-period refusals
+
+With `openbank.ledger.period-lock.mode=enforce` every refusal increments `openbank_ledger_period_lock_decisions_total{outcome="refused"}` (tags `operation`, `period_type`) and the HTTP response carries `code=ACCOUNTING_PERIOD_FROZEN`. A fiscal-year refusal carries `ACCOUNTING_YEAR_CLOSED` and has no counter of its own; find it by the response code in access logs. This is documentation only: no alert rule is defined for either code, and a non-zero `refused` count is expected whenever a caller back-dates into a closed month.
+
 ## Tech-stack version matrix
 
 | Component | Version |
@@ -124,6 +130,14 @@ Per-service path-scoped CI (only changed services build). Release axis is owned 
 
 Broker FINREP verification derives the reporting month from the selected contract requests and uses a dedicated test database. Fixture reset refuses foreign closed-period IDs and retains the immutable evidence trigger. Regression tests cover historical June 2026 and current June 2000 fixtures in both replay orders, including rejection of evidence DELETE. Production frozen-evidence validation is unchanged.
 
+## Required synthetic journal origin
+
+`POST /api/v1/journals/synthetic` applies the journal posting rules and requires a verified
+synthetic origin. A caller without the trusted workload assertion receives HTTP 403 before
+posting. Reusing an idempotency key across origin classifications returns HTTP 409. An older
+ledger image has no synthetic posting route, so the transaction worker's synthetic request fails
+before booking.
+
 ## Shared configuration defaults
 
 This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
@@ -135,3 +149,28 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## Switching the Kafka producer off per instance
 
 `mp.messaging.outgoing.ledger-events-out.enabled` is backed by the `LEDGER_EVENTS_OUT_ENABLED` environment variable (default `true`). An instance with no Kafka bus, such as the pension co-instance, sets it to `false`, so no producer is built at boot; the `@Channel` emitter still injects. `lazy-client=true` does not achieve this, because the producer is still created at boot.
+
+## Day-close participants: authorization (#13167)
+
+`PUT /api/v1/ledger/accounting-days/{date}/participants/{participant}` authorizes as its own action,
+`ledger.close.participate`, never `ledger.create`. `ledger_rest_ext.rego: close_participant_accounts`
+maps each machine account to the ONE participant it may report for (interest, lending, billing, treasury); the use case
+then checks the verified caller against `openbank.ledger.close.participants.<name>.principal`. Adding a
+participant is therefore three edits that `check-close-participants.py` keeps in step: `rules.yaml:
+close_participants`, the ledger `application.yaml` map, and the rego map entry (then regenerate the
+bundles). Declared participants today: interest, lending, billing, treasury. Mode: `shadow`.
+
+Billing joins as a close participant for its monthly cycle. It reports on its own identity, the
+Keycloak client `openbank-billing` (`service-account-openbank-billing`), not on the shared
+`openbank-services` principal its journals post with. The scoped `ledger.close.participate` grant for
+`participants/billing` is that account's only ledger grant; it holds no `ledger.create` of its own.
+
+Treasury joins as a close participant for its hourly deal accrual and the day's deal journals. It
+reports on the identity it already posts journals with, the Keycloak client `openbank-treasury`
+(`service-account-openbank-treasury`). Its map entry adds `ledger.close.participate` for
+`participants/treasury` only; its existing `ledger.create` and nostro read grants are unchanged, and it
+cannot report for any other participant.
+
+## Offline historical FINREP replay
+
+The build defines an explicit `historicalFinrepPactTest` task that replays one validated historical FINREP Pact artifact locally against the ledger provider. It is not broker verification: it never changes broker selectors, never publishes results, and refuses to run unless the supplied provider commit is a 40-hex SHA that is an ancestor of `origin/main`. It is not part of the default build.

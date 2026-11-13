@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Wakes the merge train when the one PR that main can accept next finishes its CI.
+#
+# merge-train.yml deliberately ignores an ordinary PR's CI completion: that trigger replaced the single
+# pending run faster than a runner took it, and the train starved (#14203, debounce 2026-11-02). It then
+# relied on its cron heartbeat for "a member PR turned green", and GitHub does not keep that cron: on
+# 2026-11-06 the last scheduled run was 02:49Z, so a strict-lane holder green at 09:01Z went unjudged for
+# an hour while it reserved main.
+#
+# A head that already contains main is rare by construction (the reservation holder, or a PR that was
+# just updated), so a dispatch from here cannot recreate that starvation: every other PR's completion
+# ends at the compare. The dispatch carries no authority: no train job reads any event field, and settle
+# judges only live state.
+
+name: Merge train wake
+
+on:
+  workflow_run:
+    workflows: ["Services CI", "CI", "Security scan"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  wake:
+    name: Wake the train for a head current with main
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    permissions:
+      contents: read
+      actions: write   # POST /actions/workflows/merge-train.yml/dispatches, nothing else
+    steps:
+      - name: Dispatch the train if this head contains main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::unexpected head sha"; exit 1; }
+          behind="$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${HEAD_SHA}" --jq .behind_by)"
+          if [ "$behind" != "0" ]; then
+            echo "head is ${behind} behind main: the train cannot merge it next, no wake"
+            exit 0
+          fi
+          gh workflow run merge-train.yml -R "$GITHUB_REPOSITORY" --ref main
+          echo "head contains main: train dispatched"

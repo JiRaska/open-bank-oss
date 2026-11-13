@@ -18,8 +18,9 @@ export const dynamic = 'force-dynamic'
 // state — never a fabricated number. Realises ADR-0054 phase 2 (periodic cost
 // audit) without granting the pod live billing access.
 
-// AWS service → business domain mapping (process view, ADR-0054).
-const AWS_DOMAIN: Record<string, string> = {
+// AWS infrastructure cost categories (ADR-0054). Business ownership is allocated
+// separately by /api/finops/allocation using governance and resource footprints.
+const AWS_COST_CATEGORY: Record<string, string> = {
   'EC2 - Other':                                     'Platform',
   'Amazon Elastic Compute Cloud - Compute':           'Platform',
   'Amazon Elastic Container Service for Kubernetes':  'Platform',
@@ -34,7 +35,7 @@ const AWS_DOMAIN: Record<string, string> = {
   'AWS Cost Explorer':                                'FinOps',
   'Tax':                                              'Tax',
 }
-function domainFor(name: string): string { return AWS_DOMAIN[name] ?? 'Platform' }
+function costCategoryFor(name: string): string { return AWS_COST_CATEGORY[name] ?? 'Unclassified' }
 
 export interface ServiceCost { name: string; amount: number; domain: string }
 export interface DailyCost { date: string; amount: number }
@@ -91,7 +92,7 @@ function normalize(parsed: unknown): CostReport | null {
   const p = parsed as Record<string, unknown>
   if (!Array.isArray(p.services)) return null
   const services = (p.services as { name?: unknown; amount?: unknown }[])
-    .map(s => ({ name: String(s?.name ?? 'Unknown'), amount: Math.round(Number(s?.amount) * 100) / 100, domain: domainFor(String(s?.name ?? '')) }))
+    .map(s => ({ name: String(s?.name ?? 'Unknown'), amount: Math.round(Number(s?.amount) * 100) / 100, domain: costCategoryFor(String(s?.name ?? '')) }))
     .filter(s => Number.isFinite(s.amount) && s.amount > 0)
     .sort((a, b) => b.amount - a.amount)
   const total = Math.round(services.reduce((sum, s) => sum + s.amount, 0) * 100) / 100

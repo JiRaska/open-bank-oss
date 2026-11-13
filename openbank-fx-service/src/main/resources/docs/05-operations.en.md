@@ -85,6 +85,7 @@ PENDING means screening said REVIEW or the sanctions service was unavailable.
 ### ČNB fixing missing for today
 
 1. Did the 14:40 Europe/Prague cron run? `kubectl logs -l app=openbank-fx-service | grep "ČNB fixing"`.
+   Each pod also runs the same ingestion once about 30 s after boot (`openbank.cnb.initial-delay`, repeating every `openbank.cnb.startup-every`, default 24h; `"off"` in tests). Ingestion is idempotent per business day, so a pod started after 14:40 fetches the day's fixing and records a workflow success instead of reporting `openbank_workflow_success_recorded == 0` until the next day's cron.
 2. Backfill manually (idempotent): `POST /api/v1/fx/cnb/ingest?date=YYYY-MM-DD` with `ROLE_OPERATOR`.
 3. Verify: `GET /api/v1/fx/cnb/rates/EUR`.
 

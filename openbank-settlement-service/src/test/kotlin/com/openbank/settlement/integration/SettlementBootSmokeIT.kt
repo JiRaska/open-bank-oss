@@ -5,6 +5,7 @@
 package com.openbank.settlement.integration
 
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -22,7 +23,10 @@ import org.junit.jupiter.api.Test
  * This mirrors the pattern established for pid-service (#1194) and tpp-service (#1195).
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.settlement.it.PostgresTestResource::class)
+@QuarkusTestResource(
+    com.openbank.libs.testing.containers.PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_settlement_it")],
+)
 class SettlementBootSmokeIT {
 
     @Test

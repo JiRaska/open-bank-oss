@@ -74,3 +74,29 @@ resource "vault_jwt_auth_backend_role" "sso_writer" {
   token_ttl             = 900
   token_max_ttl         = 900
 }
+
+# --- break-glass (root-equivalent) through SSO -------------------------------------------------
+#
+# Bootstrap-class changes should not depend on a long-lived root token. This role is the
+# standing alternative. It is root-equivalent, so it carries every guard the OIDC mount can
+# express: one subject, MFA (acr=mfa, enforced by Keycloak and again here), 15-minute token.
+resource "vault_policy" "breakglass" {
+  name   = "openbao-breakglass"
+  policy = file("${path.module}/policies/openbao-breakglass.hcl")
+}
+
+resource "vault_jwt_auth_backend_role" "breakglass" {
+  backend               = "oidc"
+  role_name             = "openbao-breakglass"
+  role_type             = "oidc"
+  user_claim            = "sub"
+  bound_subject         = var.operator_subject
+  bound_claims_type     = "string"
+  bound_claims          = { acr = "mfa" }
+  bound_audiences       = ["openbao"]
+  oidc_scopes           = ["openid", "profile"]
+  allowed_redirect_uris = local.oidc_redirect_uris
+  token_policies        = ["default", vault_policy.breakglass.name]
+  token_ttl             = 900
+  token_max_ttl         = 900
+}

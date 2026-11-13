@@ -114,6 +114,17 @@ class EidasMtlsFilterTest {
     }
 
     @Test
+    fun `registry free-text reason never reaches the TPP-facing CERTIFICATE_INVALID body`() {
+        every { guard.requireAuthorized("tpp-1", "AISP") } returns
+            TppAuthorizationResponse("tpp-1", false, emptySet(), "PLANTED-INTERNAL-REASON licence revoked by case 4711")
+        val result = await(ctxFor("v1/accounts"))
+
+        assertThat(result?.status).isEqualTo(401)
+        assertThat(result?.entity.toString()).contains("CERTIFICATE_INVALID", "TPP not authorized")
+        assertThat(result?.entity.toString()).doesNotContain("PLANTED-INTERNAL-REASON")
+    }
+
+    @Test
     fun `circuit-open on the TPP registry aborts with 503`() {
         every { guard.requireAuthorized("tpp-1", "AISP") } throws CircuitBreakerOpenException("open")
         val ctx = ctxFor("v1/accounts")

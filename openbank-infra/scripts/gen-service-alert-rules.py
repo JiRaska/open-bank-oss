@@ -52,12 +52,25 @@ HEADER = """\
 # `gen-service-alert-rules-drift-gate` gate fails until it has. See the generator for the design.
 """
 
+# argo-rollouts' metrics carry the CONTROLLER's namespace in `namespace` (argo-rollouts) and the
+# Rollout's own in `exported_namespace` (honor_labels off), so the Rollout leg must re-label it or no
+# Rollout ever matches the inventory. A Rollout with desired>0 and 0 available is treated as absent.
 ABSENT_EXPR = """\
 openbank:expected_service:info
   unless on (namespace, workload)
 label_replace(max by (namespace, deployment) (kube_deployment_spec_replicas), "workload", "$1", "deployment", "(.*)")
   unless on (namespace, workload)
-label_replace(max by (namespace, name) (rollout_info_replicas_desired), "workload", "$1", "name", "(.*)")
+label_replace(
+  label_replace(
+    max by (exported_namespace, name) (rollout_info_replicas_desired)
+      unless on (exported_namespace, name)
+    (
+      max by (exported_namespace, name) (rollout_info_replicas_available) == 0
+        and on (exported_namespace, name)
+      max by (exported_namespace, name) (rollout_info_replicas_desired) > 0
+    ),
+    "namespace", "$1", "exported_namespace", "(.*)"),
+  "workload", "$1", "name", "(.*)")
   unless on (namespace, workload)
 label_replace(max by (namespace, statefulset) (kube_statefulset_replicas), "workload", "$1", "statefulset", "(.*)")
 """
@@ -108,8 +121,8 @@ def build(inv: list[tuple[str, str]]) -> dict:
                 "summary": "Expected workload {{ $labels.workload }} ({{ $labels.namespace }}) does not exist",
                 "description": (
                     "The deployed-service inventory lists {{ $labels.workload }} in {{ $labels.namespace }}, "
-                    "but no Deployment, Rollout or StatefulSet series exists for it. It was deleted, never "
-                    "synced, or renamed. Scale-to-zero does NOT trigger this (the object keeps its series). "
+                    "but no Deployment, Rollout or StatefulSet series exists for it (a Rollout with desired replicas "
+                    "and none available also counts). It was deleted, never synced, or renamed. Scale-to-zero does NOT trigger this (the object keeps its series). "
                     "Check the Argo CD Application for the component."
                 ),
             },

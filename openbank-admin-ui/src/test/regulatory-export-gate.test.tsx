@@ -194,7 +194,7 @@ describe('blockReasonCopy for the balance verdicts', () => {
  * catalogue-only report and block with `no_data_source` every time, which would make the
  * data_gaps / unbalanced cases untestable while still looking green.
  */
-const FINREP_CARD = 'CNB — Finanční výkazy (FINREP)'
+const FINREP_CARD = 'CNB — Financial statements (FINREP)'
 
 async function openPreview(fetchImpl: (url: string) => Promise<Response>) {
   vi.stubGlobal('fetch', vi.fn((url: string) => url.includes('/api/v1/finrep/periods')

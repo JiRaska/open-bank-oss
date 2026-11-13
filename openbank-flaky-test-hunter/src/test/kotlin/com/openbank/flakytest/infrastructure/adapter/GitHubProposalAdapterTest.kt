@@ -120,10 +120,19 @@ class GitHubProposalAdapterTest {
     private var lastIssueRequestBody: String? = null
 
     /** GitHub Issues stub: GET lists what `openIssues` holds, POST creates and echoes an html_url. */
-    private fun startIssuesStub(openIssues: List<Map<String, String>> = emptyList(), createStatus: Int = 201): String {
+    private fun startIssuesStub(
+        openIssues: List<Map<String, Any?>> = emptyList(),
+        createStatus: Int = 201,
+        requireUserAgent: Boolean = false,
+        getResponses: Map<Int, Pair<Int, String>> = emptyMap(),
+    ): String {
         val srv = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         srv.createContext("/repos/test-owner/test-repo/issues") { ex: HttpExchange ->
             requestsSeen.incrementAndGet()
+            if (requireUserAgent && ex.requestHeaders.getFirst("User-Agent").isNullOrBlank()) {
+                respond(ex, 403, """{"message":"User agent required"}""")
+                return@createContext
+            }
             when (ex.requestMethod) {
                 "GET" -> {
                     val query = ex.requestURI.rawQuery.orEmpty().split('&').associate {
@@ -131,11 +140,14 @@ class GitHubProposalAdapterTest {
                     }
                     val perPage = query["per_page"]?.toInt() ?: openIssues.size.coerceAtLeast(1)
                     val page = query["page"]?.toInt() ?: 1
-                    respond(
-                        ex,
-                        200,
-                        objectMapper.writeValueAsString(openIssues.drop((page - 1) * perPage).take(perPage)),
-                    )
+                    val visibleIssues = query["labels"]?.let { label ->
+                        openIssues.filter { issue ->
+                            (issue["labels"] as? List<*>)?.any { (it as? Map<*, *>)?.get("name") == label } == true
+                        }
+                    } ?: openIssues
+                    val pageIssues = visibleIssues.drop((page - 1) * perPage).take(perPage)
+                    val (status, body) = getResponses[page] ?: (200 to objectMapper.writeValueAsString(pageIssues))
+                    respond(ex, status, body)
                 }
                 "POST" -> {
                     lastIssueRequestBody = ex.requestBody.readBytes().toString(StandardCharsets.UTF_8)
@@ -181,6 +193,17 @@ class GitHubProposalAdapterTest {
         adapter.allowedHosts = listOfNotNull(server?.let { "stub.test:${it.address.port};http;private" })
         adapter.resolver = EgressResolver { listOf(InetAddress.getLoopbackAddress()) }
         return adapter
+    }
+
+    @Test
+    fun `ticket delivery satisfies the GitHub User-Agent requirement`() {
+        val baseUrl = startIssuesStub(requireUserAgent = true)
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "Human triage is required") }
+
+        assertThat(url).isEqualTo("https://github.com/test-owner/test-repo/issues/4242")
+        assertThat(requestsSeen.get()).isEqualTo(2)
     }
 
     @Test
@@ -397,7 +420,7 @@ class GitHubProposalAdapterTest {
     }
 
     @Test
-    fun `an open issue carrying the same finding key is reused instead of duplicated`() {
+    fun `an open issue carrying the same finding key is reused even without labels`() {
         val reused = "https://github.com/test-owner/test-repo/issues/4000"
         val baseUrl = startIssuesStub(openIssues = listOf(marked(ticketOnlyFinding, reused)))
         val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
@@ -450,9 +473,10 @@ class GitHubProposalAdapterTest {
     }
 
     @Test
-    fun `an existing issue beyond the first 100 open issues is found`() {
+    fun `an existing issue with a different label is found beyond the first 100 open issues`() {
         val reused = "https://github.com/test-owner/test-repo/issues/4000"
-        val baseUrl = startIssuesStub(openIssues = filler(130) + marked(ticketOnlyFinding, reused))
+        val relabelled = marked(ticketOnlyFinding, reused) + ("labels" to listOf(mapOf("name" to "triage")))
+        val baseUrl = startIssuesStub(openIssues = filler(130) + relabelled)
         val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
 
         val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "diagnosis") }
@@ -460,6 +484,55 @@ class GitHubProposalAdapterTest {
         assertThat(url).isEqualTo(reused)
         assertThat(lastIssueRequestBody).isNull()
         assertThat(requestsSeen.get()).isEqualTo(2)
+    }
+
+    @Test
+    fun `a failed lookup on a later page never opens a new issue`() {
+        val baseUrl = startIssuesStub(
+            openIssues = filler(100),
+            getResponses = mapOf(2 to (503 to """{"message":"Service unavailable"}""")),
+        )
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "diagnosis") }
+
+        assertThat(url).isNull()
+        assertThat(requestsSeen.get()).isEqualTo(2)
+        assertThat(lastIssueRequestBody).isNull()
+    }
+
+    @Test
+    fun `a non-array issue list never opens a new issue`() {
+        val baseUrl = startIssuesStub(getResponses = mapOf(1 to (200 to "{}")))
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "diagnosis") }
+
+        assertThat(url).isNull()
+        assertThat(lastIssueRequestBody).isNull()
+    }
+
+    @Test
+    fun `an existing marker without a usable URL never opens a duplicate`() {
+        val baseUrl = startIssuesStub(openIssues = listOf(marked(ticketOnlyFinding, "")))
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "diagnosis") }
+
+        assertThat(url).isNull()
+        assertThat(lastIssueRequestBody).isNull()
+    }
+
+    @Test
+    fun `reaching the page limit without proving absence never opens a new issue`() {
+        val baseUrl = startIssuesStub(openIssues = filler(2000))
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "diagnosis") }
+
+        assertThat(url).isNull()
+        assertThat(requestsSeen.get()).isEqualTo(20)
+        assertThat(lastIssueRequestBody).isNull()
     }
 
     @Test

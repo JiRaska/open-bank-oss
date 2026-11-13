@@ -1,10 +1,12 @@
 """Hermetic real-shell pool controls; fake cosign never contacts a registry."""
 import collections
+import hashlib
 import json
 import os
 import pathlib
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -238,5 +240,113 @@ class WorkersTest(unittest.TestCase):
         result, _, state=self.run_gate(['healthy'],workers=5)
         self.assertEqual(result.returncode,2)
         self.assertEqual(state['calls'],[])
+
+class CosignDownloadTest(unittest.TestCase):
+    """Exercise the real shell resolver; only the two network clients are replaced."""
+
+    binary = b'#!/bin/sh\necho fixture-cosign\n'
+
+    def resolve(self, mode='direct', cached=None, version='v2.4.3'):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            commands = root/'commands'; commands.mkdir()
+            fixture = root/'fixture'; fixture.write_bytes(self.binary)
+            calls = root/'calls'
+            cache = root/'cosign-v2.4.3-linux-amd64'
+            if cached is not None:
+                cache.write_bytes(cached); cache.chmod(0o700)
+            # An installed v3 must not bypass the pinned v2 download path.
+            (commands/'cosign').write_text('#!/bin/sh\necho "GitVersion: v3.0.0"\n')
+            (commands/'uname').write_text('#!/bin/sh\ncase "$1" in -s) echo Linux;; -m) echo x86_64;; esac\n')
+            client = '''#!PYTHON
+import os,pathlib,sys
+kind=pathlib.Path(sys.argv[0]).name
+args=sys.argv[1:]
+with open(os.environ['DOWNLOAD_CALLS'],'a') as out:out.write(kind+'\\n')
+if kind=='curl':
+ assert args[-1]=='https://github.com/sigstore/cosign/releases/download/v2.4.3/cosign-linux-amd64',args
+ target=pathlib.Path(args[args.index('-o')+1])
+else:
+ assert args[:3]==['release','download','v2.4.3'],args
+ assert args[args.index('--repo')+1]=='github.com/sigstore/cosign',args
+ assert args[args.index('--pattern')+1]=='cosign-linux-amd64',args
+ assert '--clobber' in args,args
+ target=pathlib.Path(args[args.index('--output')+1])
+mode=os.environ['DOWNLOAD_MODE']
+target.write_bytes(b'partial' if mode=='down' or (kind=='curl' and mode.startswith('fallback')) else pathlib.Path(os.environ['DOWNLOAD_FIXTURE']).read_bytes())
+if mode=='down' or (kind=='curl' and mode.startswith('fallback')):sys.exit(22)
+if mode in ('corrupt','fallback-corrupt'):target.write_bytes(b'corrupt')
+'''.replace('PYTHON', sys.executable)
+            for name in ('curl', 'gh'):
+                (commands/name).write_text(client)
+            for path in commands.iterdir():path.chmod(0o700)
+            source = SCRIPT.read_text().split('resolve_cosign_v2() {', 1)[1].split('\n}\n', 1)[0]
+            # A fixture checksum in the real resolver lets the native hash tool
+            # prove refusal of corrupt bytes without downloading a release binary.
+            source = source.replace('caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708',
+                                    hashlib.sha256(self.binary).hexdigest())
+            env = dict(os.environ, PATH=str(commands)+os.pathsep+os.environ['PATH'],
+                       TMPDIR=str(root), COSIGN_VERSION=version, DOWNLOAD_MODE=mode,
+                       DOWNLOAD_CALLS=str(calls), DOWNLOAD_FIXTURE=str(fixture))
+            env.pop('COSIGN_BIN', None)
+            result = subprocess.run(['bash', '-c', 'set -uo pipefail\nresolve_cosign_v2() {'+source+'\n}\nresolve_cosign_v2'],
+                                    env=env, capture_output=True, text=True, timeout=15, check=False)
+            return (result, calls.read_text().splitlines() if calls.exists() else [],
+                    cache.read_bytes() if cache.exists() else None,
+                    list(root.glob('cosign-v2.4.3-linux-amd64.*')))
+
+    def test_direct_download_is_verified_and_returns_only_the_path(self):
+        result, calls, cached, partials = self.resolve()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, ['curl'])
+        self.assertEqual(cached, self.binary)
+        self.assertTrue(result.stdout.strip().endswith('/cosign-v2.4.3-linux-amd64'))
+        self.assertEqual(len(result.stdout.splitlines()), 1)
+        self.assertEqual(partials, [])
+
+    def test_release_frontend_failure_recovers_via_the_api(self):
+        result, calls, cached, partials = self.resolve('fallback')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, ['curl', 'gh'])
+        self.assertEqual(cached, self.binary)
+        self.assertEqual(partials, [])
+
+    def test_both_download_routes_down_fail_without_a_partial_executable(self):
+        result, calls, cached, partials = self.resolve('down')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, ['curl', 'gh'])
+        self.assertEqual(result.stdout, '')
+        self.assertIsNone(cached)
+        self.assertEqual(partials, [])
+
+    def test_corrupt_bytes_from_either_route_are_never_installed(self):
+        for mode in ('corrupt', 'fallback-corrupt'):
+            with self.subTest(mode=mode):
+                result, calls, cached, partials = self.resolve(mode)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('checksum', result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertIsNone(cached)
+                self.assertEqual(partials, [])
+                self.assertEqual(calls, ['curl'] if mode=='corrupt' else ['curl', 'gh'])
+
+    def test_verified_cache_needs_no_network(self):
+        result, calls, cached, _ = self.resolve('down', cached=self.binary)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, [])
+        self.assertEqual(cached, self.binary)
+
+    def test_corrupt_executable_cache_is_replaced_with_verified_bytes(self):
+        result, calls, cached, _ = self.resolve(cached=b'poisoned')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, ['curl'])
+        self.assertEqual(cached, self.binary)
+
+    def test_unpinned_version_cannot_download_or_reuse_the_cache(self):
+        result, calls, _, _ = self.resolve(version='v3.0.0')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, '')
+        self.assertEqual(calls, [])
+
 
 if __name__=='__main__':unittest.main()

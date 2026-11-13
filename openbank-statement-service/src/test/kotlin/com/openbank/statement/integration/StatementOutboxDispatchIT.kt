@@ -5,6 +5,7 @@ package com.openbank.statement.integration
 
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.statement.infrastructure.outbox.StatementOutboxDispatcher
 import com.openbank.statement.infrastructure.persistence.entity.StatementOutboxEntity
 import com.openbank.statement.infrastructure.persistence.repository.StatementOutboxRepositoryImpl
@@ -50,7 +51,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(StatementOutboxDispatchIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.statement.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 @QuarkusTestResource(StatementOutboxDispatchIT.DispatchEnabledResource::class)
 class StatementOutboxDispatchIT {
 

@@ -53,6 +53,15 @@
 #     exits non-zero so no `Enable auto-merge` step after it runs. If the hold cannot be transferred
 #     the held PR is left OPEN. The durable, service-scoped hold remains `rules.yaml: deploy_holds`
 #     (check-deploy-holds.py); this closes the gap for a hold expressed only on the PR.
+#   * An ARMED predecessor rides; the survivor waits. A deploy PR with auto-merge enabled has already
+#     been through CI, the deploy window and (for admin-ui) the merge train. Closing it in favour of
+#     a newer, unarmed PR restarts that whole cycle, and on a busy day the next build lands before the
+#     cycle completes — so every armed PR was closed and NOTHING deployed for hours (2026-10-30:
+#     #14316 -> #14328 -> #14334, each closed armed). It is left open; the window arms the survivor
+#     only after the armed one has merged (one armed PR per kind), and the main push from that merge
+#     rebuilds against the new pin, so the survivor's now-conflicting line is superseded in turn.
+#     The cost: an armed PR whose pin later proves wrong is no longer closed by its successor;
+#     disarm it by hand (disable its auto-merge) or record a deploy hold on main.
 #   * A comment is left on every PR it closes. A silent close of someone's PR is not acceptable even
 #     when the PR is bot-generated: the next person to look must find out why from the PR itself.
 #
@@ -66,24 +75,16 @@ set -euo pipefail
 # ── ancestry ────────────────────────────────────────────────────────────────────────────────────
 # Extract the 40-hex commit a deploy branch pins. Anything else yields "" and is treated as unknown.
 sha_of_branch() {
-  local sha="${1#"$2"}" run
-  # auto-deploy isolates candidates by producer run (#13460): `<sha>-run<digits>`. Strip exactly
-  # that suffix; anything else after the sha leaves the remainder non-hex, so it stays unknown.
-  case "$sha" in
-    *-run*)
-      run="${sha##*-run}"
-      case "$run" in
-        ''|*[!0-9]*) printf ''; return ;;
-      esac
-      sha="${sha%-run"$run"}"
-      ;;
+  local sha
+  case "$1" in
+    "$2"*) sha="${1#"$2"}" ;;
+    *) return 0 ;;
   esac
-  # 40 hex characters exactly. A truncated, suffixed or hand-cut branch name yields "" (unknown),
-  # and unknown must never mean "close it" — that was the pre-#6231 behaviour.
-  case "$sha" in
-    *[!0-9a-f]*) printf '' ;;
-    *) if [ "${#sha}" -eq 40 ]; then printf '%s' "$sha"; else printf ''; fi ;;
-  esac
+  # The workflow adds a positive run ID for unique carrier branches. It does not change the
+  # pinned source commit. Preserve legacy names; every other suffix remains unknown.
+  if [[ "$sha" =~ ^([0-9a-f]{40})(-run[1-9][0-9]*)?$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
 }
 
 # Ask GitHub how `head` relates to `base`: ahead | behind | identical | diverged.
@@ -240,8 +241,15 @@ diff_deploy_holds() {
 import sys, yaml
 def held(path):
     with open(path) as f:
-        doc = yaml.safe_load(f) or {}
-    services = ((doc.get("deploy_holds") or {}).get("services")) or {}
+        doc = yaml.safe_load(f)
+    # Fail closed: an empty body parses to None, which would read as "no holds".
+    if not isinstance(doc, dict) or not doc:
+        raise SystemExit("rules.yaml is empty or not a mapping: " + path)
+    if "deploy_holds" not in doc or not isinstance(doc["deploy_holds"], dict):
+        raise SystemExit("deploy_holds missing or not a map: " + path)
+    services = doc["deploy_holds"].get("services")
+    if services is None:
+        services = {}
     if not isinstance(services, dict):
         raise SystemExit("deploy_holds.services is not a map")
     return set(services)
@@ -361,7 +369,7 @@ run() {
     echo "::error::supersede: could not read #$KEEP's changed-file list; refusing coverage-based closes."
   fi
 
-  while IFS=$'\t' read -r n ref held; do
+  while IFS=$'\t' read -r n ref held armed; do
     [ -n "$n" ] || continue
     other_sha="$(sha_of_branch "$ref" "$PREFIX")"
     # Holds are decided ONCE, before any verdict, because the block below must apply on every
@@ -437,6 +445,11 @@ run() {
         echo "::warning::supersede: cannot establish that #$KEEP supersedes #$n (keep=${KEEP_SHA:-?} other=${other_sha:-?}, unrelated or unparsable) — leaving #$n OPEN."
         ;;
       CLOSE)
+        if [ "${armed:-0}" = "1" ]; then
+          skipped=$((skipped + 1))
+          echo "::notice::supersede: #$KEEP supersedes #$n, but #$n is already armed — it rides to merge; #$KEEP waits for the next window."
+          continue
+        fi
         if [ "$carries_rules" -eq 1 ]; then
           if ! legacy="$(unmigrated_branch_holds "$n")"; then
             owner_held=$((owner_held + 1)); skipped=$((skipped + 1))
@@ -521,7 +534,9 @@ EOF
 "This deploy PR pins services that an owner holds on${block_list}, so it will not be armed. The owner hold on${block_list} must be recorded in main's \`rules.yaml: deploy_holds\` (or${block_list} released) before this PR can deploy. $BLOCK_NOTICE_MARKER"; then
       echo "::warning::supersede: could not post the owner-hold block notice on #$KEEP."
     fi
-    return 1
+    # rc 3, distinct from the other refusals, so a log or caller can tell an owner hold apart.
+    # deploy-window-flush falls through to the other deploy kind on any refusal.
+    return 3
   fi
   if [ "$stale_keep" -ne 0 ]; then
     return 1
@@ -738,6 +753,24 @@ HOOK
     echo "self-test case 6 OK (ancestor and superset files -> #7320 closed)"
   fi
 
+  # case 50 — an ARMED predecessor is never closed: it has already cleared CI and the window, and
+  # closing it restarts the cycle for a PR that is not armed (#14316/#14328/#14334). rc stays 0 —
+  # the survivor is not unsafe, only second in line.
+  out="$(run "$P" 6222 "$NEW" "$(printf '6225\t%s%s\t0\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || contains_text "$out" 'would close #6225' \
+     || ! contains_text "$out" '#6225 is already armed'; then
+    echo "SELF-TEST FAIL case 50: armed predecessor not left to ride; rc=$rc"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 50 OK (armed predecessor left open, rc=0)"
+  fi
+  # case 51 — the same pair unarmed (explicit 0) is still closed: the guard keys on the flag only.
+  out="$(run "$P" 6222 "$NEW" "$(printf '6225\t%s%s\t0\t0' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || ! contains_text "$out" 'would close #6225'; then
+    echo "SELF-TEST FAIL case 51: unarmed predecessor was not closed; rc=$rc"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 51 OK (unarmed predecessor closed)"
+  fi
+
   # case 8 — the same pair WITHOUT a hold is ordinary: closed, rc 0, nothing inherited.
   out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t0' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
   if [ "$rc" -ne 0 ] || contains_text "$out" 'inherit hold' \
@@ -903,13 +936,14 @@ HOOK
   for path_name in coverage-skip:$OLD diverged:$CCC; do
     path_sha="${path_name#*:}"
     out="$(ov_run owner 13061 13060 "$path_sha" 2>&1)" && rc=0 || rc=$?
-    if [ "$rc" -eq 0 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' \
+    # rc 3 exactly: an owner-hold refusal is distinguishable from a rollback or unreadable evidence.
+    if [ "$rc" -ne 3 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' \
        || [ "$(keep_noticed 13061)" != 1 ] || grep -q '^pr close' "$hev"; then
       echo "SELF-TEST FAIL case 37 (${path_name%%:*}): owner hold + overlap did not block #13061; rc=$rc notices=$(keep_noticed 13061)"; ok=1; dump_out "$out"
     fi
   done
   out="$(ov_run owner 13061 13060 "$NEW" "$OLD" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -eq 0 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' || [ "$(keep_noticed 13061)" != 1 ]; then
+  if [ "$rc" -ne 3 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' || [ "$(keep_noticed 13061)" != 1 ]; then
     echo "SELF-TEST FAIL case 37 (stale-keep): owner overlap not reported/noticed; rc=$rc"; ok=1; dump_out "$out"
   fi
   # CLOSE path: case 32's pair shares the sanctions manifest.
@@ -1034,6 +1068,81 @@ HOOK
   fi
   rm -rf "$bigd"
 
+  # case 48b — platform-independent E2BIG guard: the hold check must receive FILE PATHS whose
+  # content is the fetched rules.yaml, never the content in argv/env (Linux caps one string at
+  # 128 KiB, macOS does not, so a size-based test cannot see a revert there).
+  local fk fkd fkrc
+  fkd="$(mktemp -d)"
+  mkdir "$fkd/bin"
+  cat >"$fkd/bin/gh" <<'GHSTUB'
+#!/bin/bash
+case "$*" in
+  *"pr view"*) echo 0123456789012345678901234567890123456789 ;;
+  *) printf 'deploy_holds:\n  services: {}\n' ;;
+esac
+GHSTUB
+  cat >"$fkd/py" <<'PYSTUB'
+#!/bin/bash
+# stub python3: records whether its two trailing args are readable files holding a mapping doc
+shift 2
+[ -f "$1" ] && [ -f "$2" ] && grep -q '^deploy_holds:' "$1" && grep -q '^deploy_holds:' "$2" && exit 0
+echo "hold check got non-file args" >&2; exit 97
+PYSTUB
+  chmod +x "$fkd/bin/gh" "$fkd/py"
+  # shellcheck disable=SC2031
+  ( export PATH="$fkd/bin:$PATH" REPO=fixture/repo DEPLOY_HOLD_PYTHON="$fkd/py"; unmigrated_branch_holds 1 ) >/dev/null 2>&1 && fkrc=0 || fkrc=$?
+  if [ "$fkrc" -ne 0 ]; then
+    echo "SELF-TEST FAIL case 48b: hold check was not invoked with readable rules.yaml file paths; rc=$fkrc"; ok=1
+  else
+    echo "self-test case 48b OK (hold check invoked with file paths)"
+  fi
+  # case 48c — empty body and malformed YAML must be non-zero (fail closed), not "no holds".
+  for fk in empty malformed scalar nodeploy_holds; do
+    case "$fk" in
+      empty) : >"$fkd/a.yaml" ;;
+      malformed) printf 'deploy_holds: [unclosed\n  - : :\n' >"$fkd/a.yaml" ;;
+      scalar) printf 'just a string\n' >"$fkd/a.yaml" ;;
+      nodeploy_holds) printf 'other: 1\n' >"$fkd/a.yaml" ;;
+    esac
+    printf 'deploy_holds:\n  services: {}\n' >"$fkd/b.yaml"
+    diff_deploy_holds "$fkd/a.yaml" "$fkd/b.yaml" >/dev/null 2>&1 && fkrc=0 || fkrc=$?
+    [ "$fkrc" -ne 0 ] || { echo "SELF-TEST FAIL case 48c: $fk branch rules.yaml read as no-holds (rc=0)"; ok=1; }
+    diff_deploy_holds "$fkd/b.yaml" "$fkd/a.yaml" >/dev/null 2>&1 && fkrc=0 || fkrc=$?
+    [ "$fkrc" -ne 0 ] || { echo "SELF-TEST FAIL case 48c: $fk main rules.yaml read as no-holds (rc=0)"; ok=1; }
+  done
+  echo "self-test case 48c checked (empty/malformed/scalar/no deploy_holds -> non-zero)"
+  rm -rf "$fkd"
+
+  # case 49 — the supersede STEP must stay behind the freshness verify (2026-11-03 analysis of
+  # run 41595162818). Skipping it when verify fails looks like a bug but is the guard: the file
+  # coverage above proves a newer PR touches the same manifests, NOT that its pins are fresh, and
+  # deploy-window's select_candidate falls through to an older PR when the newest one fails
+  # verify. `if: always()` would close that fallback while the replacement is unarmable. The
+  # step must (a) come after "Verify GitOps image source freshness" and (b) carry no
+  # always()/failure()/cancelled() override of the implicit success() gate.
+  local wf
+  wf="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../workflows/auto-deploy.yml"
+  if ! python3 - "$wf" <<'PY'
+import re, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+def step(name):
+    m = re.search(r"(?ms)^      - name: " + re.escape(name) + r"\n(.*?)(?=^      - |^  [A-Za-z0-9_-]+:\n|\Z)", src)
+    return m
+v, c = step("Verify GitOps image source freshness"), step("Close superseded deploy PRs")
+if not v or not c:
+    sys.exit("verify or supersede step not found")
+if v.start() > c.start():
+    sys.exit("supersede step precedes the freshness verify")
+cond = re.search(r"(?m)^        if: (.*)$", c.group(1))
+if cond and re.search(r"always\(\)|failure\(\)|cancelled\(\)", cond.group(1)):
+    sys.exit("supersede step overrides the success() gate: " + cond.group(1))
+PY
+  then
+    echo "SELF-TEST FAIL case 49: supersede step is not gated on a successful freshness verify"; ok=1
+  else
+    echo "self-test case 49 OK (supersede runs only after a successful freshness verify)"
+  fi
+
   # case 29 — producer-run isolation (#13460) suffixes every branch with `-run<id>`. The sha must
   # still parse, or KEEP_SHA is empty and every run classifies every predecessor SKIP — measured on
   # main: `closed=0 skipped=24` with "could not read a commit sha off" on each run. A malformed
@@ -1050,6 +1159,21 @@ HOOK
       echo "self-test case 29 OK (run-suffixed branches parse; malformed suffixes stay unknown)"
     fi
   fi
+
+  # Reconcile source branches require an exact producer prefix, full source SHA and
+  # canonical positive run ID. Preserve main's owner-hold/no-copy cases above.
+  local bad_branch
+  for bad_branch in "$NEW" "wrong-$NEW-run1" "$P${NEW:0:39}-run1" "$P$NEW-run" \
+      "$P$NEW-runx" "$P$NEW-run0" "$P$NEW-run01" "$P$NEW-run-1" "$P$NEW-run1-extra"; do
+    if [ -n "$(sha_of_branch "$bad_branch" "$P")" ]; then
+      echo "SELF-TEST FAIL reconcile parser: unsupported branch format was accepted"; ok=1
+    fi
+  done
+  if [ "$(sha_of_branch "$P$NEW" "$P")" != "$NEW" ] || \
+      [ "$(sha_of_branch "$P$NEW-run39500952309" "$P")" != "$NEW" ]; then
+    echo "SELF-TEST FAIL reconcile parser: canonical or legacy source format stopped working"; ok=1
+  fi
+  echo "self-test reconcile parser checked (strict prefix, complete SHA, canonical positive run ID, legacy preserved)"
 
   if [ "$ok" -ne 0 ]; then
     echo "self-test: FAILED"
@@ -1083,13 +1207,13 @@ fi
 # script would then print "nothing to close" and exit 0 — a broken probe reporting a clean result,
 # which is the failure mode this repo has been bitten by repeatedly.
 PAIRS="$(gh pr list --repo "$REPO" --state open --limit 200 \
-    --json number,headRefName,headRepositoryOwner,createdAt,isDraft,labels \
+    --json number,headRefName,headRepositoryOwner,createdAt,isDraft,labels,autoMergeRequest \
     --jq "[.[]
            | select(.headRefName | startswith(\"$PREFIX\"))
            | select(.number != ($KEEP | tonumber))
            | select(.headRepositoryOwner.login == \"${REPO%%/*}\")]
           | sort_by(.createdAt)
-          | .[] | \"\(.number)\t\(.headRefName)\t\(if .isDraft or ([.labels[].name] | index(\"blocked\")) then 1 else 0 end)\"")"
+          | .[] | \"\(.number)\t\(.headRefName)\t\(if .isDraft or ([.labels[].name] | index(\"blocked\")) then 1 else 0 end)\t\(if .autoMergeRequest then 1 else 0 end)\"")"
 
 run "$PREFIX" "$KEEP" "$KEEP_SHA" "$PAIRS"
 exit $?

@@ -59,6 +59,7 @@ import argparse
 import contextlib
 import io
 import json
+import math
 import pathlib
 import re
 import sys
@@ -79,6 +80,8 @@ ABS_TOLERANCE_BYTES = 16.0
 # has a baseline entry is a finding, so it can only shrink by being noticed. Re-measure with
 # `-f 5` before adding to it; a sharp before/after difference is NOT bimodality.
 UNSTABLE: dict[str, str] = {
+    "com.openbank.libs.benchmarks.OutboxDispatchBench.concurrentReadyBatch":
+        "2026-11-09: five unchanged-source forks (SerialGC, 512 MiB, 3+3x1s) measured 11088 / 11088 / 11064 / 12664 / 12688 B/op; two allocation plateaus on the ready path. Runs and is reported, not compared.",
     "com.openbank.libs.benchmarks.MoneyBench.allocate":
         "2026-09-30: 1592 / 1680 / 1680 / 1680 B/op over four -f 1 runs, then 1680 / 1560 / 1680 with "
         "a 5-iteration warmup (7.7 % spread, no code change) — C2 escape analysis on the BigInteger "
@@ -159,7 +162,10 @@ def load_results(path: pathlib.Path) -> dict[str, float]:
         secondary = entry.get("secondaryMetrics") or {}
         if METRIC not in secondary:
             raise ValueError(f"{path}: {name} has no {METRIC} — was JMH run with -prof gc?")
-        out[name] = float(secondary[METRIC]["score"])
+        value = float(secondary[METRIC]["score"])
+        if not math.isfinite(value) or value < 0:
+            raise ValueError(f"{path}: {name} has invalid allocation measurement {value}")
+        out[name] = value
     return out
 
 
@@ -192,6 +198,8 @@ def latency_findings(declared: set[str], bounds: dict[str, float], p99: dict[str
             findings.append(f"{name}: has a latency bound but is missing from the results")
         elif got is None:
             findings.append(f"{name}: has a latency bound but the result carries no p99 (run it in SampleTime mode)")
+        elif not math.isfinite(got) or got < 0:
+            findings.append(f"{name}: invalid p99 measurement {got} ms — expected a finite nonnegative value")
         elif got >= bounds[name]:
             findings.append(f"{name}: p99 {got:.4f} ms is not below its bound {bounds[name]:.4f} ms")
     return findings
@@ -206,6 +214,7 @@ def compare(declared: set[str], baseline: dict[str, float], results: dict[str, f
     findings: list[str] = []
     notices: list[str] = []
     base = set(baseline)
+    unstable_required = declared & set(UNSTABLE)
     for name in sorted(set(UNSTABLE) - declared):
         findings.append(f"{name}: UNSTABLE entry names no @Benchmark in {SOURCES} — remove it")
     for name in sorted(set(UNSTABLE) & base):
@@ -217,6 +226,8 @@ def compare(declared: set[str], baseline: dict[str, float], results: dict[str, f
         findings.append(f"{name}: stale baseline entry — no such @Benchmark in {SOURCES}")
     if results is None:
         return findings, notices
+    for name in sorted(unstable_required - set(results)):
+        findings.append(f"{name}: missing from the results — UNSTABLE benchmarks must still run and be reported")
     ran = set(results) - set(UNSTABLE)
     for name in sorted(set(UNSTABLE) & set(results)):
         notices.append(f"{name}: {results[name]:.1f} B/op reported, NOT compared (UNSTABLE: {UNSTABLE[name]})")
@@ -238,6 +249,19 @@ def compare(declared: set[str], baseline: dict[str, float], results: dict[str, f
                 f"({(got - want) / want * 100:+.1f} %) — ratchet the baseline down (--write-baseline)"
             )
     return findings, notices
+
+
+def ratchet_baseline(path: pathlib.Path, results: dict[str, float]) -> None:
+    """Update only measured entries, preserving other budgets and metadata; never raise a budget."""
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    baseline = doc["benchmarks"]
+    if not results:
+        raise ValueError("no measurements to ratchet")
+    for name, value in results.items():
+        if name not in baseline or not math.isfinite(value) or value < 0 or value > baseline[name]:
+            raise ValueError(f"{name}: ratchet requires a finite measurement at or below the existing budget")
+    baseline.update({name: min(float(baseline[name]), round(value, 1)) for name, value in results.items()})
+    path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 
 
 def write_baseline(path: pathlib.Path, results: dict[str, float]) -> None:
@@ -388,6 +412,8 @@ def _self_test() -> int:
     try:
         UNSTABLE[u] = "fixture: bimodal"
         unstable_cases = [
+            ("an UNSTABLE benchmark that did not run is red", ["alpha", "unstable"], {a: 1000.0},
+             {a: 1000.0}, 1, f"{u}: missing from the results"),
             ("an UNSTABLE benchmark 50 % over is not a finding", ["alpha", "unstable"], {a: 1000.0},
              {a: 1000.0, u: 3000.0}, 0, f"::notice::{u}: 3000.0 B/op reported, NOT compared"),
             ("an UNSTABLE entry naming no @Benchmark is red", ["alpha"], {a: 1000.0}, None, 1,
@@ -461,6 +487,12 @@ def _self_test() -> int:
             return rc, b.getvalue()
         for label, args, want, text in [
             ("a p99 over its latency bound is red", (3_000_000.0, {a: {"p99_ms": 2.0}}), 1, "p99 3.0000 ms is not below its bound 2.0000 ms"),
+            ("a p99 exactly at its latency bound is red", (2_000_000.0, {a: {"p99_ms": 2.0}}), 1, "p99 2.0000 ms is not below its bound 2.0000 ms"),
+            ("a NaN p99 is red", (float("nan"), {a: {"p99_ms": 2.0}}), 1, "invalid p99 measurement"),
+            ("a string NaN p99 is red", ("NaN", {a: {"p99_ms": 2.0}}), 1, "invalid p99 measurement"),
+            ("an infinite p99 is red", (float("inf"), {a: {"p99_ms": 2.0}}), 1, "invalid p99 measurement"),
+            ("a negative infinite p99 is red", (float("-inf"), {a: {"p99_ms": 2.0}}), 1, "invalid p99 measurement"),
+            ("a negative p99 is red", (-1.0, {a: {"p99_ms": 2.0}}), 1, "invalid p99 measurement"),
             ("a p99 under its latency bound is green", (40_000.0, {a: {"p99_ms": 2.0}}), 0, "bench-alloc-baseline: OK"),
             ("a bounded benchmark without percentiles is red", (1.0, {a: {"p99_ms": 2.0}}, False), 1, "carries no p99"),
             ("a latency bound naming no @Benchmark is red", (1.0, {"com.example.Ghost.x": {"p99_ms": 2.0}}), 1, "latency bound names no @Benchmark"),
@@ -486,6 +518,7 @@ def main() -> int:
     ap.add_argument("--results", help="JMH JSON produced with -prof gc -rf json")
     ap.add_argument("--enforce", action="store_true")
     ap.add_argument("--write-baseline", action="store_true")
+    ap.add_argument("--ratchet-baseline", action="store_true", help="lower only measured existing budgets")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
@@ -494,6 +527,11 @@ def main() -> int:
     if results is not None and not results.is_file():
         print(f"::error::{results} not found — the JMH run produced no results; refusing to report a pass")
         return 1
+    if args.ratchet_baseline:
+        if results is None or args.write_baseline:
+            ap.error("--ratchet-baseline requires --results and cannot combine with --write-baseline")
+        ratchet_baseline(pathlib.Path(args.root) / BASELINE, load_results(results))
+        return 0
     return run(pathlib.Path(args.root), results, args.enforce, args.write_baseline)
 
 

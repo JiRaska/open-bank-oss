@@ -6,6 +6,11 @@ plugins {
     id("openbank.quarkus-service")
 }
 
+// Compile the corporate-facts test double used by this module's consumer Pact tests.
+kotlin.sourceSets.named("consumerPactTest") {
+    kotlin.include("com/openbank/tax/contract/NoCorporateFacts.kt")
+}
+
 dependencies {
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
@@ -23,6 +28,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.reactive)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
+    // #15356: OpenPGP encryption of the GSFT depositor batch (decree annex 1.1.6).
+    // Pinned to the catalog `bouncycastle` line (1.86) so it stays aligned with bcprov.
+    implementation("org.bouncycastle:bcpg-jdk18on:1.86")
+    implementation(libs.bouncycastle.bcprov)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
 
@@ -33,6 +42,13 @@ dependencies {
     testImplementation(project(":openbank-libs-testing"))
     // #12425: consumer pacts for the pension reporting read models, written to pacts/.
     testImplementation(libs.pact.consumer)
+}
+
+// Independent Quarkus boot profiles retain more than the default 512 MiB test heap.
+// The complete real-DB/Kafka suite measured 680 MiB after GC with a 1 GiB cap (#12250); the GSFT
+// dry-run IT (#15356) is one more profile boot and the suite then ran out of heap at 1 GiB.
+tasks.named<Test>("test") {
+    maxHeapSize = "1536m"
 }
 
 // Coverage floor (ADR-0020, ratchet-only). This module had no verify{} rule, so koverVerify
@@ -50,5 +66,12 @@ kover {
                 }
             }
         }
+    }
+}
+
+// Shared synthetic wire fixture is test-only; it is never packaged in the service runtime.
+sourceSets {
+    test {
+        resources.srcDir(rootProject.file("openbank-libs-domain/src/test/resources/portfolio-contract"))
     }
 }

@@ -87,7 +87,9 @@ import datetime as dt
 import json
 import os
 import pathlib
+import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -375,6 +377,15 @@ def self_test() -> int:
         ok = result == want and (("::error::FAILED" in out) == (status == 403))
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  320-commit PR, update-branch HTTP {status} -> exit {result}")
+    report = {"targets": []}
+    with patch.dict(globals(), {"observe_update": lambda *_: "c" * 40}):
+        result, out = run_fixture(fresh, 202, recovery_report=report)
+    target_ok = (result == 0 and len(report["targets"]) == 1
+                 and report["targets"][0]["budget_validated"] is True
+                 and report["targets"][0]["updated"] is True
+                 and report["targets"][0]["updated_head_sha"] == "c" * 40)
+    failures += not target_ok
+    print(f"{'PASS' if target_ok else 'FAIL'}  target evidence records only an observed update")
     # GitHub reports the expected-head precondition race as 422, not only 409.
     # Exercise the real response handler: no retry, changed SHA or generic 422 success.
     for label, data, want in [
@@ -834,10 +845,12 @@ def evaluate_current(repo: str, branch: str, full: dict, required: list[str],
         committed = parse_ts(get(f"/repos/{repo}/commits/{sha}")["commit"]["committer"]["date"])
     ok, why = decide(pr, required, checks, now, committed, debounce)
     used = None
+    history_error = False
     if ok:
         try:
             used = branch_update_count(repo, sha, branch, cap)
         except BudgetUnreadable as error:
+            history_error = True
             ok, why = False, f"update budget unreadable ({error})"
         else:
             if used >= cap:
@@ -845,7 +858,44 @@ def evaluate_current(repo: str, branch: str, full: dict, required: list[str],
                                   "to unblock, push to the branch only after checking why CI keeps losing the race")
     return {"number": number, "head": sha, "held": held, "ok": ok, "why": why, "kind": kind, "building": building,
                 "waiting_since": (full["auto_merge"] or {}).get("enabled_at") or full.get("created_at") or "",
-                "budget": used}
+                "budget": used, "history_error": history_error}
+
+
+def observe_update(repo: str, number: int, old_sha: str, branch: str,
+                   attempts: int = 6, delay_seconds: float = 2) -> str | None:
+    """Prove GitHub's queued update became a verified merge whose first parent is old_sha."""
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(delay_seconds)
+        try:
+            code, pr = api("GET", f"/repos/{repo}/pulls/{number}")
+        except (OSError, ValueError):
+            continue
+        head = pr.get("head") if code == 200 and isinstance(pr, dict) else None
+        new_sha = head.get("sha") if isinstance(head, dict) else None
+        if not isinstance(new_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", new_sha) or new_sha == old_sha:
+            continue
+        try:
+            code, commit = api("GET", f"/repos/{repo}/commits/{new_sha}")
+        except (OSError, ValueError):
+            continue
+        details = commit.get("commit") if code == 200 and isinstance(commit, dict) else None
+        parents = commit.get("parents") if isinstance(commit, dict) else None
+        committer = details.get("committer") if isinstance(details, dict) else None
+        verification = details.get("verification") if isinstance(details, dict) else None
+        message = details.get("message") if isinstance(details, dict) else None
+        if (commit.get("sha") == new_sha and isinstance(message, str)
+                and message.partition("\n")[0].startswith(f"Merge branch '{branch}' into ")
+                and isinstance(committer, dict) and committer.get("name") == "GitHub"
+                and committer.get("email") == "noreply@github.com"
+                and isinstance(verification, dict) and verification.get("verified") is True
+                and isinstance(parents, list) and len(parents) == 2
+                and isinstance(parents[0], dict) and parents[0].get("sha") == old_sha
+                and isinstance(parents[1], dict)
+                and re.fullmatch(r"[0-9a-f]{40}", parents[1].get("sha", ""))):
+            return new_sha
+        return None
+    return None
 
 
 def admission_entries(repo: str, branch: str, main_sha: str, required: list[str],
@@ -869,7 +919,8 @@ def admission_entries(repo: str, branch: str, main_sha: str, required: list[str]
 
 
 def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
-        fleet_threshold: int, max_updates_per_pr: int = 4) -> int:
+        fleet_threshold: int, max_updates_per_pr: int = 4,
+        recovery_report: dict | None = None) -> int:
     try:
         required, strict = required_policy(repo, branch)
     except (KeyError, TypeError, ValueError, RuntimeError, OSError, SystemExit) as error:
@@ -885,6 +936,13 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         main_sha = get(f"/repos/{repo}/git/ref/heads/{branch}")["object"]["sha"]
         entries = admission_entries(repo, branch, main_sha, required, dt.datetime.now(dt.timezone.utc),
                                     debounce, fleet_threshold, max_updates_per_pr)
+        if recovery_report is not None:
+            recovery_report["targets"] = [{
+                "pr": entry["number"], "head_sha": entry["head"],
+                "budget_validated": isinstance(entry.get("budget"), int),
+                "update_count": entry.get("budget"), "history_error": entry.get("history_error", False),
+                "updated": False, "updated_head_sha": None,
+            } for entry in entries]
         for entry in entries:
             print(f"CLASS #{entry['number']}: {entry['why']}; reservation={entry['reservation']}")
         write_summary([f"- #{e['number']}: {e['why']}" for e in entries if "budget" in e["why"]])
@@ -921,6 +979,15 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
                          {"expected_head_sha": checked["head"]})
         if code == 202:
             print(f"UPDATE #{number}: one global admission (budget {checked['budget'] + 1}/{max_updates_per_pr})")
+            if recovery_report is not None:
+                observed = observe_update(repo, number, checked["head"], branch)
+                if observed:
+                    target = next((item for item in recovery_report["targets"] if item["pr"] == number), None)
+                    if target is not None:
+                        target["updated"] = True
+                        target["updated_head_sha"] = observed
+                else:
+                    print(f"::warning::#{number}: update accepted, but exact head transition was not observed")
             return 0
         if code == 409 or (code == 422 and isinstance(data, dict) and data.get("message") in (
                 "expected head sha didn’t match current head ref.",
@@ -945,6 +1012,8 @@ def main() -> int:
                     help="hard lifetime cap from server-side merge commits on the PR")
     ap.add_argument("--debounce-minutes", type=int, default=20)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--recovery-report", type=pathlib.Path,
+                    help="write run-bound per-PR update evidence for main-red recovery")
     ap.add_argument("--full-fleet-threshold", type=int, default=20,
                     help="distinct build-matrix modules at which a PR counts as full-fleet")
     a = ap.parse_args()
@@ -958,8 +1027,20 @@ def main() -> int:
     if a.max_updates < 0 or a.max_updates_per_pr < 0:
         print("::error::update caps must be nonnegative")
         return 1
-    return run(a.repo, a.branch, a.max_updates, a.debounce_minutes, a.dry_run,
-               a.full_fleet_threshold, a.max_updates_per_pr)
+    report = {
+        "version": 1, "run_id": int(os.environ.get("GITHUB_RUN_ID", "0")),
+        "attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT", "0")),
+        "main_sha": os.environ.get("GITHUB_SHA", ""), "dry_run": a.dry_run,
+        "complete": False, "successful": False, "targets": [],
+    }
+    result = run(a.repo, a.branch, a.max_updates, a.debounce_minutes, a.dry_run,
+                 a.full_fleet_threshold, a.max_updates_per_pr,
+                 recovery_report=report if a.recovery_report else None)
+    report["complete"] = True
+    report["successful"] = result == 0
+    if a.recovery_report:
+        a.recovery_report.write_text(json.dumps(report, sort_keys=True) + "\n", encoding="utf-8")
+    return result
 
 
 if __name__ == "__main__":

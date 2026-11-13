@@ -91,7 +91,7 @@ export function CustomerContextGraph({ evidence, partyName }: {
     return [node.id, { x: 400 + Math.cos(angle) * radiusX, y: 250 + Math.sin(angle) * radiusY }] as const
   }))
   const labels: Record<CustomerGraphKind, string> = {
-    domain: t('Doména', 'Domain'), account: t('Účet', 'Account'), product: t('Produkt', 'Product'),
+    domain: t('Agregát / odkaz', 'Aggregate / reference'), account: t('Účet', 'Account'), product: t('Produkt', 'Product'),
     card: t('Karta', 'Card'), notification: t('Interakce', 'Interaction'), consent: t('Souhlas', 'Consent'),
     application: t('Úvěrová žádost', 'Credit application'), case: t('AML případ', 'AML case'),
     device: t('Zařízení', 'Device'), document: t('Dokument', 'Document'),
@@ -117,7 +117,7 @@ export function CustomerContextGraph({ evidence, partyName }: {
       </div>
       <span className={styles.feedStatus} role="status"><span aria-hidden="true" className={loading ? styles.loadingDot : styles.liveDot} />{loading
         ? t('Načítám živé zdroje…', 'Loading live sources…')
-        : t(`${Math.max(0, GRAPH_FEEDS - live.unavailable.length)}/${GRAPH_FEEDS} doménových vstupů`, `${Math.max(0, GRAPH_FEEDS - live.unavailable.length)}/${GRAPH_FEEDS} domain feeds`)}</span>
+        : t(`${Math.max(0, GRAPH_FEEDS - live.unavailable.length)}/${GRAPH_FEEDS} datových zdrojů`, `${Math.max(0, GRAPH_FEEDS - live.unavailable.length)}/${GRAPH_FEEDS} data feeds`)}</span>
     </div>
     {live.unavailable.length > 0 && <p role="status" className={styles.warning}>
       {t('Nedostupné zdroje', 'Unavailable sources')}: {live.unavailable.join(', ')}. {t('Graf je částečný.', 'The graph is partial.')}

@@ -12,15 +12,25 @@ import au.com.dius.pact.consumer.junit5.PactTestFor
 import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.clients.account.AccountClient
+import com.openbank.clients.account.AccountLookup
+import com.openbank.clients.account.model.AccountResponse
 import com.openbank.vop.infrastructure.client.AccountServiceClient
-import com.openbank.vop.infrastructure.client.AccountSummary
-import io.restassured.RestAssured.given
+import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.client.ClientBuilder
+import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.MultivaluedMap
+import jakarta.ws.rs.ext.MessageBodyReader
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.io.InputStream
+import java.lang.reflect.Proxy
+import java.lang.reflect.Type
 import java.util.UUID
 
 /**
@@ -60,8 +70,10 @@ import java.util.UUID
  * on [AccountServiceClient] reddens this test, and the provider replay independently answers
  * whether account-service serves it.
  *
- * The response is bound into the REAL client DTO [AccountSummary] rather than read off a JsonPath,
- * so renaming a field on the mirror reddens THIS test — the half of the contract the provider
+ * Since #13169 the client is GENERATED from account-service's `openapi.yaml`
+ * (`openbank-client-account`, ADR-0319). Both interactions go through the REAL `AccountClient`
+ * facade over a real JAX-RS client, so the response is bound into the generated [AccountResponse]
+ * and the 404 is classified exactly as the adapter sees it — the half of the contract the provider
  * replay cannot see.
  *
  * No `X-Customer-Party-Id` header is sent, matching the client: VoP is a service-to-service check
@@ -76,7 +88,7 @@ import java.util.UUID
 @PactTestFor(providerName = "openbank-account-service", pactVersion = PactSpecVersion.V3)
 class AccountIbanLookupPactConsumerTest {
 
-    private val mapper = jacksonObjectMapper()
+    private val mapper: ObjectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)
     fun accountByIbanPact(builder: PactDslWithProvider): RequestResponsePact = builder
@@ -104,24 +116,17 @@ class AccountIbanLookupPactConsumerTest {
 
     @Test
     @PactTestFor(pactMethod = "accountByIbanPact")
-    fun `the account response binds into AccountSummary and carries the owning party id`(mockServer: MockServer) {
+    fun `the account response binds into AccountResponse and carries the owning party id`(mockServer: MockServer) {
         assertClientPathMatchesContract()
 
-        val raw = given()
-            .baseUri(mockServer.getUrl())
-            .accept("application/json")
-            // Reflected off the client, NOT retyped: this is the request the real client issues.
-            .get(clientDerivedAccountPath())
-            .then()
-            .statusCode(200)
-            .extract().asString()
+        val lookup = facadeFor(mockServer).getAccountByIban(PACT_IBAN).await().indefinitely()
 
-        val summary = mapper.readValue<AccountSummary>(raw)
-        // The one field the adapter actually consumes. `isNotBlank` rather than a fixed value:
-        // what the adapter cannot survive is the field being renamed, absent or empty.
-        assertThat(summary.partyId).isNotBlank()
-        assertThat(summary.id).isNotBlank()
-        assertThat(summary.status).isEqualTo("ACTIVE")
+        val account = (lookup as AccountLookup.Found).account
+        // The one field the adapter actually consumes: what it cannot survive is the field being
+        // renamed or absent.
+        assertThat(account.partyId).isEqualTo(UUID.fromString(PACT_OWNER_PARTY_ID))
+        assertThat(account.id).isEqualTo(UUID.fromString(PACT_ACCOUNT_ID))
+        assertThat(account.status).isEqualTo(AccountResponse.Status.ACTIVE)
     }
 
     // NO 401-without-identity pact interaction is recorded here, deliberately: the provider-side
@@ -160,12 +165,47 @@ class AccountIbanLookupPactConsumerTest {
     fun `an IBAN the bank does not hold is a 404, not an empty account`(mockServer: MockServer) {
         assertClientPathMatchesContract()
 
-        given()
-            .baseUri(mockServer.getUrl())
-            .accept("application/json")
-            .get("/api/v1/accounts/iban/$UNKNOWN_IBAN")
-            .then()
-            .statusCode(404)
+        val lookup = facadeFor(mockServer).getAccountByIban(UNKNOWN_IBAN).await().indefinitely()
+
+        assertThat(lookup).isEqualTo(AccountLookup.NotFound)
+    }
+
+    /**
+     * The real facade over the generated interface, bound to the pact mock by a real JAX-RS client. The
+     * outgoing path is reflected off the generated `@Path` annotations (the request the real client
+     * issues) while the pact pins the literal. Only `getAccountByIban` is answered.
+     */
+    private fun facadeFor(mockServer: MockServer): AccountClient {
+        val http = ClientBuilder.newBuilder().register(JsonReader(mapper)).build()
+        val rest = Proxy.newProxyInstance(
+            AccountServiceClient::class.java.classLoader,
+            arrayOf(AccountServiceClient::class.java),
+        ) { _, method, args ->
+            check(method.name == "getAccountByIban") { "unexpected account-service operation ${method.name}" }
+            Uni.createFrom().item {
+                http.target(mockServer.getUrl()).path(clientDerivedAccountPath(args!![0] as String))
+                    .request(MediaType.APPLICATION_JSON).get()
+            }
+        } as AccountServiceClient
+        return AccountClient(rest)
+    }
+
+    private class JsonReader(private val mapper: ObjectMapper) : MessageBodyReader<Any> {
+        override fun isReadable(
+            type: Class<*>,
+            genericType: Type?,
+            annotations: Array<out Annotation>?,
+            mediaType: MediaType?,
+        ) = !InputStream::class.java.isAssignableFrom(type)
+
+        override fun readFrom(
+            type: Class<Any>,
+            genericType: Type?,
+            annotations: Array<out Annotation>?,
+            mediaType: MediaType?,
+            httpHeaders: MultivaluedMap<String, String>?,
+            entityStream: InputStream,
+        ): Any = mapper.readValue(entityStream, type)
     }
 
     /**
@@ -216,13 +256,12 @@ class AccountIbanLookupPactConsumerTest {
         const val UNKNOWN_IBAN = "CZ6508000000192000145981"
         const val UNKNOWN_ACCOUNT_PATH = "/api/v1/accounts/iban/$UNKNOWN_IBAN"
 
-        fun clientDerivedAccountPath(): String {
-            val base = AccountServiceClient::class.java.getAnnotation(Path::class.java).value
-            val method = AccountServiceClient::class.java.methods
-                .single { it.name == "getAccountByIban" }
-                .getAnnotation(Path::class.java)
-                .value
-            return (base + method).replace("{iban}", PACT_IBAN)
+        /** Recomputed from the generated operation the client inherits (the class-level `@Path` sits on it). */
+        fun clientDerivedAccountPath(iban: String = PACT_IBAN): String {
+            val operation = AccountServiceClient::class.java.methods.single { it.name == "getAccountByIban" }
+            val base = operation.declaringClass.getAnnotation(Path::class.java).value
+            val method = operation.getAnnotation(Path::class.java).value
+            return (base + method).replace("{iban}", iban)
         }
     }
 }

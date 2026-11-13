@@ -178,6 +178,17 @@ def verify(event: Any, repo: str, api: Api = gh_api) -> int:
     )
     require(field(pr, "base", "ref") == "main", "PR no longer targets main")
     require(field(pr, "state") == "open", "PR is no longer open")
+    require(field(pr, "draft") is False, "PR is draft or draft status is unknown")
+    labels = field(pr, "labels")
+    require(isinstance(labels, list), "PR labels are missing or malformed")
+    label_names = []
+    for label in labels:
+        require(isinstance(label, dict), "PR label entry is malformed")
+        name = field(label, "name")
+        require(isinstance(name, str) and bool(name.strip()), "PR label name is missing or malformed")
+        label_names.append(name)
+    require(not any(name.casefold() == "blocked" for name in label_names),
+            "PR carries the blocked hold label")
     number = field(pr, "number")
     require(type(number) is int and number > 0, "invalid PR number")
 

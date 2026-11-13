@@ -17,7 +17,8 @@
           ],
           "entityType": "INDIVIDUAL",
           "idempotencyKey": "account-open:33333333-3333-4333-8333-333333333333:pact-clear",
-          "name": "Zdenka Bezprijmeni"
+          "name": "Zdenka Bezprijmeni",
+          "subjectId": "33333333-3333-4333-8333-333333333333"
         },
         "headers": {
           "Content-Type": "application/json"
@@ -43,7 +44,8 @@
           ],
           "entityType": "INDIVIDUAL",
           "idempotencyKey": "account-open:33333333-3333-4333-8333-333333333333:pact-clear",
-          "name": "Zdenka Bezprijmeni"
+          "name": "Zdenka Bezprijmeni",
+          "subjectId": "33333333-3333-4333-8333-333333333333"
         },
         "headers": {
           "Content-Type": "application/json"
@@ -91,7 +93,8 @@
           ],
           "entityType": "INDIVIDUAL",
           "idempotencyKey": "account-open:44444444-4444-4444-8444-444444444444:pact-hit",
-          "name": "Vladimir Putin"
+          "name": "Vladimir Putin",
+          "subjectId": "44444444-4444-4444-8444-444444444444"
         },
         "headers": {
           "Content-Type": "application/json"

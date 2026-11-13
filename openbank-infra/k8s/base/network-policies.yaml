@@ -177,7 +177,7 @@ spec:
           port: 4318
 ---
 # 6) Egress to internet — opt-in per service via label
-#    `openbank.io/allow-internet-egress=true`. Default services have NO egress
+#    `open-bank.tech/allow-internet-egress=true`. Default services have NO egress
 #    to the internet; FX rate fetchers / external sanctions list importers
 #    add the label to opt in.
 apiVersion: networking.k8s.io/v1
@@ -188,7 +188,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      openbank.io/allow-internet-egress: "true"
+      open-bank.tech/allow-internet-egress: "true"
   policyTypes: [Egress]
   egress:
     - to:

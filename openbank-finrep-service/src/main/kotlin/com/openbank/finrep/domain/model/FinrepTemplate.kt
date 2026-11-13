@@ -36,6 +36,8 @@ data class FinrepTemplate(
      * `PushResult.skipped()` failure this repo already paid for once.
      */
     val balanceVerdict: BalanceVerdict,
+    /** The source route used for the served response. Pure mapper results have no source route. */
+    val sourceEvidence: String? = null,
 ) {
     val hasDataGaps: Boolean get() = dataGaps.isNotEmpty()
 }

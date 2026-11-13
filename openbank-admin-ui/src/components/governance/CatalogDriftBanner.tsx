@@ -26,12 +26,13 @@ export function CatalogDriftBanner({ present, kinds = DEFAULT_KINDS }: { present
   const presentKey = present.join('|')
   const kindsKey = kinds.join('|')
   useEffect(() => {
+    let active = true
     const presentSet = new Set(presentKey.split('|'))
     const allowed = new Set(kindsKey.split('|'))
     fetch('/api/catalog/services', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : null))
       .then((data: { services?: CatalogService[] } | null) => {
-        if (!Array.isArray(data?.services)) return
+        if (!active || !Array.isArray(data?.services)) return
         setMissing(
           data.services
             .filter(s => allowed.has(s.kind) && !presentSet.has(s.short))
@@ -40,6 +41,7 @@ export function CatalogDriftBanner({ present, kinds = DEFAULT_KINDS }: { present
         )
       })
       .catch(() => { /* catalog snapshot absent — show nothing */ })
+    return () => { active = false }
   }, [presentKey, kindsKey])
 
   if (missing.length === 0) return null

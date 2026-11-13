@@ -105,7 +105,7 @@ class RiskResource {
     /** Bounded list for the console (#10618); the mismatches themselves are on the run manifest. */
     @GET
     @Operation(summary = "The most recently recorded snapshot runs, newest first (limit 1..100, default 25)")
-    @Authorize(action = "risk.snapshot.read", resource = "")
+    @Authorize(action = "risk.snapshot.list", resource = "")
     suspend fun list(@QueryParam("limit") limit: Int?): Response =
         Response.ok(SnapshotRunListResponse(snapshots.listRuns(boundedLimit(limit)).map { it.toDto() })).build()
 
@@ -250,7 +250,7 @@ class RiskResource {
     @GET
     @Path("/{id}/valuation")
     @Operation(summary = "Per-deal and per-book PV, accrued, clean and dirty of the own treasury book; 409 if UNTIED")
-    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    @Authorize(action = "risk.valuation.read", resource = "#id")
     suspend fun valuation(
         @PathParam("id") id: UUID,
         @QueryParam("bookId") bookId: String?,

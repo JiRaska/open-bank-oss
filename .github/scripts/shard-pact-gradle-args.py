@@ -17,7 +17,7 @@ def shard_args(lines: list[str], shard: int, count: int) -> list[str]:
     modules: set[str] = set()
     for group in groups:
         module, rerun, tests, pattern = group
-        if not module.startswith(":") or not module.endswith(":test"):
+        if not module.startswith(":") or not module.endswith(":consumerPactTest"):
             raise ValueError(f"unexpected Gradle task: {module}")
         if (rerun, tests, pattern) != (
             "--rerun",

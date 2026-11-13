@@ -101,6 +101,14 @@ enum class PostingKind {
 interface LedgerPostingPort {
     fun post(posting: LedgerPosting): Uni<Unit>
 
+    /** Prepare the complete immutable request before the accrual intent is committed. No network I/O. */
+    fun prepareAccrual(posting: LedgerPosting): PreparedAccrualPosting =
+        throw UnsupportedOperationException("Ledger backend cannot prepare confirmed accrual postings")
+
+    /** Post only the persisted request; unsupported backends fail before making a financial call. */
+    fun postPreparedAccrual(posting: PreparedAccrualPosting): Uni<AccrualPostingReceipt> =
+        Uni.createFrom().failure(UnsupportedOperationException("Ledger backend cannot prove an accrual receipt"))
+
     /**
      * [post], also saying whether the ledger booked the journal or only replayed an idempotency key it
      * had already posted (#10904). An implementation that cannot tell answers [LedgerPostResult.UNCONFIRMED],

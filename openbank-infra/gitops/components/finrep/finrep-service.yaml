@@ -29,6 +29,8 @@ spec:
       app.kubernetes.io/name: finrep-service
   template:
     metadata:
+      annotations:
+        openbank.tech/policy-checksum: "73bdd709fd44fdee"
       labels:
         app.kubernetes.io/name: finrep-service
         app.kubernetes.io/part-of: finrep
@@ -42,7 +44,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: finrep-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-finrep-service:sandbox-5cc84e19
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-finrep-service:sandbox-e27b7ab3@sha256:70f474f0479f22b713606cd334ec6350385358170426cdcf361f3a385343dece
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -56,18 +58,22 @@ spec:
               value: "0.1"
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
-            # Declared explicitly rather than left to the libs default (`true`), issue #2394.
-            # finrep-service contains no @Authorize annotation, so there is no OPA decision to
-            # make and no `opa` sidecar in this pod. With the default, AuthorizeInterceptor would
-            # be armed to fail closed against a PDP that does not exist — harmless while the
-            # annotation count is zero, and an instant 503/422 on whichever endpoint gets the
-            # first one. Authorization today is JWT roles (@RolesAllowed on FinrepResource /
-            # CorepResource). Flip this to true in the SAME change that adds @Authorize + the
-            # rego rules + the sidecar (ADR-0034 Phase 5), never before.
+            # Collect OPA decisions in advisory mode before a separate enforcement rollout.
             - name: AUTHZ_ENFORCE
               value: "false"
             - name: LEDGER_SERVICE_URL
               value: http://ledger-service.ledger.svc:8101
+            # Supervisory submission store (finrep/postgres.yaml): reactive + JDBC (Flyway) legs onto
+            # the same CNPG primary; env outranks application.yaml's localhost defaults.
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://finrep-db-rw.finrep.svc:5432/openbank_finrep
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://finrep-db-rw.finrep.svc:5432/openbank_finrep
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: finrep-db-app
+                  key: password
             # ADR-0313 D6: COREP C 02.00 reads the risk engine's Pillar 1 result over the engine's
             # private-CA mTLS listener (8443, client auth REQUIRED; ASVS V9.1 forbids a new plaintext
             # edge), authenticating with finrep-internal-tls (mounted at /mnt/internal-tls, named by the
@@ -118,12 +124,93 @@ spec:
             - name: internal-tls
               mountPath: /mnt/internal-tls
               readOnly: true
+        # OPA sidecar for the advisory regulatory report decisions (ADR-0034).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.21.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Keep decision and management APIs inside the pod. Kubelet probes use the read-only listener.
+            - --addr=127.0.0.1:8181
+            - --diagnostic-addr=0.0.0.0:8282
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+            - name: opa-diagnostics
+              containerPort: 8282
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: opa-diagnostics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: opa-diagnostics
+            periodSeconds: 15
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/finrep_rest_ext.rego
+              subPath: finrep_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            # Each data file is mounted under its declared bundle root.
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
       volumes:
         # Client certificate for the risk-engine 8443 mTLS edge (finrep-internal-tls).
         - name: internal-tls
           secret:
             secretName: finrep-internal-tls
             optional: false
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: finrep-opa-bundle
 ---
 apiVersion: v1
 kind: Service

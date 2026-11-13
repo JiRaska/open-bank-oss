@@ -80,26 +80,7 @@ async function queryVector(
   }
 }
 
-// Map namespace → friendly display name for the panel
-const DISPLAY: Record<string, string> = {
-  accounts: 'Account',
-  balances: 'Balance',
-  ledger: 'Ledger',
-  payments: 'Payments',
-  fx: 'FX',
-  interest: 'Interest',
-  party: 'Party',
-  kyc: 'KYC',
-  consent: 'Consent',
-  aml: 'AML',
-  dispute: 'Dispute',
-  psd2: 'PSD2',
-  audit: 'Audit',
-  'customer-edge': 'Customer Edge',
-  fraud: 'Fraud',
-  platform: 'Copilot',
-}
-
+// These observations aggregate namespaces, which may contain many services and domains.
 function savingsPotential(cpuEff: number | null, memEff: number | null): ServiceEfficiency['savingsPotential'] {
   const values = [cpuEff, memEff].filter((v): v is number => v !== null)
   if (!values.length) return 'unknown'
@@ -219,7 +200,7 @@ export async function GET() {
 
         return {
           namespace: ns,
-          displayName: DISPLAY[ns] ?? ns,
+          displayName: ns,
           cpu: {
             requestedMillicores: cpuR !== null ? Math.round(cpuR) : null,
             usedMillicores:      cpuU !== null ? Math.round(cpuU) : null,

@@ -23,13 +23,8 @@
 # — no extension needed for those. card.details.read is the exception: it is listed in rules.yaml
 # authz.operator_read_any_excluded_actions, so no generic read grant reaches the PAN. The remaining actions have no generic base-rego grant.
 #
-# Verified caller: customer-edge calls card.list/card.suspend/card.resume on the customer's own
-# card via the shared `openbank-services` Keycloak client (service-account-openbank-services,
-# whose realmRoles include ROLE_OPERATOR) — see CustomerEdgeResource.kt cardAction(). Per the
-# documented fleet-wide limitation (rules.yaml authz_policy.principal_type_service_unreachable),
-# AuthorizeInterceptor cannot distinguish this M2M caller from a real human operator holding
-# ROLE_OPERATOR, so granting the role necessarily covers both — same stance as consent-service's
-# service-consent-m2m rule.
+# Customer-edge's card control actions use its named workload grant after checking card ownership.
+# The named card-processing workload can read issuer data and submit authorization decisions.
 
 package openbank.rest
 
@@ -48,6 +43,37 @@ allowed_reasons contains "operator-card-write" if {
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action in {"card.create", "card.activate", "card.block", "card.suspend", "card.resume"}
+}
+
+# These operations are available to interactive staff. A workload with the same
+# realm role needs an explicit grant for its own operations below.
+allowed_reasons contains "staff-card-controls" if {
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action in {"card.cancel", "card.limits.update", "card.controls.update", "card.category-limits.update"}
+}
+
+allowed_reasons contains "compliance-card-cancel" if {
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	"ROLE_COMPLIANCE" in input.principal.roles
+	input.action == "card.cancel"
+}
+
+# Customer edge validates card ownership and the customer action before calling this API.
+allowed_reasons contains "service-edge-card-controls" if {
+	input.principal.id == "service-account-openbank-edge"
+	machine_named(input.principal.id)
+	"ROLE_OPERATOR" in input.principal.roles
+	input.action in {"card.cancel", "card.limits.update", "card.controls.update"}
+}
+
+allowed_reasons contains "service-card-processing-decision" if {
+	machine_named("service-account-openbank-card-processing")
+	"ROLE_API" in input.principal.roles
+	input.action == "card.authorization.decide"
 }
 
 # Requeueing dead-lettered outbox rows (CardOutboxAdminResource, #4005) republishes events that
@@ -77,17 +103,21 @@ allowed_reasons contains "compliance-card-block" if {
 # admits ROLE_API on exactly these two endpoints, and because card-issuance still runs
 # AUTHZ_ENFORCE=false a Kotlin named-caller check (CardReadCallerGuard.kt) enforces the same lists.
 # CardReadCallerGuardTest pins the Kotlin sets to these rules.
+#   customer-edge      authenticated customer list and card ownership/delegation checks
 #   delegation-service CardIssuanceRestClient.getCard  GET /cards/{id}             card.read
 #   party-service      CardServiceRestClient.listByParty GET /cards/party/{partyId} card.list
+#   card-processing    CardIssuanceClient.getCard before issuing an authorization decision
 allowed_reasons contains "service-delegation-card-read" if {
 	input.principal.type == "HUMAN"
-	machine_named("service-account-openbank-delegation")
+	some caller in {"service-account-openbank-delegation", "service-account-openbank-edge", "service-account-openbank-card-processing"}
+	machine_named(caller)
 	input.action == "card.read"
 }
 
 allowed_reasons contains "service-party-card-list" if {
 	input.principal.type == "HUMAN"
-	machine_named("service-account-openbank-party")
+	some caller in {"service-account-openbank-party", "service-account-openbank-edge"}
+	machine_named(caller)
 	input.action == "card.list"
 }
 
@@ -102,4 +132,17 @@ allowed_reasons contains "service-edge-card-details-read" if {
 	input.principal.type == "HUMAN"
 	machine_named("service-account-openbank-edge")
 	input.action == "card.details.read"
+}
+
+# Read-only staff viewer on the card list and card detail (advisory would-DENY triage, 2026-11-04).
+# CardResource's @RolesAllowed admits ROLE_VIEWER on card.list / card.read, and admin-ui grants
+# `cards:view` to ADMIN/OPERATOR/VIEWER, so a viewer IS an intended consumer of /cards. Base
+# operator-read-any covers only OPERATOR/ADMIN, so the advisory log recorded would-DENY for the
+# seeded viewer users on both actions. Human principals only; card.details.read (the PAN) is NOT in
+# this set and stays machine-only.
+allowed_reasons contains "card-read-staff-viewer" if {
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	"ROLE_VIEWER" in input.principal.roles
+	input.action in {"card.list", "card.read"}
 }

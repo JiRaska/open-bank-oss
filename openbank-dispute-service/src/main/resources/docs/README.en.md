@@ -24,3 +24,21 @@ This documentation is published directly by the service at the management endpoi
 - **Idempotency:** `Idempotency-Key` accepted by CORS; a Redis client is available but enforcement is **not yet wired** (TBD) — open uses a generated `DSP-<epochMillis>` reference
 - **Auth:** Keycloak OIDC (realm `openbank`, client `openbank-services`); roles `ROLE_VIEWER` (read), `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API` (mutations); OPA/`@Authorize` advisory (ADR-0034)
 - **Money-path:** **No** — not listed in `rules.yaml: money_path_services` (1 approval, no threat model required)
+
+## Agent read contracts
+
+`AgentDisputeReadPactConsumerTest` records five read-only Agent interactions: list disputes,
+get a dispute, list disputes by account, read a dispute timeline, and return HTTP 404 for an
+unknown dispute. The committed contract is
+`pacts/openbank-agent-service-openbank-dispute-service.json`.
+`DisputePactProviderVerificationTest` loads it from the repository `pacts/` folder and replays
+all five interactions against real Quarkus HTTP with seeded PostgreSQL in Testcontainers.
+The folder replay requires the JSON: a missing contract must fail verification rather than
+produce a successful run with no interactions. Regenerate and commit the JSON together with
+consumer changes; keep the folder and broker provider-state handlers aligned.
+
+The separate broker verifier remains conditional on a non-empty `pactbroker.url`; folder
+verification needs no broker credentials. `DisputePactAuthzOffProfile` disables authorization
+enforcement for these contract fixtures, and `@TestSecurity` supplies test identities and roles.
+These tests establish HTTP and JSON compatibility; they do not establish production OIDC,
+resource ownership, or OPA authorization.

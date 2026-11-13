@@ -140,7 +140,7 @@ tests:
             exp_annotations:
               subject_period: 30s
               summary: "SWIFT message accepted by the scheme but its debit is unbooked for over 30 minutes"
-              description: "The oldest SWIFT message with an open booking clock has waited at least 41m 0s. It is held in SENT; nothing retries it and swift-service has no re-drive path. Read the outcome under swift-settlement-<messageId> in transaction-service, then reconcile or reverse. openbank_payment_unsettled_total{rail=\"SWIFT\"} says which answer it got."
+              description: "The oldest SWIFT message with an open booking clock has waited at least 41m 0s. It is held in SENT and the re-drive sweep has not proven it either; it retries the same key, which cannot fix a deterministic answer. Read the outcome under swift-settlement-<messageId> in transaction-service, then reconcile or reverse. openbank_payment_unsettled_total{rail=\"SWIFT\"} says which answer it got."
               runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0032-payment-rail-unsettled-booking.md#swift-outbound-booking"
 
   - interval: 1m

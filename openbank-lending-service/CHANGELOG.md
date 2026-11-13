@@ -1,5 +1,75 @@
 # Changelog
 
+## [0.49.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.48.0...lending-service-v0.49.0) (2026-11-13)
+
+
+### Features
+
+* **lending:** retain the recorded loan signature time ([#15693](https://github.com/JiRaska/open-bank-oss/issues/15693)) ([8aabf3b](https://github.com/JiRaska/open-bank-oss/commit/8aabf3b723ce354d8e3ebeb9d6ac3d17e88babc7))
+
+## [0.48.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.47.0...lending-service-v0.48.0) (2026-11-13)
+
+
+### Features
+
+* **lending:** let staff confirm or overturn a requested decline review ([#15801](https://github.com/JiRaska/open-bank-oss/issues/15801)) ([8f83583](https://github.com/JiRaska/open-bank-oss/commit/8f83583f764fc5e982c23c2f578f2d201a055864))
+
+## [0.47.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.46.0...lending-service-v0.47.0) (2026-11-12)
+
+
+### Features
+
+* **lending:** let a customer request human review of an engine decline ([#15786](https://github.com/JiRaska/open-bank-oss/issues/15786)) ([22e6a4e](https://github.com/JiRaska/open-bank-oss/commit/22e6a4ef36d5bab2f896902fc2253c3f401efbcb))
+
+## [0.46.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.45.0...lending-service-v0.46.0) (2026-11-12)
+
+
+### Features
+
+* **lending,anacredit:** retain dated loan exposure lifecycle facts ([#15658](https://github.com/JiRaska/open-bank-oss/issues/15658)) ([2cd9dec](https://github.com/JiRaska/open-bank-oss/commit/2cd9decb7442f0d3c9fb3987f43bf4fe90ab6c1e))
+
+## [0.45.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.44.4...lending-service-v0.45.0) (2026-11-09)
+
+
+### Features
+
+* **lending:** deliver lending, billing and treasury close evidence ([#14181](https://github.com/JiRaska/open-bank-oss/issues/14181)) ([458d4dd](https://github.com/JiRaska/open-bank-oss/commit/458d4dd972dfe37baf3f4da4fed608a8924fa3a1))
+
+## [0.44.4](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.44.3...lending-service-v0.44.4) (2026-11-06)
+
+
+### Bug Fixes
+
+* **lending:** read the product catalog as openbank-lending, not the shared client ([#14828](https://github.com/JiRaska/open-bank-oss/issues/14828)) ([975d9d6](https://github.com/JiRaska/open-bank-oss/commit/975d9d693377b657e1dfdb90e453ace8c8fb570c))
+
+## [0.44.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.44.2...lending-service-v0.44.3) (2026-11-02)
+
+
+### Bug Fixes
+
+* **lending:** align outbox id default with the pooled sequence; origination journey E2E ([#14551](https://github.com/JiRaska/open-bank-oss/issues/14551)) ([3f72999](https://github.com/JiRaska/open-bank-oss/commit/3f7299937869f150c26c3d28ab3508c9d88ac451)), closes [#14366](https://github.com/JiRaska/open-bank-oss/issues/14366)
+
+## [0.44.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.44.1...lending-service-v0.44.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **lending:** align response Money schemas with the shipped wire shape ([#14265](https://github.com/JiRaska/open-bank-oss/issues/14265)) ([3ce683e](https://github.com/JiRaska/open-bank-oss/commit/3ce683e74337bc1ec5de8db195cfb5310987ea1d))
+
+## [0.44.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.44.0...lending-service-v0.44.1) (2026-10-28)
+
+
+### Performance
+
+* **lending:** shorten replica convergence test startup wait ([#13038](https://github.com/JiRaska/open-bank-oss/issues/13038)) ([8e77235](https://github.com/JiRaska/open-bank-oss/commit/8e772356e6976b53fcecdbaca2ddbfc9d53a6c79))
+
+## [0.44.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.43.2...lending-service-v0.44.0) (2026-10-26)
+
+
+### Features
+
+* **lending:** day-close participant — report accrual and provisioning per accounting day (ADR-0342) ([#13708](https://github.com/JiRaska/open-bank-oss/issues/13708)) ([bde7d38](https://github.com/JiRaska/open-bank-oss/commit/bde7d3842a8e2272b0d2ce15ea726b7927a5645b))
+
 ## [0.43.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.43.1...lending-service-v0.43.2) (2026-10-21)
 
 

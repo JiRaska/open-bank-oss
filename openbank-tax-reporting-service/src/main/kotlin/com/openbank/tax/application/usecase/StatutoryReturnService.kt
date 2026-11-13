@@ -11,11 +11,11 @@ import com.openbank.tax.application.port.out.ReturnDataUnavailableException
 import com.openbank.tax.application.port.out.StatutoryReturnRepository
 import com.openbank.tax.domain.model.TaxConflictException
 import com.openbank.tax.domain.model.TaxValidationException
+import com.openbank.tax.domain.returns.Periodicity
 import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnDefinition
 import com.openbank.tax.domain.returns.ReturnScope
-import com.openbank.tax.domain.returns.ReturnStatus
 import com.openbank.tax.domain.returns.StatutoryReturn
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
@@ -24,10 +24,34 @@ import java.time.LocalDate
 import java.util.UUID
 
 /** Which entities report: the company itself, plus the funds it manages. */
-data class ReportingEntities(val companyId: String, val fundIds: List<String>, val reportingStart: LocalDate?) {
+data class ReportingEntities(
+    val companyId: String,
+    val fundIds: List<String>,
+    val reportingStart: LocalDate?,
+    /**
+     * A catalogue's own first reporting day where it differs from [reportingStart]. A working-day
+     * feed (CEÚ) MUST have one: the pension start would demand a CEÚ overview for every working
+     * day since then, and an absent one means the feed is not live yet, not overdue.
+     */
+    val catalogueStarts: Map<String, LocalDate> = emptyMap(),
+) {
+    fun startFor(catalogue: ReturnCatalogue): LocalDate? = catalogueStarts[catalogue.id]
+        ?: reportingStart.takeUnless { catalogue.returns.any { it.periodicity == Periodicity.WORKING_DAY } }
+
     fun forScope(scope: ReturnScope): List<String> = when (scope) {
         ReturnScope.COMPANY -> listOf(companyId)
         ReturnScope.FUND -> fundIds
+    }
+
+    /**
+     * What an operator has not yet declared, or null when the deadline check can run. A deployment
+     * without these is unconfigured on purpose, not broken: callers report the two states apart.
+     */
+    fun missingConfiguration(catalogues: List<ReturnCatalogue>): String? = when {
+        reportingStart == null -> "Statutory return reporting start is not configured"
+        fundIds.isEmpty() && catalogues.any { catalogue -> catalogue.returns.any { it.scope == ReturnScope.FUND } } ->
+            "Statutory return fund roster is not configured"
+        else -> null
     }
 }
 
@@ -69,7 +93,7 @@ class StatutoryReturnService(
         periodLabel: String,
         by: String,
     ): StatutoryReturn {
-        val (catalogue, definition) = resolve(catalogueId, returnCode)
+        val (catalogue, definition) = catalogues.resolve(catalogueId, returnCode)
         val period = ReportingPeriod.parse(definition.periodicity, periodLabel)
         requireDeclaredEntity(entities, definition, entityId)
         requirePeriodEnded(definition, period, accountingClock.today())
@@ -87,7 +111,9 @@ class StatutoryReturnService(
             by = by,
             at = Instant.now(clock),
         )
-        return repository.insert(assembled)
+        val stored = repository.insert(assembled)
+        assembly.onStored?.invoke(stored)
+        return stored
     }
 
     suspend fun approve(id: UUID, by: String): StatutoryReturn {
@@ -98,6 +124,15 @@ class StatutoryReturnService(
     suspend fun submit(id: UUID, reference: String, by: String): StatutoryReturn {
         val current = get(id)
         return repository.save(current.submit(reference, by, Instant.now(clock)), expectedVersion = current.version)
+    }
+
+    /** Record the regulator's acknowledgement (accepted) or rejection of a SUBMITTED revision. */
+    suspend fun acknowledge(id: UUID, accepted: Boolean, detail: String, by: String): StatutoryReturn {
+        val current = get(id)
+        val answered = current.acknowledge(accepted, detail, by, Instant.now(clock))
+        // An identical repeat returns the stored state unchanged; nothing to save.
+        if (answered === current) return current
+        return repository.save(answered, expectedVersion = current.version)
     }
 
     suspend fun get(id: UUID): StatutoryReturn =
@@ -114,23 +149,18 @@ class StatutoryReturnService(
      * unknowable, so the check fails instead of publishing a misleading zero.
      */
     suspend fun breaches(): List<ReturnBreach> {
-        val start = entities.reportingStart ?: throw ReturnDataUnavailableException(
-            "Statutory return reporting start is not configured; deadline status is unavailable",
-        )
-        if (catalogues.catalogues().any { catalogue -> catalogue.returns.any { it.scope == ReturnScope.FUND } } &&
-            entities.fundIds.isEmpty()
-        ) {
-            throw ReturnDataUnavailableException(
-                "Statutory return fund roster is not configured; deadline status is unavailable",
-            )
+        entities.missingConfiguration(catalogues.catalogues())?.let {
+            throw ReturnDataUnavailableException("$it; deadline status is unavailable")
         }
         val today = accountingClock.today()
-        val stored = repository.listReturns()
+        val obligations = catalogues.catalogues()
+            .flatMap { c -> c.returns.filter { it.filingObligation }.map { c.id to it.code } }.toSet()
+        val stored = repository.listReturns().filter { (it.catalogueId to it.returnCode) in obligations }
         val latestByKey = stored.groupBy { Key(it.catalogueId, it.returnCode, it.entityId, it.period) }
             .mapValues { (_, revisions) -> revisions.maxBy { it.revision } }
         val breaches = mutableListOf<ReturnBreach>()
         latestByKey.forEach { (key, latest) ->
-            if (latest.status != ReturnStatus.SUBMITTED && latest.isOverdueAt(today)) {
+            if (latest.isOverdueAt(today)) {
                 breaches +=
                     ReturnBreach(
                         key.catalogueId,
@@ -142,13 +172,15 @@ class StatutoryReturnService(
                     )
             }
         }
-        return breaches + notAssembled(start, today, latestByKey.keys)
+        return breaches + notAssembled(today, latestByKey.keys)
     }
 
-    private fun notAssembled(start: LocalDate, today: LocalDate, existing: Set<Key>): List<ReturnBreach> =
+    private fun notAssembled(today: LocalDate, existing: Set<Key>): List<ReturnBreach> =
         catalogues.catalogues().flatMap { catalogue ->
-            catalogue.returns.flatMap { definition ->
-                expectedPeriods(definition, start, today).flatMap { period ->
+            // A working-day feed with no start of its own is not live yet: nothing is overdue.
+            val catalogueStart = entities.startFor(catalogue) ?: return@flatMap emptyList()
+            catalogue.returns.filter { it.filingObligation && !it.onDemand }.flatMap { definition ->
+                expectedPeriods(definition, catalogueStart, today).flatMap { period ->
                     entities.forScope(definition.scope)
                         .filter { entityId -> Key(catalogue.id, definition.code, entityId, period) !in existing }
                         .map { entityId ->
@@ -180,20 +212,23 @@ class StatutoryReturnService(
         return periods
     }
 
-    private fun resolve(catalogueId: String, returnCode: String): Pair<ReturnCatalogue, ReturnDefinition> {
-        val catalogue = catalogues.catalogues().firstOrNull { it.id == catalogueId }
-            ?: throw StatutoryReturnNotFoundException("No return catalogue '$catalogueId'")
-        val definition = catalogue.definition(returnCode)
-            ?: throw StatutoryReturnNotFoundException("Catalogue '$catalogueId' has no return '$returnCode'")
-        return catalogue to definition
-    }
-
     private data class Key(
         val catalogueId: String,
         val returnCode: String,
         val entityId: String,
         val period: ReportingPeriod,
     )
+}
+
+private fun ReturnCatalogueSource.resolve(
+    catalogueId: String,
+    returnCode: String,
+): Pair<ReturnCatalogue, ReturnDefinition> {
+    val catalogue = catalogues().firstOrNull { it.id == catalogueId }
+        ?: throw StatutoryReturnNotFoundException("No return catalogue '$catalogueId'")
+    val definition = catalogue.definition(returnCode)
+        ?: throw StatutoryReturnNotFoundException("Catalogue '$catalogueId' has no return '$returnCode'")
+    return catalogue to definition
 }
 
 private fun requireDeclaredEntity(entities: ReportingEntities, definition: ReturnDefinition, entityId: String) {
@@ -212,14 +247,17 @@ private fun requirePeriodEnded(definition: ReturnDefinition, period: ReportingPe
     }
 }
 
-/** Figures are never re-totalled underneath an approval; a correction follows a SUBMITTED revision. */
+/**
+ * Figures are never re-totalled underneath an approval; a correction follows a revision the
+ * regulator holds or refused (SUBMITTED, ACKNOWLEDGED, REJECTED).
+ */
 private fun requireNoOpenRevision(
     latest: StatutoryReturn?,
     definition: ReturnDefinition,
     period: ReportingPeriod,
     entityId: String,
 ) {
-    if (latest != null && latest.status != ReturnStatus.SUBMITTED) {
+    if (latest != null && !latest.status.closed) {
         throw TaxConflictException(
             "${definition.code} ${period.label} for $entityId already has revision ${latest.revision} " +
                 "in ${latest.status} — finish or correct that one",

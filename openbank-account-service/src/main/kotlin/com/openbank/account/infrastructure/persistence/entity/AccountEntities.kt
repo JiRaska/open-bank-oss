@@ -86,6 +86,10 @@ class AccountEntity : PanacheEntityBase {
     @Column(name = "nickname", length = 60)
     var nickname: String? = null
 
+    /** Who froze the account (V34): OPERATOR | PARTY_STANDING. Null unless status is FROZEN. */
+    @Column(name = "freeze_origin", length = 20)
+    var freezeOrigin: String? = null
+
     /** Terms version this TERM_DEPOSIT was opened under (V24, #9044). Null = pre-V24 account. */
     @Column(name = "terms_version")
     var termsVersion: String? = null
@@ -96,6 +100,32 @@ class AccountEntity : PanacheEntityBase {
 
     @Column(name = "terms_effective_from")
     var termsEffectiveFrom: LocalDate? = null
+
+    // ADR-0341 D1 pin (V33). Written once at insert and never by an UPDATE: `updatable = false` here,
+    // and the V33 trigger refuses a change from any other writer. Null on accounts opened before V33.
+    @Column(name = "product_revision_id", updatable = false)
+    var productRevisionId: UUID? = null
+
+    @Column(name = "product_revision_number", updatable = false)
+    var productRevisionNumber: Long? = null
+
+    @Column(name = "product_offering_id", updatable = false)
+    var productOfferingId: UUID? = null
+
+    @Column(name = "product_revision_product_code", updatable = false, length = 64)
+    var productRevisionProductCode: String? = null
+
+    @Column(name = "product_revision_content_hash", updatable = false, length = 64)
+    var productRevisionContentHash: String? = null
+
+    @Column(name = "product_revision_ir_hash", updatable = false, length = 64)
+    var productRevisionIrHash: String? = null
+
+    @Column(name = "product_revision_ir_version", updatable = false)
+    var productRevisionIrVersion: Int? = null
+
+    @Column(name = "product_revision_pinned_at", updatable = false)
+    var productRevisionPinnedAt: Instant? = null
 
     /** Stamped from the injected [java.time.Clock] in the repository layer (ADR-0100 — no wall-clock reads here). */
     @Column(name = "created_at", nullable = false, updatable = false)

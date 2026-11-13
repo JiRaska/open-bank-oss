@@ -128,6 +128,25 @@ interface TreasuryCashFlowStore {
     suspend fun apply(set: StoredFlowSet): Boolean
 
     suspend fun latest(dealIds: Collection<UUID>): Map<UUID, StoredFlowSet>
+
+    /**
+     * ADR-0344 D5: apply `treasury.cashflow.fixed` to the stored set of the SAME deal version. False
+     * (nothing changed) when none is stored or a different version is; a newer version already
+     * carries the fixing.
+     */
+    suspend fun applyFixed(
+        dealId: UUID,
+        dealVersion: Int,
+        fixed: List<com.openbank.risk.domain.valuation.StoredCashFlow>,
+    ): Boolean {
+        val current = latest(listOf(dealId))[dealId] ?: return false
+        if (current.dealVersion != dealVersion) return false
+        val patched = current.withFixed(fixed)
+        return patched != current && replace(patched)
+    }
+
+    /** Overwrite the stored set of [set]'s deal at the same version. */
+    suspend fun replace(set: StoredFlowSet): Boolean = false
 }
 
 /** One `treasury.deal.*` event as the book needs it; [rate] is present only on `booked`. */

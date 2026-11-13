@@ -40,7 +40,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: referral-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-referral-service:sandbox-d159b245
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-referral-service:sandbox-e435ad0a@sha256:75b3ed6bbb1201800b0fd76afa31328780139b58c7c5bf3dd861daac889e896a
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -197,20 +197,3 @@ spec:
     - name: management
       port: 8086
       targetPort: management
----
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
-metadata:
-  name: referral-service
-  namespace: referral
-  labels:
-    app.kubernetes.io/name: referral-service
-    app.kubernetes.io/part-of: referral
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: referral-service
-  podMetricsEndpoints:
-    - port: management
-      path: /q/metrics
-      interval: 30s

@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Threat model — openbank-pension-fund-service
 
-- **Status:** integration (ADR-0334 slices S4/S8), sandbox only — pension-service machine caller
-- **Last reviewed:** 2026-10-11 (#12425 reporting read model, #12435 integration, #12442 conflict metric on the REST mappers)
+- **Status:** integration (ADR-0334 slices S4/S8; ADR-0341 pinned fee, API v2 and durable write replay), sandbox only — pension-service machine caller
+- **Last reviewed:** 2026-11-05 (#13207 pinned fee, API v2, durable write replay; earlier: #12425 reporting read model, #12435 integration, #12442 conflict metric on the REST mappers)
 - **Owner:** pension-fund-service CODEOWNERS
 - **Related ADRs:** ADR-0030, ADR-0034, ADR-0315, ADR-0334
 
@@ -24,11 +24,12 @@ contact data.
 
 ## Trust boundaries
 
-1. Fund administrators call `/api/v1/funds`, `/navs`, `/strategies` and `/strategy-changes` with
+1. Fund administrators call `/api/v2/funds`, `/navs`, `/strategies` and `/strategy-changes` (v1
+   retained as deprecated aliases until the sunset) with
    their OWN bearer token. RBAC per method (`@RolesAllowed`, ROLE_OPERATOR / ROLE_ADMIN to write,
    plus ROLE_AUDITOR / ROLE_API to read), then OPA (`pension_fund_rest_ext.rego`: writes for real
    staff only, every `service-account-` excluded), then the domain (four-eyes).
-2. `/api/v1/contracts/{contractId}/*` is the unit-register surface pension-service calls through
+2. `/api/v2/contracts/{contractId}/*` (deprecated v1 alias retained) is the unit-register surface pension-service calls through
    its FundAdministrationPort (ADR-0334 §1). Only real staff and pension-service's own client
    (`service-account-openbank-pension`) may read holdings or place orders. The read action is
    `pension-fund.holding.inspect`, deliberately not a `.read`/`.list` verb: base rest.rego's
@@ -49,7 +50,7 @@ contact data.
 4. Market prices enter through `MarketPricePort`. The shipped adapter (`StubMarketPriceAdapter`)
    knows no prices, so every position must be priced in the request by the calculating
    administrator; an unpriced position is refused, never valued at an invented number.
-5. `/api/v1/reporting/funds/{fundId}/period-figures` (#12425) is the period-end read model
+5. `/api/v2/reporting/funds/{fundId}/period-figures` (#12425; deprecated v1 alias retained) is the period-end read model
    tax-reporting-service assembles the ČNB returns from. Aggregate only — sums and counts, no
    contract id. `pension-fund.reporting.inspect` is admitted for real staff and for
    tax-reporting-service's OWN client (`service-account-openbank-tax-reporting`, ROLE_API) alone,
@@ -57,7 +58,7 @@ contact data.
    `compliance-read-any` lets the shared service-account reach it. Proven by `opa test` (must-ALLOW/must-DENY) and by `opa eval`
    on the materialised bundle, including the sabotage run with the exclusion removed (the shared
    account is then admitted by `operator-read-any`).
-5. The REST exception mappers (#12442 observability) now count optimistic-lock conflicts on the
+6. The REST exception mappers (#12442 observability) now count optimistic-lock conflicts on the
    unit holding (`optimisticLockConflict("unit_holding")`) before answering 409. The boundary
    itself is unchanged: same status, same body, no new route or caller; the metric carries a
    fixed aggregate label only, never a contract id or a request value.
@@ -122,3 +123,106 @@ the matching deployment variable alone cannot establish required client authenti
 Rollout verification must use the reviewed image built from this configuration.
 
 - **2026-10-17** — **OPA PolicyDecisionPoint now comes from libs-runtime (#13136).** The per-service AuthzProducer is removed and the service opts into the shared `OpaPolicyDecisionPointProducer` with `openbank.authz.opa-pdp-producer.enabled: true` (a build-time switch). `opa.url` and `opa.path` keep their keys and defaults. The timeout key is renamed from `opa.timeout` (`PT0.5S`) to `opa.timeout-ms` (`500`); no manifest or environment sets either, so the effective OPA timeout stays 500 ms. No change to policy, actions, roles, the sidecar edge or fail-closed behaviour; the PDP object is the same `OpaSidecarPolicyDecisionPoint`. Rollback: revert the PR.
+
+## 2026-10-17 - Fund management fee pinned to a published catalog revision (ADR-0341)
+
+New outbound edge: pension-fund-service -> product-catalog (`accounts` namespace, private-CA mTLS
+8443, client cert `pension-fund-service-client-tls`, %prod TLS bucket `catalog-authority`) to read
+ONE immutable published revision by id (`GET /api/v2/revisions/{id}`) when a fund is created. The
+fund stores `product_revision_id` (V5) and the fee derived from the revision's
+`feeSchedule.managementFeeAnnualPercent`; NAV accrues exactly that stored rate.
+
+| Threat | Control |
+|---|---|
+| **Tampering** - an operator sets an arbitrary fee on a fund (the previous `managementFeeRate` request field priced every NAV) | The field remains deprecated: creation accepts it only if it equals the resolved revision fee, and amendment only if it equals the stored fee. It never selects the fee; that comes from the catalog revision. Amend rejects any `productRevisionId` that differs from the pinned one (a re-pin is not an amendment). Funds created before pinning keep their stored rate, read-only through the API. |
+| **Spoofing** - another service reads or authors catalog terms with this credential | Own Keycloak client `openbank-pension-fund`: no realm role, only the `catalog:read` scope. product-catalog's OPA bundle admits `catalog.read` for `service-account-openbank-pension-fund` alone (`machine_named` + `CATALOG_SCOPE_READ`); `catalog.author`/`publish`/approvals stay denied (rego tests). |
+| **Elevation** - unpublished or foreign terms priced as a fund fee | `FundRevisionTerms.parse` fails closed unless the revision id matches, `state=PUBLISHED`, schema `org.openbank.retirement.pension-savings` version >= 2, and a fee string is present. |
+| **Denial of service** - catalog down | Fund CREATION fails closed (no fund without a pinned revision); NAV, register, orders and reporting read the stored rate and never call the catalog. |
+| **Repudiation** | The revision id on the fund row is the audit link from a NAV fee back to the approved terms. |
+
+Rollback: revert the commit; `product_revision_id` stays (nullable, additive) and `management_fee_rate`
+remains correct as cached. Rollout order: seed Vault `keycloak/pension-fund-service`, create the
+Keycloak client, then deploy (the env ref is `optional: true`, so an unseeded secret fails creation
+closed rather than the pod).
+
+
+### Versioned compatibility boundary (API v2 transition)
+
+Create v2 requires an explicit published revision; amendment can omit or repeat the existing pin. The 27 retained v1 operations declare the same role/action, actor and four-eyes boundaries directly, rather than relying on resource inheritance. Their existing idempotency behavior is preserved; nine v2 writes additionally require durable response replay as described below. Reflection parity (`PensionFundVersionAuthorizationParityTest`) and real HTTP/OIDC/OPA/four-eyes regressions (`PensionFundHoldingEnforcedAuthzIT`, `PensionFundApiIT`) cover this boundary. The owner approved only the exception excluding the two old manual-fee definition writes, not their live retirement. Other v1 operations retain deprecation headers and at least 180 days of configured sunset before an approved rollout.
+
+Known callers are migrated explicitly; external writers remain an inventory gap. The v2 provider must be available across active backends before callers switch. The proposed certificate/network/pod-template changes can have same-image GitOps effects independently of image promotion; these controls take effect only on rollout. Rollback preserves revision pins and numeric precision and does not re-enable arbitrary fees for pinned funds.
+
+### Durable v2 write replay
+
+Nine v2 POST operations for fund creation, NAV calculation/decisions and strategy creation/change
+now require a validated `Idempotency-Key`. A SHA-256 caller/service-scoped key indexes V7 receipts;
+the canonical fingerprint binds method, concrete resource path and request DTO. A transaction-scoped
+PostgreSQL advisory try-lock excludes concurrent attempts; a busy key returns 409, without claiming
+the write failed permanently. A matching committed receipt replays the original status and JSON,
+even after later changes. A different path or body under the same caller key returns 409.
+
+The operation and receipt must commit in the same context-bound reactive transaction. HTTP/JDBC
+regressions include an injected failure at receipt insertion, after the domain write, to distinguish
+atomic rollback from a separately committed mutation. `PensionFundWriteReplayIT` and `FundPinnedFeePrecisionIT` execute this. Legacy v1 handlers do not gain this
+new requirement. Roles and four-eyes checks execute before replay, so a cached result grants no
+new permission. No new Redis infrastructure or in-memory production fallback is introduced.
+
+Receipts contain response snapshots, including possible audit personal data. Hashing keys is
+pseudonymization, not anonymization. V7 has no automatic expiry: deleting receipts can re-enable
+duplicate writes. Application rollback retains the table and history; schema removal/retention
+requires separate review. A 64-bit advisory hash collision can cause a transient busy response,
+but the full SHA-256 receipt key still distinguishes stored results. 
+**Residual risk - catalog call inside the replay transaction.** `createFund` resolves the revision
+from product-catalog (5 s read timeout) inside the open `PostgresWriteReplay` transaction, which holds
+a database connection and the advisory lock for the key. A slow or hung catalog therefore pins one
+connection and blocks retries of that key (409) for up to the timeout. Resolving before the
+transaction was rejected: replay must answer a previously committed result without depending on
+catalog availability, and the lookup sits behind the replay decision by design. Exposure is bounded:
+only operator/admin fund creation (rare), the timeout is short, and the pool serves other paths.
+Accepted; revisit if creation volume grows.
+
+**Residual risk - receipt retention.** V7 replay receipts hold response snapshots that can include
+audit personal data and have no TTL. Retention owner: the pension-fund-service owner. Review date:
+2027-02-05 (decide expiry or pseudonymised snapshots, keeping a window long enough that deleting a
+receipt cannot re-enable a duplicate write).
+
+### ADR-0365 — segregated NAV fee accounting and close evidence
+
+NAV publication and its source intent commit together. The shared outbox claim/backoff protocol
+and source idempotency prevent a lost acknowledgement or a second worker from duplicating a fee.
+Fund and company receipts are independent; a partial delivery, disabled delivery or a historical
+NAV without an intent cannot report complete. An immutable fund-to-company binding prevents
+configuration changes from transferring an old receipt to another book. Pending calculated NAVs
+and corrections remain visible blockers. Stable source receipt hashes survive polling and restarts.
+Business intents live separately from the disposable transport outbox; the ordinary SENT purge
+retains intents, receipts, completion and source identity. Destination polling is independent and
+refreshes recent closed days as well as the oldest pending days, so a new refusal can invalidate
+monthly proof without a new journal. Cancellation still stops the job and destination failures
+remain failures after healthy books refresh.
+
+The client verifies book/source/population in the acknowledgement and refuses redirects. Production
+accounting requires the named mTLS configuration and its own OIDC client token. A fee is an expense
+and payable in the fund and a receivable and income in the company; it creates no cash settlement.
+A negative correction requires its completed original in the same destination and population.
+
+Each book owns reconciliation and close. Cash, custody, units, payments and the company's own
+operations require source references and a complete independently approved source balance; the
+NAV fee producer cannot certify these other facts. Only verified interactive issuer subjects may
+make/check this reconciliation, with distinct immutable subjects required. The bank rejects this
+purpose, and bank machine identities are vetoed on both pension book policies.
+
+Residual risks: the chart and source references require professional review; a reference is an
+attributable attestation, not automatic validation of an external document. Historical opening and
+cutover evidence and a due-calendar adapter remain prerequisites for existing funds. Retain source
+intents/receipts with financial history; the service owner must approve retention before go-live.
+Delivery remains disabled by default and deployment/enforcement require a complete live month.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

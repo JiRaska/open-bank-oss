@@ -18,7 +18,11 @@ export async function GET() {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
-  const alertmanagerUrl = process.env.ALERTMANAGER_URL ?? 'http://alertmanager-operated.observability:9093'
+  // The sandbox Alertmanager serves under the identity-aware edge gate's route prefix
+  // (`routePrefix: /tools/alertmanager`), so its API is NOT at the server root. Calling the root
+  // answers 404, which this route renders as unavailable — every anomaly read failed that way.
+  const alertmanagerUrl = process.env.ALERTMANAGER_URL
+    ?? 'http://kube-prometheus-stack-alertmanager.observability.svc:9093/tools/alertmanager'
 
   try {
     const res = await fetch(`${alertmanagerUrl}/api/v2/alerts?filter=route%3Dfinops-agent`, {

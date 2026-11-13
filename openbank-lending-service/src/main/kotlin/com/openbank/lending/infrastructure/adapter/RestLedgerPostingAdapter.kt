@@ -4,9 +4,12 @@
 
 package com.openbank.lending.infrastructure.adapter
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.lending.application.port.out.AccrualPostingReceipt
 import com.openbank.lending.application.port.out.LedgerPostResult
 import com.openbank.lending.application.port.out.LedgerPosting
 import com.openbank.lending.application.port.out.LedgerPostingPort
+import com.openbank.lending.application.port.out.PreparedAccrualPosting
 import com.openbank.lending.infrastructure.client.LedgerCallGuard
 import com.openbank.lending.infrastructure.client.LendingGlChart
 import com.openbank.lending.infrastructure.client.LendingJournalFactory
@@ -17,9 +20,11 @@ import io.smallrye.mutiny.Uni
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
+import jakarta.inject.Inject
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.LocalDate
+import java.util.UUID
 
 /**
  * Real [LedgerPostingPort]: posts the loan book's cash events to ledger-service as balanced
@@ -47,6 +52,44 @@ class RestLedgerPostingAdapter(
 ) : LedgerPostingPort {
 
     private val log = Logger.getLogger(RestLedgerPostingAdapter::class.java)
+
+    @Inject
+    lateinit var objectMapper: ObjectMapper
+
+    override fun prepareAccrual(posting: LedgerPosting): PreparedAccrualPosting {
+        require(posting.kind == com.openbank.lending.application.port.out.PostingKind.INTEREST_ACCRUAL)
+        requireNotNull(posting.accountingDate) { "Accrual posting requires an explicit accounting date" }
+        val request = buildRequest(posting)
+        return PreparedAccrualPosting(
+            posting.reference,
+            request.transactionId,
+            LocalDate.parse(request.entryDate),
+            objectMapper.writeValueAsString(request),
+        )
+    }
+
+    override fun postPreparedAccrual(posting: PreparedAccrualPosting): Uni<AccrualPostingReceipt> {
+        val request = objectMapper.readValue(posting.requestJson, PostJournalRequest::class.java)
+        require(objectMapper.writeValueAsString(request) == posting.requestJson) {
+            "Persisted accrual request schema changed; reconciliation is required"
+        }
+        require(request.idempotencyKey == posting.reference && request.transactionId == posting.transactionId)
+        require(request.transactionId == UUID.nameUUIDFromBytes(posting.reference.toByteArray(Charsets.UTF_8)))
+        require(LocalDate.parse(request.entryDate) == posting.accountingDate)
+        return guard.postJournal(request).map { response ->
+            require(response.status == "POSTED" && response.id != UUID(0L, 0L)) {
+                "Ledger did not confirm a posted journal"
+            }
+            require(response.transactionId == posting.transactionId) {
+                "Ledger transaction does not match accrual intent"
+            }
+            val actualDate = LocalDate.parse(requireNotNull(response.entryDate) { "Ledger receipt has no entry date" })
+            require(actualDate == posting.accountingDate) {
+                "Ledger entry date does not match persisted accrual intent"
+            }
+            AccrualPostingReceipt(response.id, response.transactionId, actualDate)
+        }
+    }
 
     override fun post(posting: LedgerPosting): Uni<Unit> {
         val request = buildRequest(posting)

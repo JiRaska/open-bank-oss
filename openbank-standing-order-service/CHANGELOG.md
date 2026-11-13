@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.19.2](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.19.1...standing-order-service-v0.19.2) (2026-11-06)
+
+
+### Security
+
+* **standing-order:** authenticate the API by bearer only on the mTLS listener ([#14774](https://github.com/JiRaska/open-bank-oss/issues/14774)) ([755cc6c](https://github.com/JiRaska/open-bank-oss/commit/755cc6c8be9c2fe952c92729962c5ad6966c9e4c))
+
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.19.0...standing-order-service-v0.19.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **standing-order:** persist the failure count with the failed outbox event ([#13744](https://github.com/JiRaska/open-bank-oss/issues/13744)) ([7d495ca](https://github.com/JiRaska/open-bank-oss/commit/7d495ca5a310c78fa10a7f38a70e3600af26cb8a))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.18.3...standing-order-service-v0.19.0) (2026-10-18)
 
 

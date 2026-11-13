@@ -43,7 +43,15 @@ test('approval inbox rejects a self-approval @verifies:approvals/A1', async ({ p
   test class — or whose `verifies:<scope>/<row-id>` tests — is absent from the latest run or not
   green. A component with no envelope is *unknown*, never a verdict.
 
-The gate is advisory until `rules.yaml: threat_model_test_evidence.target_enforce_date` (ADR-0144).
+A row can also name an id in its mitigation, in backticks: `` `verifies:admin-ui/E2E-ledger` ``. A
+named id must exist and be green, so deleting or skipping the test fails it.
+
+The gate is a ratchet. A finding fails a PR only if it is missing from
+`.github/gates/baselines/threat-model-test-evidence.txt` and the PR adds or edits the row citing it. On a
+push to `main`, on a PR that leaves the row alone, or if evidence cannot be read, it stays a warning or notice, so
+it catches a claim being written against a test that does not run. It does not catch an existing
+green citation going red later: that surfaces as a warning. The baseline may only shrink against the
+PR base: a PR adding a line fails, before any evidence is read.
 
 ## Evidence provenance and limits
 
@@ -72,3 +80,17 @@ belong to the executed JUnit class, including its nested class path; class tags 
 class and its nested tests.
 The annotation reader remains a conservative source convention, not a Kotlin compiler or proof
 that a test's assertions substantiate the threat-model mitigation.
+
+## Admin UI authenticated deployed lane (#13171)
+
+`openbank-admin-ui/e2e/deployed-session.spec.ts` (job `session-smoke` in
+`admin-ui-deployed-auth-gate.yml`) signs in through the real Keycloak login form and declares one id
+per money-path screen, `@verifies:admin-ui/E2E-<screen>`, plus `admin-ui/E2E-SSO`. It signs in twice:
+as the least-privilege e2e operator, and as the synthetic operator for screens the first cannot see
+(`/approvals`, `/delegations`, `/settlements`). `/treasury` admits neither, so its verdict is only
+that it refuses them. Any non-GET to the app's origin outside `/api/auth/` and the browser trace export is aborted and fails the
+test, and a 5xx from a same-origin API call fails it too.
+
+The result reaches Test Intelligence as journey `admin-money-path-screens`, and
+`docs/threat-models/openbank-admin-ui.md` cites these ids, so the gate judges them from the latest
+scheduled run of that workflow.

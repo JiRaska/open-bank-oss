@@ -1,16 +1,20 @@
 ---
 date: 2026-10-20
-decision-status: proposed
+decision-status: superseded
 delivery-status: shipped
 authors: [Jiri Raska]
 supersedes: []
-superseded-by: []
+superseded-by: [0354]
 delivery-repos: []
 tags: [fraud, governance, audit]
 summary: "Fraud rule money thresholds (per rule, per currency) become versioned, effective-dated sets activated four-eyes at runtime and read per score; rule logic stays code; a missing set or currency fails closed to REVIEW."
 ---
 
 # ADR-0347 — Fraud rule thresholds as versioned effective-dated four-eyes data
+
+> **2026-10-24:** Superseded by [ADR-0354](0354-financial-crime-as-code-governed-packs-and-learning.md).
+> Existing delivery remains historical evidence; its contracts and controls stay in force
+> until the explicitly tested pack migration. This is not a runtime rollout.
 
 ## Context
 

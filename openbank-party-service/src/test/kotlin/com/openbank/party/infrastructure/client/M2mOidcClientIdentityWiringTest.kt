@@ -4,12 +4,7 @@
 
 package com.openbank.party.infrastructure.client
 
-import io.quarkus.oidc.client.filter.OidcClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
-import org.assertj.core.api.Assertions.assertThat
-import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
-import org.junit.jupiter.api.Test
-import org.yaml.snakeyaml.Yaml
+import com.openbank.libs.testing.oidc.M2mOidcClientIdentityWiringConformance
 
 /**
  * #10486 batch 5: party-service's GDPR Art. 15 aggregation reads accounts and transactions
@@ -20,50 +15,14 @@ import org.yaml.snakeyaml.Yaml
  * `quarkus.oidc-client.m2m` must exist with client `openbank-party` and its own secret variable (a
  * missing named client fails the first call, not the build).
  */
-class M2mOidcClientIdentityWiringTest {
+class M2mOidcClientIdentityWiringTest : M2mOidcClientIdentityWiringConformance() {
 
-    private val oidcClient: Map<*, *> = run {
-        val doc = Yaml().load<Map<String, Any>>(
-            javaClass.classLoader.getResourceAsStream("application.yaml")!!,
-        )
-        (doc["quarkus"] as Map<*, *>)["oidc-client"] as Map<*, *>
-    }
+    override val clientId = "openbank-party"
 
-    @Test
-    fun `the migrated rest-clients select the named oidc-client and not the default one`() {
-        listOf(
-            AccountServiceRestClient::class.java,
-            TransactionServiceRestClient::class.java,
-            // #10486 batch 6: the GDPR Art. 15 card list (card-issuance card.list).
-            CardServiceRestClient::class.java,
-        ).forEach { client ->
-            val named = client.getAnnotation(OidcClientFilter::class.java)
-            assertThat(named).describedAs("@OidcClientFilter on %s", client.simpleName).isNotNull
-            assertThat(named.value).describedAs("%s oidc-client name", client.simpleName).isEqualTo(NAMED)
-            assertThat(client.getAnnotationsByType(RegisterProvider::class.java).map { it.value.java })
-                .describedAs(
-                    "%s: the default-client filter would re-attach the shared principal's token",
-                    client.simpleName,
-                )
-                .doesNotContain(OidcClientRequestReactiveFilter::class.java)
-        }
-    }
-
-    @Test
-    fun `the named oidc-client authenticates as openbank-party with its own secret`() {
-        val named = oidcClient[NAMED] as Map<*, *>
-        assertThat(named["client-id"]).isEqualTo("openbank-party")
-        val secret = (named["credentials"] as Map<*, *>)["secret"] as String
-        assertThat(secret).startsWith("\${OIDC_M2M_CLIENT_SECRET:")
-        assertThat((named["grant"] as Map<*, *>)["type"]).isEqualTo("client")
-    }
-
-    @Test
-    fun `the default client stays the shared one until the remaining edges migrate`() {
-        assertThat(oidcClient["client-id"]).isEqualTo("openbank-services")
-    }
-
-    private companion object {
-        const val NAMED = "m2m"
-    }
+    override val namedClients: List<Class<*>> = listOf(
+        AccountServiceRestClient::class.java,
+        TransactionServiceRestClient::class.java,
+        // #10486 batch 6: the GDPR Art. 15 card list (card-issuance card.list).
+        CardServiceRestClient::class.java,
+    )
 }

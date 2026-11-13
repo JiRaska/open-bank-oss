@@ -34,7 +34,7 @@ import java.util.UUID
  * proposer deciding their own correction. The positions themselves are read on [NavResource].
  */
 @Tag(name = "NAV", description = "Four-eyes NAV publication and correction (ADR-0334)")
-@Path("/api/v1/position-classification-corrections")
+@Path("/api/v2/position-classification-corrections")
 @Produces(MediaType.APPLICATION_JSON)
 class PositionClassificationResource {
 

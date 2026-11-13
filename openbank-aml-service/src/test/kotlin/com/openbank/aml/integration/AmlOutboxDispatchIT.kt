@@ -56,7 +56,7 @@ class AmlOutboxDispatchIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("aml-events-out") +
+            InMemoryConnector.switchOutgoingChannelsToInMemory("aml-events-out", "oversight-events-out") +
                 InMemoryConnector.switchIncomingChannelsToInMemory("party-events-in")
 
         override fun stop() = InMemoryConnector.clear()
@@ -166,4 +166,73 @@ class AmlOutboxDispatchIT {
         val remaining = onVertxContext { repository.listProcessable(50) }
         assertThat(remaining.map { it.eventId }).doesNotContain(firstId, secondId)
     }
+
+    @Test
+    fun `a high risk case emits a minimal oversight trigger without case PII`() {
+        assertElevatedRiskTriggersOversight("HIGH")
+    }
+
+    @Test
+    fun `a critical risk case emits an oversight trigger`() {
+        assertElevatedRiskTriggersOversight("CRITICAL")
+    }
+
+    @Test
+    fun `low risk cases and later status changes stay on the domain topic only`() {
+        val lowId = UUID.randomUUID()
+        val changedId = UUID.randomUUID()
+        persistPending(
+            lowId,
+            UUID.randomUUID(),
+            "aml.case.created.v1",
+            """{"riskLevel":"LOW","occurredAt":"2026-10-28T10:15:30Z"}""",
+            Instant.now(),
+        )
+        persistPending(
+            changedId,
+            UUID.randomUUID(),
+            "aml.case.status_changed.v1",
+            """{"riskLevel":"HIGH","occurredAt":"2026-10-28T10:15:30Z"}""",
+            Instant.now(),
+        )
+
+        onVertxContext { dispatcher.dispatchForTest() }
+
+        assertThat(oversightMessages(lowId) + oversightMessages(changedId)).isEmpty()
+        assertThat(domainMessages(lowId) + domainMessages(changedId)).hasSize(2)
+    }
+
+    private fun assertElevatedRiskTriggersOversight(riskLevel: String) {
+        val eventId = UUID.randomUUID()
+        persistPending(
+            eventId,
+            UUID.randomUUID(),
+            "aml.case.created.v1",
+            """
+                {"partyId":"${UUID.randomUUID()}","customerReference":"private-customer",
+                "riskLevel":"$riskLevel","occurredAt":"2026-10-28T10:15:30Z"}
+            """.trimIndent(),
+            Instant.now(),
+        )
+
+        onVertxContext { dispatcher.dispatchForTest() }
+
+        val trigger = oversightMessages(eventId).single()
+        assertThat(trigger.payload).contains("\"sourceService\":\"aml-service\"")
+        assertThat(trigger.payload).contains("\"occurredAt\":\"2026-10-28T10:15:30Z\"")
+        assertThat(trigger.payload).doesNotContain("partyId", "private-customer", "riskLevel")
+        assertThat(domainMessages(eventId)).hasSize(1)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun domainMessages(eventId: UUID): List<Message<String>> =
+        connector.sink<String>("aml-events-out").received()
+            .map { it as Message<String> }
+            .filter { headerValue(it, OutboxKafkaHeaders.HEADER_EVENT_ID) == eventId.toString() }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun oversightMessages(eventId: UUID): List<Message<String>> =
+        connector.sink<String>("oversight-events-out").received()
+            .map { it as Message<String> }
+            .filter { headerValue(it, OutboxKafkaHeaders.HEADER_EVENT_ID) == eventId.toString() }
 }

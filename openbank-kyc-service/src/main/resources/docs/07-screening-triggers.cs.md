@@ -4,11 +4,22 @@ Perpetual-KYC slice 1 podle [ADR 0256](../../../../docs/adr/0256-perpetual-kyc-e
 
 ## Průběh
 
-1. **Konzumace** — `SanctionsListChangedConsumer` čte kanál `sanctions-list-changes-in` (explicitní DLQ topic `openbank.dlq.kyc.sanctions-list-changes`; group id a `auto.offset.reset` přicházejí z ConfigMap `kyc-service-msg-override`, aparát #686). Události `SANCTIONS_LIST_CHANGE_STORM` se ignorují.
+1. **Konzumace** — `SanctionsListChangedConsumer` čte kanál `sanctions-list-changes-in` (explicitní DLQ topic `openbank.dlq.kyc.sanctions-list-changes`; group id a `auto.offset.reset` přicházejí z ConfigMap `kyc-service-msg-override`, aparát #686). Události `SANCTIONS_LIST_CHANGE_STORM` se ignorují. Typ události se čte z Kafka **hlavičky** `ce-type`: topic je plněn z outboxu a těla zpráv žádné pole `eventType` nenesou (`openbank-contracts/openbank-sanctions-service/asyncapi.yaml`). Každý záznam se počítá v `openbank.kyc.sanctions_list_change_events{outcome}` — `handled`, `storm`, `disabled`, `ignored` (screeningové události sdílející topic), `malformed`, `unrecognised`.
 2. **Záznam** — `ScreeningTriggerService` vloží jeden trvalý řádek `kyc_screening_triggers` na (publication, party) — `insertIfAbsent`, takže redelivery Kafka zprávy naváže místo duplikování. Celý diff zůstává na řádku, aby „proč je tento klient v re-screeningu" mělo odpověď v jednom řádku.
 3. **Otevření** — jeden případ `AML_ALERT` na stranu přes `POST /api/v1/case-coordinator/cases` (`case-coordinator-agent` v namespace `platform`, port 8146, dodáno jako `CASE_COORDINATOR_URL`).
 4. **Trvalé selhání** — 429/503/timeout z coordinatoru zaznamená trigger `OPEN_FAILED` a po vyčerpání pokusů outbox řádek `KYC_COORDINATOR_OPEN_FAILED` ve STEJNÉ transakci jako změnu stavu. Chybějící `CASE_COORDINATOR_URL` namapuje každý trigger na trvalou cestu `NOT_CONFIGURED` — nikdy na tiché přeskočení.
 5. **Retry** — `ScreeningTriggerRetryJob` opakuje řádky `OPEN_FAILED` po backoffu, takže se smyčka uzavře, když se coordinator zotaví.
+
+## HTTP výsledky koordinátoru
+
+Adaptér pro otevření AML případu klasifikuje mapované HTTP chyby uvnitř stávající hranice opakování:
+
+- `201` otevře případ pouze tehdy, když odpověď obsahuje neprázdné `caseId`. Chybějící identifikátor se odmítne.
+- `409` znamená, že koordinátor případ již eviduje (`AlreadyExists`); volání se neopakuje.
+- Ostatní deterministické odpovědi `4xx`, včetně `400` a `403`, se odmítnou bez opakování. Výjimkou je `429`, které zůstává opakovatelné.
+- `429`, `5xx` a transportní chyby zachovávají stávající omezené opakování: nejvýše tři HTTP pokusy na jedno volání adaptéru. Circuit breaker a timeout mohou volání ukončit dříve. Tento limit je oddělený od rozpočtu trvalé obnovy triggeru popsaného níže.
+
+Odpovědi poskytovatele se po klasifikaci uzavírají, včetně odpovědí získaných z mapovače výjimek REST klienta. Detaily chybového výsledku obsahují pouze HTTP status nebo typ výjimky, nikdy tělo odpovědi poskytovatele, URL ani zprávu výjimky. Klasifikace zachovává stávající trvalé zpracování triggerů; nezapíná screeningové triggery ani nemění idempotenci koordinátoru.
 
 ## Známá granularita v1
 
@@ -28,6 +39,7 @@ Kandidátní množina **není** rozsahovaná per položka diffu: kyc-service neu
 ## Poznámky pro provoz
 
 - **Nový Kafka kanál je dva deploye, ne jeden** (.github/CLAUDE.md): group id / offset override `sanctions-list-changes-in` přistanou v msg-override ConfigMap až poté, co je nasazen image nesoucí `connector:` kanálu; do té doby běží consumer na fallback group id (`quarkus.application.name`), na který má KafkaUser `kyc-service` udělen Read.
+- **`outcome="unrecognised"` nad nulou znamená, že se consumer a producent neshodnou na tvaru zprávy** (chybí hlavička `ce-type`, nebo jde o typ, který consumer nezná). Záznamy se potvrzují (ack), takže to nic jiného — lag, DLQ ani chybovost — neukáže; při zapnuté smyčce je stejným signálem z druhé strany publikace na straně sanctions bez přírůstku `handled` zde.
 - Selhávací cesta consumeru rethrowuje do connectoru, takže infrastrukturní selhání dead-letteruje; selhání volání coordinatoru je práce řádku + outbox události, ne Kafky.
 - Tabulka `kyc_screening_triggers` (Flyway V12) je append-audited: přechody `state` jsou updaty, diff sloupce se zapisují jednou.
 

@@ -34,6 +34,19 @@ export type ServiceUnavailable = {
   status?: number
 }
 
+/**
+ * Thrown from a `select` decoder when the BFF answered with an explicit, well-formed
+ * "source unavailable" envelope (e.g. `{ available: false }`). It maps to that kind instead of
+ * the generic contract `error`, so an absent upstream reads as absent — never as a crash, and
+ * never as a verified empty result.
+ */
+export class SourceUnavailable extends Error {
+  constructor(readonly kind: BffFailure) {
+    super(`source unavailable: ${kind}`)
+    this.name = 'SourceUnavailable'
+  }
+}
+
 export interface ServiceResource<T> {
   data: T | null
   loading: boolean
@@ -145,9 +158,9 @@ export function useServiceResource<T = unknown>(
         let parsed: T
         try {
           parsed = (select ? select(raw) : (raw as T))
-        } catch {
+        } catch (error) {
           if (cancelled) return
-          setUnavailable({ kind: 'error', status: res.status })
+          setUnavailable({ kind: error instanceof SourceUnavailable ? error.kind : 'error', status: res.status })
           setWaking(false)
           setLoading(false)
           return

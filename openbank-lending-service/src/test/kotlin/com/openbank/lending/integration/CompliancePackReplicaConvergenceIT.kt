@@ -74,6 +74,7 @@ class CompliancePackReplicaConvergenceIT {
     class FastRefresh : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "lending.compliance.refresh-interval" to "1s",
+            "lending.compliance.refresh-initial-delay" to "1s",
         )
     }
 

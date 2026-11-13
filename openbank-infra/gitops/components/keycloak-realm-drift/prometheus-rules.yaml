@@ -52,6 +52,31 @@ spec:
               machine identity), or when a client named as `service-account-<x>` in rego lacks
               the `profile` default scope live (identity-gated rules never match) (#10486).
 
+        # A Keycloak user deletion is a one-way door: passkeys and party links key on the user id,
+        # so a deleted user can only be restored from backup, never recreated.
+        - alert: KeycloakUserDeletion
+          # Same "latest run" form as KeycloakRealmDrift: the watch runs every 10 minutes, so a
+          # scheduled-but-not-succeeded run is the signal. `for: 5m` only rides over the run
+          # itself — the restore window is what this alert buys, and it is measured in hours.
+          expr: >-
+            kube_cronjob_status_last_schedule_time{namespace="iam", cronjob="keycloak-user-deletion-watch"}
+              > kube_cronjob_status_last_successful_time{namespace="iam", cronjob="keycloak-user-deletion-watch"}
+          for: 5m
+          labels:
+            severity: critical
+            component: iam
+          annotations:
+            summary: "Keycloak users were deleted (or admin events are off)"
+            description: >-
+              keycloak-user-deletion-watch failed: a user was deleted in openbank-customers, three
+              or more in openbank inside 20 minutes, or admin events are disabled so deletions
+              cannot be seen. Read the latest `keycloak-user-deletion-watch` Job log in `iam` for
+              the user ids, timestamps and acting principal. A deleted user cannot be recreated
+              with the same id — customer-edge passkeys and parties.keycloak_sub point at it — so
+              recovery is a point-in-time restore of keycloak-db to just before the first
+              deletion, then re-inserting those users. Staleness of the watch itself is
+              covered by CronJobSuccessStale (openbank.tech/max-success-age-seconds).
+
         # A detector that quietly stops running is indistinguishable from a clean realm.
         - alert: KeycloakRealmDriftScanStale
           # 26h: the schedule is daily (03:40 UTC); allow one missed run plus slack.

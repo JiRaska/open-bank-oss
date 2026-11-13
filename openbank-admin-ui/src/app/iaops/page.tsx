@@ -390,8 +390,8 @@ function IAOpsContent() {
               </div>
               <p style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.55, margin: '4px 0 0' }}>
                 {t(
-                  `${data.controlMaturity.label} To není povolení k autonomní změně — ta zůstává na ${data.phase}/${data.totalPhases}, dokud neexistuje nezávisle ověřený provozní důkaz.`,
-                  `${data.controlMaturity.label} This is not permission for autonomous change — that remains at ${data.phase}/${data.totalPhases} until independently verified operational evidence exists.`,
+                  `${data.controlMaturity.label} Rozsah povolených akcí určuje fáze ${data.phase}/${data.totalPhases} a její nezávisle ověřené provozní důkazy.`,
+                  `${data.controlMaturity.label} Permitted actions are governed by phase ${data.phase}/${data.totalPhases} and its independently verified operational evidence.`,
                 )}
               </p>
             </div>
@@ -399,7 +399,7 @@ function IAOpsContent() {
             {/* What / Why / How */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px', marginTop: '16px' }}>
               {[
-                { h: t('Co děláme', 'What we run'), b: t('Dohledové agenty a frontu pro lidské rozhodnutí. Vývojové PR workflow je další řízený krok — jeho stav ukazuje roadmapa níže.', 'Oversight agents and a queue for human decisions. Development PR workflow is the next governed step — its status is shown in the roadmap below.') },
+                { h: t('Co děláme', 'What we run'), b: t('Dohledové agenty a frontu pro lidské rozhodnutí. Ověřený rozsah vývojových návrhů ukazuje roadmapa níže.', 'Oversight agents and a queue for human decisions. The roadmap below shows the verified scope of development proposals.') },
                 { h: t('Proč', 'Why'), b: t('Regulace (EU AI Act, DORA, GDPR, PCI) vyžaduje human oversight, záznamy a logování. Tyto kontroly nejsou ergonomie, jsou to compliance.', 'Regulation (EU AI Act, DORA, GDPR, PCI) mandates human oversight, record-keeping and logging. These controls are not ergonomics — they are the compliance surface.') },
                 { h: t('Jak', 'How'), b: t('Každá akce agenta projde stejnými branami jako člověk: charter (agents.yaml) → OPA policy → required approvals → AI-attributed audit. Deny-by-default.', 'Every agent action passes the same gates as a human: charter (agents.yaml) → OPA policy → required approvals → AI-attributed audit. Deny-by-default.') },
               ].map(x => (
@@ -441,7 +441,7 @@ function IAOpsContent() {
             </div>
           </Card>
 
-          {/* ── A2. Recorded human merges (ADR-0031 phase 3 evidence) ── */}
+          {/* ── A2. Recorded agent PR merges (ADR-0031 phase 3 evidence) ── */}
           <MergeRecordsSection knownAgentIds={data.agents.map(a => a.id)} />
 
           {/* Tool tiers — what MCP/the bot can & cannot do */}
@@ -860,8 +860,8 @@ function IAOpsContent() {
             </div>
             <p style={{ fontSize: '10px', color: 'var(--text-tertiary)', margin: '12px 0 0', lineHeight: 1.5 }}>
               {t(
-                'Pozn.: Fáze 1 je vynucovaná, je-li PDP dostupný: policy gate je deny-by-default a OPA blokuje nepovolené volání nástrojů. Při výpadku PDP se režim degraduje na advisory. Fáze 2 zůstává read-only a proposal-only — každý návrh rozhoduje člověk. EU AI Act se klasifikuje per agent; žádný agent se nedotýká scoringu úvěruschopnosti.',
-                'Note: Phase 1 is enforced while the PDP is available: the policy gate is deny-by-default and OPA blocks disallowed tool calls. A PDP outage degrades the gate to advisory. Phase 2 remains read-only and proposal-only — a human decides every proposal. EU AI Act is classified per agent; no agent touches creditworthiness scoring.',
+                'Pozn.: MCP cesta pro čtení je deny-by-default a OPA blokuje nepovolené volání nástrojů; při výpadku PDP se degraduje na advisory. Vývojová PR cesta při výpadku PDP zápis odmítne. Každý návrh rozhoduje člověk. EU AI Act se klasifikuje per agent; žádný agent se nedotýká scoringu úvěruschopnosti.',
+                'Note: The read-only MCP path is deny-by-default and OPA blocks disallowed tool calls; a PDP outage degrades it to advisory. The development PR path denies writes on a PDP outage. A human decides every proposal. EU AI Act is classified per agent; no agent touches creditworthiness scoring.',
               )}
             </p>
           </Card>

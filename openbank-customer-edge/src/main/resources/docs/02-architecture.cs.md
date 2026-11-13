@@ -109,12 +109,16 @@ Zákaznický token (z customers realmu) se **nikdy nepřeposílá** — upstream
 - **Singleton `HttpClient`** po celou dobu života aplikace — jeden sdílený connection pool, žádný únik vlákna/fd na request.
 - **Vynucené HTTP/1.1** — výchozí JDK (HTTP/2 přes cleartext h2c) rozbíjí POST-s-tělem během upgrade handshake vůči in-cluster serverům, projevuje se to jako falešné 502.
 - **Explicitní timeouty** — connect timeout na builderu (`connect-timeout-ms`, default 5000), per-request timeout (`request-timeout-ms`, default 10000).
-- **Deadline sjednocené schránky notifikací** — sloučený feed stran sdílí jeden agregovaný deadline 10 s; každé upstream čtení dostane jen zbývající čas, takže sekvenční syntetická čtení zkracují svůj timeout místo spouštění nových vln. Deadline čte injektovaný monotónní ticker (v produkci `System::nanoTime`), takže jej testy řídí ve virtuálním čase.
+- **Deadline sjednocené schránky notifikací** — sloučený feed stran sdílí jeden agregovaný deadline 10 s; každé upstream čtení dostane jen zbývající čas, takže sekvenční syntetická čtení zkracují svůj timeout místo spouštění nových vln. Deadline čte injektovaný monotónní ticker (v produkci `System::nanoTime`), takže jej testy řídí ve virtuálním čase. Striktní načtení inventáře zastoupení sdílí deadline volajícího pro upstream čtení i zpracování profilů. Vypršelý rozpočet odmítne ještě před odesláním požadavku; nedostupný inventář odmítne celou schránku místo vrácení pouze osobního profilu. Interní testovací overload také přijímá monotónní ticker, veřejné overloady nadále používají `System::nanoTime`.
 - **`@ConfigProperty` injekce do field (ne konstruktor)** — defaultní hodnoty Kotlin konstruktoru zastiňují Arc injekci, což tiše nechalo client secret `""` → každý fetch tokenu 401. Field injekce běží po konstrukci a aplikuje konfiguraci spolehlivě.
 - **Cache M2M tokenu** — `client_credentials` token cachován do 60 s před expirací; refresh je `@Synchronized`.
 - **Varianty operací** — `get` (JSON), `getRaw` (zachová upstream Content-Type pro camt.053 XML / MT940 / PDF, čte se jako `ByteArray`, aby nedošlo k poškození kódováním), `post` (idempotency-aware), `postAnonymous` (onboarding, bez party hlavičky).
 - **Režim selhání** — jakákoli výjimka transportu degraduje na JSON `502 {"error":"upstream unavailable"}`.
 - **Syntetická značka (ADR-0252)** — každý upstream request staví `upstreamRequest()`, který přidá `x-openbank-synthetic: true`, když vstupní filtr edge request přijal jako syntetický (MDC nebo OTel baggage, obojí nastavené jen pro principála z `openbank.synthetic.trusted-principals`). Hlavičku od klienta nikdy nekopíruje. Jedinou výjimkou je request na token. `UpstreamClientSyntheticTaintTest` hlídá chování i jediný vstupní bod.
+
+## Deadline sjednocené notifikační schránky
+
+Sjednocená notifikační schránka (`UnifiedNotificationInbox`) používá jeden monotónní souhrnný deadline 10 sekund (`UNIFIED_NOTIFICATION_TIMEOUT_SECONDS`) pro všechny party feedy. Syntetické požadavky zůstávají sekvenční na vlákně volajícího, aby zachovaly taint; každý upstream request dostane jen zbývající rozpočet deadline. Běžné požadavky čtou party feedy souběžně (nejvýše 16 současně na repliku, 128 ve frontě) pod stejným deadline. Po vypršení se další party už nevolají a schránka selže uzavřeně odpovědí `502 {"code":"NOTIFICATIONS_UNAVAILABLE"}` bez částečných výsledků.
 
 ## Model vlastnictví / IDOR
 
@@ -136,3 +140,24 @@ Některé upstreamy omezují jen podle `accountId` (party hlavička je tam jen p
 3. **Edge je hranicí IDOR** — vlastnictví se vynucuje zde vždy, když upstream omezuje jen podle id.
 4. **Bezstavová** — bez DB, bez outboxu, bez doménového stavu; horizontálně škálovatelná, levně škáluje na nulu.
 5. **Obohacuj na edge** — drž bankovní detail (rozdělení IBAN/BBAN, právní jméno, defaulty plateb) mimo mobilního klienta.
+
+## Delegované akce nad kartou se ptají na capability té akce (ADR-0375 D7)
+
+Ke sdílené kartě se chodí přes `mayControlCard(id, party, capability)`: držitel a majitel účtu
+projdou rovnou, kdokoli jiný potřebuje ACTIVE delegaci nesoucí capability **té konkrétní akce**.
+Na kterou capability se která akce ptá, je celá ta kontrola — a dřív to byla pro všechno stejná:
+
+| akce | capability, na kterou se ptá |
+|---|---|
+| výpis sdílené karty, čtení detailu | `CARD_VIEW` |
+| `PUT /cards/{id}/limits` | `CARD_MANAGE_LIMITS` |
+| `POST /cards/{id}/freeze`, `/unfreeze`, `/block` | `CARD_MANAGE_STATUS` |
+| `PUT /cards/{id}/controls` (contactless, online, ATM, zahraničí) | `CARD_MANAGE_CHANNELS` |
+
+Před ADR-0375 D7 se poslední dva řádky ptaly taky na `CARD_MANAGE_LIMITS`, takže dvě capabilities,
+které slovník grantů nabízí, byly grantovatelné a nikým nečtené — a delegát s pouhými limity mohl
+kartu zmrazit a vypnout jí kanály. Obě karetní presety udělují všech pět karetních capabilities,
+takže delegáta z presetu se to nedotkne; mění se případ ručně složeného grantu jen s limity.
+
+Routa s transakcemi karty tu neexistuje, a proto `CARD_VIEW_TRANSACTIONS` pořád nemá enforcera —
+nemá co hlídat, spíš než že by hlídalo špatně.

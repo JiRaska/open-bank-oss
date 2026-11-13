@@ -147,6 +147,8 @@ KafkaSanctionsOutboxEventPublisher sends to openbank.sanctions.screening.event
 audit-service + aml-service consume the event
 ```
 
+A `SanctionChecked` event that meets `SanctionsCheck.isHighRisk()` also fans out from the same durable outbox row to `openbank.oversight-triggers` (ADR-0031 D9). The trigger body contains only `sourceService` and `occurredAt`, with the original `ce-id`/`ce-type` headers for correlation. Screened names, identifiers, match details and list data are not copied to the oversight topic. CLEAR results, lower-scoring potential hits, reviews and list-change events stay on the domain topic only.
+
 ## Components from `openbank-libs`
 
 | Module | Use here |
@@ -169,3 +171,19 @@ audit-service + aml-service consume the event
 ## Scheduled-job heartbeat
 
 The 60-second sanctions-list refresh tick registers the fleet workflow-liveness heartbeat `sanctions-list-refresh` (`DomainMetrics.registerWorkflowLiveness`, seeded at startup) and records a success only on its success path: a tick counts as a success only when no list failed in it, so a feed that fails every minute goes stale instead of reading healthy. `WorkflowLivenessStale` alerts when the age exceeds twice the expected interval.
+
+## Shared check status and block threshold (ADR-0353)
+
+`SanctionsCheckStatus` is a typealias of `ScreeningMatchStatus` from `openbank-libs-fincrime`, the type the payment rails read off the wire. `isHighRisk` reads the shared `ScreeningPolicy.POTENTIAL_HIT_BLOCK_THRESHOLD` (0.85), the same bound the rails block on. Persisted values (`@Enumerated(STRING)`) and the API spelling are unchanged.
+
+## Ongoing monitoring (ADR-0376)
+
+Off by default (`openbank.sanctions.monitoring.enabled=false`). A screen answers for the moment it runs; ongoing monitoring covers what happens to the lists afterwards.
+
+- **Registry.** A service registers a subject it has onboarded (`sanctions_monitored_subjects`) with the attributes the `CUSTOMER` profile reads, under the same reference it uses as `subjectId` when screening. The owner of the registration is the calling service, read from its service-account token (`MonitoringCallerIdentity`), never from the request: a service reaches only its own subjects.
+- **Delta.** The change journal that already records every committed change of a list entry also feeds `sanctions_monitoring_pending` (a trigger; it writes nothing while the registry is empty). `SanctionsMonitoringService.runDelta` takes a bounded batch of changed entries and matches each against the registry with the live screen's own `word_similarity(subject name, entry search text)` and the `CUSTOMER` floor. It is the reverse of a screen: one entry, every subject. pg_trgm cannot index that direction directly, so each search name is also stored as a row of `sanctions_monitored_subject_names` in a size class by trigram count, and the delta probes each class through its partial trigram index with `search_name % entry` under a threshold derived for that class (`MonitoringNameIndex`). The probe only narrows the candidates; the exact score decides, so the answer is the one a full scan gives.
+- **Sweep.** `runSweep` re-evaluates a bounded batch of whole subjects through `SanctionsService.uncoveredMatches`, the function `screen` itself is built on. Never-swept subjects go first, then the least recently swept; every subject is due again after `sweep.interval` (default 30 days). It is the safety net for a missed delta and the only path that sees jurisdiction reference data.
+- **Fallback.** A backlog above `delta.max-pending`, or an entry matching more than `delta.max-candidates-per-entry` subjects, is not matched entry by entry: the queue is dropped and every subject becomes due for a sweep, in one transaction.
+- **Findings.** One row per subject, list entry and version of the entry's names, written with its `MONITORED_SUBJECT_MATCHED` outbox event in one transaction. The version ignores the order of names, so a feed that reorders aliases raises nothing. A clearance is honoured by the rule the live screen uses; PEP and jurisdiction matches are never covered by one.
+
+Both scheduled methods are `suspend` functions and register the workflow-liveness heartbeats `sanctions-monitoring-delta` and `sanctions-monitoring-sweep` only when monitoring is enabled; a disabled job that registered one would raise `WorkflowLivenessStale` in every environment that has not switched the feature on.

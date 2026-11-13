@@ -4,8 +4,8 @@
 package com.openbank.audit.integration
 
 import com.openbank.audit.application.TopicAttribution
-import com.openbank.audit.it.PostgresTestResource
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -238,6 +238,44 @@ class AuditSubscriptionSurfaceIT {
     }
 
     @Test
+    fun `party PII reveal evidence reaches the audit store with the staff actor and purpose`() {
+        val topic = "openbank.party.audit"
+        assertThat(subscribedTopics()).contains(topic)
+        val partyId = UUID.randomUUID().toString()
+        val eventId = UUID.randomUUID().toString()
+        val actor = "test-staff-subject"
+        val occurredAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS)
+        val type = "PARTY_PII_REVEALED"
+        val payload = """
+            {"eventId":"$eventId","partyId":"$partyId","actorId":"$actor","reason":"KYC_REVIEW",
+             "occurredAt":"$occurredAt","eventType":"$type","sourceService":"party-service","actorType":"HUMAN"}
+        """.trimIndent()
+        val source: InMemorySource<Message<String>> = connector.source(CHANNEL)
+        source.runOnVertxContext(true)
+        source.send(recordOn(topic, partyId, payload, type, eventId))
+
+        assertThat(awaitRows(setOf(partyId))[partyId]).isEqualTo(type to "party-service")
+        DriverManager.getConnection(jdbcUrl(), jdbcUser(), jdbcPassword()).use { connection ->
+            connection.prepareStatement(
+                "SELECT entry_id, aggregate_type, actor_id, actor_type, occurred_at, source_service_source, " +
+                    "payload::jsonb ->> 'reason' FROM audit_entries WHERE aggregate_id = ?",
+            ).use { query ->
+                query.setString(1, partyId)
+                query.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getObject(1, UUID::class.java).toString()).isEqualTo(eventId)
+                    assertThat(rows.getString(2)).isEqualTo("PARTY")
+                    assertThat(rows.getString(3)).isEqualTo(actor)
+                    assertThat(rows.getString(4)).isEqualTo("HUMAN")
+                    assertThat(rows.getTimestamp(5).toInstant()).isEqualTo(occurredAt)
+                    assertThat(rows.getString(6)).isEqualTo("EVENT")
+                    assertThat(rows.getString(7)).isEqualTo("KYC_REVIEW")
+                }
+            }
+        }
+    }
+
+    @Test
     fun `settlement state events reach the audit store with declared identity`() {
         val topic = "openbank.settlement.events"
         assertThat(subscribedTopics()).contains(topic)
@@ -282,14 +320,17 @@ class AuditSubscriptionSurfaceIT {
         topic: String,
         marker: String,
         payload: String = """{"eventType":"$EVENT_TYPE","accountId":"$marker","occurredAt":"${Instant.now()}"}""",
+        eventType: String = EVENT_TYPE,
+        eventId: String? = null,
     ): Message<String> {
         val headers = RecordHeaders()
         headers.add(
             RecordHeader(
                 OutboxKafkaHeaders.HEADER_EVENT_TYPE,
-                EVENT_TYPE.toByteArray(StandardCharsets.UTF_8),
+                eventType.toByteArray(StandardCharsets.UTF_8),
             ),
         )
+        eventId?.let { headers.add(OutboxKafkaHeaders.HEADER_EVENT_ID, it.toByteArray(StandardCharsets.UTF_8)) }
         val record = ConsumerRecord(
             topic,
             0,

@@ -3,6 +3,7 @@
 
 package com.openbank.ledger.contract
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -16,7 +17,7 @@ import javax.sql.DataSource
 
 /** Real HTTP/database proof that old and current FINREP fixture evidence does not leak between replays. */
 @QuarkusTest
-@QuarkusTestResource(value = com.openbank.ledger.it.PostgresTestResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(value = PostgresTestResource::class, restrictToAnnotatedClass = true)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 class FinrepFrozenMonthPactSeedCompatibilityIT {
     @Inject

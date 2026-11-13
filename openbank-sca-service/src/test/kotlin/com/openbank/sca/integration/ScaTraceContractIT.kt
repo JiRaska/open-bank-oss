@@ -5,8 +5,8 @@
 package com.openbank.sca.integration
 
 import com.openbank.libs.testing.trace.RecordingSpanExporter
+import com.openbank.libs.testing.trace.TraceContractProfile
 import com.openbank.sca.it.PostgresRedisTestResource
-import com.openbank.sca.it.TraceContractProfile
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile

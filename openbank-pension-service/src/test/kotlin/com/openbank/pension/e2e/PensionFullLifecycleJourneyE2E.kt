@@ -218,7 +218,7 @@ class PensionFullLifecycleJourneyE2E {
             ok(
                 operatorPost(
                     "$OPS/payments",
-                    payment("first-${UUID.randomUUID()}", 1700, dpsReference, LocalDate.now()),
+                    payment("first-${UUID.randomUUID()}", 1700, dpsReference, LocalDate.now(appClock)),
                 ),
             )
         firstPaymentOutcome = receipt.getString("outcome")
@@ -483,11 +483,12 @@ class PensionFullLifecycleJourneyE2E {
             eventually("transfer $key accepted") {
                 ok(operatorGet("/api/v2/pension/operator/transfers/$transfer")).getString("status") == "ACCEPTED"
             }
+            val incentiveYear = LocalDate.now(appClock).year - 1
             ok(
                 operatorPost(
                     "/api/v2/pension/operator/transfers/$transfer/funds-received",
                     """{"amount":250000,"currency":"CZK","originalStartDate":"$ORIGINAL_START",
-                        "incentiveHistory":[{"incentiveId":"state-contribution","year":${LocalDate.now().year - 1},"amount":4080}]}""",
+                        "incentiveHistory":[{"incentiveId":"state-contribution","year":$incentiveYear,"amount":4080}]}""",
                 ),
             )
         }
@@ -526,7 +527,9 @@ class PensionFullLifecycleJourneyE2E {
         assertThat(changed.statusCode).describedAs(changed.body.asString()).isEqualTo(200)
         assertThat(changed.jsonPath().getString("currentStrategy.strategyCode")).isEqualTo("CONSERVATIVE")
 
-        val year = ok(customerGet(retiree, "$FUNDING/$id/tax-years/${LocalDate.now().year}"))
+        // The transfer is booked on the service clock, which the workflow time-skipping above has moved
+        // on; the real clock year differs once the skipped months cross 31 December.
+        val year = ok(customerGet(retiree, "$FUNDING/$id/tax-years/${LocalDate.now(appClock).year}"))
         assertThat(year.getObject("transferIn", BigDecimal::class.java))
             .describedAs("the transferred amount is booked as a TRANSFER_IN contribution")
             .isEqualByComparingTo("250000")
@@ -739,7 +742,7 @@ class PensionFullLifecycleJourneyE2E {
         val notified = ok(
             operatorPost(
                 "/api/v2/pension/death-claims",
-                """{"contractId":"$id","dateOfDeath":"${LocalDate.now().minusDays(
+                """{"contractId":"$id","dateOfDeath":"${LocalDate.now(appClock).minusDays(
                     3,
                 )}","evidenceRef":"death-cert-e2e"}""",
             ),
@@ -832,7 +835,7 @@ class PensionFullLifecycleJourneyE2E {
         // The customer channel cannot reach operator routes at all.
         assertThat(customerGet(stranger, "/api/v2/pension/operator/transfers").statusCode).isEqualTo(403)
         assertThat(
-            customerPost(stranger, "$OPS/payments", payment("x", 1, "x", LocalDate.now())).statusCode,
+            customerPost(stranger, "$OPS/payments", payment("x", 1, "x", LocalDate.now(appClock))).statusCode,
         ).isEqualTo(403)
     }
 

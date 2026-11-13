@@ -5,10 +5,16 @@ package com.openbank.mcp.infrastructure.read
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.mcp.application.port.out.ConsentContext
+import io.mockk.every
+import io.mockk.mockk
+import io.smallrye.mutiny.Uni
 import jakarta.enterprise.inject.Vetoed
+import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import java.io.ByteArrayInputStream
+import java.io.InputStream
 import java.util.UUID
 
 /**
@@ -17,6 +23,10 @@ import java.util.UUID
  * account the consent did not grant, and a denied/expired/revoked consent must never leak a partial
  * result. Plain-unit — fake HTTP-shaped collaborators, no Quarkus context.
  */
+private const val A1 = "00000000-0000-0000-0000-0000000000a1"
+private const val A2 = "00000000-0000-0000-0000-0000000000a2"
+private const val A7 = "00000000-0000-0000-0000-0000000000a7"
+
 class RealAccountReadPortTest {
 
     private val mapper = jacksonObjectMapper()
@@ -25,15 +35,15 @@ class RealAccountReadPortTest {
         ConsentContext(agentId = "agent:mcp-tpp-42", consentId = consentId.toString(), grantedAccounts = emptyList())
 
     private fun accountJson(id: String, iban: String): JsonNode =
-        mapper.createObjectNode().put("id", id).put("iban", iban)
+        mapper.createObjectNode().put("id", id).put("accountNumber", iban)
 
     @Test
     fun `listAccounts returns only the granted IBANs, resolved to account records`() {
         val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01", "CZ02"))
-        val accounts = FakeAccountServiceClient(
+        val accounts = accountServiceStub(
             mapOf(
-                "CZ01" to accountJson("a1", "CZ01"),
-                "CZ02" to accountJson("a2", "CZ02"),
+                "CZ01" to accountJson(A1, "CZ01"),
+                "CZ02" to accountJson(A2, "CZ02"),
             ),
         )
         val port =
@@ -41,17 +51,17 @@ class RealAccountReadPortTest {
 
         val result = port.listAccounts(ctx)
 
-        assertThat(result.map { it.path("id").asText() }).containsExactlyInAnyOrder("a1", "a2")
+        assertThat(result.map { it.path("id").asText() }).containsExactlyInAnyOrder(A1, A2)
         assertThat(consent.lastRequest?.requiredScope).isEqualTo(ConsentScopes.ACCOUNTS_READ)
     }
 
     @Test
     fun `getBalance resolves the IBAN and returns the balance`() {
         val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"))
-        val accounts = FakeAccountServiceClient(mapOf("CZ01" to accountJson("a1", "CZ01")))
+        val accounts = accountServiceStub(mapOf("CZ01" to accountJson(A1, "CZ01")))
         val balances = FakeBalanceServiceClient(
             byAccountId = mapOf(
-                "a1" to mapper.createObjectNode().put("available", "100.00"),
+                A1 to mapper.createObjectNode().put("available", "100.00"),
             ),
         )
         val port = RealAccountReadPort(consent, accounts, balances, FakeTransactionServiceClient(), mapper)
@@ -68,7 +78,7 @@ class RealAccountReadPortTest {
         val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"))
         val port = RealAccountReadPort(
             consent,
-            FakeAccountServiceClient(emptyMap()),
+            accountServiceStub(emptyMap()),
             FakeBalanceServiceClient(),
             FakeTransactionServiceClient(),
             mapper,
@@ -84,7 +94,7 @@ class RealAccountReadPortTest {
         val consent = FakeConsentValidateClient(valid = false, reason = "consent revoked")
         val port = RealAccountReadPort(
             consent,
-            FakeAccountServiceClient(emptyMap()),
+            accountServiceStub(emptyMap()),
             FakeBalanceServiceClient(),
             FakeTransactionServiceClient(),
             mapper,
@@ -98,8 +108,8 @@ class RealAccountReadPortTest {
     @Test
     fun `a null grantedAccounts (all of the party's accounts) allows any account`() {
         val consent = FakeConsentValidateClient(valid = true, grantedAccounts = null)
-        val accounts = FakeAccountServiceClient(mapOf("CZ07" to accountJson("a7", "CZ07")))
-        val transactions = FakeTransactionServiceClient(byAccountId = mapOf("a7" to mapper.createArrayNode()))
+        val accounts = accountServiceStub(mapOf("CZ07" to accountJson(A7, "CZ07")))
+        val transactions = FakeTransactionServiceClient(byAccountId = mapOf(A7 to mapper.createArrayNode()))
         val port = RealAccountReadPort(consent, accounts, FakeBalanceServiceClient(), transactions, mapper)
 
         assertThat(port.listTransactions(ctx, "CZ07", limit = 10)).isNotNull
@@ -109,7 +119,7 @@ class RealAccountReadPortTest {
     fun `a malformed consent id fails closed`() {
         val port = RealAccountReadPort(
             FakeConsentValidateClient(valid = true),
-            FakeAccountServiceClient(emptyMap()),
+            accountServiceStub(emptyMap()),
             FakeBalanceServiceClient(),
             FakeTransactionServiceClient(),
             mapper,
@@ -125,7 +135,7 @@ class RealAccountReadPortTest {
         val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"), frequencyPerDay = 4)
         val port = RealAccountReadPort(
             consent,
-            FakeAccountServiceClient(emptyMap()),
+            accountServiceStub(emptyMap()),
             FakeBalanceServiceClient(),
             FakeTransactionServiceClient(),
             mapper,
@@ -172,15 +182,26 @@ class FakeConsentValidateClient(
     }
 }
 
-@Vetoed
-class FakeAccountServiceClient(
-    private val byIban: Map<String, JsonNode> = emptyMap(),
-    private val byId: Map<UUID, JsonNode> = emptyMap(),
-) : AccountServiceClient {
-    override fun getAccountByIban(iban: String): JsonNode =
-        byIban[iban] ?: throw NoSuchElementException("no such account: $iban")
-    override fun getAccountById(accountId: UUID): JsonNode =
-        byId[accountId] ?: throw NoSuchElementException("no such account: $accountId")
+/**
+ * A stub of the GENERATED account-service client (#13169), answering as the wire does: a missing account is a
+ * real 404 [Response], a found one a 200 whose body the facade reads as a stream. NOT a class implementing
+ * [AccountServiceClient]: a second implementation of an @Path-annotated interface is a duplicate-route boot
+ * failure for every @QuarkusTest in this module (see the note above).
+ */
+fun accountServiceStub(
+    byIban: Map<String, JsonNode> = emptyMap(),
+    byId: Map<UUID, JsonNode> = emptyMap(),
+): AccountServiceClient = mockk<AccountServiceClient>().also { client ->
+    every { client.getAccountByIban(any()) } answers {
+        Uni.createFrom().item(accountResponse(byIban[firstArg<String>()]))
+    }
+    every { client.getAccount(any()) } answers { Uni.createFrom().item(accountResponse(byId[firstArg<UUID>()])) }
+}
+
+fun accountResponse(body: JsonNode?): Response = mockk<Response>(relaxed = true).also {
+    every { it.status } returns if (body == null) 404 else 200
+    every { it.hasEntity() } returns (body != null)
+    every { it.readEntity(InputStream::class.java) } answers { ByteArrayInputStream(body.toString().toByteArray()) }
 }
 
 @Vetoed

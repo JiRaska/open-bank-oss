@@ -119,7 +119,9 @@ function gitopsWorkloadNamespaces(): Set<string> {
       if (!/^kind:\s*(Deployment|Rollout)\s*$/m.test(doc)) continue
       const name = doc.match(/^\s{2}name:\s*(\S+)/m)?.[1]
       const ns = doc.match(/^\s{2}namespace:\s*(\S+)/m)?.[1]
-      if (name?.startsWith('openbank-') || /-service$/.test(name ?? '')) {
+      // The control agents and analytics sink are runnable docs publishers too.
+      // Requiring a -service suffix missed their dedicated namespaces entirely.
+      if (name?.startsWith('openbank-') || /-(service|agent|auditor|sentinel|steward|hunter|sink)$/.test(name ?? '')) {
         if (ns) namespaces.add(ns)
       }
     }
@@ -504,7 +506,7 @@ describe('service registry drift guard', () => {
     // name, and the preceding GitOps guard verifies it against the module's Argo application.
     // Ports and other fleet facts remain derived from catalog.json.
     for (const [name, o] of Object.entries(SERVICE_OVERRIDES)) {
-      expect(Object.keys(o).filter(k => !['label', 'group', 'id', 'k8sName', 'k8sNamespace', 'exposeViaBff'].includes(k)), name).toEqual([])
+      expect(Object.keys(o).filter(k => !['label', 'id', 'k8sName', 'k8sNamespace', 'exposeViaBff'].includes(k)), name).toEqual([])
     }
   })
 })

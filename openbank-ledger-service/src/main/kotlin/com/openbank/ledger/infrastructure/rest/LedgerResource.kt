@@ -25,13 +25,16 @@ import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.ledger.domain.model.LedgerScope
 import com.openbank.ledger.domain.model.SubLedgerBalance
 import com.openbank.ledger.domain.model.TrialBalance
+import com.openbank.ledger.domain.model.YearEndResultAllocationPlan
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
+import com.openbank.libs.web.SyntheticTaintContext
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -62,12 +65,24 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Ledger", description = "General ledger journal entries")
+@Suppress("TooManyFunctions") // Both journal posting routes share validation and authorization in this resource.
 class LedgerResource(
     private val clock: Clock,
     private val ledgerUseCase: LedgerUseCase,
     private val replayUseCase: ReplayBookedChangesUseCase,
     private val accountingClasses: AccountingClassService,
 ) {
+
+    @jakarta.inject.Inject
+    private lateinit var callerIdentity: io.quarkus.security.identity.SecurityIdentity
+
+    /**
+     * Request-scoped taint decision, written by [com.openbank.libs.web.SyntheticTaintRequestFilter]
+     * on the CDI request context so a suspended resource method still sees it after the coroutine
+     * dispatch (#14058). The raw `ContainerRequestContext` property is kept only as a fallback read.
+     */
+    @jakarta.inject.Inject
+    private lateinit var taintContext: SyntheticTaintContext
 
     @GET
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
@@ -189,8 +204,33 @@ class LedgerResource(
         request: PostJournalRequest?,
         @Context
         requestContext: ContainerRequestContext,
+    ): Response = bookJournal(request, isSynthetic(requestContext))
+
+    @POST
+    @Path("/synthetic")
+    @RolesAllowed(Roles.API, Roles.OPERATOR)
+    @Authorize(action = "ledger.create", resource = "")
+    @Operation(summary = "Post a journal that requires an authenticated synthetic origin")
+    suspend fun postSyntheticJournal(
+        request: PostJournalRequest?,
+        @Context requestContext: ContainerRequestContext,
     ): Response {
+        if (!isSynthetic(requestContext)) throw ForbiddenException("Synthetic journal requires a trusted origin")
+        return bookJournal(request, synthetic = true)
+    }
+
+    // Both values carry the filter's authenticated trust decision. Either true value wins.
+    private fun isSynthetic(requestContext: ContainerRequestContext): Boolean =
+        taintContext.tainted || requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true
+
+    private suspend fun bookJournal(request: PostJournalRequest?, synthetic: Boolean): Response {
         requireNotNull(request) { "a request body is required" }
+        // ADR-0096 D3: this prefix is reserved for the year-end closing journal, whose attribution
+        // is written only by the allocation's own transaction. A generic post under it would be an
+        // unattributed closing journal that blocks the year's attestation.
+        require(!request.idempotencyKey.startsWith(YearEndResultAllocationPlan.KEY_PREFIX)) {
+            "idempotency keys starting with '${YearEndResultAllocationPlan.KEY_PREFIX}' are reserved"
+        }
         val command = PostJournalCommand(
             idempotencyKey = request.idempotencyKey,
             transactionId = request.transactionId,
@@ -199,9 +239,11 @@ class LedgerResource(
             description = request.description,
             lines = request.requireLines().map { it.toCommand(accountingClasses) },
             postedBy = request.createdBy,
-            // The filter sets this property only after authenticating a configured canary
-            // principal. Never accept a caller-supplied header or coroutine MDC as synthetic.
-            synthetic = requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
+            synthetic = synthetic,
+            origin = request.origin?.let { origin ->
+                check(!callerIdentity.isAnonymous) { "authenticated journal submitter is required" }
+                origin.toDomain(callerIdentity.principal.name)
+            },
         )
         val outcome = ledgerUseCase.postJournalWithOutcome(command)
         val entry = outcome.entry
@@ -308,6 +350,7 @@ data class PostJournalRequest(
      * Writing the type honestly is what makes [requireLines] reachable instead of dead code.
      */
     val lines: List<PostJournalLineRequest?>,
+    val origin: JournalOriginInput? = null,
 ) {
     /**
      * The lines, with every element proven present.

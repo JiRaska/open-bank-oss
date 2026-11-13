@@ -227,7 +227,7 @@ export default function ApprovalsPage() {
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Schvalování', 'Approvals')}</span></div>}
         icon={<ClipboardCheck size={18} aria-hidden="true" />}
         title={t('Fronta schvalování', 'Approval inbox')}
-        subtitle={t('Doménové žádosti kontrolujte zde a rozhodněte v příslušné službě. Návrhy AI agentů vyžadují schválení člověkem odlišným od autora.', 'Review domain requests here and decide them in their governed service. AI agent proposals require approval by a human other than the author.')}
+        subtitle={t('Žádosti ze schvalovacích front kontrolujte zde a rozhodněte v příslušné službě. Návrhy AI agentů vyžadují schválení člověkem odlišným od autora.', 'Review approval requests here and decide them in their governed service. AI agent proposals require approval by a human other than the author.')}
         actions={<button type="button" onClick={load} disabled={loading} aria-busy={loading}
           aria-label={t('Obnovit schvalovací frontu', 'Refresh approval queue')} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
           <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
@@ -243,7 +243,7 @@ export default function ApprovalsPage() {
       {/* ADR-0227 D2/D4: domain maker-checker queues, federated. Read-only here — disposal
           belongs to the governed per-domain flows (money-path adds SCA). */}
       <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', margin: '4px 0 10px' }}>
-        {t('Doménová schvalování', 'Domain approvals')} ({domainApprovalItems.length})
+        {t('Schvalovací fronty', 'Approval queues')} ({domainApprovalItems.length})
       </div>
       {domainLoadFailed && (
         <div className="card" role="alert" style={{
@@ -293,9 +293,9 @@ export default function ApprovalsPage() {
             </div>
           </div>
           <div style={{ flex: '1 1 180px' }}>
-            <label htmlFor="approval-domain-filter" style={{ display: 'block', marginBottom: 5, fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>{t('Doména', 'Domain')}</label>
+            <label htmlFor="approval-domain-filter" style={{ display: 'block', marginBottom: 5, fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>{t('Oblast schvalování', 'Approval area')}</label>
             <select id="approval-domain-filter" className="input" value={domainFilter} onChange={event => setDomainFilter(event.target.value as ApprovalDomain | 'all')} style={{ width: '100%' }}>
-              <option value="all">{t('Všechny domény', 'All domains')}</option>
+              <option value="all">{t('Všechny oblasti', 'All areas')}</option>
               {domainOptions.map(domain => <option key={domain} value={domain}>{domain}</option>)}
             </select>
           </div>

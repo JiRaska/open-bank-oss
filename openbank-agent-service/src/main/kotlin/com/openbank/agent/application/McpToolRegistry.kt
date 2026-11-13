@@ -15,6 +15,7 @@ import com.openbank.agent.domain.ToolDefinition
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
+import com.openbank.libs.audit.CanonicalJson
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
@@ -316,6 +317,51 @@ class McpToolRegistry {
                 "suggested_action" to (stringProp("The concrete action a human would take") to true),
             ),
         ),
+        // ── Product as Code authoring (ADR-0352 §12) — in-process over ProductToolkit, the same
+        // functions the `obp` CLI calls. Four read tools and one proposal; no publish/sign/approve.
+        ToolDefinition(
+            name = ProductAuthoringTools.LINT,
+            description = "Validate a Product IR v1 document (schema, run limits, ruleId uniqueness). Read-only.",
+            inputSchema = schema("ir" to (stringProp("The IR v1 document as JSON text") to true)),
+        ),
+        ToolDefinition(
+            name = ProductAuthoringTools.COMPILE,
+            description = "Canonicalise a Product IR v1 document and return its canonical bytes and revisionHash. " +
+                "Read-only.",
+            inputSchema = schema("ir" to (stringProp("The IR v1 document as JSON text") to true)),
+        ),
+        ToolDefinition(
+            name = ProductAuthoringTools.SIMULATE,
+            description = "Replay a portfolio fixture under a Product IR document through the pure interpreter " +
+                "and return the canonical instructions. Read-only; nothing is posted.",
+            inputSchema = schema(
+                "ir" to (stringProp("The IR v1 document as JSON text") to true),
+                "portfolio" to (stringProp("Portfolio fixture JSON: {zone, accounts:[{id, state, steps}]}") to true),
+                "from" to (stringProp("ISO-8601 instant; steps before it are skipped, optional") to false),
+                "to" to (stringProp("ISO-8601 instant; steps at or after it are skipped, optional") to false),
+            ),
+        ),
+        ToolDefinition(
+            name = ProductAuthoringTools.EXPLAIN,
+            description = "Map a ruleId, or an emitted instruction, to its path in the canonical IR. Read-only.",
+            inputSchema = schema(
+                "ir" to (stringProp("The IR v1 document as JSON text") to true),
+                "ruleId" to (stringProp("The ruleId to explain; or give 'instruction'") to false),
+                "instruction" to (stringProp("One emitted instruction as JSON text; or give 'ruleId'") to false),
+            ),
+        ),
+        ToolDefinition(
+            name = ProductAuthoringTools.PROPOSE,
+            description = "Propose a DRAFT catalog revision carrying this IR for a human to review (it has NO " +
+                "effect until approved, and never publishes).",
+            inputSchema = schema(
+                "ir" to (stringProp("The IR v1 document as JSON text") to true),
+                "offeringId" to (stringProp("UUID of the catalog offering the draft belongs to") to true),
+                "schemaId" to (stringProp("Catalog schema id of the revision") to true),
+                "schemaVersion" to (intProp("Catalog schema version") to true),
+                "rationale" to (stringProp("Why this product change is proposed") to true),
+            ),
+        ),
         ToolDefinition(
             name = "flip_feature_flag",
             description = "Propose a feature-flag flip for human approval (four-eyes, ADR-0067/issue #419). " +
@@ -395,7 +441,7 @@ class McpToolRegistry {
         "draft_ticket" to "draft.ticket",
         // Feature-flag flip proposal — four-eyes gated for MONEY_PATH flags (ADR-0067 / issue #419).
         "flip_feature_flag" to "flags.write",
-    )
+    ) + ProductAuthoringTools.CAPABILITIES
 
     /** The charter capability a tool requires, or null when the tool is unmapped (deny-by-default). */
     fun capabilityOf(toolName: String): String? = capabilities[toolName]
@@ -417,6 +463,12 @@ class McpToolRegistry {
             when {
                 toolName == "flip_feature_flag" -> flipFeatureFlag(args, actorId)
                 toolName == "draft_ticket" -> succeed(toolName, actorId, draftTicket(args, actorId))
+                toolName in ProductAuthoringTools.READ_TOOLS -> productResult(
+                    toolName,
+                    actorId,
+                    productRead(toolName, args),
+                )
+                toolName == ProductAuthoringTools.PROPOSE -> succeed(toolName, actorId, proposeProduct(args, actorId))
                 // Every remaining registered tool is a downstream READ; the adapter owns which
                 // service it reaches and how the arguments marshal onto that call.
                 downstream.handles(toolName) -> succeed(toolName, actorId, downstream.read(toolName, args))
@@ -439,6 +491,62 @@ class McpToolRegistry {
     private fun succeed(toolName: String, actorId: String, result: JsonNode): ToolCallResult {
         auditExec(actorId, toolName, AuditResult.SUCCESS)
         return ToolCallResult(content = listOf(ToolContent(text = objectMapper.writeValueAsString(result))))
+    }
+
+    /**
+     * The toolkit's canonical JSON, handed to the model byte-for-byte (the parity gate compares it).
+     * A toolkit failure (invalid IR, unknown rule) is `isError = true`, exactly where `obp` exits
+     * non-zero, and is audited as a FAILURE.
+     */
+    private fun productResult(
+        toolName: String,
+        actorId: String,
+        outcome: ProductAuthoringTools.Outcome,
+    ): ToolCallResult {
+        auditExec(
+            actorId,
+            toolName,
+            if (outcome.ok) AuditResult.SUCCESS else AuditResult.FAILURE,
+            if (outcome.ok) null else "rejected",
+        )
+        return ToolCallResult(content = listOf(ToolContent(text = outcome.text)), isError = !outcome.ok)
+    }
+
+    private fun productRead(toolName: String, args: JsonNode): ProductAuthoringTools.Outcome = when (toolName) {
+        ProductAuthoringTools.LINT -> ProductAuthoringTools.lint(args)
+        ProductAuthoringTools.COMPILE -> ProductAuthoringTools.compile(args)
+        ProductAuthoringTools.SIMULATE -> ProductAuthoringTools.simulate(args)
+        else -> ProductAuthoringTools.explain(args)
+    }
+
+    /**
+     * ADR-0352 §12: an agent proposes a product change, a human disposes. The DRAFT-revision plan is
+     * computed by the same toolkit function `obp propose` uses and recorded as a HITL proposal; this
+     * method calls no catalog endpoint, and nothing reachable from it can publish.
+     */
+    private fun proposeProduct(args: JsonNode, actorId: String): JsonNode {
+        val plan = ProductAuthoringTools.proposalPlan(args)
+        val p = proposals.create(
+            title = "Product draft revision: ${plan["revisionHash"]}",
+            rationale = ProductAuthoringTools.rationale(args),
+            suggestedAction = "Create this DRAFT revision on the catalog v2 API (it does not publish): " +
+                CanonicalJson.write(plan),
+            proposedBy = actorId,
+            modelId = charters.modelId(actorId),
+            correlationId = null,
+            metadata = mapOf("revisionHash" to plan["revisionHash"].toString()),
+        )
+        return objectMapper.createObjectNode()
+            .put("status", "proposed")
+            .put("proposalId", p.id.toString())
+            .put("state", p.state.name)
+            .put("revisionHash", plan["revisionHash"].toString())
+            .put("publishes", false)
+            .put(
+                "message",
+                "Product draft proposal recorded for human review (HITL). Nothing was written to the " +
+                    "catalog; publishing is a human decision (ADR-0259).",
+            )
     }
 
     /**

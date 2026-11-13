@@ -125,7 +125,12 @@ interface ServicingUseCase {
  * independent of cash collection. Idempotent — already-accrued installments are skipped.
  */
 interface AccrueInterestUseCase {
-    fun accrueDueInterest(asOf: LocalDate, limit: Int): Uni<AccrualOutcome>
+    /**
+     * @param deadline when set, the pass stops before the next installment once the clock passes it
+     *   and reports [AccrualOutcome.truncated]: a single batch can be long, so the budget is checked
+     *   inside it, not only between batches.
+     */
+    fun accrueDueInterest(asOf: LocalDate, limit: Int, deadline: java.time.Instant? = null): Uni<AccrualOutcome>
 }
 
 /** Collections terminal step: write off an uncollectible loan's remaining exposure (IFRS 9 Stage 3). */

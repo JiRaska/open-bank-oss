@@ -4,9 +4,10 @@
 
 package com.openbank.settlement.infrastructure.rest
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.settlement.domain.model.SettlementStatus
-import com.openbank.settlement.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
@@ -23,7 +24,10 @@ import javax.sql.DataSource
  * directly, and the read must leave the row and its outbox untouched.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_settlement_it")],
+)
 class SettlementStatusQueryIT {
     @Inject
     lateinit var dataSource: DataSource

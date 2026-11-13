@@ -13,6 +13,7 @@ import com.openbank.tax.application.port.out.ReturnWireRendererPort
 import com.openbank.tax.application.port.out.StatutoryReturnMetricsPort
 import com.openbank.tax.application.usecase.ReportingEntities
 import com.openbank.tax.application.usecase.StatutoryReturnService
+import com.openbank.tax.domain.returns.DeadlineBasis
 import com.openbank.tax.domain.returns.Periodicity
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnDefinition
@@ -20,6 +21,7 @@ import com.openbank.tax.domain.returns.ReturnScope
 import com.openbank.tax.domain.returns.SignedTerm
 import com.openbank.tax.domain.returns.StatutoryReturn
 import com.openbank.tax.domain.returns.ValidationRule
+import com.openbank.tax.infrastructure.returns.ceu.CeuReturnDataAdapter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.Startup
@@ -76,6 +78,9 @@ object CatalogueParser {
         rules = (get("rules") ?: emptyList<JsonNode>()).map { it.toRule() },
         legalBasis = text("legalBasis"),
         lineSchema = (get("lineSchema") ?: emptyList<JsonNode>()).map { it.asText() },
+        deadlineBasis = get("deadlineBasis")?.let { DeadlineBasis.valueOf(it.asText()) } ?: DeadlineBasis.CALENDAR_DAYS,
+        onDemand = get("onDemand")?.asBoolean() ?: false,
+        filingObligation = get("filingObligation")?.asBoolean() ?: true,
     )
 
     private fun JsonNode.toRule(): ValidationRule = when (val type = text("type")) {
@@ -110,7 +115,10 @@ class ReportingEntitiesProducer {
         @ConfigProperty(name = "openbank.statutory-returns.company-id", defaultValue = "company") companyId: String,
         @ConfigProperty(name = "openbank.statutory-returns.fund-ids") fundIds: Optional<List<String>>,
         @ConfigProperty(name = "openbank.statutory-returns.reporting-start") reportingStart: Optional<String>,
+        @ConfigProperty(name = "openbank.ceu.reporting-start") ceuStart: Optional<String>,
     ): ReportingEntities = ReportingEntities(
+        catalogueStarts = ceuStart.map { mapOf(CeuReturnDataAdapter.CATALOGUE_ID to LocalDate.parse(it)) }
+            .orElse(emptyMap()),
         companyId = companyId,
         fundIds = fundIds.orElse(emptyList()).map { it.trim() }.filter { it.isNotEmpty() },
         reportingStart = reportingStart.map { LocalDate.parse(it) }.orElse(null),
@@ -137,13 +145,28 @@ class StatutoryReturnDeadlineScheduler(
     private val service: StatutoryReturnService,
     private val metrics: StatutoryReturnMetricsPort,
     private val domainMetrics: DomainMetrics,
+    private val registry: MeterRegistry,
+    private val entities: ReportingEntities,
 ) {
     private val log = Logger.getLogger(StatutoryReturnDeadlineScheduler::class.java)
     private lateinit var liveness: WorkflowLivenessRecorder
 
+    /**
+     * 1 while the operator has not declared the reporting start or fund roster. An unconfigured
+     * deployment never records liveness, which on its own reads exactly like a dead scheduler;
+     * `WorkflowLivenessStale` excludes workflows reporting this, and a separate low-severity
+     * alert names the missing configuration instead.
+     */
+    private val unconfigured = AtomicInteger(0)
+
     @PostConstruct
     fun registerLiveness() {
         liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofHours(1))
+        Gauge.builder(UNCONFIGURED_GAUGE, unconfigured) { it.get().toDouble() }
+            .tag(WORKFLOW_TAG, WORKFLOW_NAME)
+            .description("1 while the workflow cannot run because its configuration is not declared")
+            .register(registry)
+        unconfigured.set(if (entities.missingConfiguration(service.catalogues()) == null) 0 else 1)
     }
 
     @Scheduled(
@@ -151,6 +174,12 @@ class StatutoryReturnDeadlineScheduler(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     suspend fun refresh() {
+        val missing = entities.missingConfiguration(service.catalogues())
+        unconfigured.set(if (missing == null) 0 else 1)
+        if (missing != null) {
+            log.debugf("statutory return deadline check skipped: %s", missing)
+            return
+        }
         val breaches = service.breaches()
         metrics.recordBreaches(breaches.size)
         liveness.recordSuccess()
@@ -168,5 +197,7 @@ class StatutoryReturnDeadlineScheduler(
     private companion object {
         const val LOG_SAMPLE = 10
         const val WORKFLOW_NAME = "statutory-return-deadline-check"
+        const val UNCONFIGURED_GAUGE = "openbank_workflow_unconfigured"
+        const val WORKFLOW_TAG = "workflow"
     }
 }

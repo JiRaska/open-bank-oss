@@ -167,7 +167,13 @@ class ContextQueryService(
         val decision = try {
             pdp.allow(
                 AuthzQuery(
-                    principal = Principal(actor.id, "HUMAN", actor.roles),
+                    principal = Principal(
+                        actor.id,
+                        "HUMAN",
+                        actor.roles,
+                        serviceAccount = actor.serviceAccount,
+                        clientId = actor.clientId,
+                    ),
                     action = action,
                     resource = ResourceRef(namespace.name.lowercase(), root),
                     attributes = mapOf(

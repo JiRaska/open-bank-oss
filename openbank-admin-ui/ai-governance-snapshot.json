@@ -1,9 +1,9 @@
 {
   "adrRef": "ADR-0031",
   "adrStatus": "Accepted",
-  "phase": 2,
+  "phase": 3,
   "totalPhases": 5,
-  "phaseLabel": "Governed oversight active — phase-3 mechanism implemented with PR writer stopped pending runtime evidence (no autonomous business action)",
+  "phaseLabel": "Bounded non-money development pilot active — test-only proposals require human merge; no autonomous business action",
   "agentsActing": 0,
   "phaseRoadmap": [
     {
@@ -14,15 +14,15 @@
     },
     {
       "number": 2,
-      "status": "active",
+      "status": "complete",
       "title": "Read-only oversight and human queue",
       "outcome": "Agents prepare evidence and proposals; a human makes every disposition."
     },
     {
       "number": 3,
-      "status": "blocked",
+      "status": "active",
       "title": "One non-money development agent",
-      "outcome": "Needs the deployed policy-gated PR path, a recorded real human merge, and deployment attestation before the phase advances."
+      "outcome": "One deployed development pilot is confined to its own tests; policy checks and human merge remain mandatory. Evidence is recorded in docs/runbooks/evidence/ai-phase3/2026-11-10.md."
     },
     {
       "number": 4,
@@ -61,7 +61,7 @@
       "id": "D2",
       "title": "Policy-gated MCP (OPA before every tools/call)",
       "status": "built",
-      "detail": "AgentPolicyGate enforces + audits every tool call. AGENT_POLICY_ENFORCEMENT=block in both the deployment and the agents.yaml declaration (reconciled #743), via an in-process charter allow-list (ADR-0080, #700) plus an OPA sidecar serving the agents.rego bundle over localhost:8181 as the external PDP (#638). Fails safe — a PDP connectivity error degrades to advisory."
+      "detail": "AgentPolicyGate enforces + audits every tool call. AGENT_POLICY_ENFORCEMENT=block in both the deployment and the agents.yaml declaration (reconciled #743), via an in-process charter allow-list (ADR-0080, #700) plus an OPA sidecar serving the agents.rego bundle over localhost:8181 as the external PDP (#638). Fails closed in block mode — a PDP connectivity error denies every tool call (#15758)."
     },
     {
       "id": "D3",
@@ -103,7 +103,7 @@
       "id": "D9",
       "title": "Phasing (blast radius grows with controls)",
       "status": "partial",
-      "detail": "Phase 1 controls live and ENFORCING (deny-by-default + block); the phase-2 HITL proposal queue is shipped. HolmesGPT (rca-investigator, ADR-0091) investigates only on operator request; an authorized operator may persist its finding into an ADR-0271 SHADOW case, but it never remediates or changes banking state. The customer-facing copilot (ADR-0089) runs in its own SCA-gated regime (proposes; the bank disposes). No agent takes autonomous business action. Phase 3 (one non-money development agent), then phases 4–5 (money-path development and independently verifiable provenance), remain future rollout steps. Phase-3 mechanism implemented: flaky-test-hunter's PR path checks the packaged agents.yaml charter in process and queries the OPA sidecar. Both fail CLOSED before any branch or PR is created, including on any PDP outage (advisory degradation is not acceptable there; every decision is audited as agent.github.pr_open with policy_decision). GitOps keeps the PR writer stopped with FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED=false: this returns DENY, never bypasses the policy checks. Temporal finding workflows remain enabled. The recorded-human-merge mechanism is implemented: record-agent-merge workflow → POST /api/v1/agent-merge-records → agent_merge_record (V6) + agent.pr.merged audit (actorType=HUMAN, out-of-band of agent telemetry). Controlled PR-writer activation and runtime verification are separate rollout work. Phase 3 remains blocked until independently verified evidence is on file: (1) the first real agent PR merge recorded through that pipeline (row + audit evidence), and (2) deployment attestation — a green fleet-attestation run (cosign/KMS-verified image attestations) covering the deployed agent-service and flaky-test-hunter images pinned by gitops to the merge commit, cross-checked against the Pact Broker deployed-version record. Phase.current moves to 3 only with both on file."
+      "detail": "Phase 1 controls live and ENFORCING (deny-by-default + block); the phase-2 HITL proposal queue is shipped. HolmesGPT (rca-investigator, ADR-0091) investigates only on operator request; an authorized operator may persist its finding into an ADR-0271 SHADOW case, but it never remediates or changes banking state. The customer-facing copilot (ADR-0089) runs in its own SCA-gated regime (proposes; the bank disposes). No agent takes autonomous business action. Phase 3 is the bounded non-money development pilot; phases 4–5 (money-path development and independently verifiable provenance) remain future steps. Phase-3 mechanism implemented: flaky-test-hunter's PR path checks the packaged agents.yaml charter in process and queries the OPA sidecar. Both fail CLOSED before any branch or PR is created, including on any PDP outage (advisory degradation is not acceptable there; every decision is audited as agent.github.pr_open with policy_decision). GitOps declares a controlled PR-writer pilot with FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED=true and a read-only snapshot of this service's own test sources. The snapshot is collected from public main at pod startup, never built or executed, and its revision is logged. A false writer switch returns DENY; it never bypasses policy. No fleet sweep cron is enabled. The recorded-human-merge mechanism is implemented: record-agent-merge workflow → POST /api/v1/agent-merge-records → agent_merge_record (V6) + agent.pr.merged audit (actorType=HUMAN, out-of-band of agent telemetry). The dated phase-3 evidence is in docs/runbooks/evidence/ai-phase3/2026-11-10.md: a completed source scan with two persisted model-backed diagnoses, independently confirmed gateway completions, a ticket proposal, an independently verified human merge and hash-chained audit event, image attestations, and matching sandbox Pact deployment records. These observations grant no wider write scope. A ticket-only scan is not proof of a successful mechanical code PR, and a deterministic fallback is not a model completion."
     }
   ],
   "decisionSummary": {
@@ -175,11 +175,12 @@
       "Model completions audited (agent.model.complete)",
       "Audit envelope + Kafka pipeline",
       "Hash-chain (record_hash/prev_hash, V5)",
-      "Externally-signed anchors (V6; AWS KMS signer configured in sandbox)"
+      "Externally-signed anchors (V6; AWS KMS signer configured in sandbox)",
+      "Bounded source pilot completed with model-backed diagnoses and a persisted ticket proposal (dated evidence, 2026-11-10)",
+      "Human agent-PR merge independently verified in the merge store, outbox and separate audit store"
     ],
     "planned": [
-      "Runtime verification of PR-path policy decisions (agent.github.pr_open; writer currently stopped in GitOps)",
-      "First real human merge recorded as agent_merge_record + agent.pr.merged audit, out-of-band of agent telemetry",
+      "First live policy-allowed mechanical repair PR from the deployed bounded writer",
       "By-actor live query endpoint (audit-service)",
       "Independently attested runtime evidence of KMS-signed anchors",
       "ai_attribution populated in evidence bundle",
@@ -189,17 +190,19 @@
   "facts": {
     "agentCharters": {
       "source": "openbank-libs/governance/agents.yaml",
-      "sha256": "ab7c341db4674803",
-      "count": 21,
+      "sha256": "f6a3e2b32aef4de1",
+      "count": 23,
       "ids": [
         "compliance-officer",
         "ledger-domain-engineer",
         "ui-assistant",
+        "product-author",
         "rca-investigator",
         "customer-copilot",
         "mcp-anonymous",
         "ap2-anonymous",
         "card-scheme-bulletin-agent",
+        "regulatory-obligations-watcher",
         "card-dispute-evidence-agent",
         "treasury-dealing-assistant",
         "finops-agent",
@@ -215,7 +218,7 @@
         "business-copilot"
       ],
       "byPlane": {
-        "control": 14,
+        "control": 16,
         "development": 2,
         "customer": 3,
         "business": 2
@@ -227,11 +230,11 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "1f19f69a5384ad89",
+      "sha256": "28d88f1e5a5575b3",
       "counts": {
         "external": 2,
         "not-applicable": 2,
-        "pending": 5,
+        "pending": 7,
         "registered": 12
       },
       "idsByStatus": {
@@ -244,8 +247,10 @@
           "ap2-anonymous"
         ],
         "pending": [
+          "product-author",
           "card-scheme-bulletin-agent",
           "card-dispute-evidence-agent",
+          "regulatory-obligations-watcher",
           "treasury-dealing-assistant",
           "kyb-analyst",
           "business-copilot"
@@ -289,10 +294,12 @@
           "system.v2",
           "system.v3"
         ],
+        "product-author": [],
         "rca-investigator": [],
         "ledger-domain-engineer": [],
         "card-scheme-bulletin-agent": [],
         "card-dispute-evidence-agent": [],
+        "regulatory-obligations-watcher": [],
         "treasury-dealing-assistant": [],
         "mcp-anonymous": [],
         "ap2-anonymous": [],
@@ -459,7 +466,7 @@
     "provenance": {
       "curated": {
         "source": "openbank-libs/governance/ai-rollout.yaml",
-        "sha256": "1cdfff25203dfc9c"
+        "sha256": "bf0b09cf9c5c219a"
       },
       "generatedBy": ".github/scripts/gen-ai-governance-snapshot.py"
     }

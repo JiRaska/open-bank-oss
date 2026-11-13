@@ -912,3 +912,6 @@ display:none!important}
 .nav .brand-lipa video{display:block;width:100%;height:auto;aspect-ratio:16/9;mix-blend-mode:darken}
 @media(max-width:1000px){.nav .brand-lipa{flex-basis:175px;width:175px}}
 @media(max-width:720px){.nav .brand-lipa{flex-basis:165px;width:165px;margin-block:-18px}}
+
+/* Canonical outlined wordmark; retain the animation only in the header. */
+.footer .brand .brand-lockup{width:190px;height:auto;max-width:100%}

@@ -11,6 +11,7 @@ import com.openbank.sanctions.application.port.out.SanctionsOutboxRepository
 import com.openbank.sanctions.application.port.out.SanctionsRepository
 import com.openbank.sanctions.domain.model.SanctionsCheck
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
+import com.openbank.sanctions.infrastructure.json.omitAbsentScreeningProfileFields
 import com.openbank.sanctions.infrastructure.persistence.entity.SanctionsCheckEntity
 import com.openbank.sanctions.infrastructure.persistence.mapper.toDomain
 import com.openbank.sanctions.infrastructure.persistence.mapper.toEntity
@@ -27,7 +28,7 @@ class SanctionsRepositoryImpl(private val outboxRepo: SanctionsOutboxRepository)
     SanctionsRepository,
     PanacheRepository<SanctionsCheckEntity> {
 
-    private val mapper = jacksonObjectMapper().findAndRegisterModules()
+    private val mapper = jacksonObjectMapper().findAndRegisterModules().omitAbsentScreeningProfileFields()
 
     override suspend fun save(check: SanctionsCheck): SanctionsCheck {
         val e = check.toEntity()
@@ -169,6 +170,9 @@ class SanctionsRepositoryImpl(private val outboxRepo: SanctionsOutboxRepository)
         Panache.withSession { find("id", id).firstResult() }.awaitSuspending()?.toDomain()
     override suspend fun findByIdempotencyKey(key: String) =
         Panache.withSession { find("idempotencyKey", key).firstResult() }.awaitSuspending()?.toDomain()
+    override suspend fun findWhitelistsForSubject(subjectId: String): List<SanctionsCheck> = Panache.withSession {
+        find("subjectId = ?1 and status = ?2", subjectId, SanctionsCheckStatus.WHITELISTED).list()
+    }.awaitSuspending().map { it.toDomain() }
     override suspend fun findByStatus(status: SanctionsCheckStatus) =
         Panache.withSession { find("status", status).list() }.awaitSuspending().map { it.toDomain() }
     override suspend fun listChecks(): List<SanctionsCheck> =

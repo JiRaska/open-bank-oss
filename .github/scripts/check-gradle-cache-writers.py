@@ -81,6 +81,10 @@ SETUP_JAVA = "actions/setup-java"
 # OS+architecture on Linux-X64, which today is fleet-lint. Everything else restores.
 # ---------------------------------------------------------------------------
 DECLARED: dict[str, tuple[str, str]] = {
+    "communication-image-only.yml::build-push": (
+        "read-only",
+        "Manual communication evidence build restores existing dependencies without adding a cache writer.",
+    ),
     "fleet-lint.yml::fleet-lint": (
         "conditional",
         "THE designated Linux-X64 writer. Runs `testClasses detekt ktlintCheck` fleet-wide "
@@ -107,11 +111,13 @@ DECLARED: dict[str, tuple[str, str]] = {
         "reasoning as dependency-submission.yml's own demotion above.",
     ),
     "security.yml::codeql": (
-        "writes-on-main",
-        "Left as-is deliberately. Its java-kotlin leg documents a 25-30 min cold penalty and "
-        "is the most preemption-exposed job in the fleet, so demoting it would trade a felt "
-        "regression for headroom already obtained more cheaply elsewhere. Revisit only with "
-        "a measurement showing fleet-lint's entry covers `testClasses` for it.",
+        "read-only",
+        "Demoted in #14413. Its own entry was the NEWEST Linux-X64 home on main after every "
+        "push (it finishes after fleet-lint), so every Services CI build leg fell back to it "
+        "— and codeql-force-compilers.init.gradle makes every compiler non-cacheable, so that "
+        "entry carried no compile outputs and build-logic + openbank-libs-* recompiled in "
+        "every service job. Its own runs gain nothing from writing: 418 of 419 tasks execute "
+        "anyway; it now restores fleet-lint's superset home for dependencies.",
     ),
     "auto-deploy.yml::build-push": (
         "writes-always",
@@ -174,6 +180,11 @@ DECLARED: dict[str, tuple[str, str]] = {
         "Consumer; restores fleet-lint's home. Builds one service's quarkusBuild to smoke "
         "the ONNX serving path inside the shipped image (#3354), on a schedule rather than "
         "per-push, so it neither needs nor should store a per-run entry.",
+    ),
+    "pension-accounting-e2e.yml::e2e": (
+        "read-only",
+        "Path-scoped packaged accounting proof restores fleet-lint's Gradle home to build "
+        "ledger and pension-fund fast jars; it never introduces another cache writer.",
     ),
     "pitest.yml::pitest": (
         "read-only",

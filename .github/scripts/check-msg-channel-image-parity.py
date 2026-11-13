@@ -68,6 +68,7 @@
 import argparse
 import base64
 import binascii
+import json
 import os
 import pathlib
 import re
@@ -182,6 +183,12 @@ def _api_show(repo: str, ref: str, path: str):
     return Unreadable(kind, last_stderr)
 
 
+# Only ONE file is read from each deployed commit, so fetch the commit alone and let `git show`
+# pull the single tree path + blob lazily (promisor). Without this every `--depth 1` fetch
+# downloaded the WHOLE repository snapshot: 15 distinct deployed shas took 352 s from an empty
+# repo (131-173 s on the CI runner, budget 108 s); the filtered form is ~2 s and ~1 MB per sha.
+_FETCH_FILTER = ["--filter=tree:0"]
+
 _FULL_SHA_CACHE: dict = {}
 _FETCHED: set = set()
 
@@ -218,16 +225,97 @@ def _resolve_full_sha(root: pathlib.Path, repo: str, ref: str):
     return None
 
 
+def _graphql_resolve_query(owner: str, name: str, refs: list) -> str:
+    """One GraphQL document resolving every abbreviated sha as an aliased `object(expression:)`."""
+    fields = " ".join(f's{i}: object(expression: "{r}") {{ oid }}' for i, r in enumerate(refs))
+    return f'query {{ repository(owner: "{owner}", name: "{name}") {{ {fields} }} }}'
+
+
+def prefetch_full_shas(root: pathlib.Path, repo: str, refs) -> int:
+    """Resolve every abbreviated sha the run will need in ONE GraphQL request (#quota).
+
+    Before this, `_resolve_full_sha` spent one REST call per distinct sha (~7 a run, on every
+    CI run). GraphQL draws on a separate budget from the 1,000/hour REST quota, and one request
+    covers them all. Only POSITIVE answers are memoised: a null (unknown sha) or any failure of
+    the batch leaves the sha uncached, so `_resolve_full_sha` falls back to exactly the per-sha
+    REST path it always had — the batch can save calls, never change a verdict. Returns the
+    number of shas it resolved.
+    """
+    todo = []
+    for r in sorted(set(refs)):
+        if not re.fullmatch(r"[0-9a-f]{4,39}", r or "") or r in _FULL_SHA_CACHE:
+            continue
+        p = subprocess.run(["git", "rev-parse", f"{r}^{{commit}}"], cwd=root,
+                           capture_output=True, text=True)
+        if p.returncode == 0 and len(p.stdout.strip()) == 40:
+            _FULL_SHA_CACHE[r] = p.stdout.strip()
+        else:
+            todo.append(r)
+    if not todo or "/" not in repo:
+        return 0
+    owner, name = repo.split("/", 1)
+    p = subprocess.run(["gh", "api", "graphql", "-f",
+                        f"query={_graphql_resolve_query(owner, name, todo)}"],
+                       capture_output=True, text=True)
+    if p.returncode != 0:
+        return 0
+    try:
+        repo_obj = (json.loads(p.stdout).get("data") or {}).get("repository") or {}
+    except ValueError:
+        return 0
+    resolved = 0
+    for i, r in enumerate(todo):
+        oid = (repo_obj.get(f"s{i}") or {}).get("oid") or ""
+        if len(oid) == 40 and oid.startswith(r):
+            _FULL_SHA_CACHE[r] = oid
+            resolved += 1
+    return resolved
+
+
 def _fetch_commit(root: pathlib.Path, full_sha: str) -> bool:
     """Bring one commit into a shallow clone over git transport (no REST quota spent)."""
     if full_sha in _FETCHED:
         return True
-    p = subprocess.run(["git", "fetch", "--depth", "1", "--quiet", "origin", full_sha],
+    p = subprocess.run(["git", "fetch", "--depth", "1", *_FETCH_FILTER, "--quiet", "origin", full_sha],
                        cwd=root, capture_output=True, text=True)
     if p.returncode == 0:
         _FETCHED.add(full_sha)
         return True
     return False
+
+
+def prefetch(root: pathlib.Path, repo: str, pairs) -> None:
+    """Resolve every distinct deployed sha concurrently, then fetch them in ONE git call.
+
+    Measured 2026-11-03: each `git fetch origin <sha>` costs ~3.4 s here (the remote advertises
+    ~15k refs, mostly refs/pull) plus ~0.8 s for the abbreviated->full REST resolution, and they
+    ran serially per distinct sha. 7 shas was ~30 s; 15 shas was 130 s+ and tripped the budget.
+    One batched fetch pays that negotiation once. If the batch fails (one sha not on the remote
+    fails them all) the per-sha path in `git_show` still runs and attributes the failure.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    refs = {r for r, _ in pairs}
+    todo = sorted({r for r in refs
+                   if subprocess.run(["git", "cat-file", "-e", f"{r}^{{commit}}"], cwd=root,
+                                      capture_output=True).returncode != 0})
+    if not todo:
+        return
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        fulls = list(ex.map(lambda r: _resolve_full_sha(root, repo, r), todo))
+    wanted = sorted({f for f in fulls if isinstance(f, str) and f not in _FETCHED})
+    if not wanted:
+        return
+    p = subprocess.run(["git", "fetch", "--depth", "1", *_FETCH_FILTER, "--quiet", "origin", *wanted],
+                       cwd=root, capture_output=True, text=True)
+    if p.returncode == 0:
+        _FETCHED.update(wanted)
+        # Each lazy tree/blob read is its own ~2-3 s round trip; do them concurrently so the
+        # serial loop below finds everything local.
+        by_ref = dict(zip(todo, fulls, strict=True))
+        warm = [(by_ref[r], path) for r, path in pairs if isinstance(by_ref.get(r), str)]
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            list(ex.map(lambda fp: _git_show(root, fp[0], fp[1]), warm))
 
 
 def git_show(root: pathlib.Path, ref: str, path: str, repo: str):
@@ -354,7 +442,12 @@ def main() -> int:
         )
         return 2
 
+    # One GraphQL request for every sha the loop below needs, instead of one REST call each.
+    prefetch_full_shas(root, repo, [images[s] for s in declared if images.get(s)])
+
     errors, quota_blocked, checked = [], [], 0
+    prefetch(root, repo, {(images[s], f"{s}/src/main/resources/application.yaml")
+                          for s in declared if s in images})
     for svc, channels in sorted(declared.items()):
         sha = images.get(svc)
         if not sha:
@@ -470,12 +563,45 @@ mp:
 
     retry_cases = _self_test_api_show_retry()
     bad_cases.extend(retry_cases)
+    bad_cases.extend(_self_test_prefetch())
 
     if bad_cases:
         print("\n::error::self-test FAILED: " + "; ".join(bad_cases))
         return 1
     print("\nself-test: the scanner distinguishes a servable channel from a declared-only one.")
     return 0
+
+
+def _self_test_prefetch():
+    """The GraphQL batch memoises only verified answers, and a failed batch changes nothing."""
+    import unittest.mock as mock
+
+    bad = []
+    full = "abc1234" + "0" * 33
+    miss = mock.Mock(returncode=1, stdout="", stderr="")
+    answer = mock.Mock(returncode=0, stderr="", stdout=json.dumps(
+        {"data": {"repository": {"s0": {"oid": full}, "s1": None, "s2": {"oid": "f" * 40}}}}))
+    _FULL_SHA_CACHE.clear()
+    with mock.patch("subprocess.run", side_effect=[miss, miss, miss, answer]) as m:
+        n = prefetch_full_shas(pathlib.Path("."), "o/r", ["abc1234", "bbbbbbb", "ccccccc", "abc1234"])
+    if m.call_count != 4:
+        bad.append(f"prefetch: expected 3 local rev-parse + ONE graphql call, got {m.call_count}")
+    if n != 1 or _FULL_SHA_CACHE.get("abc1234") != full:
+        bad.append("prefetch: a verified oid must be memoised")
+    if "bbbbbbb" in _FULL_SHA_CACHE:
+        bad.append("prefetch: a null answer must NOT be memoised (REST fallback decides)")
+    if "ccccccc" in _FULL_SHA_CACHE:
+        bad.append("prefetch: an oid not prefixed by the ref must be rejected")
+    _FULL_SHA_CACHE.clear()
+    with mock.patch("subprocess.run", side_effect=[miss, mock.Mock(returncode=1, stdout="", stderr="HTTP 403")]):
+        if prefetch_full_shas(pathlib.Path("."), "o/r", ["ddddddd"]) != 0 or _FULL_SHA_CACHE:
+            bad.append("prefetch: a failed batch must leave the cache empty")
+    _FULL_SHA_CACHE.clear()
+    for why in bad:
+        print(f"  BAD {why}")
+    if not bad:
+        print("  ok  graphql sha prefetch: one call, verified answers only, failure is a no-op")
+    return bad
 
 
 def _self_test_api_show_retry():

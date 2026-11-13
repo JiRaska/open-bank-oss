@@ -11,18 +11,33 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.openbank.aml.infrastructure.persistence.entity.AmlCaseEntity
+import com.openbank.aml.infrastructure.persistence.repository.AmlCaseRepositoryImpl
+import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
+import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.vertx.core.Vertx
+import io.vertx.core.impl.ContextInternal
 import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
+import java.time.Instant
+import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 
 /**
  * Broker-side provider verification for aml-service, published-result counterpart to
@@ -87,6 +102,12 @@ class AmlPactBrokerProviderVerificationTest {
     @Inject
     lateinit var testIdentityAssociation: TestIdentityAssociation
 
+    @Inject
+    lateinit var caseRepository: AmlCaseRepositoryImpl
+
+    @Inject
+    lateinit var vertx: Vertx
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
@@ -122,5 +143,69 @@ class AmlPactBrokerProviderVerificationTest {
     @State("no AML case exists for the FX conversion idempotency key")
     fun stateNoExistingCaseForIdempotencyKey() {
         // Intentionally empty — see the KDoc above.
+    }
+
+    /** Mirrors [AmlPactProviderVerificationTest.stateNoCaseExistsWithRequestedId] verbatim. */
+    @State("no AML case exists with the requested id")
+    fun stateNoCaseExistsWithRequestedId() {
+        // No seed: the requested case id is one this provider test never creates.
+    }
+
+    /**
+     * Mirrors [AmlPactProviderVerificationTest.stateCaseExistsForPactParty] verbatim — same seed,
+     * same constants, same Vert.x-context bridge (the broker twin must carry every @State the
+     * folder twin has, or the broker replay fails with MissingStateChangeMethod).
+     */
+    @State("an AML case exists for the pact party")
+    fun stateCaseExistsForPactParty() = runOnVertxContext {
+        // Idempotence guard as in the folder twin — pact-jvm 4.7.3 invokes @State twice.
+        if (caseRepository.findById(CASE_ID) != null) return@runOnVertxContext
+        val entity = AmlCaseEntity()
+        entity.caseId = CASE_ID
+        entity.idempotencyKey = IDEMPOTENCY_KEY
+        entity.partyId = PACT_PARTY_ID
+        entity.customerReference = CUSTOMER_REFERENCE
+        entity.screeningType = "TRANSACTION_MONITORING"
+        entity.riskLevel = "HIGH"
+        entity.status = "OPEN"
+        entity.alertCode = "PACT-ALERT-001"
+        entity.alertDetail = "pact fixture"
+        entity.matchedEntity = null
+        entity.decisionReason = null
+        entity.assignedAnalyst = null
+        entity.decidedBy = null
+        entity.screenedAt = Instant.parse("2026-01-15T00:00:00Z")
+        entity.decidedAt = null
+        entity.createdAt = Instant.parse("2026-01-15T00:00:00Z")
+        entity.updatedAt = Instant.parse("2026-01-15T00:00:00Z")
+        Panache.withTransaction {
+            caseRepository.persist(entity)
+        }.awaitSuspending()
+        Unit
+    }
+
+    /** Same Vert.x-context bridge as the folder twin — see its KDoc. */
+    private fun runOnVertxContext(block: suspend () -> Unit) {
+        val future = CompletableFuture<Unit>()
+        val duplicated = (vertx.orCreateContext as ContextInternal).duplicate()
+        VertxContextSafetyToggle.setContextSafe(duplicated, true)
+        val dispatcher = Executor { command -> duplicated.runOnContext { command.run() } }.asCoroutineDispatcher()
+        CoroutineScope(dispatcher).launch {
+            try {
+                block()
+                future.complete(Unit)
+            } catch (t: Throwable) {
+                future.completeExceptionally(t)
+            }
+        }
+        future.get(10, TimeUnit.SECONDS)
+    }
+
+    private companion object {
+        /** Must match AgentAmlReadPactConsumerTest (openbank-agent-service) and the folder twin. */
+        private val CASE_ID: UUID = UUID.fromString("2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a2a")
+        private val PACT_PARTY_ID: UUID = UUID.fromString("1b1b1b1b-1b1b-4b1b-8b1b-1b1b1b1b1b1b")
+        const val IDEMPOTENCY_KEY = "pact-agent-aml-001"
+        const val CUSTOMER_REFERENCE = "pact-agent-aml-ref"
     }
 }

@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+# WorkflowLivenessStale vs WorkflowUnconfigured (prometheus-rules-workflow-liveness.yaml).
+#
+# A workflow whose required configuration is not declared (tax-reporting's
+# statutory-return-deadline-check without a reporting start) records no success by design. It
+# reports openbank_workflow_unconfigured == 1, and the stale rule must stay quiet for it while
+# the low-severity WorkflowUnconfigured fires instead.
+#
+#   1. unconfigured: a never-succeeding age series -> WorkflowUnconfigured, no stale alert;
+#   2. negative case: the identical age series with the flag at 0 -> WorkflowLivenessStale fires,
+#      proving group 1 is quiet because of the flag, not because the rule cannot fire.
+rule_files:
+  - prometheus-rules-workflow-liveness.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'openbank_workflow_last_success_age_seconds{namespace="tax-reporting",workflow="statutory-return-deadline-check"}'
+        values: '0+60x600'
+      - series: 'openbank_workflow_expected_interval_seconds{namespace="tax-reporting",workflow="statutory-return-deadline-check"}'
+        values: '3600x600'
+      - series: 'openbank_workflow_unconfigured{namespace="tax-reporting",workflow="statutory-return-deadline-check"}'
+        values: '1x600'
+    alert_rule_test:
+      - eval_time: 8h
+        alertname: WorkflowLivenessStale
+        exp_alerts: []
+    promql_expr_test:
+      - expr: ALERTS{alertname="WorkflowUnconfigured", alertstate="firing"}
+        eval_time: 8h
+        exp_samples:
+          - labels: 'ALERTS{alertname="WorkflowUnconfigured", alertstate="firing", namespace="tax-reporting", severity="info", team="platform", workflow="statutory-return-deadline-check"}'
+            value: 1
+
+  - interval: 1m
+    input_series:
+      - series: 'openbank_workflow_last_success_age_seconds{namespace="tax-reporting",workflow="statutory-return-deadline-check"}'
+        values: '0+60x600'
+      - series: 'openbank_workflow_expected_interval_seconds{namespace="tax-reporting",workflow="statutory-return-deadline-check"}'
+        values: '3600x600'
+      - series: 'openbank_workflow_unconfigured{namespace="tax-reporting",workflow="statutory-return-deadline-check"}'
+        values: '0x600'
+    promql_expr_test:
+      - expr: ALERTS{alertname="WorkflowLivenessStale", alertstate="firing"}
+        eval_time: 8h
+        exp_samples:
+          - labels: 'ALERTS{alertname="WorkflowLivenessStale", alertstate="firing", namespace="tax-reporting", severity="warning", team="platform", workflow="statutory-return-deadline-check"}'
+            value: 1
+      - expr: ALERTS{alertname="WorkflowUnconfigured", alertstate="firing"}
+        eval_time: 8h
+        exp_samples: []

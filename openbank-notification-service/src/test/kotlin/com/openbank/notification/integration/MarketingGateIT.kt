@@ -9,6 +9,7 @@ import com.openbank.libs.contact.ContactCounterPort
 import com.openbank.libs.contact.ContactPolicy
 import com.openbank.libs.contact.ContactPolicyGate
 import com.openbank.libs.contact.ContactSuppressionPort
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.notification.application.NotificationConsumer
 import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationOutcomeEvent
@@ -48,7 +49,7 @@ import java.util.function.Supplier
  */
 @QuarkusTest
 @QuarkusTestResource(MarketingGateIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.notification.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class MarketingGateIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {

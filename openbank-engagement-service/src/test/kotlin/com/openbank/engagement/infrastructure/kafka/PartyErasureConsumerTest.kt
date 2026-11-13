@@ -6,6 +6,7 @@ package com.openbank.engagement.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.engagement.application.port.out.AdverseStateRepository
+import com.openbank.engagement.application.port.out.GameStore
 import com.openbank.engagement.domain.model.AdverseState
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -18,13 +19,15 @@ import java.util.UUID
 class PartyErasureConsumerTest {
 
     private val adverseState = mockk<AdverseStateRepository>(relaxed = true)
-    private val consumer = PartyErasureConsumer(adverseState, ObjectMapper())
+    private val games = mockk<GameStore>(relaxed = true)
+    private val consumer = PartyErasureConsumer(adverseState, ObjectMapper(), games)
 
     @Test
     fun `PARTY_ERASED sets ERASURE_REQUESTED active`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId","occurredAt":"2026-08-07T00:00:00Z"}""")
         coVerify { adverseState.setActive(partyId, AdverseState.ERASURE_REQUESTED, any()) }
+        coVerify { games.erase(partyId) }
     }
 
     @Test

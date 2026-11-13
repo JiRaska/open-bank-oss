@@ -7,7 +7,11 @@
       "description": "GET closed periods available for regulatory reporting",
       "providerStates": [
         {
-          "name": "ledger has frozen monthly trial balance for the reporting date"
+          "name": "ledger has frozen monthly trial balance for the reporting date",
+          "params": {
+            "reportingMonth": "2000-06-30",
+            "yearToDate": true
+          }
         }
       ],
       "request": {
@@ -74,7 +78,11 @@
       "description": "GET frozen January-to-date movements for FINREP F02",
       "providerStates": [
         {
-          "name": "ledger has frozen monthly trial balance for the reporting date"
+          "name": "ledger has frozen monthly trial balance for the reporting date",
+          "params": {
+            "reportingMonth": "2000-06-30",
+            "yearToDate": true
+          }
         }
       ],
       "request": {
@@ -226,7 +234,11 @@
       "description": "GET mutable January-to-date movements for FINREP F02 preview",
       "providerStates": [
         {
-          "name": "ledger has frozen monthly trial balance for the reporting date"
+          "name": "ledger has frozen monthly trial balance for the reporting date",
+          "params": {
+            "reportingMonth": "2000-06-30",
+            "yearToDate": true
+          }
         }
       ],
       "request": {
@@ -314,7 +326,11 @@
       "description": "GET the frozen GL closing balance for a FINREP reporting date",
       "providerStates": [
         {
-          "name": "ledger has frozen monthly trial balance for the reporting date"
+          "name": "ledger has frozen monthly trial balance for the reporting date",
+          "params": {
+            "reportingMonth": "2000-06-30",
+            "yearToDate": true
+          }
         }
       ],
       "request": {
@@ -400,7 +416,11 @@
       "description": "GET the frozen monthly GL movements for F02 profit and loss",
       "providerStates": [
         {
-          "name": "ledger has frozen monthly trial balance for the reporting date"
+          "name": "ledger has frozen monthly trial balance for the reporting date",
+          "params": {
+            "reportingMonth": "2000-06-30",
+            "yearToDate": true
+          }
         }
       ],
       "request": {
@@ -486,7 +506,11 @@
       "description": "GET the mutable GL closing balance for an internal working preview",
       "providerStates": [
         {
-          "name": "ledger has frozen monthly trial balance for the reporting date"
+          "name": "ledger has frozen monthly trial balance for the reporting date",
+          "params": {
+            "reportingMonth": "2000-06-30",
+            "yearToDate": true
+          }
         }
       ],
       "request": {
@@ -572,7 +596,11 @@
       "description": "GET the mutable monthly GL movements for F02 working preview",
       "providerStates": [
         {
-          "name": "ledger has frozen monthly trial balance for the reporting date"
+          "name": "ledger has frozen monthly trial balance for the reporting date",
+          "params": {
+            "reportingMonth": "2000-06-30",
+            "yearToDate": true
+          }
         }
       ],
       "request": {

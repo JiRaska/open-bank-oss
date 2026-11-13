@@ -21,7 +21,7 @@
 //
 // All BFF traffic is intercepted with page.route(); no live services required.
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
@@ -113,14 +113,16 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
 
     // The shell is part of the operator experience, not decorative page chrome: the
     // navigation rail and command bar must retain their deliberate working geometry.
-    expect(Math.round((await page.locator('#admin-sidebar:visible').boundingBox())!.width)).toBe(264)
+    expect(Math.round((await page.locator('#admin-sidebar:visible').boundingBox())!.width)).toBe(280)
     expect(Math.round((await page.locator('header:visible').boundingBox())!.height)).toBe(60)
     expect(await main.locator('.page-header').evaluate(el => getComputedStyle(el).backgroundImage)).toContain('linear-gradient')
 
     // The Explorer portrait is deliberately oversized and clipped by the guide,
     // but its top (and therefore its head) must remain inside the visible banner.
     // A negative portrait top previously left only the torso visible in production.
-    const explorerGuide = page.getByLabel('Welcome to your operations cockpit')
+    const explorerGuide = main.getByLabel('Welcome to your operations cockpit')
+    await expect(explorerGuide).toHaveCount(1)
+    await expect(explorerGuide).toBeVisible()
     const guideBox = await explorerGuide.boundingBox()
     const portraitBox = await explorerGuide.locator('img').boundingBox()
     expect(guideBox).not.toBeNull()

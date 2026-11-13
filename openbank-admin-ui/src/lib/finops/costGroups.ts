@@ -9,14 +9,16 @@
 // generate it (root CLAUDE.md rule #3 / #7). When a CI-generated catalog carries the
 // allocation taxonomy this module becomes a fallback — same trajectory as serverlessTiers.ts.
 //
-// CANONICAL service key = the manifest serviceName (NO `openbank-` prefix), which also equals
-// the gitops Deployment metadata.name. `canonicalServiceId()` strips a leading `openbank-` and
+// CANONICAL service key = the manifest serviceName (NO `openbank-` prefix), which normally equals
+// the GitOps workload metadata.name; registered naming exceptions are resolved below. `canonicalServiceId()` strips a leading `openbank-` and
 // a trailing `-service`-less alias is NOT attempted — ids must match manifest.ts exactly. The
 // data-domain (cost-center) lens is read straight from the governance manifest, so there is no
 // second hand-maintained service->domain table to rot.
 
 import type { DataDomain } from '@/lib/governance/manifest'
 import { getGovernanceManifest } from '@/lib/governance/governanceLoader'
+import { getRegistry } from '@/lib/services/fleet'
+import { k8sNameOf } from '@/lib/services/registry'
 
 export interface CostGroup {
   /** Stable id, e.g. `sepa-payment-flow`. */
@@ -72,12 +74,21 @@ export function canonicalServiceId(id: string): string {
   return id.replace(/^openbank-/, '')
 }
 
-/** Data domain (cost-center) for a service id, or undefined if the manifest doesn't know it. */
-export function domainForService(id: string): DataDomain | undefined {
-  return DOMAIN_BY_SERVICE.get(canonicalServiceId(id))
+/** Resolve only registered workload naming exceptions; never guess a missing suffix. */
+export function governanceServiceIdForWorkload(id: string): string | undefined {
+  const workload = canonicalServiceId(id)
+  const matches = getRegistry().filter(service => k8sNameOf(service) === workload)
+  if (matches.length > 1) return undefined
+  return matches.length === 1 ? canonicalServiceId(matches[0].container) : workload
 }
 
-/** All service ids the governance manifest knows — the universe a footprint must map into. */
+/** Data domain (cost-center) for a service/workload identity, or undefined when unknown. */
+export function domainForService(id: string): DataDomain | undefined {
+  const canonical = governanceServiceIdForWorkload(id)
+  return canonical ? DOMAIN_BY_SERVICE.get(canonical) : undefined
+}
+
+/** Canonical governance identities, before resolving operational workload aliases. */
 export function knownServiceIds(): Set<string> {
   return new Set(DOMAIN_BY_SERVICE.keys())
 }

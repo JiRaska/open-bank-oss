@@ -17,8 +17,8 @@ import java.time.LocalDate
  * the risk engine's, from one TIED_OUT snapshot at the report date, so C 02.00 and the admin console
  * cannot disagree.
  *
- * Layout: the post-CRR3 template of Commission Implementing Regulation C(2024) 8389 amending
- * (EU) 2021/451, Annex I sheet CA2 (EBA reporting framework 4.0), column 0010 "TREA". Rows:
+ * Layout: EBA reporting framework 4.2 COREP OF table C 02.00.a, column 0010 "TREA".
+ * The coordinates match the post-CRR3 CA2 layout used by the preview. Rows:
  *   0010 TOTAL RISK EXPOSURE AMOUNT                                   — DATA GAP (see below)
  *   0040 RWEA for credit, counterparty credit and dilution risks …    — Σ SA RWEA
  *   0050 Standardised approach (SA)                                   — Σ SA RWEA
@@ -46,8 +46,8 @@ import java.time.LocalDate
  * set actually used, when [RiskCapitalResult.parameterSetId] does not start with
  * [RiskEngineFigures.EU_CRR_CAPITAL_PARAMETER_SET_PREFIX] — same pattern as the LCR mappers' EU
  * liquidity-set gap ([RiskEngineFigures.parameterSetGap]).
- * Unverified: whether framework 4.2 (the version finrep's XBRL-CSV preflight pins) changed any CA2
- * row code relative to 4.0.
+ * The pinned taxonomy check covers the preview coordinates. C 02.00.b has a different
+ * own-funds-requirements fact set and shares the C 02.00 filing indicator.
  */
 object C0200Mapper {
 

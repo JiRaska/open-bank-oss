@@ -11,6 +11,15 @@ function promResult(value: string) {
   return { ok: true, json: async () => ({ data: { result: [{ value: [0, value] }] } }) }
 }
 const emptyResult = { ok: true, json: async () => ({ data: { result: [] } }) }
+const AGENT_IDS = ['code-review', 'copilot', 'finops-agent', 'fleet-monitor', 'holmes-rca', 'unattributed']
+function agentsResult(ids: string[]) {
+  return { ok: true, json: async () => ({ data: { result: ids.map(agent_id => ({ metric: { agent_id }, value: [0, '1'] })) } }) }
+}
+// Answers the route's agent-discovery query with AGENT_IDS; every other query goes to `handler`.
+function stubPrometheus(handler: (url: string) => unknown, ids: string[] = AGENT_IDS) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+    decodeURIComponent(String(url)).includes('count by (agent_id)') ? agentsResult(ids) : handler(url)))
+}
 
 describe('GET /api/finops/ai-costs without data', () => {
   beforeEach(() => vi.resetModules())
@@ -20,7 +29,7 @@ describe('GET /api/finops/ai-costs without data', () => {
   })
 
   it('reports no total (null, not 0) when Prometheus is unreachable', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('connection refused') }))
+    stubPrometheus((async () => { throw new Error('connection refused') }))
     const { GET } = await import('@/app/api/finops/ai-costs/route')
 
     const body = await (await GET()).json()
@@ -30,8 +39,24 @@ describe('GET /api/finops/ai-costs without data', () => {
     expect(body.agents).toEqual([])
   })
 
+  it('reports unavailable when the Langfuse bridge exports langfuse_up 0', async () => {
+    // The exporter (ai-platform/langfuse-exporter.yaml) sets langfuse_up 0 on any failed poll
+    // while keeping its counters; the route must not read those stale counters as live figures.
+    const fetchMock = vi.fn(async (url: string) =>
+      decodeURIComponent(String(url)).includes('langfuse_up') ? promResult('0') : promResult('2.5'))
+    vi.stubGlobal('fetch', fetchMock)
+    const { GET } = await import('@/app/api/finops/ai-costs/route')
+
+    const body = await (await GET()).json()
+
+    expect(body.available).toBe(false)
+    expect(body.totalCostLast7dUsd).toBeNull()
+    expect(body.agents).toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('reports no total when the bridge is up but exports no agent series', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+    stubPrometheus((async (url: string) =>
       decodeURIComponent(String(url)).includes('langfuse_up') ? promResult('1') : emptyResult))
     const { GET } = await import('@/app/api/finops/ai-costs/route')
 
@@ -43,7 +68,7 @@ describe('GET /api/finops/ai-costs without data', () => {
   })
 
   it('still reports a real total when agent series exist (the null is not a blanket)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+    stubPrometheus((async (url: string) =>
       decodeURIComponent(String(url)).includes('langfuse_up') ? promResult('1') : promResult('2.5')))
     const { GET } = await import('@/app/api/finops/ai-costs/route')
 
@@ -73,7 +98,7 @@ describe('GET /api/finops/ai-costs without data', () => {
   })
 
   it('keeps valid 24h data when every 7d cost query fails, without reporting a zero total', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    stubPrometheus((async (url: string) => {
       const query = decodeURIComponent(String(url))
       if (query.includes('langfuse_up')) return promResult('1')
       return query.includes('[7d]') ? { ok: false } : promResult('2.5')
@@ -82,7 +107,7 @@ describe('GET /api/finops/ai-costs without data', () => {
     const body = await (await GET()).json()
 
     expect(body.available).toBe(true)
-    expect(body.agents).toHaveLength(5)
+    expect(body.agents).toHaveLength(6)
     expect(body.agents.every((agent: { costLast24hUsd: number }) => agent.costLast24hUsd === 2.5)).toBe(true)
     expect(body.agents.every((agent: { costLast7dUsd: number | null }) => agent.costLast7dUsd === null)).toBe(true)
     expect(body.totalCostLast7dUsd).toBeNull()
@@ -90,7 +115,7 @@ describe('GET /api/finops/ai-costs without data', () => {
   })
 
   it('does not present a partial 7d sum as the complete total', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    stubPrometheus((async (url: string) => {
       const query = decodeURIComponent(String(url))
       if (query.includes('langfuse_up')) return promResult('1')
       return query.includes('[7d]') && query.includes('copilot') ? emptyResult : promResult('2.5')
@@ -104,7 +129,7 @@ describe('GET /api/finops/ai-costs without data', () => {
   })
 
   it('keeps measured 7d costs when 24h metrics are missing, with no invented burn rate', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    stubPrometheus((async (url: string) => {
       const query = decodeURIComponent(String(url))
       if (query.includes('langfuse_up')) return promResult('1')
       return query.includes('[24h]') ? emptyResult : promResult('2.5')
@@ -112,15 +137,15 @@ describe('GET /api/finops/ai-costs without data', () => {
     const { GET } = await import('@/app/api/finops/ai-costs/route')
     const body = await (await GET()).json()
 
-    expect(body.agents).toHaveLength(5)
-    expect(body.totalCostLast7dUsd).toBe(12.5)
+    expect(body.agents).toHaveLength(6)
+    expect(body.totalCostLast7dUsd).toBe(15)
     expect(body.agents.every((agent: { tokensLast24h: number | null; costLast24hUsd: number | null; burnRate: string | null }) =>
       agent.tokensLast24h === null && agent.costLast24hUsd === null && agent.burnRate === null)).toBe(true)
     expect(body.coverage.lastSuccessfulLoad).toBeNull()
   })
 
   it('does not turn an unavailable 24h cost into zero or a normal burn rate', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    stubPrometheus((async (url: string) => {
       const query = decodeURIComponent(String(url))
       if (query.includes('langfuse_up')) return promResult('1')
       return query.includes('[24h]') && query.includes('cost_per_token') ? { ok: false } : promResult('2.5')
@@ -128,14 +153,14 @@ describe('GET /api/finops/ai-costs without data', () => {
     const { GET } = await import('@/app/api/finops/ai-costs/route')
     const body = await (await GET()).json()
 
-    expect(body.totalCostLast7dUsd).toBe(12.5)
+    expect(body.totalCostLast7dUsd).toBe(15)
     expect(body.agents.every((agent: { costLast24hUsd: number | null; burnRate: string | null }) =>
       agent.costLast24hUsd === null && agent.burnRate === null)).toBe(true)
     expect(body.coverage.lastSuccessfulLoad).toBeNull()
   })
 
   it.each(['NaN', '+Inf', '-Inf', '2oops'])('does not treat nonnumeric metric %s as a measured value', async value => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+    stubPrometheus((async (url: string) =>
       decodeURIComponent(String(url)).includes('langfuse_up') ? promResult('1') : promResult(value)))
     const { GET } = await import('@/app/api/finops/ai-costs/route')
     const body = await (await GET()).json()
@@ -147,7 +172,7 @@ describe('GET /api/finops/ai-costs without data', () => {
   })
 
   it('preserves measured zero costs and low burn rate instead of marking zero as missing', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+    stubPrometheus((async (url: string) =>
       decodeURIComponent(String(url)).includes('langfuse_up') ? promResult('1') : promResult('0')))
     const { GET } = await import('@/app/api/finops/ai-costs/route')
     const body = await (await GET()).json()
@@ -159,7 +184,7 @@ describe('GET /api/finops/ai-costs without data', () => {
   })
 
   it('reports unavailable when the bridge is up but every agent metric query fails', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+    stubPrometheus((async (url: string) =>
       decodeURIComponent(String(url)).includes('langfuse_up') ? promResult('1') : { ok: false }))
     const { GET } = await import('@/app/api/finops/ai-costs/route')
     const body = await (await GET()).json()
@@ -171,7 +196,7 @@ describe('GET /api/finops/ai-costs without data', () => {
   })
 
   it('does not omit a missing agent from the completeness requirement for the 7d total', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    stubPrometheus((async (url: string) => {
       const query = decodeURIComponent(String(url))
       if (query.includes('langfuse_up')) return promResult('1')
       return query.includes('copilot') ? emptyResult : promResult('2.5')
@@ -180,10 +205,52 @@ describe('GET /api/finops/ai-costs without data', () => {
     const body = await (await GET()).json()
 
     expect(body.available).toBe(true)
-    expect(body.agents).toHaveLength(4)
+    expect(body.agents).toHaveLength(5)
     expect(body.agents.every((agent: { costLast7dUsd: number }) => agent.costLast7dUsd === 2.5)).toBe(true)
     expect(body.totalCostLast7dUsd).toBeNull()
     expect(body.coverage.lastSuccessfulLoad).toBeNull()
   })
 
+  it('reports available when only the unattributed bucket carries spend', async () => {
+    stubPrometheus((async (url: string) => {
+      const query = decodeURIComponent(String(url))
+      if (query.includes('langfuse_up')) return promResult('1')
+      return query.includes('agent_id="unattributed"') ? promResult('0.02') : emptyResult
+    }))
+    const { GET } = await import('@/app/api/finops/ai-costs/route')
+    const body = await (await GET()).json()
+
+    expect(body.available).toBe(true)
+    expect(body.agents.map((agent: { agentId: string }) => agent.agentId)).toEqual(['unattributed'])
+    expect(body.totalCostLast7dUsd).toBeNull()
+  })
+
+  it('reports agent ids exactly as the bridge exports them, not a fixed list', async () => {
+    stubPrometheus(url => decodeURIComponent(String(url)).includes('langfuse_up') ? promResult('1') : promResult('0.5'),
+      ['customer-copilot', 'rca-investigator', 'unattributed'])
+    const { GET } = await import('@/app/api/finops/ai-costs/route')
+    const body = await (await GET()).json()
+
+    expect(body.agents.map((agent: { agentId: string }) => agent.agentId))
+      .toEqual(['customer-copilot', 'rca-investigator', 'unattributed'])
+    expect(body.totalCostLast7dUsd).toBe(1.5)
+  })
+
+  it('drops an exported agent_id that is not charter-id shaped instead of putting it into PromQL', async () => {
+    stubPrometheus(url => decodeURIComponent(String(url)).includes('langfuse_up') ? promResult('1') : promResult('0.5'),
+      ['finops-agent', 'x"} or vector(1) #'])
+    const { GET } = await import('@/app/api/finops/ai-costs/route')
+    const body = await (await GET()).json()
+
+    expect(body.agents.map((agent: { agentId: string }) => agent.agentId)).toEqual(['finops-agent'])
+  })
+
+  it('reports unavailable when the bridge is up but exports no agent series yet', async () => {
+    stubPrometheus(url => decodeURIComponent(String(url)).includes('langfuse_up') ? promResult('1') : promResult('0.5'), [])
+    const { GET } = await import('@/app/api/finops/ai-costs/route')
+    const body = await (await GET()).json()
+
+    expect(body.available).toBe(false)
+    expect(body.agents).toEqual([])
+  })
 })

@@ -14,9 +14,13 @@ import com.openbank.billing.infrastructure.outbox.AssessedFeeOutboxPayloads
 import com.openbank.billing.infrastructure.persistence.entity.AssessedFeeEntity
 import com.openbank.billing.infrastructure.persistence.entity.BillingCycleAssessmentEntity
 import com.openbank.billing.infrastructure.persistence.entity.BillingOutboxEntity
+import com.openbank.billing.infrastructure.shadow.ProductShadowWiring
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.libs.product.WaiveReason
+import com.openbank.libs.productrevision.shadow.ProductShadowRecorder
+import com.openbank.libs.productrevision.shadow.ShadowNotComparable
+import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.pgclient.PgException
@@ -41,8 +45,11 @@ import java.util.UUID
  */
 @ApplicationScoped
 @Suppress("TooManyFunctions")
-class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, private val clock: Clock) :
-    BillingAssessmentRepository {
+class BillingAssessmentRepositoryImpl(
+    private val sf: Mutiny.SessionFactory,
+    private val clock: Clock,
+    meters: MeterRegistry,
+) : BillingAssessmentRepository {
 
     override suspend fun findExisting(cycleId: String, accountId: String, currency: String): BillingAssessment? {
         val assessment = sf.withSession { s ->
@@ -98,7 +105,33 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
             }
         }
 
-        val outboxEntities = feeEntities.filter { it.postingStatus == PostingStatus.PENDING }.map { fee ->
+        val outboxEntities = postIntentRows(feeEntities, now)
+
+        // Individual chained s.persist() calls, not persistAll(vararg) — avoids a spread
+        // operator over a to-typed-array (detekt SpreadOperator) and mirrors this repo's own
+        // multi-entity-one-transaction convention (see ComplaintRepositoryImpl.save:
+        // s.persist(entity).flatMap { s.persist(outbox.toEntity()) }).
+        val shadowEntities = shadowRows(assessment, assessmentEntity.id, now)
+        val allEntities: List<Any> = listOf(assessmentEntity) + feeEntities + outboxEntities + shadowEntities
+        try {
+            sf.withTransaction { s, _ ->
+                allEntities.fold(Uni.createFrom().voidItem() as Uni<*>) { acc, entity ->
+                    acc.chain { _ -> s.persist(entity) }
+                }
+            }.awaitSuspending()
+        } catch (e: PersistenceException) {
+            return recoverConcurrentReplay(e, assessment)
+        } catch (e: PgException) {
+            return recoverConcurrentReplay(e, assessment)
+        }
+
+        if (shadowEntities.isNotEmpty()) shadow.inputQueued()
+        return assessmentEntity.toDomain(feeEntities)
+    }
+
+    /** One `billing.fee.post-intent.v1` outbox row per fee that will post (ADR-0143 step 2). */
+    private fun postIntentRows(feeEntities: List<AssessedFeeEntity>, now: Instant) =
+        feeEntities.filter { it.postingStatus == PostingStatus.PENDING }.map { fee ->
             BillingOutboxEntity().apply {
                 eventId = Ids.newId()
                 synthetic = false
@@ -112,25 +145,37 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
             }
         }
 
-        // Individual chained s.persist() calls, not persistAll(vararg) — avoids a spread
-        // operator over a to-typed-array (detekt SpreadOperator) and mirrors this repo's own
-        // multi-entity-one-transaction convention (see ComplaintRepositoryImpl.save:
-        // s.persist(entity).flatMap { s.persist(outbox.toEntity()) }).
-        val allEntities: List<Any> = listOf(assessmentEntity) + feeEntities + outboxEntities
-        try {
-            sf.withTransaction { s, _ ->
-                allEntities.fold(Uni.createFrom().voidItem() as Uni<*>) { acc, entity ->
-                    acc.chain { _ -> s.persist(entity) }
-                }
-            }.awaitSuspending()
-        } catch (e: PersistenceException) {
-            return recoverConcurrentReplay(e, assessment)
-        } catch (e: PgException) {
-            return recoverConcurrentReplay(e, assessment)
-        }
-
-        return assessmentEntity.toDomain(feeEntities)
+    /**
+     * ADR-0352 phase 3: the legacy decision and its frozen inputs, queued for the product-IR shadow in the
+     * assessment's own transaction, so a committed assessment is never missing its comparison and a
+     * rolled-back one never leaves an orphan. Nothing on the posting path reads the row. The caller counts
+     * it only after the commit, never on the replay path, so the "queued, none processed" alert sees the
+     * inputs that really exist.
+     */
+    /**
+     * Building the shadow row is a pure mapping that can still fail on a malformed input (a revision id that
+     * is not a UUID, an unserialisable amount). That is a shadow-only fault and must never reach the money
+     * path: the assessment commits without its shadow row, and the miss is counted as `INPUT_UNKNOWN`, so
+     * a shadow that compares nothing still reads as not-comparable rather than as quiet.
+     */
+    private fun shadowRows(assessment: BillingAssessment, assessmentId: UUID, now: Instant): List<Any> {
+        val input = assessment.shadowInput ?: return emptyList()
+        return runCatching { ProductShadowRows.entity(assessmentId, input, now) }.fold(
+            onSuccess = { listOf(it) },
+            onFailure = {
+                log.warnf(
+                    "product shadow input not recorded for assessment %s: %s",
+                    assessmentId,
+                    it.javaClass.simpleName,
+                )
+                shadow.notComparable(ShadowNotComparable.INPUT_UNKNOWN)
+                emptyList()
+            },
+        )
     }
+
+    private val shadow = ProductShadowRecorder(meters, ProductShadowWiring.CONSUMER)
+    private val log = org.jboss.logging.Logger.getLogger(BillingAssessmentRepositoryImpl::class.java)
 
     /**
      * TOCTOU recovery (fix-review finding): [BillingCycleService.assessAndPost] calls

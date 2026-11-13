@@ -6,7 +6,7 @@ package com.openbank.party.integration
 
 import com.openbank.libs.testing.containers.PostgresRedpandaTestResource
 import com.openbank.libs.testing.trace.RecordingSpanExporter
-import com.openbank.party.it.TraceContractProfile
+import com.openbank.libs.testing.trace.TraceContractProfile
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest

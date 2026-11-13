@@ -209,20 +209,133 @@ $T workflow reset --workflow-id "domestic-payment-$ID" --event-id "$EVENT" --rea
 
 ### SWIFT outbound booking
 
-**swift-service has no re-drive.** It books once, right after scheme acceptance, with a single
-transaction-service call: no retry, no Temporal workflow, no scheduler. None of the operator actions
-settle a held message:
+**swift-service re-drives a held booking on its own (#13686).** It books once, right after scheme
+acceptance; if that is unproven, `SwiftSettlementRedriveScheduler` (every 60 s) calls transaction-service
+again for each MT103 that is `SENT` with an open clock and at least 2 minutes old. Same key, request
+rebuilt from the stored message (the value date is the MT103's 32A date, never today's), and it never
+resubmits to the scheme. Each message is claimed with a token and a 2-minute lease by one conditional
+UPDATE, so two pods or an overlapping tick make one call, not two. An unproven attempt backs off
+`min(2m * 2^(n-1), 1h)`; after 10 attempts (about 6h) it is **exhausted**: no longer retried,
+`openbank_payment_unsettled_total{rail="SWIFT",outcome="redrive-exhausted"}` increments, and the clock
+stays open, so this alert keeps firing. A transport blip is normally booked before the alert's 30m.
 
-- re-posting the original send returns the stored message;
-- `POST /api/v1/swift/{id}/ack` and `/reject` change the business status only, and leave the clock open.
+**The alert can fire while the re-drive is still live.** 10 attempts span about 6 hours and the alert
+fires at 30 minutes, so for most of that window the sweep is still calling transaction-service under
+`swift-settlement-<messageId>`. Booking or reversing by hand, or under any other key, while it is live
+races the sweep and can debit the customer twice. So **step 1 for SWIFT is always the stop below**,
+before step 1 of the shared procedure and before any manual action.
 
-Tracked in #13686. Until it lands, the remedy depends on step 1:
+**Step S1 — stop the re-drive for this message (four-eyes, before anything else).** Open a ticket
+recording the message id, why it is stopped, the approver and the executor (two different people). The
+approver reviews the statement and the ticket; the executor runs it and pastes the result into the
+ticket. It refuses a message whose re-drive holds a live claim: `UPDATE 0` means a call is in flight.
+Wait for the lease to pass (2 minutes) and run it again. Never act by hand on `UPDATE 0`.
+
+```sql
+-- swift-service-db, as the application owner. Expect UPDATE 1.
+UPDATE swift_messages
+SET booking_redrive_stopped_at = now(),
+    booking_redrive_stop_reason = '<ticket> approver=<name> executor=<name>'
+WHERE id = '<messageId>' AND booking_redrive_stopped_at IS NULL
+  AND (booking_redrive_claimed_until IS NULL OR booking_redrive_claimed_until < now());
+
+-- Then confirm: stopped, no live claim. Only now go on to the shared steps.
+SELECT booking_redrive_stopped_at, booking_redrive_stop_reason, booking_redrive_claim,
+       booking_redrive_claimed_until, now() AS checked_at
+FROM swift_messages WHERE id = '<messageId>';
+```
+
+A stopped message is never claimed by the sweep again. Its booking clock stays open, so the alert keeps
+firing until the message is closed as in "Closing a corrected payment".
+
+**The stop does not cancel a call already in flight.** A re-drive that stalled past its 2-minute lease
+lets the stop succeed while its transaction-service call is still running, and that call can still
+book (its proof is then recorded and counted as `outcome="late-completion"`). So, after S1:
+
+- **Step S2 — read transaction-service for `swift-settlement-<messageId>`** (step 1's query). If a row
+  exists, **reconcile from that row and never book**. Re-read it after any wait; a late completion can
+  appear minutes after the stop.
+- **Any manual booking MUST use the same idempotency key, `swift-settlement-<messageId>`.** Never a new
+  key, never a ledger adjustment that bypasses transaction-service's dedup. With the same key a stalled
+  re-drive and the manual booking resolve to one transaction; with any other key the customer is debited
+  twice.
+
+**Step S3 (only when no debit is owed) — four-eyes waive.** For a message rejected after ACSC, or
+otherwise owed no booking (confirmed with finance), close the obligation instead of leaving the alert
+firing forever. Same ticket discipline as S1: the approver signs off the ticket, then a different person
+executes. Run it only after S1 and S2 found no transaction row. A waived message leaves the age gauge and
+`SwiftBookingUnsettled`, and the sweep never claims it.
+
+```sql
+-- swift-service-db, as the application owner. Expect UPDATE 1.
+UPDATE swift_messages
+SET booking_waived_at = now(),
+    booking_waive_reason = '<ticket>: <why no debit is owed>',
+    booking_waive_approver = '<approver name>'
+WHERE id = '<messageId>' AND booking_proven_at IS NULL AND booking_waived_at IS NULL
+  AND booking_redrive_stopped_at IS NOT NULL
+  AND (booking_redrive_claimed_until IS NULL OR booking_redrive_claimed_until < now());
+```
+
+A waiver requires all three evidence fields to be present and reason/approver to be nonblank; a partial NULL triple is rejected by PostgreSQL.
+
+A validated late answer after ACK/REJECT records proof while preserving that business decision and emits no COMPLETED status event. The `late-completion` outcome still requires reconciliation of the same-key transaction.
+
+A waive is not a booking proof: `booking_proven_at` stays null, and the record of why sits in the row.
+If a transaction row for the key appears later (a late completion), reconcile it with finance; the waive
+is then wrong and must be reviewed on the same ticket.
+
+What the re-drive does **not** cover:
+
+- a message an operator already acknowledged or rejected (it is no longer `SENT`). `ack`/`reject` also
+  stop its re-drive, and answer 409 while a re-drive holds a live claim: retry after the 2-minute lease;
+- a stored `FAILED` or mismatched answer, which comes back the same on every attempt and exhausts;
+- a message with no `ordering_customer_account_id` or an unparseable value date, which never calls
+  transaction-service and exhausts too.
+
+Where the re-drive stands, on `swift-service-db` (read-only):
+
+```sql
+SELECT id AS message_id, status, booking_redrive_attempts, booking_redrive_next_at,
+       booking_redrive_claimed_until, booking_redrive_exhausted_at, booking_redrive_stopped_at
+FROM swift_messages
+WHERE message_type = 'MT103' AND booking_first_due_at IS NOT NULL AND booking_proven_at IS NULL
+ORDER BY booking_first_due_at
+LIMIT 20;
+```
+
+If the sweep itself is down, `WorkflowLivenessStale{workflow="swift-settlement-redrive"}` fires; it is
+switched by `SWIFT_SETTLEMENT_REDRIVE_ENABLED` (default `true`).
+
+Then the remedy depends on step 1:
 
 | Step 1 for `swift-settlement-<messageId>` | Remedy |
 |---|---|
-| No row: transport error/timeout, no `ordering_customer_account_id`, unparseable value date | Nothing can be re-sent in-band. Escalate to finance: the MT103 has left, so the debit is booked by a ledger correction, and the message is closed as below ("Closing a corrected payment"). Fix the data cause first (missing account id, bad value date) so the next message does not repeat it. |
-| `COMPLETED`, every field matches | Booked; only the proof is missing. **Reconcile** (section 4): record it as booked, close as below. Do not reverse and do not rebook. |
-| `COMPLETED`, money differs / `FAILED` | Same as the shared table in step 2: **reverse** a wrong booking, or a finance correction for `FAILED`. |
+| No row, re-drive still counting | Wait: the next attempt is at `booking_redrive_next_at`. If transaction-service is down, fix that first. |
+| No row, exhausted (the cause was an outage, now fixed) | **Re-drive** with the command below. |
+| No row, no `ordering_customer_account_id` / unparseable value date | Nothing can be sent in-band. After S1 and S2, escalate to finance: the MT103 has left, so the debit is booked by hand through transaction-service **under `swift-settlement-<messageId>`** (never another key), and the message is closed as below ("Closing a corrected payment"). Fix the data cause so the next message does not repeat it. |
+| `COMPLETED`, every field matches | The next attempt replays it as a matched 201 and closes the clock. If exhausted, **re-drive** with the command below. |
+| `COMPLETED`, money differs / `FAILED` | Do not re-drive. Same as the shared table in step 2: **reverse** a wrong booking, or a finance correction for `FAILED`. |
+
+**Re-drive command (exhausted message).** Four-eyes, like the stop: a ticket records the message id,
+the step 1 result that justifies it, the approver and the executor (two different people), and the
+executor runs the statement only after the approver has signed off on the ticket. Never re-arm a stopped
+message: a stop means someone is remediating it by hand. This re-arms the sweep's bookkeeping for one message and
+touches nothing else: never `booking_first_due_at`, `booking_proven_at` or `booking_transaction_id`,
+and never a message another pod holds. The sweep then picks it up within a minute, under the same key.
+
+```sql
+-- swift-service-db, as the application owner. Expect UPDATE 1; UPDATE 0 means not eligible: stop.
+UPDATE swift_messages
+SET booking_redrive_attempts = 0, booking_redrive_next_at = NULL, booking_redrive_exhausted_at = NULL
+WHERE id = '<messageId>' AND message_type = 'MT103' AND status = 'SENT'
+  AND booking_first_due_at IS NOT NULL AND booking_proven_at IS NULL
+  AND booking_redrive_exhausted_at IS NOT NULL AND booking_redrive_claim IS NULL
+  AND booking_redrive_stopped_at IS NULL;
+```
+
+Confirm a minute or two later that `booking_proven_at` is set and the status is `COMPLETED`. If it is
+counting attempts again, step 1 changed: go back to it.
 
 Do **not** use `ack` or `reject` to make the alert stop: they do not touch the booking clock, so the
 alert keeps firing, and a `REJECTED` status on a message the scheme accepted misstates what happened.

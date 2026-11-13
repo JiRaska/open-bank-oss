@@ -12,15 +12,22 @@ import com.openbank.libs.domain.case.CaseStatus
 import com.openbank.libs.domain.case.CaseType
 import com.openbank.libs.identity.MatchKey
 import com.openbank.pid.application.port.`in`.PartySearchQuery
+import com.openbank.pid.application.port.out.PartyAnonymisation
 import com.openbank.pid.application.port.out.PartyRelationshipRepository
 import com.openbank.pid.application.port.out.PartyRepository
+import com.openbank.pid.application.usecase.PartyErasedException
 import com.openbank.pid.domain.model.*
 import com.openbank.pid.infrastructure.persistence.entity.*
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.LockModeType
+import java.time.Instant
 import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 
 @ApplicationScoped
@@ -139,30 +146,42 @@ class PartyRepositoryImpl(
         return findById(party.id)!!
     }
 
+    /**
+     * The parent update and every child write run in ONE transaction that first takes
+     * `SELECT ... FOR UPDATE` on the party row and checks `erased_at` under that lock (GDPR Art. 17,
+     * #15755). [anonymize] takes the same lock, so a write and an erasure serialise: either the
+     * write commits first and the erase then cleans it, or the erase commits first and the write is
+     * refused. The child steps are chained inside the one `withTransaction` (not nested ones, which
+     * would merely join it).
+     */
     override suspend fun update(party: Party): Party {
         Panache.withTransaction {
-            find("id", party.id).firstResult().map { existing ->
-                requireNotNull(existing) { "Party ${party.id} not found" }.apply { applyUpdate(party) }
+            find("id", party.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().flatMap { existing ->
+                requireNotNull(existing) { "Party ${party.id} not found" }.apply {
+                    if (erasedAt != null) throw PartyErasedException("Party ${party.id} was erased")
+                    applyUpdate(party)
+                }
+                party.externalIds.fold(Uni.createFrom().voidItem()) { chain, extId ->
+                    chain.flatMap {
+                        extIdRepo.find("partyId = ?1 AND idType = ?2", party.id, extId.type.name).firstResult()
+                            .flatMap { exists ->
+                                if (exists == null) {
+                                    extIdRepo.persist(
+                                        PartyExternalIdEntity().also {
+                                            it.partyId = party.id
+                                            it.idType = extId.type.name
+                                            it.idValue = extId.value
+                                            it.verifiedAt = extId.verifiedAt
+                                        },
+                                    ).replaceWithVoid()
+                                } else {
+                                    Uni.createFrom().voidItem()
+                                }
+                            }
+                    }
+                }
             }
         }.awaitSuspending()
-
-        party.externalIds.forEach { extId ->
-            val exists = Panache.withSession {
-                extIdRepo.find("partyId = ?1 AND idType = ?2", party.id, extId.type.name).firstResult()
-            }.awaitSuspending()
-            if (exists == null) {
-                Panache.withTransaction {
-                    extIdRepo.persist(
-                        PartyExternalIdEntity().also {
-                            it.partyId = party.id
-                            it.idType = extId.type.name
-                            it.idValue = extId.value
-                            it.verifiedAt = extId.verifiedAt
-                        },
-                    )
-                }.awaitSuspending()
-            }
-        }
 
         return findById(party.id)!!
     }
@@ -170,6 +189,86 @@ class PartyRepositoryImpl(
     override suspend fun existsByExternalId(type: ExternalIdType, value: String): Boolean = Panache.withSession {
         extIdRepo.count("idType = ?1 AND idValue = ?2", type.name, value)
     }.awaitSuspending() > 0
+
+    override suspend fun anonymize(partyId: UUID, erasedAt: Instant): PartyAnonymisation {
+        val at = erasedAt.atOffset(ZoneOffset.UTC)
+        return Panache.withTransaction {
+            find("id", partyId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().flatMap { entity ->
+                if (entity == null) {
+                    // A concurrent insert of the same id fails this persist on the primary key; the
+                    // consumer retries, and the retry finds that row and anonymises it.
+                    persist(tombstone(partyId, at)).replaceWith(PartyAnonymisation.TOMBSTONED)
+                } else {
+                    // A repeat delivery re-runs the whole overwrite and the deletes (keeping the
+                    // original erased_at / updated_at), so anything written after the first erase
+                    // is cleaned. Unchanged values make no UPDATE, so an untouched row stays untouched.
+                    val first = entity.erasedAt == null
+                    entity.anonymise(at, first)
+                    // The external ids carry the RČ and EUDI blind indices (dedup keys) and the
+                    // other national identifiers; ID documents carry document numbers. Neither
+                    // has a reason to survive the person, so they are deleted, not blanked.
+                    extIdRepo.delete("partyId", partyId)
+                        .flatMap { docRepo.delete("partyId", partyId) }
+                        .flatMap { relRepo.update("terminationReason = null where partyId = ?1", partyId) }
+                        .replaceWith(if (first) PartyAnonymisation.FIRST else PartyAnonymisation.REPEAT)
+                }
+            }
+        }.awaitSuspending()
+    }
+
+    /**
+     * Overwrites every personal column. NOT NULL columns get a neutral sentinel (`GDPR_ERASED`,
+     * 1900-01-01) rather than a value derived from the old one, so nothing about the person can
+     * be recovered from the shell. Status becomes TERMINATED: an erased party is no longer usable
+     * and must never come back as ACTIVE.
+     */
+    private fun PartyEntity.anonymise(at: OffsetDateTime, first: Boolean) {
+        givenName = ERASED
+        familyName = ERASED
+        birthdate = ERASED_BIRTHDATE
+        birthNumberEncrypted = null
+        gender = null
+        birthplace = null
+        nationalities = emptyArray()
+        email = null
+        emailVerifiedAt = null
+        phone = null
+        phoneVerifiedAt = null
+        dataBoxId = null
+        permanentAddressStreet = null
+        permanentAddressHouseNumber = null
+        permanentAddressCity = null
+        permanentAddressPostalCode = null
+        permanentAddressCountry = null
+        permanentAddressRuianCode = null
+        robSyncedAt = null
+        caseMetadata = null
+        status = PartyStatus.TERMINATED.name
+        if (first) {
+            erasedAt = at
+            updatedAt = at
+        }
+    }
+
+    /**
+     * The erased marker for an id this service never held. Every column is a neutral sentinel: the
+     * PARTY_ERASED event carries no party type, so `party_type` is the NOT NULL placeholder
+     * NATURAL_PERSON, not a statement about the party.
+     */
+    private fun tombstone(partyId: UUID, at: OffsetDateTime) = PartyEntity().apply {
+        id = partyId
+        partyType = PartyType.NATURAL_PERSON.name
+        verificationSource = VerificationSource.API_UPLOAD.name
+        verifiedAt = at
+        kycLevel = KycLevel.NONE.name
+        createdAt = at
+        anonymise(at, first = true)
+    }
+
+    private companion object {
+        const val ERASED = "GDPR_ERASED"
+        val ERASED_BIRTHDATE: LocalDate = LocalDate.of(1900, 1, 1)
+    }
 
     override suspend fun findCandidatesByMatchKey(matchKey: String): List<Party> {
         // The match key is "familyNorm|givenNorm|birthdate|birthplaceNorm" (see MatchKey.of).
@@ -247,7 +346,7 @@ class PartyRepositoryImpl(
         kycLevel = party.kycAttributes.kycLevel.name
         kycCompletedAt = party.kycAttributes.kycCompletedAt
         kycExpiresAt = party.kycAttributes.kycExpiresAt
-        amlRiskScore = party.kycAttributes.amlRiskScore.name
+        amlRiskScore = party.kycAttributes.amlRiskScore?.name
         pepFlag = party.kycAttributes.pepFlag
         sanctionsFlag = party.kycAttributes.sanctionsFlag
         uboVerifiedAt = party.kycAttributes.uboVerifiedAt
@@ -325,7 +424,7 @@ class PartyRepositoryImpl(
             KycLevel.valueOf(kycLevel),
             kycCompletedAt,
             kycExpiresAt,
-            AmlRiskScore.valueOf(amlRiskScore),
+            amlRiskScore?.let(AmlRiskScore::valueOf),
             pepFlag,
             sanctionsFlag,
             uboVerifiedAt,
@@ -333,7 +432,7 @@ class PartyRepositoryImpl(
         ),
         relationships = relationships.map { it.toDomain() },
         caseLifecycle = caseLifecycle(),
-        createdAt = createdAt, updatedAt = updatedAt, version = version,
+        createdAt = createdAt, updatedAt = updatedAt, version = version, erasedAt = erasedAt,
     )
 
     private fun Party.toEntity() = PartyEntity().also {
@@ -358,7 +457,7 @@ class PartyRepositoryImpl(
         it.kycLevel = kycAttributes.kycLevel.name
         it.kycCompletedAt = kycAttributes.kycCompletedAt
         it.kycExpiresAt = kycAttributes.kycExpiresAt
-        it.amlRiskScore = kycAttributes.amlRiskScore.name
+        it.amlRiskScore = kycAttributes.amlRiskScore?.name
         it.pepFlag = kycAttributes.pepFlag
         it.sanctionsFlag = kycAttributes.sanctionsFlag
         it.uboVerifiedAt = kycAttributes.uboVerifiedAt
@@ -429,20 +528,38 @@ class PartyRelationshipRepositoryImpl(private val relRepo: PartyRelationshipRepo
     override suspend fun findByPartyId(partyId: UUID): List<PartyRelationship> =
         Panache.withSession { relRepo.find("partyId", partyId).list() }.awaitSuspending().map { it.toDomain() }
 
+    /**
+     * Both writes take `SELECT ... FOR UPDATE` on the owning party row and check `erased_at` under it
+     * in the writing transaction (GDPR Art. 17, #15755), the lock [PartyRepositoryImpl.anonymize]
+     * takes: a terminate racing an erase either commits first (and the erase then blanks its free-text
+     * reason) or waits and is refused. Lock order is party row, then relationship row, as in the erase.
+     */
     override suspend fun save(relationship: PartyRelationship): PartyRelationship {
-        Panache.withTransaction { relRepo.persist(relationship.toEntity()) }.awaitSuspending()
+        Panache.withTransaction {
+            lockLiveParty(relationship.partyId).flatMap { relRepo.persist(relationship.toEntity()) }
+        }.awaitSuspending()
         return Panache.withSession { relRepo.find("id", relationship.id).firstResult() }.awaitSuspending()!!.toDomain()
     }
 
     override suspend fun update(relationship: PartyRelationship): PartyRelationship = Panache.withTransaction {
-        relRepo.find("id", relationship.id).firstResult().map { existing ->
-            requireNotNull(existing) { "Relationship ${relationship.id} not found" }.also {
-                it.status = relationship.status.name
-                it.terminatedAt = relationship.terminatedAt
-                it.terminationReason = relationship.terminationReason
+        relRepo.find("id", relationship.id).firstResult().flatMap { found ->
+            val existing = requireNotNull(found) { "Relationship ${relationship.id} not found" }
+            lockLiveParty(existing.partyId).map {
+                existing.also {
+                    it.status = relationship.status.name
+                    it.terminatedAt = relationship.terminatedAt
+                    it.terminationReason = relationship.terminationReason
+                }
             }
         }
     }.awaitSuspending().toDomain()
+
+    private fun lockLiveParty(partyId: UUID): Uni<Void> = Panache.getSession().flatMap { session ->
+        session.find(PartyEntity::class.java, partyId, LockModeType.PESSIMISTIC_WRITE).map { party ->
+            if (party?.erasedAt != null) throw PartyErasedException("Party $partyId was erased")
+            party
+        }.replaceWithVoid()
+    }
 
     private fun PartyRelationshipEntity.toDomain() = PartyRelationship(
         id = id,

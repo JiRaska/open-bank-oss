@@ -4,4 +4,4 @@ metadata:
   name: authz-policy-auditor
   labels:
     app.kubernetes.io/part-of: openbank
-    openbank.io/component: authz-policy-auditor
+    open-bank.tech/component: authz-policy-auditor

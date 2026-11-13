@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 import { readFile } from 'node:fs/promises'
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 const PARTY_ID = '11111111-1111-4111-8111-111111111111'
@@ -38,7 +38,7 @@ test('rejects malformed loyalty evidence and recovers with verified customer dat
   })
 
   await page.goto('/loyalty')
-  await page.getByRole('button', { name: /Customer|Klient/ }).click()
+  await page.getByRole('navigation', { name: /Lípa sections|Sekce Lípy/ }).getByRole('button', { name: /^(Customer|Klient)$/, exact: true }).click()
   await page.getByLabel(/Search parties|Vyhledat stranu/).fill(PARTY_ID)
   const submit = page.getByRole('search').getByRole('button', { name: /Search|Vyhledat/ })
 

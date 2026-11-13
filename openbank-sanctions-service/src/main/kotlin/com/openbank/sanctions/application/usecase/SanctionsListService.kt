@@ -84,11 +84,15 @@ class SanctionsListService(
     }
 
     /**
+     * [waitForOwner] = false is the HTTP trigger's mode (#14780): if another refresh of the same
+     * list holds the fence, fail at once with [com.openbank.sanctions.domain.model.SanctionsRefreshInProgress]
+     * (409) instead of queueing a second full in-request import behind it. The scheduler waits.
+     *
      * [onDeferred] is invoked when the list did NOT actually refresh (FAILED_KEPT_EXISTING /
      * EMPTY_FEED / an inherited incomplete import). Such a refresh returns normally, so without
      * the callback a caller cannot tell it from success.
      */
-    suspend fun refresh(listType: String, onDeferred: () -> Unit = {}): SanctionsList {
+    suspend fun refresh(listType: String, waitForOwner: Boolean = true, onDeferred: () -> Unit = {}): SanctionsList {
         Log.info("Manual refresh triggered for list: $listType")
         val list = repo.requireList(listType)
         val enumType = runCatching { SanctionsListType.valueOf(listType) }.getOrNull()
@@ -120,7 +124,7 @@ class SanctionsListService(
         // The metadata write belongs to the same fenced refresh as import and publication.
         // Releasing the fence first lets an older pod overwrite a newer refresh's entry count.
         if (publicationFence != null) {
-            return publicationFence.duringRefresh(enumType) { permit ->
+            return publicationFence.duringRefresh(enumType, waitForOwner) { permit ->
                 // A queued refresh may wait for another pod to finish. Read the list only
                 // after ownership passes, so a failed import cannot restore an older count.
                 val currentList = repo.requireList(listType)
@@ -164,6 +168,25 @@ class SanctionsListService(
     suspend fun requestRefreshAll(): Int {
         Log.info("Refresh requested for all enabled sanctions lists (deferred to scheduler)")
         return repo.requestRefreshAll()
+    }
+
+    /**
+     * Single-list form of [requestRefreshAll], the same mechanism: flag the list and answer
+     * immediately; the scheduler runs the import on its next tick, through the same fenced
+     * [refresh]. Served by the v2 trigger only. The v1 operation still imports inside the request
+     * (its contract promises the refreshed list), and one large feed (PEP_GLOBAL) can outlive a
+     * client timeout there — callers that need a bounded request use v2 (#14780).
+     *
+     * A DISABLED list is refused (422): the scheduler only refreshes enabled lists, so flagging
+     * one would accept a request that nothing will ever carry out. Returns the list in its
+     * PRE-refresh state with the flag set.
+     */
+    suspend fun requestRefresh(listType: String): SanctionsList {
+        val list = repo.requireList(listType)
+        check(list.enabled) { "Sanctions list $listType is disabled; enable it before requesting a refresh" }
+        Log.info("Refresh requested for sanctions list $listType (deferred to scheduler)")
+        check(repo.requestRefresh(listType) == 1) { "Sanctions list $listType could not be flagged for refresh" }
+        return repo.requireList(listType)
     }
 
     /**

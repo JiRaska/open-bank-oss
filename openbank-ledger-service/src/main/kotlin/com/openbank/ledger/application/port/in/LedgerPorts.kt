@@ -42,6 +42,7 @@ data class PostJournalCommand(
      * known until the entry is built. See `FxRevaluationService.revalue` for the reference use.
      */
     val additionalOutboxMessages: (JournalEntry) -> List<OutboxMessage> = { emptyList() },
+    val origin: com.openbank.ledger.domain.model.JournalOrigin? = null,
 )
 
 data class JournalLineRequest(

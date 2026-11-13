@@ -6,7 +6,7 @@
 - **Database:** `openbank_notifications`.
 - **Schema:** tables live in the `public` schema. *(The governance manifest declares `notifications_schema` as the owned logical schema name; the physical migrations create objects in `public`. Declared-vs-physical: treat `public` as authoritative for the running DB.)*
 - **ORM:** Hibernate Reactive with Panache; `hibernate-orm.database.generation = none` (Flyway owns the schema).
-- **Migrations:** Flyway, `migrate-at-start = true`. Hibernate Panache allocates IDs from `<table>_seq` sequences (allocationSize 50) — every table has a matching `CREATE SEQUENCE … INCREMENT BY 50`, enforced by `HibernateSequenceGuardTest`.
+- **Migrations:** Flyway, `migrate-at-start = true`. Hibernate Panache allocates IDs from `<table>_seq` sequences (allocationSize 50) — every table has a matching `CREATE SEQUENCE … INCREMENT BY 50`, enforced by the CI gate `hibernate-sequence-guard`.
 
 ## Flyway migrations
 

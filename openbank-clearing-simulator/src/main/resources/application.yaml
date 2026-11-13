@@ -97,6 +97,9 @@ openbank:
   # every scenario is reproducible in tests and demos. Non-production only.
   clearing-simulator:
     settlement-lag-seconds: 0
+    # Bank-own (pacs.009) transfers with amount remainder 03 are answered ACSP and settle (ACSC)
+    # this many seconds later — the synthetic case for asynchronous settlement.
+    fi-settlement-lag-seconds: 30
 
 # OPA sidecar (ADR-0034). Advisory by default.
 opa:

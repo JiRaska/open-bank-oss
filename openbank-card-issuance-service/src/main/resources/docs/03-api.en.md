@@ -24,6 +24,11 @@ All endpoints require a **Keycloak Bearer token** (realm `openbank`). Operations
 | `GET /cards/{id}/secure-details` | `ROLE_OPERATOR`, and only customer-edge's own service account (no staff access) |
 | `GET /cards/party/{partyId}/entitlements` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN` |
 
+The verified `openbank-card-processing` issuer client can read a card by ID and obtain an authorization decision.
+Customer-edge may cancel its customer's card or change that card's channel controls and spending limits. Staff
+and compliance permissions follow the endpoint roles. Confirm the named issuer credential and the advisory
+decisions before enabling policy enforcement in the sandbox.
+
 ## Idempotence
 
 Card issue requires the header:
@@ -192,6 +197,6 @@ Each Kafka record carries `ce-id` (= event id), `idempotency-key` (= event id) a
 
 ## Card read caller identity
 
-The single-card read admits the delegation service account, while the party-card list admits the party service account. Both require a verified JWT whose `azp` identifies the named client and whose subject and Keycloak service-account username agree. Staff read roles are accepted only for verified interactive user sessions. A different service holding a staff role cannot use that role to bypass the named caller check.
+The single-card read admits the delegation and customer-edge service accounts, while the party-card list admits the party and customer-edge service accounts. Customer-edge derives the customer party from the authenticated session and checks card ownership or delegation before returning card data. These read grants do not change the separate secure-details or mutation authorization. Both require a verified JWT whose `azp` identifies the named client and whose subject and Keycloak service-account username agree. Staff read roles are accepted only for verified interactive user sessions. A different service holding a staff role cannot use that role to bypass the named caller check.
 
 Card-read HTTP test fixtures provide interactive staff JWT claims together with their roles, so tests exercise the same caller binding as the resource guard.

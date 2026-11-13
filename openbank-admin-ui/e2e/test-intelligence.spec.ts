@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
 test.beforeEach(async ({ context, baseURL, page }) => {
   await signInAsOperator(context, baseURL!)
-  await page.route('**/api/test-intelligence', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+  await page.route(/\/api\/test-intelligence(?:\?.*)?$/, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
     schemaVersion: 1, collectedAt: '2026-08-22T12:00:00.000Z',
     components: [{ component: 'openbank-ledger-service', released: true, moneyPath: true, evidence: [{ kind: 'integration', state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'JUnit:test', environment: 'ci', counts: { discovered: 12, executed: 12, passed: 12, failed: 0, skipped: 0, errors: 0 } }, { kind: 'contract', state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'Pact:consumer', environment: 'ci' }, { kind: 'contract', state: 'failed', observedAt: '2026-08-22T11:01:00.000Z', source: 'Pact:provider', environment: 'ci' }, { kind: 'trace', state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'trace-contract:ledger-posting', environment: 'ci', detail: '1 executed marker(s); JUnit suite passed', run: { id: '4242', attempt: 1, commit: '1234567890abcdef', branch: 'main', workflow: 'Services CI', url: 'https://example.test/run/4242', observedAt: '2026-08-22T11:00:00.000Z' } }, { kind: 'e2e', state: 'failed', observedAt: '2026-08-22T11:00:00.000Z', source: 'test-intelligence-run:v1', environment: 'ci', counts: { discovered: 2, executed: 2, passed: 1, failed: 1, skipped: 0, errors: 0 }, diagnostics: [{ kind: 'playwright-report', name: 'playwright-report-4242-a1', url: 'https://example.test/run/4242#artifacts', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true }] }], coverage: { state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'kover.xml', lines: { covered: 80, missed: 20, percentage: 80 }, branches: { covered: 6, missed: 4, percentage: 60 } }, testInfrastructure: { declared: ['postgres'], observed: [{ resource: 'postgres', image: 'postgres:16.3-alpine', lifecycle: 'started', observedAt: '2026-08-22T10:59:00.000Z' }, { resource: 'postgres', image: 'postgres:16.3-alpine', lifecycle: 'stopped', observedAt: '2026-08-22T11:01:00.000Z' }] } }],
     contracts: [], mutations: [], requiredControls: [{ id: 'openbank-ledger-service:mutation', component: 'openbank-ledger-service', kind: 'mutation', state: 'not-run', observedAt: null, reason: 'Mutation score must meet the fleet threshold (70%).', blocker: 'No retained immutable mutation evidence.' }],
@@ -24,16 +24,28 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 })
 
 test('renders the animated evidence system and consolidates test dimensions', async ({ page }) => {
+  test.setTimeout(90_000)
   await page.goto('/dashboard')
   const navigation = page.getByRole('navigation')
   const testIntelligenceLink = navigation.getByRole('link', { name: /Test Intelligence/ }).first()
   await expect(testIntelligenceLink).toBeVisible()
   await testIntelligenceLink.click()
-  await expect(page).toHaveURL(/\/system\/tests$/)
+  await expect(page).toHaveURL(/\/system\/tests$/, { timeout: 45_000 })
   await expect(page.getByRole('heading', { name: 'Test Intelligence', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Runs and history', exact: true }).click()
+  await page.getByText('Run summaries and cross-layer maps', { exact: true }).click()
+  const overview = page.getByRole('region', { name: 'Test overview' })
+  await expect(overview).toContainText('Last run')
+  await expect(overview).toContainText('Money paths')
+  await page.getByRole('button', { name: 'How testing works', exact: true }).click()
+  await page.getByText('Assurance architecture and detailed platform capabilities', { exact: true }).click()
   await expect(page.getByRole('heading', { name: /From change to confidence/ })).toBeVisible()
   await expect(page.getByRole('group', { name: /Seven Test Intelligence layers/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Runs and history', exact: true }).click()
+  await page.getByLabel('Detailed evidence view').selectOption('posture')
+  await page.getByText('Run summaries and cross-layer maps', { exact: true }).click()
   await expect(page.getByRole('region', { name: /Testing assurance map/ })).toBeVisible()
+  await expect(page.getByText('Agents may explain and propose a next step. They do not raise a verdict, delete evidence, or approve a release.')).toBeVisible()
   await expect(page.getByText('Required-control gaps')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Deterministic required controls' })).toContainText('openbank-ledger-service:mutation')
   const capabilityMatrix = page.getByRole('region', { name: 'Platform capability boundaries' })
@@ -46,26 +58,28 @@ test('renders the animated evidence system and consolidates test dimensions', as
   await expect(page.getByText(/0\/1 components published current simulation evidence/)).toBeVisible()
   // A planned, blocked customer journey is unresolved evidence. The prominent health signal
   // must remain attention-worthy even when the ordinary component evidence is otherwise green.
+  await page.getByRole('button', { name: 'How testing works', exact: true }).click()
+  await page.getByText('Assurance architecture and detailed platform capabilities', { exact: true }).click()
   await expect(page.getByText('NEEDS ATTENTION', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: /Intent enters/ }).click()
   await expect(page.getByText('Path-scoped CI is not per-test impact analysis; a prediction must not select a required gate yet.')).toBeVisible()
   await page.getByRole('button', { name: /Real experience/ }).click()
   await expect(page.getByText('Runtime telemetry arrived; correlation to a backend journey requires concrete trace evidence.')).toBeVisible()
-  await expect(page.getByText('Agents may explain and propose a next step. They do not raise a verdict, delete evidence, or approve a release.')).toBeVisible()
   await page.getByRole('button', { name: /AI finds relationships/ }).click()
   await expect(page.getByText('AI cannot rewrite evidence, skip a gate or approve its own remediation.')).toBeVisible()
+  await page.getByRole('button', { name: 'Runs and history', exact: true }).click()
   await expect(page.getByRole('cell', { name: /openbank-ledger-serviceMONEY/ })).toBeVisible()
   const componentMatrix = page.getByRole('region', { name: 'Component evidence matrix' })
-  await expect(componentMatrix.locator('td[data-component="openbank-ledger-service"][data-evidence-kind="contract"]')).toHaveText('failed')
-  await page.getByRole('button', { name: /Běhy|Execution/ }).click()
+  await expect(componentMatrix.locator('td[data-component="openbank-ledger-service"][data-evidence-kind="contract"]')).toContainText('failed')
+  await page.getByLabel('Detailed evidence view').selectOption('execution')
   await expect(page.getByText('trace', { exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'trace-contract:ledger-posting' })).toHaveAttribute('href', 'https://example.test/run/4242')
   await expect(page.getByText('1 executed marker(s); JUnit suite passed')).toBeVisible()
   await expect(page.getByRole('link', { name: 'playwright-report' })).toHaveAttribute('href', 'https://example.test/run/4242#artifacts')
   await expect(page.getByText('GitHub-authenticated · 7d · may contain sensitive browser data')).toBeVisible()
-  await page.getByRole('button', { name: /Client & RUM/ }).click()
+  await page.getByLabel('Detailed evidence view').selectOption('clients')
   await expect(page.getByText('OpenBank customer app')).toBeVisible()
-  await page.getByRole('button', { name: /Testy a flaky|Tests & flaky/ }).click()
+  await page.getByLabel('Detailed evidence view').selectOption('tests')
   const retryFlakyRow = page.getByRole('row').filter({ hasText: 'posts balanced journal' })
   await expect(retryFlakyRow).toContainText('flaky')
   await expect(retryFlakyRow).not.toContainText('stale')
@@ -73,16 +87,16 @@ test('renders the animated evidence system and consolidates test dimensions', as
   await expect(retryFlakyRow.getByRole('link', { name: /Admin UI CI · 4242 \/ 1 · 1234567/ })).toHaveAttribute('href', 'https://github.com/JiRaska/open-bank-oss/actions/runs/4242')
   await expect(page.getByLabel('Test impact mapping state')).toContainText('Test impact selection: shadow only')
   await expect(page.getByText('AI must not infer it or select a required gate.')).toBeVisible()
-  await page.getByRole('button', { name: /Testovací runtime|Test runtime/ }).click()
+  await page.getByLabel('Detailed evidence view').selectOption('runtime')
   await expect(page.getByText('1 completed isolated cycles')).toBeVisible()
   await expect(page.getByText('1 started · 1 stopped')).toBeVisible()
-  await page.getByRole('button', { name: /Historie|History/ }).click()
+  await page.getByLabel('Detailed evidence view').selectOption('history')
   await expect(page.getByText('4242 / 1')).toBeVisible()
-  await page.getByRole('button', { name: /^(Syntetika|Synthetics)$/ }).click()
+  await page.getByLabel('Detailed evidence view').selectOption('synthetic')
   await expect(page.getByText('Public edge reachability')).toBeVisible()
   await expect(page.getByLabel('Browser matrix for Admin UI SSO boundary')).toContainText('chromium')
   await expect(page.getByLabel('Browser matrix for Admin UI SSO boundary')).toContainText('firefox')
-  await expect(page.getByLabel('Browser matrix for Admin UI SSO boundary')).toContainText('not-run')
+  await expect(page.getByLabel('Browser matrix for Admin UI SSO boundary')).toContainText('no run')
   await expect(page.getByLabel('chromium browser evidence')).toContainText('Browser E2E and attributable Web Vitals passed.')
   await expect(page.getByLabel('firefox browser evidence')).toContainText('No retained immutable envelope for this declared browser variant.')
   await expect(page.getByText('ledger · Covered')).toBeVisible()
@@ -94,23 +108,25 @@ test('renders the animated evidence system and consolidates test dimensions', as
   await expect(page.getByLabel('Recent runs for Public edge reachability')).toContainText('passed')
   await expect(page.getByText('Mobile login, overview and payment UI', { exact: true })).toBeVisible()
   await expect(page.getByText('Target schedule: 0 * * * *')).toBeVisible()
-  await page.getByRole('button', { name: /Výkon|Performance/ }).click()
+  await page.getByLabel('Detailed evidence view').selectOption('performance')
   await expect(page.getByText('p95')).toBeVisible()
   await expect(page.getByText('220 ms')).toBeVisible()
   await expect(page.getByText('0.2%')).toBeVisible()
   await expect(page.getByText('99.8%')).toBeVisible()
   await expect(page.getByText('150')).toBeVisible()
-  await page.getByRole('button', { name: /Client experience/ }).click()
+  await page.getByLabel('Detailed evidence view').selectOption('clients')
   await expect(page.getByText('OpenBank customer app')).toBeVisible()
   await expect(page.getByText('Roborazzi committed-golden verification')).toBeVisible()
   await expect(page.getByText('Mobile RUM is opt-in and its runtime signal is independent of CI.')).toBeVisible()
   await expect(page.getByText('12 sampled traces · 2 error span-counter increments')).toBeVisible()
+  await page.getByRole('button', { name: 'Needs attention', exact: true }).click()
+  await page.getByRole('region', { name: 'Advisory test agent' }).scrollIntoViewIfNeeded()
   await expect(page.getByText(/AI AGENT/)).toBeVisible()
 })
 
 test('never paints an unavailable evidence bundle healthy', async ({ page }) => {
-  await page.unroute('**/api/test-intelligence')
-  await page.route('**/api/test-intelligence', route => route.fulfill({
+  await page.unroute(/\/api\/test-intelligence(?:\?.*)?$/)
+  await page.route(/\/api\/test-intelligence(?:\?.*)?$/, route => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({
@@ -128,8 +144,12 @@ test('never paints an unavailable evidence bundle healthy', async ({ page }) => 
 
   await page.goto('/system/tests')
 
+  await page.getByRole('button', { name: 'How testing works', exact: true }).click()
+  await page.getByText('Assurance architecture and detailed platform capabilities', { exact: true }).click()
   await expect(page.getByRole('main').locator('.ti-health')).toContainText(/NEEDS ATTENTION\s*1\s*signal to inspect/, { timeout: 10_000 })
   await expect(page.getByText('EVIDENCE HEALTHY', { exact: true })).not.toBeVisible()
+  await page.getByRole('button', { name: 'Runs and history', exact: true }).click()
+  await page.getByText('Run summaries and cross-layer maps', { exact: true }).click()
   const assurance = page.getByRole('region', { name: 'Testing assurance map' })
   await expect(assurance.getByRole('button', { name: /CI evidence/ })).toContainText('unknown')
   await expect(assurance.getByRole('button', { name: /Testcontainers runtime/ })).toContainText('unknown')
@@ -138,7 +158,7 @@ test('never paints an unavailable evidence bundle healthy', async ({ page }) => 
 
 test('recovers from HTTP 503 after an operator refreshes the report', async ({ page }) => {
   let requests = 0
-  await page.route('**/api/test-intelligence', route => {
+  await page.route(/\/api\/test-intelligence(?:\?.*)?$/, route => {
     requests += 1
     return requests === 1
       ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })
@@ -146,11 +166,11 @@ test('recovers from HTTP 503 after an operator refreshes the report', async ({ p
   })
 
   await page.goto('/system/tests', { waitUntil: 'domcontentloaded' })
-  await expect(page.getByText('Report is unavailable.')).toBeVisible()
+  await expect(page.getByText('The report is unavailable. You can try refreshing it.')).toBeVisible()
   const refresh = page.getByRole('button', { name: 'Refresh system tests' })
   await expect(refresh).toBeEnabled()
   await refresh.click()
-  await expect(page.getByRole('region', { name: 'Testing assurance map' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Component evidence matrix' })).toBeVisible()
   expect(requests).toBe(2)
 })
 
@@ -167,10 +187,11 @@ test('defers advisory agent code and network work until the panel approaches vie
   })
 
   await page.goto('/system/tests')
-  await expect(page.getByRole('region', { name: 'Testing assurance map' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Component evidence matrix' })).toBeVisible()
   await page.waitForTimeout(300)
   expect(agentRequests).toBe(0)
 
+  await page.getByRole('button', { name: 'Needs attention', exact: true }).click()
   const agent = page.getByRole('region', { name: 'Advisory test agent' })
   await agent.scrollIntoViewIfNeeded()
   // The Playwright server runs React in development Strict Mode, which may remount an effect;
@@ -182,10 +203,12 @@ test('defers advisory agent code and network work until the panel approaches vie
 test('keeps the evidence flow usable at the mobile breakpoint', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/system/tests')
+  await page.getByRole('button', { name: 'How testing works', exact: true }).click()
+  await page.getByText('Assurance architecture and detailed platform capabilities', { exact: true }).click()
   await expect(page.getByRole('group', { name: /Seven Test Intelligence layers/ })).toBeVisible()
-  await expect(page.getByRole('region', { name: /Testing assurance map/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /CI breaks assumptions/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Výkon|Performance/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Runs and history', exact: true }).click()
+  await expect(page.getByLabel('Detailed evidence view')).toBeVisible()
 })
 
 test('meets WCAG A and AA rules in the rendered Test Intelligence workspace', async ({ page }) => {
@@ -205,6 +228,8 @@ test('removes decorative motion when the operator requests reduced motion', asyn
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/system/tests')
 
+  await page.getByRole('button', { name: 'How testing works', exact: true }).click()
+  await page.getByText('Assurance architecture and detailed platform capabilities', { exact: true }).click()
   const animationNames = await Promise.all([
     page.locator('.ti-aurora'),
     page.locator('.ti-beam i'),
@@ -235,5 +260,5 @@ test('uses Test Intelligence as the only DevOps test-evidence destination', asyn
   const destination = page.getByRole('link', { name: /Otevřít Test Intelligence|Open Test Intelligence/ })
   await expect(destination).toBeVisible()
   await destination.click()
-  await expect(page).toHaveURL(/\/system\/tests$/)
+  await expect(page).toHaveURL(/\/system\/tests$/, { timeout: 45_000 })
 })

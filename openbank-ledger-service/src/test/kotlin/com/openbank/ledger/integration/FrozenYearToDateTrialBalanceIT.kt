@@ -3,6 +3,7 @@
 
 package com.openbank.ledger.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -20,7 +21,7 @@ import java.util.UUID
 /** Real HTTP/Postgres proof of frozen current-year flows and calendar-year isolation. */
 @QuarkusTest
 @QuarkusTestResource(
-    value = com.openbank.ledger.it.PostgresTestResource::class,
+    value = PostgresTestResource::class,
     restrictToAnnotatedClass = true,
 )
 @TestProfile(FrozenYearToDateTrialBalanceIT.IsolatedPersistenceProfile::class)

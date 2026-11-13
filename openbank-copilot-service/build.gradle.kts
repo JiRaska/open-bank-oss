@@ -41,6 +41,8 @@ dependencies {
     implementation(project(":openbank-libs-runtime"))
 
     testImplementation(libs.mockk)
+    // #14525: @TestSecurity for the authenticated error-body conformance cases.
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)

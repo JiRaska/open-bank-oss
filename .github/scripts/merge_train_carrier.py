@@ -11,7 +11,7 @@ is a carrier. It never copies member text onto the carrier: that would turn a hu
 into bot text.
 
 TRUST. A PR is a carrier only when ALL hold, judged from the LIVE PR object (never the event):
-  * head branch matches `^train/[0-9]+-[0-9]+$` and lives in this repository (not a fork);
+  * head branch matches `^train/(strict-)?[0-9]+-[0-9]+$` and lives in this repository (not a fork);
   * author login is exactly the gitops App bot, `openbank-gitops-bot[bot]`, with type `Bot`
     (a user cannot register a login containing `[bot]`, so a human cannot be that author);
   * it carries the `merge-train` label.
@@ -29,8 +29,15 @@ import subprocess
 import time
 
 BOT_LOGIN = "openbank-gitops-bot[bot]"
+BOT_ID = 305_862_397   # the App bot's numeric user id (read off carrier #13817's `user.id`); a login string alone is a name
+RECORD_CONTEXT = "merge-train/record"          # publish's record of the tree it pushed (merge-train.py)
+RECORD_RE = re.compile(r"^tree=([0-9a-f]{40})$")
 CARRIER_LABEL = "merge-train"
+# A train carrier (`train/<run>-<attempt>`, built by build/publish) or a strict carrier
+# (`train/strict-<run>-<attempt>`, built execution-free by settle, ADR-0343 amendment 2026-11-05): both
+# carry the same chain of the train's own member commits, so a body gate reads the members of either.
 TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
+STRICT_TRAIN_BRANCH_RE = re.compile(r"^train/strict-[0-9]+-[0-9]+$")
 OWN_MEMBER_RE = re.compile(r"^merge-train: member #([0-9]+)\n\nPR-Number: #\1\nPR-Head: ([0-9a-f]{40})\n$")
 OWN_REGEN_MSG = "merge-train: regenerate derived files\n"
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -53,14 +60,18 @@ RESOLVE_DEADLINE_S = 15.0
 NOT_EVALUATED_LINE = "GATE_VERDICT=NOT_EVALUATED"   # must match run-gates.py NOT_EVALUATED_LINE
 
 
+def is_carrier_branch(ref: str) -> bool:
+    return bool(TRAIN_BRANCH_RE.fullmatch(ref) or STRICT_TRAIN_BRANCH_RE.fullmatch(ref))
+
+
 def is_verified_carrier(pr: dict | None, repo: str) -> bool:
     if not isinstance(pr, dict):
         return False
     user = pr.get("user") or {}
     head = pr.get("head") or {}
     labels = {(lb or {}).get("name") for lb in pr.get("labels") or []}
-    return (user.get("login") == BOT_LOGIN and user.get("type") == "Bot"
-            and TRAIN_BRANCH_RE.fullmatch(head.get("ref") or "") is not None
+    return (user.get("login") == BOT_LOGIN and user.get("type") == "Bot" and user.get("id") == BOT_ID
+            and is_carrier_branch(head.get("ref") or "")
             and ((head.get("repo") or {}).get("full_name") == repo)
             and CARRIER_LABEL in labels)
 
@@ -87,18 +98,37 @@ def deepen_for_chain(base: str, head: str = "HEAD", cwd: str | None = None, time
     29.4 s and `git fetch --no-tags --deepen=128 origin <sha>` took 1.7 s for the same walkable chain.
     No network at all when the chain is already complete. Raises CarrierUnavailable on a timeout or a
     failed fetch — the chain was not read, which is not the same as a malformed chain."""
+    deadline = time.monotonic() + timeout
     if _git("rev-parse", "--is-shallow-repository", cwd=cwd).stdout.strip() != "true" or _chain_complete(base, head, cwd):
         return
     sha = _git("rev-parse", "--verify", "--quiet", f"{head}^{{commit}}", cwd=cwd, check=False).stdout.strip()
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise CarrierUnavailable(f"cannot resolve {head} to a commit")
-    try:
-        r = runner(["git", "fetch", "-q", "--no-tags", "--deepen=128", "origin", sha],
-                   capture_output=True, text=True, cwd=cwd, timeout=max(1.0, timeout))
-    except subprocess.TimeoutExpired:
-        raise CarrierUnavailable(f"deepening the carrier chain timed out after {timeout:.0f}s") from None
-    if r.returncode != 0:
-        raise CarrierUnavailable(f"deepening the carrier chain failed: {(r.stderr or '').strip()[:160]}")
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise CarrierUnavailable(f"deepening the carrier chain timed out after {timeout:g}s")
+        try:
+            r = runner(["git", "fetch", "-q", "--no-tags", "--deepen=128", "origin", sha],
+                       capture_output=True, text=True, cwd=cwd, timeout=remaining)
+        except subprocess.TimeoutExpired:
+            raise CarrierUnavailable(f"deepening the carrier chain timed out after {timeout:g}s") from None
+        if r.returncode == 0:
+            return
+        error = (r.stderr or "").strip()
+        # Other gates fetch concurrently in this checkout. Only this specific Git contention is
+        # transient here; never unlink a writer's lock or retry authentication/transport failures.
+        if not re.search(r"Unable to create ['\"][^'\"]*[/\\]shallow\.lock['\"]: File exists\.|"
+                         r"shallow file has changed since we read it", error):
+            raise CarrierUnavailable(f"deepening the carrier chain failed: {error[:160]}")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise CarrierUnavailable(f"deepening the carrier chain timed out after {timeout:g}s")
+        if _chain_complete(base, sha, cwd):
+            return  # The competing fetch may already have supplied the required history.
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(0.1, remaining))
 
 
 def carrier_members(base: str, head: str = "HEAD", cwd: str | None = None,
@@ -171,6 +201,29 @@ def gh_member_bodies(repo: str, numbers: list[int], timeout: float = 10) -> dict
     return out
 
 
+def gh_record_tree(repo: str, sha: str, timeout: float = 10) -> str | None:
+    """The tree in the App's LATEST `merge-train/record` status on exactly `sha`: "" when the App
+    recorded none (a human push lands on a new sha, which publish never recorded), None when the
+    statuses could not be read. Statuses by any other creator are ignored."""
+    if not REPO_RE.fullmatch(repo or "") or not re.fullmatch(r"[0-9a-f]{40}", sha or ""):
+        return None
+    try:
+        r = subprocess.run(["gh", "api", f"repos/{repo}/commits/{sha}/statuses?per_page=100"],
+                           capture_output=True, text=True, check=True, timeout=max(1.0, timeout))
+        data = json.loads(r.stdout)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError):
+        return None
+    if not isinstance(data, list):
+        return None
+    mine = [st for st in data if isinstance(st, dict) and st.get("context") == RECORD_CONTEXT
+            and (st.get("creator") or {}).get("login") == BOT_LOGIN and (st.get("creator") or {}).get("id") == BOT_ID]
+    if not mine:
+        return ""
+    newest = max(mine, key=lambda st: st.get("id") or 0)
+    m = RECORD_RE.fullmatch(newest.get("description") or "") if newest.get("state") == "success" else None
+    return m.group(1) if m else ""
+
+
 class Resolution:
     """What one job knows about whether its PR is a carrier, resolved ONCE and shared by every gate.
 
@@ -204,7 +257,7 @@ def _resolve_uncached(base: str, env, cwd, fetch_pr, fetch_bodies, deadline: flo
     if pr is None:
         # Unreadable. An ordinary PR keeps its event body (today's fallback); a PR whose EVENT says it is a
         # train head cannot be told from a carrier without the live object, so nobody may judge it now.
-        if TRAIN_BRANCH_RE.fullmatch(env.get("GITHUB_HEAD_REF", "")):
+        if is_carrier_branch(env.get("GITHUB_HEAD_REF", "")):
             return Resolution("unavailable", reason=f"PR #{number} (head {env.get('GITHUB_HEAD_REF')}) unreadable")
         return Resolution("none")
     if not is_verified_carrier(pr, repo):

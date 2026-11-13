@@ -1,5 +1,83 @@
 # Changelog
 
+## [1.33.4](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.3...agent-service-v1.33.4) (2026-11-13)
+
+
+### Bug Fixes
+
+* **agent:** classify a missing OPA result as a PDP error, fail closed on unknown enforcement mode, correct stale fail-open text ([#15813](https://github.com/JiRaska/open-bank-oss/issues/15813)) ([bc62fba](https://github.com/JiRaska/open-bank-oss/commit/bc62fba7201951923ff5c790898a54d57b352118)), closes [#15758](https://github.com/JiRaska/open-bank-oss/issues/15758)
+
+## [1.33.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.2...agent-service-v1.33.3) (2026-11-12)
+
+
+### Bug Fixes
+
+* **agent:** fail closed when the policy decision point is unreachable for write and proposal tools ([#15770](https://github.com/JiRaska/open-bank-oss/issues/15770)) ([211468e](https://github.com/JiRaska/open-bank-oss/commit/211468e4d3e495baaff3be252c67f3d314d2add5))
+
+## [1.33.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.1...agent-service-v1.33.2) (2026-11-12)
+
+
+### Bug Fixes
+
+* **agent:** send the charter id as the OpenAI user field ([#15510](https://github.com/JiRaska/open-bank-oss/issues/15510)) ([9227598](https://github.com/JiRaska/open-bank-oss/commit/9227598e4577792f02217a3f7407ee08caadaeb0))
+
+## [1.33.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.0...agent-service-v1.33.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **agent-service:** complete tool-free explanations before returning success ([#15339](https://github.com/JiRaska/open-bank-oss/issues/15339)) ([6e1f61e](https://github.com/JiRaska/open-bank-oss/commit/6e1f61eb3a43febdec0fda6106022d6102eeab8f))
+
+## [1.33.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.32.1...agent-service-v1.33.0) (2026-11-08)
+
+
+### Features
+
+* **agent:** support governed chat explanations without tools ([#15232](https://github.com/JiRaska/open-bank-oss/issues/15232)) ([f28b1fa](https://github.com/JiRaska/open-bank-oss/commit/f28b1faff4b7012ec995c1f3932e554d168e2029))
+
+## [1.32.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.32.0...agent-service-v1.32.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **admin-ui:** derive business domains from canonical governance ([#14953](https://github.com/JiRaska/open-bank-oss/issues/14953)) ([20e2adf](https://github.com/JiRaska/open-bank-oss/commit/20e2adf3413cc2d484a1138228d2d843562fd4f1))
+
+## [1.32.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.5...agent-service-v1.32.0) (2026-11-06)
+
+
+### Features
+
+* **products:** obp CLI and MCP product tools over a shared ProductToolkit (ADR-0352 phase 5a) ([#14205](https://github.com/JiRaska/open-bank-oss/issues/14205)) ([ba97611](https://github.com/JiRaska/open-bank-oss/commit/ba9761178b8f2abbf3516ec679a49ab694f95b59))
+
+## [1.31.5](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.4...agent-service-v1.31.5) (2026-10-28)
+
+
+### Bug Fixes
+
+* **ledger:** carry the synthetic taint on the CDI request context into suspended resources ([#14059](https://github.com/JiRaska/open-bank-oss/issues/14059)) ([df3ce04](https://github.com/JiRaska/open-bank-oss/commit/df3ce048f294d17a912ddbdda45f90ff41ce0fe7))
+
+## [1.31.4](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.3...agent-service-v1.31.4) (2026-10-27)
+
+
+### Bug Fixes
+
+* **sanctions:** preserve JSONB payloads in reactive persistence ([#13084](https://github.com/JiRaska/open-bank-oss/issues/13084)) ([acc9f60](https://github.com/JiRaska/open-bank-oss/commit/acc9f60c8bed588c2a611436473e13abbf7fc1c2))
+* **sanctions:** src/main touched -&gt; patch release. Refs [#11948](https://github.com/JiRaska/open-bank-oss/issues/11948) ([acc9f60](https://github.com/JiRaska/open-bank-oss/commit/acc9f60c8bed588c2a611436473e13abbf7fc1c2))
+
+## [1.31.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.2...agent-service-v1.31.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **agent-service:** preserve PR-scoped owner intent under reviewed policy ([#13798](https://github.com/JiRaska/open-bank-oss/issues/13798)) ([e9a5401](https://github.com/JiRaska/open-bank-oss/commit/e9a540196e0aa6181194adf8f3181386357ddc57))
+
+## [1.31.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.1...agent-service-v1.31.2) (2026-10-24)
+
+
+### Bug Fixes
+
+* **agent-service:** preserve merge actors and authorization evidence ([#13764](https://github.com/JiRaska/open-bank-oss/issues/13764)) ([5715671](https://github.com/JiRaska/open-bank-oss/commit/571567125e6762da9edd6c5d6adabac9848e6720))
+
 ## [1.31.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.0...agent-service-v1.31.1) (2026-10-19)
 
 

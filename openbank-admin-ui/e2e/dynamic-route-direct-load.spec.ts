@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { ROLES } from '../src/lib/auth/roles'
 import { signInWithRoles } from './helpers/auth'
 import { waitForSettledShell } from './helpers/shell'
@@ -100,7 +100,7 @@ test.describe('read-only direct loads for dynamic pages', () => {
       await expect.poll(() => new URL(page.url()).pathname).toBe(new URL(fixture.path, baseURL).pathname)
       if (template !== '/r/[token]') await waitForSettledShell(page)
 
-      const main = page.locator(template === '/r/[token]' ? 'main' : '#main-content')
+      const main = page.locator(template === '/r/[token]' ? 'main' : '#main-content:visible')
       await expect(main, `${template} shell content`).toBeVisible()
       const terminalText = expectedTerminalText[template] ?? unavailableState
       await expect.poll(async () => {

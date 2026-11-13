@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-delegation-service
 
-> Operational runbook for the `delegation` service. Data domain **open-banking**,
+> Operational runbook for the `delegation` service. Data domain **identity**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-delegation-service` |
 | HTTP port | `8126` |
-| Data domain | open-banking |
+| Data domain | identity |
 | Datastore | PostgreSQL (database `openbank_delegations`) |
 | Classification | confidential |
 | Retention | 5 years |

@@ -47,6 +47,16 @@ interface ProductCatalogClient {
     @Path("/revisions/{id}")
     fun revision(@PathParam("id") id: UUID): Uni<CatalogRevisionClientResponse>
 
+    /**
+     * The same revision as raw JSON, for the product-IR shadow (ADR-0352 phase 3): its `behaviour`
+     * and `irSignature` are read by [com.openbank.interest.infrastructure.adapter.RestCatalogRevisionIrPort]
+     * with a BigDecimal-preserving mapper, so a JSON number in the IR reaches the canonical hash exactly
+     * as the catalog signed it. Never called on the posting path.
+     */
+    @GET
+    @Path("/revisions/{id}")
+    fun revisionJson(@PathParam("id") id: UUID): Uni<String>
+
     @GET
     @Path("/offerings/{id}")
     fun offering(@PathParam("id") id: UUID): Uni<CatalogOfferingClientResponse>

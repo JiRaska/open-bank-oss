@@ -38,7 +38,7 @@ PYGEN
     printf '%s' "$com" > "$d/docs/compliance/eu-ai-act.md"
     git -C "$d" init -q 2>/dev/null
     git -C "$d" add -A >/dev/null 2>&1
-    git -C "$d" -c user.email=t@t -c user.name=t commit -qm fixture >/dev/null 2>&1
+    git -C "$d" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -qm fixture >/dev/null 2>&1
     return 0
   }
   expect() { # expect <label> <dir> <want-rc> [substring]
@@ -46,7 +46,7 @@ PYGEN
     out=$(EU_AI_ACT_ROOT="$d" bash "$SELF" 2>&1); rc=$?
     if [ "$rc" -ne "$want" ]; then
       echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
-    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+    elif [ -n "$sub" ] && ! grep -qF -- "$sub" <<< "$out"; then
       echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1))
     fi
   }

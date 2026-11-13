@@ -59,7 +59,7 @@ selftest() {
   t="$(mktemp -d)"
   (
     cd "$t" || exit 1
-    git init -q -b main . && git config user.email t@t && git config user.name t
+    git init -q -b main . && git config user.email t@t && git config user.name t && git config commit.gpgsign false
     echo base >same.txt; echo base >x.txt; git add . && git commit -qm base
     git switch -qc a; echo shared >x.txt; echo mine >y.txt; echo base >same.txt; git add . && git commit -qm a
     git switch -q main; git switch -qc b; echo shared >x.txt; echo theirs >y.txt; git add . && git commit -qm b

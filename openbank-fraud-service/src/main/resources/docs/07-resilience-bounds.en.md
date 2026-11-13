@@ -48,3 +48,11 @@ account).
 Deliberately per-module rather than a fleet default: nothing measures test heap anywhere, so a
 global bump would be an unmeasured ratchet across ~50 modules to fix one. A second module OOMing
 is the signal to raise the bound in build-logic and count Quarkus boots per module.
+
+## Fraud-score rail label bound
+
+`openbank_fraud_scores_total{verdict,rail}` admits only the verified in-repo callers `SEPA`,
+`SEPA_INSTANT`, `DOMESTIC`, `FX` and `CARD`. Every other request value, including case variants and
+empty strings, is recorded under the single `unknown` label. The API's rail string remains free-form
+for compatibility, but it cannot create unbounded Prometheus series; the `unknown` bucket is also the
+signal that a new caller needs an explicit, reviewed label addition.

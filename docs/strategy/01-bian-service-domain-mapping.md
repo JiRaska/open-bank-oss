@@ -4,6 +4,10 @@
 > Status: **Draft v0.1** — based on BIAN Service Landscape v13 (2023) and v12 conventions. Subject to revision once BIAN v14 hierarchy is published.
 > This mapping is **descriptive**, not certified by BIAN. We are not (yet) a BIAN member.
 
+> This historical capability snapshot is not the current ownership registry. Current business
+> ownership and implemented boundaries are defined by [ADR-0364](../adr/0364-canonical-business-domain-ownership-independent-of-deployment-isolation.md)
+> and [domain-boundaries.md](../architecture/domain-boundaries.md).
+
 ## What is BIAN
 
 The Banking Industry Architecture Network (BIAN) maintains a vendor-neutral, hierarchical decomposition of banking capabilities into **Business Areas → Business Domains → Service Domains**. Service Domains are the atomic units — each is a discrete, reusable banking capability with a defined functional pattern (Initiate / Update / Execute / Request / Retrieve / Notify / Control).

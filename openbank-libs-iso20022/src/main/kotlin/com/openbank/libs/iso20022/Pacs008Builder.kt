@@ -18,6 +18,12 @@ import java.time.format.DateTimeFormatter
  * clearing-settled rails (SEPA/domestic, which have no explicit value date of their own —
  * pass `creationDateTime`'s date), or the scheme-supplied value date for rails that carry one
  * (e.g. SWIFT MT103 field 32A).
+ *
+ * [paymentTypeInformation] maps to `CdtTrfTxInf/PmtTpInf`. It is optional and defaults to
+ * `null`, in which case no `PmtTpInf` is emitted and the document is byte-identical to the one
+ * produced before the field existed (#13663). A SEPA rail must set it: the EPC SCT rulebook
+ * requires `SvcLvl/Cd=SEPA` and the SCT Inst rulebook additionally `LclInstrm/Cd=INST`
+ * ([PaymentTypeInformation.SEPA_CREDIT_TRANSFER], [PaymentTypeInformation.SEPA_INSTANT]).
  */
 data class CreditTransferInstruction(
     val messageId: String,
@@ -36,7 +42,96 @@ data class CreditTransferInstruction(
     val creditorName: String,
     val creditorIban: String,
     val remittanceInfo: String?,
-)
+    val paymentTypeInformation: PaymentTypeInformation? = null,
+) {
+    /**
+     * The pre-#13663 constructor, retained so bytecode compiled against the 16-argument shape keeps
+     * linking (libs ABI rule: an addition must not remove an existing signature).
+     */
+    @Suppress("LongParameterList")
+    constructor(
+        messageId: String,
+        creationDateTime: OffsetDateTime,
+        interbankSettlementDate: OffsetDateTime,
+        endToEndId: String,
+        transactionId: String?,
+        amount: BigDecimal,
+        currency: String,
+        chargeBearer: ChargeBearer,
+        settlementMethod: SettlementMethod,
+        debtorName: String,
+        debtorIban: String,
+        debtorAgentBic: String,
+        creditorAgentBic: String,
+        creditorName: String,
+        creditorIban: String,
+        remittanceInfo: String?,
+    ) : this(
+        messageId, creationDateTime, interbankSettlementDate, endToEndId, transactionId, amount, currency,
+        chargeBearer, settlementMethod, debtorName, debtorIban, debtorAgentBic, creditorAgentBic,
+        creditorName, creditorIban, remittanceInfo, null,
+    )
+
+    /**
+     * The pre-#13663 `copy`, retained for binary compatibility; keeps [paymentTypeInformation].
+     * Defaults also retain its old JVM `copy$default` descriptor for already-compiled Kotlin callers.
+     */
+    @Suppress("LongParameterList")
+    fun copy(
+        messageId: String = this.messageId,
+        creationDateTime: OffsetDateTime = this.creationDateTime,
+        interbankSettlementDate: OffsetDateTime = this.interbankSettlementDate,
+        endToEndId: String = this.endToEndId,
+        transactionId: String? = this.transactionId,
+        amount: BigDecimal = this.amount,
+        currency: String = this.currency,
+        chargeBearer: ChargeBearer = this.chargeBearer,
+        settlementMethod: SettlementMethod = this.settlementMethod,
+        debtorName: String = this.debtorName,
+        debtorIban: String = this.debtorIban,
+        debtorAgentBic: String = this.debtorAgentBic,
+        creditorAgentBic: String = this.creditorAgentBic,
+        creditorName: String = this.creditorName,
+        creditorIban: String = this.creditorIban,
+        remittanceInfo: String? = this.remittanceInfo,
+    ): CreditTransferInstruction = CreditTransferInstruction(
+        messageId, creationDateTime, interbankSettlementDate, endToEndId, transactionId, amount, currency,
+        chargeBearer, settlementMethod, debtorName, debtorIban, debtorAgentBic, creditorAgentBic,
+        creditorName, creditorIban, remittanceInfo, paymentTypeInformation,
+    )
+}
+
+/**
+ * ISO 20022 `PaymentTypeInformation28` as the rail populates it: one service level code
+ * (`SvcLvl/Cd`, `ExternalServiceLevel1Code`, 1–4 characters) and an optional local instrument
+ * code (`LclInstrm/Cd`, `ExternalLocalInstrument1Code`, 1–35 characters).
+ *
+ * Only the coded forms are modelled; `Prtry`, `InstrPrty`, `ClrChanl` and `CtgyPurp` are not
+ * needed by any rail today.
+ */
+data class PaymentTypeInformation(val serviceLevelCode: String, val localInstrumentCode: String? = null) {
+    init {
+        require(serviceLevelCode.length in 1..MAX_SERVICE_LEVEL) {
+            "PmtTpInf/SvcLvl/Cd must be 1-$MAX_SERVICE_LEVEL characters"
+        }
+        require(localInstrumentCode == null || localInstrumentCode.length in 1..MAX_LOCAL_INSTRUMENT) {
+            "PmtTpInf/LclInstrm/Cd must be 1-$MAX_LOCAL_INSTRUMENT characters"
+        }
+    }
+
+    companion object {
+        private const val MAX_SERVICE_LEVEL = 4
+        private const val MAX_LOCAL_INSTRUMENT = 35
+
+        /** EPC SCT rulebook: `SvcLvl/Cd=SEPA`, no local instrument. */
+        @JvmField
+        val SEPA_CREDIT_TRANSFER: PaymentTypeInformation = PaymentTypeInformation("SEPA")
+
+        /** EPC SCT Inst rulebook: `SvcLvl/Cd=SEPA` and `LclInstrm/Cd=INST`. */
+        @JvmField
+        val SEPA_INSTANT: PaymentTypeInformation = PaymentTypeInformation("SEPA", "INST")
+    }
+}
 
 /** ISO 20022 `ChargeBearerType1Code`. SEPA SCT mandates `SLEV` (following service level). */
 enum class ChargeBearer { DEBT, CRED, SHAR, SLEV }
@@ -78,9 +173,7 @@ class Pacs008Builder {
     private fun buildTransaction(doc: XmlDoc, parent: Element, i: CreditTransferInstruction) {
         val tx = doc.child(parent, "CdtTrfTxInf")
 
-        val pmtId = doc.child(tx, "PmtId")
-        doc.text(pmtId, "EndToEndId", i.endToEndId)
-        i.transactionId?.let { doc.text(pmtId, "TxId", it) }
+        buildIdentificationAndType(doc, tx, i)
 
         doc.text(tx, "IntrBkSttlmAmt", i.amount.toPlainString()).setAttribute("Ccy", i.currency)
         doc.text(tx, "IntrBkSttlmDt", i.interbankSettlementDate.format(DateTimeFormatter.ISO_LOCAL_DATE))
@@ -102,6 +195,24 @@ class Pacs008Builder {
         }
         i.remittanceInfo?.let { info ->
             doc.child(tx, "RmtInf").also { doc.text(it, "Ustrd", info) }
+        }
+    }
+
+    private fun buildIdentificationAndType(doc: XmlDoc, tx: Element, i: CreditTransferInstruction) {
+        val pmtId = doc.child(tx, "PmtId")
+        doc.text(pmtId, "EndToEndId", i.endToEndId)
+        i.transactionId?.let { doc.text(pmtId, "TxId", it) }
+
+        // PmtTpInf sits between PmtId and IntrBkSttlmAmt in CreditTransferTransaction39. Absent
+        // when the caller set none, so pre-#13663 output stays byte-identical.
+        i.paymentTypeInformation?.let { buildPaymentTypeInformation(doc, tx, it) }
+    }
+
+    private fun buildPaymentTypeInformation(doc: XmlDoc, tx: Element, pti: PaymentTypeInformation) {
+        val pmtTpInf = doc.child(tx, "PmtTpInf")
+        doc.child(pmtTpInf, "SvcLvl").also { doc.text(it, "Cd", pti.serviceLevelCode) }
+        pti.localInstrumentCode?.let { code ->
+            doc.child(pmtTpInf, "LclInstrm").also { doc.text(it, "Cd", code) }
         }
     }
 

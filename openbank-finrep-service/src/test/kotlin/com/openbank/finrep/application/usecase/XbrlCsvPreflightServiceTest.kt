@@ -74,7 +74,7 @@ class XbrlCsvPreflightServiceTest {
     }
 
     @Test
-    fun `blocks a return that contains a cell with an unverified datapoint id`(): Unit = runBlocking {
+    fun `allows a return whose emitted datapoint ids are verified`(): Unit = runBlocking {
         val mapped = F0101Mapper.map(
             TrialBalanceSnapshot(
                 lines = listOf(
@@ -92,9 +92,44 @@ class XbrlCsvPreflightServiceTest {
         val result = XbrlCsvPreflightService(finrepUseCase)
             .getPreflight(GetXbrlCsvPreflightQuery("F01.01", asOf))
 
+        assertThat(result.state).isEqualTo(XbrlCsvPreflightState.READY_FOR_RENDERING)
+        assertThat(result.blockers).isEmpty()
+    }
+
+    @Test
+    fun `balanced EUR amounts cannot be published as CZK facts`(): Unit = runBlocking {
+        coEvery { finrepUseCase.getTemplate(any()) } returns F0101Mapper.map(
+            TrialBalanceSnapshot(
+                lines = listOf(
+                    TrialBalanceLineDto("1510", "ASSET", BigDecimal("100"), "CZK"),
+                    TrialBalanceLineDto("4100", "INCOME", BigDecimal("-100"), "CZK"),
+                    TrialBalanceLineDto("1002", "ASSET", BigDecimal("20"), "EUR"),
+                    TrialBalanceLineDto("2301", "LIABILITY", BigDecimal("-20"), "EUR"),
+                ),
+                ledgerReportsBalanced = true,
+            ),
+            asOf,
+        )
+
+        val result = XbrlCsvPreflightService(finrepUseCase).getPreflight(GetXbrlCsvPreflightQuery("F01.01", asOf))
+
         assertThat(result.state).isEqualTo(XbrlCsvPreflightState.BLOCKED)
-        assertThat(result.blockers).extracting<String> { it.code }.containsExactly("UNVERIFIED_DATAPOINT_ID")
-        assertThat(result.blockers.single().reason).contains("F01.01/r0030/c0010")
+        assertThat(result.blockers.single().code).isEqualTo("INCOMPLETE_OFFICIAL_MAPPING")
+        assertThat(result.blockers.single().reason).contains("verified CZK conversion")
+    }
+
+    @Test
+    fun `an empty frozen balance does not authorize an all-zero artifact`(): Unit = runBlocking {
+        coEvery { finrepUseCase.getTemplate(any()) } returns F0101Mapper.map(
+            TrialBalanceSnapshot(lines = emptyList(), ledgerReportsBalanced = true),
+            asOf,
+        )
+
+        val result = XbrlCsvPreflightService(finrepUseCase).getPreflight(GetXbrlCsvPreflightQuery("F01.01", asOf))
+
+        assertThat(result.state).isEqualTo(XbrlCsvPreflightState.BLOCKED)
+        assertThat(result.blockers.single().code).isEqualTo("INCOMPLETE_OFFICIAL_MAPPING")
+        assertThat(result.blockers.single().reason).contains("supplied no balance-sheet or profit and loss rows")
     }
 
     private fun template(

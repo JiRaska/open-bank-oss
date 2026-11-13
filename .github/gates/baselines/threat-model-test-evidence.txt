@@ -1,0 +1,5 @@
+# Threat-model test citations that had no green result when the ratchet began (2026-11-06, #13171).
+# Remove a line when its test runs green in scheduled evidence; never add one to pass a PR.
+openbank-sepa-payment|**T**ampering|RedisApprovalStoreIT
+openbank-sepa-payment|**T**ampering|XxeRejectionTest
+openbank-swift-service|**T**ampering|ClearingSimulatorInstitutionTransferTest

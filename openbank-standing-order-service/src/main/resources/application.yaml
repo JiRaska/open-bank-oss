@@ -207,3 +207,18 @@ authz:
       ssl:
         client-auth: required
       insecure-requests: enabled
+      # Listener parity (#12511, the #12506 pattern): with client-auth on, Quarkus ALSO registers its
+      # mTLS authentication mechanism, which turns any trusted client certificate into an authenticated
+      # SecurityIdentity of its own, on the TLS listener only. /api/* therefore accepts the bearer
+      # mechanism ONLY and demands authentication itself; the certificate stays transport authentication.
+      # StandingOrderListenerAuthParityIT holds both listeners to it with the production listener shape.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: authenticated
+            auth-mechanism: bearer
+          public-metadata:
+            paths: /api/v1/info,/api/v1/config
+            methods: GET
+            policy: permit

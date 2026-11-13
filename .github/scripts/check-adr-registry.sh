@@ -72,7 +72,7 @@ if [ "${1:-}" = "--self-test" ]; then
   # code, so every case would fail with 128 regardless of the rule under test. An empty repo
   # makes that grep find nothing, which is the intended condition here.
   git -C "$td" init -q 2>/dev/null
-  git -C "$td" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init >/dev/null 2>&1
+  git -C "$td" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m init >/dev/null 2>&1
 
   fm() { # fm <num> <title-num> [key=value overrides...]
     local num="$1" tnum="$2"; shift 2
@@ -214,6 +214,40 @@ if [ "${1:-}" = "--self-test" ]; then
   d=$(mkdir_fixture placeholder); fm 0001 0001 tags="[TODO-pick-from-tags.txt]" > "$d/0001-first.md"
   expect "the scaffold placeholder tag is caught" "$d" 1
 
+  # Literal marker scanning must retain every marker, including shell metacharacters.
+  marker_case=0
+  while IFS= read -r marker; do
+    marker_case=$((marker_case + 1))
+    d=$(mkdir_fixture "literal-marker-$marker_case")
+    fm 0001 0001 > "$d/0001-first.md"
+    printf '\nprefix %s suffix\n' "$marker" >> "$d/0001-first.md"
+    expect "literal scaffold marker $marker_case is caught" "$d" 1 "unfilled scaffold placeholder"
+  done <<'TEST_MARKERS'
+TODO-pick-from-tags.txt
+summary: "TODO
+authors: [<name>]
+<Short noun phrase>
+<req refs>
+What forces are at play (technical, business, regulatory)?
+State the decision clearly in active voice
+- **Option A** — short description
+TEST_MARKERS
+  for section in Context Consequences Alternatives Compliance; do
+    d=$(mkdir_fixture "inline-section-$section")
+    fm 0001 0001 | sed "s/^## $section/prose ## $section/" > "$d/0001-first.md"
+    expect "inline $section is not an anchored section" "$d" 1 "missing a '## $section"
+  done
+
+  # A heading split by a NUL must not become valid when Bash command substitution drops NULs.
+  d=$(mkdir_fixture nul-heading)
+  fm 0001 0001 | sed '/^## Context$/d' > "$d/0001-first.md"
+  printf '## Con\000text\n' >> "$d/0001-first.md"
+  expect "an ADR containing NUL is rejected before shell text checks" "$d" 1 "contains a NUL byte"
+  d=$(mkdir_fixture late-nul)
+  fm 0001 0001 > "$d/0001-first.md"
+  printf '%8192s\000' '' >> "$d/0001-first.md"
+  expect "a late NUL is rejected after the complete file is scanned" "$d" 1 "contains a NUL byte"
+
   # SUPERSESSION must be declared on BOTH sides. Declared one way only, the superseded ADR
   # still reads as live to anyone who opens it — the reader has no way to know.
   d=$(mkdir_fixture halfsuper)
@@ -231,8 +265,79 @@ if [ "${1:-}" = "--self-test" ]; then
   d=$(mkdir_fixture empty)
   expect "an empty ADR directory is an error" "$d" 1
 
+  # Field lookups use the first occurrence, including an empty first value.
+  # A last-value map or a truthiness-based cache would silently change both cases.
+  d=$(mkdir_fixture duplicate-first)
+  fm 0001 0001 | while IFS= read -r line; do
+    printf '%s\n' "$line"
+    case "$line" in decision-status:*) printf 'decision-status: invalid\n' ;; esac
+  done > "$d/0001-first.md"
+  expect "a later duplicate does not replace the first field value" "$d" 0
+
+  d=$(mkdir_fixture duplicate-empty)
+  fm 0001 0001 decision-status= | while IFS= read -r line; do
+    printf '%s\n' "$line"
+    case "$line" in decision-status:*) printf 'decision-status: accepted\n' ;; esac
+  done > "$d/0001-first.md"
+  expect "an empty first field is not replaced by a later value" "$d" 1 "decision-status '' is not one of"
+
+  # 3. INDEX DRIFT ON A PR MERGE REF. A real git history: base has 0001; the branch adds 0002 and
+  #    regenerates; main adds 0010 and regenerates (0009 keeps the hunks apart, so it merges cleanly); the merge ref merges the derived files as
+  #    text, so DIGEST's count line agrees on both sides (count=3) while the merged tree has 4.
+  #    The fixture gen-index.sh is a stand-in, so the RULE is tested, not the real generator.
+  mkrepo() { # mkrepo <name> <1 regenerate | 0 hand-edit DIGEST | 2 leave derived alone> -> repo root, HEAD = merge ref
+    local r="$td/$1"
+    local g=(git -c user.email=t@t -c user.name=t -c commit.gpgsign=false)
+    mkdir -p "$r/docs/adr"
+    cp "$REAL_ADR/lib-frontmatter.sh" "$REAL_ADR/tags.txt" "$REAL_ADR/known-repos.txt" "$r/docs/adr/"
+    printf '%s\n' '#!/usr/bin/env bash' 'cd "$(dirname "$0")"' \
+      'ls [0-9][0-9][0-9][0-9]-*.md | sort > README.md' \
+      'cp README.md CURRENT.md; cp README.md index.json' \
+      'echo "count=$(wc -l < README.md | tr -d " ")" > DIGEST.md' > "$r/docs/adr/gen-index.sh"
+    # Every step is chained with `&&`: `set -e` is disabled inside a subshell that is the left
+    # side of `||`, so a failed `checkout -b main` (an init.defaultBranch of main) once let every
+    # later commit land on `base` silently and the fixture tested the wrong history.
+    (
+      cd "$r" &&
+      git init -q -b trunk &&
+      fm 0001 0001 > docs/adr/0001-a.md &&
+      fm 0009 0009 > docs/adr/0009-i.md &&
+      bash docs/adr/gen-index.sh &&
+      git add -A && "${g[@]}" commit -qm base && git branch -q base &&
+      git checkout -qb feature &&
+      fm 0002 0002 > docs/adr/0002-b.md &&
+      case "$2" in 1) bash docs/adr/gen-index.sh ;; 0) echo "count=3" > docs/adr/DIGEST.md ;; *) true ;; esac &&
+      git add -A && "${g[@]}" commit -qm feature &&
+      git checkout -q base && git checkout -qb main &&
+      fm 0010 0010 > docs/adr/0010-j.md &&
+      bash docs/adr/gen-index.sh &&
+      git add -A && "${g[@]}" commit -qm main &&
+      "${g[@]}" merge -q --no-ff feature -m merge-ref &&
+      [ "$(git rev-parse base)" = "$(git rev-parse HEAD^2^)" ]
+    ) >/dev/null 2>&1 || return 1
+    echo "$r"
+  }
+  expect_repo() { # expect_repo <label> <repo> <want-rc> <PR_DIFF_BASE or ""> [substring]
+    local label="$1" r="$2" want="$3" base="$4" sub="${5:-}" out rc
+    out=$(cd "$r" && PR_DIFF_BASE="$base" bash "$SELF" docs/adr 2>&1); rc=$?
+    if [ "$rc" -ne "$want" ] || { [ -n "$sub" ] && ! LC_ALL=C grep -qF -- "$sub" <<<"$out"; }; then
+      echo "::error::self-test: $label — want rc=$want${sub:+ and '$sub'}, got rc=$rc" >&2
+      show_out "$label" "$out"; fails=$((fails+1))
+    fi
+  }
+  if r=$(mkrepo drift-ok 1); then
+    expect_repo "index drift from main moving passes on a PR, as a notice" "$r" 0 base "only because main moved"
+    expect_repo "the same drift fails without a PR context (a main push stays strict)" "$r" 1 "" "is stale"
+  else echo "::error::self-test: could not build the drift-ok fixture repo" >&2; fails=$((fails+1)); fi
+  if r=$(mkrepo drift-untouched 2); then
+    expect_repo "a PR that does not commit the derived index at all passes, as a notice" "$r" 0 base "only because main moved"
+  else echo "::error::self-test: could not build the drift-untouched fixture repo" >&2; fails=$((fails+1)); fi
+  if r=$(mkrepo drift-own 0); then
+    expect_repo "a PR whose OWN index is stale still fails" "$r" 1 base "is stale"
+  else echo "::error::self-test: could not build the drift-own fixture repo" >&2; fails=$((fails+1)); fi
+
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: ADR registry integrity is falsifiable (25 cases)"
+  echo "self-test ok: ADR registry integrity is falsifiable (schema, literal-marker and anchored-section cases)"
   exit 0
 fi
 
@@ -254,11 +359,23 @@ if [[ ${#adrs[@]} -eq 0 ]]; then
   exit 1
 fi
 
+# Validate the full registry bytes once before Bash text reads can discard a NUL.
+# A temporary byte snapshot keeps this portable and fails closed on unreadable input.
+_adr_nul_scan=$(mktemp)
+trap 'rm -f -- "$_adr_nul_scan"' EXIT
+cat -- "${adrs[@]}" > "$_adr_nul_scan"
+if ! LC_ALL=C tr -d '\000' <"$_adr_nul_scan" | cmp -s "$_adr_nul_scan" -; then
+  err "registry contains a NUL byte or could not be read safely; refusing shell text checks."
+  exit 1
+fi
+rm -f -- "$_adr_nul_scan"
+trap - EXIT
+
 # --- 1. Unique numbers -------------------------------------------------------
 # Collect the NNNN prefix of every ADR; any number appearing >1 is a collision.
 dupes=$(
   for f in "${adrs[@]}"; do
-    base=$(basename "$f")
+    base=${f##*/}
     echo "${base%%-*}"
   done | sort | uniq -d
 )
@@ -277,7 +394,7 @@ fi
 # A bare title ("# OSS-readiness ...") or an incidental number ("# PostgreSQL 18
 # — ...") has no anchored ADR number, so it is skipped (no false positive).
 for f in "${adrs[@]}"; do
-  base=$(basename "$f")
+  base=${f##*/}
   fnum=$((10#${base%%-*}))
   h1=$(grep -m1 '^# ' "$f" || true)
   hnum=""
@@ -294,16 +411,54 @@ done
 # --- 3. Generated index must be up to date -----------------------------------
 # Regenerate in place and fail if it changed git-tracked content. The generator
 # is deterministic, so a clean tree => no diff.
+#
+# ON A PULL REQUEST the checkout is GitHub's merge of the branch into main (HEAD^1 = main,
+# HEAD^2 = the branch tip), and the four derived files are merged as TEXT. As soon as another
+# ADR lands on main, every open ADR PR's merged index disagrees with a regeneration of the merged
+# tree, although neither side is wrong: measured 2026-11-12, this alone reddened #15726, #15740,
+# #15733, #15580 and the six-link ADR-0370 stack, each needing a hand-made merge commit. The
+# merge train regenerates these files in every carrier (merge-train.py REGEN_COMMANDS runs
+# gen-index.sh), so drift caused by main moving cannot reach main. What a PR CAN get wrong is its
+# OWN index. So on a PR: a branch that does not touch the derived files at all is fine (the train
+# regenerates them; NOT committing them is the way to never conflict on them), and a branch that
+# does touch them must have them consistent at its own tip — stale there is the PR's own defect,
+# an error as before. Either way the drift is reported as a notice, not an error. Main pushes and
+# local runs (no PR_DIFF_BASE, or no HEAD^2) stay strict.
 if [[ -x "$ADR_DIR/gen-index.sh" || -f "$ADR_DIR/gen-index.sh" ]]; then
   bash "$ADR_DIR/gen-index.sh" >/dev/null
+  drifted=()
   for derived in README.md DIGEST.md CURRENT.md index.json; do
-    if ! git diff --quiet -- "$ADR_DIR/$derived" 2>/dev/null; then
-      err "docs/adr/$derived is stale — run 'bash $ADR_DIR/gen-index.sh' and commit the result."
-      echo "----- $derived drift (committed vs regenerated) -----" >&2
-      git --no-pager diff -- "$ADR_DIR/$derived" >&2 || true
-      git checkout -- "$ADR_DIR/$derived" 2>/dev/null || true
-    fi
+    if ! git diff --quiet -- "$ADR_DIR/$derived" 2>/dev/null; then drifted+=("$derived"); fi
   done
+  if (( ${#drifted[@]} )); then
+    branch_own_index_ok=0
+    if [[ -n "${PR_DIFF_BASE:-}" ]] && tip=$(git rev-parse -q --verify 'HEAD^2' 2>/dev/null); then
+      top_abs=$(pwd -P); adr_abs=$(cd "$ADR_DIR" && pwd -P); adr_rel="${adr_abs#"$top_abs"/}"
+      touched=$(git diff --name-only "$PR_DIFF_BASE" "$tip" -- "$adr_rel/README.md" "$adr_rel/DIGEST.md" \
+        "$adr_rel/CURRENT.md" "$adr_rel/index.json" 2>/dev/null) || touched="unknown"
+      tipwt=$(mktemp -d)
+      if [[ -z "$touched" ]]; then
+        branch_own_index_ok=1
+      elif git worktree add -q --detach "$tipwt" "$tip" >/dev/null 2>&1; then
+        if (cd "$tipwt" && bash "$adr_rel/gen-index.sh" >/dev/null 2>&1 \
+              && git diff --quiet -- "$adr_rel/README.md" "$adr_rel/DIGEST.md" "$adr_rel/CURRENT.md" "$adr_rel/index.json"); then
+          branch_own_index_ok=1
+        fi
+        git worktree remove --force "$tipwt" >/dev/null 2>&1 || true
+      fi
+      rmdir "$tipwt" 2>/dev/null || true
+    fi
+    for derived in "${drifted[@]}"; do
+      if (( branch_own_index_ok )); then
+        echo "::notice title=ADR registry::docs/adr/$derived differs only because main moved (or this PR does not commit the derived index); the merge train regenerates it in the carrier. Do not hand-merge it."
+      else
+        err "docs/adr/$derived is stale — run 'bash $ADR_DIR/gen-index.sh' and commit the result."
+        echo "----- $derived drift (committed vs regenerated) -----" >&2
+        git --no-pager diff -- "$ADR_DIR/$derived" >&2 || true
+      fi
+      git checkout -- "$ADR_DIR/$derived" 2>/dev/null || true
+    done
+  fi
 else
   echo "::warning::check-adr-registry: $ADR_DIR/gen-index.sh missing — skipping index freshness check." >&2
 fi
@@ -348,7 +503,7 @@ declared_supby=""   # "NNNN>TTTT" pairs: NNNN declares it is superseded by TTTT
 declared_sup=""     # "NNNN>TTTT" pairs: NNNN declares it supersedes TTTT
 
 for f in "${adrs[@]}"; do
-  base=$(basename "$f")
+  base=${f##*/}
   num=${base%%-*}
 
   # Capture fm_extract's OWN status. `if ! fm=$(...); then case "$?"` cannot: inside
@@ -366,6 +521,31 @@ for f in "${adrs[@]}"; do
     esac
     continue
   fi
+
+  # Resolve the first value of each field in one pass over the parsed block.
+  # fm_field has first-key semantics; retain them for duplicate and empty values.
+  # Keep values as data rather than starting a command-substitution subshell for
+  # every lookup. The parser and all schema checks below remain unchanged.
+  decision=""; delivery=""; date=""; summary_raw=""
+  authors_raw=""; tags_raw=""; repos_raw=""; supby_raw=""; sup_raw=""
+  seen_fields=" "
+  while IFS= read -r field_line; do
+    field_key=${field_line%%$'\t'*}
+    field_value=${field_line#*$'\t'}
+    case "$seen_fields" in *" $field_key "*) continue ;; esac
+    seen_fields+="$field_key "
+    case "$field_key" in
+      decision-status) decision=$field_value ;;
+      delivery-status) delivery=$field_value ;;
+      date) date=$field_value ;;
+      summary) summary_raw=$field_value ;;
+      authors) authors_raw=$field_value ;;
+      tags) tags_raw=$field_value ;;
+      delivery-repos) repos_raw=$field_value ;;
+      superseded-by) supby_raw=$field_value ;;
+      supersedes) sup_raw=$field_value ;;
+    esac
+  done <<< "$fm"
 
   # 4a. malformed lines (nesting, block scalars, stray text) --------------------
   while IFS=$'\t' read -r k v; do
@@ -394,10 +574,6 @@ for f in "${adrs[@]}"; do
     in_set "$k" "$SCHEMA_KEYS $OPTIONAL_KEYS" || err "$base: unknown front-matter key '$k' (typo? see docs/adr/SCHEMA.md)."
   done <<< "$fm"
 
-  decision=$(fm_field "$fm" decision-status)
-  delivery=$(fm_field "$fm" delivery-status)
-  date=$(fm_field "$fm" date)
-  summary_raw=$(fm_field "$fm" summary)
 
   # 4c. enums and date format ---------------------------------------------------
   in_set "$decision" "$DECISION_ENUM" || err "$base: decision-status '$decision' is not one of: $DECISION_ENUM"
@@ -418,7 +594,7 @@ for f in "${adrs[@]}"; do
   fi
 
   # 4e. authors non-empty ------------------------------------------------------
-  [[ -n "$(fm_list "$(fm_field "$fm" authors)")" ]] || err "$base: authors is empty."
+  [[ -n "$(fm_list "$authors_raw")" ]] || err "$base: authors is empty."
 
   # 4f. closed vocabularies ----------------------------------------------------
   tag_count=0
@@ -428,7 +604,7 @@ for f in "${adrs[@]}"; do
     if [[ -n "$allowed_tags" ]] && ! in_set "$t" "$allowed_tags"; then
       err "$base: tag '$t' is not in $TAGS_FILE — add it there in this PR, or pick an existing tag."
     fi
-  done <<< "$(fm_list "$(fm_field "$fm" tags)")"
+  done <<< "$(fm_list "$tags_raw")"
   if [[ $tag_count -lt 1 || $tag_count -gt 4 ]]; then
     err "$base: has $tag_count tags — the schema allows 1 to 4."
   fi
@@ -437,11 +613,11 @@ for f in "${adrs[@]}"; do
     if [[ -n "$allowed_repos" ]] && ! in_set "$r" "$allowed_repos"; then
       err "$base: delivery-repos names '$r', which is not in $KNOWN_REPOS — add it there first (or fix the typo)."
     fi
-  done <<< "$(fm_list "$(fm_field "$fm" delivery-repos)")"
+  done <<< "$(fm_list "$repos_raw")"
 
   # 4g. supersession is internally consistent ----------------------------------
-  supby=$(fm_list "$(fm_field "$fm" superseded-by)")
-  sup=$(fm_list "$(fm_field "$fm" supersedes)")
+  supby=$(fm_list "$supby_raw")
+  sup=$(fm_list "$sup_raw")
   if [[ -n "$supby" && "$decision" != "superseded" ]]; then
     err "$base: superseded-by is set but decision-status is '$decision' — it must be 'superseded'."
   fi
@@ -468,9 +644,12 @@ for f in "${adrs[@]}"; do
   # DIGEST.md tier rests on, so the placeholder would have been published as this
   # ADR's entry in the decision history. Same for the TEMPLATE.md body prompts.
   # These markers exist only in the scaffolding, so they cannot false-positive.
+  # Read once; quoted pattern operands retain grep -F literal substring semantics.
+  # Bash 3.2 supports this built-in file read and requires no process per marker.
+  adr_text=$(<"$f")
   while IFS= read -r marker; do
     [[ -z "$marker" ]] && continue
-    if grep -qF -- "$marker" "$f"; then
+    if [[ "$adr_text" == *"$marker"* ]]; then
       err "$base: still contains the unfilled scaffold placeholder \"$marker\" — write the ADR before merging it."
     fi
   done <<'MARKERS'
@@ -489,9 +668,9 @@ MARKERS
   # records (ADR-0001) and some are a pointer to their successor and nothing else
   # — retro-fitting sections into them would be rewriting history, not fixing it.
   if [[ "$decision" != "superseded" ]]; then
-    grep -q '^## Context' "$f"                        || err "$base: missing a '## Context' section."
+    [[ $'\n'$adr_text == *$'\n## Context'* ]]                        || err "$base: missing a '## Context' section."
     grep -qiE '^## (The )?Decision' "$f"              || err "$base: missing a '## Decision' section."
-    grep -q '^## Consequences' "$f"                   || err "$base: missing a '## Consequences' section."
+    [[ $'\n'$adr_text == *$'\n## Consequences'* ]]                   || err "$base: missing a '## Consequences' section."
     # GRADUATED to blocking (ADR-0144 gate-graduation). These were advisory while 32
     # and 42 pre-schema ADRs respectively lacked them; that backlog is now closed, so
     # the rule enforces instead of nagging — an advisory rule nobody can ever act on
@@ -502,8 +681,8 @@ MARKERS
     # rejected option, and a compliance row must not carry an article or requirement
     # number that does not appear in the ADR's own text. A confident fabrication in
     # this directory is read by auditors as a claim about the platform.
-    grep -q '^## Alternatives' "$f" || err "$base: missing a '## Alternatives considered' section (see TEMPLATE.md; if none was recorded, say so explicitly)."
-    grep -q '^## Compliance'   "$f" || err "$base: missing a '## Compliance impact' section (see TEMPLATE.md; 'not applicable — <reason>' is a valid and common answer)."
+    [[ $'\n'$adr_text == *$'\n## Alternatives'* ]] || err "$base: missing a '## Alternatives considered' section (see TEMPLATE.md; if none was recorded, say so explicitly)."
+    [[ $'\n'$adr_text == *$'\n## Compliance'* ]] || err "$base: missing a '## Compliance impact' section (see TEMPLATE.md; 'not applicable — <reason>' is a valid and common answer)."
   fi
 done
 

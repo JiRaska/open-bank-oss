@@ -1,0 +1,22 @@
+# Scrape the Langfuse -> Prometheus bridge (ADR-0112 P1, ai-platform/langfuse-exporter.yaml).
+# Lives in `observability` like the other cross-namespace ServiceMonitors; the cluster Prometheus
+# has empty SM selectors, so it picks this up automatically.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: langfuse-exporter
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: ai-platform
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - ai-platform
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: langfuse-exporter
+  endpoints:
+    - port: metrics
+      interval: 60s
+      path: /metrics

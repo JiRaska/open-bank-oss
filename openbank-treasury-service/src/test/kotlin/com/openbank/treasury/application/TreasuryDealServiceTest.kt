@@ -33,6 +33,7 @@ import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.QuoteUnavailableException
 import com.openbank.treasury.domain.model.Side
+import com.openbank.treasury.infrastructure.LegWireJackson
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -43,6 +44,7 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
 
+@Suppress("LargeClass") // one service, every lifecycle path
 class TreasuryDealServiceTest {
 
     private val monday = DealFixtures.MONDAY
@@ -58,7 +60,7 @@ class TreasuryDealServiceTest {
         override suspend fun findById(id: String) = all.find { it.id == id }
         override suspend fun list() = all
     }
-    private val mapper = ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule())
+    private val mapper = LegWireJackson.register(ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule()))
     private var fxMid: FxMidRatePort = FxMidRatePort.NONE
     private var tolerance: FxRateTolerance = FxRateTolerance.DISABLED
     private var confirmationRequired = true
@@ -72,7 +74,10 @@ class TreasuryDealServiceTest {
         TreasuryDealService(
             deals, cps, ledger, mapper, clock, fxMid, tolerance, confirmationRequired, quotes,
             DealFixtures.permissiveProductLimits,
+            lateJournals = { lateCounts.merge(it, 1, Int::plus) },
         )
+
+    private val lateCounts = mutableMapOf<PostingEvent, Int>()
 
     /** A flat 3.5 % CZEONIA curve: 30-day mid 3.4570 %, SIMBK-A (5 bp) bid 3.4070 / ask 3.5070. */
     private fun quotesOn() {
@@ -510,6 +515,68 @@ class TreasuryDealServiceTest {
         assertThat(ledger.posted.filter { it.event == PostingEvent.ACCRUED }.map { it.dealId }).containsExactly(b.id)
     }
 
+    // --- #13882 review: day-close evidence the service must keep -----------------------------------
+
+    @Test
+    fun `the pass deadline is checked before every accrual day, not only between deals`(): Unit = runBlocking {
+        val b = book()
+        service.runSimulatedMarket()
+        val start = clock.instant().plus(java.time.Duration.ofDays(3))
+        var now = start
+        clock = object : Clock() {
+            override fun getZone() = ZoneOffset.UTC
+            override fun withZone(zone: java.time.ZoneId?) = this
+            override fun instant() = now
+        }
+        // Each accepted post takes an hour: day 1 at t0, day 2 at t0+1h, day 3 would start past the deadline.
+        ledger.onPost = { now = now.plus(java.time.Duration.ofHours(1)) }
+        val run = service.accrueInterest(LocalDate.ofInstant(start, ZoneOffset.UTC), start.plusSeconds(90 * 60))
+        ledger.onPost = {}
+        assertThat(ledger.posted.filter { it.dealId == b.id && it.event == PostingEvent.ACCRUED }).hasSize(2)
+        assertThat(run.unassessed).isEqualTo(1)
+        assertThat(run.deals).isZero()
+    }
+
+    @Test
+    fun `an accrual journal is recorded with its own day as the value date`(): Unit = runBlocking {
+        val b = book()
+        service.runSimulatedMarket()
+        clock = Clock.offset(clock, java.time.Duration.ofDays(2))
+        service.accrueInterest(LocalDate.now(clock))
+        val accruals = deals.journals.filter { it.dealId == b.id && it.event == PostingEvent.ACCRUED }
+        assertThat(accruals.map { it.valueDate }).containsExactly(monday.plusDays(1), monday.plusDays(2))
+        accruals.forEach { assertThat(ledger.entryDates.getValue(it.idempotencyKey)).isEqualTo(it.valueDate) }
+    }
+
+    @Test
+    fun `an accepted settlement stays recorded when the state change rolls back, once`(): Unit = runBlocking {
+        confirmationRequired = false
+        val b = book()
+        deals.failNextSave = true
+        assertThatThrownBy { runBlocking { service.settle(b.id, DealFixtures.approver) } }
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(deals.journals.filter { it.dealId == b.id && it.event == PostingEvent.SETTLED }).hasSize(1)
+        assertThat(service.settle(b.id, DealFixtures.approver).state).isEqualTo(DealState.SETTLED)
+        assertThat(deals.journals.filter { it.dealId == b.id && it.event == PostingEvent.SETTLED }).hasSize(1)
+    }
+
+    @Test
+    fun `a late journal is counted once - never for a refused post or a replay of a recorded key`(): Unit =
+        runBlocking {
+            confirmationRequired = false
+            val a = book()
+            val b = book(cmd(principal = "50000.00"))
+            clock = Clock.offset(clock, java.time.Duration.ofDays(3)) // both value dates have ended
+            ledger.failFor = b.id
+            assertThatThrownBy { runBlocking { service.settle(b.id, DealFixtures.approver) } }
+            ledger.failFor = null
+            deals.failNextSave = true
+            assertThatThrownBy { runBlocking { service.settle(a.id, DealFixtures.approver) } }
+            assertThat(lateCounts[PostingEvent.SETTLED]).isEqualTo(1)
+            service.settle(a.id, DealFixtures.approver) // replays the recorded key
+            assertThat(lateCounts[PostingEvent.SETTLED]).isEqualTo(1)
+        }
+
     // --- #10896: FX spot ---------------------------------------------------------------------------
 
     @Test
@@ -533,8 +600,11 @@ class TreasuryDealServiceTest {
 
     @Test
     fun `an FX spot drafted on a Friday values on the next Tuesday`(): Unit = runBlocking {
-        clock = Clock.fixed(DealFixtures.FRIDAY.atTime(9, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
-        assertThat(service.draft(fx(), DealFixtures.dealer).valueDate).isEqualTo(DealFixtures.FRIDAY.plusDays(4))
+        // The Friday a week after DealFixtures.FRIDAY: the Monday after FRIDAY itself is a CERTIS holiday
+        // (2026-09-28), which is exercised in FxSpotTest; this case is about the weekend alone.
+        val friday = DealFixtures.FRIDAY.plusDays(7)
+        clock = Clock.fixed(friday.atTime(9, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
+        assertThat(service.draft(fx(), DealFixtures.dealer).valueDate).isEqualTo(friday.plusDays(4))
     }
 
     @Test
@@ -595,6 +665,22 @@ class TreasuryDealServiceTest {
             assertThat(service.submit(off.id, DealFixtures.dealer).state).isEqualTo(DealState.PENDING_APPROVAL)
             fxMid = FxMidRatePort.NONE
             assertThat(service.draft(fx(), DealFixtures.dealer).fx!!.rateFlag).contains("mid unavailable")
+        }
+
+    @Test
+    fun `an edit cannot launder an off-market rate - edit and submit flag it exactly as a create would`(): Unit =
+        runBlocking {
+            tolerance = FxRateTolerance(true, BigDecimal("1.0"))
+            fxMid = FxMidRatePort { ccy, _ -> if (ccy == "EUR") BigDecimal("25.00") else null }
+            val fair = service.draft(fx(rate = "25.000000"), DealFixtures.dealer)
+            assertThat(fair.fx!!.rateFlag).isNull()
+            val edited = service.editDraft(fair.id, fx(rate = "27.500000"), DealFixtures.dealer)
+            val created = service.draft(fx(rate = "27.500000"), DealFixtures.dealer)
+            assertThat(edited.fx!!.rateFlag).isNotNull().isEqualTo(created.fx!!.rateFlag)
+            // Submit re-runs the same check: a flag can never be missing on the deal the approver sees.
+            val submitted = service.submit(edited.id, DealFixtures.dealer)
+            assertThat(submitted.fx!!.rateFlag).isEqualTo(created.fx!!.rateFlag)
+            assertThat(submitted.history.count { it.note?.startsWith("rate flagged:") == true }).isEqualTo(1)
         }
 
     // --- ADR-0315 D2: CONFIRMED ------------------------------------------------------------------

@@ -18,6 +18,9 @@ lineage:
     - serviceName: party-service
       relationType: api
       description: creates the entity party and its representation mandates via PartyServiceClient
+    - serviceName: sanctions-service
+      relationType: api
+      description: screens the entity, its representatives and its beneficial owners (CUSTOMER profile) when related-party screening is enabled
 databaseLineage:
   ownedDatabases:
     - openbank_kyb

@@ -67,4 +67,27 @@ class IrJsonTest {
         val deep = "[".repeat(70) + "]".repeat(70)
         assertThatThrownBy { IrJson.parse(deep) }.hasMessageContaining("nesting deeper than")
     }
+
+    @Test
+    fun `decodes a well formed unicode escape`() {
+        assertThat(IrJson.parse("\"\\u0041\"")).isEqualTo("A")
+        assertThat(IrJson.parse("\"\\u00e9\\u00E9\"")).isEqualTo("éé")
+    }
+
+    @Test
+    fun `rejects a plus signed unicode escape`() = assertBadUnicodeEscape("+041")
+
+    @Test
+    fun `rejects a minus signed unicode escape`() = assertBadUnicodeEscape("-001")
+
+    @Test
+    fun `rejects a non hex unicode escape`() = assertBadUnicodeEscape("00G1")
+
+    private fun assertBadUnicodeEscape(hex: String) {
+        val doc = "\"\\u$hex\""
+        assertThatThrownBy { IrJson.parse(doc) }
+            .withFailMessage("expected <$doc> to be rejected")
+            .isInstanceOf(ProductIrValidationException::class.java)
+            .hasMessageContaining("invalid \\u escape")
+    }
 }

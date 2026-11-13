@@ -16,3 +16,7 @@ This page currently documents only the limit-event outbox and its dedup table; t
 - **`curve_set_quote.instrument`** is `DEPOSIT`, `FRA` or `SWAP`; existing rows are deposits. Uniqueness now includes the instrument.
 - **`snapshot_run`** records the curve and valuation model versions of a run; older runs have none.
 - **Rollback of V11:** the migration header lists the statements. Dropping the new columns discards legs and stored flows; they are re-created from replayed deal events.
+
+## Deal kind vocabulary (ADR-0344)
+
+`DealKind` (`ACTUAL`, `PLANNED`, `HYPOTHETICAL`) is now owned by `openbank-libs-finance`, which treasury books with. The risk engine refers to it through a typealias, so the wire values and behaviour are unchanged. Only ACTUAL deals enter snapshot measures.

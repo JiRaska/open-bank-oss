@@ -129,3 +129,12 @@ sequenceDiagram
 3. **Žádná vzdálená volání v TX** — synchronně v rámci request/response, asynchronně přes outbox + Kafku.
 4. **Idempotence při vydání** — `Idempotency-Key` je povinný při vydání a deduplikovaný unikátním sloupcem `idempotency_key`.
 5. **Minimalizace PCI scope** — z domény odchází jen maskovaný PAN; celý PAN / CVV / PIN v modelu neexistuje.
+
+## Čtení produktového katalogu vlastní identitou služby
+
+Načtení konfigurace produktu (`ProductCatalogClient.getByCode`, `GET /api/v1/products/by-code/{code}`) se odesílá s pojmenovaným OIDC klientem `m2m`, který se autentizuje jako `openbank-card-issuance` (ROLE_API a
+scope `catalog:read`), ne jako sdílený klient `openbank-services`. product-catalog uděluje
+`catalog.read` této identitě jménem (`service-named-catalog-read`); sdílenému klientovi se samotnou
+ROLE_API ho záměrně odmítá. Pokud klient v Keycloaku nemá scope `catalog:read`, čtení bude po
+zapnutí vynucování autorizace v product-catalog odmítnuto. Výběr klienta hlídá
+`M2mOidcClientIdentityWiringTest`.

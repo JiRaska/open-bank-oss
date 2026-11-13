@@ -562,16 +562,17 @@ class InterestService(
             claim(accruals, toDate, alreadyClaimed, profile)
                 // Ledger SECOND, own rows THIRD (ADR-0033 §D) — see [postCreditLeg].
                 .flatMap { postCreditLeg(cap, ccy) }
-                .flatMap {
+                .flatMap { journalId ->
+                    val postedCap = cap.copy(ledgerEntryId = journalId)
                     // ONE transaction for the whole credit: capitalization + withholding + outbox
                     // event + the status-guarded CAPITALIZING -> CAPITALIZED flip. Previously these
                     // were four separate transactions, so a crash between them could commit the
                     // capitalization while leaving the accruals claimable — a retry then re-credited
                     // the customer AND re-booked the tax.
                     capitalizationRepo.saveWithOutbox(
-                        cap,
+                        postedCap,
                         withholding,
-                        withholdingRecordedEvent(cap, withholding),
+                        withholdingRecordedEvent(postedCap, withholding),
                         accruals.map { it.id },
                         now,
                     )
@@ -643,10 +644,10 @@ class InterestService(
      * different matter entirely and never reaches here — [capitalizeSet] refuses it before the claim
      * (see [negativeGrossFailure]).
      */
-    private fun postCreditLeg(cap: InterestCapitalization, ccy: CurrencyCode): Uni<Unit> {
+    private fun postCreditLeg(cap: InterestCapitalization, ccy: CurrencyCode): Uni<UUID?> {
         val gross = Money(cap.grossAmount, ccy)
-        if (gross.isZero()) return Uni.createFrom().item(Unit)
-        return ledgerPostingPort.post(
+        if (gross.isZero()) return Uni.createFrom().nullItem()
+        return ledgerPostingPort.postWithReceipt(
             CapitalizationPosting(
                 accountId = cap.accountId,
                 productId = cap.productId,

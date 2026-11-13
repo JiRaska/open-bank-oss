@@ -3,6 +3,10 @@ COMPOSE := docker compose -f $(BASE_DIR)/docker-compose.yml
 COMPOSE_PARALLEL_LIMIT ?= 2
 APP_SERVICES := account-service ledger-service transaction-service pid-service consent-service sca-service psd2-service tpp-registry-service balance-service agent-service party-service notification-service audit-service kyc-service sepa-payment domestic-payment aml-service api-gateway admin-ui
 
+# Compose reads .env itself, but recipe shells do not. Import only VALKEY_PASSWORD
+# (without sourcing/executing .env); an already-exported value wins, as in Compose.
+VALKEY_PW_FROM_ENV = : "$${VALKEY_PASSWORD:=$$(sed -n 's/^VALKEY_PASSWORD=//p' $(BASE_DIR)/.env 2>/dev/null | tr -d '\015' | head -n1)}" && export VALKEY_PASSWORD
+
 .PHONY: up up-infra up-all down down-v logs logs-app ps restart status kafka-topics db-connect vault-status health health-all build clean
 
 up: up-infra
@@ -56,7 +60,7 @@ health:
 	@echo "=== PostgreSQL ===" && $(COMPOSE) exec postgres pg_isready -U openbank && echo "OK"
 	@echo "=== Kafka ===" && docker inspect openbank-kafka --format='{{.State.Health.Status}}' | grep -q healthy && echo "OK"
 	@echo "=== Schema Registry ===" && curl -sf http://localhost:8081/apis/registry/v2/search/artifacts && echo "OK"
-	@echo "=== Valkey ===" && docker exec openbank-valkey valkey-cli -a $${VALKEY_PASSWORD} ping
+	@echo "=== Valkey ===" && $(VALKEY_PW_FROM_ENV) && docker exec openbank-valkey valkey-cli -a "$$VALKEY_PASSWORD" ping
 	@echo "=== Vault ===" && curl -sf http://localhost:8200/v1/sys/health | python3 -c "import sys,json; d=json.load(sys.stdin); print('OK' if not d.get('sealed') else 'SEALED')"
 	@echo "=== Keycloak ===" && curl -sf http://localhost:8080/realms/master > /dev/null && echo "OK"
 	@echo "=== Prometheus ===" && curl -sf http://localhost:9090/-/healthy && echo "OK"

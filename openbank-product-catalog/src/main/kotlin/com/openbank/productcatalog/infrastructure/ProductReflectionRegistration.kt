@@ -22,11 +22,14 @@ import com.openbank.productcatalog.domain.SavingsConfig
 import com.openbank.productcatalog.domain.TermDepositConfig
 import com.openbank.productcatalog.domain.TermsAndConditions
 import com.openbank.productcatalog.domain.WithdrawalNotice
+import com.openbank.productcatalog.domain.catalog.ApprovalRoleSpec
 import com.openbank.productcatalog.domain.catalog.CatalogChangeEvent
+import com.openbank.productcatalog.domain.catalog.RevisionApprovalPolicy
 import io.quarkus.runtime.annotations.RegisterForReflection
 
 /**
- * Native-image registration for the JSONB persistence graph. This framework concern deliberately
+ * Native-image registration for the JSONB persistence graph and the catalog-pack manifest
+ * (`RevisionApprovalPolicy`, read by `CatalogPackSeeder` at startup). This framework concern deliberately
  * lives outside the domain (ADR-0002); JVM Jackson does not need it, native deserialization does.
  */
 @RegisterForReflection(
@@ -50,6 +53,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection
         WithdrawalNotice::class,
         OverdraftType::class,
         EligibilitySegment::class,
+        RevisionApprovalPolicy::class,
+        ApprovalRoleSpec::class,
     ],
 )
 class ProductReflectionRegistration

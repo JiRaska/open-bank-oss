@@ -9,6 +9,7 @@ import {
   RefreshCw, DollarSign, Layers, Server, Workflow, Info, ArrowLeft,
 } from 'lucide-react'
 import Link from 'next/link'
+import { domainColor, domainLabel as businessDomainLabel } from '@/lib/governance/domains'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
@@ -40,11 +41,6 @@ interface AllocationResult {
   method: string
   collectedAt: string | null
   governanceSource?: ContentSourceMetadata
-}
-
-const DOMAIN_COLOR: Record<string, string> = {
-  core: 'var(--accent)', payments: 'var(--success)', compliance: 'var(--danger)',
-  identity: 'var(--warning)', 'open-banking': 'var(--info)', platform: 'var(--text-tertiary)',
 }
 
 function money(n: number, locale: string): string {
@@ -128,14 +124,7 @@ function AllocationContent() {
     return () => window.clearTimeout(initialLoad)
   }, [load])
 
-  const domainLabel = (d: string): string => ({
-    core: t('Jádro', 'Core'),
-    payments: t('Platby', 'Payments'),
-    compliance: t('Compliance', 'Compliance'),
-    identity: t('Identita', 'Identity'),
-    'open-banking': t('Open Banking', 'Open Banking'),
-    platform: t('Platforma', 'Platform'),
-  }[d] ?? d)
+  const domainLabel = (domain: string) => businessDomainLabel(domain, language === 'cs' ? 'cs' : 'en')
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
@@ -209,8 +198,8 @@ function AllocationContent() {
               <Info size={14} style={{ color: 'var(--warning-text)', flexShrink: 0 }} />
               <span style={{ fontSize: '12px', color: 'var(--warning-text)' }}>
                 {t(
-                  `${data.unmapped.length} běžících komponent není v governance manifestu (infra) — alokováno pod doménou „Platforma": ${data.unmapped.join(', ')}`,
-                  `${data.unmapped.length} running components are not in the governance manifest (infra) — allocated under the "Platform" domain: ${data.unmapped.join(', ')}`,
+                  `${data.unmapped.length} běžících komponent nemá ověřenou doménu — alokováno jako „Nezařazeno“: ${data.unmapped.join(', ')}`,
+                  `${data.unmapped.length} running components have no verified domain — allocated as "Unclassified": ${data.unmapped.join(', ')}`,
                 )}
               </span>
             </div>
@@ -219,7 +208,7 @@ function AllocationContent() {
           <Section icon={<Server size={16} style={{ color: 'var(--accent-text)' }} />} title={t('Podle služby', 'By service')}>
             {data.byService.map(s => (
               <BarRow key={s.service} label={s.service} sub={`${domainLabel(s.domain)} · ${s.cpuMillis}m · ${s.memMiB}Mi`}
-                amount={s.amount} pct={s.pct} color={DOMAIN_COLOR[s.domain] ?? 'var(--accent)'} currency={data.currency} numberLocale={numberLocale} />
+                amount={s.amount} pct={s.pct} color={domainColor(s.domain)} currency={data.currency} numberLocale={numberLocale} />
             ))}
           </Section>
 
@@ -228,7 +217,7 @@ function AllocationContent() {
             {data.byDomain.map(d => (
               <BarRow key={d.domain} label={domainLabel(d.domain)}
                 sub={t(`${d.serviceCount} služeb`, `${d.serviceCount} services`)}
-                amount={d.amount} pct={d.pct} color={DOMAIN_COLOR[d.domain] ?? 'var(--accent)'} currency={data.currency} numberLocale={numberLocale} />
+                amount={d.amount} pct={d.pct} color={domainColor(d.domain)} currency={data.currency} numberLocale={numberLocale} />
             ))}
           </Section>
 

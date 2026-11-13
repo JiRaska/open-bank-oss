@@ -65,6 +65,8 @@ too many requests
 http 429
 
 [transient]
+# HTTP/2 peer cancellation during a GitHub API request; not a cancelled workflow.
+^stream error: stream ID [0-9]+; CANCEL; received from peer$
 http 5[0-9][0-9]
 bad gateway
 service unavailable
@@ -120,3 +122,8 @@ FINAL	Could not resolve to a Repository with the name 'o/r'.
 FINAL	gh: You must verify your email address (HTTP 403)
 FINAL	gh: Reference does not exist (HTTP 422)
 FINAL	branch feofix already has a pull request (HTTP 422)
+
+TRANSIENT	stream error: stream ID 1; CANCEL; received from peer
+TRANSIENT	stream error: stream ID 37; CANCEL; received from peer
+FINAL	workflow cancelled by user
+FINAL	gh: Validation Failed: stream error: stream ID 1; CANCEL; received from peer (HTTP 422)

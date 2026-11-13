@@ -4,9 +4,14 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.agent.application
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import org.yaml.snakeyaml.LoaderOptions
+import org.yaml.snakeyaml.Yaml
+import org.yaml.snakeyaml.constructor.SafeConstructor
+
 /**
  * Maps each MCP tool to the downstream **service** it reaches and that service's product **domain**
- * (#744). Surfaced on the tools/list response so the admin-ui coverage grid groups verb-first tools
+ * from the governance declarations and canonical taxonomy packaged at build time. Surfaced on the tools/list response so the admin-ui coverage grid groups verb-first tools
  * (get_account, list_transactions, …) by service instead of a fragile name-prefix heuristic.
  *
  * Lives outside [McpToolRegistry] purely so that class stays under the detekt LargeClass budget; the
@@ -53,30 +58,29 @@ object ToolServiceCatalog {
         // Agent-local HITL tools — no downstream banking service; grouped under the agent itself.
         "draft_ticket" to "agent-service",
         "flip_feature_flag" to "agent-service",
-    )
+    ) + ProductAuthoringTools.CAPABILITIES.keys.associateWith { "agent-service" }
 
-    private val domains: Map<String, String> = mapOf(
-        "account-service" to "Core Banking",
-        "balance-service" to "Core Banking",
-        "transaction-service" to "Core Banking",
-        "product-catalog" to "Core Banking",
-        "ledger-service" to "Core Banking",
-        "interest-service" to "Core Banking",
-        "aml-service" to "Compliance",
-        "sanctions-service" to "Compliance",
-        "fx-service" to "Trading",
-        "clearing-service" to "Operations",
-        "sepa-instant-service" to "Payments",
-        "dispute-service" to "Customer Support",
-        "prometheus" to "Observability",
-        "loki" to "Observability",
-        "alertmanager" to "Observability",
-        "agent-service" to "Governance",
-    )
+    private val labels: Map<String, String> = requireNotNull(
+        javaClass.classLoader.getResourceAsStream("business-domains/taxonomy.json"),
+    ) { "Canonical business-domain taxonomy is missing from the MCP image" }.use { stream ->
+        ObjectMapper().readTree(stream).get("domains").associate { domain ->
+            domain.get("id").asText() to domain.get("labelEn").asText()
+        }
+    }
+
+    private val domains = services.values.toSet().associateWith { service ->
+        // The MCP service field predates the module name; keep its advertised identity compatible.
+        val module = if (service == "sepa-instant-service") "openbank-sepa-instant" else "openbank-$service"
+        javaClass.classLoader.getResourceAsStream("business-domains/$module/governance.yaml")
+            ?.use { stream ->
+                val declaration = Yaml(SafeConstructor(LoaderOptions())).load<Map<String, Any?>>(stream)
+                (declaration["dataDomain"] as? String)?.let(labels::get) ?: "Unclassified"
+            } ?: "Unclassified"
+    }
 
     /** The downstream service a tool reaches, or null when unmapped. */
     fun serviceOf(toolName: String): String? = services[toolName]
 
-    /** The product domain of a tool's service, or null when unmapped. */
+    /** Canonical ownership label; external infrastructure is unclassified, unknown tools return null. */
     fun domainOf(toolName: String): String? = services[toolName]?.let { domains[it] }
 }

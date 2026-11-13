@@ -6,7 +6,7 @@ package com.openbank.document.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
@@ -25,7 +25,7 @@ import java.math.BigDecimal
  */
 @RegisterRestClient(configKey = "product-catalog-api")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@OidcClientFilter("m2m")
 @RegisterProvider(ProductCatalogHostHeaderFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 interface ProductCatalogClient {

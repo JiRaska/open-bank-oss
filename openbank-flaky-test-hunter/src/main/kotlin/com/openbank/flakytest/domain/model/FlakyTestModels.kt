@@ -115,20 +115,12 @@ data class FlakyTestReport(
 )
 
 /**
- * SCHEDULED is kept, deprecated and never constructed. The weekly sweep was removed on 2026-10-17
- * because the deployed pod carries no repository checkout and no test-results artifacts, so it had
- * scanned an empty tree since it shipped. But [FlakyTestReport.trigger] is part of the Temporal
- * workflow input and result, and the namespace retains closed histories for 168 h: removing the
- * value would make a past weekly run fail to deserialize when its history is read or replayed.
- * Nothing is stored in Postgres (no trigger column). Delete the value once the retention window
- * has passed after the removal deploys (and drop the KNOWN_UNEMITTED entry in
- * check-scheduled-trigger-emitted.py). The scan path is reachable only where a checkout exists
- * (webhook or operator trigger); the production input is the Admin UI Test Intelligence snapshot
- * posted to `POST /evidence/analyze` -- see the service CLAUDE.md and the charter in agents.yaml.
+ * No periodic fleet sweep is enabled. Source scans use a webhook or operator trigger; the
+ * deployed pilot has only a read-only own-test snapshot, while a local checkout can include
+ * execution reports. Fleet execution evidence enters through Admin UI Test Intelligence
+ * snapshots at `POST /evidence/analyze`. No scheduled trigger is part of this contract.
  */
 enum class RunTrigger {
-    @Deprecated("Replay compatibility for histories of the removed weekly sweep only; never construct.")
-    SCHEDULED,
     CI_TEST_SUITE_FAILURE_WEBHOOK,
     OPERATOR_MANUAL,
 }

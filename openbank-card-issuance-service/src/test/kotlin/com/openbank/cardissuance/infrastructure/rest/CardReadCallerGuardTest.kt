@@ -49,6 +49,17 @@ class CardReadCallerGuardTest {
     }
 
     @Test
+    fun `customer edge may list and read with its verified client but a spoofed name is denied`() {
+        val edge = identity("service-account-openbank-edge", "ROLE_API")
+        val impostor = jwtIdentity("openbank-unrelated", "service-account-openbank-edge", "ROLE_API")
+        listOf(CARD_READ_CALLERS, CARD_PARTY_LIST_CALLERS).forEach { allowed ->
+            assertThatCode { requireNamedCardReader(edge, allowed) }.doesNotThrowAnyException()
+            assertThatThrownBy { requireNamedCardReader(impostor, allowed) }
+                .isInstanceOf(ForbiddenException::class.java)
+        }
+    }
+
+    @Test
     fun `staff role on an unrelated machine token cannot bypass client binding`() {
         val machine = jwtIdentity(
             "openbank-unrelated",
@@ -67,11 +78,15 @@ class CardReadCallerGuardTest {
     fun `each named principal with ROLE_API only may make its own read and not the other`() {
         val delegation = identity("service-account-openbank-delegation", "ROLE_API")
         val party = identity("service-account-openbank-party", "ROLE_API")
+        val processing = identity("service-account-openbank-card-processing", "ROLE_API")
         assertThatCode { requireNamedCardReader(delegation, CARD_READ_CALLERS) }.doesNotThrowAnyException()
         assertThatCode { requireNamedCardReader(party, CARD_PARTY_LIST_CALLERS) }.doesNotThrowAnyException()
+        assertThatCode { requireNamedCardReader(processing, CARD_READ_CALLERS) }.doesNotThrowAnyException()
         assertThatThrownBy { requireNamedCardReader(delegation, CARD_PARTY_LIST_CALLERS) }
             .isInstanceOf(ForbiddenException::class.java)
         assertThatThrownBy { requireNamedCardReader(party, CARD_READ_CALLERS) }
+            .isInstanceOf(ForbiddenException::class.java)
+        assertThatThrownBy { requireNamedCardReader(processing, CARD_PARTY_LIST_CALLERS) }
             .isInstanceOf(ForbiddenException::class.java)
     }
 

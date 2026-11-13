@@ -30,6 +30,7 @@ import java.time.Duration
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_products_listener_it")],
+    restrictToAnnotatedClass = true,
 )
 class ProductCatalogListenerAuthParityIT : ListenerAuthParityConformance() {
     override val path = "/api/v1/products"

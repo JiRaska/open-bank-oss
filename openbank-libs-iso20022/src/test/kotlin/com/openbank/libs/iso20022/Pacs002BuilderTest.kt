@@ -48,4 +48,26 @@ class Pacs002BuilderTest {
         assertThat(xml).doesNotContain("StsRsnInf")
         assertThat(validator.validate(xml)).isEqualTo(Iso20022ValidationResult.Valid)
     }
+
+    @Test
+    fun `a report naming the original message and UETR validates and reads back`() {
+        val xml = Pacs002Builder().build(
+            PaymentStatusReport(
+                messageId = "SIM-STS-1",
+                creationDateTime = java.time.OffsetDateTime.parse("2026-10-19T09:00:00Z"),
+                originalEndToEndId = "E2E",
+                originalTransactionId = null,
+                status = PaymentStatus.ACSC,
+                originalMessageId = "FI-1B4E28BA2FA14D2E",
+                originalMessageNameId = "pacs.009.001.08",
+                originalUetr = "1b4e28ba-2fa1-4d2e-883f-0016d3cca427",
+            ),
+        )
+        assertThat(
+            Iso20022Validator.forSchema(Pacs002Builder.SCHEMA_RESOURCE).validate(xml),
+        ).isEqualTo(Iso20022ValidationResult.Valid)
+        val read = Pacs002Reader().read(xml)
+        assertThat(read.originalMessageId).isEqualTo("FI-1B4E28BA2FA14D2E")
+        assertThat(read.originalUetr).isEqualTo("1b4e28ba-2fa1-4d2e-883f-0016d3cca427")
+    }
 }

@@ -199,6 +199,37 @@ data:
               "refId": "B"
             }
           ]
+        },
+        {
+          "id": 7,
+          "title": "Fraud holds: placed, by basis",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+          "targets": [
+            {
+              "expr": "sum by (basis) (increase(openbank_fraud_enforcement_holds_total[1h]))",
+              "legendFormat": "{{basis}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "title": "False-hold rate over 7d (lower = judged only, upper = timed out counted as false)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_fraud_enforcement_hold_resolutions_total{decision=\"RELEASE\",delivery=\"DELIVERED\"}[7d])) / (sum(increase(openbank_fraud_enforcement_hold_resolutions_total{decision=\"RELEASE\",delivery=\"DELIVERED\"}[7d])) + sum(increase(openbank_fraud_enforcement_rejections_total{cause=\"REVIEW_REJECTED\"}[7d])) + sum(increase(openbank_fraud_enforcement_rejections_total{cause=\"HOLD_TIMED_OUT\"}[7d])))",
+              "legendFormat": "lower bound",
+              "refId": "A"
+            },
+            {
+              "expr": "(sum(increase(openbank_fraud_enforcement_hold_resolutions_total{decision=\"RELEASE\",delivery=\"DELIVERED\"}[7d])) + sum(increase(openbank_fraud_enforcement_rejections_total{cause=\"HOLD_TIMED_OUT\"}[7d]))) / (sum(increase(openbank_fraud_enforcement_hold_resolutions_total{decision=\"RELEASE\",delivery=\"DELIVERED\"}[7d])) + sum(increase(openbank_fraud_enforcement_rejections_total{cause=\"REVIEW_REJECTED\"}[7d])) + sum(increase(openbank_fraud_enforcement_rejections_total{cause=\"HOLD_TIMED_OUT\"}[7d])))",
+              "legendFormat": "upper bound",
+              "refId": "B"
+            }
+          ]
         }
       ]
     }

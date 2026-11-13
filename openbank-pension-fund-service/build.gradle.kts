@@ -4,6 +4,9 @@
 
 plugins {
     id("openbank.quarkus-service")
+    // Inline version (not the shared catalog) so enabling mutation testing stays path-scoped to
+    // this service and does not trigger a fleet-wide rebuild. 1.19.0 supports Gradle 9.
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -13,6 +16,11 @@ dependencies {
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.opentelemetry)
+    // ADR-0341: a fund's management fee is read from its pinned catalog revision with this service's
+    // OWN client-credentials token (Keycloak client openbank-pension-fund, catalog:read only).
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
+    implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.scheduler)
 
@@ -36,6 +44,7 @@ dependencies {
     // #12425: the provider replay of tax-reporting-service's consumer pact lands with that pact
     // (stacked tax-reporting PR): check-pact-provider-replay.py rejects a replay class with no pact.
     testImplementation(libs.pact.provider)
+    testImplementation(libs.pact.consumer)
 }
 
 // twins, and the synthetic-taint profile), and the default 512m heap ran out on the fourth boot
@@ -70,4 +79,20 @@ kover {
             }
         }
     }
+}
+
+// Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3). Weekly + manual via
+// pitest.yml, advisory, never a per-PR gate. Why this service: it is money-path and its domain is
+// substantive by the pitest.yml measure, 98 branch sites across 8 domain files, so a surviving mutant is a fund order or unit calculation nobody asserted.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.pensionfund.domain.*")
+    targetTests = setOf("com.openbank.pensionfund.domain.*", "com.openbank.pensionfund.application.*")
+    // Advisory (ADR-0063): pitest.yml reports the score and warns below 70%; the Gradle task itself
+    // must not fail the run, so the threshold is 0 until the score is measured and sustained.
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    excludedClasses = setOf("com.openbank.pensionfund.domain.*Kt")
 }

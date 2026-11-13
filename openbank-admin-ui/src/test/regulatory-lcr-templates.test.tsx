@@ -37,9 +37,9 @@ function lcrResponse(templateId: string) {
 }
 
 function findLcrCard(): HTMLElement {
-  // "CNB — Krytí likvidity (LCR)" also appears in the "Future catalogue deadlines" widget, so
+  // "CNB — Liquidity coverage (LCR)" also appears in the "Future catalogue deadlines" widget, so
   // locate the report row by its disclosure button rather than by the name text alone.
-  const trigger = screen.getByRole('button', { name: /CNB — Krytí likvidity \(LCR\) — (Rozbalit|Sbalit|Expand|Collapse) detail(s)?/ })
+  const trigger = screen.getByRole('button', { name: /CNB — Liquidity coverage \(LCR\) — (Rozbalit|Sbalit|Expand|Collapse) detail(s)?/ })
   const card = trigger.closest('.card')
   expect(card).not.toBeNull()
   return card as HTMLElement
@@ -55,7 +55,7 @@ async function openLcrPreview() {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Regulatory catalogue — LCR templates', () => {
-  it('lists the four COREP LCR templates as an implemented preview under the CNB — Krytí likvidity (LCR) entry', () => {
+  it('lists the four COREP LCR templates as an implemented preview under the CNB — Liquidity coverage (LCR) entry', () => {
     vi.stubGlobal('fetch', vi.fn())
     render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
 
@@ -63,11 +63,11 @@ describe('Regulatory catalogue — LCR templates', () => {
     // Implemented (has TEMPLATE_PATHS), not "no data source" catalogue-only.
     expect(within(lcrCard).getByRole('button', { name: 'Preview export' })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /CNB — Krytí likvidity \(LCR\) — (Rozbalit|Expand) detail(s)?/ }))
-    expect(screen.getByText('C 72.00 – Likvidní aktiva')).toBeInTheDocument()
-    expect(screen.getByText('C 73.00 – Odtoky')).toBeInTheDocument()
-    expect(screen.getByText('C 74.00 – Přítoky')).toBeInTheDocument()
-    expect(screen.getByText('C 76.00 – Výpočet LCR')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /CNB — Liquidity coverage \(LCR\) — (Rozbalit|Expand) detail(s)?/ }))
+    expect(screen.getByText('C 72.00 – Liquid assets')).toBeInTheDocument()
+    expect(screen.getByText('C 73.00 – Outflows')).toBeInTheDocument()
+    expect(screen.getByText('C 74.00 – Inflows')).toBeInTheDocument()
+    expect(screen.getByText('C 76.00 – LCR calculation')).toBeInTheDocument()
   })
 
   it('loads all four LCR templates through the authenticated BFF, in catalogue order', async () => {
@@ -144,7 +144,7 @@ describe('Regulatory catalogue — LCR templates', () => {
 
     await openLcrPreview()
 
-    expect(await screen.findByText('Šablona zatím není na backendu nasazena')).toBeInTheDocument()
+    expect(await screen.findByText('Template is not deployed on the backend yet')).toBeInTheDocument()
     expect(screen.queryByText(/Failed to load|Načtení selhalo/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Liquidity buffer/)).not.toBeInTheDocument()
   })
@@ -160,7 +160,7 @@ describe('Regulatory catalogue — LCR templates', () => {
 
     await openLcrPreview()
 
-    expect(await screen.findByText('Šablona zatím není na backendu nasazena')).toBeInTheDocument()
+    expect(await screen.findByText('Template is not deployed on the backend yet')).toBeInTheDocument()
   })
 
   it('does not confuse an unmerged LCR template with the whole finrep-service being undeployed', async () => {
@@ -176,8 +176,8 @@ describe('Regulatory catalogue — LCR templates', () => {
 
     await openLcrPreview()
 
-    expect(await screen.findByText(/není v tomto prostředí nasazená/)).toBeInTheDocument()
-    expect(screen.queryByText('Šablona zatím není na backendu nasazena')).not.toBeInTheDocument()
+    expect(await screen.findByText(/is not deployed in this environment/)).toBeInTheDocument()
+    expect(screen.queryByText('Template is not deployed on the backend yet')).not.toBeInTheDocument()
   })
 
   it('labels a template built from a synthetic risk run, with the run id, and stays silent for production', async () => {

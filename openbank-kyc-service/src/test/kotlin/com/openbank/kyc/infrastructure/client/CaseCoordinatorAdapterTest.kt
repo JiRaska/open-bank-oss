@@ -9,7 +9,9 @@ import com.openbank.kyc.application.port.out.CaseOpenOutcome
 import com.openbank.kyc.domain.model.ScreeningTriggerFailure
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import io.smallrye.mutiny.Uni
+import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -31,18 +33,21 @@ class CaseCoordinatorAdapterTest {
     private fun adapter(url: Optional<String> = Optional.of("http://coordinator:8146")) =
         CaseCoordinatorAdapter(client, url, ObjectMapper()).also { it.self = it }
 
-    private fun respond(status: Int, body: String? = null) {
+    private fun respond(status: Int, body: String? = null): Response {
         val response = mockk<Response>()
         every { response.status } returns status
+        every { response.close() } returns Unit
         if (body != null) every { response.readEntity(String::class.java) } returns body
         every { client.openCase(any()) } returns Uni.createFrom().item(response)
+        return response
     }
 
     @Test
     fun `201 with a caseId is Opened`(): Unit = runBlocking {
-        respond(201, """{"caseId":"case-123"}""")
+        val response = respond(201, """{"caseId":"case-123"}""")
         val outcome = adapter().openAmlAlertCase(partyId)
         assertThat(outcome).isEqualTo(CaseOpenOutcome.Opened("case-123"))
+        verify(exactly = 1) { response.close() }
     }
 
     @Test
@@ -87,7 +92,34 @@ class CaseCoordinatorAdapterTest {
 
     @Test
     fun `a transport fault is retryable`(): Unit = runBlocking {
-        every { client.openCase(any()) } returns Uni.createFrom().failure(RuntimeException("connection refused"))
-        assertInstanceOf<CaseOpenOutcome.Retryable>(adapter().openAmlAlertCase(partyId))
+        every { client.openCase(any()) } returns
+            Uni.createFrom().failure(RuntimeException("synthetic-private-transport-detail"))
+        assertThat(adapter().openAmlAlertCase(partyId)).isEqualTo(CaseOpenOutcome.Retryable("RuntimeException"))
+    }
+
+    @Test
+    fun `mapped duplicate closes the provider response without reading its body`(): Unit = runBlocking {
+        val response = mockk<Response>()
+        every { response.status } returns 409
+        every { response.close() } returns Unit
+        every { client.openCase(any()) } returns Uni.createFrom().failure(
+            WebApplicationException("synthetic-private-provider-detail", response),
+        )
+        assertThat(adapter().openAmlAlertCase(partyId)).isEqualTo(CaseOpenOutcome.AlreadyExists)
+        verify(exactly = 1) { response.close() }
+        verify(exactly = 0) { response.readEntity(String::class.java) }
+    }
+
+    @Test
+    fun `mapped server failure closes the response and exposes only its status`(): Unit = runBlocking {
+        val response = mockk<Response>()
+        every { response.status } returns 503
+        every { response.close() } returns Unit
+        every { client.openCase(any()) } returns Uni.createFrom().failure(
+            WebApplicationException("synthetic-private-provider-detail", response),
+        )
+        assertThat(adapter().openAmlAlertCase(partyId)).isEqualTo(CaseOpenOutcome.Retryable("HTTP 503"))
+        verify(exactly = 1) { response.close() }
+        verify(exactly = 0) { response.readEntity(String::class.java) }
     }
 }

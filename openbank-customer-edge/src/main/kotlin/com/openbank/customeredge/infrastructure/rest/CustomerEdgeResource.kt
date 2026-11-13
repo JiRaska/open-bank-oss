@@ -40,10 +40,12 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.HexFormat
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -276,10 +278,15 @@ class CustomerEdgeResource(
     @Path("/accounts")
     @Authorize(action = "customer.accounts.read")
     @Blocking
-    fun listAccounts(): Response {
+    fun listAccounts(@QueryParam("cursor") cursor: String?): Response {
         val customer = customer()
-        val own = upstream.get(
-            "$accountServiceUrl/api/v1/accounts?partyId=${customer.partyId}",
+        val firstPage = cursor.isNullOrBlank()
+        val query = linkedMapOf("partyId" to customer.partyId.toString())
+        if (!firstPage) query["cursor"] = requireNotNull(cursor)
+        val own = upstream.getToService(
+            accountServiceUrl,
+            "/api/v1/accounts",
+            query,
             customer.partyId.toString(),
         )
         // Accounts shared WITH the caller belong in the list — without this a grantee accepts a
@@ -288,14 +295,42 @@ class CustomerEdgeResource(
         // whose account it is. Own accounts are unaffected if delegation-service is unreachable —
         // the customer's own money must not disappear because a secondary service is down.
         if (own.statusInfo.family != Response.Status.Family.SUCCESSFUL) return own
+        // Shared accounts ride on the FIRST page only (no cursor); a client following cursors must
+        // not receive them again on every page.
+        if (!firstPage) return own
         val shared = sharedAccountsFor(customer.partyId)
         if (shared.isEmpty()) return own
-        val merged = runCatching { objectMapper.readTree(own.entity?.toString() ?: "") }
-            .getOrNull()?.takeIf { it.isArray } ?: return own
-        val out = objectMapper.createArrayNode()
-        merged.forEach { out.add(it) }
-        shared.forEach { out.add(it) }
-        return Response.ok(objectMapper.writeValueAsString(out)).type(MediaType.APPLICATION_JSON).build()
+        return mergeSharedAccounts(own, shared)
+    }
+
+    private fun mergeSharedAccounts(own: Response, shared: List<com.fasterxml.jackson.databind.JsonNode>): Response {
+        val body = runCatching { objectMapper.readTree(own.entity?.toString() ?: "") }.getOrNull()
+            ?: return own
+        // account-service answers a page object {data, pagination}; a bare array is the legacy
+        // shape and is still merged. Anything else is passed through untouched.
+        val rows = when {
+            body.isArray -> body as com.fasterxml.jackson.databind.node.ArrayNode
+            body.path("data").isArray -> body.path("data") as com.fasterxml.jackson.databind.node.ArrayNode
+            else -> return own
+        }
+        val seen = rows.mapNotNull { it.path("id").asText(null) }.toMutableSet()
+        var appended = 0
+        shared.forEach { node ->
+            val id = node.path("id").asText(null)
+            if (id != null && seen.add(id)) {
+                rows.add(node)
+                appended++
+            }
+        }
+        if (appended == 0) return own
+        // Shared accounts sit OUTSIDE cursor pagination: they are appended to the FIRST page only
+        // (no cursor), cursors are left as account-service issued them, and only totalCount (when the
+        // upstream supplied one) is raised so the count still describes what the caller can see.
+        val pagination = body.path("pagination")
+        if (pagination is com.fasterxml.jackson.databind.node.ObjectNode && pagination.path("totalCount").isNumber) {
+            pagination.put("totalCount", pagination.path("totalCount").asLong() + appended)
+        }
+        return Response.ok(objectMapper.writeValueAsString(body)).type(MediaType.APPLICATION_JSON).build()
     }
 
     /**
@@ -2578,7 +2613,8 @@ class CustomerEdgeResource(
         if (resp.status != 200) return emptyList()
         val grants = runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") }.getOrNull()
             ?.takeIf { it.isArray } ?: return emptyList()
-        return grants.asSequence()
+        var mismatched = 0
+        val result = grants.asSequence()
             .filter { it.path("status").asText() == "ACTIVE" }
             .filter { it.path("resourceType").asText() == "ACCOUNT" }
             .filter { g ->
@@ -2587,11 +2623,15 @@ class CustomerEdgeResource(
             .mapNotNull { it.path("resourceId").asText(null) }
             .distinct()
             .mapNotNull { id -> runCatching { UUID.fromString(id) }.getOrNull() }
-            // Fetch as the OWNER's party: account-service scopes by id and the header is advisory,
-            // but sending the grantee's party id on someone else's account would be a lie in the
-            // audit trail. The grant is the authority, and it was just checked above.
-            .mapNotNull { id -> fetchAccount(id, partyId) }
-            .mapNotNull { body -> runCatching { objectMapper.readTree(body) }.getOrNull() }
+            // Fetched with the GRANTEE's party id in X-Customer-Party-Id: account-service scopes by
+            // id and the header is advisory there, so the grant (checked above) is the authority,
+            // not this header. The body must come back for the id the grant names, or it is dropped.
+            .mapNotNull { id ->
+                fetchAccount(id, partyId)
+                    ?.let { body -> runCatching { objectMapper.readTree(body) }.getOrNull() }
+                    ?.takeIf { it.path("id").asText(null) == id.toString() }
+                    .also { if (it == null) mismatched++ }
+            }
             .map { node ->
                 // Mark it, so the app can say "shared with you" rather than presenting someone
                 // else's account as the customer's own. Silently blending the two would let a
@@ -2599,6 +2639,11 @@ class CustomerEdgeResource(
                 (node as com.fasterxml.jackson.databind.node.ObjectNode).put("sharedWithMe", true)
             }
             .toList()
+        if (mismatched > 0) {
+            org.jboss.logging.Logger.getLogger(CustomerEdgeResource::class.java)
+                .warnf("Dropped %d shared account(s) whose body did not match the granted id", mismatched)
+        }
+        return result
     }
 
     /**
@@ -2687,13 +2732,22 @@ class CustomerEdgeResource(
     internal fun fetchDelegatedPaymentDecision(
         accountId: UUID,
         partyId: UUID,
-        amount: String,
-        currency: String,
+        amount: String? = null,
+        currency: String? = null,
     ): DelegatedPaymentDecision? {
-        val url = "$accountServiceUrl/api/v1/accounts/$accountId/delegation/payment-authorization" +
-            "?partyId=$partyId&amount=${URLEncoder.encode(amount, StandardCharsets.UTF_8)}" +
-            "&currency=${URLEncoder.encode(currency, StandardCharsets.UTF_8)}"
-        val resp = upstream.get(url, partyId.toString())
+        val query = buildMap {
+            put("partyId", partyId.toString())
+            if (amount != null) {
+                put("amount", amount)
+                put("currency", requireNotNull(currency))
+            }
+        }
+        val resp = upstream.getToService(
+            accountServiceUrl,
+            "/api/v1/accounts/$accountId/delegation/payment-authorization",
+            query,
+            partyId.toString(),
+        )
         if (resp.status != 200) return null
         val node = runCatching { objectMapper.readTree(resp.entity?.toString() ?: return null) }.getOrNull()
             ?: return null
@@ -2978,6 +3032,11 @@ class CustomerEdgeResource(
             debtorName,
             creditorAcctNo,
             creditorBank,
+            customerSubmissionScope = if (debit.onBehalfOf == null || debit.delegationId != null) {
+                domesticSubmissionScope(customer, debtor, debit.delegationId)
+            } else {
+                null // A legacy bank mandate has no stable grant identity to bind.
+            },
         ) ?: return badRequest("Malformed or incomplete payment body")
         if (customer.actingFor != null) {
             holdForApproval(
@@ -3035,6 +3094,61 @@ class CustomerEdgeResource(
         }
         auditPayment(resp, customer, "payments.domestic", amount, currency, creditorRaw, scaChallengeId, debit)
         return resp
+    }
+
+    /**
+     * Recover the original instruction after an ambiguous HTTP response. This path consumes no
+     * SCA challenge, creates no instruction, and makes no inference from a missing receipt.
+     */
+    @POST
+    @Path("/domestic-payments/submissions/lookup")
+    @Authorize(action = "customer.payments.read")
+    @Blocking
+    fun lookupDomesticPaymentSubmission(
+        body: DomesticSubmissionLookup?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        val key = idempotencyKey?.takeIf {
+            it.isNotBlank() && it.length <= DOMESTIC_IDEMPOTENCY_KEY_MAX_LENGTH && it.all { c -> c in ' '..'~' }
+        } ?: return badRequest("Idempotency-Key must be between 1 and 128 printable characters")
+        val debtor = body?.debtorAccountId ?: return badRequest("debtorAccountId is required")
+        val customer = customer()
+        val scope = if (ownsAccount(debtor, customer.partyId)) {
+            domesticSubmissionScope(customer, debtor, null)
+        } else {
+            // Reuse the account service's grant selection. When several grants overlap, the
+            // original amount lets it select the same grant as it did at submission.
+            val grant = fetchDelegatedPaymentDecision(debtor, customer.partyId, body.amount, "CZK")
+                ?.takeIf { it.authorized && it.grantorPartyId != null }?.delegationId
+                ?: return domesticSubmissionResult()
+            domesticSubmissionScope(customer, debtor, grant)
+        }
+        val input = objectMapper.createObjectNode()
+            .put("debtorAccountId", debtor.toString())
+            .put("customerSubmissionScope", scope)
+        val upstreamResult = upstream.post(
+            "$domesticPaymentServiceUrl/api/v1/domestic-payments/submissions/lookup",
+            customer.partyId.toString(),
+            input.toString(),
+            key,
+        )
+        if (upstreamResult.status != 200) return domesticSubmissionResult()
+        val result = runCatching { objectMapper.readTree(upstreamResult.entity?.toString()) }.getOrNull()
+        if (result?.path("outcome")?.asText() != "FOUND") return domesticSubmissionResult()
+        val paymentId = runCatching { UUID.fromString(result.path("paymentId").asText()) }.getOrNull()
+            ?: return domesticSubmissionResult()
+        val status = result.path("status").asText().takeIf(DOMESTIC_PAYMENT_STATUSES::contains)
+            ?: return domesticSubmissionResult()
+        return domesticSubmissionResult(paymentId, status)
+    }
+
+    private fun domesticSubmissionResult(paymentId: UUID? = null, status: String? = null): Response {
+        val body = if (paymentId == null) {
+            mapOf("outcome" to "UNKNOWN")
+        } else {
+            mapOf("outcome" to "FOUND", "paymentId" to paymentId.toString(), "status" to checkNotNull(status))
+        }
+        return Response.ok(body).header("Cache-Control", "no-store").build()
     }
 
     /**
@@ -3648,6 +3762,7 @@ class CustomerEdgeResource(
     fun listUnifiedNotifications(
         @QueryParam("limit") @DefaultValue("20") limit: Int,
         @QueryParam("partyId") filterPartyId: UUID?,
+        @QueryParam("cursor") cursor: String? = null,
     ): Response {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(UNIFIED_NOTIFICATION_TIMEOUT_SECONDS)
         val identity = customer()
@@ -3659,7 +3774,7 @@ class CustomerEdgeResource(
         val parties = (filterPartyId?.let(::listOf) ?: allowed).distinct()
         val remaining = deadline - System.nanoTime()
         return UnifiedNotificationInbox(upstream, objectMapper, notificationServiceUrl, remaining)
-            .list(parties, limit.coerceIn(1, 100))
+            .list(parties, limit.coerceIn(1, 100), cursor)
     }
 
     /** Mark one notification read. partyId injected from the JWT — the service scopes by it (IDOR). */
@@ -3681,11 +3796,13 @@ class CustomerEdgeResource(
     @Path("/notifications/read-all")
     @Authorize(action = "customer.notifications.mark-read")
     @Blocking
-    fun markAllNotificationsRead(): Response {
-        val customer = customer()
+    fun markAllNotificationsRead(@QueryParam("partyId") originPartyId: UUID? = null): Response {
+        // The unified inbox spans profiles, so "read all" names the origin profile explicitly;
+        // omitted, it stays the selected profile (#12260).
+        val partyId = authorizedNotificationParty(customer(), originPartyId)
         return upstream.patch(
-            "$notificationServiceUrl/api/v1/notifications/read-all?partyId=${customer.partyId}",
-            customer.partyId.toString(),
+            "$notificationServiceUrl/api/v1/notifications/read-all?partyId=$partyId",
+            partyId.toString(),
         )
     }
 
@@ -4340,8 +4457,10 @@ class CustomerEdgeResource(
     /**
      * Freeze (temporarily suspend) a card the caller controls — the reversible self-service lock.
      *
-     * Open to a delegate holding `CARD_MANAGE_LIMITS` (ADR-0249 D2): freezing is one of the controls
-     * a real disponent expects, it is reversible, and it can only ever REDUCE what the card may do.
+     * Open to a delegate holding `CARD_MANAGE_STATUS` (ADR-0249 D2, corrected by ADR-0375 D7):
+     * freezing is one of the controls a real disponent expects, it is reversible, and it can only
+     * ever REDUCE what the card may do. It used to be gated on `CARD_MANAGE_LIMITS`, which is a
+     * different authority — the status capability existed and nothing read it.
      */
     @POST
     @Path("/cards/{id}/freeze")
@@ -4384,7 +4503,7 @@ class CustomerEdgeResource(
     // is the audit subject. Ownership is enforced here (the card must belong to the JWT party).
     private fun cardAction(id: UUID, action: String): Response {
         val customer = customer()
-        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_LIMITS)) {
+        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_STATUS)) {
             return forbidden("Card does not belong to caller")
         }
         return upstream.post(
@@ -4578,7 +4697,7 @@ class CustomerEdgeResource(
                 "contactlessEnabled, onlineEnabled, atmEnabled and abroadEnabled (booleans) are all required",
                 "CARD_CONTROLS_INVALID",
             )
-        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_LIMITS)) {
+        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_CHANNELS)) {
             return forbidden("Card does not belong to caller")
         }
         val resp = upstream.put(
@@ -5833,6 +5952,16 @@ class CustomerEdgeResource(
         private const val MIN_PROMO_CODE_LENGTH = 8
         private const val MAX_PROMO_CODE_LENGTH = 128
         private const val MAX_IDEMPOTENCY_KEY_LENGTH = 255
+        private const val DOMESTIC_IDEMPOTENCY_KEY_MAX_LENGTH = 128
+        private val DOMESTIC_PAYMENT_STATUSES = setOf(
+            "RECEIVED",
+            "VALIDATED",
+            "SENT_TO_CLEARING",
+            "SETTLED",
+            "REJECTED",
+            "RETURNED",
+            "CANCELLED",
+        )
 
         // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
         // while keeping Redis abuse-proof (ADR-0190).
@@ -5896,6 +6025,16 @@ class CustomerEdgeResource(
          */
         internal const val CAP_CARD_VIEW = "CARD_VIEW"
         internal const val CAP_CARD_MANAGE_LIMITS = "CARD_MANAGE_LIMITS"
+
+        // ADR-0375 D7. These two were grantable and read by nothing: freeze/unfreeze/block and the
+        // channel toggles were all gated on CAP_CARD_MANAGE_LIMITS, so a vocabulary that
+        // distinguishes limits from status from channels was collapsed to one capability at the
+        // only place that checks it. Both card role presets grant all five card capabilities, so
+        // correcting the gating takes nothing away from a preset-based delegate; what it does take
+        // away is freeze and channel control from a hand-built grant carrying limits ALONE, which
+        // is the point — a limit is not a status and not a channel.
+        internal const val CAP_CARD_MANAGE_STATUS = "CARD_MANAGE_STATUS"
+        internal const val CAP_CARD_MANAGE_CHANNELS = "CARD_MANAGE_CHANNELS"
 
         /**
          * Last-resort product code when the account's real one cannot be resolved. Historically this
@@ -6055,6 +6194,21 @@ class CustomerEdgeResource(
             return account to bank
         }
 
+        private fun domesticSubmissionScope(customer: CustomerIdentity, account: UUID, grant: String?): String {
+            val scope = listOf(
+                "openbank-domestic-submission-v1",
+                customer.human,
+                customer.partyId,
+                account,
+                grant.orEmpty(),
+            ).joinToString("|")
+            val digest = MessageDigest.getInstance("SHA-256").digest(scope.toByteArray(StandardCharsets.UTF_8))
+            return HexFormat.of().formatHex(digest)
+        }
+
+        private fun normalizeDomesticPriority(priority: String?): String =
+            priority?.uppercase()?.takeIf { it in setOf("STANDARD", "URGENT", "INSTANT") } ?: "STANDARD"
+
         /**
          * Build the full CreateDomesticPaymentRequest the upstream needs from the app's lightweight body
          * plus the edge-resolved debtor/creditor parts. Amount is emitted as a JSON number; the optional
@@ -6073,6 +6227,7 @@ class CustomerEdgeResource(
             debtorName: String,
             creditorAccountNumber: String,
             creditorBankCode: String,
+            customerSubmissionScope: String? = null,
         ): String? = runCatching {
             val app = mapper.readTree(appBody) as? ObjectNode ?: return null
             fun txt(f: String) = app.get(f)?.takeIf { it.isTextual && it.asText().isNotBlank() }?.asText()
@@ -6087,6 +6242,7 @@ class CustomerEdgeResource(
             out.put("debtorName", debtorName)
             out.put("creditorAccountNumber", creditorAccountNumber)
             out.put("creditorBankCode", creditorBankCode)
+            customerSubmissionScope?.let { out.put("customerSubmissionScope", it) }
             out.put("creditorName", creditorName)
             out.put("amount", amount)
             out.put("currency", currency)
@@ -6094,9 +6250,7 @@ class CustomerEdgeResource(
             txt("specificSymbol")?.let { out.put("specificSymbol", it) }
             txt("constantSymbol")?.let { out.put("constantSymbol", it) }
             txt("reference")?.let { out.put("messageForPayee", it) }
-            val priority = txt("priority")?.uppercase()
-                ?.takeIf { it in setOf("STANDARD", "URGENT", "INSTANT") } ?: "STANDARD"
-            out.put("priority", priority)
+            out.put("priority", normalizeDomesticPriority(txt("priority")))
             mapper.writeValueAsString(out)
         }.getOrNull()
 
@@ -6630,3 +6784,6 @@ internal data class DelegatedPaymentDecision(
     val delegationId: String?,
     val grantorPartyId: UUID?,
 )
+
+/** Original debit account, with an optional amount to disambiguate overlapping delegated grants. */
+data class DomesticSubmissionLookup(val debtorAccountId: UUID?, val amount: String? = null)

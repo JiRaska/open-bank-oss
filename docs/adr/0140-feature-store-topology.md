@@ -180,6 +180,40 @@ nice-to-have.
 - **PSD2 / ČNB:** point-in-time reconstruction is what makes a past automated decision
   auditable and reproducible — a regulatory asset, not just an engineering one.
 
+## 2026-10-25 amendment — isolated Kafka Streams experiment (#13888)
+
+The previously deferred stream runtime is introduced as an opt-in fraud-service
+shadow projection. `ShadowVelocityTopology` writes a separate versioned topic with
+H1/H24 UTC bucket snapshots; the existing online feature store and verdict inputs
+keep their current ownership. This experiment does not complete phase 2 or replace
+the point-in-time feature contract.
+
+The source key identifies a transaction, so the topology explicitly repartitions
+by source account. The source timestamp extractor validates business event time
+before advancing any task watermark. Deduplication uses the outbox `ce-id`, which
+is distinct from the body's independently generated event UUID. Original source
+topic, partition and offset are retained across repartition. Kafka transactions
+atomically commit offsets/state/output; event-ID deduplication separately handles
+outbox redelivery at another offset.
+
+Window grace is measured after each window end, not as record age. A late event may
+still update its daily bucket after its hourly bucket has closed. Two-day identity
+retention covers every admissible daily window; an expired daily bucket cannot be
+reopened by replay. Snapshots describe records observed so far, not an arbitrary
+historical `asOf` query. Promotion requires controlled parity against the shared
+feature definitions, late-data measurements and a separate point-in-time serving
+design before any model may consume these values.
+
+`ShadowVelocityRuntime` defaults off. It owns a separate application/group ID,
+protected exactly-once configuration, external connection properties and local
+state. Normal client/native-link failures degrade the shadow signal; no readiness
+check is registered for it. CPU, heap, native memory and disk are still shared with
+the process and require measured budgets before enabling a real workload. Its
+separate Kafka identity can read the source and write only the shadow/internal
+topics. Account identifiers remain personal-data-derived: the new projection
+inherits the retention/erasure requirements above. Deployment evidence and any
+promotion follow-up remain tracked by #13888.
+
 ## References
 
 - ADR-0139 — real-time ML decisioning platform (this is its feature-store spec)

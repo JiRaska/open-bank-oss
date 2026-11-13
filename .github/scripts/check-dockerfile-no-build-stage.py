@@ -15,7 +15,7 @@ Nothing builds them. `auto-deploy.yml`, `ghcr-publish.yml` and
 `.github/workflows/Dockerfile.deploy`, and read exactly one thing from these files:
 the EXPOSE line.
 
-So three rules:
+Five rules:
 
   1. No build stage. A `FROM ... AS build` here is either dead text or a second,
      divergent definition of how images are made. Both are worse than nothing.
@@ -27,6 +27,10 @@ So three rules:
      with it, and a stub that says nothing the deploy recipe and application.yaml do not
      already say (REDUNDANT_STUB_SHA256) must not exist: delete it. 38 of them were
      byte-identical except for the port number.
+  5. Dependabot must group the shared runtime base and its declarations together,
+     including digest-only updates. Overlapping major/rest groups cannot do this:
+     assignment happens before update classification, so the major group captures
+     the image and digest changes escape into individually invalid service PRs.
 
 Rule 3 exists because #3618 moved the fleet runtime base from
 `eclipse-temurin:25-jre-alpine` (musl) to `eclipse-temurin:25-jre` (glibc) — the
@@ -65,11 +69,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import importlib.util
 import pathlib
 import re
 import sys
+
+import yaml
 
 # re.M is load-bearing on all three: without it `^` anchors to the start of the whole
 # file, so only a violation on the FIRST non-comment line could ever match. That made
@@ -168,6 +175,57 @@ def check_fleet_bases(root: pathlib.Path) -> list[str]:
     return problems
 
 
+def dependabot_pattern_matches(pattern: str, image: str) -> bool:
+    """Dependabot group patterns support only '*', case-insensitively (not fnmatch '?')."""
+    return re.fullmatch(re.escape(pattern).replace(r"\*", ".*"), image, re.IGNORECASE) is not None
+
+
+def check_dependabot_fleet_group(root: pathlib.Path) -> list[str]:
+    """Keep the updater's proposal boundary aligned with rule 3's runtime boundary."""
+    config = root / ".github/dependabot.yml"
+    try:
+        document = yaml.safe_load(config.read_text(encoding="utf-8"))
+        updates = document["updates"]
+        froms = FROM_RE.findall(strip_comments((root / DEPLOY_RECIPE).read_text(encoding="utf-8")))
+        image = froms[0].split("@", 1)[0]
+        if ":" in image.rsplit("/", 1)[-1]:
+            image = image.rsplit(":", 1)[0]
+        recipe_dir = "/" + str(pathlib.PurePosixPath(DEPLOY_RECIPE).parent)
+        matches = []
+        for update in updates:
+            directories = update.get("directories", [update.get("directory", "")])
+            if update.get("package-ecosystem") == "docker" and any(
+                fnmatch.fnmatchcase(recipe_dir, directory.rstrip("/") or "/")
+                for directory in directories
+            ):
+                matches.append((update, directories))
+        if len(matches) != 1:
+            return ["Dependabot must watch the shared runtime recipe in exactly one Docker update block."]
+        update, directories = matches[0]
+        problems = []
+        for path in fleet_base_files(root):
+            parent = str(path.relative_to(root).parent)
+            directory = "/" if parent == "." else "/" + parent
+            if not any(fnmatch.fnmatchcase(directory, pattern.rstrip("/") or "/") for pattern in directories):
+                problems.append(f"Dependabot runtime block does not watch {path.relative_to(root)} alongside {DEPLOY_RECIPE}.")
+        groups = []
+        for name, group in update.get("groups", {}).items():
+            if (group.get("applies-to", "version-updates") != "version-updates"
+                    or group.get("dependency-type", "production") != "production"):
+                continue
+            if (
+                any(dependabot_pattern_matches(pattern, image) for pattern in group.get("patterns", ["*"]))
+                and not any(dependabot_pattern_matches(pattern, image) for pattern in group.get("exclude-patterns", []))
+            ):
+                groups.append((name, group))
+        if len(groups) != 1:
+            problems.append(f"Dependabot runtime base {image} must match exactly one static group; found {len(groups)}.")
+        elif groups[0][1].get("group-by") or "update-types" in groups[0][1]:
+            problems.append(f"Dependabot runtime base group {groups[0][0]} must be static and unfiltered: digest-only updates have no SemVer delta.")
+        return problems
+    except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, yaml.YAMLError) as exc:
+        return [f"Cannot validate Dependabot runtime grouping: {type(exc).__name__}."]
+
 def _service_port_module(root: pathlib.Path):
     spec = importlib.util.spec_from_file_location(
         "service_port", root / ".github" / "scripts" / "service-port.py")
@@ -253,6 +311,59 @@ def self_test() -> int:
         if check_fleet_bases(tmp):
             failures.append("a SELF_BUILT Dockerfile was held to the fleet base")
 
+        # Rule 5: reproduce the overlap that produced individual red digest PRs.
+        config = tmp / ".github/dependabot.yml"
+        runtime = {
+            "package-ecosystem": "docker",
+            "directories": ["/.github/workflows", "/openbank-*", "/"],
+            "groups": {"runtime": {"patterns": ["eclipse-temurin"]}},
+        }
+
+        def grouping_result():
+            config.write_text(yaml.safe_dump({"version": 2, "updates": [runtime]}))
+            return check_dependabot_fleet_group(tmp)
+
+        if grouping_result():
+            failures.append("one static unfiltered fleet image group was rejected")
+        runtime["groups"] = {
+            "major": {"patterns": ["*"], "update-types": ["major"]},
+            "rest": {"patterns": ["*"]},
+        }
+        if not grouping_result():
+            failures.append("the original overlapping major/rest digest trap was accepted")
+        runtime["groups"] = {"runtime": {"patterns": ["eclipse-temurin"], "update-types": ["minor", "patch"]}}
+        if not grouping_result():
+            failures.append("a group excluding digest-only updates was accepted")
+        runtime["groups"] = {"runtime": {"group-by": "dependency-name"}}
+        if not grouping_result():
+            failures.append("a dynamic group without proven refresh support was accepted")
+        runtime["groups"] = {"runtime": {"patterns": ["eclipse-temurin"], "dependency-type": "development"}}
+        if not grouping_result():
+            failures.append("a development-only group was accepted for a runtime base")
+        runtime["groups"] = {"runtime": {"patterns": ["eclipse-temur?n"]}}
+        if not grouping_result():
+            failures.append("fnmatch '?' was treated as a Dependabot wildcard")
+        runtime["groups"] = {
+            "runtime": {"patterns": ["eclipse-temurin"]},
+            "implicit-catchall": {},
+        }
+        if not grouping_result():
+            failures.append("a patternless catch-all overlap was accepted")
+        runtime["groups"] = {
+            "runtime": {"patterns": ["ECLIPSE-TEMURIN"]},
+            "other": {"group-by": "dependency-name", "exclude-patterns": ["eclipse-*"]},
+        }
+        if grouping_result():
+            failures.append("case-insensitive grouping or an unrelated excluded dynamic group was rejected")
+        runtime["groups"] = {"runtime": {"patterns": ["eclipse-temurin"]}}
+        runtime["directories"].remove("/.github/workflows")
+        if not grouping_result():
+            failures.append("the shared runtime recipe was allowed outside Dependabot")
+        runtime["directories"].append("/.github/workflows")
+        runtime["directories"].remove("/openbank-*")
+        if not grouping_result():
+            failures.append("fleet declarations were allowed outside the shared update block")
+
         # Rule 4, both directions, on a tree that carries the real helper.
         (tmp / ".github" / "scripts").mkdir(parents=True)
         shutil.copy(pathlib.Path(__file__).with_name("service-port.py"),
@@ -289,7 +400,7 @@ def self_test() -> int:
         print(f"self-test FAILED: {f}")
     if failures:
         return 1
-    print("check-dockerfile-no-build-stage --self-test: OK — rules 3 and 4 fire on drift, "
+    print("check-dockerfile-no-build-stage --self-test: OK — rules 3, 4 and 5 fire on drift, "
           "stay quiet on agreement, covers the non-glob files, exempts SELF_BUILT")
     return 0
 
@@ -303,7 +414,8 @@ def main() -> int:
     if args.self_test:
         return self_test()
 
-    problems: list[str] = check_fleet_bases(pathlib.Path(".")) + check_ports(pathlib.Path("."))
+    problems: list[str] = (check_fleet_bases(pathlib.Path(".")) + check_ports(pathlib.Path("."))
+                           + check_dependabot_fleet_group(pathlib.Path(".")))
     ports: dict[str, list[str]] = {}
     seen_self_built: set[str] = set()
     checked = 0

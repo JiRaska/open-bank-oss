@@ -5,6 +5,7 @@
 package com.openbank.mcp.infrastructure.read
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.openbank.clients.account.api.AccountsApi
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
@@ -26,27 +27,19 @@ import java.util.UUID
 // `openbank-services`-shaped principal the downstream @Authorize checks already grant reads to).
 // Each downstream endpoint + its @Authorize action is cited in the KDoc it backs (RealAccountReadPort).
 
+/**
+ * account-service reads. The operations and DTOs are GENERATED from account-service's own `openapi.yaml`
+ * (`openbank-client-account`, ADR-0319, #13169); this interface only attaches what is specific to this
+ * consumer. Never call the generated operations directly: go through [AccountDirectory], which reads the
+ * answer through the shared `AccountClient` facade. Both reads are `@Authorize(account.read)` downstream:
+ * `GET /api/v1/accounts/iban/{iban}` (resource=#iban) and `GET /api/v1/accounts/{accountId}`
+ * (resource=#accountId) - the latter is used by [RealPaymentConfirmationReadPort] to recover the debtor's
+ * IBAN from a domestic payment, which carries only the internal `debtorAccountId`.
+ */
 @RegisterRestClient(configKey = "account-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
-@Path("/api/v1/accounts")
-@Produces(MediaType.APPLICATION_JSON)
-@Consumes(MediaType.APPLICATION_JSON)
-interface AccountServiceClient {
-    /** `GET /api/v1/accounts/iban/{iban}` — `@Authorize(account.read, resource=#iban)`. */
-    @GET
-    @Path("/iban/{iban}")
-    fun getAccountByIban(@PathParam("iban") iban: String): JsonNode
-
-    /**
-     * `GET /api/v1/accounts/{accountId}` — `@Authorize(account.read, resource=#accountId)`. Used by
-     * [RealPaymentConfirmationReadPort] to recover the debtor's IBAN from a domestic payment, which
-     * (unlike a SEPA payment) carries only the internal `debtorAccountId`, never an IBAN.
-     */
-    @GET
-    @Path("/{accountId}")
-    fun getAccountById(@PathParam("accountId") accountId: UUID): JsonNode
-}
+interface AccountServiceClient : AccountsApi
 
 @RegisterRestClient(configKey = "balance-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)

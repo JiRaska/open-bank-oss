@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-transaction-service
 
-> Operational runbook for the `transaction` service. Data domain **core**,
+> Operational runbook for the `transaction` service. Data domain **accounting**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-transaction-service` |
 | HTTP port | `8102` |
-| Data domain | core |
+| Data domain | accounting |
 | Datastore | PostgreSQL (database `openbank_transactions`) |
 | Classification | confidential |
 | Retention | 7 years |

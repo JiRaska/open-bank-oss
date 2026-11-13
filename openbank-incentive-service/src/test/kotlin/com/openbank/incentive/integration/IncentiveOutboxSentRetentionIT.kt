@@ -2,9 +2,10 @@
 package com.openbank.incentive.integration
 
 import com.openbank.incentive.infrastructure.persistence.OutboxEntities
-import com.openbank.incentive.it.IncentivePostgresTestResource
 import com.openbank.libs.persistence.outbox.SentOutboxRetention
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -28,7 +29,10 @@ import javax.sql.DataSource
  * which the purge must leave alone.
  */
 @QuarkusTest
-@QuarkusTestResource(IncentivePostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_incentive_it")],
+)
 @QuarkusTestResource(IncentiveRestContractIT.InMemoryKafkaResource::class)
 class IncentiveOutboxSentRetentionIT {
 

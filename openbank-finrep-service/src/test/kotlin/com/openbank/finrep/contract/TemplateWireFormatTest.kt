@@ -150,9 +150,11 @@ class TemplateWireFormatTest {
             "hasDataGaps",
             "isBalanced",
             "balanceVerdict",
+            "sourceEvidence",
         )
         assertThat(json["templateId"]).isEqualTo("F01.01")
         assertThat(json["period"]).isEqualTo("2026-06-30")
+        assertThat(json["sourceEvidence"]).isEqualTo("FROZEN")
         assertThat(json["isBalanced"]).isEqualTo(true)
         // The verdict is served as the ENUM NAME, which is what `openapi.yaml` documents (#6011).
         assertThat(json["balanceVerdict"]).isEqualTo("AGREED_BALANCED")
@@ -178,7 +180,7 @@ class TemplateWireFormatTest {
     }
 
     @Test
-    fun `the XBRL CSV preflight is blocked only by unverified datapoint ids when the trial balance agrees`() {
+    fun `the XBRL CSV preflight is ready when the trial balance agrees and datapoint ids are verified`() {
         val json = getJson("/api/v1/finrep/templates/F01.01/xbrl-csv/preflight", LocalDate.of(2026, 6, 30))
 
         assertThat(json.keys).containsExactlyInAnyOrder(
@@ -195,12 +197,33 @@ class TemplateWireFormatTest {
         assertThat(json["reportingFrameworkVersion"]).isEqualTo("4.2")
         assertThat(json["dpmVersion"]).isEqualTo("4.2.1")
         assertThat(json["taxonomyVersion"]).isEqualTo("4.2.0.0")
-        // F01.01 always emits r0030, whose datapoint id is unverified (#13603): never submission-ready.
-        assertThat(json["state"]).isEqualTo("BLOCKED")
+        assertThat(json["state"]).isEqualTo("READY_FOR_RENDERING")
 
         @Suppress("UNCHECKED_CAST")
         val blockers = json["blockers"] as List<Map<*, *>>
-        assertThat(blockers.map { it["code"] }).containsExactly("UNVERIFIED_DATAPOINT_ID")
+        assertThat(blockers).isEmpty()
+    }
+
+    @Test
+    fun `COREP LCR wire coordinates match the EBA 4_2 total-currency preview cells`() {
+        val fixture = checkNotNull(javaClass.getResourceAsStream("/eba/reporting-framework-4.2-lcr-preview-cells.tsv"))
+        val coordinates = fixture.bufferedReader().useLines { lines ->
+            lines.filterNot { it.startsWith("#") }.map { it.split('\t') }.groupBy { it.first() }
+        }
+        assertThat(coordinates.keys).containsExactly("C_72.00.a", "C_73.00.a", "C_74.00.a", "C_76.00.a")
+        coordinates.forEach { (variant, rows) ->
+            val templateId = variant.removeSuffix(".a")
+            val json = getJson("/api/v1/corep/templates/$templateId", LocalDate.of(2026, 6, 30))
+            assertThat(json["templateId"]).isEqualTo(templateId)
+            val cells = (json["cells"] as List<*>).map { it as Map<*, *> }
+            assertThat(cells.map { it["rowRef"] to it["colRef"] })
+                .containsExactlyElementsOf(rows.map { (_, row, col) -> row to col })
+            assertThat(cells).allSatisfy {
+                assertThat(it["label"] as String).doesNotContain("UNVERIFIED")
+                assertThat(it["isDataGap"]).isEqualTo(true)
+                assertThat(it["gapReason"] as String).isNotBlank()
+            }
+        }
     }
 
     @Test
@@ -225,7 +248,9 @@ class TemplateWireFormatTest {
 
         @Suppress("UNCHECKED_CAST")
         val cells = json["cells"] as List<Map<*, *>>
-        assertThat(cells).hasSize(9)
+        assertThat(cells).hasSize(10)
+        assertThat(cells.single { it["rowRef"] == "r200" }["label"]).isEqualTo("Other reserves")
+        assertThat(cells.single { it["rowRef"] == "r300" }["isDataGap"]).isEqualTo(true)
         assertThat(cells.first().keys)
             .containsExactlyInAnyOrder("rowRef", "colRef", "label", "value", "currency", "isDataGap", "gapReason")
         assertThat(cells.first()["rowRef"]).isEqualTo("r010")

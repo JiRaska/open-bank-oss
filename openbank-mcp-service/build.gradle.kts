@@ -11,6 +11,7 @@ dependencies {
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.opentelemetry)
+    implementation(libs.quarkus.config.yaml)
     // M2M client-credentials token attached to the downstream account/balance/transaction/consent
     // RestClient calls (ADR-0195 step 2) — same pattern as openbank-agent-service's ServiceClients.
     implementation(libs.quarkus.oidc.client.reactive.filter)
@@ -30,7 +31,11 @@ dependencies {
     // (PolicyDecisionPoint / OpaSidecarPolicyDecisionPoint) lives here.
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // #13169: the account-service operations and DTOs are generated from its openapi.yaml (ADR-0319).
+    implementation(project(":openbank-client-account"))
     testImplementation(project(":openbank-libs-testing"))
+    // Stubs the generated account-service client (#13169): it returns raw JAX-RS Responses.
+    testImplementation(libs.mockk)
     // Consumer-driven contract tests (ADR-0063, issue #2255 dimension C3). mcp's read ports became
     // real HTTP clients in #2262 and are not wired as the default yet — pinning the routes now is
     // what keeps the ADR-0195 cutover from shipping a call to a path that does not exist (#2269).
@@ -68,3 +73,15 @@ kover {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+// Package ownership inputs exactly as declared by each service, alongside canonical labels.
+tasks.named<Copy>("processResources") {
+    from(rootProject.file(".")) {
+        include("openbank-*/governance.yaml")
+        into("business-domains")
+    }
+    from(rootProject.file("openbank-libs/governance/domain-taxonomy.json")) {
+        into("business-domains")
+        rename { "taxonomy.json" }
+    }
+}

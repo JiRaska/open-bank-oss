@@ -11,20 +11,29 @@
 # Jazzer detection matches only *.java sources — the Kotlin harnesses alone
 # score 0 (checks/raw/fuzzing.go, languageFuzzSpecs).
 #
-# ADVISORY in v1 (continue-on-error): same rollout idiom as ADR-0144 — prove
-# the lane's signal on real PRs first, then drop the flag so crash findings
-# block. Crash artifacts upload to the run either way.
+# Crash findings and infrastructure failures block this workflow.
+# Crash artifacts remain available for replay and permanent regressions.
 # -----------------------------------------------------------------------------
 name: ClusterFuzzLite
 
 on:
   pull_request:
     paths:
-      - "openbank-libs-domain/**"
-      - "openbank-libs-iso20022/**"
+      - ".github/scripts/pitest-libs-advisory.init.gradle"
+      - ".github/workflows/pitest.yml"
+      - "openbank-libs*/**"
       - "fuzz/**"
       - ".clusterfuzzlite/**"
+      - ".github/workflows/services-ci.yml"
+      - ".github/workflows/libs-quality.yml"
+      - ".github/workflows/libs-bench.yml"
       - ".github/workflows/cflite-pr.yml"
+      - ".github/scripts/library_quality_scope.py"
+      - ".github/scripts/test_library_quality_scope.py"
+      - ".github/scripts/check_library_quality_evidence.py"
+      - ".github/scripts/test_library_quality_evidence.py"
+      - ".github/scripts/check-bench-alloc-baseline.py"
+      - ".github/scripts/test_bench_ratchet.py"
 
 permissions: read-all
 
@@ -60,7 +69,6 @@ jobs:
     needs: corpus-preflight
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 45
-    continue-on-error: true  # advisory-first: promote to blocking once proven (ADR-0144 idiom)
     steps:
       - name: Build fuzzers
         id: build

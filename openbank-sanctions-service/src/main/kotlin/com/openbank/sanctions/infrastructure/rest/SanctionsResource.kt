@@ -5,10 +5,11 @@
 package com.openbank.sanctions.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
-import com.openbank.sanctions.application.port.`in`.ReviewCommand
 import com.openbank.sanctions.application.port.`in`.SanctionsUseCase
 import com.openbank.sanctions.application.port.`in`.ScreenEntityCommand
+import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
+import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.NotFoundException
@@ -25,16 +26,23 @@ import java.util.UUID
 @Consumes(MediaType.APPLICATION_JSON)
 class SanctionsResource(private val useCase: SanctionsUseCase) {
 
+    @Inject
+    lateinit var identity: SecurityIdentity
+
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.list", resource = "")
-    suspend fun listAll() = useCase.listChecks()
+    suspend fun listAll() = useCase.listChecks().filter { it.isV1Compatible() }
 
     @POST
     @Path("/screen")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.create", resource = "")
-    suspend fun screen(cmd: ScreenEntityCommand) = Response.status(201).entity(useCase.screen(cmd)).build()
+    suspend fun screen(cmd: ScreenEntityCommand): Response {
+        val result = useCase.screen(cmd.forV1())
+        require(result.isV1Compatible()) { "A check created through /api/v3 cannot be replayed through /api/v1" }
+        return Response.status(201).entity(result).build()
+    }
 
     @POST
     @Path("/review")
@@ -55,23 +63,28 @@ class SanctionsResource(private val useCase: SanctionsUseCase) {
     // policy layer: `matrix-allows` (the rule that grants sanctions.clear) keys on principal type,
     // roles and action only, and no deny rule reads input.resource — verified before changing this.
     @Authorize(action = "sanctions.clear", resource = "#cmd.checkId")
-    suspend fun review(cmd: ReviewCommand) = useCase.review(cmd)
+    suspend fun review(cmd: ReviewRequest) =
+        useCase.getById(cmd.checkId)
+            ?.takeIf { it.isV1Compatible() }
+            ?.let { useCase.review(cmd.toCommand(identity)) }
+            ?: throw NotFoundException()
 
     @GET
     @Path("/{id}")
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.read", resource = "#id")
-    suspend fun get(@PathParam("id") id: UUID) = useCase.getById(id) ?: throw NotFoundException()
+    suspend fun get(@PathParam("id") id: UUID) =
+        useCase.getById(id)?.takeIf { it.isV1Compatible() } ?: throw NotFoundException()
 
     @GET
     @Path("/hits")
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.list", resource = "")
-    suspend fun hits() = useCase.listHits()
+    suspend fun hits() = useCase.listHits().filter { it.isV1Compatible() }
 
     @GET
     @Path("/pending")
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.list", resource = "")
-    suspend fun pending() = useCase.listPending()
+    suspend fun pending() = useCase.listPending().filter { it.isV1Compatible() }
 }

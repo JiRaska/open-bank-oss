@@ -1,7 +1,8 @@
 # Egress/ingress lockdown for the RUM gateway (ADR-0088 D4b, threat model E1/E2).
 # The gateway is the only public-internet-facing pod in `observability`, so it
 # gets an explicit default-deny with a tight allow-list — no arbitrary egress
-# (kills the SSRF/pivot vector E1) and ingress only from the nginx controller.
+# (kills the SSRF/pivot vector E1). OTLP ingress is edge-only; metrics are
+# restricted to the in-namespace Prometheus instance.
 #
 # Allowed egress: DNS; Tempo (the in-VPC sink, TB-3); and the Keycloak JWKS the
 # oidc auth extension needs. The JWKS lives at the token issuer
@@ -38,6 +39,15 @@ spec:
       ports:
         - protocol: TCP
           port: 4318
+    # Collector self-metrics are private to the in-namespace Prometheus.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+              app.kubernetes.io/instance: kube-prometheus-stack-prometheus
+      ports:
+        - protocol: TCP
+          port: 8888
   egress:
     # DNS.
     - to:

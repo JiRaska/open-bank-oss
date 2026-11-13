@@ -38,8 +38,8 @@ MIRRORS=(
   "apache/kafka:3.7.0                       kafka:3.7.0"
   "grafana/alloy:v1.20.1                    alloy:v1.20.1"
   "grafana/grafana:13.2.3                   grafana:13.2.3"
-  "falcosecurity/falco:0.45.0               falco:0.45.0"
-  "falcosecurity/falcoctl:0.14.2            falcoctl:0.14.2"
+  "falcosecurity/falco:0.45.2               falco:0.45.2"
+  "falcosecurity/falcoctl:0.14.3            falcoctl:0.14.3"
 )
 
 echo ">> Logging in to ECR Public (${REGION})..."

@@ -14,6 +14,7 @@ import com.openbank.pid.application.port.`in`.LinkCaseEvidenceCommand
 import com.openbank.pid.application.port.`in`.LinkExternalIdCommand
 import com.openbank.pid.application.port.`in`.TerminateRelationshipCommand
 import com.openbank.pid.application.port.`in`.TransitionPartyCaseCommand
+import com.openbank.pid.application.port.`in`.UpdateKycCommand
 import com.openbank.pid.application.port.out.EvidenceLinkPort
 import com.openbank.pid.application.port.out.PartyEventPublisher
 import com.openbank.pid.application.port.out.PartyRelationshipRepository
@@ -155,6 +156,44 @@ class PartyServiceTest {
     }
 
     @Test
+    fun `createParty asserts no risk rating (ADR-0353 D2)`(): Unit = runBlocking {
+        val partySlot = slot<Party>()
+        coEvery { partyRepository.existsByExternalId(ExternalIdType.BANKID_SUB, "sub-1") } returns false
+        coEvery { partyRepository.save(capture(partySlot)) } returns testParty()
+
+        service.createParty(createCommand())
+
+        assertThat(partySlot.captured.kycAttributes.amlRiskScore).isNull()
+    }
+
+    @Test
+    fun `updateKyc without the deprecated amlRiskScore leaves the stored value alone`(): Unit = runBlocking {
+        val party = testParty()
+        val updatedSlot = slot<Party>()
+        coEvery { partyRepository.findById(party.id) } returns party
+        coEvery { partyRepository.update(capture(updatedSlot)) } answers { updatedSlot.captured }
+        coEvery { eventPublisher.publish(any()) } returns Unit
+
+        service.updateKyc(UpdateKycCommand(party.id, KycLevel.ENHANCED, pepFlag = false, sanctionsFlag = false))
+
+        assertThat(updatedSlot.captured.kycAttributes.amlRiskScore).isEqualTo(party.kycAttributes.amlRiskScore)
+        assertThat(updatedSlot.captured.kycAttributes.kycLevel).isEqualTo(KycLevel.ENHANCED)
+    }
+
+    @Test
+    fun `updateKyc with an explicit amlRiskScore still stores it`(): Unit = runBlocking {
+        val party = testParty()
+        val updatedSlot = slot<Party>()
+        coEvery { partyRepository.findById(party.id) } returns party
+        coEvery { partyRepository.update(capture(updatedSlot)) } answers { updatedSlot.captured }
+        coEvery { eventPublisher.publish(any()) } returns Unit
+
+        service.updateKyc(UpdateKycCommand(party.id, KycLevel.ENHANCED, AmlRiskScore.HIGH, false, false))
+
+        assertThat(updatedSlot.captured.kycAttributes.amlRiskScore).isEqualTo(AmlRiskScore.HIGH)
+    }
+
+    @Test
     fun `changeStatus updates status and publishes event`(): Unit = runBlocking {
         val party = testParty()
         val updatedSlot = slot<Party>()
@@ -251,6 +290,26 @@ class PartyServiceTest {
     }
 
     @Test
+    fun `linkCaseEvidence on an erased party is refused and publishes nothing`(): Unit = runBlocking {
+        val party = testParty().copy(
+            caseLifecycle = testCaseLifecycle(status = LifecycleCaseStatus.OPEN),
+            erasedAt = now(),
+        )
+        coEvery { partyRepository.findById(party.id) } returns party
+
+        assertThatThrownBy {
+            runBlocking {
+                service.linkCaseEvidence(
+                    LinkCaseEvidenceCommand(partyId = party.id, evidenceRef = "evidence-123", actor = "pid-reviewer"),
+                )
+            }
+        }.isInstanceOf(PartyErasedException::class.java)
+
+        coVerify(exactly = 0) { eventPublisher.publish(any()) }
+        coVerify(exactly = 0) { evidenceLinkPort.recordLink(any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `transitionCase rejects invalid PID lifecycle transition`(): Unit = runBlocking {
         val party = testParty().copy(
             caseLifecycle = testCaseLifecycle(status = LifecycleCaseStatus.OPEN),
@@ -303,6 +362,7 @@ class PartyServiceTest {
         val eventSlot = slot<DomainEvent>()
 
         coEvery { relationshipRepository.findById(relationship.id) } returns relationship
+        coEvery { partyRepository.findById(party.id) } returns party
         coEvery { relationshipRepository.update(capture(updatedSlot)) } answers { updatedSlot.captured }
         coEvery { eventPublisher.publish(capture(eventSlot)) } returns Unit
 
@@ -399,6 +459,51 @@ class PartyServiceTest {
         initialRole = PartyRole.CUSTOMER,
         onboardingChannel = OnboardingChannel.BANKID,
     )
+
+    @Test
+    fun `addRelationship refuses an erased party`(): Unit = runBlocking {
+        val erased = testParty().copy(erasedAt = OffsetDateTime.parse("2026-11-12T10:00:00Z"))
+        coEvery { partyRepository.findById(erased.id) } returns erased
+
+        assertThatThrownBy {
+            runBlocking {
+                service.addRelationship(
+                    com.openbank.pid.application.port.`in`.AddRelationshipCommand(
+                        erased.id,
+                        PartyRole.CUSTOMER,
+                        com.openbank.pid.domain.model.OnboardingChannel.values().first(),
+                    ),
+                )
+            }
+        }.isInstanceOf(PartyErasedException::class.java)
+        coVerify(exactly = 0) { relationshipRepository.save(any()) }
+    }
+
+    @Test
+    fun `terminateRelationship refuses an erased party and writes no free-text reason`(): Unit = runBlocking {
+        val erased = testParty().copy(erasedAt = OffsetDateTime.parse("2026-11-12T10:00:00Z"))
+        val rel = PartyRelationship(
+            UUID.randomUUID(),
+            erased.id,
+            PartyRole.CUSTOMER,
+            RelationshipStatus.ACTIVE,
+            OffsetDateTime.parse("2024-01-01T00:00:00Z"),
+            com.openbank.pid.domain.model.OnboardingChannel.values().first(),
+            null,
+            null,
+        )
+        coEvery { relationshipRepository.findById(rel.id) } returns rel
+        coEvery { partyRepository.findById(erased.id) } returns erased
+
+        assertThatThrownBy {
+            runBlocking {
+                service.terminateRelationship(
+                    com.openbank.pid.application.port.`in`.TerminateRelationshipCommand(erased.id, rel.id, "personal"),
+                )
+            }
+        }.isInstanceOf(PartyErasedException::class.java)
+        coVerify(exactly = 0) { relationshipRepository.update(any()) }
+    }
 
     private fun testParty(id: UUID = UUID.randomUUID()) = Party(
         id = id,

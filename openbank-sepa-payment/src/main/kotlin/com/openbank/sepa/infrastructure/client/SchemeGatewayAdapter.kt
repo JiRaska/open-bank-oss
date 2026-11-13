@@ -11,11 +11,13 @@ import com.openbank.libs.iso20022.Iso20022Validator
 import com.openbank.libs.iso20022.Pacs002Reader
 import com.openbank.libs.iso20022.Pacs008Builder
 import com.openbank.libs.iso20022.PaymentStatus
+import com.openbank.libs.iso20022.PaymentTypeInformation
 import com.openbank.libs.iso20022.SettlementMethod
 import com.openbank.sepa.application.port.out.SchemeGatewayPort
 import com.openbank.sepa.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.sepa.application.port.out.SchemeSubmissionOutcome
 import com.openbank.sepa.domain.model.SepaPayment
+import com.openbank.sepa.domain.model.SepaPaymentType
 import io.quarkus.oidc.client.OidcClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -123,10 +125,21 @@ class SchemeGatewayAdapter(
             creditorName = payment.creditorName,
             creditorIban = payment.creditorIban,
             remittanceInfo = payment.remittanceInfo,
+            paymentTypeInformation = paymentTypeInformation(payment.type),
         )
     }
 
-    private companion object {
+    internal companion object {
         const val MAX_35 = 35
+
+        /**
+         * EPC rulebooks (#13663): every SEPA credit transfer carries `PmtTpInf/SvcLvl/Cd=SEPA`, and an
+         * SCT Inst additionally `LclInstrm/Cd=INST` — the only thing on the wire that tells a scheme
+         * the payment is instant. Exhaustive `when`: a new [SepaPaymentType] must decide its own.
+         */
+        fun paymentTypeInformation(type: SepaPaymentType): PaymentTypeInformation = when (type) {
+            SepaPaymentType.SCT -> PaymentTypeInformation.SEPA_CREDIT_TRANSFER
+            SepaPaymentType.SCT_INST -> PaymentTypeInformation.SEPA_INSTANT
+        }
     }
 }

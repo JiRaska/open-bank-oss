@@ -119,7 +119,8 @@ class PartyService(
                 kycLevel = KycLevel.BASIC,
                 kycCompletedAt = now,
                 kycExpiresAt = now.plusYears(1),
-                amlRiskScore = AmlRiskScore.LOW,
+                // ADR-0353 D2: pid asserts no risk rating; kyc-service owns it.
+                amlRiskScore = null,
                 pepFlag = false,
                 sanctionsFlag = false,
                 uboVerifiedAt = null,
@@ -291,7 +292,8 @@ class PartyService(
                 kycLevel = command.kycLevel,
                 kycCompletedAt = now,
                 kycExpiresAt = now.plusYears(1),
-                amlRiskScore = command.amlRiskScore,
+                // Deprecated field (ADR-0353 D2): absent in the request leaves any stored value alone.
+                amlRiskScore = command.amlRiskScore ?: party.kycAttributes.amlRiskScore,
                 pepFlag = command.pepFlag,
                 sanctionsFlag = command.sanctionsFlag,
                 lastAmlReviewAt = now,
@@ -399,6 +401,10 @@ class PartyService(
 
     override suspend fun linkCaseEvidence(command: LinkCaseEvidenceCommand): Party {
         val party = getById(command.partyId)
+        // GDPR Art. 17 (#15755): an erased party keeps its case id columns, so the lifecycle check
+        // below would pass. Nothing is stored here (the link is logged and published), so there is
+        // no row write to backstop under the party lock; the check is this read.
+        if (party.erasedAt != null) throw PartyErasedException("Party ${command.partyId} was erased")
         val caseLifecycle = party.caseLifecycle
             ?: throw IllegalStateException("PID case lifecycle is not initialized for party ${command.partyId}")
 
@@ -456,6 +462,7 @@ class PartyService(
 
     override suspend fun addRelationship(command: AddRelationshipCommand): PartyRelationship {
         val party = getById(command.partyId)
+        if (party.erasedAt != null) throw PartyErasedException("Party ${command.partyId} was erased")
         val now = OffsetDateTime.now(clock)
 
         val existing = party.relationships.firstOrNull {
@@ -498,6 +505,7 @@ class PartyService(
         if (relationship.partyId != command.partyId) {
             throw IllegalArgumentException("Relationship does not belong to party ${command.partyId}")
         }
+        if (getById(command.partyId).erasedAt != null) throw PartyErasedException("Party ${command.partyId} was erased")
 
         val now = OffsetDateTime.now(clock)
         val updated = relationship.copy(
@@ -548,3 +556,10 @@ class PartyAlreadyExistsException(message: String) : com.openbank.libs.domain.er
 class RelationshipAlreadyExistsException(message: String) :
     com.openbank.libs.domain.error.ResourceConflictException(message)
 class InvalidPartyCaseTransitionException(message: String) : RuntimeException(message)
+
+/**
+ * GDPR Art. 17 (#15755): a write targeted a party (or a record of a party) whose personal data was erased.
+ * 409 via libs-runtime's shared ResourceConflictException mapper, like PartyAlreadyExistsException;
+ * the message carries no personal data.
+ */
+class PartyErasedException(message: String) : com.openbank.libs.domain.error.ResourceConflictException(message)

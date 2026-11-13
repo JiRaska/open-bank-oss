@@ -319,6 +319,8 @@ def github_fetch(token):
             # allowlist of rate-limit response headers to diagnose quota failures.
             details = [f"HTTP {error.code}"]
             for header, label in (
+                ("X-RateLimit-Limit", "rate-limit-limit"),
+                ("X-RateLimit-Resource", "rate-limit-resource"),
                 ("X-RateLimit-Remaining", "rate-limit-remaining"),
                 ("X-RateLimit-Reset", "rate-limit-reset"),
                 ("Retry-After", "retry-after"),
@@ -327,7 +329,9 @@ def github_fetch(token):
                 if value is None:
                     continue
                 safe_value = str(value).strip()
-                if re.fullmatch(r"[0-9]{1,12}", safe_value):
+                if (label == "rate-limit-resource" and re.fullmatch(r"[a-z_]{1,32}", safe_value)) or (
+                    label != "rate-limit-resource" and re.fullmatch(r"[0-9]{1,12}", safe_value)
+                ):
                     details.append(f"{label}={safe_value}")
             raise RuntimeError(f"GitHub API {endpoint} failed ({'; '.join(details)})") from None
     return fetch

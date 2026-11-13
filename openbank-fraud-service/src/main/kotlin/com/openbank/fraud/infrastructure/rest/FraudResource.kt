@@ -6,6 +6,7 @@ package com.openbank.fraud.infrastructure.rest
 
 import com.openbank.fraud.application.port.`in`.ScoreFraudUseCase
 import com.openbank.fraud.domain.model.FraudScore
+import com.openbank.fraud.domain.model.FraudVerdict
 import com.openbank.fraud.domain.model.ScoreRequest
 import com.openbank.libs.authz.Authorize
 import jakarta.annotation.security.RolesAllowed
@@ -104,9 +105,14 @@ private fun ScoreFraudRequest.toDomain() = ScoreRequest(
     counterpartyId = counterpartyId,
 )
 
-private fun FraudScore.toResponse() = ScoreFraudResponse(
-    verdict = verdict.name,
-    score = score,
-    reasons = reasons,
-    ruleVersion = ruleVersion,
-)
+internal fun FraudScore.toResponse(): ScoreFraudResponse {
+    // UNKNOWN is a consumer's reading of an unreadable answer (ADR-0353 D4); emitting it would hand
+    // every rail a verdict this service never rendered. Fail closed: a 500, never a fake verdict.
+    check(verdict != FraudVerdict.UNKNOWN) { "fraud-service must never emit the consumer-only UNKNOWN verdict" }
+    return ScoreFraudResponse(
+        verdict = verdict.name,
+        score = score,
+        reasons = reasons,
+        ruleVersion = ruleVersion,
+    )
+}

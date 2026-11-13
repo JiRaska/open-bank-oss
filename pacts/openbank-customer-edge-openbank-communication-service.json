@@ -1,0 +1,70 @@
+{
+  "consumer": {
+    "name": "openbank-customer-edge"
+  },
+  "interactions": [
+    {
+      "description": "the edge reads the published customer app copy",
+      "providerStates": [
+        {
+          "name": "customer-copilot has approved published app copy"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/personas/customer-copilot/published"
+      },
+      "response": {
+        "body": {
+          "styleVersion": 1,
+          "uiMessages": {
+            "cs.status.loading": "Hledam.",
+            "en.status.loading": "Checking."
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.styleVersion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "the edge reads app copy with no published version",
+      "providerStates": [
+        {
+          "name": "customer-copilot has no published app copy"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/personas/customer-copilot/published"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-communication-service"
+  }
+}

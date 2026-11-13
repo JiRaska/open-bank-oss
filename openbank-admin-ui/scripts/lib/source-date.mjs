@@ -23,6 +23,7 @@
 // generators are written under.
 
 import { execFileSync } from 'child_process'
+import { readFileSync } from 'fs'
 
 /**
  * Commit time of the newest input, as an ISO-8601 UTC string.
@@ -55,4 +56,24 @@ export function sourceDate(repo, paths = []) {
   if (!raw) return null // pathspec matched nothing tracked
   const d = new Date(raw)
   return Number.isNaN(d.getTime()) ? null : d.toISOString()
+}
+
+// A deploy pin can change the GitOps commit date without changing any fact in a
+// snapshot baked into the same image. Keep the previous provenance only when the
+// entire rendered payload is identical apart from its timestamp. A changed fact,
+// missing prior artifact, or explicit SOURCE_DATE_EPOCH gets a fresh source date.
+// The stamp is monotonic: it never goes older than the previously committed value.
+// Only for source-date stamps; scan-time fields (scannedAt) must NOT use this.
+export function preserveDerivedTimestamp(outputPath, next, field) {
+  if (process.env.SOURCE_DATE_EPOCH) return next
+  let previous
+  try { previous = JSON.parse(readFileSync(outputPath, 'utf8')) } catch { return next }
+  if (typeof previous?.[field] !== 'string' || Number.isNaN(Date.parse(previous[field]))) return next
+  const before = { ...previous }
+  const after = { ...next }
+  delete before[field]
+  delete after[field]
+  if (JSON.stringify(before) === JSON.stringify(after)) return { ...next, [field]: previous[field] }
+  const nextMs = typeof next[field] === 'string' ? Date.parse(next[field]) : NaN
+  return Number.isNaN(nextMs) || nextMs < Date.parse(previous[field]) ? { ...next, [field]: previous[field] } : next
 }

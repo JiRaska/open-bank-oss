@@ -143,3 +143,9 @@ sequenceDiagram
 3. **Transakční outbox** — DB zápis a Kafka publish jsou oddělené; at-least-once doručení, idempotentní konzumenti.
 4. **Autorizace na edge** — OPA-gated akce (`@Authorize`), výchozí advisory, vynutitelné přes `AUTHZ_ENFORCE`.
 5. **Money-path disciplína** — povrch vysokohodnotových wire; autenticita zprávy je dominantní kontrola (viz [06 — Compliance](./06-compliance.md) a threat model).
+
+## Hranice odpovědi a opakování institucionálního převodu
+
+Odeslání pacs.009 přijme výsledek pacs.002 pouze tehdy, když původní ID zprávy a UETR odpovídají ID zprávy a UETR převodu. Chybějící nebo odlišná identita znamená nedostupnou odpověď, nikoli potvrzené vypořádání či odmítnutí. Následné dohledání zachovává uloženou identitu převodu. Timeout odeslání může označit jako `SUBMISSION_UNKNOWN` pouze odesílající verzi ve stavu `SUBMITTING`; novější verze i rozhodnutí životního cyklu zůstávají zachované. Konflikt očekávané verze ponechá vítězný stav a jeho události beze změny.
+
+Konzument uvolnění zachovává stávající klasifikátor opakování, počet pokusů a konečné selhání předané do cesty nack. Pomocná funkce pro opakování dostává redigovaný pohled na výjimku a kanonické UUID jako klíč logu (nebo žádný klíč); pro klasifikaci a předání se obnoví původní selhání. Provozní zprávy zachovávají třídu selhání a důvěryhodné uložené identifikátory převodu, nikoli surové výjimky závislostí či diagnostiku validace XML. Regresní testy gateway, životního cyklu a konzumenta ověřují identitu odpovědi, souběžné změny stavu, počty pokusů i pozorovatelný řetězec výjimek v logu. Jde o vlastnosti zdroje a testů, nikoli o tvrzení, že proběhlo nasazení.

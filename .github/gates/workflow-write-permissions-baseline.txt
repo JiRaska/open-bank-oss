@@ -7,9 +7,9 @@ admin-ui-deploy.yml|job:build-push|pull-requests
 # Dataset-only OIDC publisher; IAM limits writes to Gate Health snapshots and its CAS selector.
 admin-ui-evidence.yml|job:publish|id-token
 agent-review.yml|job:review|pull-requests
-alert-rca-weekly.yml|job:review|contents
-alert-rca-weekly.yml|job:review|issues
-alert-rca-weekly.yml|job:review|pull-requests
+alert-rca-weekly.yml|job:publish|contents
+alert-rca-weekly.yml|job:publish|issues
+alert-rca-weekly.yml|job:publish|pull-requests
 api-contract-post-merge.yml|job:raise-issue|issues
 auto-deploy-red-watch.yml|job:watch|issues
 auto-deploy.yml|job:build-push|contents
@@ -31,16 +31,26 @@ backfill-release-evidence.yml|job:backfill|contents
 backfill-release-evidence.yml|job:backfill|id-token
 branch-cleanup.yml|job:delete-closed-deploy-branch|contents
 branch-cleanup.yml|job:prune-stale-branches|contents
+# ADR-0366 mirror; IAM trust pins main + this workflow file, push limited to ci-artifacts/* repos.
+ci-artifact-mirror.yml|job:mirror|id-token
 ci.yml|job:app-status|pull-requests
 credential-inventory.yml|job:inventory|issues
 db-backup-associations.yml|job:live-check|id-token
-dependabot-verification-metadata.yml|job:refresh-metadata|contents
 dependency-review.yml|job:dependency-review|pull-requests
+# Fixed-text refusal comment only; the job never checks out or runs PR code.
+dependabot-verification-metadata-push.yml|job:push|pull-requests
 dependency-submission.yml|job:raise-issue|issues
+# ADR-0361 drill: OIDC to a role that reads one SSM parameter (schedule/dispatch only); issues to post on #14163.
+deception-drill.yml|job:drill|id-token
+# Opens/refreshes one tracking issue per class when a CI credential or apt pin needs action (#15483).
+date-driven-expiry-watch.yml|job:apt-pins|issues
+date-driven-expiry-watch.yml|job:credentials|issues
+deception-drill.yml|job:drill|issues
 dependency-submission.yml|job:submit|contents
 deploy-code-lag-watch.yml|job:watch|issues
 deploy-drift-watch.yml|job:watch|issues
 deps-freshness.yml|job:freshness|issues
+ecr-live-tags.yml|job:tag|id-token
 external-feed-watch.yml|job:watch|issues
 finops-lifecycle.yml|job:audit|issues
 fleet-attestation.yml|job:close-probe-issue|issues
@@ -53,9 +63,14 @@ ghcr-publish.yml|job:publish|id-token
 ghcr-publish.yml|job:publish|packages
 governance-horizon-watch.yml|job:watch|issues
 image-rescan.yml|job:escalate|issues
+# Adds/removes only the needs-kind label (rules.yaml: issues.kinds).
+issue-kind.yml|job:kind|issues
 labels.yml|job:sync|issues
+main-red-watch.yml|job:reconcile|contents
+main-red-watch.yml|job:watch|contents
 main-red-watch.yml|job:watch|issues
 merged-past-red-check-watch.yml|job:watch|issues
+ops-heartbeat.yml|job:watch|issues
 pact-verification-reconcile.yml|job:reconcile|actions
 perf-gate.yml|job:raise-issue|issues
 platform-images.yml|job:build|id-token
@@ -74,8 +89,8 @@ scorecard.yml|job:analysis|id-token
 scorecard.yml|job:analysis|security-events
 security.yml|job:codeql|security-events
 security.yml|job:trivy|security-events
-service-build-stall-watch.yml|job:watch|actions
-service-build-stall-watch.yml|job:watch|issues
+service-build-stall-watch.yml|job:mutate|actions
+service-build-stall-watch.yml|job:mutate|issues
 services-ci.yml|job:build_other_openbank_account_service|id-token
 services-ci.yml|job:build_other_openbank_agent_service|id-token
 services-ci.yml|job:build_other_openbank_aml_service|id-token
@@ -92,6 +107,7 @@ services-ci.yml|job:build_other_openbank_card_processing_service|id-token
 services-ci.yml|job:build_other_openbank_case_coordinator_agent|id-token
 services-ci.yml|job:build_other_openbank_clearing_service|id-token
 services-ci.yml|job:build_other_openbank_clearing_simulator|id-token
+services-ci.yml|job:build_other_openbank_client_account|id-token
 services-ci.yml|job:build_other_openbank_client_product_catalog|id-token
 services-ci.yml|job:build_other_openbank_client_transaction|id-token
 services-ci.yml|job:build_other_openbank_communication_service|id-token
@@ -123,6 +139,7 @@ services-ci.yml|job:build_other_openbank_libs_benchmarks|id-token
 services-ci.yml|job:build_other_openbank_libs_detekt_rules|id-token
 services-ci.yml|job:build_other_openbank_libs_domain|id-token
 services-ci.yml|job:build_other_openbank_libs_finance|id-token
+services-ci.yml|job:build_other_openbank_libs_fincrime|id-token
 services-ci.yml|job:build_other_openbank_libs_iso20022|id-token
 services-ci.yml|job:build_other_openbank_libs_lending|id-token
 services-ci.yml|job:build_other_openbank_libs_runtime|id-token
@@ -176,6 +193,7 @@ services-ci.yml|job:build_pr_openbank_card_processing_service|id-token
 services-ci.yml|job:build_pr_openbank_case_coordinator_agent|id-token
 services-ci.yml|job:build_pr_openbank_clearing_service|id-token
 services-ci.yml|job:build_pr_openbank_clearing_simulator|id-token
+services-ci.yml|job:build_pr_openbank_client_account|id-token
 services-ci.yml|job:build_pr_openbank_client_product_catalog|id-token
 services-ci.yml|job:build_pr_openbank_client_transaction|id-token
 services-ci.yml|job:build_pr_openbank_communication_service|id-token
@@ -207,6 +225,7 @@ services-ci.yml|job:build_pr_openbank_libs_benchmarks|id-token
 services-ci.yml|job:build_pr_openbank_libs_detekt_rules|id-token
 services-ci.yml|job:build_pr_openbank_libs_domain|id-token
 services-ci.yml|job:build_pr_openbank_libs_finance|id-token
+services-ci.yml|job:build_pr_openbank_libs_fincrime|id-token
 services-ci.yml|job:build_pr_openbank_libs_iso20022|id-token
 services-ci.yml|job:build_pr_openbank_libs_lending|id-token
 services-ci.yml|job:build_pr_openbank_libs_runtime|id-token
@@ -258,3 +277,8 @@ vex-hotfix.yml|job:vex-hotfix|issues
 vex-hotfix.yml|job:vex-hotfix|pull-requests
 vex-triage.yml|job:vex-triage|issues
 test-evidence-reconcile.yml|job:reconcile|id-token
+merge-train-stall-watch.yml|job:watch|issues
+merge-train-wake.yml|job:wake|actions
+
+# Communication artifact producer: OIDC authenticates registry push and KMS attestations only.
+communication-image-only.yml|job:build-push|id-token

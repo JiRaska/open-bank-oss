@@ -42,7 +42,7 @@ ES_KIND = re.compile(r"^kind:[ \t]*ExternalSecret\b", re.M)
 # Roles declared only under a runtime conditional TODAY, owned by an open issue. Such a role
 # passes with a warning; an entry that is no longer conditional is reported stale (like
 # KNOWN_UNCOVERED in check-pact-provider-replay.py). Remove the entry when the `if` goes.
-KNOWN_CONDITIONAL = {"ledger-pension-co-db-vault-role": "#13172"}
+KNOWN_CONDITIONAL: dict[str, str] = {}
 
 
 def declared_roles(text: str) -> tuple[set[str], set[str]]:

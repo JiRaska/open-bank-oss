@@ -1,0 +1,114 @@
+{
+  "consumer": {
+    "name": "openbank-party-service"
+  },
+  "interactions": [
+    {
+      "description": "GET accounts for a party before a merge",
+      "providerStates": [
+        {
+          "name": "an account owned by a known party exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts",
+        "query": {
+          "limit": [
+            "100"
+          ],
+          "partyId": [
+            "66666666-7777-4888-8999-aaaaaaaaaaaa"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "data": [
+            {
+              "accountNumber": "CZ6508000000192000145399",
+              "currencyCode": "CZK",
+              "id": "11111111-2222-4333-8444-555555555555",
+              "status": "ACTIVE"
+            }
+          ],
+          "pagination": {
+            "hasNextPage": false
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET accounts for a party that owns none",
+      "providerStates": [
+        {
+          "name": "no account exists for the requested party"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts",
+        "query": {
+          "limit": [
+            "100"
+          ],
+          "partyId": [
+            "66666666-7777-4888-8999-aaaaaaaaaaab"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "data": [
+
+          ],
+          "pagination": {
+            "hasNextPage": false
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET accounts with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts",
+        "query": {
+          "limit": [
+            "100"
+          ],
+          "partyId": [
+            "66666666-7777-4888-8999-aaaaaaaaaaaa"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-account-service"
+  }
+}

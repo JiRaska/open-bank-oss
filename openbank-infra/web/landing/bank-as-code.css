@@ -1,0 +1,1454 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Bank as Code extends the existing public-site palette and typography. */
+.bac {
+  --ob-bg: light-dark(#f7f9fc,#0b1120);
+  --ob-paper: light-dark(#fff,#111b2c);
+  --ob-ink: light-dark(#0c1830,#eef5ff);
+  --ob-muted: light-dark(#516078,#a9b8ce);
+  --ob-line: light-dark(#dbe3ef,#29374f);
+  --ob-blue: light-dark(#1857dd,#83b1ff);
+  --ob-soft: light-dark(#eaf1ff,#172b49);
+  --ob-grid: light-dark(#ccd9ed55,#637d9d20);
+  background: var(--ob-bg);
+  color: var(--ob-ink);
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  isolation: isolate;
+}
+.bac *,.bac *:before,.bac *:after {
+  box-sizing: border-box;
+}
+.bac [hidden] {
+  display: none !important;
+}
+.bac h1,.bac h2,.bac h3,.bac p {
+  margin: 0px;
+}
+.bac button,.bac input,.bac select {
+  font: inherit;
+}
+.bac button,.bac a {
+  
+}
+.bac button {
+  color: inherit;
+}
+.bac a {
+  color: inherit;
+  text-decoration: none;
+}
+.bac .ob-bound {
+  width: calc(100% - 72px);
+  max-width: 1180px;
+  margin-inline: auto;
+}
+.bac .ob-mono {
+  font-family: "Space Mono", monospace;
+}
+.bac nav {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+}
+.bac nav button {
+  min-height: 44px;
+  border: 0px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 13px 11px;
+  white-space: nowrap;
+  border-radius: 7px;
+}
+.bac nav button[aria-current=page] {
+  background: var(--ob-soft);
+  color: var(--ob-blue);
+}
+.bac .ob-eyebrow {
+  font: 11px "Space Mono", monospace;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ob-blue);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.bac .ob-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+  flex: 0 0 auto;
+}
+.bac .ob-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 46px;
+  padding: 12px 19px;
+  border: 1px solid var(--ob-line);
+  border-radius: 8px;
+  background: var(--ob-paper);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+}
+.bac .ob-button.ob-primary {
+  background: rgb(23, 91, 232);
+  border-color: rgb(23, 91, 232);
+  color: white;
+  box-shadow: 0 5px 15px #1557df20;
+}
+.bac .ob-button:hover {
+  box-shadow: 0 5px 20px #145be825;
+}
+.bac .ob-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 25px;
+}
+.bac h1 {
+  font-size: clamp(42px, 5.3vw, 66px);
+  line-height: 1.03;
+  font-weight: 600;
+  letter-spacing: -0.055em;
+  margin: 21px 0px 23px;
+}
+.bac h1 em,.bac h2 em {
+  font-style: normal;
+  color: var(--ob-blue);
+}
+.bac .ob-lede {
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--ob-muted);
+  max-width: 490px;
+}
+.bac .ob-footnote {
+  font-size: 11px;
+  color: var(--ob-muted);
+  margin-top: 17px;
+}
+.bac .ob-principles {
+  display: grid;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  border-top: 1px solid var(--ob-line);
+  border-bottom: 1px solid var(--ob-line);
+  padding: 22px 0px;
+  gap: 20px;
+}
+.bac .ob-principles div {
+  display: flex;
+  gap: 13px;
+  align-items: center;
+  font-size: 13px;
+}
+.bac .ob-principles i,.bac .ob-principles svg {
+  width: 17px;
+  height: 17px;
+  color: var(--ob-blue);
+  flex: 0 0 auto;
+}
+.bac .ob-section {
+  padding: 68px 0px;
+}
+.bac .ob-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 35px;
+  margin-bottom: 30px;
+}
+.bac h2 {
+  font-size: clamp(29px, 3.7vw, 42px);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 1.12;
+  margin-top: 14px;
+}
+.bac .ob-section-head p {
+  max-width: 360px;
+  font-size: 14px;
+  color: var(--ob-muted);
+}
+.bac .ob-architecture {
+  background: rgb(12, 25, 49);
+  border-radius: 16px;
+  overflow: hidden;
+  color: rgb(238, 245, 255);
+  position: relative;
+}
+.bac .ob-dark-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  padding: 18px 23px;
+  border-bottom: 1px solid rgb(48, 64, 91);
+  font: 11px "Space Mono", monospace;
+  color: rgb(184, 201, 231);
+}
+.bac .ob-dark-head .ob-button {
+  padding: 7px 12px;
+  min-height: 35px;
+  color: rgb(212, 230, 255);
+  background: rgb(23, 44, 73);
+  border-color: rgb(52, 81, 110);
+  font: 11px "Space Mono", monospace;
+}
+.bac .ob-process {
+  display: grid;
+  grid-template-columns: repeat(4,minmax(0,1fr));
+  gap: 22px;
+  padding: 35px 25px;
+  background-image: radial-gradient(rgba(102, 131, 170, 0.17) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+.bac .ob-step {
+  border: 1px solid rgb(53, 76, 112);
+  background: rgb(17, 33, 60);
+  border-radius: 10px;
+  padding: 20px 15px;
+  min-height: 145px;
+  position: relative;
+  transition: background .3s,border-color .3s;
+}
+.bac .ob-step:not(:last-child):after {
+  content: "→";
+  position: absolute;
+  right: -18px;
+  top: 49%;
+  color: rgb(117, 151, 200);
+  font-size: 16px;
+}
+.bac .ob-step small {
+  font: 10px "Space Mono", monospace;
+  color: rgb(142, 172, 212);
+}
+.bac .ob-step h3 {
+  font-size: 20px;
+  font-weight: 500;
+  margin: 15px 0px 5px;
+  letter-spacing: -0.03em;
+}
+.bac .ob-step p {
+  font-size: 11px;
+  color: rgb(182, 201, 231);
+}
+.bac .ob-step[data-active=true] {
+  border-color: rgb(120, 207, 255);
+  background: rgb(23, 58, 96);
+  box-shadow: 0 0 25px #48abff20;
+}
+.bac .ob-process-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 25px;
+  border-top: 1px solid rgb(48, 64, 91);
+  font-size: 12px;
+  color: rgb(182, 201, 231);
+}
+.bac .ob-process-caption strong {
+  color: rgb(131, 220, 255);
+  font-weight: 400;
+}
+.bac .ob-discipline-grid {
+  display: grid;
+  grid-template-columns: repeat(4,minmax(0,1fr));
+  gap: 13px;
+  margin-top: 26px;
+}
+.bac .ob-discipline {
+  min-width: 0px;
+  background: var(--ob-paper);
+  border: 1px solid var(--ob-line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.bac .ob-mini-art {
+  height: 105px;
+  padding: 19px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font: 11px "Space Mono", monospace;
+  color: var(--ob-blue);
+  border-bottom: 1px solid var(--ob-line);
+}
+.bac .ob-mini-art span {
+  background: var(--ob-paper);
+  border: 1px solid var(--ob-line);
+  padding: 6px 8px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.bac .ob-mini-art .ob-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bac .ob-mini-art b {
+  font-weight: 400;
+  color: var(--ob-muted);
+}
+.bac .ob-discipline-body {
+  padding: 18px 15px;
+}
+.bac .ob-discipline h3 {
+  font-size: 15px;
+  letter-spacing: -0.03em;
+  font-weight: 500;
+  min-height: 46px;
+}
+.bac .ob-discipline p {
+  font-size: 12px;
+  color: var(--ob-muted);
+  margin: 8px 0px 14px;
+  min-height: 58px;
+}
+.bac details summary {
+  color: var(--ob-blue);
+  font-size: 12px;
+  min-height: 44px;
+  padding: 10px 0px;
+}
+.bac details .ob-detail {
+  font-size: 12px;
+  color: var(--ob-muted);
+  padding: 12px 0px 3px;
+  overflow-wrap: anywhere;
+}
+.bac details a {
+  display: block;
+  color: var(--ob-blue);
+  text-decoration: underline;
+  margin-top: 12px;
+}
+.bac .ob-story-grid {
+  display: grid;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 17px;
+}
+.bac .ob-story {
+  padding: 0px;
+  background: var(--ob-paper);
+  border: 1px solid var(--ob-line);
+  border-radius: 12px;
+  overflow: hidden;
+  text-align: left;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  transition: transform .2s;
+}
+.bac .ob-story:hover {
+  transform: translateY(-4px);
+}
+.bac .ob-story-art {
+  height: 155px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(13, 27, 53);
+  width: 100%;
+  padding: 22px;
+  color: rgb(190, 212, 255);
+  gap: 8px;
+  font: 12px "Space Mono", monospace;
+  position: relative;
+  overflow: hidden;
+}
+.bac .ob-story-art:before {
+  content: "";
+  position: absolute;
+  inset: 0px;
+  background-image: linear-gradient(rgba(102, 153, 221, 0.075) 1px, transparent 1px), linear-gradient(90deg, rgba(102, 153, 221, 0.075) 1px, transparent 1px);
+  background-size: 23px 23px;
+}
+.bac .ob-story-art>* {
+  position: relative;
+}
+.bac .ob-story-art strong {
+  font-size: 40px;
+  font-weight: 400;
+  letter-spacing: -0.05em;
+  color: rgb(132, 220, 255);
+}
+.bac .ob-code-cube {
+  padding: 18px 14px;
+  border: 1px solid rgb(84, 112, 156);
+  background: rgb(24, 45, 75);
+  box-shadow: 7px 7px 0 #203b62;
+  border-radius: 6px;
+}
+.bac .ob-check-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bac .ob-check-stack span {
+  padding: 6px 14px;
+  background: rgb(25, 48, 77);
+  border-left: 2px solid rgb(103, 218, 252);
+}
+.bac .ob-story-copy {
+  padding: 24px 22px;
+  width: 100%;
+}
+.bac .ob-story-copy small {
+  color: var(--ob-blue);
+  font: 10px "Space Mono", monospace;
+}
+.bac .ob-story-copy h3 {
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 1.15;
+  margin: 12px 0px 18px;
+}
+.bac .ob-story-copy p {
+  font-size: 13px;
+  color: var(--ob-muted);
+}
+.bac .ob-story-copy>span {
+  display: block;
+  font-size: 12px;
+  color: var(--ob-blue);
+  margin-top: 23px;
+}
+.bac .ob-join {
+  padding: 42px;
+  border: 1px solid var(--ob-line);
+  border-radius: 14px;
+  background: var(--ob-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  margin-bottom: 65px;
+}
+.bac .ob-join h2 {
+  font-size: 34px;
+  margin: 0px;
+}
+.bac .ob-join p {
+  color: var(--ob-muted);
+  margin-top: 12px;
+  font-size: 14px;
+}
+.bac .ob-join .ob-button {
+  flex: 0 0 auto;
+}
+.bac .ob-article-head {
+  padding: 46px 0px 35px;
+  max-width: 780px;
+}
+.bac .ob-article-head h1 {
+  font-size: clamp(39px, 5.6vw, 65px);
+}
+.bac .ob-back {
+  border: 0px;
+  background: none;
+  padding: 0px 0px 27px;
+  font-size: 12px;
+  color: var(--ob-muted);
+}
+.bac .ob-lab {
+  background: rgb(12, 25, 49);
+  border: 1px solid rgb(45, 66, 98);
+  border-radius: 16px;
+  overflow: hidden;
+  color: rgb(238, 245, 255);
+}
+.bac .ob-lab-grid {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+}
+.bac .ob-editor {
+  padding: 28px;
+  min-width: 0px;
+  border-right: 1px solid rgb(48, 64, 91);
+  background: rgb(14, 29, 54);
+}
+.bac .ob-file {
+  font: 11px "Space Mono", monospace;
+  color: rgb(159, 181, 213);
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+.bac .ob-file span {
+  color: rgb(130, 220, 255);
+}
+.bac .ob-code {
+  font: 12px / 1.95 "Space Mono", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0px;
+  color: rgb(214, 228, 252);
+}
+.bac .ob-code .ob-key {
+  color: rgb(145, 184, 255);
+}
+.bac .ob-code .ob-string {
+  color: rgb(130, 220, 255);
+}
+.bac .ob-code .ob-comment {
+  color: rgb(141, 164, 198);
+}
+.bac .ob-code .ob-number {
+  color: rgb(199, 175, 255);
+}
+.bac .ob-editor-note {
+  font-size: 11px;
+  color: rgb(159, 181, 213);
+  border-top: 1px solid rgb(48, 64, 91);
+  margin-top: 24px;
+  padding-top: 16px;
+}
+.bac .ob-live {
+  padding: 28px;
+  min-width: 0px;
+  background: radial-gradient(at 100% 0, rgb(36, 62, 98) 0, transparent 65%);
+}
+.bac .ob-live small {
+  font: 10px "Space Mono", monospace;
+  color: rgb(169, 195, 232);
+}
+.bac .ob-live h3 {
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+  margin: 12px 0px 25px;
+}
+.bac .ob-rate {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  gap: 15px;
+}
+.bac .ob-rate output {
+  font: 24px "Space Mono", monospace;
+  color: rgb(130, 220, 255);
+}
+.bac input[type=range] {
+  width: 100%;
+  accent-color: rgb(120, 186, 255);
+  min-height: 28px;
+  margin: 12px 0px 15px;
+}
+.bac .ob-checkbox {
+  display: flex;
+  align-items: start;
+  gap: 10px;
+  font-size: 12px;
+  color: rgb(195, 211, 237);
+  padding: 14px 0px;
+  border-top: 1px solid rgb(48, 64, 91);
+}
+.bac .ob-checkbox input {
+  width: 18px;
+  height: 18px;
+  accent-color: rgb(124, 183, 255);
+  flex: 0 0 auto;
+  margin: 1px 0px;
+}
+.bac .ob-amount {
+  font: 48px "Space Grotesk", sans-serif;
+  letter-spacing: -0.055em;
+  color: rgb(243, 248, 255);
+  margin: 18px 0px 8px;
+  font-variant-numeric: tabular-nums;
+}
+.bac .ob-breakdown {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  font: 11px "Space Mono", monospace;
+  color: rgb(183, 204, 235);
+}
+.bac .ob-interest-bar {
+  display: flex;
+  height: 7px;
+  border-radius: 3px;
+  background: rgb(37, 57, 89);
+  overflow: hidden;
+  margin: 14px 0px 20px;
+}
+.bac .ob-interest-bar span {
+  height: 100%;
+  transition: width .35s;
+  background: rgb(131, 183, 255);
+}
+.bac .ob-interest-bar span:last-child {
+  background: rgb(116, 230, 220);
+}
+.bac .ob-lab-note {
+  padding: 17px 25px;
+  border-top: 1px solid rgb(48, 64, 91);
+  color: rgb(169, 190, 219);
+  font-size: 11px;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+.bac .ob-lab-note a {
+  color: rgb(141, 218, 255);
+  text-decoration: underline;
+  flex: 0 0 auto;
+}
+.bac .ob-two-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px;
+  margin-top: 34px;
+}
+.bac .ob-two-columns h3 {
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  margin-bottom: 12px;
+}
+.bac .ob-two-columns p {
+  font-size: 14px;
+  color: var(--ob-muted);
+}
+.bac .ob-two-columns a {
+  display: inline-block;
+  color: var(--ob-blue);
+  font-size: 13px;
+  margin-top: 18px;
+  text-decoration: underline;
+}
+.bac .ob-switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 25px;
+}
+.bac .ob-switches button {
+  min-height: 43px;
+  padding: 10px 16px;
+  border: 1px solid var(--ob-line);
+  border-radius: 7px;
+  background: var(--ob-paper);
+  font-size: 13px;
+}
+.bac .ob-switches button[aria-pressed=true] {
+  background: var(--ob-ink);
+  color: var(--ob-bg);
+  border-color: var(--ob-ink);
+}
+.bac .ob-evidence {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 24px;
+  padding: 28px;
+  background-image: radial-gradient(rgba(102, 131, 170, 0.17) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+.bac .ob-evidence-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 19px;
+}
+.bac .ob-evidence-node {
+  border: 1px solid rgb(54, 87, 126);
+  background: rgb(18, 39, 66);
+  padding: 16px 18px;
+  border-radius: 9px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+.bac .ob-evidence-node:not(:last-child):after {
+  content: "↓";
+  position: absolute;
+  bottom: -20px;
+  left: 29px;
+  color: rgb(123, 169, 213);
+}
+.bac .ob-evidence-node b {
+  font: 11px "Space Mono", monospace;
+  color: rgb(129, 217, 251);
+  flex: 0 0 auto;
+}
+.bac .ob-evidence-node span {
+  font-size: 13px;
+}
+.bac .ob-evidence-node[data-active=true] {
+  background: rgb(29, 65, 98);
+  border-color: rgb(135, 223, 255);
+}
+.bac .ob-receipt {
+  background: rgb(240, 246, 255);
+  border-radius: 10px;
+  color: rgb(20, 37, 65);
+  padding: 25px;
+  align-self: center;
+  box-shadow: 8px 8px 0 #243e61;
+}
+.bac .ob-receipt small {
+  font: 10px "Space Mono", monospace;
+  color: rgb(70, 96, 128);
+}
+.bac .ob-receipt h3 {
+  font-size: 24px;
+  letter-spacing: -0.04em;
+  margin: 12px 0px 23px;
+  font-weight: 500;
+}
+.bac .ob-receipt dl {
+  font: 11px / 1.7 "Space Mono", monospace;
+  margin: 0px;
+}
+.bac .ob-receipt dl div {
+  padding: 9px 0px;
+  border-top: 1px solid rgb(199, 215, 236);
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  overflow-wrap: anywhere;
+}
+.bac .ob-receipt dd {
+  margin: 0px;
+  text-align: right;
+  font-weight: 500;
+  max-width: 60%;
+}
+.bac .ob-receipt-stamp {
+  margin-top: 20px;
+  padding: 9px 0px;
+  border-top: 1px solid rgb(199, 215, 236);
+  font: 11px "Space Mono", monospace;
+  color: rgb(25, 88, 162);
+}
+.bac .ob-ai-scene {
+  padding: 32px 25px;
+  background-image: linear-gradient(rgba(102, 131, 170, 0.086) 1px, transparent 1px), linear-gradient(90deg, rgba(102, 131, 170, 0.086) 1px, transparent 1px);
+  background-size: 25px 25px;
+}
+.bac .ob-ai-flow {
+  display: grid;
+  grid-template-columns: 1fr 30px 1fr 30px 1.1fr;
+  align-items: center;
+  gap: 6px;
+}
+.bac .ob-ai-box {
+  border: 1px solid rgb(54, 91, 133);
+  background: rgb(20, 42, 72);
+  border-radius: 12px;
+  padding: 23px 16px;
+  text-align: center;
+  min-width: 0px;
+}
+.bac .ob-ai-box[data-active=true] {
+  background: rgb(32, 70, 107);
+  border-color: rgb(137, 221, 255);
+  box-shadow: 0 0 24px #4bb6ff22;
+}
+.bac .ob-ai-box.ob-gate {
+  border-color: rgb(114, 156, 255);
+  background: rgb(32, 58, 101);
+}
+.bac .ob-ai-box i,.bac .ob-ai-box svg {
+  width: 28px;
+  height: 28px;
+  color: rgb(144, 220, 255);
+  margin-bottom: 15px;
+}
+.bac .ob-ai-box h3 {
+  font-size: 18px;
+  font-weight: 500;
+  margin-bottom: 7px;
+}
+.bac .ob-ai-box p {
+  font: 10px / 1.7 "Space Mono", monospace;
+  color: rgb(183, 204, 235);
+  overflow-wrap: anywhere;
+}
+.bac .ob-ai-arrow {
+  font-size: 24px;
+  color: rgb(105, 150, 200);
+  text-align: center;
+}
+.bac .ob-ai-log {
+  margin-top: 28px;
+  border: 1px solid rgb(51, 76, 112);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.bac .ob-ai-log-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 13px 16px;
+  background: rgb(20, 36, 62);
+  font: 10px "Space Mono", monospace;
+  color: rgb(169, 191, 221);
+}
+.bac .ob-ai-log pre {
+  padding: 20px 16px;
+  background: rgb(11, 23, 44);
+  font: 12px / 1.8 "Space Mono", monospace;
+  color: rgb(141, 223, 255);
+  margin: 0px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bac .ob-ai-result {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  margin-top: 22px;
+}
+.bac .ob-ai-result p {
+  font-size: 12px;
+  color: rgb(199, 217, 241);
+}
+.bac .ob-next {
+  margin-top: 45px;
+  padding: 23px 0px;
+  border-top: 1px solid var(--ob-line);
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+}
+.bac .ob-next p {
+  font-size: 13px;
+  color: var(--ob-muted);
+}
+.bac .ob-step.ob-flash,.bac .ob-evidence-node.ob-flash,.bac .ob-ai-box.ob-flash {
+  animation: ob-signal .6s ease-out;
+}
+@keyframes ob-signal {
+0% { box-shadow: 0 0 0 0 #72cfff77;
+  }
+100% { box-shadow: 0 0 0 12px #72cfff00;
+  }
+}
+@media (max-width:1000px) {
+.bac .ob-bound {
+  width: calc(100% - 48px);
+}
+.bac nav button {
+  padding: 12px 8px;
+  font-size: 11px;
+}
+.bac .ob-discipline h3 {
+  min-height: 0px;
+}
+.bac .ob-discipline p {
+  min-height: 38px;
+}
+.bac .ob-mini-art {
+  height: 115px;
+  font-size: 12px;
+}
+.bac .ob-story-copy {
+  padding: 20px 17px;
+}
+.bac .ob-story-copy h3 {
+  font-size: 22px;
+}
+}
+@media (max-width:840px) {
+.bac .ob-discipline-grid {
+  grid-template-columns: repeat(2,minmax(0,1fr));
+}
+}
+@media (max-width:700px) {
+.bac .ob-bound {
+  width: calc(100% - 36px);
+}
+.bac nav {
+  width: 100%;
+  margin: 8px 0px 0px;
+  justify-content: space-between;
+}
+.bac nav button {
+  font-size: 11px;
+  flex: 1 1 0%;
+  padding: 11px 6px;
+}
+.bac h1 {
+  font-size: 48px;
+  margin: 17px 0px 20px;
+}
+.bac .ob-principles {
+  grid-template-columns: 1fr;
+  padding: 22px 0px;
+  gap: 15px;
+}
+.bac .ob-section {
+  padding: 45px 0px;
+}
+.bac .ob-section-head {
+  display: block;
+  margin-bottom: 25px;
+}
+.bac .ob-section-head p {
+  margin-top: 18px;
+  max-width: 500px;
+}
+.bac .ob-process {
+  grid-template-columns: 1fr 1fr;
+  padding: 22px 18px;
+  gap: 18px;
+}
+.bac .ob-step:nth-child(2):after {
+  display: none;
+}
+.bac .ob-process-caption {
+  flex-direction: column;
+  gap: 8px;
+}
+.bac .ob-story-grid {
+  grid-template-columns: 1fr;
+}
+.bac .ob-story {
+  display: grid;
+  grid-template-columns: .8fr 1fr;
+}
+.bac .ob-story-art {
+  height: 100%;
+  min-height: 190px;
+  padding: 18px 12px;
+}
+.bac .ob-story-copy h3 {
+  font-size: 23px;
+}
+.bac .ob-story-art strong {
+  font-size: 32px;
+}
+.bac .ob-join {
+  padding: 28px;
+  display: block;
+  margin-bottom: 40px;
+}
+.bac .ob-join .ob-button {
+  margin-top: 23px;
+}
+.bac .ob-join h2 {
+  font-size: 30px;
+}
+.bac .ob-article-head {
+  padding-top: 30px;
+}
+.bac .ob-article-head h1 {
+  font-size: 44px;
+}
+.bac .ob-lab-grid {
+  grid-template-columns: 1fr;
+}
+.bac .ob-editor {
+  border-right: 0px;
+  border-bottom: 1px solid rgb(48, 64, 91);
+  padding: 24px;
+}
+.bac .ob-live {
+  padding: 24px;
+}
+.bac .ob-lab-note {
+  flex-direction: column;
+  gap: 10px;
+  padding: 17px 22px;
+}
+.bac .ob-two-columns {
+  grid-template-columns: 1fr;
+  gap: 28px;
+}
+.bac .ob-evidence {
+  grid-template-columns: 1fr;
+  gap: 30px;
+  padding: 22px;
+}
+.bac .ob-ai-flow {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+.bac .ob-ai-arrow {
+  transform: rotate(90deg);
+  line-height: 1;
+}
+.bac .ob-ai-box {
+  padding: 20px;
+}
+.bac .ob-ai-box i,.bac .ob-ai-box svg {
+  margin-bottom: 7px;
+}
+.bac .ob-ai-result {
+  align-items: start;
+  flex-direction: column;
+}
+.bac .ob-next {
+  align-items: start;
+  flex-direction: column;
+}
+}
+@media (max-width:420px) {
+.bac h1 {
+  font-size: 41px;
+}
+.bac .ob-article-head h1 {
+  font-size: 38px;
+}
+.bac .ob-discipline-grid {
+  grid-template-columns: 1fr;
+}
+.bac .ob-discipline {
+  display: grid;
+  grid-template-columns: 105px 1fr;
+}
+.bac .ob-mini-art {
+  height: 100%;
+  border-bottom: 0px;
+  border-right: 1px solid var(--ob-line);
+  flex-direction: column;
+  padding: 12px 7px;
+  font-size: 10px;
+}
+.bac .ob-mini-art span {
+  padding: 5px;
+}
+.bac .ob-discipline p {
+  min-height: 0px;
+}
+.bac .ob-discipline h3 {
+  font-size: 15px;
+}
+.bac .ob-story {
+  display: flex;
+}
+.bac .ob-story-art {
+  min-height: 140px;
+  height: 140px;
+}
+.bac .ob-process {
+  grid-template-columns: 1fr;
+}
+.bac .ob-step {
+  min-height: 114px;
+}
+.bac .ob-step:not(:last-child):after {
+  content: "↓";
+  left: 50%;
+  top: auto;
+  bottom: -22px;
+  right: auto;
+  display: block;
+}
+.bac .ob-step h3 {
+  margin-top: 9px;
+}
+.bac .ob-dark-head {
+  align-items: start;
+  padding: 16px;
+  flex-wrap: wrap;
+}
+.bac .ob-dark-head>span {
+  max-width: 100%;
+  font-size: 10px;
+}
+.bac .ob-code {
+  font-size: 11px;
+}
+.bac .ob-editor,.bac .ob-live {
+  padding: 20px;
+}
+.bac .ob-file {
+  font-size: 10px;
+  flex-wrap: wrap;
+}
+.bac .ob-breakdown {
+  font-size: 10px;
+}
+.bac .ob-ai-scene {
+  padding: 22px 17px;
+}
+.bac .ob-receipt {
+  padding: 20px;
+}
+.bac .ob-actions .ob-button {
+  font-size: 12px;
+  padding: 12px 14px;
+}
+}
+@media (prefers-reduced-motion:reduce) {
+.bac *,.bac *:before,.bac *:after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+.bac .ob-story:hover {
+  transform: none;
+}
+}
+.bac {
+  color-scheme: light;
+  --ob-bg: #f8f6f1;
+  --ob-paper: #fff;
+  --ob-ink: #0c100f;
+  --ob-muted: #545c58;
+  --ob-line: #d7dcd6;
+  --ob-blue: #1f6feb;
+  --ob-soft: #e5eeff;
+  --ob-grid: #c4cdc445;
+  font: 16px / 1.65 "Space Grotesk", system-ui, sans-serif;
+}
+.bac .ob-bound {
+  width: min(1240px, 100% - 96px);
+}
+.bac .ob-mono,.bac .ob-eyebrow,.bac .ob-code,.bac .ob-file,.bac .ob-mini-art,.bac .ob-dark-head,.bac .ob-step small,.bac .ob-story-copy small,.bac .ob-story-art,.bac .ob-ai-log pre,.bac .ob-ai-log-head,.bac .ob-ai-box p,.bac .ob-receipt dl,.bac .ob-receipt small,.bac .ob-receipt-stamp,.bac .ob-live small,.bac .ob-rate output,.bac .ob-breakdown {
+  font-family: "Space Mono", monospace;
+}
+.bac h1 {
+  font-size: clamp(42px, 5.4vw, 78px);
+  line-height: 1.07;
+  font-weight: 700;
+  letter-spacing: -0.045em;
+}
+.bac .ob-eyebrow {
+  font-size: 11px;
+  line-height: 1.6;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  color: rgb(23, 79, 174);
+}
+.bac .ob-actions {
+  gap: 14px;
+  margin-top: 28px;
+  align-items: center;
+}
+.bac .ob-button {
+  min-height: 50px;
+  border-radius: 9px;
+  padding: 12px 21px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  gap: 24px;
+  background: transparent;
+  border-color: rgb(160, 168, 164);
+  box-shadow: none;
+}
+.bac .ob-button.ob-primary {
+  background: rgb(31, 111, 235);
+  color: rgb(255, 255, 255);
+  border-color: rgb(31, 111, 235);
+  box-shadow: none;
+}
+.bac .ob-button:hover {
+  box-shadow: none;
+  background: rgb(255, 255, 255);
+}
+.bac .ob-button.ob-primary:hover {
+  background: rgb(23, 79, 174);
+}
+.bac .ob-button.ob-iphone {
+  gap: 9px;
+  padding-inline: 14px;
+  border-color: rgb(166, 189, 233);
+  background: rgb(237, 243, 255);
+  color: rgb(23, 79, 174);
+}
+.bac .ob-iphone svg,.bac .ob-iphone i {
+  width: 17px;
+  height: 21px;
+  flex: 0 0 auto;
+}
+.bac .ob-footnote {
+  font-size: 12px;
+  margin-top: 19px;
+}
+.bac h2 {
+  font-size: clamp(34px, 4vw, 54px);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 1.07;
+}
+.bac .ob-bank-intro {
+  padding: 80px 0px 0px;
+}
+.bac .ob-bank-intro .ob-section-head {
+  gap: 65px;
+}
+.bac .ob-bank-intro .ob-section-head p {
+  font-size: 18px;
+  max-width: 510px;
+}
+.bac .ob-topic-nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 25px;
+  margin-top: 25px;
+  padding: 18px 0px;
+  border-block: 1px solid var(--ob-line);
+}
+.bac .ob-topic-nav button,.bac .ob-topic-nav a {
+  flex: 0 0 auto;
+  border: 0px;
+  border-radius: 0px;
+  background: none;
+  padding: 9px 0px;
+  min-height: 44px;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgb(23, 79, 174);
+  white-space: normal;
+  text-align: left;
+}
+.bac .ob-topic-nav button[aria-current=page] {
+  background: none;
+  color: var(--ob-ink);
+  text-decoration: underline;
+  text-underline-offset: 8px;
+}
+.bac .ob-principles {
+  margin-top: 30px;
+}
+.bac .ob-article-head {
+  max-width: 850px;
+  padding: 50px 0px 35px;
+}
+.bac .ob-article-head h1 {
+  font-size: clamp(42px, 5.4vw, 72px);
+  font-weight: 700;
+}
+.bac .ob-article-head .ob-lede {
+  font-size: 21px;
+  max-width: 700px;
+}
+.bac .ob-article-head .ob-back {
+  display: none;
+}
+.bac .ob-section {
+  padding-block: 70px;
+}
+.bac .ob-architecture,.bac .ob-lab {
+  background: rgb(10, 14, 13);
+  color: rgb(245, 247, 242);
+  border-color: rgb(56, 65, 60);
+  border-radius: 14px;
+}
+.bac .ob-dark-head {
+  border-color: rgb(56, 65, 60);
+  color: rgb(186, 200, 192);
+}
+.bac .ob-dark-head .ob-button {
+  background: rgb(27, 41, 35);
+  border-color: rgb(66, 82, 73);
+  color: rgb(224, 236, 229);
+}
+.bac .ob-process,.bac .ob-evidence {
+  background-image: radial-gradient(rgba(147, 177, 165, 0.17) 1px, transparent 1px);
+}
+.bac .ob-step {
+  background: rgb(20, 32, 27);
+  border-color: rgb(60, 81, 71);
+}
+.bac .ob-step small,.bac .ob-step p,.bac .ob-process-caption {
+  color: rgb(182, 201, 189);
+}
+.bac .ob-step[data-active=true] {
+  background: rgb(21, 56, 66);
+  border-color: rgb(101, 191, 216);
+}
+.bac .ob-process-caption {
+  border-color: rgb(56, 65, 60);
+}
+.bac .ob-process-caption strong {
+  color: rgb(150, 214, 237);
+}
+.bac .ob-discipline {
+  border-radius: 10px;
+  background: rgb(255, 253, 248);
+}
+.bac .ob-mini-art {
+  background: rgb(241, 238, 231);
+  border-color: rgb(215, 220, 214);
+  color: rgb(23, 79, 174);
+}
+.bac .ob-mini-art span {
+  background: rgb(255, 253, 248);
+}
+.bac .ob-discipline h3 {
+  font-weight: 600;
+}
+.bac .ob-story {
+  background: rgb(255, 253, 248);
+  border-radius: 12px;
+}
+.bac .ob-story-art {
+  background: rgb(241, 238, 231);
+  color: rgb(23, 79, 174);
+}
+.bac .ob-story-art:before {
+  background-image: linear-gradient(rgba(161, 175, 163, 0.133) 1px, transparent 1px), linear-gradient(90deg, rgba(161, 175, 163, 0.133) 1px, transparent 1px);
+}
+.bac .ob-story-art strong {
+  color: rgb(31, 111, 235);
+}
+.bac .ob-code-cube {
+  background: rgb(255, 253, 248);
+  border-color: rgb(183, 199, 189);
+  box-shadow: 7px 7px 0 #dce4df;
+}
+.bac .ob-check-stack span {
+  background: rgb(255, 253, 248);
+  border-color: rgb(31, 111, 235);
+}
+.bac .ob-story-copy h3 {
+  font-size: 27px;
+  font-weight: 600;
+}
+.bac .ob-editor {
+  background: rgb(16, 24, 20);
+  border-color: rgb(56, 65, 60);
+}
+.bac .ob-live {
+  background: radial-gradient(at 100% 0, rgb(28, 48, 43) 0, transparent 65%);
+}
+.bac .ob-editor-note,.bac .ob-checkbox,.bac .ob-lab-note {
+  border-color: rgb(56, 65, 60);
+  color: rgb(185, 201, 191);
+}
+.bac .ob-evidence-node {
+  background: rgb(20, 36, 28);
+  border-color: rgb(59, 85, 72);
+}
+.bac .ob-evidence-node[data-active=true] {
+  background: rgb(23, 57, 67);
+  border-color: rgb(123, 198, 220);
+}
+.bac .ob-receipt {
+  background: rgb(248, 246, 241);
+  color: rgb(12, 16, 15);
+  box-shadow: 8px 8px 0 #29372f;
+}
+.bac .ob-receipt dl div,.bac .ob-receipt-stamp {
+  border-color: rgb(203, 213, 203);
+}
+.bac .ob-ai-scene {
+  background-image: linear-gradient(rgba(147, 177, 165, 0.086) 1px, transparent 1px), linear-gradient(90deg, rgba(147, 177, 165, 0.086) 1px, transparent 1px);
+}
+.bac .ob-ai-box {
+  background: rgb(20, 36, 28);
+  border-color: rgb(59, 85, 72);
+}
+.bac .ob-ai-box.ob-gate {
+  background: rgb(32, 58, 50);
+  border-color: rgb(108, 155, 134);
+}
+.bac .ob-ai-box[data-active=true] {
+  background: rgb(23, 57, 67);
+  border-color: rgb(123, 198, 220);
+}
+.bac .ob-ai-log {
+  border-color: rgb(59, 85, 72);
+}
+.bac .ob-ai-log-head {
+  background: rgb(20, 36, 28);
+}
+.bac .ob-ai-log pre {
+  background: rgb(10, 18, 16);
+}
+.bac .ob-join {
+  background: rgb(241, 238, 231);
+  border: 0px;
+  border-radius: 0px;
+  padding: 45px 35px;
+}
+.bac .ob-join h2 {
+  font-weight: 700;
+}
+@media (max-width:720px) {
+.bac .ob-bound {
+  width: calc(100% - 40px);
+}
+.bac .ob-desktop {
+  display: none;
+}
+.bac .ob-actions {
+  gap: 10px;
+}
+.bac .ob-bank-intro {
+  padding-top: 50px;
+}
+.bac .ob-topic-nav {
+  gap: 6px 18px;
+}
+.bac .ob-topic-nav button,.bac .ob-topic-nav a {
+  font-size: 12px;
+}
+.bac .ob-article-head {
+  padding-top: 32px;
+}
+.bac .ob-article-head .ob-lede {
+  font-size: 18px;
+}
+.bac .ob-section {
+  padding-block: 48px;
+}
+.bac .ob-story-copy h3 {
+  font-size: 24px;
+}
+}
+@media (max-width:420px) {
+.bac .ob-discipline {
+  display: block;
+}
+.bac .ob-mini-art {
+  height: 90px;
+  flex-direction: row;
+  border-right: 0px;
+  border-bottom: 1px solid var(--ob-line);
+  font-size: 11px;
+  gap: 7px;
+}
+.bac .ob-discipline-body {
+  min-width: 0px;
+  padding: 18px;
+}
+.bac .ob-discipline h3 {
+  font-size: 17px;
+}
+}
+
+.bac .ob-symbol { display:inline-flex;
+  color:var(--ob-blue);
+  font:500 15px "Space Mono",monospace;
+  min-width:20px;
+  }
+.bac .ob-ai-box .ob-symbol { color:#90dcff;
+  margin-bottom:15px;
+  font-size:24px;
+  }
+.bac .ob-topic-nav a[aria-current="page"] { color:var(--ob-ink);
+  text-decoration:underline;
+  text-underline-offset:8px;
+  }
+.bac .ob-button:disabled { opacity:.65;
+  cursor:wait;
+  }
+.bac .ob-detail a { display:block;
+  }
+.bac .ob-topic-nav { margin-left:0;
+  }
+.bac .ob-topic-nav.ob-bound { margin-inline:auto;
+  }
+.bac:not(.bac-ready) .ob-switches { display:none;
+  }

@@ -8,6 +8,8 @@ import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -21,9 +23,14 @@ import org.junit.jupiter.api.Test
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_tax_reporting_api_it")],
+    restrictToAnnotatedClass = true,
 )
 @QuarkusTestResource(StatutoryReturnMessagingTestResource::class)
+@TestProfile(StatutoryReturnApiIT.ApiProfile::class)
 class StatutoryReturnApiIT {
+    // Keep this class-scoped database separate from other Quarkus boots.
+    class ApiProfile : QuarkusTestProfile
+
     private val path = "/api/v1/statutory-returns"
     private val absentId = "00000000-0000-0000-0000-000000000099"
     private val assembleBody = """{
@@ -98,6 +105,33 @@ class StatutoryReturnApiIT {
         } When { post("$path/assemble") } Then {
             statusCode(503)
             body("error", containsString("pension-service"))
+        }
+        // PSP 34-12 PS: no PENSION_COMPANY_TREASURY_URL here (ADR-0337) — refused by name, never zero-filled.
+        Given {
+            contentType("application/json")
+            body(
+                """{"catalogueId":"cz-pension-cnb","returnCode":"PSP34-12-PS","entityId":"company","period":"2025-Q1"}""",
+            )
+        } When { post("$path/assemble") } Then {
+            statusCode(503)
+            body("error", containsString("treasury is not configured as a source"))
+        }
+        // #15356: this boot has no GSFT key or bank code — it started anyway, and both refuse by name.
+        Given {
+            contentType("application/json")
+            body("""{"reference":"GSFT-1"}""")
+        } When { post("$path/$absentId/gsft-delivery") } Then {
+            statusCode(503)
+            body("error", containsString("openbank.gsft.pgp-public-key is not configured"))
+        }
+        Given {
+            contentType("application/json")
+            body(
+                """{"catalogueId":"cz-gsft","returnCode":"GSFT-DIW-TEST","entityId":"company","period":"2025-01-06"}""",
+            )
+        } When { post("$path/assemble") } Then {
+            statusCode(503)
+            body("error", containsString("openbank.gsft.bank-code is not configured"))
         }
     }
 }

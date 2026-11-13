@@ -1,0 +1,156 @@
+{
+  "consumer": {
+    "name": "openbank-agent-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the AML case behind the aml_get_case tool",
+      "providerStates": [
+        {
+          "name": "an AML case exists for the pact party"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/aml/cases/2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a2a"
+      },
+      "response": {
+        "body": {
+          "alertCode": "PACT-ALERT-001",
+          "customerReference": "pact-agent-aml-ref",
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "idempotencyKey": "pact-agent-aml-001",
+          "partyId": "1b1b1b1b-1b1b-4b1b-8b1b-1b1b1b1b1b1b",
+          "riskLevel": "HIGH",
+          "screeningType": "TRANSACTION_MONITORING",
+          "status": "OPEN"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.partyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the AML cases of the pact party behind the aml_list_cases tool",
+      "providerStates": [
+        {
+          "name": "an AML case exists for the pact party"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/aml/cases",
+        "query": {
+          "limit": [
+            "20"
+          ],
+          "offset": [
+            "0"
+          ],
+          "partyId": [
+            "1b1b1b1b-1b1b-4b1b-8b1b-1b1b1b1b1b1b"
+          ]
+        }
+      },
+      "response": {
+        "body": [
+          {
+            "customerReference": "pact-agent-aml-ref",
+            "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "partyId": "1b1b1b1b-1b1b-4b1b-8b1b-1b1b1b1b1b1b",
+            "status": "OPEN"
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[0].id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$[0].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[0].partyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET an AML case id aml-service does not hold, via the aml_get_case tool",
+      "providerStates": [
+        {
+          "name": "no AML case exists with the requested id"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/aml/cases/3c3c3c3c-3c3c-4c3c-8c3c-3c3c3c3c3c3c"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-aml-service"
+  }
+}

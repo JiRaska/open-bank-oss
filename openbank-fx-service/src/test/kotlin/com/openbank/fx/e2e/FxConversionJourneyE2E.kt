@@ -4,10 +4,13 @@
 
 package com.openbank.fx.e2e
 
-import com.openbank.fx.domain.screening.ScreeningMatchStatus
-import com.openbank.fx.domain.screening.ScreeningResult
-import com.openbank.fx.domain.screening.ScreeningRole
+import com.openbank.fx.application.port.out.ScreeningEntityType
+import com.openbank.fx.application.port.out.ScreeningSubject
+import com.openbank.fx.infrastructure.client.PartyNameAdapter
 import com.openbank.fx.infrastructure.client.SanctionsScreeningAdapter
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
@@ -68,7 +71,7 @@ class FxConversionJourneyE2E {
         val port = mockk<SanctionsScreeningAdapter>()
         coEvery { port.screen(any(), any(), any()) } answers {
             ScreeningResult(
-                subject = firstArg(),
+                subject = firstArg<ScreeningSubject>().primaryName,
                 role = ScreeningRole.DEBTOR,
                 status = ScreeningMatchStatus.CLEAR,
                 score = 0.0,
@@ -76,6 +79,11 @@ class FxConversionJourneyE2E {
             )
         }
         QuarkusMock.installMockForType(port, SanctionsScreeningAdapter::class.java)
+        // The screened identity comes from party-service; without a name the conversion is held.
+        val names = mockk<PartyNameAdapter>()
+        coEvery { names.screeningSubject(any()) } returns
+            ScreeningSubject(listOf("Jan Novak"), ScreeningEntityType.INDIVIDUAL)
+        QuarkusMock.installMockForType(names, PartyNameAdapter::class.java)
     }
 
     @Test

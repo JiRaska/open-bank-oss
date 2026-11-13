@@ -47,6 +47,14 @@ erDiagram
   }
 ```
 
+## Přechod do FAILED a outbox
+
+Při třetím po sobě jdoucím selhání provedení se `failure_count = 3` a stav `FAILED` ukládají
+ve stejné transakci jako outbox řádek `standing-order.failed.v1`. Pokud vložení do outboxu
+selže, stav i počet selhání se společně vrátí zpět; událost selhání se neuloží.
+PostgreSQL regrese načítá uložený počet, porovnává identifikátory transakcí a vynuceným
+selháním vložení do outboxu ověřuje rollback před úspěšným opakováním.
+
 ## Migrace
 
 Flyway, immutable historické skripty, forward-only (`migrate-at-start: true`):

@@ -98,7 +98,7 @@ com.openbank.party/
 | `PartyRepository` | `PartyRepositoryImpl` | persist/find/search/anonymize party |
 | `PartyDocumentRepository` | (Panache) | persist/list dokumentů party |
 | `PartyOutboxRepository` | `PartyOutboxRepositoryImpl` | životní cyklus outbox řádku |
-| `PartyOutboxEventPublisher` | `KafkaPartyOutboxEventPublisher` | emise uloženého outbox payloadu |
+| `OutboxEventPublisher` | `KafkaPartyOutboxEventPublisher` | emise uloženého outbox payloadu |
 
 | Port (in) | Adaptér |
 |---|---|
@@ -186,3 +186,10 @@ požadavku, hlavičky a původní Vert.x kontext; zamítnutí nikdy nespouští 
 se propaguje a nevydává se za náhradní rozhodnutí poskytovatele. PartyReactiveGuardIT ověřuje
 povolení i zamítnutí přes skutečné HTTP/CDI pro Uni a CompletionStage, včetně průběžného běhu
 jediného event loopu během čekání na rozhodnutí. REST ani eventové kontrakty se nemění.
+
+`FlagdProducer` vzniká při startu (`@Startup`), ne při prvním použití. Jeho první volající
+vyhodnocuje flag na workeru `Dispatchers.IO`, jehož class loader nemá registrovaný SmallRye config;
+při líném vytvoření tam injekce `@ConfigProperty` selhala s `SRCFG00015` a každé
+`GET /api/v1/parties` i `/api/v1/parties/search` vrátilo 500. Při startu na hlavním vlákně se config
+vyřeší předem a producer pak jen čte pole. PartyFuzzRegressionIT ověřuje obě cesty na čerstvě
+nastartované aplikaci.

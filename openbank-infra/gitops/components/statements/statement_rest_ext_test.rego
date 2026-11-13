@@ -86,3 +86,21 @@ test_edge_m2m_cannot_export if {
 test_anonymous_denied if {
 	count(allowed_reasons) == 0 with input as {"principal": {"service_account": false, "type": "ANONYMOUS", "id": "anon", "roles": []}, "action": "statement.close-run.list"}
 }
+
+# --- statement.restate: human OPERATOR/ADMIN only, never the edge M2M or a viewer ---
+
+test_operator_restates if {
+	"operator-statement-restate" in allowed_reasons with input as {"principal": operator, "action": "statement.restate"}
+}
+
+test_admin_restates if {
+	"operator-statement-restate" in allowed_reasons with input as {"principal": admin, "action": "statement.restate"}
+}
+
+test_viewer_cannot_restate if {
+	count(allowed_reasons) == 0 with input as {"principal": viewer, "action": "statement.restate"}
+}
+
+test_edge_m2m_cannot_restate if {
+	count(allowed_reasons) == 0 with input as {"principal": edge_m2m, "action": "statement.restate"}
+}

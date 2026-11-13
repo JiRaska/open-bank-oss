@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
-// "Recorded human merges" — the ADR-0031 phase 3 merge evidence on the IAOps
-// Control Room. Lists WHO (a human) merged an agent-authored PR. This panel is
+// ADR-0031 merge evidence: actual executor and separate human authorization.
+// This panel is
 // evidence, not attestation: it never claims phase 3 is reached — with zero
 // records it says exactly that recording has not activated yet, and when the
 // fetch fails it degrades to a quiet inline note, not a governance incident.
@@ -10,7 +10,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { GitPullRequest, Hand, Info, RefreshCw } from 'lucide-react'
+import { Bot, GitPullRequest, Hand, Info, RefreshCw } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { getAgentPersona } from '@/components/agent/AgentIdentity'
 import { parseAgentMergeRecordList, type AgentMergeRecord } from '@/lib/agent-merge-records/types'
@@ -29,6 +29,7 @@ export function MergeRecordsSection({ knownAgentIds }: MergeRecordsSectionProps)
   const [records, setRecords] = useState<AgentMergeRecord[] | null>(null)
   const [last30d, setLast30d] = useState(0)
   const [failed, setFailed] = useState(false)
+  const [dropped, setDropped] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -40,6 +41,7 @@ export function MergeRecordsSection({ knownAgentIds }: MergeRecordsSectionProps)
         if (cancelled) return
         const now = Date.now()
         setRecords(parsed.records)
+        setDropped(parsed.dropped)
         setLast30d(parsed.records.filter(r => now - Date.parse(r.mergedAt) <= THIRTY_DAYS_MS).length)
       } catch {
         if (!cancelled) setFailed(true)
@@ -60,7 +62,7 @@ export function MergeRecordsSection({ knownAgentIds }: MergeRecordsSectionProps)
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <span style={{ color: 'var(--accent-text)' }}><GitPullRequest size={16} /></span>
           <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
-            {t('Zaznamenané lidské merge', 'Recorded human merges')}
+            {t('Zaznamenaná sloučení PR agentů', 'Recorded agent PR merges')}
           </span>
           {records !== null && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 700,
@@ -72,8 +74,8 @@ export function MergeRecordsSection({ knownAgentIds }: MergeRecordsSectionProps)
         </div>
         <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '6px 0 0' }}>
           {t(
-            'Kdo (člověk) mergnul PR agenta — trvalý důkaz ADR-0031 fáze 3 vedle rozhodnutí o návrhu. Záznam vytváří pipeline po každém mergi.',
-            'WHO (a human) merged an agent’s PR — the ADR-0031 phase 3 durable evidence next to the proposal decision. The pipeline records each merge.',
+            'Skutečný slučovatel PR a oddělené lidské schválení. Historická žádost pro PR nepotvrzuje schválení konkrétního HEAD.',
+            'The actual merge executor and separate human authorization. A historical PR request does not certify approval of a specific head.',
           )}
         </p>
       </div>
@@ -98,7 +100,13 @@ export function MergeRecordsSection({ knownAgentIds }: MergeRecordsSectionProps)
         </div>
       )}
 
-      {records !== null && records.length === 0 && (
+      {dropped > 0 && (
+        <p role="status" style={{ color: 'var(--warning-text)', fontSize: '12px' }}>
+          {t('Některé záznamy mají neplatný formát nebo neúplnou evidenci. Zobrazuji pouze platné záznamy.', 'Some merge records have an invalid format or incomplete evidence. Showing only valid records.')}
+        </p>
+      )}
+
+      {records !== null && records.length === 0 && dropped === 0 && (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '10px 14px',
           borderRadius: '8px', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
           <Info size={13} style={{ color: 'var(--text-tertiary)', marginTop: '1px', flexShrink: 0 }} />
@@ -116,7 +124,7 @@ export function MergeRecordsSection({ knownAgentIds }: MergeRecordsSectionProps)
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                {[t('Agent', 'Agent'), t('PR', 'PR'), t('Větev', 'Branch'), t('Mergnul', 'Merged by'), t('Mergnuto (UTC)', 'Merged at (UTC)'), t('Nadpis', 'Title')].map(h => (
+                {[t('Agent', 'Agent'), t('PR', 'PR'), t('Větev', 'Branch'), t('Sloučil', 'Merged by'), t('Lidské schválení', 'Human authorization'), t('Mergnuto (UTC)', 'Merged at (UTC)'), t('Nadpis', 'Title')].map(h => (
                   <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-tertiary)', fontWeight: 600, fontSize: '11px', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
@@ -139,13 +147,30 @@ export function MergeRecordsSection({ knownAgentIds }: MergeRecordsSectionProps)
                   <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', verticalAlign: 'top', fontFamily: 'monospace', fontSize: '11px', whiteSpace: 'nowrap' }}>{r.headBranch}</td>
                   <td style={{ padding: '10px 12px', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
                     <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{r.mergedBy}</span>{' '}
-                    <span title={t('Člověk — auditovaný aktér tohoto mergu', 'Human — the audited actor of this merge')}
+                    <span title={r.mergedByType === 'GITHUB_APP'
+                      ? t('App — skutečný vykonavatel merge', 'App — the actual merge executor')
+                      : t('Člověk — auditovaný aktér tohoto mergu', 'Human — the audited actor of this merge')}
                       style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: 750,
                         padding: '1px 6px', borderRadius: '8px', background: 'var(--warning-bg)', color: 'var(--warning-text)',
                         border: '1px solid var(--warning-border)' }}>
-                      <Hand size={9} />
-                      {t('Člověk', 'Human')}
+                      {r.mergedByType === 'GITHUB_APP' ? <Bot size={9} /> : <Hand size={9} />}
+                      {r.mergedByType === 'GITHUB_APP' ? 'App' : t('Člověk', 'Human')}
                     </span>
+                  </td>
+                  <td style={{ padding: '10px 12px', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                    {(r.policyAuthorization ?? r.authorization) ? (
+                      <>
+                        <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{(r.policyAuthorization ?? r.authorization)?.approvedBy}</div>
+                        <a href={(r.policyAuthorization ?? r.authorization)?.evidenceUrl} target="_blank" rel="noreferrer"
+                          style={{ color: 'var(--accent-text)', fontSize: '11px' }}>
+                          {r.policyAuthorization
+                            ? t('Žádost pro PR podle tehdejších pravidel', 'PR request under the policy at merge time')
+                            : r.authorization?.scope === 'HEAD'
+                            ? t('Schválení přesného HEAD', 'Exact-head approval')
+                            : t('Historická žádost pro PR', 'Historical PR request')}
+                        </a>
+                      </>
+                    ) : t('Přímé lidské sloučení', 'Direct human merge')}
                   </td>
                   <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
                     {new Date(r.mergedAt).toLocaleString(dateLocale, { timeZone: 'UTC', dateStyle: 'medium', timeStyle: 'short' })}

@@ -4,11 +4,22 @@ Perpetual-KYC slice 1 of [ADR 0256](../../../../docs/adr/0256-perpetual-kyc-even
 
 ## Flow
 
-1. **Consume** — `SanctionsListChangedConsumer` reads the channel `sanctions-list-changes-in` (explicit DLQ topic `openbank.dlq.kyc.sanctions-list-changes`; group id and `auto.offset.reset` come from the `kyc-service-msg-override` ConfigMap, the #686 apparatus). `SANCTIONS_LIST_CHANGE_STORM` events are ignored.
+1. **Consume** — `SanctionsListChangedConsumer` reads the channel `sanctions-list-changes-in` (explicit DLQ topic `openbank.dlq.kyc.sanctions-list-changes`; group id and `auto.offset.reset` come from the `kyc-service-msg-override` ConfigMap, the #686 apparatus). `SANCTIONS_LIST_CHANGE_STORM` events are ignored. The event type is read from the `ce-type` Kafka **header**: the topic is outbox-relayed and its bodies carry no `eventType` field (`openbank-contracts/openbank-sanctions-service/asyncapi.yaml`). Every record is counted in `openbank.kyc.sanctions_list_change_events{outcome}` — `handled`, `storm`, `disabled`, `ignored` (the screening events sharing the topic), `malformed`, `unrecognised`.
 2. **Record** — `ScreeningTriggerService` inserts one durable `kyc_screening_triggers` row per (publication, party) — `insertIfAbsent`, so a Kafka redelivery resumes instead of duplicating. The full diff is retained on the row so "why is this customer under review" has a one-row answer.
 3. **Open** — one `AML_ALERT` case per party via `POST /api/v1/case-coordinator/cases` (`case-coordinator-agent` in the `platform` namespace, port 8146, supplied as `CASE_COORDINATOR_URL`).
 4. **Fail durably** — coordinator 429/503/timeout records an `OPEN_FAILED` trigger, and once attempts exhaust, a `KYC_COORDINATOR_OPEN_FAILED` outbox row written in the SAME transaction as the state flip. A missing `CASE_COORDINATOR_URL` maps every trigger to the durable `NOT_CONFIGURED` path — never to a silent skip.
 5. **Retry** — `ScreeningTriggerRetryJob` re-attempts backed-off `OPEN_FAILED` rows, so the loop closes when the coordinator recovers.
+
+## Coordinator HTTP outcomes
+
+The AML case-opening adapter classifies mapped HTTP failures inside its existing retry boundary:
+
+- `201` opens the case only when the response contains a nonblank `caseId`. A missing identifier is rejected.
+- `409` means the coordinator already has the case (`AlreadyExists`); it is not retried.
+- Other deterministic `4xx` responses, including `400` and `403`, are rejected without retry. `429` is the exception: it remains retryable.
+- `429`, `5xx` and transport failures retain the existing bounded retry policy: at most three HTTP attempts per adapter invocation. The circuit breaker and timeout may stop an invocation earlier. This bound is separate from the durable trigger recovery budget below.
+
+Provider responses are closed after classification, including responses recovered from the REST client's exception mapper. Failure outcome details contain only the HTTP status or exception type, never a provider response body, URL or exception message. These classifications preserve the existing durable trigger handling; they do not enable screening triggers or change coordinator idempotency.
 
 ## Known v1 granularity
 
@@ -28,6 +39,7 @@ The candidate set is **not** diff-scoped per entry: kyc-service persists no part
 ## Operations notes
 
 - **A new Kafka channel is two deploys, not one** (.github/CLAUDE.md): the `sanctions-list-changes-in` group id / offset overrides land in the msg-override ConfigMap only after an image carrying the channel's `connector:` is deployed; until then the consumer runs on the fallback group id (`quarkus.application.name`), which the `kyc-service` KafkaUser is granted Read on.
+- **`outcome="unrecognised"` above zero means the consumer and the producer disagree about the wire shape** (a missing `ce-type` header or a type this consumer does not know). The records are acked, so nothing else — lag, DLQ, error rate — shows it; with the loop enabled, a publication on the sanctions side and no `handled` increment here is the same signal from the other end.
 - The consumer's failure path rethrows to the connector so infrastructure failures dead-letter; coordinator-call failures are the row + outbox event's job, not Kafka's.
 - The `kyc_screening_triggers` table (Flyway V12) is append-audited: `state` transitions are updates, the diff columns are write-once.
 

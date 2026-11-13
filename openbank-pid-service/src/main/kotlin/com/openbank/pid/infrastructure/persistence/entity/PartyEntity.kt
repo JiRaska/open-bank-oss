@@ -77,8 +77,9 @@ class PartyEntity : PanacheEntityBase {
     @Column(name = "kyc_expires_at")
     var kycExpiresAt: OffsetDateTime? = null
 
-    @Column(name = "aml_risk_score", nullable = false, length = 20)
-    lateinit var amlRiskScore: String
+    // Deprecated, nullable since V14 (ADR-0353 D2).
+    @Column(name = "aml_risk_score", length = 20)
+    var amlRiskScore: String? = null
 
     @Column(name = "pep_flag", nullable = false)
     var pepFlag: Boolean = false
@@ -133,6 +134,10 @@ class PartyEntity : PanacheEntityBase {
 
     @Column(name = "case_metadata", columnDefinition = "TEXT")
     var caseMetadata: String? = null
+
+    /** GDPR Art. 17 (#15755): set once the row's personal data has been anonymised in place. */
+    @Column(name = "erased_at")
+    var erasedAt: OffsetDateTime? = null
 
     @Column(name = "created_at", nullable = false, updatable = false)
     lateinit var createdAt: OffsetDateTime

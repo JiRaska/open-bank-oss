@@ -35,6 +35,7 @@ class RealPaymentConfirmationReadPort(
 ) : PaymentConfirmationReadPort {
 
     private val gate = ConsentGate(consent)
+    private val directory = AccountDirectory(accounts)
 
     override fun getPaymentConfirmation(consentContext: ConsentContext, paymentId: String): JsonNode {
         val id = runCatching { UUID.fromString(paymentId) }.getOrElse {
@@ -76,7 +77,9 @@ class RealPaymentConfirmationReadPort(
         "SEPA" -> payment.path("debtorIban").asText()
         else -> {
             val debtorAccountId = UUID.fromString(payment.path("debtorAccountId").asText())
-            accounts.getAccountById(debtorAccountId).path("accountNumber").asText()
+            checkNotNull(directory.byId(debtorAccountId).accountNumber) {
+                "account-service returned an account without an accountNumber"
+            }
         }
     }
 }

@@ -72,9 +72,9 @@ proto adaptér hodnotu před odesláním převede; dříve odcházelo surové `Y
 přijato. Uložená hodnota, která už nejde parsovat, nic neodešle a zpráva zůstane `SENT`. Zaúčtování prokazuje
 jen HTTP 200/201/202 s čitelnou transakcí ve stavu `COMPLETED`. Chybějící, nečitelná, `FAILED` nebo
 rozpracovaná odpověď zůstává neurčitá, včetně `204`. `409` ani `400`/`422` zprávu nedokončí.
-Volající po nedostupném či neurčitém výsledku zachová `SENT`; automatické opakování zpráv `SENT`
-zde není implementováno. Případné pozdější dorovnání musí použít stejný idempotency key
-`swift-settlement-<messageId>`.
+Volající po nedostupném či neurčitém výsledku zachová `SENT`; re-drive zaúčtování (#13686, viz provoz)
+ji zkouší znovu se stejným idempotency key `swift-settlement-<messageId>` a stejný klíč musí použít
+i každé ruční dorovnání.
 API kontrakt této služby (`valueDate` `^\d{8}$`) se nemění.
 
 | Vstup | Odpověď |
