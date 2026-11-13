@@ -188,3 +188,29 @@ The domain resolves an `InitiatorScope` from the principal: pension may pay only
 configured debtor account (`OPENBANK_DOMESTIC_PAYMENT_SCOPED_INITIATORS_PENSION_DEBTOR_ACCOUNT_ID`),
 an unset value permits nothing, and any other ROLE_API-only machine is `Undeclared` and may pay from
 no account. The scope is checked before the `Idempotency-Key` is claimed.
+
+## The delegated debit re-asks its authority at create time (ADR-0375 D1)
+
+`createDelegatedPayment` consults account-service's authority facts before it builds the trusted
+command, and decides with the pure kernel `DelegatedDebitAuthority` from `openbank-libs-fincrime`.
+The capability asked for is `ACCOUNT_INITIATE_PAYMENT`, passed as an argument — never defaulted and
+never widened to "whatever the grant happens to carry".
+
+**What that closes.** The reservation proves authority *as it was at reserve time*:
+`SpendReservationService.evaluateLockedGrant` checks the resource type and the payment capability
+under a row lock. Nothing re-checks the interval since. `DelegationService.revoke` emits
+`DelegationRevoked` and releases no reservation — there is no revoke-to-release wiring in the fleet
+— and `SpendReservation` carries no TTL, so a `RESERVED` row persists until it is confirmed or
+released. The window between reserve and create is therefore unbounded, and a grant revoked inside
+it left a reservation that still bought this payment.
+
+**Two outcomes, kept apart.** A grant that has been withdrawn is
+`DelegationAuthorityWithdrawn` — definitive, not retryable. A lookup that could not be answered is
+the existing `AccountAuthorityUnavailable`, retryable, because an account-service outage must not
+read to the customer like a revoked mandate. `DelegationAuthorityClient` therefore never collapses
+a transport failure into an empty list, which is the one shape that would silently merge the two;
+its sibling `AccountServiceClient` answers `null` on error, which is right for its own questions and
+would be exactly wrong here.
+
+Both arguments to the lookup — the account and the actor — come from the durable reservation
+snapshot, never from the request, so a caller cannot choose whose grants are consulted.

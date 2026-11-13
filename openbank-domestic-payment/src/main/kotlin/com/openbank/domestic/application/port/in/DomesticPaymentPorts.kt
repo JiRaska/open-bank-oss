@@ -115,6 +115,17 @@ sealed interface DelegatedDomesticPaymentResult {
 
     /** Account-service could not prove debit-account ownership; retryable future mapping = 503. */
     data object AccountAuthorityUnavailable : DelegatedDomesticPaymentResult
+
+    /**
+     * The grant that bought the reservation no longer authorises this debit (ADR-0375 D1);
+     * future mapping = 403, definitive, NOT retryable.
+     *
+     * Distinct from [AccountAuthorityUnavailable] on purpose, and the distinction is the control:
+     * one says the authority was read and has been withdrawn, the other says it could not be read.
+     * Collapsing them would either retry a refusal forever or refuse on an outage — and a refusal
+     * on the money path is indistinguishable to the customer from a revoked mandate.
+     */
+    data class DelegationAuthorityWithdrawn(val reason: String) : DelegatedDomesticPaymentResult
 }
 
 interface ApplyDelegatedSpendReservationStateUseCase {

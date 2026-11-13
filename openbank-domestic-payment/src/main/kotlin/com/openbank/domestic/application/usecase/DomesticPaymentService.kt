@@ -14,12 +14,14 @@ import com.openbank.domestic.application.port.`in`.TransitionDomesticPaymentStat
 import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.DelegatedPaymentSaveOutcome
 import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepository
+import com.openbank.domestic.application.port.out.DelegationAuthorityPort
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
 import com.openbank.domestic.application.workflow.domesticPaymentWorkflowId
 import com.openbank.domestic.domain.error.DomesticSchemeRules
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
+import com.openbank.domestic.domain.model.DelegatedSpendReservationSnapshot
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
@@ -27,6 +29,9 @@ import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.domestic.domain.model.InitiatorScope
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
+import com.openbank.libs.fincrime.admission.AdmissionDecision
+import com.openbank.libs.fincrime.admission.DelegationAuthorityFacts
+import com.openbank.libs.fincrime.admission.StepOutcome
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.temporal.client.WorkflowClient
@@ -37,6 +42,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.UUID
 
 // #10911/#11059 phase 3 (money-path): extends the libs-domain base so libs-runtime's
@@ -90,6 +96,18 @@ class DomesticPaymentService(
         Clock.systemUTC(),
     )
 
+    /**
+     * Field injection, not a constructor parameter, and that is forced rather than stylistic:
+     * `config/detekt/detekt.yml` sets `constructorThreshold: 9` and `LongParameterList` fires AT
+     * the threshold, so a tenth parameter fails the gate. Same remedy as `LoanStageEventConsumer`
+     * and `VopRateLimitFilter`.
+     *
+     * A test that drives the delegated path must assign it; one that does not reach that path
+     * never touches it.
+     */
+    @Inject
+    lateinit var delegationAuthorityPort: DelegationAuthorityPort
+
     companion object {
         private const val PAYMENT_CREATED_EVENT = "domestic.payment.created"
         private const val PAYMENT_STATUS_CHANGED_EVENT = "domestic.payment.status-changed"
@@ -97,6 +115,9 @@ class DomesticPaymentService(
         private const val OWN_BANK_CODE = "0000"
         private const val IDEMPOTENCY_KEY_MAX_LENGTH = 128
         private const val DELEGATED_ACTOR_SCOPE_PREFIX = "openbank:delegated-spend:v1"
+
+        /** The capability the authority step is asked about; never a default. */
+        private const val CAPABILITY_INITIATE_PAYMENT = "ACCOUNT_INITIATE_PAYMENT"
 
         private val TERMINAL_STATUSES = setOf(
             DomesticPaymentStatus.SETTLED,
@@ -186,6 +207,8 @@ class DomesticPaymentService(
             )
         }
 
+        refuseDelegatedAuthority(snapshot, resolvedOwnerPartyId)?.let { return it }
+
         val trustedCommand = normalizedCommand.copy(
             debtorAccountId = snapshot.resourceId,
             actorId = snapshot.granteePartyId,
@@ -201,6 +224,46 @@ class DomesticPaymentService(
             // compares this proof with the stored grantor before any write can commit.
             debitOwnerPartyId = resolvedOwnerPartyId,
         )
+    }
+
+    /**
+     * ADR-0375 D1 — re-ask the authority at CREATE time, and not because the reservation might be
+     * forged.
+     *
+     * The reservation proves authority AS IT WAS AT RESERVE TIME:
+     * `SpendReservationService.evaluateLockedGrant` checks the resource type and
+     * `ACCOUNT_INITIATE_PAYMENT` under a row lock. What nothing re-checks is the interval since.
+     * `DelegationService.revoke` emits `DelegationRevoked` and releases no reservation — there is
+     * no revoke-to-release wiring anywhere — and `SpendReservation` carries no TTL, so a RESERVED
+     * row persists until it is confirmed or released. The window is therefore unbounded, and a
+     * grant revoked inside it leaves a reservation that still buys this payment.
+     *
+     * Returns the refusal to propagate, or null to proceed. Unavailable is NOT a refusal: it maps
+     * to the existing retryable result, because an outage must not read to the customer like a
+     * withdrawn mandate.
+     */
+    private suspend fun refuseDelegatedAuthority(
+        snapshot: DelegatedSpendReservationSnapshot,
+        resolvedOwnerPartyId: UUID,
+    ): DelegatedDomesticPaymentResult? {
+        val outcome = DelegationAuthorityFacts.outcome(
+            lookup = delegationAuthorityPort.factsFor(snapshot.resourceId, snapshot.granteePartyId),
+            accountId = snapshot.resourceId,
+            ownerPartyId = resolvedOwnerPartyId,
+            actorPartyId = snapshot.granteePartyId,
+            requiredCapability = CAPABILITY_INITIATE_PAYMENT,
+            now = OffsetDateTime.now(clock),
+        )
+        return when {
+            outcome is StepOutcome.Unavailable -> DelegatedDomesticPaymentResult.AccountAuthorityUnavailable
+            outcome is StepOutcome.Decided && outcome.decision == AdmissionDecision.ALLOW -> null
+            outcome is StepOutcome.Decided ->
+                DelegatedDomesticPaymentResult.DelegationAuthorityWithdrawn(outcome.reason.value)
+            // The step is bound and always applies on this path, so no other outcome can occur.
+            // Refused rather than defaulted: treating an unexpected outcome as a pass is the shape
+            // that admits a payment no control decided on.
+            else -> DelegatedDomesticPaymentResult.AccountAuthorityUnavailable
+        }
     }
 
     private suspend fun createPaymentInternal(
