@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.10.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.9.0...customer-edge-v1.10.0) (2026-11-12)
+
+
+### Features
+
+* **document:** ownership projection for delegated object grants, with ADR-0375 and its D4 gate ([#15824](https://github.com/JiRaska/open-bank-oss/issues/15824)) ([f15f8c1](https://github.com/JiRaska/open-bank-oss/commit/f15f8c133d3afbabd9bc34b65749559c1bc8eaf3))
+
+## [1.9.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.8.0...customer-edge-v1.9.0) (2026-11-12)
+
+
+### Features
+
+* **domestic-payment,customer-edge:** look up domestic payments after a timeout ([#15609](https://github.com/JiRaska/open-bank-oss/issues/15609)) ([f93e072](https://github.com/JiRaska/open-bank-oss/commit/f93e072a5a3ec1f978206eae789f7b0530a88a69))
+
 ## [1.8.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.7.0...customer-edge-v1.8.0) (2026-11-08)
 
 

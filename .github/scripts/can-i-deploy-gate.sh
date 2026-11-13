@@ -78,7 +78,7 @@ source_not_evaluated=0
 
 refuse_reconcile_source() {
   local svc="$1"
-  local why="Broker has no Pacticipant and no verified Pact source"
+  local why="${2:-Broker has no Pacticipant and no verified Pact source}"
   echo "::error::reconcile source refused for ${svc}: ${why}"
   reconcile_source_blocked=1
   reconcile_blocked="$(jq -cn --argjson old "$reconcile_blocked" --arg svc "$svc" '$old + [$svc] | unique')"
@@ -187,11 +187,30 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
     done
   fi
   if [ "$source_failure" -eq 0 ] && [ "$(jq -r 'length' <<< "$historical_services")" -gt 0 ]; then
+    resolver_rc=0
     historical_source_map="$(python3 .github/scripts/verify-successful-service-ci.py \
-      --resolve-reconcile-sources "$historical_services" "$GITHUB_SHA")" || {
+      --resolve-reconcile-sources "$historical_services" "$GITHUB_SHA")" || resolver_rc=$?
+    # Exit 3 is trusted only when its two halves exactly partition what was asked: a name the
+    # resolver invents, drops, or reports both ways falls through to the whole-set refusal.
+    if [ "$resolver_rc" -eq 3 ] && jq -e --argjson asked "$historical_services" '
+         type == "object" and (.resolved | type == "object") and
+         (.unresolved | type == "array" and length > 0 and all(.[]; type == "string")) and
+         (((.resolved | keys) + .unresolved | sort) == ($asked | sort))
+       ' >/dev/null <<< "$historical_source_map"; then
+      # The evidence was read in full; only the named services have no proven source. Refuse
+      # each of them as a member (the same per-member path as an absent Pacticipant) and let
+      # every proven peer continue under the unchanged proof below. A failure to READ the
+      # evidence (any other non-zero exit) still refuses the whole set.
+      for svc in $(jq -r '.unresolved[]' <<< "$historical_source_map"); do
+        refuse_reconcile_source "$svc" "no successful main Services CI build+contract with an exact Pact version at a tree-equivalent source"
+      done
+      historical_services="$(jq -c --argjson gone "$(jq -c '.unresolved' <<< "$historical_source_map")" \
+        '[.[] | select(. as $s | $gone | index($s) | not)]' <<< "$historical_services")"
+      historical_source_map="$(jq -c '.resolved' <<< "$historical_source_map")"
+    elif [ "$resolver_rc" -ne 0 ]; then
       echo "::error::reconcile source refused: no verified historical Services CI source for every requested service"
       source_failure=1
-    }
+    fi
     if [ "$source_failure" -eq 0 ] && ! jq -e --argjson services "$historical_services" '
       type == "object" and (keys | sort) == ($services | sort) and
       all(.[]; type == "object" and
