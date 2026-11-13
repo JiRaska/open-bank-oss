@@ -20,7 +20,7 @@ import kotlin.io.path.readText
  * [SepaPaymentWorkflowImpl] (#15724). Any change to the workflow's command sequence that is not
  * guarded by `Workflow.getVersion` fails here, before it can wedge an in-flight production payment.
  *
- * The histories under `src/test/resources/temporal-histories/` were recorded from the shipped
+ * The histories under `src/test/resources/temporal/histories/` were recorded from the shipped
  * workflow and activities by [SepaPaymentWorkflowHistoryRecorder]; see the README there. Never
  * regenerate an existing history from changed code.
  */

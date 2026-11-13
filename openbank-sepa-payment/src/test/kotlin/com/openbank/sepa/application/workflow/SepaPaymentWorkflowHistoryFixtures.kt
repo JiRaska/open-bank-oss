@@ -23,7 +23,7 @@ import java.nio.file.Paths
 internal object SepaPaymentWorkflowHistoryFixtures {
 
     /** Module-relative; Gradle runs tests with the module directory as the working directory. */
-    val HISTORY_DIR: Path = Paths.get("src", "test", "resources", "temporal-histories")
+    val HISTORY_DIR: Path = Paths.get("src", "test", "resources", "temporal", "histories")
 
     /** Fixed worker identity, so no recorded history carries the recording machine's host name. */
     const val IDENTITY = "sepa-history-recorder"
