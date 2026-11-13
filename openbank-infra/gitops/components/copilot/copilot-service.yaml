@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: copilot-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-copilot-service:sandbox-548fa683@sha256:3cb2453e52f4d90f9163dd49d87833ab754a3cccc0907c9cbc192e1eed6a1def
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-copilot-service:sandbox-beb88a65@sha256:710e729a50299507022ae98a81d69970440779f5f61727c416aac76a62c8b7ff
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
