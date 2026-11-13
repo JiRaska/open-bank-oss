@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.8.5...kyb-service-v0.9.0) (2026-11-13)
+
+
+### Features
+
+* **kyb:** screen the entity and its related parties, and gate approval on it ([#15768](https://github.com/JiRaska/open-bank-oss/issues/15768)) ([f5dc9e5](https://github.com/JiRaska/open-bank-oss/commit/f5dc9e586d7d46ed5a788f375414728400cf5174))
+
 ## [0.8.5](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.8.4...kyb-service-v0.8.5) (2026-10-14)
 
 

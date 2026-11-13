@@ -4,7 +4,7 @@ Perpetual-KYC slice 1 podle [ADR 0256](../../../../docs/adr/0256-perpetual-kyc-e
 
 ## Průběh
 
-1. **Konzumace** — `SanctionsListChangedConsumer` čte kanál `sanctions-list-changes-in` (explicitní DLQ topic `openbank.dlq.kyc.sanctions-list-changes`; group id a `auto.offset.reset` přicházejí z ConfigMap `kyc-service-msg-override`, aparát #686). Události `SANCTIONS_LIST_CHANGE_STORM` se ignorují.
+1. **Konzumace** — `SanctionsListChangedConsumer` čte kanál `sanctions-list-changes-in` (explicitní DLQ topic `openbank.dlq.kyc.sanctions-list-changes`; group id a `auto.offset.reset` přicházejí z ConfigMap `kyc-service-msg-override`, aparát #686). Události `SANCTIONS_LIST_CHANGE_STORM` se ignorují. Typ události se čte z Kafka **hlavičky** `ce-type`: topic je plněn z outboxu a těla zpráv žádné pole `eventType` nenesou (`openbank-contracts/openbank-sanctions-service/asyncapi.yaml`). Každý záznam se počítá v `openbank.kyc.sanctions_list_change_events{outcome}` — `handled`, `storm`, `disabled`, `ignored` (screeningové události sdílející topic), `malformed`, `unrecognised`.
 2. **Záznam** — `ScreeningTriggerService` vloží jeden trvalý řádek `kyc_screening_triggers` na (publication, party) — `insertIfAbsent`, takže redelivery Kafka zprávy naváže místo duplikování. Celý diff zůstává na řádku, aby „proč je tento klient v re-screeningu" mělo odpověď v jednom řádku.
 3. **Otevření** — jeden případ `AML_ALERT` na stranu přes `POST /api/v1/case-coordinator/cases` (`case-coordinator-agent` v namespace `platform`, port 8146, dodáno jako `CASE_COORDINATOR_URL`).
 4. **Trvalé selhání** — 429/503/timeout z coordinatoru zaznamená trigger `OPEN_FAILED` a po vyčerpání pokusů outbox řádek `KYC_COORDINATOR_OPEN_FAILED` ve STEJNÉ transakci jako změnu stavu. Chybějící `CASE_COORDINATOR_URL` namapuje každý trigger na trvalou cestu `NOT_CONFIGURED` — nikdy na tiché přeskočení.
@@ -39,6 +39,7 @@ Kandidátní množina **není** rozsahovaná per položka diffu: kyc-service neu
 ## Poznámky pro provoz
 
 - **Nový Kafka kanál je dva deploye, ne jeden** (.github/CLAUDE.md): group id / offset override `sanctions-list-changes-in` přistanou v msg-override ConfigMap až poté, co je nasazen image nesoucí `connector:` kanálu; do té doby běží consumer na fallback group id (`quarkus.application.name`), na který má KafkaUser `kyc-service` udělen Read.
+- **`outcome="unrecognised"` nad nulou znamená, že se consumer a producent neshodnou na tvaru zprávy** (chybí hlavička `ce-type`, nebo jde o typ, který consumer nezná). Záznamy se potvrzují (ack), takže to nic jiného — lag, DLQ ani chybovost — neukáže; při zapnuté smyčce je stejným signálem z druhé strany publikace na straně sanctions bez přírůstku `handled` zde.
 - Selhávací cesta consumeru rethrowuje do connectoru, takže infrastrukturní selhání dead-letteruje; selhání volání coordinatoru je práce řádku + outbox události, ne Kafky.
 - Tabulka `kyc_screening_triggers` (Flyway V12) je append-audited: přechody `state` jsou updaty, diff sloupce se zapisují jednou.
 

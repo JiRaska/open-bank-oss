@@ -9,6 +9,7 @@ import com.openbank.kyb.application.port.`in`.AnswerQuestionnaireCommand
 import com.openbank.kyb.application.port.`in`.AttestRepresentationCommand
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
+import com.openbank.kyb.application.port.`in`.DisposeFindingCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.LookupCommand
 import com.openbank.kyb.application.port.`in`.MakeDeclarationsCommand
@@ -25,6 +26,7 @@ import com.openbank.kyb.application.port.`in`.StartCaseCommand
 import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.domain.model.CaseStatus
+import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistrySearchQuery
@@ -35,6 +37,7 @@ import com.openbank.kyb.infrastructure.rest.dto.BusinessAgreementResponse
 import com.openbank.kyb.infrastructure.rest.dto.CaseResponse
 import com.openbank.kyb.infrastructure.rest.dto.ClaimInvitationRequest
 import com.openbank.kyb.infrastructure.rest.dto.DeclarationsRequest
+import com.openbank.kyb.infrastructure.rest.dto.DisposeFindingRequest
 import com.openbank.kyb.infrastructure.rest.dto.ExtractResponse
 import com.openbank.kyb.infrastructure.rest.dto.InviteCosignersRequest
 import com.openbank.kyb.infrastructure.rest.dto.LookupRequest
@@ -527,6 +530,41 @@ class KybResource {
         requireNotNull(identifier) { "path parameter 'identifier' is required" }
         val rows = representation.history(IdentifierScheme.valueOf(scheme.uppercase()), identifier)
         return Response.ok(rows.map { AttestationResponse.from(it) }).build()
+    }
+
+    @POST
+    @Path("/cases/{id}/screening/findings/{subjectKey}/disposition")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    // Authorised under the review action: kyb_rest_ext.rego grants staff exactly that and excludes
+    // service accounts, and a new action name would be denied until the policy bundle names it.
+    @Authorize(action = "kyb.case.review.resolve", resource = "#id")
+    @Operation(summary = "Operator decides one screening finding (false positive, or confirmed)")
+    suspend fun disposeFinding(
+        @PathParam("id") id: UUID,
+        @PathParam("subjectKey") subjectKey: String,
+        request: DisposeFindingRequest?,
+    ): Response {
+        requireOperator()
+        val disposition = requireNotNull(request?.disposition) { "disposition is required" }.let {
+            runCatching { FindingDisposition.valueOf(it.uppercase()) }
+                .getOrElse { _ -> throw IllegalArgumentException("unknown disposition '$it'") }
+        }
+        // The decider is the authenticated principal. No identity, no decision.
+        val operator = requireNotNull(identity.principal?.name?.takeIf { it.isNotBlank() }) {
+            "an authenticated operator is required"
+        }
+        val case = onboarding.disposeFinding(
+            DisposeFindingCommand(
+                id,
+                subjectKey,
+                disposition,
+                requireNotNull(request.reason) {
+                    "reason is required"
+                },
+                operator,
+            ),
+        )
+        return Response.ok(CaseResponse.from(case, null)).build()
     }
 
     @POST
