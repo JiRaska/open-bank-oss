@@ -84,7 +84,8 @@ class MonitoringRegistrationService {
         val now = Instant.now(clock)
         backfill(now)
         store.requeueConfirmedBefore(now.minus(settings.reassertAfter), now, settings.batchSize)
-        store.due(now, settings.batchSize).forEach { deliver(it) }
+        // Read the clock again: a row the backfill just created is due from the moment it was written.
+        store.due(Instant.now(clock), settings.batchSize).forEach { deliver(it) }
         return MonitoringRunOutcome.COMPLETED
     }
 

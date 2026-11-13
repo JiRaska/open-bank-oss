@@ -14,6 +14,8 @@ import com.openbank.kyb.application.port.out.CeremonyStatus
 import com.openbank.kyb.application.port.out.DocumentGateway
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.MandateRequest
+import com.openbank.kyb.application.port.out.MonitoredSubjectRegistryException
+import com.openbank.kyb.application.port.out.MonitoredSubjectRegistryPort
 import com.openbank.kyb.application.port.out.PartyGateway
 import com.openbank.kyb.application.port.out.PepProfile
 import com.openbank.kyb.application.port.out.RegistryAdapter
@@ -104,6 +106,14 @@ class StubAresAdapter : RegistryAdapter {
                 RepresentationRule.SOLE,
                 listOf("Olga Souběžná"),
             )
+            // Reserved for the ongoing-monitoring ITs, one entity and one representative per test,
+            // for the same reason as the screening ones above.
+            in MONITORING_ENTITIES -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf(MONITORING_ENTITIES.getValue(identifier.value)),
+            )
             // 26185610 — a sole trader.
             "26185610" -> extract(identifier, LegalFormClass.SOLE_TRADER, RepresentationRule.SOLE, listOf("Jan Novák"))
             else -> null
@@ -134,6 +144,20 @@ class StubAresAdapter : RegistryAdapter {
         val hits =
             query.city?.let { c -> all.filter { it.registeredAddress?.contains(c, ignoreCase = true) == true } } ?: all
         return RegistrySearchResult(hits = hits, totalMatches = hits.size)
+    }
+
+    companion object {
+        /** IČO -> the single jednatel of that company. Every name is invented. */
+        val MONITORING_ENTITIES = mapOf(
+            "71000054" to "Marek Sledovaný",
+            "71000062" to "Ivana Nedělitelná",
+            "71000071" to "Oskar Opakovaný",
+            "71000089" to "Zdena Odhlášená",
+            "71000097" to "Viktor Doplněný",
+            "71000101" to "Libor Nalezený",
+            "71000119" to "Dana Drátová",
+            "71000127" to "Emil Plánovaný",
+        )
     }
 
     private fun extract(id: LegalEntityIdentifier, form: LegalFormClass, rule: RepresentationRule, reps: List<String>) =
@@ -267,5 +291,32 @@ class StubDocumentGateway : DocumentGateway {
             AgreementDisclosure("VOP_CS", "1.1.0", "Všeobecné obchodní podmínky", "b".repeat(64), null),
             AgreementDisclosure("SAZEBNIK_PO_CS", "1.0.0", "Sazebník", "c".repeat(64), null),
         )
+    }
+}
+
+/**
+ * Monitored-subject registry double. It accepts everything unless a test sets [failWith], which
+ * makes every call fail the way the adapter reports a refusal: by throwing, with a reason.
+ * Calls are recorded per reference, so a test asserts on its own subjects only.
+ */
+@Alternative
+@Priority(1)
+@ApplicationScoped
+class StubMonitoredSubjectRegistry : MonitoredSubjectRegistryPort {
+    data class Registration(val subjectRef: String, val organisation: Boolean, val name: String)
+
+    val registered = CopyOnWriteArrayList<Registration>()
+    val withdrawn = CopyOnWriteArrayList<String>()
+
+    @Volatile var failWith: String? = null
+
+    override suspend fun register(subjectRef: String, organisation: Boolean, name: String) {
+        failWith?.let { throw MonitoredSubjectRegistryException(it, null) }
+        registered += Registration(subjectRef, organisation, name)
+    }
+
+    override suspend fun withdraw(subjectRef: String) {
+        failWith?.let { throw MonitoredSubjectRegistryException(it, null) }
+        withdrawn += subjectRef
     }
 }
