@@ -19,7 +19,6 @@ data class ConvertCommand(
     val fromCurrency: String,
     val toCurrency: String,
     val fromAmountMinorUnits: Long,
-    val partyName: String,
 )
 
 data class GetRateHistoryQuery(

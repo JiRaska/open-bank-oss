@@ -40,6 +40,8 @@ Management endpointy jsou na vyhrazeném management portu **8085** (`quarkus.man
 | `OPA_PATH` | `/v1/data/openbank/rest/allow` | OPA decision path |
 | `AUTHZ_ENFORCE` | `false` | advisory vs enforce autorizace |
 | `openbank.kyc.auto-approve` | `false` | **pouze sandbox** straight-through schválení; v prod MUSÍ zůstat false |
+| `KYC_SCREENING_RETRY_ENABLED` | `true` | opakování prověření zákazníka u případů otevřených během výpadku `sanctions-service`; `false` zastaví opakování, ne metriku backlogu |
+| `KYC_SCREENING_RETRY_INTERVAL` / `_MIN_AGE` / `_BATCH_SIZE` | `1m` / `PT2M` / `50` | perioda úlohy, čekání po posledním pokusu, počet případů na běh |
 
 Datasource: `postgresql://…/openbank_kyc`. Kafka bootstrap: `localhost:29092` (přepisováno per prostředí). Standardní bezpečnostní response hlavičky jsou nastaveny v `application.yaml` (HSTS, CSP `default-src 'self'`, X-Frame-Options DENY, atd.).
 
@@ -73,6 +75,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 - **Případy se neotevírají automaticky** — ověř, že konzument `party-events-in` je připojen ke skupině `kyc-service-party` a že `PARTY_CREATED` teče na `openbank.party.events`. `openCaseForParty` je idempotentní; replay topicu je bezpečný.
 - **Chyba duplicitního případu při insertu** — očekávané při replayi/scale-outu; `uq_kyc_cases_active_party` odmítne losera a kód znovu načte. Žádná akce, pokud chyby nepřetrvávají pro různé party.
 - **Flyway checksum mismatch při startu** — nikdy nepřepisuj aplikovanou migraci; nastav `QUARKUS_FLYWAY_REPAIR_AT_START=true` v GitOps env, po ustálení odstraň.
+- **Případy bez prověření** — `openbank_kyc_sanctions_unscreened_cases{service="kyc"}` počítá rozpracované případy, jejichž sankční kontrola je `PENDING` a nikdy nebyla prověřena; `openbank_kyc_sanctions_unscreened_oldest_age_seconds` je stáří nejstaršího (obě metriky čtou NaN do prvního měření po startu). Číslo, které neklesá, ačkoli je `sanctions-service` zdravá, znamená, že úloha neběží (heartbeat `kyc-unscreened-case-retry`, `WorkflowLivenessStale`), je vypnutá, nebo k těm případům nemá jméno — `SELECT case_id FROM kyc_cases WHERE pending_screening_name IS NULL AND status NOT IN ('APPROVED','REJECTED','EXPIRED')` vypíše kandidáty pro posuzovatele. Řádek logu `kyc.unscreened-case.retry attempted=… settled=… failed=…` hlásí každý běh; jméno nikdy neobsahuje.
 - **Sandbox auto-approve v prod** — pokud se případy schvalují s revizorem `sandbox-auto-approval` v ne-sandbox prostředí, `openbank.kyc.auto-approve` je špatně nastaven; okamžitě přepni na `false` (compliance incident, obejití čtyř očí).
 
 ## Observabilita

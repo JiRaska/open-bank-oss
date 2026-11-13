@@ -111,6 +111,26 @@ Waiting for the per-list lock or generation row is limited to 30 seconds. A time
 leaves journal evidence intact. The scheduler continues to the other lists and retries pending
 publication on its next tick; the import itself runs at its next due time or on a new request.
 
+### Jurisdiction reference data ageing
+
+`sanctions_jurisdictions` is copied from published lists by migration, so it ages without any
+error. Three gauges per `source_list` make that visible
+(`prometheus-rules-sanctions-jurisdictions.yaml`):
+
+| Series | Meaning |
+|---|---|
+| `openbank_sanctions_jurisdiction_rows` | active rows; `0` = an expected list that is not loaded (`JurisdictionReferenceDataNotLoaded`, info) |
+| `openbank_sanctions_jurisdiction_publication_age_seconds` | age of the newest loaded publication |
+| `openbank_sanctions_jurisdiction_verification_age_seconds` | time since the list was compared with its source; over 150 days fires `JurisdictionReferenceDataNotReverified` |
+
+The ages come from dates stored in the table, not from the pod's start, so they are correct on a
+freshly started pod and an alert does not clear on a restart. To clear it:
+
+1. Fetch the current publication from the publisher (never from memory or a secondary summary).
+2. If it changed, add a migration inserting the new rows with `version + 1` and the new
+   `published_on`, and setting `active = false` on the rows it supersedes.
+3. If it did not change, add a migration that only moves `verified_on` for that `source_list`.
+
 ### Large backlog of POTENTIAL_HIT reviews
 
 1. Check the pending queue: `GET /api/v1/sanctions/pending`
@@ -167,6 +187,16 @@ sanctions sets `openbank.warmup.protected-path: /api/v1/sanctions/pending`, so t
 
 OFAC and EU FSF imports now parse through the shared hardened `SecureXml` SAX parser. A feed containing a DOCTYPE is rejected, including external DTDs and entity declarations. On parse failure the import keeps the previously stored list and reports `FAILED_KEPT_EXISTING`; investigate the upstream feed and do not disable the parser guard to force a refresh. `SanctionsImportServiceTest` and `EuFsfSaxParserTest` exercise the rejection.
 
+## Internal mTLS listener in production
+
+In production the service listens on two ports. The plain HTTP port (8123) is unchanged and still serves the probes and every existing caller. Port 8443 is a second listener for east-west callers: TLS 1.3 with a certificate from the platform's private CA, and a client certificate is required. The deployment mounts the certificate, key and CA bundle at `/mnt/internal-tls` from the `sanctions-service-internal-tls` secret; the secret is not optional, so the pod does not start without it.
+
+The client certificate is transport authentication only. The API is authenticated by the OIDC bearer token on both ports, and a request on 8443 with a valid certificate and no token is answered 401, exactly as on the plain port.
+
+`quarkus.http.ssl.client-auth` is fixed when the image is built, under the `%prod` profile in `application.yaml`. The `QUARKUS_HTTP_SSL_CLIENT_AUTH` variable in the deployment only states the same value and cannot change it. Local development and tests run without the listener, so a passing local run does not prove the deployed handshake.
+
+If calls to 8443 fail after a rollout, check together: the mounted secret and its expiry, that the caller presents a certificate from the same CA, the network policy path to 8443, and that the caller still sends a bearer token.
+
 ## Shared configuration defaults
 
 This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
@@ -174,3 +204,36 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Ongoing monitoring (ADR-0376)
+
+| Property | Default | Purpose |
+|---|---|---|
+| `openbank.sanctions.monitoring.enabled` (`SANCTIONS_MONITORING_ENABLED`) | `false` | Master switch. Off: registration answers 503 and no run matches anything |
+| `openbank.sanctions.monitoring.delta.max-entries-per-run` | `5` | Changed list entries matched per tick |
+| `openbank.sanctions.monitoring.delta.max-pending` | `20000` | Backlog above which the delta is replaced by a full re-sweep |
+| `openbank.sanctions.monitoring.delta.max-candidates-per-entry` | `5000` | Matches per entry above which the sweep takes over |
+| `openbank.sanctions.monitoring.sweep.batch-size` | `25` | Subjects re-evaluated per tick |
+| `openbank.sanctions.monitoring.sweep.interval` | `P30D` | How often every subject is fully re-evaluated |
+| `openbank.sanctions.monitoring.claim-lease` | `PT15M` | How long a claimed subject or queue row stays claimed |
+
+Metrics (Prometheus names):
+
+| Metric | Reading |
+|---|---|
+| `openbank_sanctions_monitoring_enabled` | 1 or 0: the flag |
+| `openbank_sanctions_monitoring_subjects` | Subjects registered. NaN until a run has observed the registry, so NaN while disabled |
+| `openbank_sanctions_monitoring_delta_pending` | Changed entries waiting to be matched |
+| `openbank_sanctions_monitoring_sweep_lag_seconds` | How long the least recently swept subject is overdue; 0 while the sweep keeps up |
+| `openbank_sanctions_monitoring_findings_total{match_kind,detection}` | Findings written. A match already found, or covered by a clearance, is not counted |
+| `openbank_sanctions_monitoring_runs_total{path,outcome}` | Runs by outcome: `completed`, `resweep_requested`, `disabled`, `failed` |
+
+Sizing: the sweep covers `batch-size` subjects per minute, so a full cycle over N subjects takes N / (batch-size × 1440) days; keep that below `sweep.interval` or `sweep_lag_seconds` grows. One delta entry costs a probe of the registry's trigram indexes, not a pass over the registry: measured on one million synthetic subjects, 0.3 s on average (about 0.05 s for an entry with one name, about 0.6 s with five) against 7.3 s for a full scan. The cost grows with the registry and with how common the entry's trigrams are, so 5,000 changed entries a day are about 25 minutes of one database core at that size; the delta is sized for registries up to the low millions and feeds up to the low tens of thousands of changes a day. Above `delta.max-pending` the run requests a re-sweep instead. The figures are from synthetic names on one core; re-measure on real data before raising `delta.max-entries-per-run`.
+
+### Sweep lag growing
+
+`sweep_lag_seconds` above zero means subjects are overdue. Check `runs_total{path="sweep",outcome="failed"}` and the log for `Sanctions monitoring sweep failed for registry row` (a subject that cannot be evaluated is retried after the lease and fails its run each time); otherwise raise `sweep.batch-size`.
+
+### Delta backlog growing
+
+`delta_pending` rising means list changes arrive faster than they are matched. Above `delta.max-pending` the service drops the queue and re-sweeps everyone (`outcome="resweep_requested"`), which is correct and slower. Raising `delta.max-entries-per-run` spends more database time per tick.

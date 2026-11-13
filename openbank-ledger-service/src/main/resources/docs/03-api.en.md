@@ -31,6 +31,8 @@ The role matrix is locked by `LedgerSecurityContractTest`.
 
 Query params: `fromDate` (default `2020-01-01`), `toDate` (default today), `limit` (default 20), `cursor`.
 Returns a `CursorPage<JournalEntryResponse>`: `{ data: [...], pagination: { nextCursor, hasMore } }`.
+Journals are ordered by entry date, creation timestamp, and journal ID, all descending. Use the returned cursor with
+the same date range. PostgreSQL limits each page before the service loads its journal lines.
 
 ### `GET /api/v1/journals/{journalId}` — get one entry
 
@@ -87,6 +89,18 @@ Posting is idempotent via the **`idempotencyKey` field on the request body** (no
 ## Error model
 
 `ApiError`: `{ "code": "...", "message": "..." }`. Mapping is centralized in `ExceptionMappers` and deferred to `openbank-libs` for the generic fallback (ADR-0049 D4 — the service does not register a catch-all `Exception` mapper). Typical statuses: `400` (unbalanced / invalid posting), `401`/`403` (auth), `404` (unknown journal), `409` (idempotency-key conflict).
+
+## Posting refusals that carry a machine code
+
+A posting or reversal dated into a locked period answers `409`. Three locks exist and the body of each carries a stable `code` next to the unchanged `error` text, so a caller can tell them apart from any other 409 (an idempotency conflict, a mismatched replay) without parsing prose:
+
+| Lock | `code` | Remedy |
+|---|---|---|
+| Accounting day no longer OPEN (ADR-0207 D3) | `ACCOUNTING_DAY_CLOSED` | Re-date into the current open day. |
+| Statutory period FROZEN (ADR-0096 D1; refused only when `openbank.ledger.period-lock.mode=enforce`) | `ACCOUNTING_PERIOD_FROZEN` | Book the correction into the current open period. |
+| Fiscal year ATTESTED (#869) | `ACCOUNTING_YEAR_CLOSED` | Book an adjustment in the current open period. |
+
+The `code` field is additive; the `error` field is unchanged. These refusals are deterministic for the same entry date, so a caller must not retry the same payload unchanged. The two period-level codes are not yet handled specially by any caller; they are treated as a plain 409 today.
 
 ## Day-close participants (ADR-0342)
 

@@ -69,6 +69,35 @@ Flyway, immutable historical scripts, forward-only:
 
 > Migrations are immutable after apply. Never alter a migration that has been applied to a production DB.
 
+## Jurisdiction reference data
+
+`sanctions_jurisdictions` (V21) holds embargoed and high-risk countries: `list_type`,
+`source_list`, `country_code`, `measure` (`EMBARGO` | `HIGH_RISK`), `version`, `source_ref`,
+`published_on`, `verified_on`, `active`. `list_type` is the screening-list slot a row is consulted
+under; `source_list` is the publication it was copied from.
+
+No source the service imports publishes these as a machine-readable feed — the `FATF_HIGH_RISK`
+import is skipped as not entity based — so the rows are **versioned reference data**. They change
+only through a reviewed Flyway migration: a new publication adds rows with a higher `version` and
+retires the rows it supersedes (`active = false`), so the history stays in the table. A partial
+unique index allows one active row per (list, publication, country). There is no endpoint that
+writes this table: which countries are listed is a compliance decision recorded in the migration
+that adds them.
+
+| `source_list` | Loaded | Source |
+|---|---|---|
+| `EU_HIGH_RISK_THIRD_COUNTRIES` | V22 — 26 countries, all `HIGH_RISK` | Commission Delegated Regulation (EU) 2016/1675, Annex, consolidated version of 2026-01-29; compared with EUR-Lex on 2026-11-11 |
+| `FATF_CALL_FOR_ACTION` | not loaded | the publisher's site could not be retrieved; no row is written from memory |
+| `FATF_INCREASED_MONITORING` | not loaded | as above |
+
+No row carries `EMBARGO`: the EU regulation requires enhanced due diligence, not a prohibition,
+and no source loaded so far states a country embargo.
+
+**Ageing.** These lists change several times a year and nothing imports them, so each row carries
+the date of its publication (`published_on`) and the date it was last compared with the source
+(`verified_on`). A re-verification that finds the source unchanged is still a migration — it
+moves `verified_on`. The service publishes the age of both per `source_list`; see `05-operations`.
+
 ## Indexes
 
 - `sanctions_checks(idempotency_key)` — UNIQUE, deduplication at insert
@@ -140,3 +169,17 @@ Every `sanctions_lists.list_type` requires a row in `sanctions_change_publicatio
 `V19__backfill_sanctions_publication_state.sql` initializes any missing list state with the table defaults. Existing fingerprints, generations and active-refresh flags are preserved by `ON CONFLICT (list_type) DO NOTHING`. Fresh-schema and V18-upgrade integration tests cover this invariant and replay with nondefault existing state.
 
 Retain these additive control rows when rolling back application code, together with pending journal and outbox evidence. Removing a row can discard a generation, active fence or fingerprint and prevent older application code from publishing safely. Apply state repairs through forward migrations rather than manual recovery SQL.
+
+## Ongoing monitoring tables (V23, ADR-0376)
+
+| Table | Holds | Retention |
+|---|---|---|
+| `sanctions_monitored_subjects` | One row per registered subject: owning service, subject reference, entity type, name, aliases, normalised search names, date of birth, nationality, country, sweep bookkeeping | Until deregistration, which deletes the row |
+| `sanctions_monitored_subject_names` | One row per normalised search name of a subject, with its trigram count and size class; exists only to index the delta match | Deleted with the subject (`ON DELETE CASCADE`) and replaced with its attributes |
+| `sanctions_monitoring_findings` | One row per subject, list entry and version of the entry's names; `delisted_at` once the entry left its list | Deleted with the subject (`ON DELETE CASCADE`) |
+| `sanctions_monitoring_pending` | Queue of committed list-entry changes not yet matched | Until matched, or dropped in favour of a re-sweep |
+| `sanctions_monitoring_state` | One row: when a full re-sweep was last requested | Permanent |
+
+The registry, its names and the findings are personal data (name, aliases and date of birth are direct identifiers; a finding links a subject to a list entry). Unlike `sanctions_checks`, they are not the statutory AML record: the owning service keeps that. Erasure therefore applies, and deregistration is how it is carried out.
+
+Indexes: `uq_sanctions_monitored_subject (owner_service, subject_ref)` for registration; the partial `idx_sanctions_monitored_unswept (id) WHERE last_swept_at IS NULL` and `idx_sanctions_monitored_swept (last_swept_at, id)` for the sweep, so an idle tick reads a few index entries; the partial unique `uq_sanctions_monitoring_finding_open` is what makes a finding idempotent. The delta match reads fifteen partial GIN trigram indexes, `idx_sanctions_monitored_name_trgm_c1` to `_c15` on `sanctions_monitored_subject_names (search_name) WHERE size_class = N`: the subject's name is the needle of `word_similarity` and pg_trgm indexes only the haystack, so the index serves a necessary condition (`search_name % entry` under a per-class threshold) and the exact score is computed on the candidates. Measured on one million synthetic subjects: 68 MB of trigram indexes and 157 MB of name rows with their b-tree indexes, next to about 350 MB for the registry.

@@ -87,7 +87,7 @@ interface LoanApplicationRepository {
 
     /**
      * The sign leg's claim (ADR-0211 D1/D6): the conditional AWAITING_SIGNATURE → SIGNED
-     * transition AND the signature artefact hash, in one statement. A separate
+     * transition, signature artefact hash and bank-recorded receipt instant, in one statement. A separate
      * [compareAndSetStatus]-then-update pair could leave a SIGNED row whose artefact hash never
      * arrived (or carry a hash on a row the transition lost to a concurrent caller) — the same
      * split-write defect [compareAndSetDecision] exists to close for the ASSESSMENT leg.
