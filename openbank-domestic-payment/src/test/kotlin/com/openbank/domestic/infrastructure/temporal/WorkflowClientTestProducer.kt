@@ -51,6 +51,6 @@ class WorkflowClientTestProducer {
 
     class NoOpDomesticPaymentWorkflow : DomesticPaymentWorkflow {
         override fun process(paymentId: UUID): DomesticPaymentStatus = DomesticPaymentStatus.RECEIVED
-        override fun resolveFraudHold(decision: FraudReviewDecision) = Unit
+        override fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?) = Unit
     }
 }

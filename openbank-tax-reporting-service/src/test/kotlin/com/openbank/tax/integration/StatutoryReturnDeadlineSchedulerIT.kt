@@ -49,6 +49,11 @@ class StatutoryReturnDeadlineSchedulerIT {
         assertThat(recorded)
             .describedAs("a real cron tick must finish its reactive repository query and record success")
             .isEqualTo(1.0)
+        assertThat(
+            registry.find("openbank_workflow_unconfigured")
+                .tag("workflow", "statutory-return-deadline-check")
+                .gauge()?.value(),
+        ).describedAs("a configured deployment must not report itself unconfigured").isEqualTo(0.0)
     }
 
     private fun successRecorded(): Double? = registry.find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
@@ -57,8 +62,12 @@ class StatutoryReturnDeadlineSchedulerIT {
 }
 
 class StatutoryReturnMessagingTestResource : QuarkusTestResourceLifecycleManager {
-    override fun start(): Map<String, String> =
-        InMemoryConnector.switchIncomingChannelsToInMemory("withholding-remitted-in")
+    override fun start(): Map<String, String> = InMemoryConnector.switchIncomingChannelsToInMemory(
+        "withholding-remitted-in",
+        "ceu-account-events-in",
+        "ceu-delegation-events-in",
+        "ceu-party-events-in",
+    )
 
     override fun stop() = InMemoryConnector.clear()
 }

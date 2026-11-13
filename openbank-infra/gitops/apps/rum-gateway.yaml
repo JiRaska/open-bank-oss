@@ -91,7 +91,7 @@ spec:
             # browser and no session to gate on. The paths are already narrowed to
             # /v1/traces and /v1/metrics, and the pod's own NetworkPolicy
             # (networkpolicy-rum-gateway.yaml) is what contains it.
-            openbank.io/ungated-machine-callers: >-
+            open-bank.tech/ungated-machine-callers: >-
               Mobile OTLP/HTTP export from SDKs in the field; no browser session
               exists to authenticate against.
             nginx.ingress.kubernetes.io/limit-rps: "20"
@@ -115,6 +115,8 @@ spec:
               secretName: rum-gateway-tls
         # OTLP-HTTP is exposed (mobile SDKs export OTLP/HTTP); gRPC is disabled.
         ports:
+          metrics:
+            enabled: true
           otlp:
             enabled: false
           otlp-http:
@@ -126,6 +128,8 @@ spec:
           jaeger-thrift: { enabled: false }
           jaeger-grpc: { enabled: false }
           zipkin: { enabled: false }
+        serviceMonitor:
+          enabled: true
         config:
           extensions:
             # Required by the chart (drives the liveness/readiness probes); a
@@ -147,9 +151,21 @@ spec:
               issuer_url: https://kc.open-bank.tech/realms/openbank-customers
               audience: openbank-rum
               username_claim: party_id
+          # The chart's default config is MERGED with this block (helm: `null` deletes a key),
+          # so everything this gateway does not use must be nulled out explicitly. Left in
+          # place, the defaults give the pod an UNAUTHENTICATED OTLP gRPC listener on :4317
+          # (the `oidc` authenticator below is attached to the http protocol only), jaeger and
+          # zipkin listeners, a self-scrape receiver, and default logs/metrics pipelines that
+          # accept anything the gRPC listener receives and write it to a `debug` exporter (pod
+          # logs). The NetworkPolicy only admits :4318, which is why this was not reachable from
+          # other pods; this removes the listeners instead of relying on it.
           receivers:
+            jaeger: null
+            zipkin: null
+            prometheus: null
             otlp:
               protocols:
+                grpc: null
                 http:
                   endpoint: 0.0.0.0:4318
                   auth:
@@ -212,6 +228,7 @@ spec:
               send_batch_size: 512
               timeout: 5s
           exporters:
+            debug: null
             # TB-3: in-VPC hop to Tempo. The redacted, validated spans join the
             # same backend → one trace from the user's tap to the ledger write.
             otlp_grpc/tempo:
@@ -226,6 +243,8 @@ spec:
           service:
             extensions: [health_check, oidc]
             pipelines:
+              logs: null
+              metrics: null
               traces:
                 receivers: [otlp]
                 processors: [memory_limiter, redaction, transform, probabilistic_sampler, batch]

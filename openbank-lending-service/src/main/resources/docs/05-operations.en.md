@@ -173,3 +173,31 @@ sets scoped aggregate `unreconciled` evidence for its work/requested dates; late
 cannot clear it. Use the existing controlled ledger reconciliation/waiver process for disposition.
 No per-customer tombstone or new retention period is introduced. Rollback retains V28 tables and
 pending evidence; reverting code does not prove an unresolved remote posting absent.
+
+## Daily close source evidence
+
+Completed accrual/provisioning receipts and their in-flight markers remain relevant after a
+scheduler is disabled. Missing, running or unresolved allowance work emits a stable REFUSED,
+revoking an earlier positive result. V30 retains actual allowance delivery acknowledgements
+atomically with SENT, separately from the disposable outbox. Its date index supports the bounded
+monthly audit scan. An existing database's coverage starts on the next Prague calendar day;
+earlier purged delivery history is unknown and cannot qualify. Fresh databases begin with full
+coverage of their subsequently written facts. A reviewed cutover is required for legacy history.
+Rollback retains receipts, coverage and financial history. Keep the deployment hold and require
+a full live month plus production-volume scan timing before activation.
+
+
+Observed due-job obligations are now retained separately from actual run receipts. Disabling or moving a scheduler after a missing-work refusal cannot remove that obligation, including after restart. Only a real completed run or an attributable ledger waiver can resolve it. Observations do not fabricate completed jobs or reconstruct schedules that were never observed. Rollback retains both obligation and run tables.
+
+## Dated loan lifecycle facts (#9890)
+
+Lending publishes version 1 of `loan.exposure_fact` on the existing lending events topic. The
+lending outbox records paid installments, schedule replacement and final closure, write-off or
+unwind in the local transaction that writes the corresponding source change. Disbursement facts
+carry the original booking time and a separate cash confirmation time. Lending emits them after
+both ledger credits succeed, in the same outbox transaction as the legacy disbursement event.
+A paid installment reports scheduled principal and interest applied and the remaining scheduled
+principal. Early settlement notices and acceleration can precede final closure.
+
+AnaCredit stores these facts separately. Pre-existing loans need independently verified historical
+evidence for reconciliation. See #9890 for the reporting inputs still outstanding.

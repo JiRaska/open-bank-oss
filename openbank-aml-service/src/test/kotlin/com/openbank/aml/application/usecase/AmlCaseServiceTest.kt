@@ -150,6 +150,9 @@ class AmlCaseServiceTest {
         val event = slot<OutboxMessage>()
         coVerify { amlCaseRepository.update(any(), capture(event)) }
         val payload = objectMapper.readTree(event.captured.payload)
+        // #4403: a rail acting on one kind of case reads these two to find its payment.
+        assertThat(payload.get("alertCode").asText()).isEqualTo("TM-900")
+        assertThat(payload.hasNonNull("transactionId")).isTrue()
         // Read it back through the same mapper that wrote it — this one serialises Instant as a
         // numeric epoch, so `Instant.parse(asText())` would fail on the shape, not the value.
         val occurredAt = objectMapper.treeToValue(payload.path("occurredAt"), Instant::class.java)

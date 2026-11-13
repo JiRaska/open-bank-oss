@@ -39,5 +39,15 @@ jq '[.[][] | ([.labels[].name] | index("merge-priority:repair") != null) as $rep
       and (.head.ref | startswith("chore/gitops-auto-deploy-") or startswith("chore/admin-ui-deploy-"))))
   | {number, head: .head.ref, head_sha: .head.sha, created_at: .created_at, armed: (.auto_merge != null),
      state, repair_priority: $repair}]' "$out/open-pr-pages.json" > "$out/prs.json"
+# An armed deploy PR that CANNOT merge (conflict, or a failed check on its head) would
+# otherwise freeze its whole kind: the flush defers to it and supersede lets it ride (#14498).
+# Mark it `stuck` so the flush disarms it and lets the newest PR of that kind carry its pins.
+# A query error fails loudly (set -e): guessing "not stuck" would restore the freeze silently.
+for n in $(jq -r '.[] | select(.armed) | .number' "$out/prs.json"); do
+  view=$(gh pr view "$n" --repo "$repo" --json mergeStateStatus,statusCheckRollup)
+  stuck=$(python3 .github/scripts/deploy-window.py stuck <<< "$view")
+  jq --argjson n "$n" --argjson stuck "$stuck" 'map(if .number == $n then .stuck = $stuck else . end)' \
+    "$out/prs.json" > "$out/prs.json.tmp" && mv "$out/prs.json.tmp" "$out/prs.json"
+done
 jq -e 'type == "array"' "$out/commits.json" "$out/prs.json" >/dev/null
 echo "deploy-window inputs: $(jq length "$out/commits.json") commits, $(jq length "$out/prs.json") open deploy PR(s), $(jq '[.[]|select(.armed)]|length' "$out/prs.json") armed"

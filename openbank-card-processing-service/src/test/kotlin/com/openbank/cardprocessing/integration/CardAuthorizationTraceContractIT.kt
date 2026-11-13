@@ -8,6 +8,7 @@ import com.openbank.cardprocessing.integration.CardAuthorizationOutboxIT.StubIss
 import com.openbank.libs.testing.trace.RecordingSpanExporter
 import com.openbank.libs.testing.trace.TraceContractProfile
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
@@ -47,7 +48,10 @@ import org.junit.jupiter.api.Test
  * money write, so it is the right first contract here.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.cardprocessing.it.PostgresTestResource::class)
+@QuarkusTestResource(
+    com.openbank.libs.testing.containers.PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_card_processing_it")],
+)
 @TestProfile(CardAuthorizationTraceContractIT.CardTraceProfile::class)
 @TestSecurity(user = "card-processing-it", roles = ["ROLE_OPERATOR"])
 class CardAuthorizationTraceContractIT {

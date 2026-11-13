@@ -300,27 +300,27 @@ class UpstreamClient {
             builder.queryParam(name, "{$parameter}")
             values[parameter] = value
         }
-        get(builder.buildFromMap(values), partyId, requestTimeoutMs)
+        sendGet(builder.buildFromMap(values).toASCIIString(), partyId, requestTimeoutMs)
     } catch (e: Exception) {
-        // Query values may contain opaque paging tokens, so do not log them.
-        Log.error("upstream call to $baseUrl failed: ${e::class.qualifiedName}: ${e.message}", e)
+        // Some request exceptions include their complete URI, which may carry opaque query values.
+        Log.error("structured upstream GET failed: ${e::class.qualifiedName}")
         Response.status(502).entity("""{"error":"upstream unavailable"}""")
             .type(MediaType.APPLICATION_JSON).build()
     }
 
     /** Cap a single call by the caller's remaining aggregate budget. */
     fun get(url: String, partyId: String?, timeoutMs: Long): Response = try {
-        get(validatedUri(url), partyId, timeoutMs)
+        sendGet(url, partyId, timeoutMs)
     } catch (e: Exception) {
         Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
         Response.status(502).entity("""{"error":"upstream unavailable"}""")
             .type(MediaType.APPLICATION_JSON).build()
     }
 
-    private fun get(uri: URI, partyId: String?, timeoutMs: Long): Response {
+    private fun sendGet(url: String, partyId: String?, timeoutMs: Long): Response {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceIn(1, requestTimeoutMs))
         val request = upstreamRequest()
-            .uri(uri)
+            .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken(deadline)}")
             .apply { if (partyId != null) header(PARTY_HEADER, partyId) }
             .header("Accept", "application/json")
@@ -573,6 +573,28 @@ class UpstreamClient {
         post(structuredUri(baseUrl, path), partyId, body, idempotencyKey)
     } catch (e: Exception) {
         // Do not log path: it may contain an opaque invitation or recovery token.
+        Log.error("upstream call to $baseUrl failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /** POST with an isolated service authority, caller-derived path and encoded query values. */
+    fun postToServiceWithQuery(
+        baseUrl: String,
+        path: String,
+        query: Map<String, String>,
+        partyId: String,
+        body: String,
+    ): Response = try {
+        val builder = UriBuilder.fromUri(structuredUri(baseUrl, path))
+        val values = linkedMapOf<String, Any>()
+        query.entries.forEachIndexed { index, (name, value) ->
+            val parameter = "query$index"
+            builder.queryParam(name, "{$parameter}")
+            values[parameter] = value
+        }
+        post(builder.buildFromMap(values), partyId, body, null)
+    } catch (e: Exception) {
         Log.error("upstream call to $baseUrl failed: ${e::class.qualifiedName}: ${e.message}", e)
         Response.status(502).entity("""{"error":"upstream unavailable"}""")
             .type(MediaType.APPLICATION_JSON).build()

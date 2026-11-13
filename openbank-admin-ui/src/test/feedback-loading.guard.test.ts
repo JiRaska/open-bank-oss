@@ -7,8 +7,8 @@ describe('screen feedback loading contract', () => {
   it('announces the existing initial loading state', () => {
     const source = readFileSync(path.resolve(__dirname, '../app/feedback/page.tsx'), 'utf8')
     expect(source).toContain('<p role="status" aria-live="polite">')
-    expect(source).toContain("cs ? 'Načítám…' : 'Loading…'")
-    expect(source).toContain("aria-label={cs ? 'Obnovit zpětnou vazbu k obrazovkám' : 'Refresh screen feedback'}")
+    expect(source).toContain("language === 'cs' ? 'Načítám…' : 'Loading…'")
+    expect(source).toContain("aria-label={language === 'cs' ? 'Obnovit zpětnou vazbu k obrazovkám' : 'Refresh screen feedback'}")
     expect(source).toContain("fetch('/api/feedback/screen-feedback', { cache: 'no-store' })")
   })
 })

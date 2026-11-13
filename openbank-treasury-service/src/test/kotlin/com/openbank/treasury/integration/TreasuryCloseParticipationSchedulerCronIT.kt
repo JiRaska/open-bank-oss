@@ -8,8 +8,8 @@ import com.openbank.libs.close.CloseOutcome
 import com.openbank.libs.close.CloseParticipationReport
 import com.openbank.libs.close.CloseParticipationSink
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.treasury.infrastructure.close.TreasuryCloseJobs
-import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -72,6 +72,22 @@ class TreasuryCloseParticipationSchedulerCronIT {
     lateinit var clock: Clock
 
     @Test
+    fun `observed obligations survive a later read without scheduling and create no completed run`() {
+        val day = java.time.LocalDate.of(2001, 1, 2)
+        io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
+            evidence.requiredJobs(day, day, mapOf(day to setOf("accrual")))
+        }
+        val retained = io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
+            evidence.requiredJobs(day, day, emptyMap())
+        }
+        assertThat(retained[day]).containsExactly("accrual")
+        val completed = io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
+            evidence.findBetween(day, day)
+        }
+        assertThat(completed).isEmpty()
+    }
+
+    @Test
     fun `the cron holds pending and in-flight days, reports refusals, and RAN once the event left`() {
         val today = AccountingClock.bank(clock).today()
         val pendingDay = today.minusDays(1)
@@ -111,17 +127,19 @@ class TreasuryCloseParticipationSchedulerCronIT {
             assertThat(it.outcome).isEqualTo(CloseOutcome.REFUSED)
             assertThat(it.reason).contains("ACCOUNTING_DAY_CLOSED")
         }
-        assertThat(seen(pendingDay)).describedAs("held while its journal event is in the outbox").isEmpty()
-        assertThat(seen(inFlightDay)).describedAs("held while its pass is in flight").isEmpty()
+        assertThat(seen(pendingDay)).describedAs("held while its journal event is in the outbox")
+            .isNotEmpty().allSatisfy { assertThat(it.outcome).isEqualTo(CloseOutcome.REFUSED) }
+        assertThat(seen(inFlightDay)).describedAs("held while its pass is in flight")
+            .isNotEmpty().allSatisfy { assertThat(it.outcome).isEqualTo(CloseOutcome.REFUSED) }
 
         jdbc { c ->
             c.createStatement().use {
                 it.executeUpdate("UPDATE treasury_outbox SET status = 'SENT' WHERE event_id = '$event'")
             }
         }
-        awaitReport(pendingDay)
+        awaitReport(pendingDay, CloseOutcome.RAN)
         assertThat(seen(pendingDay)).anySatisfy { assertThat(it.outcome).isEqualTo(CloseOutcome.RAN) }
-        assertThat(seen(inFlightDay)).isEmpty()
+        assertThat(seen(inFlightDay)).isNotEmpty().allSatisfy { assertThat(it.outcome).isEqualTo(CloseOutcome.REFUSED) }
     }
 
     @Inject
@@ -167,9 +185,9 @@ class TreasuryCloseParticipationSchedulerCronIT {
         .filter { it.first == TreasuryCloseJobs.PARTICIPANT && it.second.businessDate == day }
         .map { it.second }
 
-    private fun awaitReport(day: LocalDate) {
+    private fun awaitReport(day: LocalDate, outcome: CloseOutcome? = null) {
         val deadline = System.nanoTime() + WAIT_NANOS
-        while (seen(day).isEmpty()) {
+        while (seen(day).none { outcome == null || it.outcome == outcome }) {
             check(System.nanoTime() < deadline) { "no report for $day within the wait" }
             Thread.sleep(POLL_MILLIS)
         }

@@ -21,7 +21,9 @@
 #
 # Pentest atestace vydaná CI lanou (`by: ci-*`) NESÍ navíc `ops: N` — počet
 # skutečně otestovaných operací z běhu (Selected minus auth-blocked; lane ho od
-# #5769 zapisuje strojově do fuzz-reports/<svc>-ops*.json). Pod prahem
+# #5769 zapisuje strojově do fuzz-reports/<svc>-ops*.json). Gate ověřuje tento
+# počet proti artefaktu přesného běhu; důkaz smí být nejvýše 21 dní starý.
+# Pod prahem
 # (5 operací) patří místo toho `not_fuzzable: "<důvod>"` — jinak zelená lane,
 # která otestovala jednu operaci, obnovuje atestaci donekonečna, aniž by
 # cokoli testovala (#5769). Gate `readiness-attestation-format` to vynucuje.
@@ -43,10 +45,6 @@
 
 ledger:
   restore_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, ref: docs/bcp/dr-test-log.md }
-  pentest:       { date: 2026-10-03, ttl_days: 21, by: ci-schemathesis, ops: 30, ref: https://github.com/JiRaska/open-bank-oss/actions/runs/37097114298 }
-
-consent:
-  pentest:       { date: 2026-10-03, ttl_days: 21, by: ci-schemathesis, ops: 14, ref: https://github.com/JiRaska/open-bank-oss/actions/runs/37097114298 }
 
 # --- zbytek zatím prázdný: žádná další M-dimenze není dosvědčena (a to je pravda) ---
 # Pozn. k `by:` u automatizovaných běhů — atestant je scheduled CI lane, ne člověk:

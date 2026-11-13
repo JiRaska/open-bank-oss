@@ -85,6 +85,7 @@ PENDING znamená, že screening řekl REVIEW nebo byla sanctions-service nedostu
 ### Chybí ČNB fixing pro dnešek
 
 1. Proběhl cron 14:40 Europe/Prague? `kubectl logs -l app=openbank-fx-service | grep "ČNB fixing"`.
+   Každý pod navíc spustí stejnou ingestaci zhruba 30 s po startu (`openbank.cnb.initial-delay`, opakuje se každých `openbank.cnb.startup-every`, výchozí 24h; v testech `"off"`). Ingestace je idempotentní pro pracovní den, takže pod nastartovaný po 14:40 si fixing dne stáhne a zaznamená úspěch workflow, místo aby až do cronu dalšího dne hlásil `openbank_workflow_success_recorded == 0`.
 2. Backfill ručně (idempotentní): `POST /api/v1/fx/cnb/ingest?date=YYYY-MM-DD` s `ROLE_OPERATOR`.
 3. Ověření: `GET /api/v1/fx/cnb/rates/EUR`.
 

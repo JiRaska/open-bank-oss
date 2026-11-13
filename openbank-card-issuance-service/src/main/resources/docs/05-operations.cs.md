@@ -92,7 +92,7 @@ To je záměr: `Idempotency-Key` se shodoval s existujícím `cards.idempotency_
 
 - Unit: `CardTest` (stavový automat), `CardServiceTest`, `CardOutboxDispatchTest`.
 - Integrační: `CardOutboxDispatchIT` s `PostgresRedisTestResource` — izolovaný PostgreSQL + Valkey na test JVM přes Testcontainers (CI infra sweep #578); Kafka je in-memory. Scheduler je pod `%test` vypnutý, takže IT řídí `dispatchScheduledBatch()` explicitně.
-- Governance: `HibernateSequenceGuardTest` hlídá konvenci `<table>_seq`.
+- Governance: CI gate `hibernate-sequence-guard` hlídá konvenci `<table>_seq`.
 - Pokrytí je ratchet-only (kover); card-issuance **není** money-path, takže vyšší money-path floor neplatí.
 
 ## Deploy / release

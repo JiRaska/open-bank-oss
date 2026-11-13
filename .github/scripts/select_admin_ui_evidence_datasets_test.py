@@ -68,6 +68,60 @@ class DatasetSelectionTests(unittest.TestCase):
         self.assertIn("dataset: ${{ fromJSON(needs.authorize-source.outputs.datasets) }}", source)
         self.assertIn('if [ -n "$ROLLBACK_SNAPSHOT" ] && [ "$SELECTED_DATASET" = all ]; then', source)
 
+    def test_test_intelligence_contracts_carry_broker_verdicts(self):
+        # Without quality-report.json every published contract row was `unknown` with no
+        # reason (132/132) while the Broker held 102 passed + 30 pending-verification.
+        source = WORKFLOW.read_text(encoding="utf-8")
+        branch = source.split("test-intelligence)", 1)[1].split(";;", 1)[0]
+        quality = branch.index("scripts/collect-quality-report.mjs")
+        self.assertLess(quality, branch.index("collect-admin-ui-test-evidence.py"))
+        for name in ("PACT_BROKER_URL", "PACT_BROKER_USERNAME", "PACT_BROKER_PASSWORD"):
+            self.assertIn(f"{name}: ${{{{ matrix.dataset == 'test-intelligence' && ", source)
+        # Pact provenance is git history; a depth-1 clone stamps HEAD on every Pact.
+        self.assertIn("fetch-depth: ${{ matrix.dataset == 'test-intelligence' && '0' || '1' }}", source)
+
+
+class SupersededSourceSkipTest(unittest.TestCase):
+    """A workflow_run for a commit main has moved past must not start a collector."""
+
+    def test_superseded_workflow_run_selects_no_dataset_and_skips_publish(self) -> None:
+        import yaml
+
+        workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / "workflows" / "admin-ui-evidence.yml").read_text())
+        jobs = workflow["jobs"]
+        resolve = next(step["run"] for step in jobs["authorize-source"]["steps"] if step.get("id") == "source")
+        check = resolve.index("git ls-remote --exit-code origin refs/heads/main")
+        self.assertLess(resolve.index('if [ "$EVENT_NAME" = workflow_run ]'), check)
+        self.assertLess(check, resolve.index("datasets='[]'"))
+        self.assertLess(resolve.index("datasets='[]'"), resolve.index('echo "datasets=$datasets"'))
+        # An empty matrix is a workflow error, so the publish job itself must be skipped.
+        self.assertIn("needs.authorize-source.outputs.datasets != '[]'", jobs["publish"]["if"])
+
+    def _run_guard(self, event: str, sha: str, main: str) -> str:
+        """Execute the step's real superseded-source guard with `git` stubbed; return datasets."""
+        import os
+        import subprocess
+        import tempfile
+        import yaml
+
+        workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / "workflows" / "admin-ui-evidence.yml").read_text())
+        run = next(step["run"] for step in workflow["jobs"]["authorize-source"]["steps"] if step.get("id") == "source")
+        guard = run[run.index('if [ "$EVENT_NAME" = workflow_run ]'):]
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp, "git")
+            stub.write_text(f"#!/bin/sh\nprintf '%s\\trefs/heads/main\\n' {main}\n")
+            stub.chmod(0o755)
+            out = Path(tmp, "out")
+            script = f"set -euo pipefail\nsha={sha}\ndatasets='[\"pact\"]'\n{guard}"
+            env = {**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}", "EVENT_NAME": event, "GITHUB_OUTPUT": str(out)}
+            subprocess.run(["bash", "-c", script], check=True, env=env, capture_output=True, text=True)
+            return dict(line.split("=", 1) for line in out.read_text().splitlines())["datasets"]
+
+    def test_guard_skips_a_superseded_source_and_keeps_a_current_one(self) -> None:
+        self.assertEqual("[]", self._run_guard("workflow_run", "a" * 40, "b" * 40))
+        self.assertEqual('["pact"]', self._run_guard("workflow_run", "a" * 40, "a" * 40))
+        self.assertEqual('["pact"]', self._run_guard("schedule", "a" * 40, "b" * 40))
+
 
 if __name__ == "__main__":
     unittest.main()

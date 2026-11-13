@@ -84,7 +84,7 @@ def verify(root: Path, base: str, head: str,
     # Keep the transition check for replaced pins, then separately verify every newly added
     # pin. The existing parser pairs additions with a removed pin for the same image; by itself
     # it misses a stale second pin added beside an otherwise fresh replacement.
-    transition_failures = verify_pins(patch, check_fresh)
+    transition_failures = verify_pins(patch, check_fresh, require_digest=True)
     failures = [] if transition_failures == ["no image pins found in the GitOps diff"] else [
         f"stale or unverifiable GitOps image pin: {pin}" for pin in transition_failures
     ]

@@ -7,6 +7,7 @@ import com.openbank.engagement.infrastructure.persistence.repository.EngagementO
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepositoryV2
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.outbox.OutboxRepositoryV2ConformanceIT
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
@@ -28,7 +29,7 @@ import java.util.UUID
     value = EngagementOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
     restrictToAnnotatedClass = true,
 )
-@QuarkusTestResource(EngagementPostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class EngagementOutboxRepositoryV2IT : OutboxRepositoryV2ConformanceIT() {
 
     // The kit drives OutboxDispatch itself; the scheduled dispatcher would race it for seeded rows.

@@ -180,13 +180,12 @@ class BusinessSigningService(
     // ---------------------------------------------------------------- creation
 
     suspend fun createPayment(cmd: PaymentApprovalCommand): ApprovalRequest {
-        // Natural-key idempotency: the initiator's single-use SCA challenge. A retry of a request
-        // that was already created replays it; the same challenge for anything else is refused.
+        val payload = codec.canonical(cmd.payload)
+        // A consumed challenge can replay only its original frozen instruction.
         repository.findBySignatureChallenge(cmd.initiatorScaChallengeId)?.let { existing ->
-            if (existing.entityPartyId == cmd.entityPartyId &&
-                existing.initiatorPartyId == cmd.initiatorPartyId &&
-                existing.kind == cmd.kind
-            ) {
+            val sameParties = existing.entityPartyId == cmd.entityPartyId &&
+                existing.initiatorPartyId == cmd.initiatorPartyId
+            if (sameParties && existing.kind == cmd.kind && existing.payload == payload) {
                 return existing
             }
             throw refused(CONFLICT, "SCA_CHALLENGE_USED", "that SCA challenge has already authorised another request")
@@ -204,7 +203,6 @@ class BusinessSigningService(
             )
             ScaVerdict.UNAVAILABLE -> throw refused(UNAVAILABLE, "SCA_UNAVAILABLE", "sca-service could not be reached")
         }
-        val payload = codec.canonical(cmd.payload)
         val summary = codec.canonical(
             linkedMapOf<String, Any?>(
                 "amount" to cmd.amount?.amount?.toPlainString(),
@@ -366,7 +364,13 @@ class BusinessSigningService(
     /** Everything waiting for THIS human's signature, across every entity they can sign for now. */
     suspend fun pendingFor(humanPartyId: UUID): PendingForHuman {
         val now = clock.instant()
-        val entities = mandates.actingFor(humanPartyId)
+        // An unreadable register is a 503 like every other mandate read here (liveMandates), never
+        // an unmapped 500 — and never an empty list, which would read as "nothing waits for you".
+        val entities = try {
+            mandates.actingFor(humanPartyId)
+        } catch (e: MandateDirectoryUnavailableException) {
+            throw refused(UNAVAILABLE, "MANDATES_UNAVAILABLE", e.message ?: "party-service could not be reached")
+        }
         if (entities.isEmpty()) return PendingForHuman(emptyList(), emptyList())
         val names = entities.associate { it.entityPartyId to it.name }
         val items = repository.listPending(names.keys, LIST_LIMIT)

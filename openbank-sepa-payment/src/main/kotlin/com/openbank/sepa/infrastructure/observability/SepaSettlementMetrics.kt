@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.infrastructure.observability
 
+import com.openbank.clients.transaction.UnsettledOutcome
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.Startup
@@ -19,7 +20,7 @@ class SepaSettlementMetrics {
     @Inject
     lateinit var registryInstance: Instance<MeterRegistry>
 
-    private var counters: Map<Outcome, Counter> = emptyMap()
+    private var counters: Map<UnsettledOutcome, Counter> = emptyMap()
 
     @PostConstruct
     fun register() {
@@ -28,26 +29,16 @@ class SepaSettlementMetrics {
 
     /** Zero means no observed unsettled attempts since process start, not proof of successful bookings. */
     fun bindTo(registry: MeterRegistry) {
-        counters = Outcome.entries.associateWith { outcome ->
+        counters = UnsettledOutcome.entries.associateWith { outcome ->
             registry.counter(METRIC, "rail", "SEPA", "outcome", outcome.label)
         }
     }
 
-    fun unsettled(outcome: Outcome) {
+    fun unsettled(outcome: UnsettledOutcome) {
         counters[outcome]?.increment()
     }
 
-    enum class Outcome(val label: String) {
-        MISMATCH("mismatch"),
-
-        // A FAILED response, including a replay; this label does not prove the request was replayed.
-        FAILED_REPLAY("failed-replay"),
-        CONFLICT("conflict"),
-        UNEXPECTED_STATUS("unexpected-status"),
-        TRANSPORT_ERROR("transport-error"),
-    }
-
     companion object {
-        const val METRIC = "openbank.payment.unsettled"
+        const val METRIC = UnsettledOutcome.METRIC
     }
 }

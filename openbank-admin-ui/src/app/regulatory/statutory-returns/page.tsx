@@ -1,0 +1,107 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+'use client'
+
+import Link from 'next/link'
+import { useEffect, useState } from 'react'
+import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { ceuFilings, loadStatutoryReturns, type ReturnBreach, type ReturnCapability, type StatutoryReturn } from '@/components/regulatory/statutoryReturns'
+
+type Snapshot = { capability: ReturnCapability; returns: StatutoryReturn[]; breaches: ReturnBreach[] | null }
+type State = { status: 'loading' } | { status: 'error'; kind: UnavailableKind } | { status: 'ready'; data: Snapshot }
+
+export default function StatutoryReturnsPage() {
+  const { t, language } = useLanguage()
+  const [state, setState] = useState<State>({ status: 'loading' })
+
+  useEffect(() => {
+    let active = true
+    loadStatutoryReturns().then(result => {
+      if (active) setState(result.ok ? { status: 'ready', data: result.data } : { status: 'error', kind: result.kind })
+    })
+    return () => { active = false }
+  }, [])
+
+  return (
+    <div>
+      <PageHeader
+        title={t('Statutární výkazy', 'Statutory returns')}
+        subtitle={t('Stav sestavení a zákonných termínů podle tax-reporting-service', 'Build status and statutory deadlines from tax-reporting-service')}
+        breadcrumb={<Link href="/regulatory">{t('Regulatorní výkaznictví', 'Regulatory reporting')}</Link>}
+      />
+      {state.status === 'loading' && <p role="status">{t('Načítání výkazů…', 'Loading returns…')}</p>}
+      {state.status === 'error' && <DataUnavailable kind={state.kind} service="Tax-reporting-service" lang={language} />}
+      {state.status === 'ready' && <>
+        <section aria-labelledby="capability-heading" className="card" style={{ padding: 20, marginBottom: 16 }}>
+          <h2 id="capability-heading">{t('Možnosti systému', 'System capabilities')}</h2>
+          <p>{t('Datový zdroj', 'Data source')}: {state.data.capability.dataSourceAvailable ? t('dostupný', 'available') : t('nedostupný', 'unavailable')}</p>
+          <p>{t('Regulatorní soubor', 'Regulatory file')}: {state.data.capability.wireFormatAvailable ? t('dostupný', 'available') : t('nedostupný', 'unavailable')}</p>
+          <p>{state.data.capability.note}</p>
+          <p>{t('Schválení a odeslání se v této obrazovce neprovádí.', 'Approval and submission are not performed on this screen.')}</p>
+        </section>
+        <section aria-labelledby="breaches-heading" className="card" style={{ padding: 20, marginBottom: 16 }}>
+          <h2 id="breaches-heading">{t('Překročené termíny', 'Missed deadlines')}</h2>
+          {state.data.breaches === null ? <p role="status">{t('Kontrolu termínů nelze vyhodnotit: služba ji odmítla spočítat (např. není nastaven začátek reportingu). Nejde o potvrzení, že žádný termín nebyl překročen.', 'Deadline status cannot be evaluated: the service refused to compute it (for example, no reporting start is configured). This is not a confirmation that no deadline was missed.')}</p> :
+            state.data.breaches.length === 0 ? <p>{t('API nehlásí žádný překročený termín.', 'The API reports no missed deadline.')}</p> :
+            <ul>{state.data.breaches.map(item =>
+              <li key={`${item.catalogueId}/${item.returnCode}/${item.entityId}/${item.period}`}>
+                {item.returnCode} · {item.entityId} · {item.period} · {item.kind} · {t('termín', 'due')} {item.dueDate}
+              </li>)}</ul>}
+        </section>
+        <CeuSection returns={state.data.returns} />
+        <section aria-labelledby="returns-heading" className="card" style={{ padding: 20 }}>
+          <h2 id="returns-heading">{t('Revize výkazů', 'Return revisions')}</h2>
+          {state.data.returns.length === 0 ? <p>{t('API zatím nevrátilo žádnou sestavenou revizi.', 'The API has not returned any built revision yet.')}</p> :
+            <ul>{state.data.returns.map(item =>
+              <li key={item.id}>
+                {item.returnCode} · {item.entityId} · {item.period} · {t('revize', 'revision')} {item.revision} · {item.status}
+                {item.submissionReference ? ` · ${t('reference', 'reference')} ${item.submissionReference}` : ''}
+              </li>)}</ul>}
+        </section>
+      </>}
+    </div>
+  )
+}
+
+/** ADR-0367 pilot: the CEÚ daily change overview, read-only. Approval, SDAT delivery and ČNB's answer are recorded in the backend. */
+function CeuSection({ returns }: { returns: StatutoryReturn[] }) {
+  const { t } = useLanguage()
+  const filings = ceuFilings(returns)
+  const show = (value: number | null) => (value === null ? t('neuvedeno', 'not reported') : String(value))
+  return (
+    <section aria-labelledby="ceu-heading" className="card" style={{ padding: 20, marginBottom: 16 }}>
+      <h2 id="ceu-heading">{t('CEÚ – denní přehled změn (ČNB)', 'CEÚ – daily change overview (ČNB)')}</h2>
+      <p>{t('Každý pracovní den do 12:00 přehled změn účtů za období od předchozího pracovního dne. Syntetičtí zákazníci jsou vždy vyloučeni a jejich počet je uveden.',
+        'Every working day by 12:00, the account changes since the previous working day. Synthetic customers are always excluded and their count is shown.')}</p>
+      {filings.length === 0 ? <p>{t('API zatím nevrátilo žádný přehled CEÚ.', 'The API has not returned any CEÚ overview yet.')}</p> :
+        <table className="table">
+          <thead>
+            <tr>
+              <th>{t('Období do', 'Window end')}</th>
+              <th>{t('Stav', 'Status')}</th>
+              <th>{t('Změny', 'Changes')}</th>
+              <th>{t('Vyloučené syntetické účty / vazby', 'Excluded synthetic accounts / ties')}</th>
+              <th>{t('Reference SDAT', 'SDAT reference')}</th>
+              <th>{t('Odpověď ČNB', 'ČNB answer')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filings.map(item => (
+              <tr key={item.id}>
+                <td>{item.window}{item.initialLoad ? ` · ${t('úvodní plné načtení', 'initial full load')}` : ''}</td>
+                <td>{item.status} · {t('revize', 'revision')} {item.revision}</td>
+                <td>{show(item.changes)}</td>
+                <td>{show(item.syntheticAccountsDropped)} / {show(item.syntheticRelationsDropped)}</td>
+                <td>{item.submissionReference ?? '—'}</td>
+                <td>{item.acknowledgement ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>}
+    </section>
+  )
+}

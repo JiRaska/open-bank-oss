@@ -30,7 +30,7 @@
 #                                  proxy replica; one connection lands on one replica.
 #   controller HSTS / nosniff / hide-headers
 #                               -> ResponseHeaderModifier below
-#   openbank.io/ungated-machine-callers (ADR-0234) is an Ingress-policy declaration; it
+#   open-bank.tech/ungated-machine-callers (ADR-0234) is an Ingress-policy declaration; it
 #   moves to the HTTPRoute form when Phase 2 rewrites that Kyverno policy for routes.
 ---
 apiVersion: gateway.networking.k8s.io/v1beta1
@@ -58,7 +58,7 @@ metadata:
     # every HTTPRoute in `observability` must be gated by an extAuth SecurityPolicy or declare
     # why it is not (Kyverno require-gated-or-declared-tool-httproute-cel). The OIDC check on
     # the OTLP receiver and the per-client rate limit below are this host's controls.
-    openbank.io/ungated-machine-callers: >-
+    open-bank.tech/ungated-machine-callers: >-
       Mobile OTLP/HTTP export from SDKs in the field; no browser session
       exists to authenticate against.
 spec:

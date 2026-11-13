@@ -8,11 +8,9 @@ import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.slot
 import io.mockk.verify
 import jakarta.enterprise.inject.Instance
 import jakarta.ws.rs.container.ContainerRequestContext
-import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.UriInfo
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -30,6 +28,9 @@ class HoneytokenFilterTest {
         }
         return HoneytokenFilter(Optional.ofNullable(config)).apply { registryInstance = inst }
     }
+
+    private fun hits(reg: MeterRegistry, path: String): Double =
+        reg.find(SecurityTelemetry.HONEYTOKEN_HITS).tags("path", path).counter()?.count() ?: 0.0
 
     private fun request(path: String): ContainerRequestContext {
         val uriInfo = mockk<UriInfo>()
@@ -59,55 +60,58 @@ class HoneytokenFilterTest {
     }
 
     @Test
-    fun `a honey path hit aborts with 404 and counts the configured path`() {
+    fun `a honey path hit counts the configured path and never answers itself`() {
         val reg = SimpleMeterRegistry()
         val ctx = request("api/v1/internal/debug")
-        val aborted = slot<Response>()
 
         filter("/api/v1/internal/debug,/api/v1/admin/export", reg).filter(ctx)
 
-        verify { ctx.abortWith(capture(aborted)) }
-        assertThat(aborted.captured.status).isEqualTo(404)
-        val counter = reg.find(SecurityTelemetry.HONEYTOKEN_HITS)
-            .tags("path", "api/v1/internal/debug").counter()
-        assertThat(counter).isNotNull
-        assertThat(counter!!.count()).isEqualTo(1.0)
+        // Not aborting is the point: the platform's own routing 404 answers, so the prober
+        // cannot tell a honey path from any other missing route.
+        verify(exactly = 0) { ctx.abortWith(any()) }
+        assertThat(hits(reg, "api/v1/internal/debug")).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `runs before resource matching, or a honey path is never seen`() {
+        assertThat(HoneytokenFilter::class.java.isAnnotationPresent(jakarta.ws.rs.container.PreMatching::class.java))
+            .isTrue()
     }
 
     @Test
     fun `leading slash in config or request is insignificant`() {
-        val ctx = request("api/v1/admin/export")
+        val reg = SimpleMeterRegistry()
 
-        filter("api/v1/admin/export").filter(ctx)
+        filter("api/v1/admin/export", reg).filter(request("/api/v1/admin/export"))
 
-        verify { ctx.abortWith(any()) }
+        assertThat(hits(reg, "api/v1/admin/export")).isEqualTo(1.0)
     }
 
     @Test
-    fun `a normal business path passes through untouched`() {
-        val ctx = request("api/v1/payments")
+    fun `a normal business path is not counted`() {
+        val reg = SimpleMeterRegistry()
 
-        filter("/api/v1/internal/debug").filter(ctx)
+        filter("/api/v1/internal/debug", reg).filter(request("api/v1/payments"))
 
-        verify(exactly = 0) { ctx.abortWith(any()) }
+        assertThat(reg.find(SecurityTelemetry.HONEYTOKEN_HITS).counters()).isEmpty()
     }
 
     @Test
     fun `a prefix of a honey path is not a hit`() {
-        val ctx = request("api/v1/internal")
+        val reg = SimpleMeterRegistry()
 
-        filter("/api/v1/internal/debug").filter(ctx)
+        filter("/api/v1/internal/debug", reg).filter(request("api/v1/internal"))
 
-        verify(exactly = 0) { ctx.abortWith(any()) }
+        assertThat(reg.find(SecurityTelemetry.HONEYTOKEN_HITS).counters()).isEmpty()
     }
 
     @Test
-    fun `no micrometer registry still aborts with 404`() {
+    fun `no micrometer registry is not an error`() {
         val ctx = request("api/v1/internal/debug")
 
         filter("/api/v1/internal/debug", reg = null).filter(ctx)
 
-        verify { ctx.abortWith(any()) }
+        verify(exactly = 0) { ctx.abortWith(any()) }
     }
 
     @Test

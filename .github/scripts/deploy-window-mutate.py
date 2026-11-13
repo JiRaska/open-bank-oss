@@ -53,7 +53,7 @@ def require_train_policy(repo: str) -> None:
         raise ValueError(f"merge train does not own merging: {reason}")
 
 
-def selected_pr(pr, repo: str, number: int, head: str, base: str) -> tuple[str, str]:
+def selected_pr(pr, repo: str, number: int, head: str) -> tuple[str, str]:
     if not isinstance(pr, dict) or pr.get("number") != number:
         raise ValueError("selected deployment response is missing or malformed")
     if pr.get("state") != "open" or pr.get("draft") is not False:
@@ -67,7 +67,9 @@ def selected_pr(pr, repo: str, number: int, head: str, base: str) -> tuple[str, 
     source, target = pr.get("head"), pr.get("base")
     if not isinstance(source, dict) or not isinstance(target, dict):
         raise ValueError("selected deploy PR head/base are unreadable")
-    if source.get("sha") != head or target.get("sha") != base or target.get("ref") != "main":
+    # REST base.sha is the PR creation base, not the live main checked separately.
+    if (source.get("sha") != head or target.get("ref") != "main"
+            or not SHA_RE.fullmatch(str(target.get("sha", "")))):
         raise ValueError("selected deploy PR head or base changed; retry selection")
     if any(not isinstance(ref.get("repo"), dict) or ref["repo"].get("full_name") != repo
            for ref in (source, target)):
@@ -109,20 +111,23 @@ def reselect(number: int, head: str, base: str) -> bool:
         prs = json.loads((root / "prs.json").read_text(encoding="utf-8"))
         commits = json.loads((root / "commits.json").read_text(encoding="utf-8"))
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
-        decision_args = (int(time.time()), window.last_deploy_from_commits(commits),
+        decision_args = (int(time.time()), window.last_deploy_by_kind(commits),
                          int(os.getenv("DEPLOY_WINDOW_SECONDS", "1800")),
                          window.manual_deploy_head(event))
-        choice = window.flush(prs, *decision_args)
-        if choice is None and any(p.get("repair_priority") and p.get("state", "open") == "open"
-                                  for p in prs):
+        # The flush offers one candidate per deploy kind and the workflow falls through a
+        # refused kind, so the arm is valid iff it is STILL one of the same candidates.
+        def offered(candidates: list[dict]) -> bool:
+            return any(c["number"] == number and c.get("head_sha") == head for c in candidates)
+
+        choices = window.flush_candidates(prs, *decision_args)
+        if not choices and any(p.get("repair_priority") and p.get("state", "open") == "open"
+                               for p in prs):
             # A newly marked repair is an expected successful deferral, not a failure.
             # Prove it is the only selection difference; this counterfactual never arms.
             unprioritized = [{**p, "repair_priority": False} for p in prs]
-            without_repair = window.flush(unprioritized, *decision_args)
-            if (without_repair and without_repair["number"] == number
-                    and without_repair.get("head_sha") == head):
+            if offered(window.flush_candidates(unprioritized, *decision_args)):
                 return False
-        if not choice or choice["number"] != number or choice.get("head_sha") != head:
+        if not offered(choices):
             raise ValueError("deploy selection deferred or changed (window, repair, armed PR or head)")
         return True
 
@@ -136,14 +141,14 @@ def main(args: argparse.Namespace) -> None:
         raise ValueError("main changed after selection; retry next flush")
     require_train_policy(repo)
     node_id, branch = selected_pr(gh("api", f"repos/{repo}/pulls/{args.number}"), repo,
-                                  args.number, args.selected_head, args.selected_main)
+                                  args.number, args.selected_head)
     verify_source(repo, args.number, branch, args.selected_main)
     require_train_policy(repo)
     should_arm = reselect(args.number, args.selected_head, args.selected_main)
     if live_main(repo) != args.selected_main:
         raise ValueError("main changed before arming; retry next flush")
     latest = selected_pr(gh("api", f"repos/{repo}/pulls/{args.number}"), repo,
-                         args.number, args.selected_head, args.selected_main)
+                         args.number, args.selected_head)
     if latest != (node_id, branch):
         raise ValueError("selected deploy PR identity changed before arming")
     if not should_arm:

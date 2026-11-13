@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.7.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.6.0...product-catalog-v1.7.0) (2026-11-12)
+
+
+### Features
+
+* **product-catalog:** bind fincrime replay reviews to stable actors ([#15696](https://github.com/JiRaska/open-bank-oss/issues/15696)) ([f821367](https://github.com/JiRaska/open-bank-oss/commit/f82136778ac2c84e32d1b25bfbc703b941edaa55))
+
+## [1.6.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.5.3...product-catalog-v1.6.0) (2026-11-08)
+
+
+### Features
+
+* **infra:** provision OpenBao TLS listener and Transit key for product-IR signing ([#15117](https://github.com/JiRaska/open-bank-oss/issues/15117)) ([35f7501](https://github.com/JiRaska/open-bank-oss/commit/35f7501ca1e47759e8a2df550dafeec1bdec5632))
+
+## [1.5.3](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.5.2...product-catalog-v1.5.3) (2026-11-03)
+
+
+### Bug Fixes
+
+* **product-catalog:** register pack approval policy for native reflection ([#14587](https://github.com/JiRaska/open-bank-oss/issues/14587)) ([e0d8600](https://github.com/JiRaska/open-bank-oss/commit/e0d8600e7e3bba6a02bd883467ef5a79d90bd092))
+
+## [1.5.2](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.5.1...product-catalog-v1.5.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* **product-catalog:** describe v1 disabled-route errors ([#14488](https://github.com/JiRaska/open-bank-oss/issues/14488)) ([f83dff3](https://github.com/JiRaska/open-bank-oss/commit/f83dff3d56eee9e0e10b28d90605a83330390654))
+
 ## [1.5.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.5.0...product-catalog-v1.5.1) (2026-10-30)
 
 

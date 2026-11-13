@@ -168,3 +168,30 @@ Výmaz nevyřešeného záměru sleduje životní cyklus splátky a zachová pou
 `unreconciled` dotčených pracovních/požadovaných dnů, kterou úspěšný běh nesmaže. Dispozici řeší
 existující řízené dorovnání či waiver v ledgeru. Nevzniká zákaznický tombstone ani nová retenční lhůta.
 Rollback zachová tabulky V28 i čekající důkazy; návrat kódu nedokazuje, že vzdálený zápis nenastal.
+
+## Zdrojové důkazy denní uzávěrky
+
+Dokončené akruály, provisioning i rozpracované průchody zůstávají podkladem i po vypnutí scheduleru.
+Chybějící, běžící či nedoručená práce opravných položek hlásí stabilní REFUSED a odvolá dřívější
+kladný výsledek. V30 ukládá skutečné potvrzení doručení atomicky se SENT, odděleně od dočasného
+outboxu. Datumový index podporuje ohraničenou měsíční kontrolu. U existující databáze začíná pokrytí
+následující pražský kalendářní den; dříve smazaná doručení jsou neznámá a nemohou knihu kvalifikovat.
+Nová databáze pokrývá skutečnosti zapsané od svého vzniku. Historie vyžaduje schválený přechod.
+Rollback zachovává potvrzení, pokrytí i účetní historii. Hold trvá do vyhodnocení celého živého
+měsíce a ceny čtení při skutečném objemu dat.
+
+
+Pozorované povinnosti úloh se ukládají odděleně od dokladů skutečných běhů. Vypnutí nebo přesun scheduleru po odmítnutí chybějící práce povinnost neodstraní, ani po restartu. Vyřeší ji skutečně dokončený běh nebo doložená výjimka v ledgeru. Pozorování nevyrábí dokončené běhy ani zpětně neodvozuje nikdy nepozorované plány. Rollback zachová tabulku povinností i běhů.
+
+## Údaje o životním cyklu úvěru s datem účinnosti (#9890)
+
+Lending publikuje událost `loan.exposure_fact` ve verzi 1 do stávajícího tématu událostí Lending.
+Outbox ukládá zaplacení splátky, změnu splátkového kalendáře a konečné splacení, odpis či storno
+ve stejné lokální transakci jako zdrojovou změnu. Událost o čerpání obsahuje původní čas zaúčtování
+a samostatný čas potvrzení převodu prostředků. Lending ji publikuje po potvrzení obou zápisů do
+hlavní knihy ve stejné outboxové transakci jako původní událost o čerpání. Zaplacená splátka obsahuje
+uhrazenou jistinu a úrok podle kalendáře a zbývající jistinu podle kalendáře. Oznámení o ukončení
+a zesplatnění mohou předcházet konečnému splacení.
+
+AnaCredit ukládá tyto údaje odděleně. Pro kontrolu úvěrů vzniklých dříve jsou potřeba samostatně
+ověřené historické podklady. Chybějící vstupy pro výkaz eviduje #9890.

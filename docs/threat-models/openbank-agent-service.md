@@ -139,8 +139,11 @@ browser-provider hiding and the unchanged client-credentials fallback.
   protected by the per-event hash chain + externally-signed anchors (ADR-0086 / ADR-0031 D5, #2383).
 - **T-T2 — policy bypass.** The in-process charter allow-list (ADR-0080) denies out-of-charter
   capabilities *before* the PDP, so a compromised/unreachable OPA sidecar cannot widen privilege
-  (fail-closed; `block` mode keeps blocking). PDP connectivity errors degrade to advisory only for
-  *non-charter-denied* tools, logged at WARN.
+  (fail-closed; `block` mode keeps blocking). In `block` mode a PDP connectivity error is now
+  DENIED for every tool (#15758; previously it degraded to advisory with a WARN), reported as its
+  own `pdp_unavailable_denied` outcome on `openbank.agent.policy.gate.decisions`. In `advisory`
+  mode the call still proceeds. **Residual:** an OPA outage halts all agent tool calls in `block`
+  mode (availability traded for integrity).
 
 ### Repudiation
 
@@ -159,12 +162,13 @@ browser-provider hiding and the unchanged client-credentials fallback.
   producer's `eventId` is the row's `entry_id`, so an at-least-once redelivery de-duplicates rather
   than double-chaining (`AgentAuditRedeliveryIT`).
   **Residual, stated rather than implied:**
-  - **The transport is off by default.** `AGENT_AUDIT_KAFKA_ENABLED` defaults to `false` (#6209's
-    deliberate rollout choice), and the gitops `group.id`/`auto.offset.reset` override that
-    audit-service needs is deliberately not added yet. Until both land, AI provenance is durable in
-    agent-service's *local* outbox and has not reached the tamper-evident trail — the outbox grows
-    unbounded and no `audit_entries` row exists. This is a rollout state, not a design gap, but it
-    is the state today and no green test contradicts it.
+  - **The transport is enabled by deployment, not by default.** The baked defaults of
+    `AGENT_AUDIT_KAFKA_ENABLED` (agent-service) and `AUDIT_AGENT_AUDIT_KAFKA_ENABLED`
+    (audit-service) remain `false`, which keeps local dev and tests fail-closed. The GitOps
+    manifests set both to `true`, and audit-service's msg-override ConfigMap supplies the
+    consumer's `group.id`/`auto.offset.reset` (#14200). An environment deployed without those
+    overrides keeps provenance in agent-service's *local* outbox only, where it never reaches the
+    tamper-evident trail.
   - **`aggregate_id` degrades to the `unknown` sentinel.** The envelope spells the acted-on
     resource `aggregateId`; `AuditConsumer.inferAggregateId` derives that column from a fixed chain
     of business id field names and cannot see it. The row is therefore attributable to the actor
@@ -265,6 +269,9 @@ browser-provider hiding and the unchanged client-credentials fallback.
   yet — that is a separate, later decision (registry entry + ADR-0148 evals), not this change.
 
 ## 4. Change log
+
+- **2026-11-11 (#15758 item 5):** `AgentPolicyGate` fails closed when the policy decision point errors in
+  `block` mode (EU AI Act Art. 14). New outcome `pdp_unavailable_denied`. Rollback: revert the commit.
 
 - **2026-10-16 (#12883):** ADR-0031 phase 3 merge-evidence ingest. New inbound trust boundary (g):
   GitHub Actions `record-agent-merge` → `POST /api/v1/agent-merge-records` with a per-run

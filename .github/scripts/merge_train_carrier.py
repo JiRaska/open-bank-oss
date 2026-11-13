@@ -11,7 +11,7 @@ is a carrier. It never copies member text onto the carrier: that would turn a hu
 into bot text.
 
 TRUST. A PR is a carrier only when ALL hold, judged from the LIVE PR object (never the event):
-  * head branch matches `^train/[0-9]+-[0-9]+$` and lives in this repository (not a fork);
+  * head branch matches `^train/(strict-)?[0-9]+-[0-9]+$` and lives in this repository (not a fork);
   * author login is exactly the gitops App bot, `openbank-gitops-bot[bot]`, with type `Bot`
     (a user cannot register a login containing `[bot]`, so a human cannot be that author);
   * it carries the `merge-train` label.
@@ -33,7 +33,11 @@ BOT_ID = 305_862_397   # the App bot's numeric user id (read off carrier #13817'
 RECORD_CONTEXT = "merge-train/record"          # publish's record of the tree it pushed (merge-train.py)
 RECORD_RE = re.compile(r"^tree=([0-9a-f]{40})$")
 CARRIER_LABEL = "merge-train"
+# A train carrier (`train/<run>-<attempt>`, built by build/publish) or a strict carrier
+# (`train/strict-<run>-<attempt>`, built execution-free by settle, ADR-0343 amendment 2026-11-05): both
+# carry the same chain of the train's own member commits, so a body gate reads the members of either.
 TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
+STRICT_TRAIN_BRANCH_RE = re.compile(r"^train/strict-[0-9]+-[0-9]+$")
 OWN_MEMBER_RE = re.compile(r"^merge-train: member #([0-9]+)\n\nPR-Number: #\1\nPR-Head: ([0-9a-f]{40})\n$")
 OWN_REGEN_MSG = "merge-train: regenerate derived files\n"
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -56,6 +60,10 @@ RESOLVE_DEADLINE_S = 15.0
 NOT_EVALUATED_LINE = "GATE_VERDICT=NOT_EVALUATED"   # must match run-gates.py NOT_EVALUATED_LINE
 
 
+def is_carrier_branch(ref: str) -> bool:
+    return bool(TRAIN_BRANCH_RE.fullmatch(ref) or STRICT_TRAIN_BRANCH_RE.fullmatch(ref))
+
+
 def is_verified_carrier(pr: dict | None, repo: str) -> bool:
     if not isinstance(pr, dict):
         return False
@@ -63,7 +71,7 @@ def is_verified_carrier(pr: dict | None, repo: str) -> bool:
     head = pr.get("head") or {}
     labels = {(lb or {}).get("name") for lb in pr.get("labels") or []}
     return (user.get("login") == BOT_LOGIN and user.get("type") == "Bot" and user.get("id") == BOT_ID
-            and TRAIN_BRANCH_RE.fullmatch(head.get("ref") or "") is not None
+            and is_carrier_branch(head.get("ref") or "")
             and ((head.get("repo") or {}).get("full_name") == repo)
             and CARRIER_LABEL in labels)
 
@@ -249,7 +257,7 @@ def _resolve_uncached(base: str, env, cwd, fetch_pr, fetch_bodies, deadline: flo
     if pr is None:
         # Unreadable. An ordinary PR keeps its event body (today's fallback); a PR whose EVENT says it is a
         # train head cannot be told from a carrier without the live object, so nobody may judge it now.
-        if TRAIN_BRANCH_RE.fullmatch(env.get("GITHUB_HEAD_REF", "")):
+        if is_carrier_branch(env.get("GITHUB_HEAD_REF", "")):
             return Resolution("unavailable", reason=f"PR #{number} (head {env.get('GITHUB_HEAD_REF')}) unreadable")
         return Resolution("none")
     if not is_verified_carrier(pr, repo):

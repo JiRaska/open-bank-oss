@@ -99,7 +99,22 @@ def scan(root: pathlib.Path, now: dt.datetime) -> tuple[int, list[str]]:
     found: list[str] = []
     for p in files:
         found.extend(problems(p, root, now))
+    found.extend(disagreements(files, root))
     return len(files), found
+
+
+def disagreements(files: list[pathlib.Path], root: pathlib.Path) -> list[str]:
+    """Every host must send a reporter to the SAME contact and policy (#9880: the copies drifted)."""
+    out: list[str] = []
+    for key in ("contact", "policy"):
+        seen: dict[str, list[str]] = {}
+        for p in files:
+            vals = fields(p.read_text(encoding="utf-8", errors="replace")).get(key) or []
+            seen.setdefault(" | ".join(sorted(vals)), []).append(p.relative_to(root).as_posix())
+        if len(seen) > 1:
+            detail = "; ".join(f"{v or '(none)'} in {', '.join(fs)}" for v, fs in sorted(seen.items()))
+            out.append(f"security.txt copies disagree on {key.capitalize()}: {detail}")
+    return out
 
 
 def self_test() -> int:
@@ -133,7 +148,19 @@ def self_test() -> int:
             ok = (not want and not got) or (want and len(got) == len(want) and all(w in g for w, g in zip(want, got, strict=True)))
             print(f"  {'ok ' if ok else 'BAD'} {name}: {got}")
             bad += 0 if ok else 1
-    print(f"SUBJECTS={len(cases)}")
+        a, b = root / "agreeA" / ".well-known", root / "agreeB" / ".well-known"
+        a.mkdir(parents=True)
+        b.mkdir(parents=True)
+        (a / "security.txt").write_text(good)
+        (b / "security.txt").write_text(good)
+        same = disagreements([a / "security.txt", b / "security.txt"], root)
+        (b / "security.txt").write_text(good.replace("SECURITY.md", "docs/OTHER.md"))
+        drift = disagreements([a / "security.txt", b / "security.txt"], root)
+        for name, ok in (("copies agree", same == []),
+                         ("copies drift on Policy", len(drift) == 1 and "disagree on Policy" in drift[0])):
+            print(f"  {'ok ' if ok else 'BAD'} {name}")
+            bad += 0 if ok else 1
+    print(f"SUBJECTS={len(cases) + 2}")
     print("security.txt self-test: " + ("PASS" if not bad else f"FAIL ({bad})"))
     return 1 if bad else 0
 

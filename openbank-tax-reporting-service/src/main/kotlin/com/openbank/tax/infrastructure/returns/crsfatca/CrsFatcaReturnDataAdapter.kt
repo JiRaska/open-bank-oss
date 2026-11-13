@@ -4,6 +4,7 @@
 
 package com.openbank.tax.infrastructure.returns.crsfatca
 
+import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.tax.application.port.out.ReturnAssemblyData
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
 import com.openbank.tax.application.usecase.IncomeCreditService
@@ -25,11 +26,17 @@ interface CrsFatcaReportingSources {
     /** Page of ACTIVE accounts; [cursor] is the opaque value the previous page answered. */
     suspend fun activeAccounts(limit: Int, cursor: String?): AccountPage
 
+    /** GSFT deposit account roster as of the reporting day, including frozen and dormant accounts. */
+    suspend fun depositRoster(day: LocalDate, limit: Int, cursor: String?): CursorPage<DepositRosterAccountDto>
+
     /** Tax facts for one party. Null when the party never declared a profile (not reportable). */
     suspend fun partyTaxFacts(partyId: UUID): PartyTaxFactsDto?
 
     /** Booked balance of one account currency at the period end. */
     suspend fun bookedBalance(accountId: UUID, currency: String, asOf: LocalDate): BigDecimal
+
+    /** As [bookedBalance], but a missing balance row FAILS instead of reading as zero (GSFT). */
+    suspend fun bookedBalanceStrict(accountId: UUID, currency: String, asOf: LocalDate): BigDecimal
 }
 
 data class AccountPage(val accounts: List<AccountSummaryDto>, val nextCursor: String?)
@@ -44,6 +51,12 @@ class RestCrsFatcaReportingSources(
         val page = accounts.active(limit, cursor)
         AccountPage(page.data, page.pagination.nextCursor.takeIf { page.pagination.hasNextPage })
     }
+
+    override suspend fun depositRoster(
+        day: LocalDate,
+        limit: Int,
+        cursor: String?,
+    ): CursorPage<DepositRosterAccountDto> = sourced("account-service") { accounts.depositRoster(day, limit, cursor) }
 
     override suspend fun partyTaxFacts(partyId: UUID): PartyTaxFactsDto? = try {
         parties.taxFacts(partyId)
@@ -73,6 +86,9 @@ class RestCrsFatcaReportingSources(
     } catch (e: ProcessingException) {
         throw ReturnDataUnavailableException("balance-service unreachable: ${e.message}", e)
     }
+
+    override suspend fun bookedBalanceStrict(accountId: UUID, currency: String, asOf: LocalDate): BigDecimal =
+        sourced("balance-service") { balances.bookedAsOf(accountId, currency, asOf).bookedAmount }
 
     private suspend fun <T> sourced(source: String, call: suspend () -> T): T = try {
         call()

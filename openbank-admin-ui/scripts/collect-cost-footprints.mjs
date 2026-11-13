@@ -3,12 +3,12 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // Derive per-service resource footprints (the cost-allocation cost-driver) from the gitops
-// Deployment manifests, baked into the admin-ui image at build time (ADR-0062, mirrors
+// Deployment/Rollout workload manifests, baked into the admin-ui image at build time (ADR-0062, mirrors
 // generate-service-graph.mjs). The admin-ui is a READ-ONLY consumer (root CLAUDE.md rule #3/#7):
 // it never reaches into openbank-infra/ at runtime, so this collector flattens the authoritative
 // `resources.requests` (cpu/memory) into cost-footprints.json, which the allocation route serves.
 //
-// The CANONICAL service key is the Deployment metadata.name, which equals the admin-ui manifest
+// The CANONICAL service key is the workload metadata.name, which equals the admin-ui manifest
 // serviceName and the rules.yaml:finops_cost_groups ids — the stable join across all three.
 //
 // Honest by construction: a manifest with no requests contributes no footprint (never a
@@ -70,9 +70,9 @@ function listYaml(dir) {
   return out
 }
 
-// Sum requests across all containers of a Deployment pod template.
-function footprintOf(deployment) {
-  const containers = deployment?.spec?.template?.spec?.containers
+// Sum requests across all containers of a Deployment or Rollout pod template.
+function footprintOf(workload) {
+  const containers = workload?.spec?.template?.spec?.containers
   if (!Array.isArray(containers)) return null
   let cpuMillis = 0, memMiB = 0
   for (const c of containers) {
@@ -85,21 +85,35 @@ function footprintOf(deployment) {
   return { cpuMillis, memMiB }
 }
 
-const found = new Map() // service -> {cpuMillis, memMiB}
+const workloads = new Map() // physical [namespace, name] -> {service, cpuMillis, memMiB}
 for (const file of listYaml(COMPONENTS)) {
   let docs
   try { docs = parseAllDocuments(readFileSync(file, 'utf-8')) } catch { continue }
   for (const d of docs) {
     let obj
     try { obj = d.toJSON() } catch { continue }
-    if (obj?.kind !== 'Deployment') continue
+    if (!['Deployment', 'Rollout'].includes(obj?.kind)) continue
     const name = obj?.metadata?.name
     const fp = footprintOf(obj)
     if (!name || !fp) continue
-    // Keep the larger request if a name appears twice (overlays).
-    const prev = found.get(name)
-    if (!prev || fp.cpuMillis + fp.memMiB > prev.cpuMillis + prev.memMiB) found.set(name, fp)
+    // Deployment/Rollout overlays for the same physical workload count once.
+    // An omitted namespace stays an unknown identity; neither directories nor domains supply it.
+    const namespace = typeof obj?.metadata?.namespace === 'string' && obj.metadata.namespace.trim()
+      ? obj.metadata.namespace : null
+    const key = JSON.stringify([namespace, name])
+    const prev = workloads.get(key)
+    if (!prev || fp.cpuMillis + fp.memMiB > prev.cpuMillis + prev.memMiB) {
+      workloads.set(key, { service: name, ...fp })
+    }
   }
+}
+
+// Distinct workload/tenant namespaces contribute to the same canonical service key.
+// Namespace is a physical identity dimension, never a business-domain assignment.
+const found = new Map() // service -> {cpuMillis, memMiB}
+for (const { service, cpuMillis, memMiB } of workloads.values()) {
+  const prev = found.get(service) ?? { cpuMillis: 0, memMiB: 0 }
+  found.set(service, { cpuMillis: prev.cpuMillis + cpuMillis, memMiB: prev.memMiB + memMiB })
 }
 
 const footprints = [...found.entries()]
@@ -109,7 +123,7 @@ const footprints = [...found.entries()]
 const doc = {
   schema: 'openbank.cost-footprints/v1',
   generator: 'collect-cost-footprints.mjs',
-  source: 'gitops Deployment resources.requests (openbank-infra/gitops/components) — ADR-0062',
+  source: 'gitops Deployment/Rollout workload resources.requests (openbank-infra/gitops/components) — ADR-0062',
   available: footprints.length > 0,
   collectedAt: null,
   footprints,

@@ -1,6 +1,6 @@
 ---
 date: 2026-08-11
-decision-status: proposed
+decision-status: accepted
 delivery-status: partial
 followup: "#5708 — remaining slices triaged there; party materiality is shipped by #4751, while KYC/coordinator, sanctions diff, and expiry triggers remain"
 authors: [Jiri Raska]

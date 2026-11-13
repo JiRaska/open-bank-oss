@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+from http.client import IncompleteRead
 import json
 import subprocess
 import unittest
@@ -194,6 +195,72 @@ class VerifySuccessfulServiceCiTest(unittest.TestCase):
                     self.assertNotIn(secret, message)
                 self.assertEqual(request.call_count, 1)
 
+    def test_retries_same_second_page_without_duplicate_evidence(self):
+        first = "https://api.github.test/jobs?per_page=20&page=1"
+        second = "https://api.github.test/jobs?per_page=20&page=2"
+        calls = []
+        def respond(request, timeout):
+            calls.append(request.full_url)
+            if len(calls) == 1:
+                return FixtureResponse({"jobs": [{"id": 1}]}, {"Link": f'<{second}>; rel="next"'})
+            if len(calls) == 2:
+                raise HTTPError(second, 502, "untrusted", {}, None)
+            return FixtureResponse({"jobs": [{"id": 2}]})
+        with patch.object(MODULE, "urlopen", respond), patch.object(MODULE.time, "sleep"):
+            self.assertEqual(MODULE._json_pages(first, "fixture-token"), [{"id": 1}, {"id": 2}])
+        self.assertEqual(calls, [first, second, second])
+
+    def test_incomplete_body_retries_whole_page_and_exhausts_closed(self):
+        class Truncated(FixtureResponse):
+            def read(self):
+                raise IncompleteRead(b'{"jobs": [', 100)
+        with patch.object(MODULE, "urlopen", side_effect=lambda *a, **k: Truncated({})) as request, patch.object(MODULE.time, "sleep"):
+            with self.assertRaises(MODULE.VerificationError):
+                MODULE._json_pages("https://api.github.test/jobs", "fixture-token")
+        self.assertEqual(request.call_count, 3)
+
+    def test_transient_http_exhaustion_is_bounded_and_safe(self):
+        error = HTTPError("https://api.github.test/jobs?secret=hidden", 502, "hidden", {}, None)
+        with patch.object(MODULE, "urlopen", side_effect=error) as request, patch.object(MODULE.time, "sleep"):
+            with self.assertRaisesRegex(MODULE.VerificationError, r"/jobs failed .*HTTP 502") as caught:
+                MODULE._json_pages(error.url, "fixture-token")
+        self.assertEqual(request.call_count, 3)
+        self.assertNotIn("hidden", str(caught.exception))
+
+    def test_retry_respects_resolution_deadline(self):
+        error = HTTPError("https://api.github.test/jobs", 502, "reason", {}, None)
+        with patch.object(MODULE, "urlopen", side_effect=error) as request, patch.object(MODULE.time, "monotonic", side_effect=[0, 0, 2]), patch.object(MODULE.time, "sleep") as sleep:
+            with self.assertRaises(MODULE.VerificationError):
+                MODULE._json_pages(error.url, "fixture-token", deadline=1)
+        self.assertEqual(request.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_incomplete_response_can_recover_without_using_partial_bytes(self):
+        class Truncated(FixtureResponse):
+            def read(self):
+                raise IncompleteRead(b'{"jobs": [{"id": 999}]}', 100)
+        with patch.object(MODULE, "urlopen", side_effect=[Truncated({}), FixtureResponse({"jobs": [{"id": 1}]})]), patch.object(MODULE.time, "sleep"):
+            self.assertEqual(MODULE._json_pages("https://api.github.test/jobs", "fixture-token"), [{"id": 1}])
+
+    def test_smaller_jobs_pages_keep_existing_row_capacity_and_fail_closed_at_limit(self):
+        def respond(request, timeout):
+            page = int(parse_qs(urlsplit(request.full_url).query)["page"][0])
+            following = f'https://api.github.test/jobs?per_page=20&page={page + 1}'
+            return FixtureResponse({"jobs": [{"id": page}]}, {"Link": f'<{following}>; rel="next"'})
+        with patch.object(MODULE, "urlopen", respond):
+            with self.assertRaisesRegex(MODULE.VerificationError, "exceeded 100 pages"):
+                MODULE._json_pages("https://api.github.test/jobs?per_page=20&page=1", "fixture-token")
+
+    def test_malformed_page_is_not_retried(self):
+        with patch.object(MODULE, "urlopen", return_value=FixtureResponse({"jobs": "invalid"})) as request:
+            with self.assertRaises(MODULE.VerificationError):
+                MODULE._json_pages("https://api.github.test/jobs", "fixture-token")
+        self.assertEqual(request.call_count, 1)
+
+    def test_jobs_use_smaller_pages(self):
+        _, requested = self.verify()
+        self.assertEqual(parse_qs(urlsplit(requested[1]).query)["per_page"], ["20"])
+
     def test_http_failure_omits_untrusted_quota_headers(self):
         error = HTTPError("https://api.github.test/jobs", 403, "reason", {
             "X-RateLimit-Remaining": "header-secret\n::error::injected",
@@ -244,6 +311,31 @@ class VerifySuccessfulServiceCiTest(unittest.TestCase):
             MODULE._json_pages(first, "fixture-token")
         self.assertEqual(calls, [first, second])
 
+    def test_candidate_services_run_concurrently_with_unchanged_verdicts(self):
+        import threading
+        import time as _time
+
+        services = [f"openbank-svc-{i}" for i in range(8)]
+        barrier = threading.Barrier(len(services), timeout=5)
+
+        def push_might(service, _sha, *, deadline=None):
+            barrier.wait()  # deadlocks (BrokenBarrierError) if the probes run serially
+            return service != "openbank-svc-1"
+
+        def tree_equivalent(service, _a, _b, *, deadline=None):
+            return service != "openbank-svc-2"
+
+        with (
+            patch.object(MODULE, "_push_might_build_service", push_might),
+            patch.object(MODULE, "_tree_equivalent", tree_equivalent),
+        ):
+            got = MODULE._candidate_services(
+                services, SHA, "b" * 40, True, _time.monotonic() + 60
+            )
+        self.assertEqual(
+            got, set(services) - {"openbank-svc-1", "openbank-svc-2"}
+        )
+
     def test_expired_resolver_budget_fails_before_api_call(self):
         with (
             patch.object(MODULE, "urlopen") as request,
@@ -265,6 +357,77 @@ class VerifySuccessfulServiceCiTest(unittest.TestCase):
                 "fixture-token",
                 "https://api.github.test",
             )
+
+
+class VerifySuccessfulServicesCiBatchTest(unittest.TestCase):
+    """The batch form proves exactly what the single form proves, in one jobs fetch."""
+
+    OTHER = "openbank-ledger-service"
+
+    def batch(self, candidates, jobs):
+        requested: list[str] = []
+        responses = {
+            f"/repos/{REPOSITORY}/actions/workflows/services-ci.yml/runs": {
+                "workflow_runs": [run_fixture()]
+            },
+            f"/repos/{REPOSITORY}/actions/runs/{RUN_ID}/attempts/{ATTEMPT}/jobs": {"jobs": jobs},
+        }
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            requested.append(request.full_url)
+            path = request.full_url.split("?", 1)[0].replace("https://api.github.test", "")
+            value = responses.get(path)
+            if value is None:
+                raise AssertionError(f"unexpected API request: {request.full_url}")
+            return FixtureResponse(value)
+
+        with patch.object(MODULE, "urlopen", fake_urlopen):
+            result = MODULE.verify_successful_services_ci(
+                candidates, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        return result, requested
+
+    def jobs_for(self, *services, contract="success", all_green="success"):
+        jobs = [{"name": "all-green", "conclusion": all_green}]
+        for service in services:
+            jobs.append({"name": f"build ({service}) / {service} (build)", "conclusion": "success"})
+            jobs.append(
+                {"name": f"build ({service}) / {service} (contract)", "conclusion": contract}
+            )
+        return jobs
+
+    def test_two_services_on_one_sha_cost_one_runs_and_one_jobs_request(self):
+        result, requested = self.batch(
+            {SERVICE: SHA, self.OTHER: SHA}, self.jobs_for(SERVICE, self.OTHER)
+        )
+        self.assertEqual(set(result), {SERVICE, self.OTHER})
+        self.assertEqual(result[SERVICE], {"sha": SHA, "run_id": str(RUN_ID), "attempt": ATTEMPT})
+        self.assertEqual(len(requested), 2)
+
+    def test_unproven_service_is_absent_not_raised(self):
+        result, _ = self.batch({SERVICE: SHA, self.OTHER: SHA}, self.jobs_for(SERVICE))
+        self.assertEqual(set(result), {SERVICE})
+
+    def test_red_contract_or_all_green_proves_nothing(self):
+        result, _ = self.batch({SERVICE: SHA}, self.jobs_for(SERVICE, contract="failure"))
+        self.assertEqual(result, {})
+        result, _ = self.batch({SERVICE: SHA}, self.jobs_for(SERVICE, all_green="failure"))
+        self.assertEqual(result, {})
+
+    def test_duplicate_job_name_proves_nothing(self):
+        jobs = self.jobs_for(SERVICE) + [
+            {"name": f"build ({SERVICE}) / {SERVICE} (contract)", "conclusion": "success"}
+        ]
+        result, _ = self.batch({SERVICE: SHA}, jobs)
+        self.assertEqual(result, {})
+
+    def test_invalid_input_is_refused(self):
+        for candidates in ({}, {"not-a-service": SHA}, {SERVICE: "abc"}):
+            with self.assertRaises(MODULE.VerificationError):
+                MODULE.verify_successful_services_ci(
+                    candidates, REPOSITORY, "fixture-token", "https://api.github.test"
+                )
 
 
 class ResolveReconcileSourceTest(unittest.TestCase):
@@ -368,6 +531,61 @@ class ResolveReconcileSourceTest(unittest.TestCase):
         self.assertEqual(resolved[second_service]["sha"], self.OLDER)
         self.assertEqual(len(requested), 2, "one run-list and one shared jobs request")
 
+    def test_unproven_service_is_reported_by_name_with_its_proven_peers(self):
+        """A complete run listing that proves some services yields a per-service refusal.
+
+        The proven half travels with the error so the gate refuses only the named members;
+        before, one never-built service stranded every proven peer in the reconcile batch.
+        """
+        unbuilt = "openbank-anacredit-service"
+        run = self.run_record(
+            38, self.OLDER, "2026-10-17T12:00:00Z", event="workflow_dispatch"
+        )
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            path = urlsplit(request.full_url).path
+            if path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse({"workflow_runs": [run]})
+            if path.endswith("/runs/38/attempts/1/jobs"):
+                return FixtureResponse({"jobs": job_fixture()["jobs"][:3]})
+            raise AssertionError(f"unexpected API request: {request.full_url}")
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+            patch.object(MODULE, "_is_ancestor", return_value=True),
+            patch.object(MODULE, "_tree_equivalent", return_value=True),
+            patch.object(MODULE, "_exact_pact_exists", return_value=True),
+            self.assertRaises(MODULE.UnresolvedServicesError) as caught,
+        ):
+            MODULE.resolve_reconcile_service_sources(
+                [SERVICE, unbuilt],
+                self.TIP,
+                REPOSITORY,
+                "fixture-token",
+                "https://api.github.test",
+            )
+
+        self.assertEqual(caught.exception.missing, [unbuilt])
+        self.assertEqual(set(caught.exception.resolved), {SERVICE})
+        self.assertEqual(caught.exception.resolved[SERVICE]["sha"], self.OLDER)
+        self.assertIsInstance(caught.exception, MODULE.VerificationError)
+
+    def test_api_failure_is_not_downgraded_to_a_per_service_refusal(self):
+        def fake_urlopen(request, timeout):
+            del request, timeout
+            raise MODULE.HTTPError("u", 502, "bad gateway", {}, None)
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            self.assertRaises(MODULE.VerificationError) as caught,
+        ):
+            MODULE.resolve_reconcile_service_sources(
+                [SERVICE], self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertNotIsInstance(caught.exception, MODULE.UnresolvedServicesError)
+
     def test_failed_verification_metadata_does_not_prove_the_service(self):
         run = self.run_record(36, self.OLDER, "2026-10-17T12:00:00Z")
         jobs = job_fixture()["jobs"] + [
@@ -381,6 +599,72 @@ class ResolveReconcileSourceTest(unittest.TestCase):
                 run, {SERVICE}, REPOSITORY, "fixture-token", "https://api.github.test"
             )
         self.assertEqual(proven, set())
+
+    def test_unexpanded_skipped_metadata_matrix_is_no_metadata_job(self):
+        """The API shape of a main push that changed no build file (runs 43210743668,
+        43331225900): one SKIPPED job named with the literal matrix template. Before
+        this case existed every fixture omitted that job, so the resolver refused the
+        commonest run shape while its tests stayed green."""
+        run = self.run_record(38, self.OLDER, "2026-10-17T12:00:00Z")
+        shard = "verification-metadata (${{ matrix.shard.label }})"
+        module = "verification-metadata (${{ matrix.module }})"
+        cases = (
+            # (label, metadata jobs, expected metadata, service proven?)
+            ("skipped shard template", [(shard, "skipped")], set(), True),
+            ("skipped module template", [(module, "skipped")], set(), True),
+            ("template but a shard was expected", [(shard, "skipped")],
+             {"verification-metadata (shard 1/1)"}, False),
+            ("template not skipped", [(shard, "failure")], set(), False),
+            ("template cancelled", [(shard, "cancelled")], set(), False),
+            ("template reported green", [(shard, "success")], set(), False),
+            ("template beside a real shard",
+             [(shard, "skipped"), ("verification-metadata (shard 1/1)", "success")],
+             set(), False),
+            ("two templates", [(shard, "skipped"), (module, "skipped")], set(), False),
+            ("lookalike name", [("verification-metadata (${{ matrix.other }})", "skipped")],
+             set(), False),
+            ("unrecognized source contract", [(shard, "skipped")], None, False),
+        )
+        for label, metadata, expected, proves in cases:
+            jobs = job_fixture()["jobs"] + [
+                {"name": name, "conclusion": conclusion} for name, conclusion in metadata
+            ]
+            with (
+                self.subTest(case=label),
+                patch.object(MODULE, "_json_pages", return_value=jobs),
+                patch.object(
+                    MODULE, "_expected_verification_jobs", return_value=expected
+                ),
+            ):
+                proven = MODULE._jobs_prove_services(
+                    run, {SERVICE}, REPOSITORY, "fixture-token", "https://api.github.test"
+                )
+            self.assertEqual(proven, {SERVICE} if proves else set(), label)
+
+    def test_unrelated_red_job_does_not_erase_a_green_service_with_skipped_matrix(self):
+        """Two unrelated contract jobs killed by a runner shutdown reddened all-green;
+        this service's own build and contract stayed green and remain valid evidence."""
+        run = self.run_record(39, self.OLDER, "2026-10-17T12:00:00Z")
+        other = "openbank-other-service"
+        jobs = [
+            job if job["name"] != "all-green" else job | {"conclusion": "failure"}
+            for job in job_fixture()["jobs"]
+        ] + [
+            {"name": f"build ({other}) / {other} (build)", "conclusion": "success"},
+            {"name": f"build ({other}) / {other} (contract)", "conclusion": "failure"},
+            {
+                "name": "verification-metadata (${{ matrix.shard.label }})",
+                "conclusion": "skipped",
+            },
+        ]
+        with (
+            patch.object(MODULE, "_json_pages", return_value=jobs),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+        ):
+            proven = MODULE._jobs_prove_services(
+                run, {SERVICE, other}, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertEqual(proven, {SERVICE})
 
     def test_missing_required_verification_metadata_job_is_not_vacuously_green(self):
         run = self.run_record(35, self.OLDER, "2026-10-17T12:00:00Z")
@@ -783,6 +1067,100 @@ class ResolveReconcileSourceTest(unittest.TestCase):
                 "https://api.github.test",
             )
         self.assertEqual(result, (self.OLDER, "35", 1))
+
+    def test_global_build_inputs_differ_is_proven_only_from_two_readable_trees(self):
+        import os
+        import tempfile
+
+        def git(*args, cwd):
+            return subprocess.run(
+                ["git", "-c", "commit.gpgsign=false", "-c", "user.email=t@example.com",
+                 "-c", "user.name=t", *args],
+                cwd=cwd, check=True, capture_output=True, text=True,
+            ).stdout.strip()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            git("init", "-q", ".", cwd=tmp)
+            for d in ("build-logic", "gradle", "config"):
+                os.makedirs(os.path.join(tmp, d))
+                Path(tmp, d, "f").write_text("1\n")
+            git("add", "-A", cwd=tmp)
+            git("commit", "-qm", "base", cwd=tmp)
+            base = git("rev-parse", "HEAD", cwd=tmp)
+            Path(tmp, "README.md").write_text("x\n")
+            git("add", "-A", cwd=tmp)
+            git("commit", "-qm", "docs", cwd=tmp)
+            same = git("rev-parse", "HEAD", cwd=tmp)
+            Path(tmp, "build-logic", "f").write_text("2\n")
+            git("add", "-A", cwd=tmp)
+            git("commit", "-qm", "build-logic", cwd=tmp)
+            changed = git("rev-parse", "HEAD", cwd=tmp)
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                self.assertTrue(MODULE._global_build_inputs_differ(base, changed))
+                self.assertFalse(MODULE._global_build_inputs_differ(base, same))
+                # Unreadable evidence is never "differs": fall back to the full proof.
+                self.assertFalse(MODULE._global_build_inputs_differ("f" * 40, changed))
+            finally:
+                os.chdir(cwd)
+
+    def test_resolver_skips_per_service_proofs_when_global_build_inputs_differ(self):
+        runs = {
+            "workflow_runs": [
+                self.run_record(30, "c" * 40, "2026-10-17T12:00:00Z"),
+            ]
+        }
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            if urlsplit(request.full_url).path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse(runs)
+            raise AssertionError(f"unexpected API request: {request.full_url}")
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE, "_is_ancestor", return_value=True),
+            patch.object(MODULE, "_global_build_inputs_differ", return_value=True),
+            patch.object(MODULE, "_is_gradle_module", return_value=True),
+            patch.object(MODULE, "_push_might_build_service") as might_build,
+            patch.object(MODULE, "_tree_equivalent", return_value=True) as equivalent,
+            self.assertRaises(MODULE.VerificationError),
+        ):
+            MODULE.resolve_reconcile_service_source(
+                SERVICE, self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertEqual(might_build.call_count, 0)
+        self.assertEqual(equivalent.call_count, 0)
+
+    def test_self_built_service_is_not_skipped_by_gradle_global_inputs(self):
+        runs = {"workflow_runs": [self.run_record(30, "c" * 40, "2026-10-17T12:00:00Z")]}
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            path = urlsplit(request.full_url).path
+            if path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse(runs)
+            if path.endswith("/runs/30/attempts/1/jobs"):
+                return FixtureResponse(job_fixture())
+            raise AssertionError(f"unexpected API request: {request.full_url}")
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+            patch.object(MODULE, "_is_ancestor", return_value=True),
+            patch.object(MODULE, "_global_build_inputs_differ", return_value=True),
+            patch.object(MODULE, "_is_gradle_module", return_value=False),
+            patch.object(MODULE, "_push_might_build_service", return_value=True),
+            patch.object(MODULE, "_tree_equivalent", return_value=True) as equivalent,
+            patch.object(MODULE, "_exact_pact_exists", return_value=True),
+        ):
+            result = MODULE.resolve_reconcile_service_source(
+                SERVICE, self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertEqual(result[0], "c" * 40)
+        self.assertGreaterEqual(equivalent.call_count, 1)
+
 
     def test_resolver_api_failure_is_a_refusal(self):
         def fail_urlopen(_request, timeout):

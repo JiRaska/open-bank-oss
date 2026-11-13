@@ -75,7 +75,7 @@ redeployed.
 
 Billing still decides every fee the legacy way; the shadow only measures. `openbank.billing.product-ir.decision-mode` is `shadow` (default and the only accepted value); `ir`, the ADR-0352 §9 switch, is refused at boot until it is built. `ProductShadowScheduler` runs every `openbank.billing.product-shadow.every` (default 5 minutes, on by default) and re-decides committed assessments with the product IR of the account's pinned revision. It reads the IR and its signature from product-catalog once per revision and keeps a local immutable copy; the posting path never calls the catalog for it.
 
-Signature verification is `openbank.billing.product-shadow.verification.mode`: `disabled` (default; nothing is compared and every IR-bearing input counts as `verification_disabled`), `openbao` (Transit `verify` on key `product-ir-publish`; billing's role must hold `verify` only) or `hmac` (dev and test only; a production launch with it refuses to boot).
+Signature verification is `openbank.billing.product-shadow.verification.mode`: `disabled` (default; nothing is compared and every IR-bearing input counts as `verification_disabled`), `openbao` (Transit `verify` on key `product-ir-publish`; billing's role must hold `verify` only) or `hmac` (dev and test only; a production launch with it refuses to boot). In `openbao` mode the client logs in with kubernetes-auth role `billing-ir-verify` (ServiceAccount `billing/billing-service`) and reaches OpenBao's TLS listener `https://openbao.vault.svc:8203`, trusting only the private CA in the mounted `ca.crt` (`openbank.billing.product-shadow.verification.openbao.ca-file`). Provisioning: runbook 0027, *Product IR signing*.
 
 Every IR `Post` is checked for money conservation before it is compared; an unbalanced one, or an evaluation the interpreter refuses, counts as `ir_evaluation_failed` and is never compared. Metrics: `openbank_product_shadow_inputs_total`, `openbank_product_shadow_compared_total{product,rule_id}`, `openbank_product_shadow_diverged_total{product,rule_id}` and `openbank_product_shadow_not_comparable_total{reason}`, all with `consumer="billing"`. Alerts: `ProductShadowStalled` (queued, none processed in 6 hours), `ProductShadowComparedNothing` (IR revisions met, none compared in 24 hours) and `ProductShadowDiverged`. Inputs that are all `no_ir` alert on nothing: those products are not migrated yet. Billing may switch to the IR only after divergence has been zero across a full cadence of every fee rule (ADR-0352 §9), behind a flag that does not exist yet.
 
@@ -104,3 +104,26 @@ idempotent by cycle id and never overlaps a running sweep.
 increments `openbank_billing_fee_post_closed_day_refusals_total`. Alert `BillingFeeRefusedIntoClosedDay`
 fires. Recover with runbook `0033-billing-fee-refused-into-closed-day.md` (four-eyes re-bill under a new
 key recorded in `billing_fee_rebill`).
+
+## Product-catalog reads use this service's own identity
+
+The published-revision read (`ProductCatalogRestClient`, `GET /api/v2/legacy-products/{productId}/published-revision`) is sent with the named OIDC client `m2m`, which authenticates as `openbank-billing` (ROLE_API plus the
+`catalog:read` scope), not as the shared `openbank-services` client. product-catalog grants
+`catalog.read` to this identity by name (`service-named-catalog-read`); it deliberately refuses the
+shared client on ROLE_API alone. If the Keycloak client lacks the `catalog:read` scope, the read is
+denied once product-catalog enforces authorization. `M2mOidcClientIdentityWiringTest` pins the
+client selection.
+
+## Daily close source evidence
+
+A persisted cycle run owns its date even when the current scheduler is switched off. Pending or
+failed fees hold completion throughout their cycle month; switching the sweep off does not cancel
+financial work. A non-cycle date is SKIPPED only with no unresolved fee work and a known cycle
+owner, or no financial evidence. Posted fees without a completed source cycle remain REFUSED.
+Completion reads durable assessed-fee posting states, so ordinary SENT outbox retention cannot
+erase its acknowledgement. The bounded recovery window includes the previous calendar month;
+source identities are stable across retries. Retain the deployment hold and observe a complete
+live month before reviewing enforcement, including the cost of the wider source scan.
+
+
+Observed due-job obligations are now retained separately from actual run receipts. Disabling or moving a scheduler after a missing-work refusal cannot remove that obligation, including after restart. Only a real completed run or an attributable ledger waiver can resolve it. Observations do not fabricate completed jobs or reconstruct schedules that were never observed. Rollback retains both obligation and run tables.

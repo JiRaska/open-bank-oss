@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 describe('Test Intelligence discoverability', () => {
   it('is a primary platform destination and a platform workspace shortcut', () => {
-    const sidebar = readFileSync('src/components/layout/Sidebar.tsx', 'utf8')
+    const sidebar = readFileSync('src/lib/navigation/catalog.ts', 'utf8')
     const persona = readFileSync('src/lib/auth/persona.ts', 'utf8')
     const platform = sidebar.slice(sidebar.indexOf('const platformNav'), sidebar.indexOf('const toolsNav'))
 

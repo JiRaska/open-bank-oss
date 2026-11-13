@@ -1,0 +1,15 @@
+-- Align the lending_outbox.id default with the sequence Hibernate actually draws from.
+--
+-- V1 created id BIGSERIAL, so native INSERTs (AccrualProgressRepository.emit's
+-- loan.interest_accrued event) take ids from lending_outbox_id_seq starting at 1, while the
+-- Panache entity path draws pooled blocks from lending_outbox_seq (V3, increment 50) — also
+-- starting at 1. The two pools overlap, so the first native insert collides with the first
+-- entity-inserted row (duplicate key on lending_outbox_pkey, 23505) whenever any outbox row
+-- already exists. Proven by the module test suite: AccrualProgressAtomicityIT fails 409 the
+-- moment any earlier test committed an entity outbox row into the shared test database.
+--
+-- Pointing the column default at lending_outbox_seq makes every id come from one pool; the
+-- pooled optimizer tolerates gaps from interleaved single nextval calls by design.
+--
+-- Rollback: ALTER TABLE lending_outbox ALTER COLUMN id SET DEFAULT nextval('lending_outbox_id_seq');
+ALTER TABLE lending_outbox ALTER COLUMN id SET DEFAULT nextval('lending_outbox_seq');

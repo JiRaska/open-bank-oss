@@ -7,6 +7,7 @@ package com.openbank.pensionfund.integration
 import com.openbank.libs.testing.trace.RecordingSpanExporter
 import com.openbank.libs.testing.trace.TraceContractProfile
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
@@ -22,7 +23,7 @@ import java.util.UUID
 /**
  * The observable distributed shape of a unit order.
  *
- * `POST /api/v1/contracts/{contractId}/orders` places a participant's unit order by INSERTing the
+ * `POST /api/v2/contracts/{contractId}/orders` places a participant's unit order by INSERTing the
  * `unit_orders` row — the pending instruction NAV settlement later executes, so the row IS the
  * pension-fund money write at request time (the reservation/dedup properties of the outgoing leg
  * are pinned separately by [OutgoingReservationIT]). The spans asserted here are the service's
@@ -42,7 +43,10 @@ import java.util.UUID
  * point, so it is the right first contract here.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.pensionfund.it.PostgresTestResource::class)
+@QuarkusTestResource(
+    com.openbank.libs.testing.containers.PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_pension_fund_it")],
+)
 @TestProfile(PensionFundTraceContractIT.PensionFundTraceProfile::class)
 @TestSecurity(user = "trace-it-operator", roles = ["ROLE_OPERATOR", "ROLE_API"])
 class PensionFundTraceContractIT {
@@ -57,16 +61,17 @@ class PensionFundTraceContractIT {
     private fun createFund(): UUID {
         val isin = "TR" + UUID.randomUUID().toString().replace("-", "").take(9).uppercase() + "0"
         val id: String = Given {
+            header("Idempotency-Key", UUID.randomUUID().toString())
             contentType("application/json")
             body(
                 """{"name":"Trace test","isin":"$isin","lei":"315700ABCDEF12345678",
                     "depositaryReference":"TEST-DEP","custodyAccountReference":"TEST-CUST",
                     "currency":"CZK","riskClass":3,"mandatoryConservative":false,
-                    "managementFeeRate":0,"launchNavPerUnit":1}
+                    "productRevisionId":"00000000-0000-0000-0000-000000000001","launchNavPerUnit":1}
                 """.trimIndent(),
             )
         } When {
-            post("/api/v1/funds")
+            post("/api/v2/funds")
         } Then {
             statusCode(201)
         } Extract {
@@ -85,18 +90,18 @@ class PensionFundTraceContractIT {
             header("Idempotency-Key", "trace-it-${System.nanoTime()}")
             body("""{"fundId":"$fund","type":"SUBSCRIBE","amount":1000.00}""")
         } When {
-            post("/api/v1/contracts/$contract/orders")
+            post("/api/v2/contracts/$contract/orders")
         } Then {
             statusCode(202)
             body("id", notNullValue())
         }
 
         exporter.contract()
-            .requiresSpan("POST /api/v1/contracts/{contractId}/orders")
-            .requiresAttribute("POST /api/v1/contracts/{contractId}/orders", "http.response.status_code")
+            .requiresSpan("POST /api/v2/contracts/{contractId}/orders")
+            .requiresAttribute("POST /api/v2/contracts/{contractId}/orders", "http.response.status_code")
             .requiresAttribute("INSERT unit_orders", "db.sql.table")
             .requiresSameTrace(
-                "POST /api/v1/contracts/{contractId}/orders",
+                "POST /api/v2/contracts/{contractId}/orders",
                 "INSERT unit_orders",
             )
             .hasNoErrorSpan()

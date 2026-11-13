@@ -8,7 +8,7 @@ Treasury zpracovává nedůvěryhodné soubory camt.053 pomocí `SecureXml`. Jeh
 
 Před opakováním akce přečtěte obchod a jeho poslední přechod přes autentizované treasury API. Čekající schválení stále vyžaduje jiného lidského schvalovatele; zamítnutý produktový mandát nelze odstranit seniorní výjimkou pro limit protistrany. U zaúčtovaného obchodu bez očekávaného finančního efektu porovnejte přechod v treasury, doručení outboxu a výsledek idempotentního žurnálu ledgeru. Slepé opakování stejného přechodu může skrýt chybu na hranici účtování nebo doručení události.
 
-Při párování výpisů sledujte výsledek reconciliace a otevřené rozdíly. Úspěšný import XML sám nedokazuje vypořádání obchodu. Repoziční runbook `docs/runbooks/svc-treasury.md` popisuje zdraví služby a obnovu; konfigurace nasazení zůstává v GitOps.
+Při párování výpisů sledujte výsledek reconciliace a otevřené rozdíly. Úspěšný import XML sám nedokazuje vypořádání obchodu. Hodinový průchod rozdílů znovu odsouhlasí každý výpis z posledních 31 dnů a k tomu až 50 starších výpisů, které ještě mají otevřený rozdíl; ty prochází postupně dokola, takže dojde na každý. Pozdní zaúčtování v hlavní knize tak rozdíl uzavře bez ohledu na stáří výpisu. Rozdíl uzavře jen odpovídající odsouhlasení; cesta k odpisu neexistuje. Repoziční runbook `docs/runbooks/svc-treasury.md` popisuje zdraví služby a obnovu; konfigurace nasazení zůstává v GitOps.
 
 ## Nasazení účetních tříd v ledgeru (ADR-0341 D3)
 
@@ -186,3 +186,15 @@ a stejně se porovnávají i oba zůstatky.
   - řádek zapsaný víc než 7 dní před `openingDate` s valutou po něm;
   - pohyb, který korespondent zaúčtoval jiný den, než je valuta zapsaná bankou. Takový řádek
     zůstane i nespárovaný.
+
+## Zdrojové důkazy denní uzávěrky
+
+Dokončení porovnává uložené akruály, trvalé účetní zápisy obchodů a potvrzené přechody jejich stavu.
+Čekající či DEAD události, otevřené účetní záměry, neaplikovaná potvrzení a nedokončené průchody
+hlásí REFUSED i po dřívějším RAN nebo vypnutí scheduleru. SKIPPED připouští jen den bez požadované
+či historicky doložené práce a bez nehotového účtování; hotové zápisy jsou viditelné i při vypnutém
+akruálu. Kontrola zahrnuje předchozí kalendářní měsíc, stejný podklad zachovává identitu a nová
+práce zneplatní zmrazený důkaz. Hold zůstává do posouzení celého živého měsíce a provozní ceny čtení.
+
+
+Pozorované povinnosti úloh se ukládají odděleně od dokladů skutečných běhů. Vypnutí nebo přesun scheduleru po odmítnutí chybějící práce povinnost neodstraní, ani po restartu. Vyřeší ji skutečně dokončený běh nebo doložená výjimka v ledgeru. Pozorování nevyrábí dokončené běhy ani zpětně neodvozuje nikdy nepozorované plány. Rollback zachová tabulku povinností i běhů.

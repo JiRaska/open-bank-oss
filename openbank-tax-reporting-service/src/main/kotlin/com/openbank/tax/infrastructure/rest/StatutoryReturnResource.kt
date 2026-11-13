@@ -12,9 +12,11 @@ import com.openbank.tax.application.port.out.ReturnWireRendererPort
 import com.openbank.tax.application.usecase.ReturnBreach
 import com.openbank.tax.application.usecase.StatutoryReturnNotFoundException
 import com.openbank.tax.application.usecase.StatutoryReturnService
+import com.openbank.tax.domain.model.TaxConflictException
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnValidationException
 import com.openbank.tax.domain.returns.StatutoryReturn
+import com.openbank.tax.infrastructure.returns.gsft.GsftReturnDataAdapter
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -140,15 +142,39 @@ class StatutoryReturnResource(
     @Operation(
         summary = "Record the regulator submission reference (APPROVED → SUBMITTED; refused if content ≠ attestation)",
     )
-    suspend fun submitted(@PathParam("id") id: String, request: RecordSubmissionRequest): Response =
-        Response.ok(service.submit(parseId(id), request.reference, actingPrincipal()).toResponse()).build()
+    suspend fun submitted(@PathParam("id") id: String, request: RecordSubmissionRequest): Response {
+        val returnId = parseId(id)
+        val actor = actingPrincipal()
+        // A GSFT batch is filed only through its delivery route, which verifies the stored package
+        // against the attested hashes and encrypts it; recording a reference here would file a
+        // return whose package nobody checked.
+        if (service.get(returnId).catalogueId == GsftReturnDataAdapter.CATALOGUE_ID) {
+            throw TaxConflictException("A GSFT return is submitted through POST /{id}/gsft-delivery, not /submitted")
+        }
+        return Response.ok(service.submit(returnId, request.reference, actor).toResponse()).build()
+    }
 
-    private fun parseId(value: String): UUID = runCatching { UUID.fromString(value) }.getOrNull()
-        ?: throw WebApplicationException("id must be a UUID (got '$value')", Response.Status.BAD_REQUEST)
+    @POST
+    @Path("/{id}/acknowledgement")
+    @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.statutory-return.acknowledge", resource = "#id")
+    @Operation(
+        summary = "Record the regulator's acknowledgement or rejection (SUBMITTED → ACKNOWLEDGED | REJECTED)",
+    )
+    suspend fun acknowledgement(@PathParam("id") id: String, request: RecordAcknowledgementRequest): Response {
+        val accepted = requireNotNull(request.accepted) { "accepted is required" }
+        val detail = requireNotNull(if (accepted) request.reference else request.reason) {
+            if (accepted) "reference is required when accepted" else "reason is required when rejected"
+        }
+        return Response.ok(service.acknowledge(parseId(id), accepted, detail, actingPrincipal()).toResponse()).build()
+    }
 
     private fun actingPrincipal(): String =
         TaxReportingActor.staffSubject(identity, "assemble, approve or submit a statutory return")
 }
+
+private fun parseId(value: String): UUID = runCatching { UUID.fromString(value) }.getOrNull()
+    ?: throw WebApplicationException("id must be a UUID (got '$value')", Response.Status.BAD_REQUEST)
 
 data class AssembleReturnRequest(
     val catalogueId: String,
@@ -158,6 +184,13 @@ data class AssembleReturnRequest(
 )
 
 data class RecordSubmissionRequest(val reference: String)
+
+/** `accepted` with the regulator's `reference`, or not accepted with its `reason`. */
+data class RecordAcknowledgementRequest(
+    val accepted: Boolean?,
+    val reference: String? = null,
+    val reason: String? = null,
+)
 
 data class ReturnCapabilityResponse(
     val dataSourceAvailable: Boolean,
@@ -186,6 +219,9 @@ data class StatutoryReturnResponse(
     val submittedBy: String?,
     val submittedAt: String?,
     val submissionReference: String?,
+    val acknowledgedBy: String?,
+    val acknowledgedAt: String?,
+    val acknowledgement: String?,
 )
 
 data class ReturnDefinitionResponse(
@@ -196,6 +232,9 @@ data class ReturnDefinitionResponse(
     val deadlineDaysAfterPeriodEnd: Int,
     val legalBasis: String,
     val datapoints: List<String>,
+    val deadlineBasis: String,
+    val onDemand: Boolean,
+    val filingObligation: Boolean,
 )
 
 data class ReturnCatalogueResponse(
@@ -215,7 +254,7 @@ data class ReturnBreachResponse(
     val kind: String,
 )
 
-private fun StatutoryReturn.toResponse() = StatutoryReturnResponse(
+internal fun StatutoryReturn.toResponse() = StatutoryReturnResponse(
     id = id,
     catalogueId = catalogueId,
     catalogueVersion = catalogueVersion,
@@ -236,6 +275,9 @@ private fun StatutoryReturn.toResponse() = StatutoryReturnResponse(
     submittedBy = submittedBy,
     submittedAt = submittedAt?.toString(),
     submissionReference = submissionReference,
+    acknowledgedBy = acknowledgedBy,
+    acknowledgedAt = acknowledgedAt?.toString(),
+    acknowledgement = acknowledgement,
 )
 
 private fun ReturnCatalogue.toResponse() = ReturnCatalogueResponse(
@@ -252,6 +294,9 @@ private fun ReturnCatalogue.toResponse() = ReturnCatalogueResponse(
             it.deadlineDaysAfterPeriodEnd,
             it.legalBasis,
             it.datapoints,
+            it.deadlineBasis.name,
+            it.onDemand,
+            it.filingObligation,
         )
     },
 )

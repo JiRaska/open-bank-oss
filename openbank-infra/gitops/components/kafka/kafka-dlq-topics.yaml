@@ -133,6 +133,36 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
+# openbank-aml-service :: channel `ledger-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.aml.ledger-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-aml-service :: channel `transaction-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.aml.transaction-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-anacredit-service :: channel `lending-events-in`
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -585,6 +615,21 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
+# openbank-pid-service :: channel `party-events-in` (GDPR Art. 17 erasure, #15755)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.pid.party-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-kyc-service :: channel `sanctions-list-changes-in` (ADR-0256 trigger loop)
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -740,6 +785,21 @@ apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
   name: openbank.dlq.domestic-payment.delegated-spend-reservation-state-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-domestic-payment :: channel `fraud-hold-resolution-in` (#4403)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.domestic-payment.fraud-hold-resolution-in
   namespace: messaging
   labels:
     strimzi.io/cluster: openbank-cluster
@@ -910,6 +970,55 @@ apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
   name: openbank.dlq.tax-reporting.withholding-remitted-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-tax-reporting-service :: channel `ceu-party-events-in`
+# A record here is a party classification the CEÚ projection has not seen; a parked SYNTHETIC one
+# could let a canary account through the exclusion until replayed.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.tax-reporting.ceu-party-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-tax-reporting-service :: channel `ceu-account-events-in`
+# A record here is an account change missing from the CEÚ register projection until replayed.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.tax-reporting.ceu-account-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-tax-reporting-service :: channel `ceu-delegation-events-in`
+# A record here is a disposer change missing from the CEÚ register projection until replayed.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.tax-reporting.ceu-delegation-events-in
   namespace: messaging
   labels:
     strimzi.io/cluster: openbank-cluster

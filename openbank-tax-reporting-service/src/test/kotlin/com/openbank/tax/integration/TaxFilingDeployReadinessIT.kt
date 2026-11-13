@@ -66,8 +66,12 @@ class TaxFilingDeployReadinessIT {
     }
 
     class InMemoryChannels : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> =
-            InMemoryConnector.switchIncomingChannelsToInMemory("withholding-remitted-in")
+        override fun start(): Map<String, String> = InMemoryConnector.switchIncomingChannelsToInMemory(
+            "withholding-remitted-in",
+            "ceu-account-events-in",
+            "ceu-delegation-events-in",
+            "ceu-party-events-in",
+        )
 
         override fun stop() = InMemoryConnector.clear()
     }

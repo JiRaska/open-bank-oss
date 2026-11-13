@@ -42,7 +42,7 @@ metadata:
     # WHY IT IS EXEMPT: GlitchTip holds pseudonymous crash events with a short retention, all of
     # which are re-sent by devices in the field; losing the database costs visibility, not records.
     # It holds no customer, money-path or regulatory data, so it has no recovery-point requirement.
-    openbank.io/backup-exempt-reason: "crash-event sink only — pseudonymous, short-retention, re-emitted by clients; no customer or money-path data"
+    open-bank.tech/backup-exempt-reason: "crash-event sink only — pseudonymous, short-retention, re-emitted by clients; no customer or money-path data"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -94,6 +94,10 @@ spec:
           enabled: true
           className: nginx
           annotations:
+            # DNS moved to the Envoy Gateway route (components/observability/
+            # httproute-glitchtip.yaml). This makes external-dns ignore this Ingress; it stays
+            # as the rollback until a later change deletes it.
+            external-dns.kubernetes.io/controller: gateway-api-cutover-pending
             cert-manager.io/cluster-issuer: letsencrypt-prod
             # ADR-0234: declared exemption from the identity-aware edge gate.
             # This host carries ONLY machine traffic — a GlitchTip/Sentry SDK
@@ -105,7 +109,7 @@ spec:
             # narrowed to ingest + the two dSYM-upload endpoints — widening it
             # re-opens the management API on an ungated host, which is exactly
             # what this annotation waives.
-            openbank.io/ungated-machine-callers: >-
+            open-bank.tech/ungated-machine-callers: >-
               SDK event ingest (DSN-authenticated) and sentry-cli dSYM upload
               (org-token-authenticated); neither can follow a login redirect.
             # ATTACK-SURFACE REDUCTION (ADR-0056): only the event INGEST must be
@@ -185,6 +189,10 @@ spec:
         # Transient cache/broker; data loss only logs users out — no persistence.
         valkey:
           enabled: true
+          # Pin to the fleet Valkey patch (9.1.3) instead of the chart appVersion
+          # (9.1.1), so the Infrastructure page reports one Valkey version.
+          image:
+            tag: 9.1.3-alpine
         # In-cluster Postgres via the CloudNativePG operator (installed in the
         # sandbox). The chart creates a CNPG `Cluster` (glitchtip-pg) + the
         # `glitchtip-pg-app` secret and wires DATABASE_URL from it automatically —

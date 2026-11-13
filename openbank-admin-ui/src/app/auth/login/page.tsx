@@ -8,7 +8,7 @@ import { ArrowRight, CheckCircle2, KeyRound, Languages, Loader2, ShieldCheck, Sp
 import { signIn } from "next-auth/react"
 import { useSearchParams } from "next/navigation"
 import Image from "next/image"
-import { Suspense, useEffect, useState } from "react"
+import { Suspense, useEffect, useState, useSyncExternalStore } from "react"
 import { useLanguage } from "@/lib/i18n/LanguageContext"
 import { safeCallbackPath } from "@/lib/auth/safeCallbackPath"
 import styles from "./login.module.css"
@@ -58,12 +58,22 @@ const COPY = {
   },
 } as const
 
+const noopSubscribe = () => () => {}
+
 function LoginContent() {
   const params = useSearchParams()
   const { language, setLanguage } = useLanguage()
   const [pending, setPending] = useState(false)
   const [scene, setScene] = useState(0)
   const [alternateReady, setAlternateReady] = useState(false)
+  // The page is prerendered, so the sign-in button is visible before React attaches its
+  // onClick. A click in that window did nothing at all: no /api/auth request was ever sent and
+  // the browser synthetic timed out on the login page (#14779). Render it disabled until
+  // hydration, so neither a person nor Playwright (which waits for an enabled target) can
+  // press a dead button.
+  // useSyncExternalStore answers false for the server snapshot and during hydration, and true
+  // once the client has taken over, without a setState-in-effect re-render.
+  const hydrated = useSyncExternalStore(noopSubscribe, () => true, () => false)
   const copy = COPY[language]
   const error = params.get("error")
   const callbackUrl = safeCallbackPath(params.get("callbackUrl"))
@@ -155,7 +165,7 @@ function LoginContent() {
           <h2>{copy.welcome}</h2>
           <p className={styles.guidance}>{copy.guidance}</p>
           {error && <div className={styles.error} role="alert">{error === "SessionExpired" ? copy.sessionExpired : copy.genericError}</div>}
-          <button type="button" className={styles.signInButton} onClick={handleSignIn} disabled={pending} aria-busy={pending}>
+          <button type="button" className={styles.signInButton} onClick={handleSignIn} disabled={pending || !hydrated} aria-busy={pending}>
             {pending ? <Loader2 className={styles.spinner} size={18} aria-hidden="true" /> : <KeyRound size={18} aria-hidden="true" />}
             <span>{pending ? copy.signingIn : copy.signIn}</span>
             {!pending && <ArrowRight className={styles.arrow} size={18} aria-hidden="true" />}

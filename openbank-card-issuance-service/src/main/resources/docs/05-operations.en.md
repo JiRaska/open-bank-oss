@@ -92,7 +92,7 @@ This is by design: the `Idempotency-Key` matched an existing `cards.idempotency_
 
 - Unit: `CardTest` (state machine), `CardServiceTest`, `CardOutboxDispatchTest`.
 - Integration: `CardOutboxDispatchIT` with `PostgresRedisTestResource` — isolated PostgreSQL + Valkey per test JVM via Testcontainers (CI infra sweep #578); Kafka is in-memory. The scheduler is disabled under `%test` so the IT drives `dispatchScheduledBatch()` explicitly.
-- Governance: `HibernateSequenceGuardTest` guards the `<table>_seq` convention.
+- Governance: the CI gate `hibernate-sequence-guard` guards the `<table>_seq` convention.
 - Coverage is ratchet-only (kover); card-issuance is **not** money-path so the higher money-path floor does not apply.
 
 ## Deploy / release

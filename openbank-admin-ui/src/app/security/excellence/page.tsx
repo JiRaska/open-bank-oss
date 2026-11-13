@@ -321,11 +321,20 @@ async function fetchFuzz(snap: KpisSnapshot | null): Promise<Patch> {
   // skutečně profuzzoval (exercised-surface záznam), ne jen zobrazil v job listu.
   const z = snap?.fuzz
   if (!z?.available || z.coveragePct == null) return unavailable('not_deployed')
+  // Auth-blocked operations ran no handler logic: say so next to the green, never fold them in.
+  const notRun = z.totalNotRun ?? 0
+  const blockedSvc = z.authBlockedServices ?? 0
+  const notRunNote = notRun || blockedSvc
+    ? {
+        cs: ` · ${notRun} operací neproběhlo (jen 401/403)${blockedSvc ? `, ${blockedSvc} služeb zcela blokováno` : ''}`,
+        en: ` · ${notRun} ops not run (401/403 only)${blockedSvc ? `, ${blockedSvc} services fully auth-blocked` : ''}`,
+      }
+    : { cs: '', en: '' }
   return {
     status: z.coveragePct < 100 ? 'degraded' : 'ok',
     score: z.coveragePct,
-    metricCs: `${z.tested}/${z.inScope} služeb profuzzováno · ${z.totalExercised} operací${z.excludedCount ? ` · ${z.excludedCount} vyjmuto` : ''}${z.runDate ? ` · ${z.runDate}` : ''}`,
-    metricEn: `${z.tested}/${z.inScope} services fuzzed · ${z.totalExercised} ops${z.excludedCount ? ` · ${z.excludedCount} excluded` : ''}${z.runDate ? ` · ${z.runDate}` : ''}`,
+    metricCs: `${z.tested}/${z.inScope} služeb profuzzováno · ${z.totalExercised} operací${notRunNote.cs}${z.excludedCount ? ` · ${z.excludedCount} vyjmuto` : ''}${z.runDate ? ` · ${z.runDate}` : ''}`,
+    metricEn: `${z.tested}/${z.inScope} services fuzzed · ${z.totalExercised} ops${notRunNote.en}${z.excludedCount ? ` · ${z.excludedCount} excluded` : ''}${z.runDate ? ` · ${z.runDate}` : ''}`,
   }
 }
 

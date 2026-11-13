@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.30.0...party-service-v0.31.0) (2026-11-13)
+
+
+### Features
+
+* **party:** let a compliance officer see who an AML case is about ([#15957](https://github.com/JiRaska/open-bank-oss/issues/15957)) ([81190ff](https://github.com/JiRaska/open-bank-oss/commit/81190ff929c640c0fd4816f3ce9786d24882168d)), closes [#15939](https://github.com/JiRaska/open-bank-oss/issues/15939)
+
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.29.2...party-service-v0.30.0) (2026-11-12)
+
+
+### Features
+
+* **party,admin-ui,audit:** mask backoffice profiles and audit full access ([#15617](https://github.com/JiRaska/open-bank-oss/issues/15617)) ([548fa68](https://github.com/JiRaska/open-bank-oss/commit/548fa683b80260e3a82e57053c4600732faa00d7))
+
+## [0.29.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.29.1...party-service-v0.29.2) (2026-11-06)
+
+
+### Bug Fixes
+
+* **party:** create FlagdProducer at boot so party list and search stop 500ing ([#14788](https://github.com/JiRaska/open-bank-oss/issues/14788)) ([d0be0f9](https://github.com/JiRaska/open-bank-oss/commit/d0be0f9e1454400a82cf8f0418ca6ca23b95e9aa))
+
 ## [0.29.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.29.0...party-service-v0.29.1) (2026-10-24)
 
 

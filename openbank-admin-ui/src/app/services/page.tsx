@@ -14,6 +14,7 @@ import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { DOMAIN_GROUPS, domainColor, domainLabel, isDomainId } from '@/lib/governance/domains'
 import { buildRegistry, findInRegistry, type ServiceEntry } from '@/lib/services/registry'
 
 // The ONLY hand-listed card: `libs` is a documentation bundle, not a runtime service, so no
@@ -22,17 +23,8 @@ import { buildRegistry, findInRegistry, type ServiceEntry } from '@/lib/services
 // (/api/services/health → Kubernetes discovery, ADR-0051), so neither a new module nor a newly
 // deployed workload needs an edit here.
 const STATIC_CANDIDATES = [
-  { id: 'libs', label: 'openbank-libs', group: 'platform' },
+  { id: 'libs', label: 'openbank-libs', group: 'unclassified' },
 ] as const
-
-const GROUP_LABELS: Record<string, { label: string; color: string }> = {
-  'core':         { label: 'Core Banking',     color: '#2563eb' },
-  'identity':     { label: 'Identity',         color: '#059669' },
-  'open-banking': { label: 'Open Banking',     color: '#7c3aed' },
-  'payments':     { label: 'Payments',         color: '#dc2626' },
-  'compliance':   { label: 'Compliance',       color: '#d97706' },
-  'platform':     { label: 'Platform',         color: '#6b7280' },
-}
 
 interface DocsStatus {
   id: string
@@ -65,7 +57,7 @@ function fleetSize(services: { short: string; kind: string; runnable?: boolean }
   ).length
 }
 
-interface CatalogModule { name: string; short: string; kind: string; runnable?: boolean; apiTitle?: string | null; port?: number | null; mgmtPort?: number | null }
+interface CatalogModule { name: string; short: string; kind: string; runnable?: boolean; dataDomain?: string | null; apiTitle?: string | null; port?: number | null; mgmtPort?: number | null }
 
 function candidateFromCatalog(registry: readonly ServiceEntry[], catalogModule: CatalogModule): Candidate {
   const registered = registry.find(service => service.container === catalogModule.name)
@@ -73,7 +65,7 @@ function candidateFromCatalog(registry: readonly ServiceEntry[], catalogModule: 
   return {
     id,
     label: registered?.label ?? catalogModule.apiTitle ?? catalogModule.short.replaceAll('-', ' '),
-    group: registered?.group ?? 'platform',
+    group: registered?.group ?? (isDomainId(catalogModule.dataDomain) ? catalogModule.dataDomain : 'unclassified'),
     catalogShort: catalogModule.short,
   }
 }
@@ -96,7 +88,7 @@ function catalogShortFor(registry: readonly ServiceEntry[], c: Candidate): strin
 }
 
 export default function ServicesDocsOverviewPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [candidates, setCandidates] = useState<Candidate[]>(STATIC_CANDIDATES as readonly Candidate[] as Candidate[])
   const [source, setSource] = useState<'kubernetes' | 'partial' | 'static' | 'unavailable'>('unavailable')
   const [catalogAvailable, setCatalogAvailable] = useState(false)
@@ -132,7 +124,7 @@ export default function ServicesDocsOverviewPage() {
           if (catalog.available === true && Array.isArray(catalog.services)) {
             const derived = buildRegistry(catalog.services)
             const catalogCandidates = catalog.services
-              .filter(catalogModule => catalogModule.runnable === true)
+              .filter(catalogModule => catalogModule.runnable === true || isDomainId(catalogModule.dataDomain))
               .map(catalogModule => candidateFromCatalog(derived, catalogModule))
             const count = fleetSize(catalog.services)
             for (const candidate of catalogCandidates) {
@@ -181,8 +173,8 @@ export default function ServicesDocsOverviewPage() {
               const id = registered?.id ?? s.name.replace(/-service$/, '')
               const existing = byId.get(id)
               byId.set(id, existing
-                ? { ...existing, group: s.group }
-                : { id, label: s.label || id, group: s.group, catalogShort: s.name })
+                ? existing
+                : { id, label: s.label || id, group: isDomainId(s.group) ? s.group : 'unclassified', catalogShort: s.name })
             }
           }
         }
@@ -232,7 +224,7 @@ export default function ServicesDocsOverviewPage() {
 
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const filteredCandidates = candidates.filter(candidate => {
-    const matchesQuery = !normalizedQuery || [candidate.label, candidate.id, candidate.group]
+    const matchesQuery = !normalizedQuery || [candidate.label, candidate.id, candidate.group, domainLabel(candidate.group, language === 'cs' ? 'cs' : 'en')]
       .some(value => value.toLocaleLowerCase().includes(normalizedQuery))
     const matchesGroup = groupFilter === 'all' || candidate.group === groupFilter
     const hasDocs = statuses[candidate.id]?.hasDocs === true
@@ -362,7 +354,7 @@ export default function ServicesDocsOverviewPage() {
           <span>{t('Skupina', 'Group')}</span>
           <select value={groupFilter} onChange={event => setGroupFilter(event.target.value)} style={{ padding: '7px 28px 7px 9px', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', color: 'var(--text-primary)', fontSize: '12px' }}>
             <option value="all">{t('Všechny', 'All')}</option>
-            {Object.entries(GROUP_LABELS).map(([id, group]) => <option key={id} value={id}>{t(group.label, group.label)}</option>)}
+            {DOMAIN_GROUPS.filter(id => candidates.some(candidate => candidate.group === id)).map(id => <option key={id} value={id}>{domainLabel(id, language === 'cs' ? 'cs' : 'en')}</option>)}
           </select>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
@@ -401,14 +393,14 @@ export default function ServicesDocsOverviewPage() {
                 className="docs-card-hover"
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: GROUP_LABELS[svc.group]?.color }} />
+                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: domainColor(svc.group) }} />
                   <div style={{ fontSize: '13px', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{svc.label}</div>
                   <ArrowRight size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)', flexWrap: 'wrap' }}>
                   <FileText size={11} />
                   {statuses[svc.id]?.sections ?? '?'} {t('sekcí', 'sections')} ·
-                  <span style={{ color: GROUP_LABELS[svc.group]?.color }}>{GROUP_LABELS[svc.group]?.label}</span>
+                  <span style={{ color: domainColor(svc.group) }}>{domainLabel(svc.group, language === 'cs' ? 'cs' : 'en')}</span>
                   <ServerlessTierBadge serviceId={svc.id} dense />
                 </div>
                 {(statuses[svc.id]?.version || statuses[svc.id]?.gitCommit) && (

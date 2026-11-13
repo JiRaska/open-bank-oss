@@ -9,6 +9,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { Toaster } from 'sonner'
 import { AgentDock } from '@/components/agent/AgentDock'
 import { SessionProvider } from '@/components/auth/SessionProvider'
+import { DomainOwnershipProvider, type DomainOwnership } from './DomainOwnershipContext'
 import { InitialRolesProvider } from '@/components/auth/InitialRolesContext'
 import { RumScreenTracker } from '@/components/telemetry/RumScreenTracker'
 import { isPublicSurface } from '@/lib/auth/publicSurface'
@@ -25,11 +26,15 @@ export function AppProviders({
   initialLanguage = null,
   initialTheme = 'light',
   initialRoles = null,
+  initialOperatorId = null,
+  initialDomainOwnership = {},
 }: {
   children: React.ReactNode
   initialLanguage?: Language | null
   initialTheme?: Theme
   initialRoles?: string[] | null
+  initialOperatorId?: string | null
+  initialDomainOwnership?: DomainOwnership
 }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -38,8 +43,8 @@ export function AppProviders({
   const shared = (
     <ThemeProvider initialTheme={initialTheme}>
       <LanguageProvider initialLanguage={initialLanguage} refreshServerContent={refreshServerContent}>
-        <InitialRolesProvider roles={initialRoles}>
-          {children}
+        <InitialRolesProvider roles={initialRoles} operatorId={initialOperatorId}>
+          <DomainOwnershipProvider ownership={initialDomainOwnership}>{children}</DomainOwnershipProvider>
           {!publicSurface && <AgentDock />}
           <Toaster richColors position="top-right" />
         </InitialRolesProvider>

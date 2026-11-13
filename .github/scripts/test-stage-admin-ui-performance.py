@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 import zipfile
 
@@ -27,7 +28,14 @@ def load(name, file):
 
 STAGE = load("stage_admin_ui_performance", HERE / "stage-admin-ui-performance.py")
 SELECTOR = load("stage_performance_selector", SOURCE_ROOT / ".github/scripts/select-performance-evidence.py")
+STAGE_SELECTOR_REAL = load("stage_performance_selector_real", SOURCE_ROOT / ".github/scripts/select-performance-evidence.py")
 COLLECTOR = load("stage_performance_collector", SOURCE_ROOT / ".github/scripts/collect-admin-ui-test-evidence.py")
+V1_GATE_LANES = (
+    ("perf-reports-openbank-product-catalog", "k6 smoke (openbank-product-catalog)",
+     "openbank-product-catalog-product-catalog-smoke"),
+    ("perf-reports-openbank-flaky-test-hunter", "k6 smoke (openbank-flaky-test-hunter)",
+     "openbank-flaky-test-hunter-flaky-test-hunter-smoke"),
+)
 REPO = "fixture/bank"
 SHA = "a" * 40
 START = "2026-10-01T10:00:00Z"
@@ -92,6 +100,17 @@ class PerformanceStageTests(unittest.TestCase):
         self.runs = {"perf-gate.yml": [], "perf-baseline.yml": []}
         self.jobs, self.artifacts, self.archives, self.attempts = {}, {}, {}, {}
         self.logs, self.reads = {}, []
+        # Fix the gate scope to the v1 two-lane fixture: the real one is derived from
+        # perf-gate.yml and grows, which must not rewrite every case below.
+        self.use_gate_lanes(V1_GATE_LANES)
+
+    def use_gate_lanes(self, lanes):
+        for name, value in (("GATE_LANES", lanes),
+                            ("EXPECTED_GATE", tuple((a, j) for a, j, _ in lanes)),
+                            ("GATE_SCENARIO", {a: sc for a, _, sc in lanes})):
+            patcher = mock.patch.object(SELECTOR, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def add_run(self, metadata, components=None):
         workflow = metadata["path"].rsplit("/", 1)[1]
@@ -374,6 +393,38 @@ class PerformanceStageTests(unittest.TestCase):
         self.assertEqual(len(result["payloads"]), 22)
         self.assertEqual(len(result["sources"][1]["selected"]), 11)
         self.assertFalse(result["sources"][1]["missing"])
+
+    def test_gate_measured_read_baseline_is_attributed_to_the_gate_not_the_sandbox_lane(self):
+        ledger = ("perf-reports-openbank-ledger-service", "k6 smoke (openbank-ledger-service)",
+                  "openbank-ledger-service-ledger-read-baseline")
+        self.use_gate_lanes(V1_GATE_LANES + (ledger,))
+        self.module("openbank-ledger-service", "ledger")
+        self.module("openbank-account-service", "account")
+        self.gate()
+        result = self.collect()
+        gate, baseline = result["sources"][0], result["sources"][1]
+        self.assertIn("openbank-ledger-service-ledger-read-baseline",
+                      {entry["scenario_id"] for entry in gate["selected"]})
+        self.assertFalse(gate["missing"])
+        claimed = {entry["scenario_id"] for entry in baseline["expected"]}
+        self.assertNotIn("openbank-ledger-service-ledger-read-baseline", claimed,
+                         "an unconfigured sandbox lane must not overwrite the gate's verdict")
+        self.assertIn("openbank-account-service-account-read-baseline", claimed)
+
+    def test_real_gate_scope_is_derived_from_perf_gate_declared(self):
+        self.assertEqual({sc for _, _, sc in STAGE_SELECTOR_REAL.GATE_LANES}, {
+            "openbank-product-catalog-product-catalog-smoke",
+            "openbank-flaky-test-hunter-flaky-test-hunter-smoke",
+            "openbank-ledger-service-ledger-read-baseline",
+            "openbank-balance-service-balance-read-baseline",
+            "openbank-transaction-service-transaction-read-baseline",
+            "openbank-consent-service-consent-read-baseline",
+            "openbank-domestic-payment-domestic-payment-read-baseline",
+            "openbank-fx-service-fx-read-baseline",
+            "openbank-sca-service-sca-read-baseline",
+            "openbank-sepa-instant-sepa-instant-read-baseline",
+            "openbank-sepa-payment-sepa-payment-read-baseline",
+        })
 
     def test_ambiguous_baseline_definition_is_never_attributed(self):
         self.module()

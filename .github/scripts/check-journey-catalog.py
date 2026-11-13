@@ -50,6 +50,8 @@
 #       python3 .github/scripts/check-journey-catalog.py --self-test
 
 import argparse
+import contextlib
+import io
 import pathlib
 import re
 import sys
@@ -605,6 +607,25 @@ def self_test():
             '            summary: covers journey-demo among others',
         ),
         expect_finding=True)
+
+    # Two entries sharing an id must fail the gate as the CI gate runs it (--enforce): exit 2,
+    # and the finding must be the duplicate-id one, not a side effect of the copied entry.
+    dup = SELF_TEST_CATALOG_OK + SELF_TEST_CATALOG_OK.split("  - id: later")[1].join(
+        ["  - id: later", ""])
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        write_tree(root, dup, SELF_TEST_CRONJOB, SELF_TEST_RULES)
+        findings, fatal, _ = check(root)
+        saved_argv = sys.argv
+        sys.argv = ["check-journey-catalog.py", "--root", str(root), "--enforce"]
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = main()
+        finally:
+            sys.argv = saved_argv
+        cases.append(("two journeys with the same id exit 2 under --enforce",
+                      code == 2 and any("later: duplicate id" in f for f in findings),
+                      [f"exit={code}", *findings]))
 
     failed = [c for c in cases if not c[1]]
     for label, ok, detail in cases:

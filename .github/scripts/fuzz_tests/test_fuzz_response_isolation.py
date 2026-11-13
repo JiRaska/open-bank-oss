@@ -159,8 +159,22 @@ class ResponseIsolationTests(unittest.TestCase):
         by_identity = {(op.method.lower(), op.path): op for item in schema.get_all_operations() if (op := item.ok())}
         enroll = by_identity[('post', '/api/v1/sca/parties/{partyId}/devices')]
         consume = by_identity[('post', '/api/v1/sca/challenges/{id}/consume')]
-        self.assertIn('DeleteDevice', enroll.responses.get('202').definition.get('links', {}))
-        self.assertNotIn('DeleteDevice', consume.responses.get('202').definition.get('links', {}))
+        # The inferred link NAME is Schemathesis's, not ours (4.30 calls it
+        # DeleteEnrolledDeviceResponse; an older run named it DeleteDevice), and the 202
+        # PendingApproval body carries no device id, so the link now lands on 201. Assert the
+        # property instead of the name: enroll links to the revoke operation, and that link
+        # never leaks onto consume through the shared PendingApproval response object.
+        def device_links(responses):
+            return {name for code, resp in responses.items()
+                    for name in resp.definition.get('links', {})
+                    if 'Device' in name}
+        self.assertTrue(device_links(enroll.responses), 'enroll inferred no link to its device')
+        self.assertEqual(device_links(consume.responses), set())
+        for op in by_identity.values():
+            pending = op.responses.get('202')
+            if pending is not None:
+                self.assertEqual(device_links({'202': pending}), set(),
+                                 f'{op.method} {op.path}: device link leaked onto shared 202')
         self.assertNotIn('links', schema.raw_schema['components']['responses']['PendingApproval'])
 
     def test_extension_env_loads_hook_before_schema_load(self):

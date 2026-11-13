@@ -1,7 +1,7 @@
 # Single-broker KRaft Kafka for the sandbox. Strimzi 0.46+ is KRaft-only and
 # requires KafkaNodePools (both annotations below). One dual-role node
-# (controller+broker) for FinOps; prod should split roles and raise replicas to
-# 3 with matching replication factors. Kafka version and KRaft metadataVersion
+# (controller+broker) `dual`; ADR-0373 step 1 adds a 2-node broker-only pool `brokers`
+# (three brokers, one controller) -- replication factors are raised in later steps, see runbook 0034. Kafka version and KRaft metadataVersion
 # are pinned explicitly on the Kafka CR below (see the comment there). Bootstrap Service for clients:
 # `openbank-cluster-kafka-bootstrap.messaging.svc:9093` (internal mTLS — the only
 # listener; the plaintext :9092 one was removed in #3393).
@@ -46,6 +46,67 @@ spec:
       cpu: "1"
       memory: 1536Mi
 ---
+# ADR-0373 step 1 (runbook 0034): two broker-only nodes beside the dual-role node, giving three
+# brokers. WHY A SEPARATE POOL, not `replicas: 3` on `dual`: Strimzi uses a STATIC KRaft controller
+# quorum, and its documentation lists "scaling a node pool with the controller role" (and adding or
+# removing the controller role) as unsupported, so `dual` (controller+broker) stays at 1 replica and
+# the extra brokers are a pool without the controller role. Consequence, stated plainly: there is
+# still exactly ONE controller. Three brokers protect partition data once topics are reassigned
+# (steps 3-4); they do not make the metadata quorum highly available. Moving to three controllers
+# is a separate migration, outside ADR-0373 step 1.
+# NOTHING is changed for existing topics here: replication.factor, min.insync.replicas and every
+# KafkaTopic stay as they were, so the new brokers hold no partitions until step 3.
+# Same sizing as `dual` so the resource delta in the runbook is the manifest's own numbers.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: brokers
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  replicas: 2
+  roles:
+    - broker
+  template:
+    persistentVolumeClaim:
+      metadata:
+        annotations:
+          argocd.argoproj.io/sync-options: Prune=false
+    pod:
+      # Never two brokers on one node (hard), spread over zones when capacity allows (soft) --
+      # the same pair the CNPG clusters use. The selector covers every pod of the Kafka cluster
+      # (all of them are brokers), so it counts the `dual` broker too. Set on THIS pool only: adding a pod template to `dual`
+      # would roll the only controller.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              strimzi.io/name: openbank-cluster-kafka
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              strimzi.io/name: openbank-cluster-kafka
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 5Gi
+        class: gp3
+        deleteClaim: false
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1152Mi
+    limits:
+      cpu: "1"
+      memory: 1536Mi
+---
 apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
@@ -68,7 +129,8 @@ spec:
     # this was pinned, so pinning it changed nothing on the running broker.
     # Bump metadataVersion only after the broker version is rolled and healthy —
     # a KRaft metadata version cannot be downgraded.
-    version: 4.2.0
+    # 4.2.2 (patch, same 4.2-IV1 metadata) needs operator >= 1.3; 1.2.x supports only 4.2.0/4.2.1.
+    version: 4.2.2
     metadataVersion: 4.2-IV1
     # SimpleAuthorizer for KafkaUser ACLs (ADR-0108 hardening, issue #2013;
     # ADR-0137 mTLS migration). KRaft inter-broker comms use the managed
@@ -200,6 +262,24 @@ spec:
         limits:
           cpu: 250m
           memory: 448Mi
+  # Transport CA lifetimes, stated rather than inherited (ADR-0172 D3). These are the
+  # Strimzi defaults, written out so the inventory row has a figure a reviewer can read
+  # and a change to it is a reviewed diff instead of an operator upgrade. Because the
+  # values equal what already applies, adding this block renews nothing and rolls no
+  # broker. Cluster CA signs broker/operator certs; clients CA signs every KafkaUser
+  # cert (ADR-0137 mTLS). A CA is renewed when it enters its renewal window, and the
+  # leaf certs it signed are re-issued in the same reconciliation, so a client cert
+  # lives at most validityDays.
+  clusterCa:
+    generateCertificateAuthority: true
+    validityDays: 365
+    renewalDays: 30
+    certificateExpirationPolicy: renew-certificate
+  clientsCa:
+    generateCertificateAuthority: true
+    validityDays: 365
+    renewalDays: 30
+    certificateExpirationPolicy: renew-certificate
 ---
 # Domain event topic for account-service. Declared explicitly (the broker does
 # not auto-create topics) so the topic operator manages it and the producer's
@@ -209,6 +289,38 @@ apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
   name: openbank.accounts.account.created
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
+# Account lifecycle status events (#9073). Create this topic before the producer switches;
+# audit and analytics-sink subscribe to both account topics during the transition.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.accounts.account.status-changed
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
+# Savings withdrawal approvals (#9073). Declare before moving account-outbox-out;
+# audit and analytics-sink subscribe first while the current relay stays on account.created.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.accounts.savings-withdrawal.approved
   namespace: messaging
   labels:
     strimzi.io/cluster: openbank-cluster

@@ -4,7 +4,9 @@
 
 package com.openbank.pensionfund.it
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.common.http.TestHTTPResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -29,7 +31,11 @@ import javax.net.ssl.TrustManagerFactory
 /** Exercises the fund service's actual TLS listener, required client auth, trust, and HTTP compatibility. */
 @QuarkusTest
 @TestProfile(ServerMutualTlsIT.RequiredClientCertificateProfile::class)
-@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    restrictToAnnotatedClass = true,
+    initArgs = [ResourceArg(name = "db", value = "openbank_pension_fund_it")],
+)
 @QuarkusTestResource(ServerMutualTlsTestResource::class, restrictToAnnotatedClass = true)
 class ServerMutualTlsIT {
     class RequiredClientCertificateProfile : QuarkusTestProfile {

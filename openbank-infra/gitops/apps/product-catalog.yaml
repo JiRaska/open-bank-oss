@@ -3,6 +3,8 @@
 # product-catalog.yaml and the ADR-0083 HTTPScaledObject out of components/accounts
 # (directory.include), so it can track `main` without dragging in the rest of the
 # accounts component or disturbing the running account-service.
+# The OPA bundle ConfigMap is owned here too: the pod mounts it, so the Application
+# that owns the workload must own its bundle (accounts excludes it).
 # Stateless in-memory in this phase — no DB/Kafka/OIDC — co-located in the
 # `accounts` namespace so the admin-ui Kubernetes discovery lists it automatically.
 # ADR-0083 T1 pilot: product-catalog-http-scaledobject.yaml adds the HTTPScaledObject
@@ -22,7 +24,7 @@ spec:
     targetRevision: main
     path: openbank-infra/gitops/components/accounts
     directory:
-      include: '{product-catalog.yaml,product-catalog-http-scaledobject.yaml,product-catalog-db.yaml}'
+      include: '{product-catalog.yaml,product-catalog-http-scaledobject.yaml,product-catalog-db.yaml,product-catalog-opa-bundle.yaml}'
   destination:
     server: https://kubernetes.default.svc
     namespace: accounts

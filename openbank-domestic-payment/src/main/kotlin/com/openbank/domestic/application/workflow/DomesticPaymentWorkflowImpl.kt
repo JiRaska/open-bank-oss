@@ -11,6 +11,7 @@ import io.temporal.common.RetryOptions
 import io.temporal.workflow.Workflow
 import java.time.Duration
 import java.util.UUID
+import com.uber.m3.util.Duration as TallyDuration
 
 @Suppress("MagicNumber")
 class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
@@ -56,6 +57,18 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
         const val FRAUD_ENFORCEMENT_CHANGE_ID = "fraud-enforcement"
         private const val FRAUD_ENFORCEMENT_VERSION = 1
 
+        /** A fraud-hold signal the run refused (not holding, another case, already decided). */
+        const val IGNORED_FRAUD_SIGNAL_METRIC = "openbank_domestic_fraud_hold_signal_ignored"
+
+        /**
+         * Workflow time from the fraud HOLD to its end, tagged `outcome` = `RELEASED|REJECTED|TIMED_OUT`.
+         * It measures how long the payment WAITED, from the moment the gate held it to the moment
+         * the workflow observed the analyst's decision (or the timeout) — not how long the analyst
+         * worked the case, and not delivery latency of the AML event. Bucketed up to the 48 h
+         * timeout by `FraudHoldDurationMeterFilter`.
+         */
+        const val FRAUD_HOLD_DURATION_METRIC = "openbank_domestic_fraud_hold_duration"
+
         /** A held payment with no analyst decision by then is REJECTED, never released. */
         val FRAUD_HOLD_TIMEOUT: Duration = Duration.ofHours(48)
         private const val UNLIMITED_ATTEMPTS = 0
@@ -75,12 +88,35 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
 
     private var fraudReviewDecision: FraudReviewDecision? = null
 
-    override fun resolveFraudHold(decision: FraudReviewDecision) {
-        // First answer wins; a late or duplicate signal cannot overturn a decision already taken.
-        if (fraudReviewDecision == null) fraudReviewDecision = decision
+    /** True only between the HOLD and its end; a decision outside that window is not a decision. */
+    private var awaitingFraudReview = false
+    private var expectedFraudCaseKey: String? = null
+
+    override fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?) {
+        // Deterministic: the flag is set by workflow code right before the await, and signal order
+        // is recorded in history, so a replay accepts and ignores exactly the same signals.
+        val ignoredBecause = when {
+            !awaitingFraudReview -> "not_holding"
+            caseIdempotencyKey == null || caseIdempotencyKey != expectedFraudCaseKey -> "case_mismatch"
+            // First answer wins; a late or duplicate signal cannot overturn a decision already taken.
+            fraudReviewDecision != null -> "already_decided"
+            else -> null
+        }
+        if (ignoredBecause == null) {
+            fraudReviewDecision = decision
+            return
+        }
+        Workflow.getLogger(DomesticPaymentWorkflowImpl::class.java)
+            .warn("Ignored fraud hold signal $decision: $ignoredBecause")
+        Workflow.getMetricsScope()
+            .tagged(mapOf("reason" to ignoredBecause))
+            .counter(IGNORED_FRAUD_SIGNAL_METRIC)
+            .inc(1)
     }
 
     override fun process(paymentId: UUID): DomesticPaymentStatus {
+        // Known from the start, so the case binding and the holding window are independent guards.
+        expectedFraudCaseKey = fraudReviewCaseKey(paymentId)
         val decision = activities.screenPayment(paymentId)
 
         return when (decision) {
@@ -141,10 +177,24 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
         FraudGateAction.PROCEED -> null
         FraudGateAction.REJECT -> FraudRejectCause.DECLINED
         FraudGateAction.HOLD -> {
+            awaitingFraudReview = true
+            val heldAtMillis = Workflow.currentTimeMillis()
             val answered = Workflow.await(FRAUD_HOLD_TIMEOUT) { fraudReviewDecision != null }
-            when {
-                !answered -> FraudRejectCause.HOLD_TIMED_OUT
-                fraudReviewDecision == FraudReviewDecision.RELEASE -> null
+            awaitingFraudReview = false
+            val outcome = when {
+                !answered -> "TIMED_OUT"
+                fraudReviewDecision == FraudReviewDecision.RELEASE -> "RELEASED"
+                else -> "REJECTED"
+            }
+            // Metrics emitted through the workflow scope are suppressed on replay, so this records
+            // once per hold and adds nothing to the workflow history.
+            Workflow.getMetricsScope()
+                .tagged(mapOf("outcome" to outcome))
+                .timer(FRAUD_HOLD_DURATION_METRIC)
+                .record(TallyDuration.ofMillis((Workflow.currentTimeMillis() - heldAtMillis).toDouble()))
+            when (outcome) {
+                "TIMED_OUT" -> FraudRejectCause.HOLD_TIMED_OUT
+                "RELEASED" -> null
                 else -> FraudRejectCause.REVIEW_REJECTED
             }
         }

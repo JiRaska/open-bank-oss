@@ -7,12 +7,12 @@ package com.openbank.treasury.integration
 import com.openbank.libs.close.CloseParticipationReport
 import com.openbank.libs.close.CloseParticipationSink
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.TreasuryCloseEvidencePort
 import com.openbank.treasury.domain.DealFixtures
 import com.openbank.treasury.infrastructure.close.TreasuryCloseParticipationScheduler
 import com.openbank.treasury.infrastructure.scheduler.InterestAccrualScheduler
-import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -36,7 +36,7 @@ import java.sql.DriverManager
 import java.time.Clock
 import java.time.LocalDate
 import java.util.UUID
-import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ConcurrentHashMap
 
 /** Real HTTP and PostgreSQL: acknowledgements survive a real stale lifecycle transaction, never a mock rollback. */
 @QuarkusTest
@@ -60,10 +60,10 @@ class TreasuryCloseLifecycleEvidenceIT {
     @Alternative
     @ApplicationScoped
     class RecordingSink : CloseParticipationSink {
-        val delivered = CopyOnWriteArrayList<CloseParticipationReport>()
+        val delivered = ConcurrentHashMap<LocalDate, CloseParticipationReport>()
 
         override fun deliver(participant: String, report: CloseParticipationReport): Uni<Unit> {
-            delivered += report
+            delivered[report.businessDate] = report
             return Uni.createFrom().item(Unit)
         }
     }
@@ -121,9 +121,8 @@ class TreasuryCloseLifecycleEvidenceIT {
         .post("/api/v1/treasury/deals/$id/$verb")
 
     private fun reportsFor(day: LocalDate): List<CloseParticipationReport> {
-        sink.delivered.clear()
         VertxContextSupport.subscribeAndAwait { reporter.reportDays(AccountingClock.bank(clock).today()) }
-        return sink.delivered.filter { it.businessDate == day }
+        return listOfNotNull(sink.delivered[day])
     }
 
     private fun eventState(id: UUID, kind: String, state: String) = jdbc { c ->
@@ -151,14 +150,14 @@ class TreasuryCloseLifecycleEvidenceIT {
         onContext { accrual.run() } // Completes, but CONFIRMED is not in its SETTLED-deal query.
         val unresolved = VertxContextSupport.subscribeAndAwait { evidence.postingsFor(day) }
         assertThat(unresolved.unapplied).isEqualTo(1)
-        assertThat(reportsFor(day)).isEmpty()
+        assertThat(reportsFor(day).map { it.outcome.name }).containsExactly("REFUSED")
 
         action(id, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
         onContext { accrual.run() }
         val pending = VertxContextSupport.subscribeAndAwait { evidence.postingsFor(day) }
         assertThat(pending.unapplied).isZero()
         assertThat(pending.pending).isEqualTo(1) // Event created today still belongs to yesterday's journal.
-        assertThat(reportsFor(day)).isEmpty()
+        assertThat(reportsFor(day).map { it.outcome.name }).containsExactly("REFUSED")
         eventState(id, "settled", "SENT")
         assertThat(reportsFor(day).map { it.outcome.name }).containsExactly("RAN")
         assertThat(onContext { deals.journals(id) }.count { it.event.name == "SETTLED" }).isEqualTo(1)
@@ -182,7 +181,7 @@ class TreasuryCloseLifecycleEvidenceIT {
         assertThat(settled.pending).isZero()
         assertThat(matured.pending).isEqualTo(1)
         assertThat(reportsFor(settlementDay).map { it.outcome.name }).containsExactly("RAN")
-        assertThat(reportsFor(maturityDay)).isEmpty()
+        assertThat(reportsFor(maturityDay).map { it.outcome.name }).containsExactly("REFUSED")
         eventState(id, "matured", "DEAD")
         assertThat(VertxContextSupport.subscribeAndAwait { evidence.postingsFor(settlementDay) }.dead).isZero()
         assertThat(reportsFor(maturityDay).map { it.outcome.name }).containsExactly("REFUSED")

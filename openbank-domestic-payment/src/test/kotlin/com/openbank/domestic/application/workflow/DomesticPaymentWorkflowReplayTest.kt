@@ -69,7 +69,7 @@ class PreFraudGateDomesticPaymentWorkflow : DomesticPaymentWorkflow {
         ActivityOptions.newBuilder().setScheduleToCloseTimeout(Duration.ofMinutes(10)).build(),
     )
 
-    override fun resolveFraudHold(decision: FraudReviewDecision) = Unit
+    override fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?) = Unit
 
     override fun process(paymentId: UUID): DomesticPaymentStatus = when (activities.screenPayment(paymentId)) {
         ScreeningDecision.BLOCK -> {

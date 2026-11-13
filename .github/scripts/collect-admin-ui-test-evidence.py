@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -80,6 +81,76 @@ def require_github_api_url(url: str) -> None:
         raise CollectionError("refusing a GitHub API request outside api.github.com")
 
 
+RATE_LIMIT_ATTEMPTS = 4
+RATE_LIMIT_MAX_WAIT_SECONDS = 300
+# Shared across every request: collection runs inside a 30-minute job, so the sum of all
+# rate-limit sleeps must leave time to publish. Past it, fail with a diagnostic.
+RATE_LIMIT_BUDGET_SECONDS = 900
+_RATE_LIMIT_DEADLINE = time.monotonic() + RATE_LIMIT_BUDGET_SECONDS
+_GITHUB_API_ATTEMPTS = 0
+_CORE_QUOTA_WARNED = False
+
+
+def rate_limit_wait(exc: HTTPError, attempt: int, now: float | None = None) -> float | None:
+    """Seconds to wait before retrying a rate-limited GET, or None when the error is a real answer.
+
+    Only 403/429 that GitHub marks as a limit qualify: Retry-After (secondary limits), or an
+    exhausted primary window (x-ratelimit-remaining: 0). A permission 403 carries neither and
+    stays final. Admin UI evidence failed 7/7 sampled runs (2026-11-01..08) on a bare HTTP 403
+    because this collector had no retry at all.
+    """
+    if exc.code not in (403, 429):
+        return None
+    headers = exc.headers or {}
+    retry_after = headers.get("Retry-After")
+    if retry_after is not None and str(retry_after).strip().isdigit():
+        wait = float(retry_after)
+    elif headers.get("x-ratelimit-remaining") == "0" and str(headers.get("x-ratelimit-reset", "")).isdigit():
+        wait = float(headers["x-ratelimit-reset"]) - (time.time() if now is None else now) + 1
+    elif exc.code == 429:
+        wait = 60.0 * (2 ** (attempt - 1))
+    else:
+        return None
+    return min(max(wait, 1.0), RATE_LIMIT_MAX_WAIT_SECONDS)
+
+
+def warn_on_core_quota(headers) -> None:
+    global _CORE_QUOTA_WARNED
+    if _CORE_QUOTA_WARNED or headers.get("x-ratelimit-resource") != "core":
+        return
+    used = headers.get("x-ratelimit-used", "")
+    limit = headers.get("x-ratelimit-limit", "")
+    if used.isdecimal() and limit.isdecimal() and int(limit) > 0 and int(used) * 5 >= int(limit) * 4:
+        print(f"::warning title=GitHub REST core quota::Shared installation quota used {used}/{limit} (at least 80%).")
+        _CORE_QUOTA_WARNED = True
+
+
+def open_with_rate_limit_retry(opener, request: Request, timeout: int, sleep=time.sleep,
+                               deadline: float | None = None, clock=time.monotonic):
+    global _GITHUB_API_ATTEMPTS
+    deadline = _RATE_LIMIT_DEADLINE if deadline is None else deadline
+    for attempt in range(1, RATE_LIMIT_ATTEMPTS + 1):
+        _GITHUB_API_ATTEMPTS += 1
+        try:
+            response = opener.open(request, timeout=timeout)  # noqa: S310 - origin is fixed by callers
+        except HTTPError as exc:
+            warn_on_core_quota(exc.headers or {})
+            wait = rate_limit_wait(exc, attempt)
+            if wait is None or attempt == RATE_LIMIT_ATTEMPTS:
+                raise
+            if clock() + wait > deadline:
+                raise CollectionError(
+                    f"GitHub API rate limited (HTTP {exc.code}) and the {RATE_LIMIT_BUDGET_SECONDS}s "
+                    "rate-limit budget cannot cover the next wait; failing before the job timeout") from exc
+            print(f"::warning::GitHub API rate limited (HTTP {exc.code}); retry {attempt}/"
+                  f"{RATE_LIMIT_ATTEMPTS - 1} in {wait:.0f}s", file=sys.stderr)
+            sleep(wait)
+        else:
+            warn_on_core_quota(response.headers)
+            return response
+    raise AssertionError("unreachable")
+
+
 def api_json(url: str, token: str) -> dict:
     require_github_api_url(url)
     request = Request(url, headers={
@@ -89,7 +160,7 @@ def api_json(url: str, token: str) -> dict:
     })
     try:
         opener = build_opener(StripAuthorizationOnCrossHostRedirect)
-        with opener.open(request, timeout=30) as response:  # noqa: S310 - origin is fixed above
+        with open_with_rate_limit_retry(opener, request, 30) as response:  # noqa: S310 - origin is fixed above
             value = json.load(response)
     except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
         status = f"HTTP {exc.code}" if isinstance(exc, HTTPError) else type(exc).__name__
@@ -135,6 +206,92 @@ def trusted_deploy_run(run: dict, repo_slug: str) -> bool:
         and isinstance(run.get("head_sha"), str)
         and re.fullmatch(r"[0-9a-f]{40}", run["head_sha"]) is not None
     )
+
+
+# Synthetic journey producers and the envelope prefix each one uploads. Their verdicts are
+# runtime observations, not build evidence: the only path that used to stage them was the
+# admin-ui BUILD (admin-ui-deploy.yml "Stage immutable per-attempt Test Intelligence
+# history"), so whenever no admin-ui build ran the published snapshot re-served the last
+# build's verdict. Measured 2026-10-31: a 07:45Z snapshot showed admin-operator-access red
+# from 00:40Z although the 05:31Z and 06:22Z runs had passed.
+SYNTHETIC_PRODUCERS = (
+    (".github/workflows/admin-ui-browser-synthetic.yml", "test-intelligence-run-openbank-admin-ui-"),
+    (".github/workflows/synthetic-journeys.yml", "test-intelligence-run-openbank-platform-"),
+    (".github/workflows/admin-ui-deployed-auth-gate.yml", "test-intelligence-run-openbank-admin-ui-deployed-session-"),
+)
+# Enough completed runs for collect-test-intelligence.mjs to tell a fresh failure from a
+# recovery (retainActionableFailure) without downloading the whole 30-day history.
+SYNTHETIC_RUNS = 6
+SYNTHETIC_HISTORY_DIR = "openbank-admin-ui/test-run-history"
+
+
+def trusted_synthetic_run(run: dict, repo_slug: str, expected_path: str) -> bool:
+    repository = run.get("head_repository")
+    repository_name = repository.get("full_name") if isinstance(repository, dict) else repository
+    return (
+        run.get("event") in {"push", "schedule", "workflow_dispatch"}
+        and run.get("head_branch") == "main"
+        and run.get("path") == expected_path
+        and run.get("status") == "completed"
+        and repository_name == repo_slug
+        and isinstance(run.get("head_sha"), str)
+        and re.fullmatch(r"[0-9a-f]{40}", run["head_sha"]) is not None
+    )
+
+
+def synthetic_payloads(repo_slug: str, fetch_json, fetch_bytes) -> tuple[dict[str, bytes], list[str]]:
+    """Envelopes of the latest trusted main synthetic runs, keyed by staging path.
+
+    A producer that cannot be read is a WARNING, never an empty success: the snapshot then
+    falls back to the seed's verdict and says so, instead of silently showing it as fresh."""
+    payloads: dict[str, bytes] = {}
+    warnings: list[str] = []
+    for workflow, prefix in SYNTHETIC_PRODUCERS:
+        name = PurePosixPath(workflow).name
+        try:
+            listing = fetch_json(f"{API_ORIGIN}/repos/{repo_slug}/actions/workflows/{name}/runs"
+                                 f"?branch=main&status=completed&per_page={SYNTHETIC_RUNS}")
+            runs = listing.get("workflow_runs") if isinstance(listing, dict) else None
+            if not isinstance(runs, list):
+                raise CollectionError("workflow response has no workflow_runs list")
+            staged = 0
+            for run in runs[:SYNTHETIC_RUNS]:
+                if not isinstance(run, dict) or not trusted_synthetic_run(run, repo_slug, workflow):
+                    continue
+                inventory = fetch_json(f"{API_ORIGIN}/repos/{repo_slug}/actions/runs/{run['id']}/artifacts?per_page={PER_PAGE}")
+                artifacts = inventory.get("artifacts") if isinstance(inventory, dict) else None
+                if not isinstance(artifacts, list):
+                    raise CollectionError("artifact response has no artifacts list")
+                for artifact in artifacts:
+                    artifact_name = artifact.get("name") if isinstance(artifact, dict) else None
+                    if (not isinstance(artifact_name, str) or not artifact_name.startswith(prefix)
+                            or artifact.get("expired") is not False
+                            or not re.fullmatch(r"[A-Za-z0-9._-]+", artifact_name)
+                            or type(artifact.get("id")) is not int):
+                        continue
+                    try:
+                        envelope = ENVELOPES.extract(fetch_bytes(
+                            f"{API_ORIGIN}/repos/{repo_slug}/actions/artifacts/{artifact['id']}/zip"))
+                        # Bind the envelope to the run it was downloaded from: an artifact
+                        # carrying another run's provenance is not this run's observation.
+                        claimed = json.loads(envelope)["run"]
+                        commit = claimed.get("commit")
+                        if (str(claimed.get("id")) != str(run["id"]) or not isinstance(commit, str)
+                                or len(commit) < 7 or not run["head_sha"].startswith(commit)):
+                            raise ValueError("envelope provenance differs from its producing run")
+                    except (CollectionError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
+                        # One unreadable artifact rejects only itself; the producer's other
+                        # runs are still read, so the snapshot keeps every verdict it can prove.
+                        warnings.append(f"synthetic envelope {artifact_name} rejected: {exc}")
+                        continue
+                    payloads[f"{SYNTHETIC_HISTORY_DIR}/{artifact_name}.json"] = envelope
+                    staged += 1
+            if staged == 0:
+                warnings.append(f"No trusted main synthetic envelope was available from {name}; "
+                                "its journey verdicts are carried from the last aggregate, not observed now.")
+        except CollectionError as exc:
+            warnings.append(f"synthetic producer {name} unreadable ({exc}); journey verdicts are carried, not fresh.")
+    return payloads, warnings
 
 
 def safe_archive_members(archive: bytes) -> list[tuple[zipfile.ZipInfo, PurePosixPath]]:
@@ -525,7 +682,7 @@ def api_bytes(url: str, token: str) -> bytes:
     })
     try:
         opener = build_opener(StripAuthorizationOnCrossHostRedirect)
-        with opener.open(request, timeout=60) as response:  # noqa: S310 - origin is fixed above
+        with open_with_rate_limit_retry(opener, request, 60) as response:  # noqa: S310 - origin is fixed above
             value = response.read(MAX_ARCHIVE_BYTES + 1)
             if len(value) > MAX_ARCHIVE_BYTES:
                 raise CollectionError("compressed artifact archive exceeds size limit")
@@ -592,7 +749,7 @@ def performance_authority(core: dict, staging: dict, repo_slug: str) -> set[str]
 
 def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
             fetch_page=None, fetch_run=None, fetch_attempt=None, fetch_archive=None,
-            seed=SEED_UNSET, run_collector=None, performance_stage=None) -> dict:
+            seed=SEED_UNSET, run_collector=None, performance_stage=None, synthetic_stage=None) -> dict:
     components = repo_components(repo)
     if not token:
         raise CollectionError("GITHUB_TOKEN is required to read trusted CI artifacts")
@@ -754,7 +911,14 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
             raise CollectionError(f"performance artifact collection failed: {exc}") from exc
         stage_payloads(performance["payloads"])
 
-        warnings = list(performance["warnings"])
+        if synthetic_stage:
+            synthetic, synthetic_warnings = synthetic_stage()
+        else:
+            synthetic, synthetic_warnings = synthetic_payloads(
+                repo_slug, lambda url: api_json(url, token), lambda url: api_bytes(url, token))
+        stage_payloads(synthetic)
+
+        warnings = list(performance["warnings"]) + synthetic_warnings
         if absent:
             warnings.append("No retained trusted main run envelope was available for: " + ", ".join(absent) + ". Their execution evidence is unknown, not passed.")
         if seed_report is None:
@@ -802,6 +966,8 @@ def main() -> int:
     except (CollectionError, OSError, ValueError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
         print(f"Test Intelligence collection failed: {exc}", file=sys.stderr)
         return 1
+    finally:
+        print(f"::notice title=github-rest-attempts::Test Intelligence REST attempts={_GITHUB_API_ATTEMPTS}")
     return 0
 
 

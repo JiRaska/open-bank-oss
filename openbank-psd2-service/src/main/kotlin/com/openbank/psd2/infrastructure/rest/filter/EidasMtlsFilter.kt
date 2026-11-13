@@ -74,13 +74,16 @@ class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) 
             try {
                 val authorization = tppAuthorizationGuard.requireAuthorized(tppId, requiredRole)
                 if (!authorization.authorized) {
+                    // The registry's free-text reason stays in the server log; the TPP-facing
+                    // text is fixed so registry internals never reach the caller.
                     log.warnf(
-                        "TPP %s rejected for role=%s path=%s",
+                        "TPP %s rejected for role=%s path=%s reason=%s",
                         tppId.sanitizeForLog(),
                         requiredRole,
                         path.sanitizeForLog(),
+                        authorization.reason.sanitizeForLog(),
                     )
-                    certificateInvalid(authorization.reason)
+                    certificateInvalid()
                 } else {
                     ctx.setProperty("tppId", tppId)
                     null
@@ -117,14 +120,14 @@ class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) 
             ),
         ).build()
 
-    private fun certificateInvalid(reason: String?): Response = Response.status(401)
+    private fun certificateInvalid(): Response = Response.status(401)
         .entity(
             mapOf(
                 "tppMessages" to listOf(
                     mapOf(
                         "category" to "ERROR",
                         "code" to "CERTIFICATE_INVALID",
-                        "text" to (reason ?: "TPP not authorized"),
+                        "text" to "TPP not authorized",
                     ),
                 ),
             ),

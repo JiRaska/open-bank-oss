@@ -1,6 +1,6 @@
 ---
 date: 2026-07-30
-decision-status: proposed
+decision-status: accepted
 delivery-status: partial
 followup: "#5679 — 14 of 16 services expose no pending list, so the federated inbox cannot see them"
 authors: [Jiri Raska]

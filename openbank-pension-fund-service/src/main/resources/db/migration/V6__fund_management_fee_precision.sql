@@ -1,0 +1,12 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+--
+-- Catalog managementFeeAnnualPercent supports six fractional decimal places. Dividing by 100
+-- requires eight fractional places in the cached annual rate; preserve the catalog fee exactly.
+-- Keep the existing three integer places so every previously stored value remains representable.
+-- Existing rounded values are preserved, not reconstructed or repriced by this migration.
+--
+-- Rollback: roll back the application while retaining NUMERIC(11,8) and product_revision_id.
+-- Do not narrow the column: that would round newly stored rates and lose their exact pinned fee.
+-- Older binaries can read the expanded numeric value; no destructive schema rollback is required.
+ALTER TABLE funds ALTER COLUMN management_fee_rate TYPE NUMERIC(11, 8);

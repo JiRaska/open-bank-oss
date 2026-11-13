@@ -69,7 +69,7 @@ com.openbank.ledger/
 ├── application/               ◄── use-case orchestration
 │   ├── port/in/               LedgerPorts (LedgerUseCase), FxRevaluationPorts
 │   ├── port/out/              GlAccountRepository, JournalRepository,
-│   │                          LedgerOutboxPort, CnbRateProvider
+│   │                          LedgerOutboxRepository, CnbRateProvider
 │   └── usecase/               LedgerService, FxRevaluationService
 │
 └── infrastructure/            ◄── adapters
@@ -92,7 +92,7 @@ com.openbank.ledger/
 | `FxRevaluationUseCase` (in) | `FxRevaluationService` | daily mark-to-ČNB revaluation |
 | `JournalRepository` (out) | `PanacheJournalRepository` | persist/read journal entries + lines |
 | `GlAccountRepository` (out) | `PanacheGlAccountRepository` | chart-of-accounts lookups by code/id |
-| `LedgerOutboxPort` (out) | `LedgerOutboxRepositoryImpl` | enqueue + claim outbox rows |
+| `LedgerOutboxRepository` (out) | `LedgerOutboxRepositoryImpl` | enqueue + claim outbox rows |
 | `CnbRateProvider` (out) | `FxServiceCnbRateAdapter` (→ `FxServiceClient`) | statutory ČNB FX fixing |
 
 ## Outbox flow
@@ -123,7 +123,13 @@ sequenceDiagram
   end
 ```
 
-**Why outbox (ADR-0050):** the DB write and the Kafka publish must be atomic-ish. Money-path delivery is regulatory-grade: a single in-JVM writer (`concurrentExecution = SKIP`) plus `replicas: 1` guarantee exactly one dispatcher claims a row; per-row failures are isolated and bounded by a DEAD transition. The dispatcher runs fully on the Vert.x event loop (reactive Panache) to avoid worker-thread session errors.
+**Outbox (ADR-0050).** The journal and its outbox row commit in one PostgreSQL transaction.
+The dispatcher publishes to Kafka with at-least-once delivery. Its atomic
+`FOR UPDATE SKIP LOCKED` claim coordinates concurrent replicas, and the scheduler skips
+overlapping ticks within each replica. The claim returns the entity's mapped columns
+explicitly, allowing this version to keep dispatching when a later migration adds columns.
+Bounded attempts move a poison row to `DEAD`. The dispatcher runs on the Vert.x event loop
+to retain the reactive Panache session.
 
 ## Partition lifecycle
 

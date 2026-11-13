@@ -69,7 +69,7 @@ class IrSignerProducer(
     private val hmacSecret: Optional<String>,
     @ConfigProperty(
         name = "openbank.catalog.ir-signing.openbao.address",
-        defaultValue = "https://openbao.vault.svc:8200",
+        defaultValue = "https://openbao.vault.svc:8203",
     )
     private val baoAddress: String,
     @ConfigProperty(name = "openbank.catalog.ir-signing.openbao.transit-mount", defaultValue = "transit")
@@ -81,6 +81,9 @@ class IrSignerProducer(
         defaultValue = "/var/run/secrets/kubernetes.io/serviceaccount/token",
     )
     private val saTokenPath: String,
+    /** PEM of the private CA behind OpenBao's TLS listener; absent = the JVM default trust store. */
+    @ConfigProperty(name = "openbank.catalog.ir-signing.openbao.ca-file")
+    private val caFile: Optional<String>,
 ) {
     @Produces
     @Singleton
@@ -89,7 +92,10 @@ class IrSignerProducer(
             throw IrSigningException("IR signing is disabled (${IrSigningMode.PROPERTY}=disabled)")
         }
         IrSigningMode.OPENBAO -> {
-            val transport = OpenBaoTransport(URI.create(baoAddress))
+            val transport = OpenBaoTransport(
+                URI.create(baoAddress),
+                caFile.map { OpenBaoTransport.pemTrustSslContext(Path.of(it)) }.orElse(null),
+            )
             val login = OpenBaoKubernetesLogin(transport, role, Path.of(saTokenPath))
             OpenBaoTransitIrSigner(transport, keyId, CachingOpenBaoTokenSource(login::login), transitMount)
         }

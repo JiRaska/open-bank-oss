@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.19.1...sanctions-service-v0.20.0) (2026-11-13)
+
+
+### Features
+
+* **sanctions:** ongoing monitoring by delta with a monitored-subject registry (off by default) ([#15897](https://github.com/JiRaska/open-bank-oss/issues/15897)) ([c0a0ea5](https://github.com/JiRaska/open-bank-oss/commit/c0a0ea5b80530c84a0fb1e4e7fd60b854a2b3bfd))
+
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.19.0...sanctions-service-v0.19.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **sanctions:** record the authenticated principal as reviewer, not a body field ([#15812](https://github.com/JiRaska/open-bank-oss/issues/15812)) ([416a88c](https://github.com/JiRaska/open-bank-oss/commit/416a88c0721936881d0ffaab274739ff1aac86b0)), closes [#15748](https://github.com/JiRaska/open-bank-oss/issues/15748)
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.6...sanctions-service-v0.19.0) (2026-11-12)
+
+
+### Features
+
+* **sanctions:** add screening profiles, country and bank identifier to the v3 screen ([#15743](https://github.com/JiRaska/open-bank-oss/issues/15743)) ([07180dd](https://github.com/JiRaska/open-bank-oss/commit/07180dd5547acb6b35e0916f2d522d044c29f030))
+* **sanctions:** serve a private-CA mTLS listener on 8443 beside the plain port ([#15783](https://github.com/JiRaska/open-bank-oss/issues/15783)) ([9abdbd5](https://github.com/JiRaska/open-bank-oss/commit/9abdbd5705b9b6c0fa0b20136338bedff37ad2d0))
+
+## [0.18.6](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.5...sanctions-service-v0.18.6) (2026-11-12)
+
+
+### Bug Fixes
+
+* **sanctions:** unwrap legacy jsonb string payloads so check list reads again ([#15606](https://github.com/JiRaska/open-bank-oss/issues/15606)) ([c15d88f](https://github.com/JiRaska/open-bank-oss/commit/c15d88f8fc990629a103d02ed25e7a0a3483513c))
+
+## [0.18.5](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.4...sanctions-service-v0.18.5) (2026-11-07)
+
+
+### Bug Fixes
+
+* **sanctions:** initialize missing publication state ([#15140](https://github.com/JiRaska/open-bank-oss/issues/15140)) ([454cb53](https://github.com/JiRaska/open-bank-oss/commit/454cb53aa48d4b24795816dcfad6371c98caf414))
+
+## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.3...sanctions-service-v0.18.4) (2026-11-06)
+
+
+### Bug Fixes
+
+* **sanctions:** defer single-list refresh to the scheduler and add a 202 v2 trigger ([#14785](https://github.com/JiRaska/open-bank-oss/issues/14785)) ([cc21e6a](https://github.com/JiRaska/open-bank-oss/commit/cc21e6aa47c13df81378bf11a4d5c598d9a8bcf1))
+
 ## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.2...sanctions-service-v0.18.3) (2026-10-29)
 
 

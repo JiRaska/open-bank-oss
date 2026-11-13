@@ -1,5 +1,48 @@
 # Changelog
 
+## [1.10.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.9.0...customer-edge-v1.10.0) (2026-11-12)
+
+
+### Features
+
+* **document:** ownership projection for delegated object grants, with ADR-0375 and its D4 gate ([#15824](https://github.com/JiRaska/open-bank-oss/issues/15824)) ([f15f8c1](https://github.com/JiRaska/open-bank-oss/commit/f15f8c133d3afbabd9bc34b65749559c1bc8eaf3))
+
+## [1.9.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.8.0...customer-edge-v1.9.0) (2026-11-12)
+
+
+### Features
+
+* **domestic-payment,customer-edge:** look up domestic payments after a timeout ([#15609](https://github.com/JiRaska/open-bank-oss/issues/15609)) ([f93e072](https://github.com/JiRaska/open-bank-oss/commit/f93e072a5a3ec1f978206eae789f7b0530a88a69))
+
+## [1.8.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.7.0...customer-edge-v1.8.0) (2026-11-08)
+
+
+### Features
+
+* **admin-ui:** add visual Lion Quest course authoring for marketing ([#15227](https://github.com/JiRaska/open-bank-oss/issues/15227)) ([1274803](https://github.com/JiRaska/open-bank-oss/commit/127480353627a49e08d9108cdbc5259305ed32a5))
+
+## [1.7.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.6.1...customer-edge-v1.7.0) (2026-11-06)
+
+
+### Features
+
+* **engagement,customer-edge,admin-ui:** manage Lion Quest chapters through the bank ([#14964](https://github.com/JiRaska/open-bank-oss/issues/14964)) ([beb444f](https://github.com/JiRaska/open-bank-oss/commit/beb444f56996633fa564719fe5dca1b8ec943a96))
+
+## [1.6.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.6.0...customer-edge-v1.6.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **admin-ui:** tolerate slow fleet documentation probes and discover agent namespaces ([#14168](https://github.com/JiRaska/open-bank-oss/issues/14168)) ([7280f51](https://github.com/JiRaska/open-bank-oss/commit/7280f51d45c53706cbd910f78fc881c25c11290e))
+* **customer-edge:** answer a refused pension read as access denied, not a change refusal ([#14649](https://github.com/JiRaska/open-bank-oss/issues/14649)) ([4d94d31](https://github.com/JiRaska/open-bank-oss/commit/4d94d31f3530e5a5b79aef1b21777fe8a3b8b04d))
+
+## [1.6.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.2...customer-edge-v1.6.0) (2026-11-03)
+
+
+### Features
+
+* **customer-edge:** page the unified notification inbox by keyset cursor ([#14622](https://github.com/JiRaska/open-bank-oss/issues/14622)) ([fab74b5](https://github.com/JiRaska/open-bank-oss/commit/fab74b50dc95032b074bd1c8ecc387b47c889c46)), closes [#12260](https://github.com/JiRaska/open-bank-oss/issues/12260)
+
 ## [1.5.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.1...customer-edge-v1.5.2) (2026-10-30)
 
 

@@ -20,6 +20,7 @@ class ResourceTypeWarmupTest {
     data class Dto(val id: String, val nested: Nested)
     data class Nested(val amount: java.math.BigDecimal)
     data class Command(val note: String)
+    data class Book<T>(val items: T)
 
     @Path("/x")
     @Suppress("UnusedParameter", "FunctionOnlyReturningConstant")
@@ -61,5 +62,23 @@ class ResourceTypeWarmupTest {
     fun `builds the serializers without an instance`() {
         val detail = ResourceTypeWarmup.warm(ObjectMapper(), listOf(Resource::class.java))
         assertThat(detail).isEqualTo("1 resources, 3 (de)serializers built, 0 unbuildable")
+    }
+
+    @Test
+    fun `expands generic bindings and container content so nested DTOs are warmed too`() {
+        val mapper = ObjectMapper()
+        val book = mapper.typeFactory.constructParametricType(
+            Book::class.java,
+            mapper.typeFactory.constructCollectionType(List::class.java, Dto::class.java),
+        )
+        assertThat(ResourceTypeWarmup.expand(book).map { it.rawClass })
+            .containsExactly(Book::class.java, List::class.java, Dto::class.java)
+    }
+
+    @Test
+    fun `drops opaque leaves when expanding`() {
+        val mapper = ObjectMapper()
+        val list = mapper.typeFactory.constructCollectionType(List::class.java, String::class.java)
+        assertThat(ResourceTypeWarmup.expand(list).map { it.rawClass }).containsExactly(List::class.java)
     }
 }

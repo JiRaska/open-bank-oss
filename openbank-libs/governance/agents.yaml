@@ -27,7 +27,7 @@ defaults:
   policy_decision: deny               # deny-by-default; OPA must find a matching allow rule
   enforced: block                     # ADR-0031 D8 gate flipped (#700/#638): declaration now matches
                                       # the deployed AGENT_POLICY_ENFORCEMENT=block (reconcile #743).
-                                      # A PDP connectivity error still degrades to advisory (fail-safe).
+                                      # A PDP connectivity error denies the call (fail closed, #15758).
   audit:
     actor_type: AI_AGENT              # every action -> AuditEvent (ADR-0031 D5)
     capture: [model_id, model_version, prompt_hash, tool_calls, policy_decision]
@@ -185,6 +185,10 @@ tool_tiers:
     - query.account.readonly      # PSD2 consent-scoped account list (openbank-mcp-service, ADR-0181)
     - query.consent.readonly      # the PSD2 consents the acting agent holds (openbank-mcp-service, ADR-0181)
     - verify.mandate              # bank-side AP2 mandate verification (openbank-ap2-service, ADR-0193) — evidence only, moves no funds
+    - product.lint                # Product IR lint, in-process ProductToolkit (openbank-agent-service, ADR-0352 §12)
+    - product.compile             # canonical IR + revisionHash, in-process (ADR-0352 §12)
+    - product.simulate            # portfolio replay through the pure interpreter; posts nothing (ADR-0352 §12)
+    - product.explain             # ruleId / instruction -> IR path (ADR-0352 §12)
   write_proposal: # produces a reviewable artifact, never a direct effect
     - draft.ticket
     - gh.pr.open
@@ -192,12 +196,15 @@ tool_tiers:
     - git.branch
     - git.commit.signed
     - run.skill            # constrained to the agent's `skills` allowlist
+    - product.propose      # DRAFT catalog revision as a HITL proposal; never publishes (ADR-0352 §12)
   deny:           # hard-forbidden for ALL agents -- not registrable
     - money.transfer
     - money.post.ledger
     - gh.pr.merge
     - gh.pr.approve
     - secrets.read.raw
+    - product.publish      # ADR-0259: publishing a product revision is a human decision, never an agent's
+    - product.sign         # ADR-0352 §4: the identity-bound signature belongs to the catalog publish path
 
 # ---------------------------------------------------------------------------------------
 # Case classes for agent swarm coordination (ADR-0244). A case is one long-running
@@ -324,6 +331,24 @@ agents:
       # ADR-0031 D4); the assistant itself only reads.
       - every: proposal
     limits: { tokens_per_run: 100000, runs_per_day: 500 }
+
+  - id: product-author
+    plane: control
+    model: llama-3.3-70b-versatile
+    charter: "The AI Author of ADR-0352 §12. Drafts and checks Product IR with the same toolkit the obp CLI runs (lint, compile, simulate, explain) and proposes a DRAFT catalog revision for a human; it never signs, approves or publishes."
+    data_scope:
+      read: [catalog]
+      pii: none
+    tools:
+      # Exactly the five MCP product tools. product.sign / product.publish are tool_tiers.deny for
+      # every agent; they are restated here so the charter reads complete on its own.
+      allow: [product.lint, product.compile, product.simulate, product.explain, product.propose]
+      deny:  [product.publish, product.sign, "money.*", "gh.pr.*", "*.write", secrets.read.raw]
+    requires_human:
+      # product.propose lands in the admin-ui approval queue; publishing stays four-eyes in the catalog.
+      - every: proposal
+      - approver_must_differ_from: author
+    limits: { tokens_per_run: 150000, runs_per_day: 100 }
 
   - id: rca-investigator
     plane: control
@@ -488,6 +513,86 @@ agents:
         Art. 13 — transparency: every filed issue cites the bulletin it came from and the capability
         it was mapped to, so a reader can check the mapping rather than trust it.
       dora: ICT third-party change awareness — a scheme mandate is a supplier-imposed change
+  # Regulatory obligations watcher (ADR-0367 decision 6).
+  #
+  # stale-ref-ok: the register file lands with the sibling PR #15358, merged before this charter is enabled.
+  #
+  # WHY IT EXISTS: openbank-libs/governance/regulatory-obligations.yaml cites, for every duty, the
+  # legal text and the authority's specification. Those sources change — a decree is amended, ČNB
+  # republishes a reporting calendar, GSFT changes its file format — and the register says nothing
+  # when they do. Most of its deadlines are still marked `unverified`, too, so the useful daily
+  # work is mostly confirmation: fetch the cited source, compare it with the row, and propose the
+  # correction with the quote that justifies it.
+  #
+  # WHY IT IS PROPOSAL-ONLY: a regulatory duty is an interpretation of law. The agent's only
+  # output is a governance issue (draft.ticket) citing the source; it opens no PR and never writes
+  # the register. A human decides and changes the register in a reviewed PR.
+  #
+  # ENFORCEMENT, STATED HONESTLY: the write and execute tiers are listed under tools.deny, but
+  # agents.rego only evaluates a tier/resource deny when the caller sends input.tier; the MCP and
+  # REST paths do not. What actually protects today is deny-by-default (nothing outside the allow
+  # list is granted), not the deny list. The PR that enables this charter must carry an `opa eval`
+  # run against the served bundle with a must-DENY (write/execute) and a must-ALLOW (read,
+  # draft.ticket) control.
+  #
+  # `enabled: false` ON PURPOSE: it needs an allow-listed outbound fetch of the cited public
+  # sources (zakonyprolidi.cz, e-sbirka.cz, eur-lex.europa.eu, cnb.cz, gsft.cz, fau.gov.cz,
+  # financnisprava.gov.cz) and a prompt in prompts/registry.yaml. Enable both in the same PR.
+  - id: regulatory-obligations-watcher
+    plane: control
+    model: deepseek-ai/DeepSeek-V3.2
+    charter: ADR-0367
+    description: >
+      Re-reads the legal texts and authority specifications cited by the regulatory obligations
+      register, flags amendments, changed deadlines or formats and still-unverified rows, and files
+      one governance issue per finding citing the source. It reads sources and may only file a
+      governance issue (draft.ticket); it opens no PR and never writes the register, a report or
+      a filing.
+    enabled: false
+    enforcement: block
+    schedule:
+      weekly: Monday 06:30 UTC
+    data_scope:
+      read:
+        - read.governance
+      pii: none
+    tools:
+      allow:
+        - tier: read
+          resources:
+            - read.governance
+        - tier: write_proposal
+          resources:
+            - draft.ticket
+      deny:
+        - tier: write
+          resources:
+            - '*'
+        - tier: execute
+          resources:
+            - '*'
+    requires_human:
+      - every: proposal
+      - any_legal_interpretation
+      - any_register_change
+    limits:
+      tokens_per_run: 60000
+      runs_per_day: 1
+      kill_switch: true
+    audit:
+      capture:
+        - model_id
+        - prompt_hash
+        - tool_calls
+        - policy_decision
+        - obligation_id
+        - source_url
+        - source_quote
+    compliance:
+      eu_ai_act: >
+        Art. 13 — transparency: every issue cites the obligation id, the source URL and the quoted
+        passage, so a reader checks the finding against the law instead of trusting it.
+      dora: not applicable — no ICT system or third-party arrangement is changed
   # Card dispute evidence drafter (ADR-0283 phase 4, issue #8869).
   #
   # WHY IT EXISTS: a chargeback is won or lost on what was filed before the network's respond-by
@@ -1064,9 +1169,9 @@ agents:
       test functions using runBlocking/GlobalScope.launch/GlobalScope.async without an explicit
       ': Unit' return type, which JUnit5 silently drops; Pact provider tests gated on
       pactbroker.url; two colliding @Provider classes; declared-vs-executed @Test counts) is
-      reachable only through the CI-failure webhook and the operator trigger where a repository
-      checkout exists -- the deployed pod mounts none, which is why the weekly sweep it carried
-      until 2026-10-17 had scanned an empty tree since the day it shipped and was removed.
+      reachable through the CI-failure webhook and the operator trigger where a repository
+      checkout exists. The deployed source pilot mounts only this module's test sources as a
+      read-only sparse snapshot of public main taken at pod startup; no fleet sweep cron is enabled.
       Every finding without a bounded mechanical repair opens a tracking issue (label
       flaky-test) through the GitHub adapter for the HITL queue -- guessing wrong on a fix here
       (suspend fun vs ': Unit', which @Provider class should own an interaction) risks silently
@@ -1081,9 +1186,9 @@ agents:
                                                       # only where a checkout is mounted
     data_scope:
       read:
-        - read.governance             # the Admin UI's bounded Test Intelligence snapshot; on a
-                                       # developer checkout also src/test/kotlin trees and
-                                       # build/test-results/test/*.xml JUnit reports
+        - read.governance             # bounded Test Intelligence evidence; the deployed source
+                                       # pilot reads only its own test snapshot. A developer
+                                       # checkout can also supply JUnit execution reports.
       pii: none                       # test source text and JUnit report metadata only; no customer data
     tools:
       allow:

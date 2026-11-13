@@ -109,6 +109,7 @@ RUN set -e; \
     cp -R /repo/openbank-libs/governance /governance-src/openbank-libs/governance; \
     test -s /governance-src/openbank-libs/governance/rules.yaml; \
     test -s /governance-src/openbank-libs/governance/card-capabilities.yaml; \
+    test -s /governance-src/openbank-libs/governance/regulatory-obligations.yaml; \
     cp -R /repo/openbank-libs/governance/prompts/. /governance-bundle/prompts/ 2>/dev/null || true; \
     echo "── governance bundle: $(ls /governance-bundle/adr | wc -l) ADR(s), $(ls /governance-bundle/threat-models | wc -l) threat model(s), $(ls /governance-bundle/agents | wc -l) agent charter(s), $(find /governance-bundle/prompts -name '*.md' | wc -l) prompt(s) ──"; \
     find /governance-bundle -name '*.md' | sort
@@ -210,7 +211,7 @@ RUN set -e; \
     find openbank-infra/gitops -name '*.yaml' | while read -r f; do mkdir -p "/pv-src/$(dirname "$f")"; cp "$f" "/pv-src/$f"; done; \
     test -s /pv-src/openbank-infra/gitops/components/kafka/kafka.yaml
 
-FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS deps
+FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS deps
 WORKDIR /app
 COPY openbank-admin-ui/package.json openbank-admin-ui/package-lock.json* ./
 # Resilient install: the registry/network can flake (ECONNRESET mid-download) and a bare
@@ -235,7 +236,7 @@ RUN npm config set fetch-retries 5 \
 # copy into the arm64 runtime stage. Running on the native arch avoids
 # QEMU overhead (~10× slower) and SIGILL crashes on x86 hosts.
 # ──────────────────────────────────────────────────────────────────────
-FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS build
+FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS build
 WORKDIR /app
 
 # BuildInfo — passed in via docker-compose build args, stamped into the bundle.
@@ -252,6 +253,11 @@ ENV NEXT_PUBLIC_BUILD_VERSION=$BUILD_VERSION \
 COPY --from=deps /app/node_modules ./node_modules
 COPY openbank-admin-ui/ ./
 COPY .github/gates/gates.yaml /.github/gates/gates.yaml
+# The SDLC guide derives a bounded configuration snapshot inside the image build.
+COPY .github/workflows/merge-train.yml .github/workflows/auto-deploy.yml /.github/workflows/
+COPY openbank-infra/gitops/components/ledger/ledger-service.yaml /openbank-infra/gitops/components/ledger/ledger-service.yaml
+COPY openbank-infra/gitops/components/argo-rollouts/analysis-template.yaml /openbank-infra/gitops/components/argo-rollouts/analysis-template.yaml
+COPY openbank-infra/gitops/apps/ledger.yaml /openbank-infra/gitops/apps/ledger.yaml
 # platform-versions.json is PARSED by `npm run build` (prebuild) from the infra sources of truth, staged
 # at their repo-relative paths, so the UI can never show a hand-typed Kubernetes/EKS/Loki/Postgres version.
 COPY --from=platform-versions-collector /pv-src/ /
@@ -303,7 +309,7 @@ RUN echo "maps before prune: $(find .next/static -name '*.map' | wc -l)" \
 # ──────────────────────────────────────────────────────────────────────
 # Stage 4: Runtime image — minimal surface, non-root.
 # ──────────────────────────────────────────────────────────────────────
-FROM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS runtime
+FROM node:26-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -321,6 +327,11 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/gate-catalog.json ./gate-catalog.json
+# Baked by prebuild:image from openbank-libs/governance/*.yaml; read at runtime from cwd (/app)
+# by src/lib/cards/capabilities.ts and src/lib/regulatory/obligations.ts. Without these the
+# /cards and /regulatory pages render an empty register in the image only.
+COPY --from=build /app/card-capabilities.json ./card-capabilities.json
+COPY --from=build /app/regulatory-obligations.json ./regulatory-obligations.json
 # OpenTelemetry preload. Both files sit at the package root rather than inside the standalone
 # bundle because Next.js only emits application code there; a --require preload is invisible to
 # its file tracing. See otel-bootstrap.cjs for why the SDK cannot be started from
@@ -397,6 +408,8 @@ COPY --chmod=0644 openbank-libs/governance/compliance-controls.yaml ./compliance
 # scripts/generate-catalog.mjs before the build so this file always exists.
 # --chmod=0644 for the same UID-100 readability reason as test-results.json.
 COPY --chmod=0644 openbank-admin-ui/catalog.json ./catalog.json
+# Same-source ownership fallback when a published content bundle predates the domain contract.
+COPY --chmod=0644 openbank-admin-ui/governance.json ./governance.json
 # CI-produced code-derived dependency graph (ADR-0029 D1; read-only consumer; see
 # src/app/api/catalog/graph/route.ts). build-push-admin-ui.sh runs
 # scripts/generate-service-graph.mjs before the build so this file always exists.

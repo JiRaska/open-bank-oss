@@ -6,6 +6,7 @@ package com.openbank.sdd.integration
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.sdd.infrastructure.outbox.SddOutboxDispatcher
 import com.openbank.sdd.infrastructure.persistence.entity.SddOutboxEntity
 import com.openbank.sdd.infrastructure.persistence.repository.SddOutboxRepositoryImpl
@@ -46,7 +47,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(SddOutboxDispatchIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.sdd.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class SddOutboxDispatchIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {

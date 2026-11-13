@@ -60,14 +60,14 @@ isolation from transport/persistence.
 | # | Element | Threat (STRIDE) | Mitigation | Residual |
 |---|---------|-----------------|------------|----------|
 | S1 | REST in | **Spoofing** — caller forges identity to post journals | Bearer JWT (Keycloak); `@RolesAllowed("ROLE_OPERATOR")` on `postJournal`/`reverseJournal`; reads now `@RolesAllowed(SERVICE, AUDITOR, VIEWER, OPERATOR, ADMIN)` (no longer `@PermitAll` — K7); **OPA fine-grained authz now ENFORCED (ADR-0034 Phase 5, issue #266)** — `AUTHZ_ENFORCE=true` + sidecar deployed; every `@Authorize`-annotated action is deny-by-default unless an explicit `rest.rego`/`ledger_rest_ext.rego` reason fires. M2M rules gate on `input.principal.id == "service-account-openbank-services"` (a `HUMAN`-typed client_credentials identity — `AuthorizeInterceptor` never emits `principal.type == "SERVICE"`, PR #403 / `rules.yaml: authz_policy`), not a role or the unreachable SERVICE type | transaction/lending/settlement/balance-service **all share the single `openbank-services` Keycloak client** (ADR-0104 D3) — OPA cannot distinguish WHICH of the four is calling, only that SOME caller holds that client's token; a compromised credential for that shared client can post (`ledger.create`) and reverse (`ledger.reverse`) — *open, tracked below* |
-| T1 | Journal posting | **Tampering** — unbalanced or asymmetric entry corrupts the books | `validateBalance()` enforces Σdebit=Σcredit **per base currency** in the domain; rejects on mismatch; covered by unit tests | Low — invariant is in pure domain |
+| T1 | Journal posting | **Tampering** — unbalanced or asymmetric entry corrupts the books | `validateBalance()` enforces Σdebit=Σcredit **per base currency** in the domain; rejects on mismatch; covered by unit tests. **Second check in the database (ADR-0372, V44):** deferred constraint triggers refuse the COMMIT of any transaction that leaves a posted journal with fewer than two lines, more than `ledger_max_journal_lines()` lines, without both a debit and a credit side, or not netting to zero per `base_currency`, whoever the writer is; no override exists | Low — the domain check binds the service, the storage check binds every other writer on the connection |
 | T2 | Sub-ledger dim | **Tampering** — `subAccountId` stamped on a non-deposit-control leg, polluting GL tie-out | `loadAndValidateGlAccounts` rejects `subAccountId` on any non-deposit-control account (`isDepositControl`, codes 2100–2103); unit-tested (accept 2100 / reject 1100) | Low |
-| T3 | Persisted rows | **Tampering** — direct DB mutation of posted lines | App-only write path; posted entries immutable (corrections via reversal `copy()` preserving dimension); DB creds in Vault (ADR-0017); migrations forward-only Flyway | DB-admin insider — covered by infra controls, out of service scope |
+| T3 | Persisted rows | **Tampering** — direct DB mutation of posted lines | App-only write path; posted entries immutable (corrections via reversal `copy()` preserving dimension); DB creds in Vault (ADR-0017); migrations forward-only Flyway. **Enforced by the database (ADR-0372, V44):** `BEFORE UPDATE/DELETE` and `BEFORE TRUNCATE` triggers refuse any rewrite of a posted journal row or of a line of a posted journal; the only update a posted row accepts is the measured lifecycle transition `POSTED → REVERSED` with `version + 1`. A line can be INSERTED only into a journal the same transaction wrote (or a `PENDING` one), so nothing is appended to a posted journal later and a reversal's lines cannot land on the original. A reviewed repair calls `ledger_declare_repair(reason)` in the same transaction and every rewritten row lands in the append-only `ledger_repair_audit` | **Not stopped:** a superuser, the table owner (`DISABLE TRIGGER`, `DROP TRIGGER`), `session_replication_role = replica`, partition `DETACH`/`DROP`. Flyway and the service still share one role, so the same credential that is refused can also declare a repair — that leaves a record, it does not need a second person. Tamper evidence for these cases stays with the closed-period anchors; the role split is the planned next step (ADR-0372) |
 | R1 | All mutations | **Repudiation** — operator denies posting/reversal | `postedBy`/`reversedBy`/`createdBy` captured per entry; `entryNumber` monotone; reversal records `reason`; audit via outbox event stream | Strengthen with signed audit (ADR-0029 evidence bundle) — *planned* |
 | I1 | Reads | **Information disclosure** — book-of-record / customer sub-ledger balances leak | Reads **now role-gated** to `SERVICE, AUDITOR, VIEWER, OPERATOR, ADMIN` (K7 — previously `@PermitAll`); `subAccountId` filter is server-side; no cross-customer enumeration endpoint; base `rest.rego` `operator-read-any`/`compliance-read-any` now ENFORCED on every `ledger.read`/`ledger.list` action | Role-coarse — per-tenant scoping still not resource-scoped for reads (no `party-self-service` equivalent on ledger reads; reads are role-gated, not tenant-gated) — *open* |
 | I2 | Metrics / observability | **Information disclosure** — domain metrics leak PII or enable per-customer inference via high-cardinality labels | `DomainMetrics` enforces a low-cardinality tag contract: ledger postings are tagged only by `currency` + `type` (`posting`/`reversal`), the outbox-backlog gauge only by `service` — **never** an account id, IBAN, amount, party, or entry id (amounts belong in histograms, not labels). Increments happen **after** the posting commits and only for genuinely new entries (idempotent replays return early), so a replay cannot inflate counts. The backlog is a read-only `SELECT count(*) WHERE status IN ('PENDING','FAILED')` refreshed by a 10 s scheduled tick **on the event loop** — no scrape-thread DB access (`HR000068`-safe) and no new write path. `/q/metrics` is cluster-internal (not Ingress-exposed). | Low — labels bounded by ISO-4217 currency × a closed `type` set |
-| D1 | Posting path | **DoS** — flood of postings / expensive trial-balance scans | Cursor pagination on journals; partial index on `(sub_account_id, base_currency)`; reactive non-blocking stack; per-service resource limits (k8s) | Rate-limiting at gateway — infra scope |
-| D2 | Outbox relay | **DoS** — a poison outbox row retried forever starves the dispatch batch | **Bounded retries → terminal `DEAD` + operator alert** (ADR-0050 N5); `concurrentExecution=SKIP`; sequential per-aggregate dispatch | `FOR UPDATE SKIP LOCKED` claim for multi-writer — *planned* |
+| D1 | Posting path | **DoS** — flood of postings / expensive trial-balance scans | Journal reads limit each cursor page in PostgreSQL before hydrating entries and lines; partial index on `(sub_account_id, base_currency)`; reactive non-blocking stack; per-service resource limits (k8s) | Rate-limiting at gateway — infra scope |
+| D2 | Outbox relay | **DoS** — a poison outbox row retried forever starves the dispatch batch | **Bounded retries → terminal `DEAD` + operator alert** (ADR-0050 N5); `concurrentExecution=SKIP`; sequential per-aggregate dispatch | The atomic `FOR UPDATE SKIP LOCKED` claim projects only mapped columns, so additive outbox columns cannot interrupt the compatible relay during a schema rollout. |
 | E1 | Roles | **Elevation** — reader triggers a posting | Mutations gated by `ROLE_OPERATOR`; read roles exclude write capability; no posting logic on read endpoints; **OPA enforce mode is now ON (ADR-0034 Phase 5)** — a call with no matching `allowed_reasons` (e.g. a compliance/viewer role attempting `ledger.create`) is 403'd by `data.openbank.rest.allow`'s default-deny, in addition to the `@RolesAllowed` outer gate | Two independent gates (RBAC + OPA) both currently key off the SAME role set (`ROLE_OPERATOR`/`ROLE_ADMIN`) — OPA does not yet add attribute-based conditions (e.g. tenant/value-band) beyond role membership for ledger writes — *open* |
 | E2 | Attestation / year-close | **Elevation** — a SERVICE principal or a non-operator attests a fiscal year | `ledger.approve` (year-close attest) has **NO service-\* OPA grant**, and since #3765 the `operator-year-close-attest` rule also **excludes every `service-account-*` identity outright** (`not startswith(input.principal.id, "service-account-")`). That exclusion is what makes the "no M2M path" claim true: *absence of a service-\* rule was never sufficient* — the rule was role-only, and both `service-account-openbank-services` and `service-account-openbank-edge` are classified `HUMAN` while holding `ROLE_OPERATOR` in a realm, so `opa eval` against the deployed bundle returned `allow=true, reason="operator-year-close-attest"` for both. Measured before and after: the fix denies exactly `ledger.approve` for both service-accounts and changes no other decision, with staff (`ROLE_OPERATOR`/`ROLE_ADMIN`) still allowed. In-service four-eyes (draftedBy ≠ attestedBy, see §4) is a second, independent control on top | Low — two independent controls (OPA identity+role gate and in-service four-eyes) must both be defeated. **Was Medium until #3765**: a single compromised shared-client credential satisfied the OPA gate on its own |
 | E3 | Close DRAFT / maker evidence | **Elevation** — an M2M journal writer creates the close DRAFT and is recorded as its maker | Close creation uses the dedicated `ledger.close.draft` action and `operator-ledger-close-draft` OPA reason, which requires operator/admin and excludes every `service-account-*` identity. Routine M2M posting remains narrowly allowed only on `ledger.create`; it cannot manufacture maker evidence. Regression tests cover both the shared service account denial and the staff operator allow decision | Low — RBAC plus the identity-aware OPA rule gate the maker action; freeze independently requires a distinct human checker |
@@ -79,6 +79,15 @@ isolation from transport/persistence.
 - A `JournalEntry` cannot reach `POSTED` unless balanced per base currency.
 - `subAccountId` is permitted **only** on deposit-control legs (2100–2103).
 - Posted entries are immutable; the only correction is a balanced reversal that preserves all dimensions.
+- **Both of the above hold in the database too (ADR-0372, V44), and must keep holding there.** A new
+  code path that updates a posted journal row beyond `POSTED → REVERSED, version + 1`, that
+  updates or deletes a line of a posted journal, or that inserts a line into a journal another
+  transaction posted, is refused by PostgreSQL with SQLSTATE `55000`; a posted journal that is
+  unbalanced, one-sided or has fewer than two lines is refused at COMMIT with `23514`. A journal
+  and all of its lines are written in one transaction. Do not widen the trigger to make
+  such a path pass: correct it with a reversal, or — for a one-off data repair — declare it with
+  `ledger_declare_repair(reason)` so it is logged. `ledger_repair_audit` is append-only and has no
+  override.
 - **Period lock (#869):** once a fiscal year is `ATTESTED`, no posting **or reversal** may land in it
   (`LedgerService.requireOpenPeriod`, checked on `postJournal`/`reverseJournal` by `entryDate.year`,
   derived for a reversal from the original it preserves). A late posting into a sealed year would
@@ -86,6 +95,15 @@ isolation from transport/persistence.
   read-only re-verify endpoint (`GET /close/{year}/verify`) is the **detective** control that proves a
   sealed period is still hash-identical (or surfaces drift) without flipping state. Corrections to a
   closed year must be booked as an adjustment in the current open period.
+- **Refusal codes (period lock, year lock):** the 409 for a posting into a FROZEN period carries
+  `code=ACCOUNTING_PERIOD_FROZEN` and the ATTESTED-year 409 carries `code=ACCOUNTING_YEAR_CLOSED`, the
+  same body field the day lock already uses. The change is additive and does not alter any decision:
+  the lock still refuses exactly the same postings, the `error` text is unchanged, and the codes
+  disclose nothing beyond the period label the message already contained. The risk it addresses is
+  availability and integrity at the callers: an uncoded 409 is indistinguishable from an idempotency
+  conflict, so a caller may retry a deterministic refusal forever or fail a whole job on it. A code is
+  a classification aid, never an authorization signal; callers must not treat it as permission to
+  re-date into another period.
 - **Four-eyes year-close attestation (#869):** the attestor (checker) MUST differ from the draft
   author (maker, `YearCloseRecord.draftedBy` — recorded as the verified JWT subject on every
   create/refresh of the DRAFT). Enforced **fail-closed** in both `YearCloseService.attest` (409) and
@@ -247,6 +265,72 @@ an additional store; not implemented in this PR. Also open (unchanged by this PR
 set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
+
+- **2026-11-11** — **Storage-enforced journal invariants (ADR-0372, #15718).** Migration V44 adds
+  the second check for T1 and T3 inside PostgreSQL; no endpoint, role, event or OPA action changes.
+  STRIDE: *Tampering* — a writer that never loads the domain model (a migration, a repair script, a
+  new repository method, a manual session) can no longer commit an unbalanced posted journal, nor
+  update, delete or truncate posted journal rows and lines. Measured before writing the trigger:
+  the service issues exactly one update against the two tables (`saveReversal`: `POSTED →
+  REVERSED`, `version + 1`) and no delete, and inserts journals already `POSTED`, so that single
+  transition is the whole allow-list. Proven by effect over plain JDBC with the domain model
+  bypassed in `LedgerStorageInvariantIT`, which was run red against the schema without V44 first;
+  rows T1 and T3 will cite it once it has a green result on `main`. *Repudiation* — a rewrite that is genuinely needed is
+  declared per transaction with `ledger_declare_repair(reason)` and leaves one row per rewritten
+  journal row or line in `ledger_repair_audit` (reason, operation, row identity, changed column
+  names, database role, transaction id — never row contents); that table refuses UPDATE, DELETE
+  and TRUNCATE unconditionally. The declaration is bound to the declaring transaction id, so a
+  session-level setting left on a pooled connection opens nothing. *Denial of service* — every
+  line insert reads its journal's state and every written journal row and line raises one deferred
+  event at commit. The check is linear in journals and quadratic in the lines of one journal, and
+  that region is closed by size: a posted journal may hold at most `ledger_max_journal_lines()`
+  lines (500, defined in that one function) unless a repair is declared, so the worst case is a
+  bounded fraction of a second. The widest journal the service itself builds is the year-end
+  allocation, one line per CZK income or expense account plus retained earnings: 22 lines on the
+  current chart. The posting API does not state the cap yet, because adding `maxItems` is a
+  breaking change to the published contract; a wider posting is refused at COMMIT.
+  **Stated limits:** the control guards against mistakes and unreviewed code, not against a
+  database superuser or the table owner, who can disable or drop a trigger; it does not see
+  partition `DETACH`/`DROP` or a `TRUNCATE` aimed at a single partition; and the
+  runtime role can itself declare a repair, because Flyway and the service share credentials — the
+  declaration is logged but not independently approved. Journals that were already unbalanced
+  before V44 are reported by the migration as a warning and neither rewritten nor re-checked until
+  something writes to them. Follow-ups: the CI gate `ledger-journal-rewrite-declared` (a ledger
+  migration that updates or deletes journal rows must declare the repair in the same file) and the
+  INSERT-only runtime role, both outside this change.
+- **2026-11-10** — **Year-end result allocation (ADR-0096 D3, first half).** New surface
+  `GET|POST /api/v1/ledger/close/{fiscalYear}/result-allocation`. The POST posts one closing journal
+  dated 31 December that zeroes the year's CZK income/expense accounts into Retained Earnings
+  (6020). STRIDE: *Tampering/Elevation* — the POST is `ROLE_OPERATOR` + `ledger.close.draft`
+  (human-only maker action, no new OPA grant); a machine identity cannot reach it. The closing
+  journal goes through the ordinary posting path, so the day, period and fiscal-year locks apply,
+  and the attestation (four-eyes, fresh-hash re-verify) is the checker step that reviews it; an
+  ATTESTED year refuses allocation (409). *Spoofing/four-eyes* — the closing journal is posted by
+  the system poster, so its description is NOT the control. Every allocation is an insert-only row
+  in `ledger_year_close_allocation` (V42) keyed by the journal's idempotency key; a year allocated by
+  two principals keeps both, and attestation refuses ALL of them as well as the drafter.
+  *Atomicity* — the whole allocation is ONE database transaction: `SELECT … FOR UPDATE` on the DRAFT
+  `ledger_year_close` row, the plan, the journal posted through the ordinary posting path (its
+  repository calls join the open transaction), and the attribution insert, committed together or
+  not at all. There is no intermediate state and no recovery step. The `year-end-result:` key
+  prefix is reserved: `POST /api/v1/journals` refuses it (400), so no other path can create a
+  closing journal without an attribution. *TOCTOU* — attestation runs entirely under the same
+  `SELECT … FOR UPDATE` on the year-close row, and every check (fresh trial-balance hash,
+  allocators, unattributed journals) is read AFTER the lock. A conditional UPDATE alone was measured
+  insufficient: under READ COMMITTED Postgres re-checks only the locked row's own columns after the
+  wait, not `NOT EXISTS` subqueries, and the race IT saw allocate and attest both succeed until the
+  lock moved first. The conditional UPDATE stays as a second line. *Integrity* — carry-relative: the plan comes from the year's own
+  trial balance and the journal lands inside that year; the key
+  `year-end-result:{year}:{plan digest}:{n}` takes the first ordinal with no journal, a replayed
+  key is a 409 and never "posted", and after posting the plan must be empty (else the transaction
+  rolls back). Proven on Postgres by `YearEndResultAllocationIT` and
+  `YearEndResultAllocationConcurrencyIT`: a sabotaged attribution insert rolls the journal back,
+  the reserved prefix is refused, racing allocations book one journal, an allocate/attest race
+  never yields an attest by the allocator, and racing attests flip once.
+  *Information disclosure* — the preview is a read with the same roles as the trial balance.
+  Residual: a non-CZK income/expense balance is refused rather than translated; the opening-balance
+  roll and an attest-time "P&L must be zero" gate are not built. Rollback: revert; already-posted closing
+  journals are corrected by reversal, like any journal.
 
 - **2026-10-28** — **Journal-approval OPA grants restored (#12906).** `ledger.approval.read` and
   `ledger.approval.decide` now admit only HUMAN operators/admins whose principal is not a service
@@ -755,6 +839,11 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ### Synthetic taint request carrier (#4348, #14058, #14059)
 
+- **Required-origin posting (#7284):** `POST /api/v1/journals/synthetic` applies the existing
+  ledger.create policy and checks the trusted taint before opening a journal write. Existing
+  ledger images reject this path. The ledger binds idempotent replay to the journal's stored
+  classification, including a request that lost a concurrent duplicate race. The route requires
+  the existing authenticated workload allowlist.
 - **Classification integrity:** a false synthetic flag can include canary activity in real-only
   ledger views; an unjustified true flag can exclude real activity. Fail-to-real rejects untrusted
   self-exclusion but is not a universally safe accounting fallback for a trusted canary.
@@ -782,3 +871,88 @@ set) apply equally to the new `ledger.approval.decide` action.
   reads and may restore false-real classification. Existing journal flags are not rewritten.
   Dedicated caller provisioning and trusted-principals configuration are separate work (#14060);
   live canary seeding and deployed acceptance remain separate operational decisions.
+
+- **2026-11-08 — At-close participation evidence (#13167).** A monthly readiness read is protected by
+  `ledger.read` and the existing authenticated read roles. A new additive table is written only
+  inside the day-transition transaction, under the same day lock as participant reports and
+  waivers; insert failure rolls back the state change and its outbox event. No update or backfill
+  API exists. The snapshot records the configured participant principals, required jobs, latest
+  reports and qualifying post-cutoff tie-out id. Later reports cannot retroactively repair the
+  historical verdict. Missing evidence, disabled checks, waivers, declaration drift and unexercised
+  monthly jobs fail readiness closed. Report identity checks and human-only reasoned waivers
+  remain mandatory, including in advisory authorization mode. Job names are bounded and only
+  RAN may attest them. Snapshots retain operator attribution and waiver reasons under the same
+  audit-data access/retention obligations as participation history; no such values enter metrics.
+  Rollback retains the additive table and history. This read does not activate enforcement,
+  release deployment holds or attest pension-company/fund accounting mappings.
+The retained verdict records reconciliation start and the committed journal count through its
+business date. Writers take a shared advisory lock; only the short close capture takes it
+exclusively, so normal postings remain concurrent. A run that overlaps a journal commit cannot
+qualify. Monthly readiness compares the retained count to current immutable journal history:
+backdated postings and reversals invalidate qualification without rewriting the original evidence;
+postings dated after the evaluated day do not. Legacy runs without a read watermark stay unknown.
+The count query runs over journal history and must be measured at production volume before
+activation; the implementation does not claim a production latency or a completed live month.
+
+
+### ADR-0365 — purpose-bound pension books
+
+The pension fee endpoint rejects the bank, mismatched fund/book ids, unverified client identity,
+changed source payloads, missing correction bases and untrusted synthetic classification. The
+first receipt binds the database to its book; later configuration cannot reassign it. Idempotent
+POSTED and NO_POSTING receipts remain distinct and retained after a software rollback.
+
+Pension reconciliation compares the entire enabled own chart (including zero balances), rejects
+foreign/disabled accounts with activity, and stores a read start plus committed journal watermark.
+Independent verified interactive issuer subjects propose and approve once. The purpose-specific
+OPA grants do not give the NAV producer generic journal posting, reversal or balance access.
+Participation grants require the actual typed OPA resource: type `ledger` and the caller's own
+participant id. Bare strings, another resource type and another participant fail closed. The bank
+and pension policy fixtures use the same resource shape emitted by the runtime PDP adapter.
+The registered runtime Flyway callback checks and binds database identity before any chart SQL.
+Changing kind/id, reusing a pension database as the bank, or assigning an unbound database with
+journal history fails startup. The company chart is the reviewed mounted source, selected by an
+explicit script path; runtime Flyway location overrides alone are not discovery evidence.
+At-close snapshots retain book identity; a bank verdict or another book's snapshot cannot qualify
+this book. Exceptions remain attributable waivers and never qualify a month for promotion.
+
+Residual: external source references are professional attestations. The implementation does not
+prove their contents, approve a statutory chart or supply missing custody/payment adapters. Source
+receipt hashes prevent transport replay from claiming newer work; they do not grant source actors
+permission to invent a completed business job. Keep production rollout staged and observe a full
+representative calendar month before considering enforcement.
+The journal population check also retains an order-independent SHA-256 multiset fingerprint of
+committed journal ids. Archive removal plus the same number of new postings cannot reuse a count
+as proof. Its four exact numeric SHA-256 limb sums avoid materialising/sorting the whole set.
+Capture computes this before excluding writers, under the transition transaction's relation lock,
+then verifies the short count check under the writer barrier. Production-volume CPU and monthly
+read latency still require measurement before rollout; this is a consistency check, not a signature.
+
+A newer declared participant receipt also invalidates monthly readiness, including a refusal or
+zero-journal run after close. Frozen reports are never replaced by later success; missing legacy
+receipt sequences cannot prove that sources stayed unchanged. Stable source retries append no new
+receipt and preserve the proof. Producers must refresh the current and immediately prior month,
+including closed days, and explicitly revoke completion while source work is pending.
+
+### Period freeze lock enforced in sandbox (#15760 item 6)
+- **Threat:** back-dating a journal into an already reported (FROZEN) month changes the live ledger
+  without changing the reported figures (tampering, repudiation of reported numbers).
+- **Before:** `LEDGER_PERIOD_LOCK_MODE` was unset, so the lock ran in shadow: the attempt was counted
+  as `would_refuse` and posted anyway (detect-only).
+- **Now:** the sandbox manifest sets `enforce`, so the posting is refused with `FrozenPeriodException`
+  and the correction must be booked in the current open period. The 30-day shadow counter showed 13
+  decisions, all `allowed`, none `would_refuse`.
+- **Residual:** the code default in `application.yaml` stays `shadow`, so any environment that does not
+  set the variable remains detect-only. Flipping the default is a follow-up once enforce has run in
+  sandbox. Reversal routing and `evaluate()` are unchanged.
+- **Tests:** `PeriodFreezeLockTest` (shadow records without refusing, enforce refuses).
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

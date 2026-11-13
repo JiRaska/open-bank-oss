@@ -17,6 +17,7 @@
 | `collateral` | Security registered against a loan (AnaCredit categories) | `id`, `loan_id` → `loan`, `type`, `description`, `market_value`+`currency`, `haircut` (`[0,1]`), `valued_at` |
 | `lending_outbox` | Transactional outbox (ADR-0003) | `id` (BIGSERIAL), `event_id` (unique), `aggregate_id`, `event_type`, `payload`, `status`, `attempt_count`, `sent_at`, `last_error`, `created_at`, `updated_at` |
 | `loan_provisioning` | IFRS 9 stage/ECL history, one row per loan per reporting period (ADR-0028 Phase 3) | `id`, `loan_id` → `loan`, `period` (`yyyy-MM`), `as_of`, `outstanding_balance`+`currency`, `days_past_due`, `bucket`, `stage`, `expected_credit_loss`, `created_at`; `UNIQUE(loan_id, period)` |
+| `loan_decline_review` | Customer-requested human review of an engine decline; at most one per application (V32) | `id`, `application_id` (unique) → `loan_application`, `party_id`, `requested_at`, `engine_outcome`/`engine_reasons`/`policy_versions`/`engine_decided_at` (snapshot), `status` (`REQUESTED`/`CONFIRMED`/`OVERTURNED`), `reviewed_by`, `reviewed_at`, `review_reason` (mandatory once decided), `successor_application_id` (set only when overturned). `loan_application.predecessor_application_id` links a successor back |
 
 ### PostgreSQL enum types (V1)
 
@@ -40,6 +41,9 @@ Monetary amounts are `NUMERIC(20,2)` with a separate `CHAR(3)` ISO-4217 `currenc
 | **V2** | `V2__installment_interest_accrual.sql` | Adds `installment.interest_accrued` + `accrued_at`; partial `idx_installment_accruable` (servicing posting loop, ADR-0028 Phase 2) |
 | **V3** | `V3__hibernate_sequences.sql` | `CREATE SEQUENCE lending_outbox_seq INCREMENT BY 50` — Panache id allocation needs `<table>_seq`; CREATE TABLE only made `<table>_id_seq`, and generation is `none`. Rollback: `DROP SEQUENCE lending_outbox_seq;` |
 | **V4** | `V4__loan_provisioning.sql` | Adds `loan_provisioning` (IFRS 9 stage/ECL history) + `idx_loan_provisioning_loan_period` (ADR-0028 Phase 3). Rollback: `DROP TABLE loan_provisioning;` |
+| **V29** | `V29__lending_outbox_id_sequence_alignment.sql` | Points `lending_outbox.id`'s default at `lending_outbox_seq` — native inserts (`loan.interest_accrued`) drew ids from the BIGSERIAL sequence starting at 1 and collided with the Panache entity path's pooled ids (23505). Rollback: `ALTER TABLE lending_outbox ALTER COLUMN id SET DEFAULT nextval('lending_outbox_id_seq');` |
+| **V32** | `V32__loan_decline_review.sql` | Adds `loan_decline_review` (CHECK constraints: decided ⇒ reviewer + reason ≥ 10 chars; successor ⇔ `OVERTURNED`). Rollback: `DROP TABLE loan_decline_review;` — only before the first review is written |
+| **V34** | `V34__loan_application_predecessor.sql` | Adds `loan_application.predecessor_application_id` (back link from a decline-review successor). Rollback: `ALTER TABLE loan_application DROP COLUMN predecessor_application_id;` |
 
 **Rule (CLAUDE.md):** never edit a migration after it is applied to a live DB — add a new versioned migration. `validate-on-migrate` is off; use `QUARKUS_FLYWAY_REPAIR_AT_START` only as a transient recovery measure.
 

@@ -1,5 +1,59 @@
 # Changelog
 
+## [1.45.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.45.0...ledger-service-v1.45.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **ledger:** give frozen-period and closed-year 409s a machine code ([#15811](https://github.com/JiRaska/open-bank-oss/issues/15811)) ([0f6fe9f](https://github.com/JiRaska/open-bank-oss/commit/0f6fe9facbb1f9484f2d5250875f8826cd3f5d97)), closes [#15760](https://github.com/JiRaska/open-bank-oss/issues/15760)
+
+## [1.45.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.44.1...ledger-service-v1.45.0) (2026-11-12)
+
+
+### Features
+
+* **ledger:** enforce journal balance and append-only in the database (ADR-0372) ([#15733](https://github.com/JiRaska/open-bank-oss/issues/15733)) ([f4e1b6c](https://github.com/JiRaska/open-bank-oss/commit/f4e1b6c39999187b4b64076bab5f3299830de4dd))
+
+## [1.44.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.44.0...ledger-service-v1.44.1) (2026-11-12)
+
+
+### Performance
+
+* **ledger:** page journal history in PostgreSQL ([#15618](https://github.com/JiRaska/open-bank-oss/issues/15618)) ([ffa69d0](https://github.com/JiRaska/open-bank-oss/commit/ffa69d093f4083242e5a19b60a68ada789cc1e11))
+
+## [1.44.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.43.0...ledger-service-v1.44.0) (2026-11-12)
+
+
+### Features
+
+* **transaction,ledger:** preserve synthetic origin across transfer booking ([#15651](https://github.com/JiRaska/open-bank-oss/issues/15651)) ([598e95a](https://github.com/JiRaska/open-bank-oss/commit/598e95a8b82d024258202d5bd176b57b089c7913))
+
+
+### Bug Fixes
+
+* **ledger:** keep outbox claims compatible with additive schema changes ([#15634](https://github.com/JiRaska/open-bank-oss/issues/15634)) ([706cf7d](https://github.com/JiRaska/open-bank-oss/commit/706cf7daf4c73fafebc56684a2e0bca324a84b98))
+
+## [1.43.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.42.0...ledger-service-v1.43.0) (2026-11-11)
+
+
+### Features
+
+* **ledger:** allocate the fiscal-year result to retained earnings (ADR-0096 D3) ([#15548](https://github.com/JiRaska/open-bank-oss/issues/15548)) ([51115c7](https://github.com/JiRaska/open-bank-oss/commit/51115c7d62374060125157f942f553a5206e42e7))
+
+## [1.42.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.41.0...ledger-service-v1.42.0) (2026-11-09)
+
+
+### Features
+
+* **ledger:** add segregated pension fee accounting and close evidence ([#15210](https://github.com/JiRaska/open-bank-oss/issues/15210)) ([7bfb640](https://github.com/JiRaska/open-bank-oss/commit/7bfb640b41dfb2a75e7f32c120341b42c286cb9d))
+
+## [1.41.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.40.0...ledger-service-v1.41.0) (2026-11-09)
+
+
+### Features
+
+* **ledger:** prove daily close completeness before enforcement ([#14179](https://github.com/JiRaska/open-bank-oss/issues/14179)) ([6107f91](https://github.com/JiRaska/open-bank-oss/commit/6107f91a8055fdf46f82b5b5eff701079fe1fdf5))
+
 ## [1.40.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.39.1...ledger-service-v1.40.0) (2026-10-29)
 
 

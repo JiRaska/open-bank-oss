@@ -12,6 +12,7 @@ import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 const held = {
   businessDate: '2026-10-16',
   complete: false,
+  participantsMode: 'enforce',
   missing: ['interest'],
   refused: ['billing'],
   participants: [
@@ -36,6 +37,18 @@ describe('Day-close participants panel (ADR-0342)', () => {
     expect(screen.getByText('capitalization: 4 posting(s) refused')).toBeInTheDocument()
     expect(screen.getByText('Refused')).toBeInTheDocument()
     expect(screen.getByText('late')).toBeInTheDocument()
+  })
+
+  it('does not claim shadow mode blocks a day and exposes the waiver owner', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...held, participantsMode: 'shadow', participants: [
+      ...held.participants,
+      { participant: 'treasury', status: 'WAIVED', reason: 'accepted outage INC-1', reportedBy: 'finance-operator', journalsPosted: 0, itemsProcessed: 0, late: false },
+    ] }), { status: 200 })))
+    renderPanel()
+    expect(await screen.findByText(/blocking an incomplete close is not confirmed/)).toBeInTheDocument()
+    expect(screen.queryByText(/the day stays in CUTOFF/)).not.toBeInTheDocument()
+    expect(screen.getByText('finance-operator')).toBeInTheDocument()
+    expect(screen.getByText('accepted outage INC-1')).toBeInTheDocument()
   })
 
   it('degrades through the shared unavailable panel when ledger-service is not deployed', async () => {

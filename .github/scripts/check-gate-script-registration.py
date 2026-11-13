@@ -68,6 +68,10 @@ MANIFEST = REPO / ".github/gates/gates.yaml"
 # here is a claim a human made, and the check fails on a STALE one (a helper that has since been
 # registered, or one that no longer exists) so this list cannot quietly become permanent.
 HELPERS: dict[str, str] = {
+    "check-billing-annual-issuance-history.py": (
+        "operator-run preflight over untracked, operator-held CSV exports (never a CI input); "
+        "its unit tests live in test-billing-annual-issuance-history.py"
+    ),
     "check-recorded-source-manifests.py": (
         "invoked via the quoted `helper` variable in resolve-record-deployment-version.sh; "
         "that resolver's self-test also runs its --self-test"
@@ -156,10 +160,17 @@ def coverage(names: list[str] | None = None) -> tuple[dict[str, str], list[str]]
             if path.parent == SCRIPTS_DIR or path == MANIFEST:
                 continue
             try:
-                text = strip_comments(gatelib.read_text(path, errors="ignore"))
+                raw = gatelib.read_text(path, errors="ignore")
             except OSError:
                 continue
-            for name in list(pending):
+            # Cheap prefilter: stripping comments only removes text, so a pattern can match the
+            # stripped text only if the bare name is in the raw text. Skips the per-char comment
+            # scan and the regex for the ~all files that never mention a pending script.
+            hits = [n for n in pending if n in raw]
+            if not hits:
+                continue
+            text = strip_comments(raw)
+            for name in hits:
                 if pats[name].search(text):
                     covered[name] = f"invoked by {path.relative_to(REPO)}"
                     pending.remove(name)

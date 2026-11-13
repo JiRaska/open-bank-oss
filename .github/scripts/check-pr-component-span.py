@@ -118,6 +118,7 @@ def self_test() -> int:
         g("init", "-q", "-b", "main")
         g("config", "user.email", "t@t")
         g("config", "user.name", "t")
+        g("config", "commit.gpgsign", "false")
         for svc in ("a", "b", "c", "d", "a/nested"):
             (root / svc).mkdir(parents=True, exist_ok=True)
             (root / svc / "version.txt").write_text("0.1.0\n")

@@ -33,12 +33,12 @@ import java.time.LocalDate
  * Reports treasury-service's day-close participation to ledger-service (ADR-0342), on the pattern of
  * lending-service's `LendingCloseParticipationScheduler`.
  *
- * Every tick re-offers the last [lookbackDays] completed accounting days. Treasury's posting job, the
+ * Every tick refreshes the configured recovery window and the whole readiness month. Treasury's posting job, the
  * accrual (`InterestAccrualScheduler`), runs on an interval, so it is due on every day on which it is
  * switched on; switched off, the day is SKIPPED with that reason. A due job with no completed
- * `treasury_close_job_run` row means the day is not reported at all and the ledger keeps it in CUTOFF.
+ * `treasury_close_job_run` row explicitly refuses the day, revoking any earlier completion.
  *
- * Additional holds, all "not reported yet", never a guess:
+ * Additional incomplete-work receipts explicitly refuse completion:
  *  - **in flight**: a pass for the day marked itself started and has not finished. A marker older
  *    than the DERIVED [TreasuryCloseJobs.staleAfter] is a pass that died, reported REFUSED
  *    `pass started and never completed`, so a crash cannot hold the day unresolvably;
@@ -110,22 +110,26 @@ class TreasuryCloseParticipationScheduler(
         val allDelivered: Boolean get() = delivered == attempted
     }
 
-    /** Report every completed day in `[today - lookbackDays, today - 1]`. Visible for tests. */
+    /** Refresh completed days across the configured recovery window and the readiness month. Visible for tests. */
     fun reportDays(today: LocalDate): Uni<TickResult> {
-        val from = today.minusDays(lookbackDays)
+        val from = CloseParticipationAssembler.reportingFrom(today, lookbackDays)
         val to = today.minusDays(1)
         val days = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }.toList()
-        return evidence.findBetween(from, to).flatMap { runs ->
-            evidence.inFlightBetween(from, to).flatMap { inFlight ->
-                Multi.createFrom().iterable(days)
-                    .onItem().transformToUniAndConcatenate { day -> assemble(day, runs, inFlight) }
-                    .collect().asList()
-                    .flatMap { assembled ->
-                        Multi.createFrom().iterable(assembled.filterNotNull())
-                            .onItem().transformToUniAndConcatenate { reporter.report(it) }
-                            .collect().asList()
-                    }
-                    .map { results -> TickResult(attempted = results.size, delivered = results.count { it }) }
+        return evidence.requiredJobs(from, to, days.associateWith { dueJobs() }).flatMap { required ->
+            evidence.findBetween(from, to).flatMap { runs ->
+                evidence.inFlightBetween(from, to).flatMap { inFlight ->
+                    Multi.createFrom().iterable(days)
+                        .onItem().transformToUniAndConcatenate { day ->
+                            assemble(day, runs, inFlight, required[day].orEmpty())
+                        }
+                        .collect().asList()
+                        .flatMap { assembled ->
+                            Multi.createFrom().iterable(assembled.filterNotNull())
+                                .onItem().transformToUniAndConcatenate { reporter.report(it) }
+                                .collect().asList()
+                        }
+                        .map { results -> TickResult(attempted = results.size, delivered = results.count { it }) }
+                }
             }
         }
     }
@@ -134,40 +138,27 @@ class TreasuryCloseParticipationScheduler(
         day: LocalDate,
         runs: List<CloseJobRun>,
         inFlight: List<InFlightRun>,
+        required: Set<String>,
     ): Uni<CloseParticipationReport?> = evidence.postingsFor(day).flatMap { postings ->
         // The outbox hold and the DEAD check apply WHATEVER is due (#13882 review): settlements,
         // maturities and reversals post journals with the accrual switched off too.
-        if (postings.pending > 0) {
-            log.infof(
-                "treasury day-close for %s not reported: %d journal event(s) still in the outbox",
-                day,
-                postings.pending,
-            )
-            return@flatMap Uni.createFrom().nullItem()
-        }
-        if (postings.openIntents > 0) {
-            log.infof(
-                "treasury day-close for %s not reported: %d posting intent(s) still open",
-                day,
-                postings.openIntents,
-            )
-            return@flatMap Uni.createFrom().nullItem()
-        }
-        if (postings.unapplied > 0) {
-            log.infof(
-                "treasury day-close for %s not reported: %d acknowledged journal(s) await lifecycle application",
-                day,
-                postings.unapplied,
-            )
-            return@flatMap Uni.createFrom().nullItem()
-        }
-        val due = dueJobs()
+        lifecycleGap(day, postings)?.let { return@flatMap Uni.createFrom().item(it) }
+        val due = required + runs.filter { it.businessDate == day }.map { it.job } +
+            inFlight.filter { it.businessDate == day }.map { it.job }
         if (due.isEmpty()) return@flatMap Uni.createFrom().item(withoutDueJob(day, postings))
         val now = clock.instant()
         val flying = inFlight.filter { it.businessDate == day && it.job in due }
         if (flying.any { it.startedAt.plus(staleAfter).isAfter(now) }) {
-            log.infof("treasury day-close for %s not reported: a pass for it is still in flight", day)
-            return@flatMap Uni.createFrom().nullItem()
+            log.infof("treasury day-close for %s refused: a pass for it is still in flight", day)
+            return@flatMap Uni.createFrom().item(
+                CloseParticipationAssembler.incomplete(
+                    day,
+                    "Treasury accrual is still running",
+                    flying.map {
+                        it.toString()
+                    },
+                ),
+            )
         }
         // A marker past staleAfter is a pass that died: that job is REFUSED, never "still running".
         val abandoned = flying.map {
@@ -177,16 +168,37 @@ class TreasuryCloseParticipationScheduler(
             .filterNot { run -> abandoned.any { it.job == run.job } } + abandoned
         val accrual = forDay.firstOrNull { it.job == TreasuryCloseJobs.ACCRUAL }
         if (accrual == null) {
-            log.infof("treasury day-close for %s not reported: the accrual has not run", day)
-            return@flatMap Uni.createFrom().nullItem()
+            log.infof("treasury day-close for %s refused: the accrual has not run", day)
+            return@flatMap Uni.createFrom().item(
+                CloseParticipationAssembler.incomplete(
+                    day,
+                    "Treasury accrual has not run",
+                    due.sorted() + forDay.map { it.toString() },
+                ),
+            )
         }
         assessedSince(day, postings).map { assessed ->
             if (!assessed) {
-                log.infof("treasury day-close for %s not reported: a deal settled after the last accrual pass", day)
-                return@map null
+                log.infof("treasury day-close for %s refused: a deal settled after the last accrual pass", day)
+                return@map CloseParticipationAssembler.incomplete(
+                    day,
+                    "Treasury settlement has not been assessed",
+                    listOf(accrual.toString(), postings.toString()),
+                )
             }
             CloseParticipationAssembler.assemble(day, due, listOf(fold(accrual, postings)), SKIP_REASON)
         }
+    }
+
+    private fun lifecycleGap(day: LocalDate, postings: DayJournalPostings): CloseParticipationReport? {
+        val reason = when {
+            postings.pending > 0 -> "Treasury journal delivery is pending"
+            postings.openIntents > 0 -> "Treasury posting intents are open"
+            postings.unapplied > 0 -> "Treasury journal lifecycle application is pending"
+            else -> return null
+        }
+        log.infof("treasury day-close for %s refused: %s", day, reason)
+        return CloseParticipationAssembler.incomplete(day, reason, listOf(postings.toString()))
     }
 
     /**
@@ -215,18 +227,25 @@ class TreasuryCloseParticipationScheduler(
      * posted. SKIPPED only when it has no journal and no journal event; DEAD events are REFUSED and
      * journals are RAN, never a SKIPPED that would hide them.
      */
-    private fun withoutDueJob(day: LocalDate, postings: DayJournalPostings): CloseParticipationReport = when {
-        postings.dead > 0 -> CloseParticipationReport(
-            businessDate = day,
-            outcome = CloseOutcome.REFUSED,
-            reason = "${postings.dead} ${TreasuryCloseJobs.REASON_JOURNAL_EVENTS_DEAD}",
+    private fun withoutDueJob(day: LocalDate, postings: DayJournalPostings): CloseParticipationReport {
+        val report = when {
+            postings.dead > 0 -> CloseParticipationReport(
+                businessDate = day,
+                outcome = CloseOutcome.REFUSED,
+                reason = "${postings.dead} ${TreasuryCloseJobs.REASON_JOURNAL_EVENTS_DEAD}",
+            )
+            postings.journals > 0 -> CloseParticipationReport(
+                businessDate = day,
+                outcome = CloseOutcome.RAN,
+                journalsPosted = postings.journals,
+            )
+            else -> CloseParticipationReport(businessDate = day, outcome = CloseOutcome.SKIPPED, reason = SKIP_REASON)
+        }
+        val identity = "$report|$postings"
+        return report.copy(
+            sourceRunId = java.security.MessageDigest.getInstance("SHA-256").digest(identity.toByteArray())
+                .joinToString("") { "%02x".format(it) },
         )
-        postings.journals > 0 -> CloseParticipationReport(
-            businessDate = day,
-            outcome = CloseOutcome.RAN,
-            journalsPosted = postings.journals,
-        )
-        else -> CloseParticipationReport(businessDate = day, outcome = CloseOutcome.SKIPPED, reason = SKIP_REASON)
     }
 
     /** The accrual is due every day it is switched on. */

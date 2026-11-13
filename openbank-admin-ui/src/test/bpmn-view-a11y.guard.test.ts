@@ -12,6 +12,8 @@ describe('BPMN process discovery accessibility', () => {
     expect(source).toContain('type="button"\n          onClick={checkServices}')
     expect(source).toContain('disabled={isChecking}')
     expect(source).toContain('aria-busy={isChecking}')
+    expect(source).toContain("t('Procesní dráha', 'Lane')")
+    expect(source).not.toContain("t('Doména', 'Lane')")
     expect(source).toContain('<RefreshCw size={14} aria-hidden="true" />')
     expect(source).toContain("t('Kontrola stavu', 'Status checked')")
     expect(source).toContain("fetch('/api/services/health', { signal: controller.signal, cache: 'no-store' })")

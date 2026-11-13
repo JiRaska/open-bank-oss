@@ -1,0 +1,33 @@
+name: Tech debt
+description: A refactor or cleanup with no user-facing behavior change
+labels: ["tech-debt", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tech debt is work that changes no behavior a caller can observe. If it does change
+        behavior, it is a bug (shipped behavior is wrong) or an enhancement (new capability).
+
+  - type: textarea
+    id: debt
+    attributes:
+      label: What is the debt
+      description: The concrete code, config or process, with paths.
+    validations:
+      required: true
+
+  - type: textarea
+    id: cost
+    attributes:
+      label: What it costs today
+      description: Measured where possible — build time, defects it caused, toil.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How we know it is paid off, without changing observable behavior.
+    validations:
+      required: true

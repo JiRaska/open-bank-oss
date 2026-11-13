@@ -19,7 +19,15 @@
 # scan also reads runs CREATED up to 24 hours ago, because GitHub's `created` query cannot filter
 # by completion time: a long matrix run can finish now after starting hours ago (#10262). The
 # deep scan retains a three-hour completion overlap; `run_attempt == 1` and the flake ledger marker
-# make repeated scans idempotent. Before #9645, `workflow_run: completed`
+# make repeated scans idempotent.
+#
+# Two bounds, not one (#15962). The frequent scan used a single 30-minute bound for creation
+# AND completion, so it saw only runs that started and finished inside one half hour — never a
+# main Services CI run that fans out to the self-hosted pool. And the deep scan was reachable
+# only from the hourly cron, which is delivered far less often than hourly. The frequent scan
+# now reads four hours of creations for the same 30-minute completion lookback, and a
+# dispatched tick takes the deep window once an hour. Both rules live in
+# `select-ci-reconcile-candidates.py` with their fixtures. Before #9645, `workflow_run: completed`
 # created a new Actions run for every watched completion, including ordinary successes whose
 # jobs were all skipped. A PR burst exhausted the installation's 5,000-call API quota and made
 # unrelated security gates fail with rate-limit 403s.
@@ -102,23 +110,40 @@
 # it, the call reaches the API. Do not drop the flag, and do not "fix" this by adding a
 # checkout — cloning the repo to make one API call is pure waste.
 #
+# GITHUB-SIDE TRANSIENTS (installation quota, artifact service)
+# A `failure` whose every failed job died on `API rate limit exceeded for installation`, on a
+# gate shard that is NOT EVALUATED only, or on the artifact service (`Failed to CreateArtifact`
+# with its `Artifact not found` consumers) is re-run once too — but only after the cause can have
+# cleared: the quota must be above 20% again (GET /rate_limit, free) and an artifact outage must
+# be 30 minutes old. Until then the decision is `deferred-*` and a later tick (the hourly deep
+# scan re-reads three hours of completions) decides again. Measured 2026-11-10..12 over 747
+# failed runs, these were the largest causes nothing re-ran. Logs are read only for jobs that
+# already failed, once per decision, capped per decision. Rationale and fixtures:
+# `spot-kill-retry.sh`.
+#
 # WATCH LIST
-# The expensive services, security and dependency-submission lanes. A cancelled PR attempt is
+# The expensive services, security and dependency-submission lanes, plus `CI` for FAILURES only
+# (its quota-starved gate shards; a cancelled CI run is a concurrency supersession on a hosted
+# runner, never a reclaim, so `select-ci-reconcile-candidates.py` does not select it). A
+# cancelled PR attempt is
 # retried only while it remains the live PR head; an old retry can cancel a newer attempt.
 # Do NOT add auto-deploy here — it has its own reconcile tick.
 name: Auto-retry spot-killed CI runs
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Every 10 min, not 5: each tick spends >=3 REST calls of the 1,000/h repository quota, and
+    # the 30-min short window still overlaps three ticks. Retry latency +5 min worst case.
+    - cron: "*/10 * * * *"
     - cron: "7 * * * *" # bounded catch-up for long-running workflows
   workflow_dispatch:
     inputs:
       scan_mode:
         description: "Reconciliation query window"
         type: choice
-        options: [short, deep]
-        default: short
+        # auto: deep when the tick starts in the first 25 minutes of the hour, else short.
+        options: [auto, short, deep]
+        default: auto
 
 concurrency:
   group: ci-reconcile
@@ -154,7 +179,7 @@ jobs:
       # The wait is capped short on purpose: the frequent 30-minute scan overlaps six ticks,
       # and the hourly deep scan overlaps three hours of completions. A quota-limited tick can
       # be re-covered without leaving a runner asleep for the whole installation reset window.
-      - name: Read recent completions from the three watched workflows
+      - name: Read recent completions from the four watched workflows
         id: read-runs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -165,12 +190,13 @@ jobs:
           set -euo pipefail
           source .github/scripts/gh-retry.sh
           started_at=$(date +%s)
-          mode=short
-          if [[ "$RECONCILE_SCHEDULE" == '7 * * * *' || "$RECONCILE_DISPATCH_MODE" == deep ]]; then
-            mode=deep
-          fi
+          # The window is decided by the script (resolve_mode, self-tested), not here: the
+          # hourly cron is delivered too rarely to be the only path to the deep scan (#15962).
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          mode=$(python3 .github/scripts/select-ci-reconcile-candidates.py --resolve-mode \
+            --schedule "$RECONCILE_SCHEDULE" --dispatch-mode "$RECONCILE_DISPATCH_MODE" --now "$now")
           plan=$(python3 .github/scripts/select-ci-reconcile-candidates.py \
-            --query-mode "$mode" --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+            --query-mode "$mode" --now "$now")
           created_query=$(jq -r '.created_query' <<< "$plan")
           lookback=$(jq -r '.updated_lookback_minutes' <<< "$plan")
           echo "mode=$mode created_range=$created_query updated_lookback_minutes=$lookback" >> "$GITHUB_STEP_SUMMARY"
@@ -201,7 +227,7 @@ jobs:
             echo "workflow=$workflow runs=$total requests=$expected" >> "$GITHUB_STEP_SUMMARY"
             rm -rf "$dir"
           }
-          for workflow in services-ci.yml security.yml dependency-submission.yml; do
+          for workflow in services-ci.yml security.yml dependency-submission.yml ci.yml; do
             # A fixed created range prevents page drift from NEW runs, but GitHub can
             # index an already-created run between pages and change total_count. Re-read
             # the entire snapshot, never accept a partial page set as "no spot kills".

@@ -133,7 +133,7 @@ class DomesticPaymentWorkflowImplTest {
         run.start(paymentId)
         env.sleep(Duration.ofHours(1))
         verify(exactly = 0) { activities.submitScheme(any()) }
-        stub.resolveFraudHold(FraudReviewDecision.RELEASE)
+        stub.resolveFraudHold(FraudReviewDecision.RELEASE, fraudReviewCaseKey(paymentId))
 
         assertThat(run.getResult(DomesticPaymentStatus::class.java)).isEqualTo(DomesticPaymentStatus.VALIDATED)
         verify(exactly = 1) { activities.submitScheme(paymentId) }
@@ -147,10 +147,45 @@ class DomesticPaymentWorkflowImplTest {
         val stub = workflowStub()
         val run = WorkflowStub.fromTyped(stub)
         run.start(paymentId)
-        stub.resolveFraudHold(FraudReviewDecision.REJECT)
+        env.sleep(Duration.ofMinutes(1))
+        stub.resolveFraudHold(FraudReviewDecision.REJECT, fraudReviewCaseKey(paymentId))
 
         assertThat(run.getResult(DomesticPaymentStatus::class.java)).isEqualTo(DomesticPaymentStatus.REJECTED)
         verify { activities.rejectForFraud(paymentId, FraudRejectCause.REVIEW_REJECTED) }
+        verify(exactly = 0) { activities.submitScheme(any()) }
+    }
+
+    @Test
+    fun `a RELEASE signalled before the hold does not pre-arm a release (#4403)`() {
+        val paymentId = UUID.randomUUID()
+        every { activities.screenPayment(paymentId) } returns ScreeningDecision.CLEAR
+        every { activities.validatePayment(paymentId) } returns Unit
+        val stub = workflowStub()
+        val run = WorkflowStub.fromTyped(stub)
+        // The gate is slow; the signal lands while the run is still before the HOLD.
+        every { activities.fraudGate(paymentId) } answers {
+            stub.resolveFraudHold(FraudReviewDecision.RELEASE, fraudReviewCaseKey(paymentId))
+            FraudGateAction.HOLD
+        }
+        run.start(paymentId)
+
+        assertThat(run.getResult(DomesticPaymentStatus::class.java)).isEqualTo(DomesticPaymentStatus.REJECTED)
+        verify { activities.rejectForFraud(paymentId, FraudRejectCause.HOLD_TIMED_OUT) }
+        verify(exactly = 0) { activities.submitScheme(any()) }
+    }
+
+    @Test
+    fun `a RELEASE naming another case does not release the hold (#4403)`() {
+        val paymentId = cleared(FraudGateAction.HOLD)
+        val stub = workflowStub()
+        val run = WorkflowStub.fromTyped(stub)
+        run.start(paymentId)
+        env.sleep(Duration.ofHours(1))
+        stub.resolveFraudHold(FraudReviewDecision.RELEASE, "aml-${UUID.randomUUID()}-FRAUD_REVIEW")
+        stub.resolveFraudHold(FraudReviewDecision.RELEASE, null)
+
+        assertThat(run.getResult(DomesticPaymentStatus::class.java)).isEqualTo(DomesticPaymentStatus.REJECTED)
+        verify { activities.rejectForFraud(paymentId, FraudRejectCause.HOLD_TIMED_OUT) }
         verify(exactly = 0) { activities.submitScheme(any()) }
     }
 

@@ -31,7 +31,7 @@ metadata:
   namespace: iam
   labels:
     app.kubernetes.io/part-of: iam
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -207,9 +207,6 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: treasury
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: vault
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: wealth

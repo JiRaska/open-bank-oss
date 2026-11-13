@@ -94,10 +94,14 @@ def _pages(fetch_json, url, field):
     raise StageError("performance API pagination exceeded its complete-history budget")
 
 
-def _baseline_specs(repo_root, warnings):
+def _baseline_specs(repo_root, warnings, gate_components=frozenset()):
     candidates = []
     for file in sorted(repo_root.glob("openbank-*/src/test/k6/*-read-baseline.js")):
         component = file.relative_to(repo_root).parts[0]
+        if component in gate_components:
+            # perf-gate.yml measures this module against a throwaway stack; a second,
+            # unconfigured shared-sandbox producer would overwrite that verdict with not-run.
+            continue
         scenario = file.stem
         identifier = scenario.removesuffix("-read-baseline")
         if COMPONENT.fullmatch(component) and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", identifier):
@@ -119,8 +123,7 @@ def _baseline_specs(repo_root, warnings):
 
 def _gate_specs(selector):
     return [{"component": artifact.removeprefix("perf-reports-"),
-             "scenario_id": artifact.removeprefix("perf-reports-") + "-"
-                 + artifact.removeprefix("perf-reports-openbank-") + "-smoke",
+             "scenario_id": selector.GATE_SCENARIO[artifact],
              "artifact": artifact, "job": job,
              "summary": artifact.removeprefix("perf-reports-") + "-summary.json",
              "envelope": artifact.removeprefix("perf-reports-") + "-run.json"}
@@ -264,7 +267,9 @@ def stage_performance(repo_root, repo_slug, fetch_json, fetch_bytes, *, safe_arc
     result = {"payloads": {}, "sources": [], "warnings": []}
     sources = [
         ("perf-gate.yml", "smoke", _gate_specs(selector)),
-        ("perf-baseline.yml", "baseline", _baseline_specs(repo_root, result["warnings"])),
+        ("perf-baseline.yml", "baseline", _baseline_specs(
+            repo_root, result["warnings"],
+            frozenset(artifact.removeprefix("perf-reports-") for artifact, _ in selector.EXPECTED_GATE))),
         ("perf-gate.yml", "security-abuse", [{"component": "openbank-security-abuse", "scenario_id": "security-abuse-smoke",
             "artifact": "perf-reports-security-abuse", "job": "k6 security abuse (product-catalog, auth on)",
             "summary": "security-abuse-summary.json", "envelope": "security-abuse-run.json"}]),

@@ -4,6 +4,7 @@
 
 package com.openbank.notification.it
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
@@ -23,7 +24,7 @@ import org.testcontainers.utility.DockerImageName
 class RedisTestResource : QuarkusTestResourceLifecycleManager {
 
     private companion object {
-        const val VALKEY_IMAGE = "valkey/valkey:8-alpine"
+        const val VALKEY_IMAGE = "valkey/valkey:9.1.3-alpine"
     }
 
     private var redis: GenericContainer<*>? = null

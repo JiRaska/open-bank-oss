@@ -47,7 +47,7 @@ Obecně **nepoužitelná** na firemní data registru. Jediné pole, které by mo
 
 ### Toky dat ven
 - → **psd2-service** (synchronní API): autorizační rozhodnutí (`tppId`, `authorized`, `roles`, `reason`). Žádné zákaznické PII.
-- → **Kafka** `openbank.tpp.registry.event` (uvnitř OpenBank, např. audit): události registrace/blacklist **až po zapojení** — aktuálně outbox transport existuje, ale žádné události se nevypouštějí.
+- → **Kafka** `openbank.tpp.registry.event` (uvnitř OpenBank): události `TPP_REGISTERED` / `TPP_BLACKLISTED` z transakčního outboxu, které audit-service ukládá do auditní stopy (#13177). Bez osobních údajů zákazníků.
 
 Žádná data neopouštějí region EU/EHP.
 

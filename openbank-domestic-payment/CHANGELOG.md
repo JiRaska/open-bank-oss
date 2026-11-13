@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.6.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.6.0...domestic-payment-v1.6.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **domestic-payment:** keep outbox claims compatible with additive schema changes ([#15655](https://github.com/JiRaska/open-bank-oss/issues/15655)) ([e0ad686](https://github.com/JiRaska/open-bank-oss/commit/e0ad686f34299ed22747eb907f8ec5f1b4323e76)), closes [#11652](https://github.com/JiRaska/open-bank-oss/issues/11652)
+
+## [1.6.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.5.0...domestic-payment-v1.6.0) (2026-11-12)
+
+
+### Features
+
+* **domestic-payment,customer-edge:** look up domestic payments after a timeout ([#15609](https://github.com/JiRaska/open-bank-oss/issues/15609)) ([f93e072](https://github.com/JiRaska/open-bank-oss/commit/f93e072a5a3ec1f978206eae789f7b0530a88a69))
+
+## [1.5.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.4.0...domestic-payment-v1.5.0) (2026-11-10)
+
+
+### Features
+
+* **domestic-payment:** measure fraud hold wait time and enforce holds in sandbox ([#15198](https://github.com/JiRaska/open-bank-oss/issues/15198)) ([2caa703](https://github.com/JiRaska/open-bank-oss/commit/2caa703b063394402963f88e9b138351ffaf507c))
+
+## [1.4.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.3.1...domestic-payment-v1.4.0) (2026-11-07)
+
+
+### Features
+
+* **domestic-payment:** release fraud holds from the analyst's AML case decision ([#15060](https://github.com/JiRaska/open-bank-oss/issues/15060)) ([4e7636d](https://github.com/JiRaska/open-bank-oss/commit/4e7636dbc48dcb1aa3df75f9d13df5b85223356e))
+
+## [1.3.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.3.0...domestic-payment-v1.3.1) (2026-11-06)
+
+
+### Security
+
+* **domestic-payment:** authenticate the API by bearer only on the mTLS listener ([#14759](https://github.com/JiRaska/open-bank-oss/issues/14759)) ([670a7b4](https://github.com/JiRaska/open-bank-oss/commit/670a7b44bcd000a29075dc99588942398a875b4c))
+
 ## [1.3.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.3...domestic-payment-v1.3.0) (2026-10-30)
 
 

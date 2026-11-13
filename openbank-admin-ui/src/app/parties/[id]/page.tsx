@@ -21,6 +21,7 @@ import { parseKycCaseEvidence, type KycCaseEvidence } from '@/lib/parties/kycEvi
 import { parsePartyEvidence, type PartyEvidence } from '@/lib/parties/partyEvidenceContract'
 
 const PAGE_SIZE = 25
+type RevealReason = 'KYC_REVIEW' | 'CUSTOMER_SUPPORT' | 'DATA_CORRECTION'
 
 // The list endpoint's NotificationSummary (notification-service openapi.yaml 1.5.0).
 // Metadata only — `body` is deliberately absent here and is NOT fetched by this page.
@@ -35,7 +36,12 @@ function PartyDetailPage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { roles } = useAuth()
-  const [party, setParty]     = useState<PartyEvidence | null>(null)
+  const [maskedParty, setMaskedParty] = useState<PartyEvidence | null>(null)
+  const [revealedParty, setRevealedParty] = useState<PartyEvidence | null>(null)
+  const [revealReason, setRevealReason] = useState<RevealReason | ''>('')
+  const [revealUnavailable, setRevealUnavailable] = useState<UnavailableKind | null>(null)
+  const [revealing, setRevealing] = useState(false)
+  const activeReveal = useRef<AbortController | null>(null)
   const [kyc, setKyc]         = useState<KycCaseEvidence | null>(null)
   const [kycUnavailable, setKycUnavailable] = useState<UnavailableKind>('no_data')
   const [loading, setLoading] = useState(true)
@@ -44,8 +50,51 @@ function PartyDetailPage() {
   const activeLoad = useRef<AbortController | null>(null)
 
   const canSeeMessages = hasPermission(roles, 'notifications:view')
+  const canReveal = maskedParty?.id === id && maskedParty.piiRevealAllowed &&
+    hasPermission(roles, 'parties:reveal-pii')
+  const showingReveal = canReveal && revealedParty?.id === id
+  const party = showingReveal ? revealedParty : maskedParty?.id === id ? maskedParty : null
+
+  const clearReveal = useCallback(() => {
+    activeReveal.current?.abort()
+    activeReveal.current = null
+    setRevealedParty(null)
+    setRevealUnavailable(null)
+    setRevealReason('')
+    setRevealing(false)
+  }, [])
+
+  const reveal = async () => {
+    if (!canReveal || !revealReason || activeReveal.current) return
+    const controller = new AbortController()
+    activeReveal.current = controller
+    setRevealing(true)
+    setRevealUnavailable(null)
+    try {
+      const res = await fetch(svcUrl('party-service', '/api/v1/parties/' + id + '/pii-reveal'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: revealReason }),
+        cache: 'no-store',
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]),
+      })
+      const detail = res.ok ? parsePartyEvidence(await res.json(), id) : null
+      const unavailableKind = res.ok ? 'error' : await classifyBffFailure(res)
+      if (activeReveal.current !== controller) return
+      if (detail && !detail.piiMasked) setRevealedParty(detail)
+      else setRevealUnavailable(unavailableKind)
+    } catch {
+      if (activeReveal.current === controller) setRevealUnavailable('unreachable')
+    } finally {
+      if (activeReveal.current === controller) {
+        activeReveal.current = null
+        setRevealing(false)
+      }
+    }
+  }
 
   const load = useCallback(async () => {
+    clearReveal()
     activeLoad.current?.abort()
     const controller = new AbortController()
     activeLoad.current = controller
@@ -63,7 +112,7 @@ function PartyDetailPage() {
       const verifiedParty = parsePartyEvidence(await partyRes.value.json(), id)
       if (!verifiedParty) { setUnavailable({ kind: 'error' }); return }
       if (controller.signal.aborted) return
-      setParty(verifiedParty)
+      setMaskedParty(verifiedParty)
       // KYC is supplementary: a party with no case is normal, so a failure here degrades
       // that card rather than the page.
       if (kycRes.status === 'fulfilled' && kycRes.value.ok) {
@@ -84,7 +133,7 @@ function PartyDetailPage() {
         setLoading(false)
       }
     }
-  }, [id])
+  }, [clearReveal, id])
 
   useEffect(() => {
     void load()
@@ -92,6 +141,8 @@ function PartyDetailPage() {
       const controller = activeLoad.current
       activeLoad.current = null
       controller?.abort()
+      activeReveal.current?.abort()
+      activeReveal.current = null
     }
   }, [load])
 
@@ -181,6 +232,32 @@ function PartyDetailPage() {
               <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Detaily subjektu', 'Party Details')}</span>
               <span style={{ marginLeft: 'auto' }}><StatusBadge status={party.status} /></span>
             </div>
+            {canReveal && (
+              <div style={{ marginBottom: '12px' }}>
+                {showingReveal ? (
+                  <button className="btn btn-secondary" type="button" onClick={clearReveal}>
+                    {t('Skrýt osobní údaje', 'Hide personal data')}
+                  </button>
+                ) : (
+                  <form onSubmit={event => { event.preventDefault(); void reveal() }}
+                    style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    <select className="input" value={revealReason}
+                      aria-label={t('Důvod zobrazení osobních údajů', 'Reason for viewing personal data')}
+                      onChange={event => setRevealReason(event.target.value as RevealReason | '')}>
+                      <option value="">{t('Vyberte důvod', 'Select a reason')}</option>
+                      <option value="KYC_REVIEW">{t('Kontrola KYC', 'KYC review')}</option>
+                      <option value="CUSTOMER_SUPPORT">{t('Podpora klienta', 'Customer support')}</option>
+                      <option value="DATA_CORRECTION">{t('Oprava údajů', 'Data correction')}</option>
+                    </select>
+                    <button className="btn btn-secondary" type="submit" disabled={!revealReason || revealing}>
+                      {t('Zobrazit osobní údaje', 'Reveal personal data')}
+                    </button>
+                  </form>
+                )}
+                {revealUnavailable && <DataUnavailable kind={revealUnavailable} service="Party-service"
+                  feature={t('Osobní údaje', 'Personal data')} lang={language} dense />}
+              </div>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {[
                 [t('Typ', 'Type'),                        party.partyType],
@@ -254,7 +331,7 @@ function PartyDetailPage() {
         </div>
       )}
 
-      {tab === 'messages' && <MessagesTab partyId={party.id} partyEmail={party.email} roles={roles} />}
+      {tab === 'messages' && <MessagesTab partyId={party.id} partyEmail={maskedParty?.piiMasked === false ? maskedParty.email : ''} roles={roles} />}
     </div>
   )
 }

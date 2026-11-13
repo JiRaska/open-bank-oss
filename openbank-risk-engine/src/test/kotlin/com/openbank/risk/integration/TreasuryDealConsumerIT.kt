@@ -4,9 +4,9 @@
 
 package com.openbank.risk.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.risk.application.port.out.TreasuryDealBook
 import com.openbank.risk.infrastructure.kafka.TreasuryDealConsumer
-import com.openbank.risk.it.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest

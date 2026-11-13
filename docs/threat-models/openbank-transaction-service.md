@@ -326,20 +326,15 @@ Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has
   is mandatory at the gateway; revisit if the gateway becomes optional.
 - Reversal now has the four-eyes *mechanism* wired (§4a) but not enforced
   (`authz.four-eyes.enforce=false`) — a candidate for a follow-up rollout under issue #413.
-- **Temporal orchestration path (ADR-0120 Phase 1, flag-gated OFF).** When
-  `openbank.transaction.orchestration.temporal.enabled=true`, `initiateTransaction` drives the payment
-  through a durable `PaymentWorkflow` instead of `PaymentSagaOrchestrator`; activities wrap the **same**
-  ports with identical arguments, so the §4 money-direction and the ADR-0039 D-2 hold-release invariant
-  are preserved (success path never releases the hold; balance projection does). New trust surface: the
-  worker opens a synchronous gRPC connection to the Temporal frontend (`:7233`) at startup — a *boot*
-  failure if the `openbank-payments` Temporal namespace is unprovisioned or the NetworkPolicy blocks it
-  (the `payments` k8s namespace is already allowlisted in `temporal-platform-ingress`). Workflow history
-  becomes a second store of in-flight payment state (durable, replayable — a DORA Art. 17 positive); it
-  must be access-controlled like the saga table. The ledger idempotency key on the Temporal path is
-  `workflow-<txid>-ledger` (distinct from the saga path's `saga-<txid>-ledger`): safe because a
-  transaction is initiated under exactly one flag value, but the canary cutover (Phase 4) must not
-  re-initiate an in-flight saga transaction under the workflow path. Flag is OFF in all environments;
-  this change is inert until a separately-approved cutover.
+- **Temporal orchestration (ADR-0120 Phase 5: sole orchestrator).** `initiateTransaction` always
+  drives the payment through the durable `PaymentWorkflow`; `PaymentSagaOrchestrator` and the
+  orchestration enable flag were removed (`TransactionService.kt`
+  records this). Activities wrap the same ports, so the §4 money-direction and the ADR-0039 D-2
+  hold-release invariant are preserved (success path never releases the hold; balance projection
+  does). Trust surface: the worker's gRPC connection to the Temporal frontend (`:7233`, namespace
+  `openbank-payments`), which carries no transport authentication today (#6066). Workflow history is a
+  second store of in-flight payment state and must be access-controlled. The ledger idempotency key
+  is `workflow-<txid>-ledger`.
 
 ## 6. Change log
 
@@ -383,6 +378,13 @@ Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has
 
 - **2026-09-06** — New inbound REST surface `TransactionCategoryResource`: a customer sets, clears and lists their own spend category, keyed by counterparty rather than by transaction (#8573). New trust boundary crossing, hence §4f. No money path touched and `merchantCategory` keeps its MCC meaning — the resolved value is a new additive field. Two gaps recorded rather than claimed away: the row has no actor identity, and the new action is reachable by the shared M2M service account. Rollback: revert the commit and drop the table (see the migration's Rollback note); the read path falls back to the merchant catalogue, which is what renders today.
 - **2026-09-05** — New inbound REST surface `MerchantCatalogResource` (`/api/v1/merchants`): list, an unmatched-descriptor worklist, upsert and delete, so the D5 catalogue §4c reads can actually be filled (#8573). New trust boundary crossing, hence §4d. No money path touched and no cardholder data added — the table stays keyed by acquirer descriptor. Residual gap recorded rather than papered over: the row records `updated_at` but not who edited it. Rollback: revert the commit; §4c degrades to the empty catalogue it reads today, which already renders the raw descriptor.
+
+- **2026-11-11** — Transaction initiation persists the authenticated synthetic classification before
+  starting Temporal (ADR-0252, #7284). A worker loads the stored value when selecting the ledger
+  route. Initiation, terminal and reversal events carry the same classification. An idempotency
+  replay across classifications receives HTTP 409, including a concurrent duplicate. Existing
+  rows default to ordinary origin. Trust-list activation and canary scheduling require review after
+  the transaction workers and ledger route are deployed.
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal balance, FX and ledger REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or transaction-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
@@ -691,3 +693,13 @@ Residual risk: manually deleting a retained image/Deployment can strand pinned
 executions. Require server-side drainage evidence before retirement, retain artifacts
 for recovery, and keep changes under the existing two-review money-path process.
 No new payment command, retry policy, API contract or schema is introduced.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

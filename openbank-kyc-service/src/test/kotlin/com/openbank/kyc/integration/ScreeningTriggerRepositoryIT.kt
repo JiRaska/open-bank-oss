@@ -13,7 +13,7 @@ import com.openbank.kyc.domain.model.ScreeningTriggerFailure
 import com.openbank.kyc.domain.model.ScreeningTriggerState
 import com.openbank.kyc.infrastructure.persistence.KycRepository
 import com.openbank.kyc.infrastructure.persistence.repository.ScreeningTriggerRepositoryImpl
-import com.openbank.kyc.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile

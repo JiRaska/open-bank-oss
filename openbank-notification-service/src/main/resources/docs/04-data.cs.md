@@ -6,7 +6,7 @@
 - **Databáze:** `openbank_notifications`.
 - **Schéma:** tabulky jsou ve schématu `public`. *(Governance manifest deklaruje `notifications_schema` jako logický název vlastněného schématu; fyzické migrace vytvářejí objekty v `public`. Deklarováno-vs-fyzicky: za autoritativní pro běžící DB berte `public`.)*
 - **ORM:** Hibernate Reactive s Panache; `hibernate-orm.database.generation = none` (schéma vlastní Flyway).
-- **Migrace:** Flyway, `migrate-at-start = true`. Hibernate Panache alokuje ID ze sekvencí `<table>_seq` (allocationSize 50) — každá tabulka má odpovídající `CREATE SEQUENCE … INCREMENT BY 50`, vynuceno `HibernateSequenceGuardTest`.
+- **Migrace:** Flyway, `migrate-at-start = true`. Hibernate Panache alokuje ID ze sekvencí `<table>_seq` (allocationSize 50) — každá tabulka má odpovídající `CREATE SEQUENCE … INCREMENT BY 50`, vynuceno CI gate `hibernate-sequence-guard`.
 
 ## Flyway migrace
 

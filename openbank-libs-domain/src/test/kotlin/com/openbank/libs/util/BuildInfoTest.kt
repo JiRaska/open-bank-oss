@@ -8,33 +8,32 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 /**
- * `openbank-service-build.properties` is stamped by the service Gradle convention;
- * `openbank-libs-domain` itself never generates it, so under this
- * module's own test classpath the resource stream is absent and every build-time property falls
- * back to its documented default. That fallback path — never letting a missing resource surface as
- * an empty string or a thrown exception — is exactly what these assertions pin.
+ * `openbank-build-info.properties` is stamped by THIS module's processResources (it used to live in
+ * the umbrella openbank-libs JAR, which services depending on domain/runtime directly never had, so
+ * admin-ui showed Quarkus/Gradle/libs as `unknown`). The expected values are handed in by Gradle
+ * from the version catalog, so an unstamped or missing resource fails here.
+ * `openbank-service-build.properties` is stamped by the service convention, never by this module,
+ * so the commit still falls back to its documented default.
  */
 class BuildInfoTest {
 
     @Test
-    fun `a build-time property falls back to unknown when the stamped resource is absent`() {
-        assertThat(BuildInfo.quarkusVersion).isEqualTo("unknown")
-        assertThat(BuildInfo.gradleVersion).isEqualTo("unknown")
+    fun `build-time stack versions are stamped from the version catalog, never unknown`() {
+        assertThat(BuildInfo.quarkusVersion).isEqualTo(expected("expected.quarkus.version"))
+        assertThat(BuildInfo.kotlinVersion).isEqualTo(expected("expected.kotlin.version"))
+        assertThat(BuildInfo.gradleVersion).isEqualTo(expected("expected.gradle.version"))
+        assertThat(BuildInfo.libsVersion).isEqualTo(expected("expected.libs.version"))
+        assertThat(BuildInfo.quarkusLts).isTrue()
+    }
+
+    @Test
+    fun `values never stamped by this module fall back to unknown, not a blank or a token`() {
         assertThat(BuildInfo.buildTime).isEqualTo("unknown")
         assertThat(BuildInfo.gitCommit).isEqualTo("unknown")
-        assertThat(BuildInfo.libsVersion).isEqualTo("unknown")
     }
 
-    @Test
-    fun `kotlinVersion falls back to the running Kotlin compiler version, not a blank string`() {
-        assertThat(BuildInfo.kotlinVersion).isEqualTo(KotlinVersion.CURRENT.toString())
-        assertThat(BuildInfo.kotlinVersion).isNotBlank()
-    }
-
-    @Test
-    fun `quarkusLts defaults to false rather than throwing on a missing flag`() {
-        assertThat(BuildInfo.quarkusLts).isFalse()
-    }
+    private fun expected(key: String): String =
+        requireNotNull(System.getProperty(key)) { "Gradle must pass -D$key (see build.gradle.kts)" }
 
     @Test
     fun `runtime JVM properties reflect the actual running JVM, not the stamped-resource fallback`() {

@@ -34,7 +34,7 @@ The rules reported in `breaches[]` are `PRODUCT_NOT_PERMITTED`, `CURRENCY_NOT_PE
 
 ## Contract
 
-The API contract is `openapi.yaml` (`info.version` follows ADR-0048). Product limits are additive: 1.18.0, with a 422 on `submit` and `approve`.
+The API contract is `openapi.yaml` (`info.version` follows ADR-0048). Product limits were additive in 1.18.0, with a 422 on `submit` and `approve`. Version 1.25.0 corrects the documented HTTP 400 validation body to the shared runtime `ProblemDetail`; treasury business denials retain their `Error` body.
 
 
 ## Custodian portfolio statements

@@ -59,7 +59,7 @@ if [ "${1:-}" = "--self-test" ]; then
     rc=$?
     if [ "$rc" -ne "$want" ]; then
       echo "::error::self-test: $label — expected rc=$want, got rc=$rc: $out" >&2; fails=$((fails+1))
-    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+    elif [ -n "$sub" ] && ! grep -qF -- "$sub" <<< "$out"; then
       echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1))
     fi
   }

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import http.server
+import errno
 import importlib.util
 import json
 import os
@@ -53,9 +54,11 @@ def cleanup_stage_process(process: subprocess.Popen) -> None:
         process.wait(timeout=2)
 
 
-def start_stage(test_case: unittest.TestCase, trace_dir: Path, stage: str, env: dict[str, str]) -> subprocess.Popen:
+def start_stage(test_case: unittest.TestCase, trace_dir: Path, stage: str, env: dict[str, str],
+                *, command: list[str] | None = None, pass_fds: tuple[int, ...] = ()) -> subprocess.Popen:
     process = subprocess.Popen(
-        [sys.executable, str(IPC_SCRIPT), "serve", "--stage", stage],
+        command or [sys.executable, str(IPC_SCRIPT), "serve", "--stage", stage],
+        pass_fds=pass_fds,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -648,6 +651,108 @@ class AggregatorTests(unittest.TestCase):
             rows = [row for row in report["records"] if row["stage"] == "quality_report" and row["client"] == "node_fetch"]
             self.assertEqual(sum(row["numericSendCount"] for row in rows), 2)
             self.assertTrue(all(not row["complete"] for row in rows))
+
+
+class FinishAcknowledgementTests(unittest.TestCase):
+    def test_ack_precedes_shutdown_and_broken_peer_still_stops(self) -> None:
+        # Probe the real handler's ACK boundary without a production test switch or sleep.
+        # A pipe lets the broken peer close before the actual socket write is attempted.
+        bootstrap = r"""
+import importlib.util, json, os, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("ipc", sys.argv[1])
+ipc = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ipc)
+probe = Path(sys.argv[2])
+release_fd = int(sys.argv[3])
+read_frame = ipc._Handler._read_frame
+setup = ipc._Handler.setup
+
+def observed_frame(handler):
+    event = read_frame(handler)
+    if event and event.get("type") == "finish":
+        handler.finish_probe = True
+    return event
+
+class AckWriter:
+    def __init__(self, writer, handler):
+        self.writer, self.handler = writer, handler
+    def __getattr__(self, name):
+        return getattr(self.writer, name)
+    def write(self, data):
+        if not getattr(self.handler, "finish_probe", False):
+            return self.writer.write(data)
+        observation = {"shutdownBeforeAck": self.handler.server.state.finish_requested.is_set()}
+        probe.write_text(json.dumps(observation))
+        if observation["shutdownBeforeAck"]:
+            raise AssertionError("shutdown published before ACK")
+        if release_fd >= 0:
+            assert os.read(release_fd, 1) == b"1"
+        try:
+            return self.writer.write(data)
+        except OSError as error:
+            observation["writeErrno"] = error.errno
+            probe.write_text(json.dumps(observation))
+            raise
+
+def observed_setup(handler):
+    setup(handler)
+    handler.wfile = AckWriter(handler.wfile, handler)
+
+ipc._Handler._read_frame = observed_frame
+ipc._Handler.setup = observed_setup
+raise SystemExit(ipc.serve("sbom", "github"))
+"""
+        for broken_peer in (False, True):
+            with self.subTest(broken_peer=broken_peer), tempfile.TemporaryDirectory() as directory:
+                trace_dir = Path(directory)
+                probe = trace_dir / "ack-observation.json"
+                env = {**os.environ, "ADMIN_UI_TRACE_DIR": directory}
+                read_fd, write_fd = os.pipe() if broken_peer else (-1, -1)
+                try:
+                    server = start_stage(self, trace_dir, "sbom", env,
+                                         command=[sys.executable, "-c", bootstrap, str(IPC_SCRIPT), str(probe), str(read_fd)],
+                                         pass_fds=(read_fd,) if broken_peer else ())
+                    if read_fd >= 0:
+                        os.close(read_fd)
+                        read_fd = -1
+                    spec = importlib.util.spec_from_file_location("ipc_client", IPC_SCRIPT)
+                    assert spec and spec.loader
+                    ipc = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(ipc)
+                    with patch.dict(os.environ, env):
+                        invocation = ipc.Invocation("sbom", "curl", "github")
+                        self.assertTrue(invocation.started)
+                        invocation.end(Counter(api=2), complete=True, reason=None)
+                    if broken_peer:
+                        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                            client.connect(str(trace_dir / "sbom.sock"))
+                            client.sendall(b'{"type":"finish","stage":"sbom","authAlias":"github"}\n')
+                            deadline = time.monotonic() + 5
+                            while not probe.exists() and server.poll() is None and time.monotonic() < deadline:
+                                time.sleep(0.01)
+                            self.assertTrue(probe.exists(), "finish must reach the real ACK write")
+                        os.write(write_fd, b"1")
+                        server.wait(timeout=5)
+                        report = json.loads((trace_dir / "admin-ui-stage-sbom.json").read_text())
+                    else:
+                        report = finish_stage(trace_dir, "sbom", env, server)
+                    self.assertEqual(server.returncode, 0)
+                    observation = json.loads(probe.read_text())
+                    self.assertFalse(observation["shutdownBeforeAck"])
+                    if broken_peer:
+                        self.assertIn(observation["writeErrno"], {errno.EPIPE, errno.ECONNRESET})
+                    self.assertTrue(report["complete"])
+                    self.assertEqual(report["records"], [
+                        {"client": "curl", "destinationClass": "api", "numericSendCount": 2}
+                    ])
+                    self.assertTrue(all(sentinel not in json.dumps(report) for sentinel in SENTINELS))
+                    self.assertFalse((trace_dir / "sbom.sock").exists())
+                    self.assertFalse((trace_dir / "sbom.pid").exists())
+                finally:
+                    for descriptor in (read_fd, write_fd):
+                        if descriptor >= 0:
+                            os.close(descriptor)
 
 
 class SupervisorTests(unittest.TestCase):

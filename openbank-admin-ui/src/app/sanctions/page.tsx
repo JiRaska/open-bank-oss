@@ -30,6 +30,7 @@ import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { statusTone } from '@/components/ui/tone'
 import { readApprovalId } from '@/lib/approvals/triage'
 import { trustedHttpsUrl } from '@/lib/security/trustedUrls'
+import { SanctionsRefreshState } from '@/components/sanctions/SanctionsRefreshState'
 
 interface SanctionCheck {
   id: string; name: string; entityType: string; status: string
@@ -97,7 +98,7 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
         <span style={{ color: 'var(--text-tertiary)', fontSize: '13px' }}>:</span>
         <select id={`sanctions-cron-${list.id}-minute`} aria-label={t('Minuta spouštění', 'Run minute')} value={minute} onChange={e => setMinute(+e.target.value)}
           style={{ padding: '4px 8px', borderRadius: '5px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '12px' }}>
-          {[0,5,10,15,20,25,30,35,40,45,50,55].map(m => <option key={m} value={m}>{String(m).padStart(2,'0')}</option>)}
+          {Array.from({length:60},(_,i)=>i).map(m => <option key={m} value={m}>{String(m).padStart(2,'0')}</option>)}
         </select>
       </div>
       <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -171,6 +172,7 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
               <div>{new Date(list.lastUpdatedAt).toLocaleString(dateLocale)}</div>
             </>
           ) : <div>{t('Nikdy nestaženo', 'Never downloaded')}</div>}
+          <SanctionsRefreshState refreshRequestedAt={list.refreshRequestedAt} dateLocale={dateLocale} />
         </div>
         <Can permission="sanctions:manage">
         <button type="button" onClick={handleRefresh} disabled={refreshing} aria-busy={refreshing} aria-label={t('Stáhnout sankční seznam', 'Download sanctions list')}
@@ -414,6 +416,12 @@ export default function SanctionsPage() {
   const handleRefreshList = async (listType: string) => {
     setListsError('')
     const res = await fetch(`/api/sanctions/lists/${listType}/refresh`, { method: 'POST' })
+    if (res.status === 422) {
+      // The service refuses a disabled list: the scheduler would never carry the request out.
+      setListsError(t('Seznam je pozastavený — nejdřív obnovte automatické aktualizace, pak ho lze stáhnout.',
+        'This list is paused — resume its automatic updates before downloading it.'))
+      return
+    }
     if (!res.ok) {
       const errorPayload = await res.json().catch(() => ({ error: 'Refresh failed' })) as ApiError
       setListsError(errorPayload.error ?? t(`Obnovení listu selhalo (HTTP ${res.status})`, `Failed to refresh list (HTTP ${res.status})`))

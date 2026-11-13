@@ -83,6 +83,28 @@ MARSHAL_VERSION = 4
 _parse_cache: dict[str, list] = {}
 
 
+def hermetic_git_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """An environment in which `git init` / `git commit` behave identically on a Mac and on the runner.
+
+    A fixture that commits with no identity works on macOS (git derives one from the account) and
+    fails on ubuntu-latest with "Please tell me who you are" (#14697); a fixture that does not
+    neutralise signing fails the other way round for anyone whose global config signs commits.
+    This sets a fixed identity, points the global and system config at /dev/null (so no
+    `commit.gpgsign`, hook path, or credential helper leaks in), and refuses terminal prompts.
+    `check-git-fixture-hermetic.py` accepts its name as proof on both counts."""
+    env = dict(os.environ if base is None else base)
+    env.pop("GIT_DIR", None)
+    env.pop("GIT_INDEX_FILE", None)
+    env.pop("GIT_WORK_TREE", None)
+    env.update({
+        "GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+        "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    })
+    return env
+
+
 def _disk_dir() -> pathlib.Path | None:
     d = os.environ.get(CACHE_DIR_ENV)
     if not d:
@@ -111,9 +133,13 @@ def read_text(path: os.PathLike | str, errors: str = "strict") -> str:
     return pathlib.Path(path).read_text(encoding="utf-8", errors=errors)
 
 
-def _parse(text: str) -> list:
+def _parse(text: str, *, pure_python: bool = False) -> list:
     """Every document in `text`, cached by content sha across processes when enabled."""
+    # PyYAML's C and Python safe loaders differ for some directives, tabs and escapes.
+    # Compatibility callers keep SafeLoader and cannot consume the default loader's blobs.
     sha = hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+    if pure_python:
+        sha = "python-" + sha  # disjoint key/blob names; no input prefix can cross loaders
     docs = _parse_cache.get(sha)
     if docs is not None:
         return docs
@@ -135,7 +161,7 @@ def _parse(text: str) -> list:
         except Exception:  # a truncated or unreadable blob is a cache miss, never a failure
             docs = None
     if docs is None:
-        docs = list(yaml.load_all(text, Loader=SafeLoader))
+        docs = list(yaml.load_all(text, Loader=yaml.SafeLoader if pure_python else SafeLoader))
         if blob_path is not None:
             try:
                 # Write-then-rename: four gates run concurrently in a shard and may reach the
@@ -155,9 +181,9 @@ def _parse(text: str) -> list:
     return docs
 
 
-def load_yaml_all(path: os.PathLike | str, errors: str = "strict") -> list:
-    """Every YAML document in `path`. Raises `yaml.YAMLError` exactly as `safe_load_all` does."""
-    return copy.deepcopy(_parse(read_text(path, errors=errors)))
+def load_yaml_all(path: os.PathLike | str, errors: str = "strict", *, pure_python: bool = False) -> list:
+    """Every document, isolated per caller. `pure_python` preserves safe_load_all's parser."""
+    return loads_all(read_text(path, errors=errors), pure_python=pure_python)
 
 
 def load_yaml(path: os.PathLike | str, errors: str = "strict") -> Any:
@@ -166,9 +192,17 @@ def load_yaml(path: os.PathLike | str, errors: str = "strict") -> Any:
     return copy.deepcopy(docs[0]) if docs else None
 
 
-def loads_all(text: str) -> list:
-    """As `load_yaml_all`, for text a caller already holds (an embedded ConfigMap value)."""
-    return copy.deepcopy(_parse(text))
+def loads_all(text: str, *, pure_python: bool = False) -> list:
+    """As `load_yaml_all`, for a single content snapshot a caller already holds."""
+    docs = _parse(text, pure_python=pure_python)
+    try:
+        return copy.deepcopy(docs)
+    except RecursionError:
+        if not pure_python:
+            raise
+        # SafeLoader can construct deep alias graphs that deepcopy cannot traverse.
+        # A fresh parse retains the original result without exposing cached mutable objects.
+        return list(yaml.safe_load_all(text))
 
 
 def loads(text: str) -> Any:

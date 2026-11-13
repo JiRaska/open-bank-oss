@@ -66,6 +66,8 @@ from pathlib import Path
 
 import yaml
 
+import gatelib
+
 REPO = Path(__file__).resolve().parents[2]
 AGENTS_YAML = REPO / "openbank-libs" / "governance" / "agents.yaml"
 
@@ -110,7 +112,7 @@ def gitops_env_overrides() -> dict:
         return out
     for src in sorted(GITOPS_ROOT.rglob("*.yaml")):
         try:
-            docs = list(yaml.safe_load_all(src.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(src, pure_python=True)
         except yaml.YAMLError:
             continue  # a Helm-templated or otherwise unparseable manifest sets no literal env
         for doc in docs:

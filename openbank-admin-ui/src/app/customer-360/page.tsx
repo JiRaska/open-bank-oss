@@ -196,7 +196,7 @@ export default function Customer360Page() {
           )}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
-            <StatCard label={t('Domén', 'Domains')} value={data.domains.length} />
+            <StatCard label={t('Typů agregátů', 'Aggregate types')} value={data.domains.length} />
             <StatCard label={t('Událostí', 'Events')} value={totalEvents} />
             <StatCard label={t('Účtů', 'Accounts')} value={data.accountIds.length} tone="info" />
             <StatCard
@@ -217,12 +217,12 @@ export default function Customer360Page() {
 
           <div className="card" style={{ marginBottom: '20px', overflowX: 'auto', padding: '20px' }}>
             <h2 className="section-title" style={{ marginBottom: '12px' }}>
-              {t('Domény a aktuálnost', 'Domains and recency')}
+              {t('Typy agregátů a aktuálnost', 'Aggregate types and recency')}
             </h2>
             <table className="table">
               <thead>
                 <tr>
-                  <th>{t('Doména', 'Domain')}</th>
+                  <th>{t('Typ agregátu', 'Aggregate type')}</th>
                   <th style={{ textAlign: 'right' }}>{t('Událostí', 'Events')}</th>
                   <th>{t('Poslední událost', 'Last event')}</th>
                   <th>{t('Kdy', 'When')}</th>

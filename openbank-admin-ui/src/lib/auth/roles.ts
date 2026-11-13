@@ -146,6 +146,9 @@ export const PERMISSIONS = {
   // auditor is included deliberately — the programme's obligation and its cap are exactly what an
   // audit asks about.
   "loyalty:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR, ROLES.VIEWER],
+  "game:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.MARKETING],
+  "game:edit":             [ROLES.ADMIN, ROLES.MARKETING],
+  "game:manage":           [ROLES.ADMIN],
   "campaign:view":          [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR],
   "campaign:create":        [ROLES.ADMIN, ROLES.OPERATOR],
   "campaign:submit":        [ROLES.ADMIN, ROLES.OPERATOR],
@@ -183,6 +186,8 @@ export const PERMISSIONS = {
   // additionally admits ROLE_RISK so a risk officer can see an obligor's name. Search and list stay
   // on `parties:view`; never use this for a directory link.
   "parties:view-detail":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.KYC, ROLES.RISK],
+  "parties:search":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
+  "parties:reveal-pii":   [ROLES.ADMIN, ROLES.KYC],
   // Mirrors party-service POST /api/v1/parties: a viewer may inspect parties but
   // must never be offered a customer-creation workflow.
   "parties:create":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
@@ -397,6 +402,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
     // its own permission at the BFF boundary — this prefix only gates the page shell.
     '/reporting',
   ]],
+  ['game:view', ['/loyalty/game']],
   ['loyalty:view', ['/loyalty']],
   ['campaign:view', ['/segments']],
   ['campaign:create', ['/segments/new']],
@@ -421,7 +427,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
   ['approvals:view', ['/approvals']],
   ['settlements:view', ['/settlements']],
   ['system:view', [
-    '/api/platform-versions', '/api/finops',
+    '/api/platform-versions', '/api/finops', '/api/test-intelligence',
     '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
     '/security', '/system',
   ]],

@@ -73,7 +73,7 @@ Indexy `idx_fx_outbox_status_created_at (status, created_at ASC)`, `idx_fx_outbo
 
 `migrate-at-start = true`, `validate-on-migrate = false`. **Nikdy needituj aplikovanou migraci** (checksum mismatch → pád startu; jako záchrana `QUARKUS_FLYWAY_REPAIR_AT_START=true`).
 
-> **Důvod V3:** Hibernate Reactive + `PanacheEntity` alokují id ze sekvence `<table>_seq` (allocationSize 50). `BIGSERIAL` PK vytvoří jen `<table>_id_seq` a schéma je `generation:none`, takže inserty by selhaly s *relation "fx_outbox_seq" does not exist*. V3 ji přidává. `HibernateSequenceGuardTest` hlídá regresi. Rollback: `DROP SEQUENCE fx_outbox_seq;`.
+> **Důvod V3:** Hibernate Reactive + `PanacheEntity` alokují id ze sekvence `<table>_seq` (allocationSize 50). `BIGSERIAL` PK vytvoří jen `<table>_id_seq` a schéma je `generation:none`, takže inserty by selhaly s *relation "fx_outbox_seq" does not exist*. V3 ji přidává. CI gate `hibernate-sequence-guard` hlídá regresi. Rollback: `DROP SEQUENCE fx_outbox_seq;`.
 
 ## PII & klasifikace
 

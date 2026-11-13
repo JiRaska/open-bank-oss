@@ -1,0 +1,117 @@
+# Read-only worker for the standard owner recorder. Existing transport values are
+# native secrets, so runner headers cannot disclose addresses before CLI redaction.
+name: Read existing agent merge evidence
+
+on:
+  workflow_call:
+    inputs:
+      operation:
+        type: string
+        required: true
+      prs:
+        type: string
+        default: ''
+    secrets:
+      agent_service_url:
+        required: true
+      recorder_issuer:
+        required: true
+      recorder_client_id:
+        required: true
+      recorder_client_secret:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+  statuses: read
+
+jobs:
+  observe:
+    # The reusable github context identifies the caller, not this worker. A foreign
+    # workflow, repository, ref, actor or rerun must never receive a recorder token.
+    if: >-
+      github.repository == 'JiRaska/open-bank-oss' &&
+      github.workflow_ref == 'JiRaska/open-bank-oss/.github/workflows/record-agent-merge.yml@refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+      github.actor == github.repository_owner && github.triggering_actor == github.repository_owner &&
+      github.run_attempt == 1
+    runs-on: openbank-build
+    timeout-minutes: 20
+    env:
+      AGENT_SERVICE_URL: ${{ secrets.agent_service_url }}
+      AGENT_MERGE_RECORDER_ISSUER: ${{ secrets.recorder_issuer }}
+      AGENT_MERGE_RECORDER_CLIENT_ID: ${{ secrets.recorder_client_id }}
+      AGENT_MERGE_RECORDER_CLIENT_SECRET: ${{ secrets.recorder_client_secret }}
+      # Keep canonical PR metadata independent of any runner environment override.
+      AGENT_MERGE_PROPOSAL_ID: ''
+    steps:
+      - name: Check out trusted current main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
+        with:
+          repository: JiRaska/open-bank-oss
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate bounded read request
+        env:
+          OPERATION: ${{ inputs.operation }}
+          READ_PRS: ${{ inputs.prs }}
+        run: |
+          set -euo pipefail
+          case "$OPERATION" in
+            capabilities) [ -z "$READ_PRS" ] || exit 1 ;;
+            verify-existing)
+              [[ "$READ_PRS" =~ ^[1-9][0-9]*(,[1-9][0-9]*)*$ ]] || exit 1
+              IFS=, read -r -a prs <<< "$READ_PRS"
+              (( ${#prs[@]} <= 100 )) || exit 1
+              ;;
+            *) exit 1 ;;
+          esac
+          [ -n "$AGENT_SERVICE_URL" ] && [ -n "$AGENT_MERGE_RECORDER_ISSUER" ] && \
+            [ -n "$AGENT_MERGE_RECORDER_CLIENT_ID" ] && [ -n "$AGENT_MERGE_RECORDER_CLIENT_SECRET" ] || exit 1
+
+      - name: Mint existing recorder identity for reads
+        env:
+          TOKEN_FILE: ${{ runner.temp }}/agent-merge-reader-token
+        run: |
+          set -euo pipefail
+          umask 077
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          curl -sf --retry 3 --retry-delay 2 --max-time 15 \
+            -u "${AGENT_MERGE_RECORDER_CLIENT_ID}:${AGENT_MERGE_RECORDER_CLIENT_SECRET}" \
+            -d grant_type=client_credentials \
+            "${AGENT_MERGE_RECORDER_ISSUER}/protocol/openid-connect/token" -o "$tmp"
+          tok="$(jq -r '.access_token // empty' "$tmp")"
+          [ -n "$tok" ]
+          printf 'Authorization: Bearer %s' "$tok" > "$TOKEN_FILE"
+
+      - name: Read capabilities or independently verify existing rows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOKEN_FILE: ${{ runner.temp }}/agent-merge-reader-token
+          OPERATION: ${{ inputs.operation }}
+          READ_PRS: ${{ inputs.prs }}
+        run: |
+          set -euo pipefail
+          case "$OPERATION" in
+            capabilities)
+              python3 .github/scripts/record-agent-merge.py --read-capabilities --token-file "$TOKEN_FILE"
+              ;;
+            verify-existing)
+              IFS=, read -r -a prs <<< "$READ_PRS"
+              for pr in "${prs[@]}"; do
+                python3 .github/scripts/record-agent-merge.py --pr "$pr" --read-existing --token-file "$TOKEN_FILE"
+              done
+              ;;
+            *) exit 1 ;;
+          esac
+
+      - name: Remove ephemeral recorder credential
+        if: always()
+        env:
+          TOKEN_FILE: ${{ runner.temp }}/agent-merge-reader-token
+        run: rm -f -- "$TOKEN_FILE"

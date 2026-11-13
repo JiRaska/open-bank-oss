@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.16.1...engagement-service-v0.16.2) (2026-11-12)
+
+
+### Bug Fixes
+
+* **engagement:** consult the live suppression list before promotional contact ([#15776](https://github.com/JiRaska/open-bank-oss/issues/15776)) ([25772c3](https://github.com/JiRaska/open-bank-oss/commit/25772c37a6cb2a2254e03dbdb0376af8f2014360))
+
+## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.16.0...engagement-service-v0.16.1) (2026-11-12)
+
+
+### Security
+
+* **campaign:** drop baked-in datasource password fallbacks + gate ([#15540](https://github.com/JiRaska/open-bank-oss/issues/15540)) ([d5d111d](https://github.com/JiRaska/open-bank-oss/commit/d5d111df2bda173c5645fc9e05e52aebc4cd1cb0))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.15.1...engagement-service-v0.16.0) (2026-11-08)
+
+
+### Features
+
+* **admin-ui:** add visual Lion Quest course authoring for marketing ([#15227](https://github.com/JiRaska/open-bank-oss/issues/15227)) ([1274803](https://github.com/JiRaska/open-bank-oss/commit/127480353627a49e08d9108cdbc5259305ed32a5))
+
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.15.0...engagement-service-v0.15.1) (2026-11-08)
+
+
+### Bug Fixes
+
+* **engagement:** give the test JVM 2g so Kover's shutdown save stops OOMing ([#15245](https://github.com/JiRaska/open-bank-oss/issues/15245)) ([a45e222](https://github.com/JiRaska/open-bank-oss/commit/a45e222c24e5d382815f56900162cbda7643a80d))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.14.5...engagement-service-v0.15.0) (2026-11-06)
+
+
+### Features
+
+* **engagement,customer-edge,admin-ui:** manage Lion Quest chapters through the bank ([#14964](https://github.com/JiRaska/open-bank-oss/issues/14964)) ([beb444f](https://github.com/JiRaska/open-bank-oss/commit/beb444f56996633fa564719fe5dca1b8ec943a96))
+
 ## [0.14.5](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.14.4...engagement-service-v0.14.5) (2026-10-14)
 
 

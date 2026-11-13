@@ -7,6 +7,8 @@ package com.openbank.aml.infrastructure.rest
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.port.`in`.ListAmlCasesQuery
+import com.openbank.aml.application.usecase.AmlCaseNotFoundException
+import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.ScreeningType
 import com.openbank.aml.infrastructure.rest.dto.CreateAmlCaseRequest
@@ -80,6 +82,11 @@ class AmlCaseResource(
         requireNamedMachineCaller(identity)
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
+        // ADR-0371: keys with this prefix mark cases the pack evaluation opened; nobody may mint one here.
+        require(!idempotencyKey.startsWith(AmlCase.PACK_MONITORING_KEY_PREFIX)) {
+            "Idempotency-Key prefix '${AmlCase.PACK_MONITORING_KEY_PREFIX}' is reserved"
+        }
+        requireFraudReviewKeyCaller(identity, idempotencyKey)
 
         // #10916: the key is bound to this request's fingerprint and claimed ATOMICALLY before any
         // side effect runs — a different body under the same key answers 409 IDEMPOTENCY_KEY_REUSED,
@@ -141,8 +148,12 @@ class AmlCaseResource(
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_API")
     @Authorize(action = "amlCase.read", resource = "#caseId")
     @Operation(summary = "Get AML case by ID")
-    suspend fun getCase(@PathParam("caseId") caseId: UUID): Response =
-        Response.ok(amlCaseUseCase.getCase(caseId).toResponse()).build()
+    suspend fun getCase(@PathParam("caseId") caseId: UUID): Response {
+        val amlCase = amlCaseUseCase.getCase(caseId)
+        // ADR-0371 §7: to anyone but compliance a pack-monitoring case does not exist — 404, not 403.
+        if (!mayRead(amlCase)) throw AmlCaseNotFoundException(caseId)
+        return Response.ok(amlCase.toResponse()).build()
+    }
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_API")
@@ -164,7 +175,7 @@ class AmlCaseResource(
                 offset = offset,
             ),
         )
-        return Response.ok(amlCases.map { it.toResponse() }).build()
+        return Response.ok(amlCases.filter { mayRead(it) }.map { it.toResponse() }).build()
     }
 
     @PUT
@@ -172,12 +183,23 @@ class AmlCaseResource(
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
     @Authorize(action = "amlCase.updateDecision", resource = "#caseId")
     @Operation(summary = "Update AML case decision")
-    suspend fun updateDecision(@PathParam("caseId") caseId: UUID, request: UpdateAmlDecisionRequest): Response =
-        Response.ok(amlCaseUseCase.updateDecision(request.toCommand(caseId)).toResponse()).build()
+    suspend fun updateDecision(@PathParam("caseId") caseId: UUID, request: UpdateAmlDecisionRequest): Response {
+        if (!mayRead(amlCaseUseCase.getCase(caseId))) throw AmlCaseNotFoundException(caseId)
+        // decidedBy is the authenticated caller, never a field of the request (ADR-0371 §5).
+        val command = request.toCommand(caseId, identity.principal.name)
+        return Response.ok(amlCaseUseCase.updateDecision(command).toResponse()).build()
+    }
+
+    /**
+     * Pack-monitoring cases are confidential (ADR-0371 §7): readable by the compliance role only.
+     * A rail-opened TRANSACTION_MONITORING case is not one and stays visible to its operators.
+     */
+    private fun mayRead(amlCase: AmlCase): Boolean = !amlCase.isPackMonitoringCase || identity.hasRole(MONITORING_ROLE)
 
     private companion object {
         const val IDEMPOTENCY_SERVICE = "aml-service"
         const val CASES_PATH = "/api/v1/aml/cases"
+        const val MONITORING_ROLE = "ROLE_COMPLIANCE"
     }
 }
 
@@ -205,5 +227,16 @@ internal fun requireNamedMachineCaller(identity: SecurityIdentity) {
     if (AML_CASE_CREATE_STAFF_ROLES.any(identity::hasRole) && ServiceAccountIdentity.isHumanStaff(identity)) return
     if (!ServiceAccountIdentity.isOneOf(identity, AML_CASE_CREATE_CALLERS)) {
         throw ForbiddenException("caller is not a named AML case-open service")
+    }
+}
+
+/** Only the rail's own verified machine identity may create or replay its fraud-review case. */
+internal fun requireFraudReviewKeyCaller(identity: SecurityIdentity, idempotencyKey: String) {
+    if (
+        idempotencyKey.startsWith("aml-") &&
+        idempotencyKey.endsWith("-FRAUD_REVIEW") &&
+        !ServiceAccountIdentity.isPrincipal(identity, "service-account-openbank-domestic-payment")
+    ) {
+        throw ForbiddenException("fraud-review case keys are reserved for domestic-payment")
     }
 }

@@ -2,6 +2,9 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+import com.openbank.buildlogic.buildFactsInputs
+import com.openbank.buildlogic.pactBrokerSystemProperties
+import io.quarkus.gradle.tasks.QuarkusBuildTask
 import io.quarkus.gradle.tasks.QuarkusApplicationModelTask
 import io.quarkus.gradle.tooling.ProjectDescriptorBuilder
 import java.util.zip.ZipFile
@@ -18,6 +21,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.allopen")
     id("org.cyclonedx.bom")
     id("org.jetbrains.kotlinx.kover")
+    id("openbank.test-provenance")
     // Static analysis gate (detekt + ktlint, ratchet via per-module baselines).
     id("openbank.static-analysis")
     id("openbank.packaged-library-sbom")
@@ -59,7 +63,16 @@ abstract class QuarkusPackagingFileOperations {
 // implementation fingerprint, so previously contaminated cache entries are not reused.
 val packagingFileOperations = objects.newInstance<QuarkusPackagingFileOperations>()
 val quarkusGeneratedStaging = layout.buildDirectory.dir("quarkus-build/gen")
+// Schema export is an augmentation output, outside Quarkus's declared app directory.
+// Declare it only when requested so a cache hit restores the schema as well as the JAR.
 tasks.named("quarkusAppPartsBuild") {
+    val schemaExportProjectDirectory = layout.projectDirectory
+    val generatedOpenApiDirectory = providers.systemProperty("quarkus.smallrye-openapi.store-schema-directory")
+        .filter { it.isNotBlank() }
+        .map { schemaExportProjectDirectory.dir(it) }
+    if (generatedOpenApiDirectory.isPresent) {
+        outputs.dir(generatedOpenApiDirectory).withPropertyName("generatedOpenApiSchema")
+    }
     doFirst {
         packagingFileOperations.fileSystemOperations.delete {
             delete(quarkusGeneratedStaging.get().asFile)
@@ -147,6 +160,14 @@ tasks.named<Copy>("processResources") {
     dependsOn(generateServiceDocs)
 }
 
+// Runtime classpath normalization also applies to Quarkus augmentation. Its
+// artifact cache must retain the FULL metadata, including the current source SHA.
+tasks.withType<QuarkusBuildTask>().configureEach {
+    inputs.property("unfilteredBuildFacts", providers.provider {
+        buildFactsInputs(classpath.files, normalizeCommit = false)
+    })
+}
+
 val verifyServiceDocs by tasks.registering {
     group = "verification"
     description = "Verify that current service documentation is packaged in the Quarkus application JAR."
@@ -162,7 +183,9 @@ val verifyServiceDocs by tasks.registering {
             val commit = properties
                 ?.let { Regex("(?m)^git\\.commit=([0-9a-fA-F]{40})$").find(it)?.groupValues?.get(1) }
             check(facts != null && facts.contains(project.version.toString())
-                && commit != null && facts.contains(commit) && commit == sourceCommit.get().trim()) {
+                && commit != null && facts.contains(commit) && commit == sourceCommit.get().trim()
+                && facts == generatedServiceDocs.get().asFile.resolve("docs/00-build.md").readText()
+                && properties == generatedServiceDocs.get().asFile.resolve("openbank-service-build.properties").readText()) {
                 "${project.name}: current build facts were not packaged in the Quarkus application JAR"
             }
         }
@@ -342,17 +365,7 @@ tasks.withType<Test>().configureEach {
     // Set on the test JVM fork, not the Gradle daemon — System.setProperty at config time would
     // not propagate into the forked test process.
     systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+    pactBrokerSystemProperties.forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
 // Consumer contracts compile independently of the full service test suite.

@@ -5,10 +5,10 @@ package com.openbank.wealth.integration
 
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.outbox.OutboxDispatchConformanceIT
 import com.openbank.wealth.infrastructure.outbox.WealthOutboxDispatcher
 import com.openbank.wealth.infrastructure.persistence.repository.WealthOutboxRepositoryImpl
-import com.openbank.wealth.it.PostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager

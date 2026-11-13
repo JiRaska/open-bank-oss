@@ -3,6 +3,7 @@
 
 package com.openbank.ledger.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -31,7 +32,7 @@ import java.util.UUID
  * is checked against the journal's cumulative balance, which counts everything up to month end.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.ledger.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class ClosedPeriodClosingBalanceIT {
 

@@ -9,13 +9,16 @@ import com.openbank.agent.application.port.out.PolicyDecisionPoint
 import com.openbank.agent.domain.policy.AgentIdentity
 import com.openbank.agent.domain.policy.EnforcementMode
 import com.openbank.agent.domain.policy.GateOutcome
+import com.openbank.agent.domain.policy.GateResult
 import com.openbank.agent.domain.policy.PolicyDecision
 import com.openbank.agent.domain.policy.PolicyQuery
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.security.sanitizeForLog
+import io.micrometer.core.instrument.MeterRegistry
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -47,6 +50,24 @@ class AgentPolicyGate {
 
     private val log = Logger.getLogger(AgentPolicyGate::class.java)
 
+    // Service-local registry, null-safe exactly like AgentMetricsAdapter / libs DomainMetrics
+    // (ADR-0085 §2): absent in slim test slices, so a missing registry never breaks the gate.
+    internal var meterRegistry: MeterRegistry? = null
+
+    @Inject
+    fun initMetrics(registryInstance: Instance<MeterRegistry>) {
+        meterRegistry = if (registryInstance.isResolvable) registryInstance.get() else null
+    }
+
+    private fun recordOutcome(result: GateResult) {
+        meterRegistry?.counter(METRIC_DECISIONS, "service", "agent", "outcome", result.label)?.increment()
+    }
+
+    companion object {
+        /** Counter of gate decisions by [GateResult.label]; alert on `pdp_unavailable_denied`. */
+        const val METRIC_DECISIONS = "openbank.agent.policy.gate.decisions"
+    }
+
     // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
     /**
@@ -59,29 +80,27 @@ class AgentPolicyGate {
         audit(tool, decision, identity?.modelId ?: "unknown")
 
         // D9 (ADR-0031): BLOCK mode enforces the policy decision — a DENY stops the call.
-        // Safety guard: if the PDP engine itself errored (pdpError=true, set by the OPA adapter on
-        // connectivity failure), fall back to advisory + WARN rather than locking the assistant out
-        // completely. Using the structured `pdpError` flag (not free-form reason text) prevents an
-        // OPA policy rule that happens to include "unavailable" in its reason from silently bypassing
-        // BLOCK mode.
-        val proceed = when {
-            decision.allow -> true
-            mode == EnforcementMode.ADVISORY -> true
-            decision.pdpError -> {
-                log.warnf(
-                    "agent policy BLOCK but PDP errored — falling back to ADVISORY for tool=%s; " +
-                        "fix the OPA sidecar to restore enforcement. reason=%s",
-                    tool.sanitizeForLog(),
-                    decision.reason.sanitizeForLog(),
-                )
-                true
-            }
-            else -> false // BLOCK + PDP reachable + explicit policy DENY → block the call
-        }
+        // A PDP outage (pdpError=true, set by the OPA adapter on connectivity failure) is a DENY
+        // like any other in BLOCK mode: it FAILS CLOSED for every tool. The in-process charter
+        // allow-list is empty for agents that declare none, so it is not a backstop for every
+        // call, and a tool that can change state or propose a change must never proceed
+        // unevaluated (EU AI Act Art. 14, #15758). The structured `pdpError` flag (not free-form
+        // reason text) only selects the metric/log outcome; it never lets a call through.
+        // In ADVISORY mode behaviour is unchanged: the call proceeds and the DENY is audited.
+        val proceed = decision.allow || mode == EnforcementMode.ADVISORY
+        val result = GateResult.of(decision, proceed)
+        recordOutcome(result)
 
         if (!decision.allow) {
             // In BLOCK mode a blocked call is an operational event → log at WARN for alerting.
-            if (!proceed) {
+            if (result == GateResult.PDP_UNAVAILABLE_DENIED) {
+                log.errorf(
+                    "agent policy BLOCK: DENIED (fail-closed, PDP unavailable) — agent=%s tool=%s reason=%s",
+                    decision.agent.sanitizeForLog(),
+                    tool.sanitizeForLog(),
+                    decision.reason.sanitizeForLog(),
+                )
+            } else if (!proceed) {
                 log.warnf(
                     "agent policy BLOCK: DENIED — agent=%s tool=%s reason=%s",
                     decision.agent.sanitizeForLog(),
@@ -100,7 +119,7 @@ class AgentPolicyGate {
                 )
             }
         }
-        return GateOutcome(decision = decision, mode = mode, proceed = proceed)
+        return GateOutcome(decision = decision, mode = mode, proceed = proceed, result = result)
     }
 
     private fun decide(
@@ -175,10 +194,19 @@ class AgentPolicyGate {
         runBlocking { auditPublisher.publish(event) }
     }
 
-    private fun parseMode(): EnforcementMode =
-        runCatching { EnforcementMode.valueOf(enforcementMode.trim().uppercase()) }
+    // An UNSET value takes the documented advisory default (config defaultValue). A value that is
+    // SET but unrecognised (a typo such as "blok") must never silently disable enforcement, so it
+    // is treated as BLOCK and logged at ERROR.
+    private fun parseMode(): EnforcementMode {
+        val raw = enforcementMode.trim()
+        if (raw.isEmpty()) return EnforcementMode.ADVISORY
+        return runCatching { EnforcementMode.valueOf(raw.uppercase()) }
             .getOrElse {
-                log.warnf("unknown agent.policy.enforcement=%s, defaulting to ADVISORY", enforcementMode)
-                EnforcementMode.ADVISORY
+                log.errorf(
+                    "unknown agent.policy.enforcement=%s; failing closed to BLOCK (valid: advisory, block)",
+                    raw.sanitizeForLog(),
+                )
+                EnforcementMode.BLOCK
             }
+    }
 }

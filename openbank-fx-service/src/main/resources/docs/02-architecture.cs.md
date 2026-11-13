@@ -67,7 +67,7 @@ com.openbank.fx/
 │
 ├── application/               ◄── orchestrace use-casů
 │   ├── port/in/               FxUseCase, CnbRateIngestionUseCase + příkazy/dotazy
-│   ├── port/out/              FxRateRepository, FxConversionRepository, FxEventPublisher,
+│   ├── port/out/              FxRateRepository, FxConversionRepository, FraudScoringPort,
 │   │                          SanctionsScreeningPort, AmlCasePort, FxOutbox*, CnbRateProvider
 │   └── usecase/               FxService, CnbRateIngestionService
 │
@@ -90,15 +90,17 @@ Rozhodnutí o konverzi je srdcem služby. `FxService.convert` zjistí a ověří
 sequenceDiagram
   participant C as Volající
   participant FX as FxService
+  participant P as party-service
   participant S as sanctions-service
   participant A as aml-service
   participant DB as PostgreSQL
 
-  C->>FX: POST /convert (partyName, Idempotency-Key)
+  C->>FX: POST /convert (partyId, Idempotency-Key)
   FX->>DB: findByIdempotencyKey → vrať, pokud existuje
   FX->>FX: resolve SPOT kurz, ověř platnost, spočítej částky + poplatek
-  FX->>S: screen(partyName, DEBTOR)
-  alt screening nedostupný
+  FX->>P: GET party podle id (evidovaná jména a typ)
+  FX->>S: screen(evidovaná jména, DEBTOR)
+  alt jméno klienta nebo screening nedostupný
     FX->>DB: ulož PENDING
     FX-->>A: otevři AML případ (MEDIUM, SCREENING_UNAVAILABLE)
   else CLEAR
@@ -136,7 +138,7 @@ sequenceDiagram
 
 Dispatcher obaluje Kafka publish přes MicroProfile Fault Tolerance: `@Bulkhead(1)`, `@CircuitBreaker(volume=10, ratio=0.5, delay=5s)`, `@Retry(max=2)`, `@Timeout(3000ms)`. Selhání publishe se zapíše do řádku (`status`, `last_error`, `attempt_count`) a opakuje při dalším pollu — at-least-once doručení, očekávají se idempotentní konzumenti.
 
-> **Pozn. (aktuální kód):** `KafkaFxEventPublisher` (adaptér doménové události `FxEventPublisher` volaný přímo z `settle`) je nyní no-op stub; živá Kafka cesta je *outbox* dispatcher (`KafkaFxOutboxEventPublisher` na kanálu `fx-events-out`). Propojení obou je známý follow-up.
+> **Pozn. (aktuální kód):** `settle()` zapisuje událost konverze do transakčního outboxu (`FxOutboxRepository`) ve stejné transakci jako změnu stavu; `FxOutboxDispatcher` ji publikuje přes `KafkaFxOutboxEventPublisher` (sdílený port `OutboxEventPublisher`) na kanálu `fx-events-out`. Dřívější přímý publisher doménových událostí (`KafkaFxEventPublisher`, no-op stub) byl odstraněn (#1033).
 
 ## ČNB ingest (ADR-0046)
 

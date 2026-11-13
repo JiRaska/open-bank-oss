@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { signIn } from 'next-auth/react'
+import { renderToString } from 'react-dom/server'
 import LoginPage from '@/app/auth/login/page'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { safeCallbackPath } from '@/lib/auth/safeCallbackPath'
@@ -38,6 +39,19 @@ describe('safeCallbackPath', () => {
 })
 
 describe('login experience', () => {
+  it('prerenders the SSO button disabled so a click before hydration cannot be lost', () => {
+    // Server HTML is what a browser shows before React attaches onClick. An enabled button there
+    // swallowed the browser synthetic's click (#14779); disabled, Playwright waits for hydration.
+    const html = renderToString(<LanguageProvider><LoginPage /></LanguageProvider>)
+    const button = [...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('button')]
+      .find(b => b.textContent?.includes('Continue with Keycloak SSO'))
+    expect(button).not.toBeNull()
+    expect(button!.disabled).toBe(true)
+
+    renderPage()
+    expect(screen.getByRole('button', { name: 'Continue with Keycloak SSO' })).toBeEnabled()
+  })
+
   it('explains the workspace and signs in through the single governed provider', async () => {
     query = new URLSearchParams('callbackUrl=%2Fpayments%3Fstatus%3Dpending')
     vi.mocked(signIn).mockResolvedValue(undefined)

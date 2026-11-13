@@ -39,12 +39,26 @@ For HTTPS, `SafeHttpClient` in `openbank-libs-runtime` uses JVM certificate chai
 
 Internal clients that retain an injected JDK `HttpClient` (the LLM gateway, content guard, embeddings, flagd and OPA sidecar) use `BoundedBodyHandlers.ofString()` instead of unbounded `BodyHandlers.ofString()`. The default response cap is 4 MiB; exceeding it cancels the response subscription and fails the call with `IOException`. Use `SafeHttpClient` for external egress, where the response cap and destination-host policy are enforced together.
 
+### HTTP response lifecycle
+
+The internal HTTP adapters and OpenBao transport bound the complete response body by the configured request deadline. A shorter request or transport deadline wins; the response-size limits remain unchanged. Expiry or thread interruption requests cancellation of the original JDK exchange.
+
+The suspending OPA and LLM adapters also propagate caller coroutine cancellation to the blocking exchange. Cancellation propagates to the caller instead of becoming a policy outage or a fallback value. This uses the existing coroutine IO dispatcher; no separate executor or timer pool is created. Ordinary transport failures retain each adapter's existing error policy.
+
 ## Day-close participation (ADR-0342)
 
-`com.openbank.libs.close` (in `openbank-libs-runtime`) is the participant side of the ledger's day-close contract: `CloseParticipationAssembler` folds a service's persisted job runs into one report per accounting day, and `CloseParticipationReporter` delivers it without ever failing the calling job. A job run that was refused or partially failed folds to `REFUSED`, which the ledger treats as NOT complete: the day stays in `CUTOFF` until the participant reports `RAN` or an operator waives it. Business dates must come from `AccountingClock`, never from the UTC `Clock` bean.
+`com.openbank.libs.close` (in `openbank-libs-runtime`) is the participant side of the ledger's day-close contract: `CloseParticipationAssembler` folds a service's persisted job runs into one report per accounting day, and `CloseParticipationReporter` delivers it without ever failing the calling job. A job run that was refused or partially failed folds to `REFUSED`, which the ledger treats as NOT complete. In enforce mode the day stays in `CUTOFF` until a successful report or an attributable, justified waiver; shadow records the gap without holding close. A waiver never qualifies monthly readiness. Business dates must come from `AccountingClock`, never from the UTC `Clock` bean.
+
+`exercisedJobs` identifies successful persisted jobs with observed work; an empty sweep does not exercise a monthly cycle. `sourceRunId` hashes stable source receipts, so retrying unchanged evidence does not advance the ledger's work watermark. Use `incomplete` to revoke an earlier positive report when due work is missing, even if no new journal exists. `reportingFrom` includes the preceding calendar month and preserves a longer recovery window. Never invent historical receipts to fill a proof.
+
+The original five-argument report constructor and `copy`, including Kotlin default bridges, remain available to compiled consumers. Copying through the legacy entry point preserves the new source evidence. Generate ABI declarations with `updateKotlinAbi`, then run `checkKotlinAbi` in a separate Gradle invocation. Keep shadow and deployment holds until a complete representative live month and rollout review; SDK delivery alone does not authorize enforcement.
 
 ## Blob store opt-in and warm-up entity skipping (2026-10-17)
 
 `PostgresBlobStore` is opt-in. It is enabled only when `openbank.objectstore.backend=postgres` is set; when the property is missing, the store is not enabled. `openbank-document-service` sets it explicitly (default `postgres`), and `openbank-customer-edge` sets it explicitly to `s3`.
 
 The Hibernate Reactive warm-up (`HibernateReactiveWarmup`) skips entities whose owning bean was removed at build time, such as `ObjectStoreBlobEntity` when `PostgresBlobStore` is absent. Such entities are counted as inactive and are not queried, so the warm-up does not touch tables that the service does not own.
+
+Resource-type warm-up expands each endpoint type into its nested types (container content, map keys and generic bindings, recursively) before building serializers, so a DTO reached only through a type variable such as `Page<List<Dto>>` is warm before readiness rather than on the first request (#12042). Opaque leaves such as `String` and primitives are skipped.
+
+The raw-socket `SafeHttpClient` also enforces its whole-call deadline while sending a request body. One shared daemon closes expired sockets; successful and failed calls immediately remove their pending deadline tasks. Forced expiry disables `SO_LINGER` waiting so it cannot delay other calls’ deadline tasks. Normal completion preserves the socket configuration.

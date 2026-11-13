@@ -40,7 +40,7 @@ Flyway, immutable forward-only scripts:
 | `V1__create_psd2_outbox.sql` | Table `psd2_outbox` + indexes `idx_psd2_outbox_status_created_at` (status, created_at ASC) and `idx_psd2_outbox_aggregate_id` |
 | `V2__hibernate_sequences.sql` | `CREATE SEQUENCE psd2_outbox_seq INCREMENT BY 50` — required because Panache allocates ids from `<table>_seq` while the table uses `BIGSERIAL`; without it every INSERT fails with `relation "psd2_outbox_seq" does not exist`. Rollback: `DROP SEQUENCE psd2_outbox_seq;` |
 
-There is a regression guard test (`HibernateSequenceGuardTest`) that protects the V2 sequence convention.
+There is a CI gate (`hibernate-sequence-guard`) that protects the V2 sequence convention.
 
 ## Indexes
 

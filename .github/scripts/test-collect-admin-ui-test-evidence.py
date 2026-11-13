@@ -7,6 +7,7 @@ import json
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stdout
 from unittest.mock import patch
 from pathlib import Path
 
@@ -399,6 +400,73 @@ class AggregateSeedTests(unittest.TestCase):
             self.read(response=lambda _url, _token: (_ for _ in ()).throw(COLLECTOR.CollectionError("unavailable")))
 
 
+class SyntheticStagingTests(unittest.TestCase):
+    """Synthetic journeys are staged from their own producer runs, not only from an admin-ui
+    build (2026-10-31: the snapshot re-served a 00:40Z failure after 05:31Z/06:22Z passes)."""
+
+    WORKFLOW = ".github/workflows/admin-ui-browser-synthetic.yml"
+    SHA = "a" * 40
+
+    def envelope(self, run_id, commit=None):
+        value = json.loads(json.dumps(ENVELOPE))
+        value["component"] = "openbank-admin-ui"
+        value["run"] = dict(value["run"], id=str(run_id), commit=commit or self.SHA,
+                            url=f"https://github.com/org/repo/actions/runs/{run_id}")
+        return archive({"run-chromium.json": json.dumps(value).encode()})
+
+    def run(self, run_id, **extra):
+        return {"id": run_id, "event": "schedule", "head_branch": "main", "status": "completed",
+                "path": self.WORKFLOW, "head_repository": {"full_name": "org/repo"}, "head_sha": self.SHA, **extra}
+
+    def fetchers(self, runs, archives):
+        def fetch_json(url):
+            if "/workflows/admin-ui-browser-synthetic.yml/runs" in url:
+                return {"workflow_runs": runs}
+            if "/workflows/" in url:
+                return {"workflow_runs": []}
+            run_id = int(url.split("/runs/")[1].split("/")[0])
+            return {"artifacts": [{"id": run_id * 10, "expired": False,
+                                   "name": f"test-intelligence-run-openbank-admin-ui-operator-chromium-{run_id}-a1"}]}
+        return fetch_json, lambda url: archives[int(url.split("/artifacts/")[1].split("/")[0])]
+
+    def test_stages_every_trusted_main_run_including_schedule_and_dispatch(self):
+        runs = [self.run(2), self.run(1, event="workflow_dispatch")]
+        payloads, warnings = COLLECTOR.synthetic_payloads(
+            "org/repo", *self.fetchers(runs, {20: self.envelope(2), 10: self.envelope(1)}))
+        self.assertEqual(sorted(payloads), [
+            "openbank-admin-ui/test-run-history/test-intelligence-run-openbank-admin-ui-operator-chromium-1-a1.json",
+            "openbank-admin-ui/test-run-history/test-intelligence-run-openbank-admin-ui-operator-chromium-2-a1.json"])
+        self.assertTrue(any("synthetic-journeys.yml" in warning for warning in warnings))
+
+    def test_untrusted_runs_and_foreign_provenance_are_never_staged(self):
+        runs = [self.run(3, head_branch="feature"), self.run(4, event="pull_request"),
+                self.run(5, path=".github/workflows/other.yml"), self.run(6, head_repository={"full_name": "fork/repo"}),
+                self.run(7)]
+        payloads, warnings = COLLECTOR.synthetic_payloads(
+            "org/repo", *self.fetchers(runs, {70: self.envelope(8)}))
+        self.assertEqual(payloads, {})
+        self.assertTrue(any("provenance differs" in warning for warning in warnings))
+
+    def test_one_unreadable_artifact_rejects_only_itself(self):
+        runs = [self.run(2), self.run(1)]
+        fetch_json, fetch_bytes = self.fetchers(runs, {10: self.envelope(1)})
+        def flaky_bytes(url):
+            if "/artifacts/20/" in url:
+                raise COLLECTOR.CollectionError("GitHub artifact download failed (HTTP 502)")
+            return fetch_bytes(url)
+        payloads, warnings = COLLECTOR.synthetic_payloads("org/repo", fetch_json, flaky_bytes)
+        self.assertEqual([k.rsplit("/", 1)[1] for k in payloads],
+                         ["test-intelligence-run-openbank-admin-ui-operator-chromium-1-a1.json"])
+        self.assertTrue(any("operator-chromium-2-a1 rejected" in w for w in warnings))
+
+    def test_unreadable_producer_is_a_warning_not_an_empty_success(self):
+        def fetch_json(url):
+            raise COLLECTOR.CollectionError("GitHub API failed (HTTP 502)")
+        payloads, warnings = COLLECTOR.synthetic_payloads("org/repo", fetch_json, lambda url: b"")
+        self.assertEqual(payloads, {})
+        self.assertEqual(len([w for w in warnings if "unreadable" in w]), 3)
+
+
 class CollectionTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -412,6 +480,7 @@ class CollectionTests(unittest.TestCase):
         # Existing service-only fixtures must never perform implicit network reads.
         kwargs.setdefault("performance_stage", lambda *_args, **_kwargs:
                           {"payloads": {}, "sources": [], "warnings": []})
+        kwargs.setdefault("synthetic_stage", lambda: ({}, []))
         return COLLECTOR.collect(*args, **kwargs)
 
     def tearDown(self):
@@ -455,6 +524,24 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(report["mutations"], seed["mutations"])
         self.assertIn("collected at 2026-10-18T12:00:00Z", report["warnings"][-1])
         self.assertFalse((self.repo / COMPONENT / "build").exists())
+
+    def test_synthetic_envelopes_are_visible_to_the_node_collector_and_then_removed(self):
+        staged = "openbank-admin-ui/test-run-history/test-intelligence-run-openbank-admin-ui-x-1-a1.json"
+        seen = []
+        def run(command, cwd, check):
+            seen.append((self.repo / staged).read_bytes())
+            output = Path(command[command.index("--out") + 1])
+            output.write_text(json.dumps({"schemaVersion": 1, "collectedAt": "2026-10-31T08:00:00Z",
+                                          "components": [], "warnings": [], "totals": {}}))
+        with tempfile.TemporaryDirectory() as output_dir:
+            output = Path(output_dir) / "result.json"
+            self.collect(self.repo, output, "org/repo", "token", fetch_page=lambda _name, _page: [],
+                         seed=None, run_collector=run,
+                         synthetic_stage=lambda: ({staged: b"{}"}, ["synthetic note"]))
+            report = json.loads(output.read_text())
+        self.assertEqual(seen, [b"{}"])
+        self.assertIn("synthetic note", report["warnings"])
+        self.assertFalse((self.repo / staged).exists())
 
     def test_absent_component_is_reported_unknown_and_api_errors_fail(self):
         def run(command, cwd, check):
@@ -679,6 +766,83 @@ class CollectionTests(unittest.TestCase):
         with self.assertRaisesRegex(COLLECTOR.CollectionError, "performance artifact collection failed"):
             self.collect(self.repo, self.repo / "bad.json", "org/repo", "token", fetch_page=lambda *_: [],
                          seed=None, performance_stage=invalid)
+
+
+class RateLimitRetryTest(unittest.TestCase):
+    """A rate-limited GET waits and retries; a permission 403 stays a real answer."""
+
+    @staticmethod
+    def http_error(code: int, headers: dict) -> "COLLECTOR.HTTPError":
+        from email.message import Message
+        msg = Message()
+        for key, value in headers.items():
+            msg[key] = value
+        return COLLECTOR.HTTPError("https://api.github.com/x", code, "limited", msg, io.BytesIO(b""))
+
+    class Response(str):
+        headers = {}
+
+    class Opener:
+        def __init__(self, errors):
+            self.errors, self.calls = list(errors), 0
+
+        def open(self, request, timeout):
+            self.calls += 1
+            if self.errors:
+                raise self.errors.pop(0)
+            return RateLimitRetryTest.Response("ok")
+
+    def test_core_quota_warns_once_at_eighty_percent(self):
+        output = io.StringIO()
+        headers = {"x-ratelimit-resource": "core", "x-ratelimit-limit": "5000"}
+        with patch.object(COLLECTOR, "_CORE_QUOTA_WARNED", False), redirect_stdout(output):
+            COLLECTOR.warn_on_core_quota({**headers, "x-ratelimit-used": "3999"})
+            COLLECTOR.warn_on_core_quota({**headers, "x-ratelimit-used": "4000"})
+            COLLECTOR.warn_on_core_quota({**headers, "x-ratelimit-used": "4500"})
+        self.assertIn("4000/5000", output.getvalue())
+        self.assertEqual(1, output.getvalue().count("::warning"))
+
+    def test_secondary_limit_honours_retry_after_then_succeeds(self):
+        opener = self.Opener([self.http_error(403, {"Retry-After": "75"})])
+        sleeps = []
+        with patch.object(COLLECTOR, "_GITHUB_API_ATTEMPTS", 0):
+            result = COLLECTOR.open_with_rate_limit_retry(opener, COLLECTOR.Request("https://api.github.com/x"), 30, sleeps.append)
+            self.assertEqual(2, COLLECTOR._GITHUB_API_ATTEMPTS)
+        self.assertEqual(("ok", 2, [75.0]), (result, opener.calls, sleeps))
+
+    def test_shared_budget_fails_before_a_wait_it_cannot_cover(self):
+        opener = self.Opener([self.http_error(403, {"Retry-After": "300"})])
+        sleeps = []
+        with self.assertRaises(COLLECTOR.CollectionError):
+            COLLECTOR.open_with_rate_limit_retry(opener, COLLECTOR.Request("https://api.github.com/x"), 30,
+                                                 sleeps.append, deadline=1100.0, clock=lambda: 1000.0)
+        self.assertEqual((1, []), (opener.calls, sleeps))
+
+    def test_shared_budget_allows_a_wait_it_can_cover(self):
+        opener = self.Opener([self.http_error(403, {"Retry-After": "60"})])
+        sleeps = []
+        result = COLLECTOR.open_with_rate_limit_retry(opener, COLLECTOR.Request("https://api.github.com/x"), 30,
+                                                      sleeps.append, deadline=1100.0, clock=lambda: 1000.0)
+        self.assertEqual(("ok", [60.0]), (result, sleeps))
+
+    def test_primary_limit_waits_until_reset(self):
+        error = self.http_error(403, {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1100"})
+        self.assertEqual(101.0, COLLECTOR.rate_limit_wait(error, 1, now=1000.0))
+
+    def test_permission_403_is_not_retried(self):
+        # Negative case: without rate-limit headers a 403 is final, so it must raise on call 1.
+        opener = self.Opener([self.http_error(403, {}), self.http_error(403, {})])
+        with self.assertRaises(COLLECTOR.HTTPError):
+            COLLECTOR.open_with_rate_limit_retry(opener, COLLECTOR.Request("https://api.github.com/x"), 30, lambda _: None)
+        self.assertEqual(1, opener.calls)
+
+    def test_exhaustion_raises_after_bounded_attempts(self):
+        opener = self.Opener([self.http_error(429, {}) for _ in range(9)])
+        sleeps = []
+        with self.assertRaises(COLLECTOR.HTTPError):
+            COLLECTOR.open_with_rate_limit_retry(opener, COLLECTOR.Request("https://api.github.com/x"), 30, sleeps.append)
+        self.assertEqual(COLLECTOR.RATE_LIMIT_ATTEMPTS, opener.calls)
+        self.assertTrue(all(w <= COLLECTOR.RATE_LIMIT_MAX_WAIT_SECONDS for w in sleeps))
 
 
 if __name__ == "__main__":

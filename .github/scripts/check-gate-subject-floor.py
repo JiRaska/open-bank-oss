@@ -58,6 +58,7 @@ NO_CORPUS = {
     # `gh`/`aws`/`curl` stub them inside the self-test (ensure-ecr-repository.sh even validates its
     # own stub first). No repo corpus to floor.
     "agent-review-proof-falsifiable",
+    "verify-added-checksums-falsifiable",
     "argocd-sync-integrity-unit-test",
     "agent-review-scope-falsifiable",
     "alert-rca-ledger-guards",
@@ -68,6 +69,8 @@ NO_CORPUS = {
     "co-deploy-set-derivation-unit-test",
     "deploy-code-lag-report-unit-test",
     "deploy-window-decision",
+    "deploy-script-tests-previously-unreachable",
+    "ci-script-tests-previously-unreachable",
     "ensure-ecr-repository",
     "gate-runner-self-test",
     "pact-provider-version-proof-unit-test",
@@ -121,6 +124,12 @@ NO_CORPUS = {
     # again. It prints SUBJECTS= including zero, so "clean" and "did not look" stay
     # distinguishable in the log — the same shape as openapi-version-not-taken above.
     "no-epoch-instant-default",
+
+    # DIFF-SCOPED: its corpus is the automated Applications whose source.path this PR first
+    # introduces, so zero is the ordinary case and a floor would fail every other PR. It prints
+    # SUBJECTS= including zero, so "no new service" and "did not look" stay distinguishable; its
+    # self-test carries the known-positive.
+    "service-application-readiness",
 }
 
 # Gates that examine a real corpus and do not yet report how much of it they found. This list

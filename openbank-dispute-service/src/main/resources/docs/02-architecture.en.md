@@ -40,7 +40,7 @@ Pure Kotlin, zero framework imports:
 
 ### Application (`application`)
 - **Inbound ports** (`port.in`): `OpenDisputeUseCase`, `UpdateDisputeUseCase`, `GetDisputeUseCase`.
-- **Outbound ports** (`port.out`): `DisputeRepository`, `DisputeEvidenceRepository`, `DisputeTimelineRepository`, `DisputeOutboxRepository`, `DisputeOutboxEventPublisher`.
+- **Outbound ports** (`port.out`): `DisputeRepository`, `DisputeEvidenceRepository`, `DisputeTimelineRepository`, `DisputeOutboxRepository`; publishing goes through the shared libs port `OutboxEventPublisher`.
 - **Use-case implementation**: `DisputeService` implements all three inbound ports. It generates the `DSP-…` reference, computes `resolutionDeadline` from `resolution-sla-days`, writes the aggregate via the repository and appends a `DisputeTimelineEvent` on every mutation. `withdraw`/`escalate` delegate to `update` with the appropriate status.
 
 ### Infrastructure (`infrastructure`)
@@ -69,7 +69,7 @@ The transactional-outbox pattern decouples the DB write from the Kafka publish:
 | `OpenDisputeUseCase` / `UpdateDisputeUseCase` / `GetDisputeUseCase` | in | `DisputeResource` |
 | `DisputeRepository` / `…EvidenceRepository` / `…TimelineRepository` | out | Panache repository impls |
 | `DisputeOutboxRepository` | out | `DisputeOutboxRepositoryImpl` |
-| `DisputeOutboxEventPublisher` | out | `KafkaDisputeOutboxEventPublisher` |
+| `OutboxEventPublisher` | out | `KafkaDisputeOutboxEventPublisher` |
 
 ## Cross-cutting
 

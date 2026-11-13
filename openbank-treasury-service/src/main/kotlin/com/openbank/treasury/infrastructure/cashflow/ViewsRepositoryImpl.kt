@@ -7,10 +7,13 @@ package com.openbank.treasury.infrastructure.cashflow
 import com.openbank.treasury.application.port.out.PositionClose
 import com.openbank.treasury.application.port.out.SavedFilter
 import com.openbank.treasury.application.port.out.ViewsRepository
+import com.openbank.treasury.application.port.out.requestFingerprint
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import org.hibernate.exception.ConstraintViolationException
+import java.sql.SQLException
 
 @ApplicationScoped
 class PositionClosePanacheRepository : PanacheRepository<PositionCloseEntity>
@@ -25,24 +28,51 @@ class ViewsRepositoryImpl(
 ) : ViewsRepository {
 
     override suspend fun recordClose(close: PositionClose, commandKey: String): PositionClose {
-        val existing = Panache.withSession { closes.find("commandKey", commandKey).firstResult() }.awaitSuspending()
-        if (existing != null) return existing.toDomain()
-        Panache.withTransaction {
-            closes.persist(
-                PositionCloseEntity().apply {
-                    snapshotId = close.snapshotId
-                    closeDate = close.date
-                    bookId = close.bookId
-                    scenario = close.scenario
-                    special = close.special
-                    closedBy = close.closedBy
-                    closedAt = close.closedAt
-                    positionsJson = close.positionsJson
-                    this.commandKey = commandKey
-                },
-            )
-        }.awaitSuspending()
+        replayOrConflict(close, commandKey)?.let { return it }
+        try {
+            Panache.withTransaction {
+                closes.persist(
+                    PositionCloseEntity().apply {
+                        snapshotId = close.snapshotId
+                        closeDate = close.date
+                        bookId = close.bookId
+                        scenario = close.scenario
+                        special = close.special
+                        closedBy = close.closedBy
+                        closedAt = close.closedAt
+                        positionsJson = close.positionsJson
+                        this.commandKey = commandKey
+                    },
+                )
+            }.awaitSuspending()
+        } catch (e: ConstraintViolationException) {
+            // A concurrent first call with the same key won the insert: judge it as a replay, not a 500.
+            if (!violatesCommandKey(e)) throw e
+            return replayOrConflict(close, commandKey) ?: throw e
+        }
         return close
+    }
+
+    /** The stored close when [commandKey] was used for this same request; null when unused; 409 otherwise. */
+    private suspend fun replayOrConflict(close: PositionClose, commandKey: String): PositionClose? {
+        val existing = Panache.withSession { closes.find("commandKey", commandKey).firstResult() }
+            .awaitSuspending() ?: return null
+        val stored = existing.toDomain()
+        check(stored.requestFingerprint() == close.requestFingerprint()) {
+            "Idempotency-Key was already used for a position close on another request"
+        }
+        return stored
+    }
+
+    private fun violatesCommandKey(e: Throwable): Boolean = generateSequence(e) { it.cause }
+        .filterIsInstance<SQLException>()
+        .any { ex ->
+            val msg = ex.message.orEmpty()
+            (ex.sqlState == UNIQUE_VIOLATION || msg.contains("($UNIQUE_VIOLATION)")) && msg.contains("command_key")
+        }
+
+    private companion object {
+        const val UNIQUE_VIOLATION = "23505"
     }
 
     private fun PositionCloseEntity.toDomain() =

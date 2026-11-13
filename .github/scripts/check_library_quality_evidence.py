@@ -45,10 +45,35 @@ class EvidenceUnavailable(RuntimeError):
     """A read could not establish evidence; never a successful or negative test verdict."""
 
 
+# GITHUB_TOKEN's installation quota (1,000 REST reads/h) is shared by every job in the
+# repository. A fixed 30 s poll spent ~34 reads per all-green run while producers ran and,
+# under quota pressure, its retries drained the quota further (2026-11-05: all-green failed
+# NOT_EVALUATED for ~2 h). Waits back off exponentially and every HTTP request, retries and
+# pagination pages included, is charged to a hard per-invocation budget; exhausting it is
+# NOT_EVALUATED, never a pass.
+MAX_API_CALLS = 25
+POLL_DELAYS = (30, 60, 120, 240)
+LOW_QUOTA_REMAINING = 100
+
+
 class ReadBudget:
-    def __init__(self, timeout):
+    def __init__(self, timeout, max_calls=None):
         self.deadline = time.monotonic() + timeout
         self.recoveries = 0
+        self.calls = 0
+        self.max_calls = MAX_API_CALLS if max_calls is None else max_calls
+        self.quota_remaining = None
+
+    def charge(self, endpoint):
+        if self.calls >= self.max_calls:
+            raise EvidenceUnavailable(f"{endpoint}: API call budget of {self.max_calls} exhausted")
+        self.calls += 1
+
+    def poll_delay(self, poll):
+        delay = POLL_DELAYS[min(poll, len(POLL_DELAYS) - 1)]
+        if self.quota_remaining is not None and self.quota_remaining < LOW_QUOTA_REMAINING:
+            delay = POLL_DELAYS[-1]  # The shared quota is nearly gone: poll as rarely as allowed.
+        return delay
 
     def remaining(self):
         remaining = self.deadline - time.monotonic()
@@ -112,6 +137,7 @@ def quota_delay(status, headers, body):
 
 def api(endpoint, *, budget):
     for attempt in range(3):
+        budget.charge(endpoint)
         try:
             response = subprocess.run(
                 ["gh", "api", "--include", "--paginate", endpoint], text=True,
@@ -119,10 +145,14 @@ def api(endpoint, *, budget):
             )
             budget.remaining()
             pages = responses(response.stdout)
+            budget.calls += len(pages) - 1  # --paginate: each page is one more REST request.
         except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
             raise EvidenceUnavailable(f"{endpoint}: {type(exc).__name__}") from exc
         if response.returncode == 0 and all(status == 200 for status, _headers, _body in pages):
             budget.recoveries += int(attempt > 0)
+            remaining = pages[-1][1].get("x-ratelimit-remaining", "")
+            if re.fullmatch(r"[0-9]{1,12}", remaining):
+                budget.quota_remaining = int(remaining)
             return [body for _status, _headers, body in pages]
         # A failed later page never supplies partial proof, even if earlier pages were 200.
         if response.returncode == 0 or any(status != 200 for status, _headers, _body in pages[:-1]):
@@ -157,6 +187,7 @@ def require_proofs(args, budget):
         print("Library proofs: not applicable to these paths")
         return 0
     completed_jobs = {}
+    polls = 0
     while True:
         generation = budget.recoveries
         runs = [r for page in api(f"repos/{args.repo}/actions/runs?head_sha={args.head}&event=pull_request&per_page=100", budget=budget)
@@ -193,7 +224,8 @@ def require_proofs(args, budget):
         if state == "failure" or time.monotonic() >= budget.deadline:
             print("::error::Library quality evidence failed or is missing; refusing all-green")
             return 1
-        time.sleep(min(30, max(0, budget.deadline - time.monotonic())))
+        time.sleep(min(budget.poll_delay(polls), max(0, budget.deadline - time.monotonic())))
+        polls += 1
 
 
 if __name__ == "__main__":

@@ -53,26 +53,43 @@ permissions:
   contents: read
 
 concurrency:
-  # One fleet-lint per ref; a newer main push supersedes an in-flight one.
-  # On a push to main, github.ref is always refs/heads/main regardless of commit, so a
-  # ref-keyed group made every new commit cancel the previous commit's run. Bot commits
-  # (auto-deploy pin bumps, release-please) land every few minutes, so a main run rarely
-  # survived to completion — 9 of 11 CI runs and 9 of 11 Security runs were cancelled on
-  # 2026-08-02 (issue #3390). Give each main commit its own lane and never cancel it;
-  # PR pushes keep the superseding behaviour, which is what that setting is for.
-  # The key stays O(1) — a sha, never a list: interpolating a fleet-sized value here
-  # stops the job being created at all (#3082).
+  # Main pushes share ONE lane and are never cancelled once started: GitHub keeps one running
+  # and one pending run per group, and a newer push replaces only the PENDING one. So a burst
+  # of N commits landing within minutes costs two fleet runs (the first commit and the newest)
+  # instead of N. Measured 2026-11-11 over 30 commits in 10 landing batches: this job is the
+  # single largest hosted-minute line on main, ~25 min per commit, and five commits landing in
+  # five minutes held five hosted slots for the same fleet compile.
+  #
+  # This is NOT the shape issue #3390 removed. There the group was ref-keyed WITH
+  # cancel-in-progress, so every bot commit killed the RUNNING run and 9 of 11 never finished.
+  # Here cancel-in-progress stays false for main pushes: every run that starts finishes, and
+  # the newest commit is always either running or next. Only a run that never started is
+  # dropped, and its tree is contained in the commit that replaced it.
+  #
+  # Safe for this workflow only because nothing consumes its verdict per commit: it is not a
+  # required context, not a deploy input, and main-red-watch reads a cancelled run as
+  # not-a-verdict (never as green). Workflows with a per-commit consumer must keep the sha in
+  # their main-push group; check-main-push-concurrency.py holds both lists.
   # A scheduled run must not share a lane with a manual dispatch: both fall to the
   # 'ci' key otherwise, so a workflow_dispatch cancels an in-flight nightly. Same
   # separation services-ci.yml already makes for the nightly fleet build.
-  group: fleet-lint-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci') }}
+  group: fleet-lint-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main-push' || 'ci') }}
   cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
   fleet-lint:
     name: fleet lint + compile
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
-    timeout-minutes: 25
+    # Sized for a COLD build, not a warm one. Any change under build-logic/ changes the build
+    # script classpath, which invalidates every compile/detekt/ktlint entry in the Gradle build
+    # cache at once, so the next run recompiles the whole fleet: measured 43 min on a hosted
+    # runner (run 43108818019, 2026-11-11: 1557 of 1693 tasks executed), against 5-12 min warm. At the former limit of 25 that run was cancelled,
+    # and a cancelled job saves no cache -- so the NEXT run was just as cold, and the one after
+    # it: 69 consecutive runs on main ended at the limit with no verdict (2026-11-10/11). The
+    # limit must exceed the cold duration or the gate cannot recover on its own. This value is
+    # the backstop for setup and post steps; the Gradle step carries its own, lower limit below,
+    # because a STEP that times out fails the job whereas a JOB that times out is `cancelled`.
+    timeout-minutes: 75
     permissions:
       contents: read
       issues: write
@@ -115,7 +132,7 @@ jobs:
 
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Install both so
       # Gradle's toolchain resolution picks the right one with zero Foojay downloads.
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: |
@@ -176,9 +193,9 @@ jobs:
           GRADLE_INIT
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           # Only main saves the Actions cache; scheduled/dispatch restore read-only.
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
@@ -204,8 +221,14 @@ jobs:
       # So classify the failure instead of letting both land in the same bucket. The step
       # still fails either way — an OOM'd run has NOT linted the fleet and must not read as
       # a pass — but it says which kind it was, and the alert issue says so too.
+      # timeout-minutes on the STEP, below the job's: a job that hits its own limit concludes
+      # `cancelled`, which skips the `if: failure()` alert below and which main-red-watch files
+      # under "not a verdict" (a spot-killed runner looks the same) -- so a gate that could no
+      # longer finish stayed invisible for two days. A step that hits its limit FAILS instead:
+      # the run concludes `failure`, the alert fires and the watch reads it as red.
       - name: Fleet compile + detekt + ktlint
         id: lint
+        timeout-minutes: 70
         run: |
           set -o pipefail
           log="$RUNNER_TEMP/fleet-lint.log"
@@ -266,6 +289,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           FAILURE_KIND: ${{ steps.lint.outputs.kind }}
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -287,7 +311,11 @@ jobs:
               ? 'ABORTED on infrastructure, **not** a lint finding: the Gradle daemon ran out of memory, so the task graph stopped part-way and every module after the abort was never linted. This run is not evidence that the fleet is broken, nor that it is clean — the gate did not run. Raise `-Xmx` in `fleet-lint.yml`\'s `GRADLE_OPTS` (a ratchet — see the comment there) and re-run.'
               : kind === 'lint'
                 ? 'a module no longer compiles or violates the current detekt/ktlint ruleset, even though path-scoped PR CI was green. See the run for the full per-module list.'
-                : 'failed before the classification step could run (setup, checkout, or toolchain) — read the run log directly.';
+                : process.env.LINT_OUTCOME === 'failure'
+                  // The Gradle step itself failed but never reached its classifier, so it was
+                  // killed mid-build -- in practice its own timeout-minutes. Not a finding.
+                  ? 'ABORTED, **not** a lint finding: the Gradle step was killed before it finished (its `timeout-minutes`), so the fleet was not fully linted. A cold build after a `build-logic/` change is the usual cause; if this repeats, the cold build has outgrown the limit in `fleet-lint.yml`.'
+                  : 'failed before the classification step could run (setup, checkout, or toolchain) — read the run log directly.';
             const note = `The fast fleet-lint gate (compile + detekt + ktlint, no tests) failed on \`${trigger}\` — ${cause}\n\nRun: ${runUrl}\nDetected: ${detected}`;
             if (open.length > 0) {
               const n = open[0].number;

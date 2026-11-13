@@ -921,7 +921,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "attributes": {}
     },
@@ -1045,6 +1046,23 @@
       "attributes": {}
     },
     {
+      "clientId": "openbank-card-processing",
+      "name": "OpenBank Card Processing Issuer Client",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ]
+    },
+    {
       "clientId": "openbank-fx",
       "name": "OpenBank FX Service",
       "enabled": true,
@@ -1098,6 +1116,24 @@
       "attributes": {}
     },
     {
+      "clientId": "openbank-pension-fund",
+      "name": "OpenBank Pension Fund Service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles",
+        "catalog:read"
+      ],
+      "attributes": {}
+    },
+    {
       "clientId": "openbank-tax-reporting",
       "name": "OpenBank Tax Reporting Service",
       "enabled": true,
@@ -1144,7 +1180,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "attributes": {}
     },
@@ -1161,7 +1198,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "attributes": {}
     },
@@ -1281,6 +1319,24 @@
         "openid",
         "profile",
         "roles"
+      ],
+      "attributes": {}
+    },
+    {
+      "clientId": "openbank-card-issuance",
+      "name": "OpenBank Card Issuance Service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles",
+        "catalog:read"
       ],
       "attributes": {}
     },
@@ -1538,6 +1594,14 @@
       ]
     },
     {
+      "username": "service-account-openbank-card-processing",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-card-processing",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
       "username": "service-account-openbank-fx",
       "enabled": true,
       "serviceAccountClientId": "openbank-fx",
@@ -1560,6 +1624,12 @@
       "realmRoles": [
         "ROLE_API"
       ]
+    },
+    {
+      "username": "service-account-openbank-pension-fund",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-pension-fund",
+      "realmRoles": []
     },
     {
       "username": "service-account-openbank-tax-reporting",
@@ -1645,6 +1715,14 @@
       "username": "service-account-openbank-statement",
       "enabled": true,
       "serviceAccountClientId": "openbank-statement",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-card-issuance",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-card-issuance",
       "realmRoles": [
         "ROLE_API"
       ]

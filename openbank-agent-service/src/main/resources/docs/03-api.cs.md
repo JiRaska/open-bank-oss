@@ -1,8 +1,8 @@
 # API
 
-REST/RPC kontrakt je formalizován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.17.0**). Služba je **interní** — **není** vystavena přes API Gateway externím TPP.
+REST/RPC kontrakt je formalizován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.18.1**). Služba je **interní** — **není** vystavena přes API Gateway externím TPP.
 
-Platí dvě verzovací osy (ADR-0048): release verze (`version.txt` = `1.27.4`) a API-kontraktová verze (`openapi.yaml: info.version` = `1.17.0`, `openbank.api.version = "1"`). Jsou nezávislé.
+Platí dvě verzovací osy (ADR-0048): release verze (`version.txt`) a API-kontraktová verze (`openapi.yaml: info.version` = `1.18.1`, `openbank.api.version = "1"`). Jsou nezávislé.
 
 ## Povrchy
 
@@ -26,6 +26,20 @@ Jediný JSON-RPC 2.0 dispatcher. Pole `method` vybírá operaci. Notifikační m
 | `tools/list` | Vyjmenuje dostupné nástroje (name, description, JSON-Schema `inputSchema`). |
 | `tools/call` | Vyvolá pojmenovaný nástroj s `arguments`. Volání je autorizováno policy gate **před** provedením; zamítnutí vrací `ToolCallResult` s `isError=true` a důvodem policy. |
 | `ping` | Liveness — vrací `{ "pong": true }`. |
+
+### Metadata obchodního vlastnictví
+
+Každá položka `tools/list` zachovává identitu cílové služby v poli `service`. Štítek
+`domain` pochází ze stejné modulové deklarace `governance.yaml` a kanonické taxonomie
+domén přibalené při sestavení obrazu služby. Externí infrastruktura bez deklarace je
+`Unclassified`; známé bankovní nástroje musí mít doloženého vlastníka.
+Historická identita nástrojů `sepa-instant-service` přebírá vlastnictví modulu
+`openbank-sepa-instant` bez přejmenování nástrojů nebo změny jejich cíle.
+
+MCP relay v admin UI doplňuje aktuální schválené publikované vlastnictví pouze do
+úspěšných odpovědí `tools/list`, pokud metadata předběhnou obraz agent služby. Množina
+nástrojů, filtrování podle charteru, capabilities, vstupní schémata a odpovědi
+`tools/call` zůstávají zachované.
 
 ### Katalog nástrojů (vše read-only)
 
@@ -148,3 +162,38 @@ včetně citlivých důvodů a referencí. Poskytovatel filtruje uvolněné/expi
 prostředky. Spotřebitelský Pact pokrývá aktivní rezervaci, prázdný výsledek a předání 401 bez identity;
 kanonický kontraktní test objevuje Pact drift CI. Fixture neprokazují živý token, předání hlavičky
 customer-edge ani produkční rozhodnutí OPA. Poskytovatel zachovává RBAC/OPA i volitelnou kontrolu vlastníka.
+
+## Nástroje pro tvorbu produktů jako kódu (ADR-0352 §12)
+
+Pět MCP nástrojů umožňuje chartě `product-author` navrhovat a kontrolovat Product IR v1. Běží
+v procesu nad `ProductToolkit` (openbank-libs-domain), tedy nad přesně týmiž funkcemi, které volá CLI
+`obp`, a vracejí kanonický JSON toolkitu beze změny — CLI i MCP proto pro stejný dokument dávají
+identické bajty (gate `product-ir-authoring-parity`). Žádný z nich nevolá jinou službu.
+
+| Nástroj | Oprávnění | Úroveň | Argumenty | Účinek |
+|---|---|---|---|---|
+| `product_lint` | `product.lint` | read | `ir` | schéma, limity běhu, jedinečnost `ruleId`; pro neplatný dokument `{ok:false, problems}` |
+| `product_compile` | `product.compile` | read | `ir` | kanonické IR a `revisionHash` |
+| `product_simulate` | `product.simulate` | read | `ir`, `portfolio`, `from?`, `to?` | přehraje fixture portfolia čistým interpretem; nic neúčtuje |
+| `product_explain` | `product.explain` | read | `ir`, `ruleId` nebo `instruction` | JSON pointer pravidla v kanonickém IR |
+| `product_propose` | `product.propose` | write_proposal | `ir`, `offeringId`, `schemaId`, `schemaVersion`, `rationale` | zapíše plán DRAFT revize jako HITL návrh; do katalogu nic nezapisuje |
+
+Nástroj pro publikaci, podpis ani schválení neexistuje. `product.publish` a `product.sign` jsou
+v `tool_tiers.deny` (agents.yaml) a jednotkový test shodí build, pokud název kteréhokoli
+registrovaného nástroje obsahuje `publish`, `sign` nebo `approve`. Publikace zůstává lidským
+katalogovým krokem se čtyřma očima (ADR-0259) a podpis vázaný na identitu patří publikační cestě
+katalogu (ADR-0352 §4). Textové JSON argumenty jsou omezeny na 256 KiB, `rationale` návrhu na 4 KiB.
+
+Výsledek nástroje má `isError = true` právě tehdy, když by `obp` pro stejný vstup skončil nenulovým
+kódem — neplatné IR (`{ok:false, problems}`, tytéž bajty, které obp vypíše na stderr), neznámé
+`ruleId` nebo cizí instrukce — takže agent, který čte jen `isError`, nikdy nepovažuje selhání za úspěch.
+
+## Vysvětlení bez přístupu k nástrojům
+
+`GET /agent/models` deklaruje `capabilities.toolFreeChat: true`. Klient, který potřebuje pouze vysvětlení důkazů, nejprve ověří tuto schopnost a potom odešle `POST /agent/chat` s `allowTools: false`. Pro stávající klienty zůstává výchozí hodnota `true`.
+
+Omezený běh modelu nenabízí žádné nástroje a na stávající hranici volání odmítne i nevyžádaný požadavek modelu na nástroj. Zachovává směrování modelů, autorizaci, chartu, limity, audit i nouzové zastavení. Odpověď potvrzuje `toolsRestricted: true`; klient před přijetím vysvětlení ověří také prázdné `toolCalls`. Odmítnutý požadavek modelu tak může vést k nedostupnému vysvětlení, nikdy ke spuštění nástroje.
+
+Vysvětlení omezených metadat testu je interpretace. Nenahrazuje zaznamenaný výsledek ani schválení vydání. Starší server schopnost neoznamuje; přísný klient ponechá důkazy dostupné a označí vysvětlení za nedostupné.
+
+Operátorský chat bez nástrojů má prostor nejvýše 2 048 výstupních tokenů včetně uvažování modelu. Odpověď zastavená výstupním limitem nebo prázdná odpověď se audituje jako nedostupná a vrací HTTP 503; neúplné vysvětlení se nevrací jako úspěšná odpověď. Běžný chat zachovává stávající limit 512 tokenů.

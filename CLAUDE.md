@@ -64,6 +64,10 @@ Open one for a **fleet sweep**, a **governance follow-up** (the actionable tail 
 or an **enhancement** — not for architectural decisions (→ `docs/adr`), questions (→ Discussions), or
 security holes (→ private Security Advisories). Every PR links its issue (`Closes #<n>` / `Refs #<n>`).
 Labels are code (`.github/labels.yml`, applied by the Label-sync workflow) — don't create them by hand.
+Every issue carries **exactly one kind** label — `bug`, `enhancement`, `governance`, `sweep` or
+`tech-debt` (`rules.yaml: issues.kinds`). This repo is user-owned, so GitHub's native issue types
+are unavailable and a label is the only carrier; a template sets it, `gh issue create` does not,
+so pass `--label <kind>` yourself. `issue-kind.yml` flags violations with `needs-kind`.
 
 Autonomous work is WIP-limited across every prefix in
 `rules.yaml: autonomous_agent_prs.agent_branch_prefixes`, up to `max_open_prs` open PRs. Read both
@@ -631,19 +635,21 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `rest.rego` and consults no per-service exclusion. So the only gate is at build time — a write
   action must be declared in `rules.yaml: shared_m2m_matrix_write_grants.declared`
   (`check-matrix-write-grants.py`, enforced). Two things this cost: the "graduated ⇒ denied" column
-  of the audits was never true, because `data.rules.shared_m2m_write_prohibition` **is not emitted
-  into any bundle** (it is nested under `change_requirements:`, so `gen-rules-opa-data.py` cannot
-  select it) and the veto has therefore never fired anywhere; and `ledger.approve`, documented as
+  of the audits was untrue until 2026-08-07, because `data.rules.shared_m2m_write_prohibition` was
+  nested under `change_requirements:`, so `gen-rules-opa-data.py` could not select it and the veto
+  never fired (it is now a top-level key, emitted into `rules-opa-data.yaml` and every bundle that
+  embeds it — the lesson is to check the derived subset, not `rules.yaml`); and `ledger.approve`, documented as
   "NEVER reachable by any SERVICE principal", resolved `allow=true` for both service-accounts on the
   live bundle. **Measure a policy claim with `opa eval` against the bundle ConfigMap** — materialise
   it to the sidecar's own directory layout (`rules-data.yaml` → `rules/data.yaml`) and probe
   `data.openbank.rest.allow` per (principal, action), with a must-DENY and a must-ALLOW control in
   every run. Reading the rego cannot tell you which of several reasons actually fires (#3765/#3734).
 - **The three realm JSONs in this tree disagree about which roles the M2M accounts hold** — the
-  deployed gitops template gives `service-account-openbank-services` only `ROLE_API`, while the
-  docker and CI realms also give it `ROLE_OPERATOR`. Any statement of the form "the shared client
-  carries ROLE_OPERATOR" is environment-specific; take the union when reasoning about exposure, and
-  say which realm you read.
+  deployed gitops template and the docker realm give `service-account-openbank-services` only
+  `ROLE_API`, while the CI realm gives it `ROLE_OPERATOR` and `ROLE_COMPLIANCE` and no `ROLE_API`.
+  Any statement of the form "the shared client carries ROLE_OPERATOR" is environment-specific; take
+  the union when reasoning about exposure, and say which realm you read. Read the roles with `jq`
+  rather than from this bullet: an earlier wording put the docker realm on the wrong side.
 
 - **A backup that has never been configured reports the same "success" as one that works — CNPG's
   archiver is a NO-OP with a success exit code when no `barmanObjectStore` exists, and both
@@ -731,7 +737,12 @@ fire from *outside* it, so they stay here:
   `sequenceDiagram` message or `Note` is a statement separator — write `#59;`. Both render as a red
   "Mermaid render failed" box in the Service Docs page, which nothing in CI loads: 40 of 248 blocks
   across 21 services were broken that way, found only when someone opened one. Now enforced by the
-  `mermaid-parses` gate, which parses every block with admin-ui's own mermaid.
+  `mermaid-parses` gate, which parses every block with admin-ui's own mermaid. **Mermaid 12.3
+  accepts a bare `@` inside a bracketed label**, so the trap is version-bound. Keep quoting labels,
+  but never use the bare-`@` form as a negative fixture: bumping the renderer made two such fixtures
+  vacuous at once and turned `main` red on `mermaid-parses` UNFALSIFIED (#15330). Hold self-tests to
+  forms the installed parser still rejects (`a@{ shape: nope }`, a literal `;`), and when you bump
+  mermaid, run every mermaid self-test, not only the one that failed.
 
 ### Multi-agent / parallel work
 - **A review fix pushed to a PR branch AFTER auto-merge fires is silently lost — the squash already
@@ -748,6 +759,10 @@ fire from *outside* it, so they stay here:
   references files living only in an unmerged parent PR (e.g. ADR numbers the registry gate
   requires on-branch), merging the parent branch into the child makes the child's CI green
   independently; the shared files drop out of the diff as the parent lands on main.
+- **`merge-priority:expedite` is the OWNER's lever — an agent never applies or removes it.** The merge
+  train serves a labelled, armed PR first in its lane (after a fix for a red main). Agents run under the
+  owner's token, so nothing technical stops an agent labelling its own PR; that is exactly why the rule
+  is absolute. To get a PR expedited, say so in the report and let the owner label it.
 - **A PR-queue drain has a CEILING, and "queue empty" is the wrong success measure.** Measured
   2026-08-01: 21 PRs merged in one session and the queue still went 2 -> 8, because parallel
   agents open roughly one PR every two minutes. What survives a drain is structural, not
@@ -1070,6 +1085,12 @@ repo is the single source of truth.
     a collision-free number. Fill in `tags` and `summary`; the scaffold's placeholders
     are rejected by CI on purpose.
   - Before pushing: `bash docs/adr/gen-index.sh && bash .github/scripts/check-adr-registry.sh`.
+  - **In a PR, prefer NOT committing `README.md`/`DIGEST.md`/`CURRENT.md`/`index.json` at all.**
+    The merge train regenerates them in every carrier, and `check-adr-registry.sh` accepts a PR
+    that leaves them untouched (it reports the drift as a notice). Every ADR PR that commits its
+    own copy conflicts with every other one on the same four files; on 2026-11-12 that alone
+    needed hand-made merges on ten PRs. If you did commit them and they conflict, take main's
+    side and regenerate — never hand-merge them.
     `README.md`, `DIGEST.md`, `CURRENT.md` and `index.json` are DERIVED — never hand-edit them.
 - Shared runtime plumbing (ADR-0122 domain/runtime split): pure domain logic —
   security, audit envelope, outbox ports, idempotency store — lives in

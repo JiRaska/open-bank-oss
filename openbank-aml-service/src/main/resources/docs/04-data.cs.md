@@ -66,7 +66,7 @@ Flyway, neměnné historické skripty, forward-only (`migrate-at-start=true`):
 | `V4__hibernate_sequences.sql` | Sekvence `aml_cases_seq`, `aml_outbox_seq` (INCREMENT BY 50) — alokace id Panache při `generation:none` | `DROP SEQUENCE aml_cases_seq, aml_outbox_seq;` |
 | `V5__amount_check_constraints.sql` | CHECK `amount IS NULL OR amount > 0`; CHECK `match_score` v 0..100 | drop dvou constraintů |
 
-> Migrace sekvencí `V4` opravuje známý defekt alokace id Hibernate-Reactive + Panache (BIGSERIAL vytvoří jen `<table>_id_seq`, ale Panache očekává `<table>_seq`). Proti regresi hlídá `HibernateSequenceGuardTest`.
+> Migrace sekvencí `V4` opravuje známý defekt alokace id Hibernate-Reactive + Panache (BIGSERIAL vytvoří jen `<table>_id_seq`, ale Panache očekává `<table>_seq`). Proti regresi hlídá CI gate `hibernate-sequence-guard`.
 
 ## Indexy
 
@@ -103,3 +103,33 @@ Záznam případu je **restricted** (`dataClassification: restricted`). GDPR **p
 - **Upstream (topic):** kyc-service (triggers), sanctions-service (updates).
 - **Vlastněné schéma:** `aml_schema`. **Závislá schémata:** sepa_schema, domestic_schema, swift_schema, sepa_instant_schema.
 - `dataLineageRole: both` — služba je zároveň konzumentem i producentem compliance dat.
+
+## Příjem dat pro monitoring transakcí (ADR-0371, migrace V11)
+
+Monitoring po zaúčtování zaznamenává zaúčtované pohyby a počítá je po stranách. Nic z toho neleží na platební cestě.
+
+| Tabulka | Klíč | Účel |
+|---|---|---|
+| `aml_booked_movement` | `(journal_entry_id, account_id, currency)` | jedna zaúčtovaná změna jednoho klientského účtu v jedné měně z události `AccountBookedChanged`; klíč je obchodní klíč zaúčtování, takže znovu doručená nebo znovu vydaná událost nic nezmění |
+| `aml_movement_origin` | `transaction_id` | platební kanál (rail) původní transakce z `TransactionInitiated`; platí první zápis |
+| `aml_account_party` | `account_id` | účet → vlastnící strana, zapamatováno po odpovědi autority účtů |
+| `aml_movement_counter` | `(party_id, currency, direction, rail, scheme_revision, bucket_start, band_code)` | klouzavé počty |
+
+- Čítače částky nesčítají ani nepřevádějí a nikdy nepřekračují měnu; `currency` je součást klíče a pásmo částky patří jedné měně.
+- Šířka okna a pásma částek jsou **data** (`openbank.aml.monitoring.counter-scheme.resource`). Soubor v tomto repozitáři je syntetický; jeho pásma nic neznamenají. `scheme_revision` je součást klíče čítače, takže změněné pásmo zakládá nové čítače.
+- Každý pohyb se počítá v pásmu `ALL` a v každém pásmu, které jeho částku obsahuje.
+- Pohyb přiřadí straně a kanálu a započítá v jedné transakci úloha `aml-movement-attribution`. Zaúčtování bez události původní transakce se po `origin-grace` započítá s kanálem `NONE`. Pohyb, jehož účet nemá známou stranu, zůstává nezapočítaný a zkouší se znovu.
+- Známá omezení: storno účtuje ledger jako opačný pohyb a počítá se jako pohyb; atributy protistrany dnes nenese žádná událost.
+- Tabulky obsahují identifikátory stran a účtů a částky. Jsou to záznamy monitoringu se stejnou povinností uchování jako případy; lhůtu tento dokument neuvádí (ADR-0371).
+
+## Vyhodnocení monitoringu transakcí (ADR-0371, migrace V12)
+
+| Tabulka | Klíč | Účel |
+|---|---|---|
+| `aml_monitoring_evaluation` | `(party_id, pack_hash)` | poslední vyhodnocení strany pod jedním obsahem balíčku: `NO_FINDING`, `FINDING` nebo `INCOMPLETE` s důvodem |
+| `aml_monitoring_hit` | `hit_id`; unikátní `(party_id, scenario_code, window_start)` | jeden řádek na stranu, scénář a okno s hashem balíčku a snímkem čítače; opakovaný nález ho obnoví |
+
+- Výsledek „čisté“ neexistuje. `NO_FINDING` znamená, že pravidla balíčku počtům neodpovídala; `INCOMPLETE`, že balíček nešlo vyhodnotit. Ani jedno není tvrzení o straně.
+- Balíček, jeho dva slovníky a jeho počítané příznaky jsou **data** (`openbank.aml.monitoring.pack.*`). Dodané soubory jsou syntetické. Příznak je připnut hashem přes měnu, pásmo, směr, kanál a okno, takže úprava okna zneplatní připnutí v balíčku a služba nenastartuje.
+- Výchozí režim je SHADOW: nález se zaznamená a nic dalšího se nestane. S `openbank.aml.monitoring.evaluation.open-cases=true` nález otevře `AmlCase` typu `TRANSACTION_MONITORING` s klíčem strana, scénář a okno.
+- Dodané scénáře: opakované pohyby v pásmu pod hranicí (tři varianty měna/směr). Rychlý průtok a aktivita po dlouhé nečinnosti dodány **nejsou**: pravidlo balíčku porovnává jeden počet s minimem a tyto dva scénáře potřebují konjunkci počtů, respektive nepřítomnost.

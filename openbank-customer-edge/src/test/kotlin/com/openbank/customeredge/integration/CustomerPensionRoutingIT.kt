@@ -227,6 +227,21 @@ class CustomerPensionRoutingIT {
     }
 
     @Test
+    fun `an upstream 403 on a transfers read is access denied, never a change refusal`() {
+        StubUpstreamResource.stub("$API/transfers", status = 403, body = "{}")
+        StubUpstreamResource.stub("$API/transfers/$TRANSFER", status = 403, body = "{}")
+
+        When { get("/customer/v1/pension/transfers?pending=false") } Then {
+            statusCode(403)
+            body("code", equalTo("PENSION_ACCESS_DENIED"))
+        }
+        When { get("/customer/v1/pension/transfers/$TRANSFER") } Then {
+            statusCode(403)
+            body("code", equalTo("PENSION_ACCESS_DENIED"))
+        }
+    }
+
+    @Test
     fun `a pending transfer is shown, and consent is bound to that transfer before anything is spent`() {
         StubUpstreamResource.stub("$API/transfers/$TRANSFER", body = transfer())
         val ref = "pension-transfer-out:$OWN:PF-B:B-42:$TRANSFER"

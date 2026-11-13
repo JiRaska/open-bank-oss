@@ -4,6 +4,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { DOMAIN_GROUPS, domainColor } from '@/lib/governance/domains'
 
 const css = fs.readFileSync(path.join(process.cwd(), 'src/app/globals.css'), 'utf8')
 
@@ -194,6 +195,25 @@ describe('admin UI token contrast', () => {
     }
     expect({ unexpected, stale, missing: [...new Set(missing)] })
       .toEqual({ unexpected: [], stale: [], missing: [] })
+  })
+
+  it.each(['light', 'dark'] as const)('%s: domain labels meet AA on content surfaces and their tinted chips', theme => {
+    const tokens = { ...declarations(':root'), ...(theme === 'dark' ? declarations('\\.dark') : {}) }
+    for (const domain of DOMAIN_GROUPS) {
+      const token = domainColor(domain).match(/^var\((--[\w-]+)\)$/)?.[1]
+      expect(token, domain).toBeTruthy()
+      const foreground = resolve(tokens, token!)
+      for (const surface of ['--bg', '--surface', '--surface-2']) {
+        const background = resolve(tokens, surface)
+        const tinted = '#' + [0, 1, 2].map(index => {
+          const start = 1 + index * 2
+          return Math.round(Number.parseInt(foreground.slice(start, start + 2), 16) * 0.08
+            + Number.parseInt(background.slice(start, start + 2), 16) * 0.92).toString(16).padStart(2, '0')
+        }).join('')
+        expect(contrast(foreground, background), `${domain} on ${surface}`).toBeGreaterThanOrEqual(AA)
+        expect(contrast(foreground, tinted), `${domain} on tinted ${surface}`).toBeGreaterThanOrEqual(AA)
+      }
+    }
   })
 
   // Sabotage that motivated this test: removing '--surface-3' from SURFACE_TOKENS left the suite

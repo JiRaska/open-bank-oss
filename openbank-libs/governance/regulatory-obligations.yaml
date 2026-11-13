@@ -1,0 +1,1161 @@
+# Regulatory obligations register — what a Czech universal bank must report, to whom, and why.
+#
+# WHY THIS FILE EXISTS
+#   The regulatory catalogue in admin-ui (`REPORT_CATALOG`) was built from what the platform could
+#   already produce, so a duty with no code (CEÚ, GSFT) was invisible to every inventory taken from
+#   the code. This register starts from the LAW instead: each entry is one obligation, sourced to
+#   the legal text and the authority's technical specification, and THEN mapped onto the reports
+#   and services that cover it. A gap is therefore a row with `coverage.status: missing`, not an
+#   absence nobody notices.
+#
+# DERIVED SURFACES — edit this file, never them
+#   - docs/compliance/regulatory-obligations.md   (.github/scripts/check-regulatory-obligations.py --write)
+#   - openbank-admin-ui/regulatory-obligations.json (openbank-admin-ui/scripts/generate-regulatory-obligations.mjs)
+#   Enforced by gate `regulatory-obligations-register` (check-regulatory-obligations.py).
+#
+# HONESTY RULES
+#   - `cadence_confidence` says how the deadline was established: `verified` (checked against the
+#     cited source), `known-eu` (well-established EU text, not re-checked), `unverified` (a lead,
+#     not a fact). Never upgrade a value without checking the source.
+#   - `coverage.status` describes `origin/main`, not open PRs:
+#       filed-return   a backend computes the return, it appears in the regulatory catalogue and a
+#                      real filing document and transport exist
+#       computed-preview  a backend computes the figures and the catalogue shows them, but nothing
+#                      builds a filing document and the only transport is a dry-run one: a
+#                      preview, not a fileable return
+#       bff-only       the catalogue offers it, but the figures are computed in the admin-ui BFF
+#                      (declared debt, ADR-0367 decision 2)
+#       data-only      a backend computes the underlying data or metric, but no return exists
+#       missing        nothing in the platform produces it
+#       external       deliberately handled outside the core-banking platform (e.g. general ledger
+#                      tax filings, statutory accounts)
+#       conditional    applies only under a business model this platform does not run today;
+#                      `applicability` names the trigger
+#   - `reports` lists ids from the admin-ui regulatory catalogue; the checker fails on an unknown id
+#     and on any catalogue entry that no obligation claims.
+#
+# A watcher charter (`regulatory-obligations-watcher`) is PROPOSED separately and lands disabled
+# until a source fetcher is wired; nothing watches the cited sources today. Changes to this file
+# happen only through a reviewed PR.
+# `personal_data` values are QUOTED on purpose: unquoted yes/no are YAML 1.1 booleans to PyYAML
+# and would render as True/False (the checker rejects a non-string value).
+
+schema_version: 1
+
+statuses: [filed-return, computed-preview, bff-only, data-only, missing, external, conditional]
+kinds: [periodic-aggregate, granular-feed, event, register, disclosure]
+confidences: [verified, known-eu, unverified]
+
+authorities:
+  cnb: { cs: Česká národní banka, en: Czech National Bank, url: https://www.cnb.cz/ }
+  gsft: { cs: Garanční systém finančního trhu, en: Financial Market Guarantee System, url: https://www.gsft.cz/ }
+  fau: { cs: Finanční analytický úřad, en: Financial Analytical Office, url: https://www.fau.gov.cz/ }
+  fs: { cs: Finanční správa ČR, en: Czech Financial Administration, url: https://www.financnisprava.gov.cz/ }
+  uoou: { cs: Úřad pro ochranu osobních údajů, en: Office for Personal Data Protection, url: https://uoou.gov.cz/ }
+  nukib: { cs: Národní úřad pro kybernetickou a informační bezpečnost, en: National Cyber and Information Security Agency, url: https://nukib.gov.cz/ }
+  csu: { cs: Český statistický úřad, en: Czech Statistical Office, url: https://csu.gov.cz/ }
+  courts: { cs: "Soudy, exekutoři a orgány činné v trestním řízení", en: "Courts, bailiffs and law enforcement", url: null }
+  social: { cs: "ČSSZ, zdravotní pojišťovny, úřady práce", en: "Social security, health insurers, labour offices", url: null }
+  trade-repository: { cs: Registr obchodních údajů, en: Trade repository, url: null }
+  public: { cs: Veřejnost a klienti, en: Public and clients, url: null }
+
+areas:
+  - { id: register, cs: Centrální registry, en: Central registers }
+  - { id: deposit-insurance, cs: Pojištění vkladů a řešení krize, en: Deposit insurance and resolution }
+  - { id: prudential, cs: Obezřetnostní výkaznictví (EBA/ČNB), en: Prudential reporting (EBA/CNB) }
+  - { id: statistics, cs: Statistické výkaznictví, en: Statistical reporting }
+  - { id: payments, cs: Platební styk, en: Payments }
+  - { id: ict, cs: Provozní odolnost a ICT, en: Operational resilience and ICT }
+  - { id: aml, cs: AML a mezinárodní sankce, en: AML and international sanctions }
+  - { id: tax, cs: Daně a výměna informací, en: Tax and information exchange }
+  - { id: requests, cs: Součinnost s orgány veřejné moci, en: Information requests from public bodies }
+  - { id: disclosure, cs: Uveřejňování a klientské informace, en: Disclosure and client information }
+  - { id: markets, cs: Trhy a distribuce, en: Markets and distribution }
+
+obligations:
+  # ── Central registers ──────────────────────────────────────────────────────────────────────
+  - id: cnb-ceu-account-register
+    area: register
+    name: { cs: Centrální evidence účtů – denní přehled změn, en: Central Register of Accounts – daily change feed }
+    authority: cnb
+    legal_basis: zákon č. 300/2016 Sb. § 3; vyhláška č. 30/2017 Sb. ve znění vyhlášky č. 163/2021 Sb.
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2016-300
+      spec: https://www.cnb.cz/cs/statistika/metodicke-informace/centralni-evidence-uctu/
+    cadence: Každý pracovní den do 12:00 za změny předchozího pracovního dne.
+    cadence_confidence: verified
+    kind: granular-feed
+    transport: SDAT
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [openbank-tax-reporting-service], tracking: ADR-0367 }
+    note: Registrový feed, ne součet za období — hlásí se delta stavu účtů a osob s nimi spojených. Syntetické klienty (ADR-0252) je nutné vyloučit.
+  - id: cnb-ceu-initial-load
+    area: register
+    name: { cs: CEÚ – úplné předání stavu, en: CEÚ – full snapshot }
+    authority: cnb
+    legal_basis: vyhláška č. 30/2017 Sb.
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2017-30
+      spec: https://www.cnb.cz/cs/statistika/metodicke-informace/centralni-evidence-uctu/
+    cadence: Při zahájení činnosti a na žádost ČNB.
+    cadence_confidence: unverified
+    kind: register
+    transport: SDAT
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [openbank-tax-reporting-service], tracking: ADR-0367 }
+  - id: cnb-anacredit
+    area: register
+    name: { cs: AnaCredit – granulární údaje o úvěrech, en: AnaCredit granular credit data }
+    authority: cnb
+    legal_basis: národní rámec ČNB pro AnaCredit podle vzoru nařízení ECB (EU) 2016/867
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2016/867/oj
+      spec: https://www.cnb.cz/cs/statistika/anacredit/vykazovani_do_anacredit/index.html
+    cadence: Měsíčně, část údajů čtvrtletně.
+    cadence_confidence: unverified
+    kind: granular-feed
+    transport: SDAT
+    personal_data: "partial"
+    applicability: always
+    coverage: { status: data-only, reports: [], services: [openbank-anacredit-service], tracking: null }
+    note: Služba existuje, ale v regulatorním katalogu není a nemá záznam podání.
+  - id: cnb-central-credit-register
+    area: register
+    name: { cs: Centrální registr úvěrů, en: Central Credit Register }
+    authority: cnb
+    legal_basis: zákon č. 6/1993 Sb. § 41
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/1993-6
+      spec: null
+    cadence: Měsíčně; ověřit, zda není sloučen s AnaCredit.
+    cadence_confidence: unverified
+    kind: granular-feed
+    transport: SDAT
+    personal_data: "partial"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+
+  # ── Deposit insurance and resolution ──────────────────────────────────────────────────────
+  - id: gsft-depositor-data
+    area: deposit-insurance
+    name: { cs: Údaje o oprávněných osobách a pojištěných pohledávkách, en: Depositor data for payout (single customer view) }
+    authority: gsft
+    legal_basis: "zákon č. 21/1992 Sb. § 41c odst. 10 a § 41d odst. 4; vyhláška č. 71/2011 Sb. ve znění vyhlášky č. 431/2016 Sb."
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2011-71
+      spec: https://www.gsft.cz/
+    cadence: "Do 3 pracovních dnů od rozhodného dne (údaje podle § 41f odst. 7–8 do 10 pracovních dnů); evidenci je nutné vést trvale."
+    cadence_confidence: verified
+    kind: event
+    transport: "Dávka CSV (CP-1250) souborů DIW/DIC/DIA/DIL/DII, ZIP, šifrováno PGP nebo jiným dohodnutým způsobem (příloha vyhlášky 71/2011 Sb., bod 1.1.6)"
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
+    note: Evidence pojištěných pohledávek na klienta (souhrn přes účty, limit 100 000 EUR, výjimky, dočasně vysoké zůstatky). Syntetické klienty nutno vyloučit — jinak by se vyplácela náhrada fiktivním osobám.
+  - id: gsft-test-delivery
+    area: deposit-insurance
+    name: { cs: Testovací předání údajů GSFT, en: GSFT test deliveries }
+    authority: gsft
+    legal_basis: "zákon č. 21/1992 Sb. § 41n"
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/1992-21
+      spec: https://www.gsft.cz/
+    cadence: "GSFT ověřuje systém vyplácení nejméně jednou ročně; údaje na žádost ve lhůtě nejméně 3 pracovních dnů; zátěžový test nejméně jednou za 3 roky. Testovací dávky nesou atribut TEST."
+    cadence_confidence: verified
+    kind: event
+    transport: dávkové soubory pro GSFT
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
+  - id: gsft-contribution-base
+    area: deposit-insurance
+    name: { cs: Podklady pro příspěvek do Fondu pojištění vkladů, en: Deposit insurance contribution base }
+    authority: gsft
+    legal_basis: "zákon č. 21/1992 Sb. § 41c odst. 3, § 41ca–41cc"
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/1992-21
+      spec: https://www.gsft.cz/
+    cadence: "Ročně: ČNB stanoví příspěvek do 31. 5. z evidence banky, banka platí do 30. 6.; zda banka podává samostatný podklad, neověřeno."
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: neověřeno
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
+  - id: resolution-fund-contribution
+    area: deposit-insurance
+    name: { cs: Podklady pro příspěvek do Fondu pro řešení krize, en: Resolution fund contribution data }
+    authority: cnb
+    legal_basis: zákon č. 374/2015 Sb.; nařízení v přenesené pravomoci (EU) 2015/63
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2015-374
+      spec: null
+    cadence: Ročně.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: cnb-mrel-resolution
+    area: deposit-insurance
+    name: { cs: MREL a výkazy pro plánování řešení krize, en: MREL and resolution planning reporting }
+    authority: cnb
+    legal_basis: zákon č. 374/2015 Sb.; prováděcí nařízení (EU) 2021/622 a 2018/1624
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2015-374
+      spec: null
+    cadence: MREL pololetně nebo ročně; výkazy plánování ročně.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: cnb-recovery-plan
+    area: deposit-insurance
+    name: { cs: Ozdravný plán, en: Recovery plan }
+    authority: cnb
+    legal_basis: zákon č. 374/2015 Sb.; směrnice 2014/59/EU čl. 5
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2015-374
+      spec: null
+    cadence: Ročně.
+    cadence_confidence: unverified
+    kind: event
+    transport: datová schránka / SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: external, reports: [], services: [], tracking: null }
+    note: Dokument řízení banky, nikoli výstup core-banking platformy.
+
+  # ── Prudential (EBA/ČNB) ──────────────────────────────────────────────────────────────────
+  - id: eba-finrep
+    area: prudential
+    name: { cs: FINREP – finanční výkazy, en: FINREP financial reporting }
+    authority: cnb
+    legal_basis: nařízení (EU) 575/2013 (CRR) čl. 99; prováděcí nařízení (EU) 2024/3117
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg_impl/2024/3117/oj
+      spec: https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks
+    cadence: Čtvrtletně (12. 5., 11. 8., 11. 11., 11. 2.); některé šablony pololetně/ročně.
+    cadence_confidence: known-eu
+    kind: periodic-aggregate
+    transport: SDAT (XBRL-CSV)
+    personal_data: "no"
+    applicability: always
+    coverage: { status: computed-preview, reports: [cnb-finrep], services: [openbank-finrep-service], tracking: "#5914" }
+    note: "Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914."
+  - id: eba-corep-own-funds
+    area: prudential
+    name: { cs: COREP – kapitál a kapitálové požadavky, en: COREP own funds and requirements }
+    authority: cnb
+    legal_basis: CRR čl. 430 odst. 1 písm. a); prováděcí nařízení (EU) 2024/3117
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2013/575/oj
+      spec: https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks
+    cadence: Čtvrtletně, stejné termíny jako FINREP.
+    cadence_confidence: known-eu
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: computed-preview, reports: [cnb-capital], services: [openbank-finrep-service], tracking: "#5914" }
+    note: "Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914."
+  - id: eba-lcr
+    area: prudential
+    name: { cs: Ukazatel krytí likviditou (LCR), en: Liquidity Coverage Ratio }
+    authority: cnb
+    legal_basis: CRR čl. 415; nařízení v přenesené pravomoci (EU) 2015/61
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg_del/2015/61/oj
+      spec: https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks
+    cadence: Měsíčně, 15 kalendářních dnů po referenčním dni.
+    cadence_confidence: known-eu
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: computed-preview, reports: [cnb-lcr], services: [openbank-finrep-service, openbank-risk-engine], tracking: "#5914" }
+    note: "Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914."
+  - id: eba-nsfr
+    area: prudential
+    name: { cs: Ukazatel čistého stabilního financování (NSFR), en: Net Stable Funding Ratio }
+    authority: cnb
+    legal_basis: CRR čl. 428a a násl.; prováděcí nařízení (EU) 2024/3117
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2013/575/oj
+      spec: https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks
+    cadence: Čtvrtletně.
+    cadence_confidence: known-eu
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: data-only, reports: [], services: [openbank-risk-engine], tracking: null }
+  - id: eba-leverage
+    area: prudential
+    name: { cs: Pákový poměr, en: Leverage ratio }
+    authority: cnb
+    legal_basis: CRR čl. 429 a 430
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2013/575/oj
+      spec: https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks
+    cadence: Čtvrtletně.
+    cadence_confidence: known-eu
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: eba-large-exposures
+    area: prudential
+    name: { cs: Velké expozice, en: Large exposures }
+    authority: cnb
+    legal_basis: CRR čl. 394
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2013/575/oj
+      spec: https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks
+    cadence: Čtvrtletně.
+    cadence_confidence: known-eu
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "partial"
+    applicability: always
+    coverage: { status: data-only, reports: [], services: [openbank-risk-engine], tracking: null }
+  - id: eba-almm
+    area: prudential
+    name: { cs: Doplňkové ukazatele sledování likvidity (ALMM), en: Additional liquidity monitoring metrics }
+    authority: cnb
+    legal_basis: CRR čl. 415 odst. 3 písm. b)
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2013/575/oj
+      spec: https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks
+    cadence: Měsíčně (malé a nekomplexní instituce čtvrtletně).
+    cadence_confidence: known-eu
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: eba-asset-encumbrance
+    area: prudential
+    name: { cs: Zatížení aktiv, en: Asset encumbrance }
+    authority: cnb
+    legal_basis: CRR čl. 430 odst. 1 písm. g)
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2013/575/oj
+      spec: https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks
+    cadence: Čtvrtletně, pololetně nebo ročně podle šablony.
+    cadence_confidence: known-eu
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: eba-irrbb
+    area: prudential
+    name: { cs: Úrokové riziko investičního portfolia (IRRBB), en: IRRBB supervisory reporting }
+    authority: cnb
+    legal_basis: CRR čl. 430; prováděcí technické normy EBA k IRRBB
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2013/575/oj
+      spec: https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks
+    cadence: Čtvrtletně nebo pololetně podle velikosti.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: data-only, reports: [], services: [openbank-risk-engine], tracking: null }
+  - id: eba-remuneration
+    area: prudential
+    name: { cs: Odměňování – benchmarking a vysoce odměňovaní, en: Remuneration benchmarking and high earners }
+    authority: cnb
+    legal_basis: směrnice 2013/36/EU (CRD) čl. 75
+    sources:
+      law: https://eur-lex.europa.eu/eli/dir/2013/36/oj
+      spec: https://www.eba.europa.eu/
+    cadence: Ročně.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "partial"
+    applicability: always
+    coverage: { status: external, reports: [], services: [], tracking: null }
+  - id: eba-funding-plans
+    area: prudential
+    name: { cs: Plány financování, en: Funding plans }
+    authority: cnb
+    legal_basis: EBA GL/2019/05 (vydané podle čl. 16 nařízení (EU) č. 1093/2010)
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2010/1093/oj
+      spec: https://www.eba.europa.eu/
+    cadence: Ročně, nad prahem velikosti.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: "conditional: instituce nad prahem EBA GL/2019/05"
+    coverage: { status: conditional, reports: [], services: [], tracking: null }
+  - id: eba-supervisory-benchmarking
+    area: prudential
+    name: { cs: Benchmarking interních modelů, en: Supervisory benchmarking of internal models }
+    authority: cnb
+    legal_basis: CRD čl. 78
+    sources:
+      law: https://eur-lex.europa.eu/eli/dir/2013/36/oj
+      spec: https://www.eba.europa.eu/
+    cadence: Ročně.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: "conditional: banka používá IRB nebo interní modely"
+    coverage: { status: conditional, reports: [], services: [], tracking: null }
+  - id: cnb-icaap-ilaap
+    area: prudential
+    name: { cs: ICAAP/ILAAP a podklady pro SREP, en: ICAAP/ILAAP and SREP submissions }
+    authority: cnb
+    legal_basis: zákon č. 21/1992 Sb.; CRD čl. 73 a 86
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/1992-21
+      spec: null
+    cadence: Ročně.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: neověřeno
+    personal_data: "no"
+    applicability: always
+    coverage: { status: external, reports: [], services: [], tracking: null }
+  - id: eba-esg-supervisory
+    area: prudential
+    name: { cs: Výkaznictví ESG rizik, en: ESG risk supervisory reporting }
+    authority: cnb
+    legal_basis: nařízení (EU) 2024/1623 (CRR3); prováděcí technické normy EBA
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2024/1623/oj
+      spec: https://www.eba.europa.eu/
+    cadence: Neověřeno (stav ITS k listopadu 2026).
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+
+  # ── Statistical ────────────────────────────────────────────────────────────────────────────
+  - id: cnb-bank-statistics
+    area: statistics
+    name: { cs: "Měnová a finanční statistika bank (rozvahová statistika, vklady)", en: "Monetary and financial statistics (balance sheet, deposits)" }
+    authority: cnb
+    legal_basis: "zákon č. 6/1993 Sb. § 41; vyhláška č. 346/2013 Sb. o předkládání výkazů bankami (lhůty v přílohách a metadatech SDAT); nařízení ECB 2021/379"
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/1993-6
+      spec: https://www.cnb.cz/cs/statistika/vykaznictvi-sber-dat/vykaznictvi-banky-PZB/
+    cadence: Měsíčně a čtvrtletně podle výkazu (kalendář ČNB).
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: bff-only, reports: [sdat-accounts], services: [], tracking: ADR-0367 }
+  - id: cnb-mir-interest-rates
+    area: statistics
+    name: { cs: Úrokové sazby MFI (MIR), en: MFI interest rate statistics }
+    authority: cnb
+    legal_basis: nařízení ECB (EU) 2013/1072; zákon č. 6/1993 Sb. § 41
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2013/1072/oj
+      spec: https://www.cnb.cz/cs/statistika/vykaznictvi-sber-dat/vykaznictvi-banky-PZB/
+    cadence: Měsíčně.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: cnb-payment-statistics
+    area: statistics
+    name: { cs: Statistika platebního styku, en: Payment statistics }
+    authority: cnb
+    legal_basis: nařízení ECB (EU) 2020/2011; vyhláška č. 314/2013 Sb.
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2020/2011/oj
+      spec: https://www.cnb.cz/cs/statistika/vykaznictvi-sber-dat/vykaznictvi-banky-PZB/
+    cadence: Měsíčně až pololetně podle výkazu.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: bff-only, reports: [sdat-payments, ecb-payments], services: [], tracking: ADR-0367 }
+    note: Katalog cituje u ECB výkazu nařízení ECB/2013/43, které bylo nahrazeno nařízením (EU) 2020/2011.
+  - id: cnb-bop
+    area: statistics
+    name: { cs: Platební bilance a vztahy k nerezidentům, en: Balance of payments and non-resident positions }
+    authority: cnb
+    legal_basis: devizový zákon č. 219/1995 Sb.; vyhláška ČNB
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/1995-219
+      spec: null
+    cadence: Měsíčně nebo čtvrtletně.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: cnb-minimum-reserves
+    area: statistics
+    name: { cs: Povinné minimální rezervy – báze, en: Minimum reserves base }
+    authority: cnb
+    legal_basis: zákon č. 6/1993 Sb. § 26; vyhláška ČNB o povinných minimálních rezervách
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/1993-6
+      spec: null
+    cadence: Za každé udržovací období.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: data-only, reports: [], services: [openbank-risk-engine], tracking: null }
+  - id: cnb-mortgage-survey
+    area: statistics
+    name: { cs: Šetření o úvěrech na bydlení (LTV/DTI/DSTI), en: Residential mortgage lending survey }
+    authority: cnb
+    legal_basis: zákon č. 6/1993 Sb. § 41; doporučení ČNB k hypotečním limitům
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/1993-6
+      spec: null
+    cadence: Pololetně.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: csu-surveys
+    area: statistics
+    name: { cs: Statistická zjištění ČSÚ, en: Czech Statistical Office surveys }
+    authority: csu
+    legal_basis: zákon č. 89/1995 Sb.; vyhláška o programu statistických zjišťování
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/1995-89
+      spec: null
+    cadence: Podle ročního programu.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: DANTE web
+    personal_data: "no"
+    applicability: always
+    coverage: { status: external, reports: [], services: [], tracking: null }
+
+  # ── Payments ───────────────────────────────────────────────────────────────────────────────
+  - id: psd2-fraud-statistics
+    area: payments
+    name: { cs: Statistika podvodů v platebním styku, en: Payment fraud statistics }
+    authority: cnb
+    legal_basis: "zákon č. 370/2017 Sb. § 222; vyhláška č. 401/2021 Sb.; výkaz PSSIVYP22"
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2017-370
+      spec: https://www.cnb.cz/cs/statistika/metodicke-informace/pss/
+    cadence: "Pololetně, výkaz PSSIVYP22 (platební statistika včetně podvodů); lhůta podle metadat SDAT neověřena."
+    cadence_confidence: known-eu
+    kind: periodic-aggregate
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: psd2-tra-fraud-monitoring
+    area: payments
+    name: { cs: Monitoring míry podvodů pro výjimku TRA, en: TRA exemption fraud-rate monitoring }
+    authority: cnb
+    legal_basis: nařízení v přenesené pravomoci (EU) 2018/389 čl. 17–21
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg_del/2018/389/oj
+      spec: null
+    cadence: Čtvrtletně interně; oznámení ČNB při překročení prahu.
+    cadence_confidence: known-eu
+    kind: event
+    transport: neověřeno
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: psd2-api-statistics
+    area: payments
+    name: { cs: Statistiky dostupnosti rozhraní PSD2, en: PSD2 dedicated-interface statistics }
+    authority: public
+    legal_basis: nařízení v přenesené pravomoci (EU) 2018/389 čl. 32–33
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg_del/2018/389/oj
+      spec: null
+    cadence: Čtvrtletní zveřejnění.
+    cadence_confidence: known-eu
+    kind: disclosure
+    transport: web banky
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [openbank-psd2-service], tracking: null }
+  - id: instant-payments-reporting
+    area: payments
+    name: { cs: Okamžité platby – reporting poplatků a odmítnutí, en: Instant Payments Regulation reporting }
+    authority: cnb
+    legal_basis: nařízení (EU) 2024/886 čl. 15
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2024/886/oj
+      spec: null
+    cadence: Ročně; časování pro stát mimo eurozónu neověřeno.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: neověřeno
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: ifr-interchange
+    area: payments
+    name: { cs: Údaje o mezibankovních poplatcích (karty), en: Card interchange fee compliance data }
+    authority: cnb
+    legal_basis: nařízení (EU) 2015/751
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2015/751/oj
+      spec: null
+    cadence: Na žádost.
+    cadence_confidence: unverified
+    kind: event
+    transport: neověřeno
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+
+  # ── ICT and operational resilience ────────────────────────────────────────────────────────
+  - id: dora-major-ict-incident
+    area: ict
+    name: { cs: Hlášení závažného incidentu IKT, en: Major ICT-related incident report }
+    authority: cnb
+    legal_basis: nařízení (EU) 2022/2554 (DORA) čl. 19; RTS (EU) 2025/301; ITS (EU) 2025/302
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2022/2554/oj
+      spec: https://www.cnb.cz/
+    cadence: Počáteční do 4 h od klasifikace (nejpozději 24 h od zjištění), průběžné do 72 h, závěrečné do 1 měsíce.
+    cadence_confidence: known-eu
+    kind: event
+    transport: kanál ČNB pro DORA
+    personal_data: "no"
+    applicability: always
+    coverage: { status: bff-only, reports: [dora-ict], services: [], tracking: ADR-0367 }
+    note: Pro úvěrové instituce nahrazuje hlášení incidentů podle PSD2 čl. 96.
+  - id: dora-register-of-information
+    area: ict
+    name: { cs: Registr informací o smluvních ujednáních s poskytovateli IKT, en: DORA register of information }
+    authority: cnb
+    legal_basis: DORA čl. 28 odst. 3; prováděcí nařízení (EU) 2024/2956
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg_impl/2024/2956/oj
+      spec: https://www.cnb.cz/cs/statistika/metodicke-informace/dora/
+    cadence: "Na výzvu ČNB přes SDAT; poslední sběr do 2. 3. 2026, na nejvyšší úrovni konsolidace v EU."
+    cadence_confidence: unverified
+    kind: register
+    transport: SDAT
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: dora-critical-ict-contract
+    area: ict
+    name: { cs: Oznámení smlouvy na kritické nebo důležité funkce IKT, en: Notice of planned ICT contract for critical functions }
+    authority: cnb
+    legal_basis: DORA čl. 28 odst. 3
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2022/2554/oj
+      spec: null
+    cadence: Při události.
+    cadence_confidence: known-eu
+    kind: event
+    transport: neověřeno
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: dora-tlpt
+    area: ict
+    name: { cs: Penetrační testy vedené hrozbami (TLPT), en: Threat-led penetration testing }
+    authority: cnb
+    legal_basis: DORA čl. 26; RTS (EU) 2025/1190
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2022/2554/oj
+      spec: null
+    cadence: Každé 3 roky, pokud je instituce určena.
+    cadence_confidence: unverified
+    kind: event
+    transport: neověřeno
+    personal_data: "no"
+    applicability: "conditional: instituce určená ČNB k TLPT"
+    coverage: { status: conditional, reports: [], services: [], tracking: null }
+  - id: nis2-cyber-incident
+    area: ict
+    name: { cs: Hlášení kybernetického incidentu NÚKIB, en: Cyber incident report to NÚKIB }
+    authority: nukib
+    legal_basis: zákon o kybernetické bezpečnosti (NIS2); DORA jako lex specialis pro banky
+    sources:
+      law: https://eur-lex.europa.eu/eli/dir/2022/2555/oj
+      spec: null
+    cadence: Při události.
+    cadence_confidence: unverified
+    kind: event
+    transport: neověřeno
+    personal_data: "no"
+    applicability: "conditional: použitelnost vedle DORA neověřena"
+    coverage: { status: conditional, reports: [], services: [], tracking: null }
+  - id: uoou-personal-data-breach
+    area: ict
+    name: { cs: Ohlášení porušení zabezpečení osobních údajů, en: Personal data breach notification }
+    authority: uoou
+    legal_basis: nařízení (EU) 2016/679 (GDPR) čl. 33 a 34; zákon č. 110/2019 Sb.
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2016/679/oj
+      spec: https://uoou.gov.cz/
+    cadence: Do 72 hodin od zjištění.
+    cadence_confidence: known-eu
+    kind: event
+    transport: formulář ÚOOÚ / datová schránka
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: "#15756" }
+    note: Interim runbook docs/runbooks/0035-personal-data-breach-notification.md; skutečný rejstřík se vede mimo veřejné repo, v repu je jen šablona docs/compliance/personal-data-breach-register.md; workflow v kódu zatím neexistuje.
+
+  # ── AML and sanctions ─────────────────────────────────────────────────────────────────────
+  - id: fau-suspicious-transaction
+    area: aml
+    name: { cs: Oznámení podezřelého obchodu, en: Suspicious transaction report }
+    authority: fau
+    legal_basis: zákon č. 253/2008 Sb. § 18
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2008-253
+      spec: https://www.fau.gov.cz/
+    cadence: "Bez zbytečného odkladu, a hrozí-li nebezpečí z prodlení, ihned po zjištění (§ 18 odst. 1)."
+    cadence_confidence: verified
+    kind: event
+    transport: "písemně nebo elektronicky se zajištěním důvěrnosti (§ 18 odst. 4, § 19); konkrétní kanál neověřen"
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: bff-only, reports: [aml-far], services: [openbank-aml-service], tracking: ADR-0367 }
+    note: Zákaz informování klienta (§ 38).
+  - id: fau-information-request
+    area: aml
+    name: { cs: Poskytnutí informací na žádost FAÚ, en: Responses to FAÚ information requests }
+    authority: fau
+    legal_basis: zákon č. 253/2008 Sb. § 24
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2008-253
+      spec: https://www.fau.gov.cz/
+    cadence: Ve lhůtě stanovené FAÚ.
+    cadence_confidence: unverified
+    kind: event
+    transport: MoneyWeb / datová schránka
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: fau-sanctions-assets
+    area: aml
+    name: { cs: Oznámení o majetku podléhajícím mezinárodní sankci, en: Report of assets subject to international sanctions }
+    authority: fau
+    legal_basis: zákon č. 69/2006 Sb.; nařízení (EU) 269/2014 čl. 8; nařízení (EU) 833/2014
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2006-69
+      spec: https://www.fau.gov.cz/
+    cadence: Bez zbytečného odkladu.
+    cadence_confidence: unverified
+    kind: event
+    transport: datová schránka / MoneyWeb
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [openbank-sanctions-service], tracking: null }
+  - id: eu-russia-belarus-deposits
+    area: aml
+    name: { cs: Vklady ruských a běloruských osob nad 100 000 EUR, en: Russia/Belarus deposits above EUR 100k }
+    authority: fau
+    legal_basis: nařízení (EU) 833/2014 čl. 5g; nařízení (ES) 765/2006 čl. 1y
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2014/833/oj
+      spec: null
+    cadence: Pololetně.
+    cadence_confidence: known-eu
+    kind: periodic-aggregate
+    transport: neověřeno
+    personal_data: "partial"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: beneficial-owner-discrepancy
+    area: aml
+    name: { cs: Oznámení nesrovnalosti v evidenci skutečných majitelů, en: Beneficial owner register discrepancy report }
+    authority: courts
+    legal_basis: zákon č. 37/2021 Sb.
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2021-37
+      spec: null
+    cadence: Při zjištění.
+    cadence_confidence: unverified
+    kind: event
+    transport: neověřeno
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [openbank-kyb-service], tracking: null }
+
+  # ── Tax ────────────────────────────────────────────────────────────────────────────────────
+  - id: fs-crs
+    area: tax
+    name: { cs: Automatická výměna informací o finančních účtech (CRS/DAC2), en: CRS / DAC2 reporting }
+    authority: fs
+    legal_basis: "zákon č. 164/2013 Sb. § 13k, § 13l, § 13t; směrnice 2011/16/EU ve znění DAC2 a DAC8"
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2013-164
+      spec: https://www.financnisprava.gov.cz/
+    cadence: "Oznámení do 30. 6. roku následujícího po vykazovaném roce, pouze elektronicky; předběžné ohlášení do 31. 5."
+    cadence_confidence: verified
+    kind: granular-feed
+    transport: EPO / MOJE daně (XML)
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: data-only, reports: [], services: [openbank-tax-reporting-service, openbank-party-service], tracking: ADR-0340 }
+    note: Daňová rezidence je atribut osoby (ADR-0339); hrubý výnos je zaznamenáván z událostí srážkové daně.
+  - id: fs-fatca
+    area: tax
+    name: { cs: FATCA, en: FATCA reporting }
+    authority: fs
+    legal_basis: mezivládní dohoda ČR–USA; zákon č. 164/2013 Sb.
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2013-164
+      spec: https://www.financnisprava.gov.cz/
+    cadence: Ročně, do 30. 6.
+    cadence_confidence: unverified
+    kind: granular-feed
+    transport: EPO
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: bff-only, reports: [fatca-report], services: [openbank-tax-reporting-service], tracking: ADR-0340 }
+  - id: fs-withholding-tax
+    area: tax
+    name: { cs: Odvod a vyúčtování daně vybírané srážkou (úroky), en: Withholding tax remittance and settlement (interest) }
+    authority: fs
+    legal_basis: zákon č. 586/1992 Sb. § 36 a § 38d
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/1992-586
+      spec: https://www.financnisprava.gov.cz/
+    cadence: "Odvod do konce měsíce následujícího po měsíci srážky (ověřeno, § 38d odst. 3); lhůta ročního vyúčtování (§ 38d odst. 9) neověřena."
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: EPO / MOJE daně
+    personal_data: "no"
+    applicability: always
+    coverage: { status: data-only, reports: [], services: [openbank-tax-reporting-service, openbank-interest-service], tracking: null }
+    note: Tax-reporting-service sestavuje měsíční podání podle § 38d odst. 3; v regulatorním katalogu není.
+  - id: fs-nonresident-withholding
+    area: tax
+    name: { cs: Hlášení o srážkové dani u plateb nerezidentům, en: Withholding notice for payments to non-residents }
+    authority: fs
+    legal_basis: zákon č. 586/1992 Sb. § 38d odst. 3
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/1992-586
+      spec: https://www.financnisprava.gov.cz/
+    cadence: Měsíčně.
+    cadence_confidence: unverified
+    kind: granular-feed
+    transport: EPO
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: data-only, reports: [], services: [openbank-tax-reporting-service], tracking: null }
+  - id: fs-dac6
+    area: tax
+    name: { cs: Oznámení přeshraničních uspořádání (DAC6), en: Reportable cross-border arrangements (DAC6) }
+    authority: fs
+    legal_basis: zákon č. 164/2013 Sb.; směrnice (EU) 2018/822
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2013-164
+      spec: https://www.financnisprava.gov.cz/
+    cadence: Do 30 dnů od události.
+    cadence_confidence: known-eu
+    kind: event
+    transport: EPO
+    personal_data: "yes"
+    applicability: "conditional: banka vystupuje jako zprostředkovatel uspořádání"
+    coverage: { status: conditional, reports: [], services: [], tracking: null }
+  - id: fs-dac8-crypto
+    area: tax
+    name: { cs: DAC8 – kryptoaktiva, en: DAC8 crypto-asset reporting }
+    authority: fs
+    legal_basis: směrnice (EU) 2023/2226
+    sources:
+      law: https://eur-lex.europa.eu/eli/dir/2023/2226/oj
+      spec: null
+    cadence: Ročně od vykazovacího roku 2026.
+    cadence_confidence: known-eu
+    kind: granular-feed
+    transport: neověřeno
+    personal_data: "yes"
+    applicability: "conditional: banka poskytuje služby kryptoaktiv podle MiCA"
+    coverage: { status: conditional, reports: [], services: [], tracking: null }
+  - id: fs-corporate-taxes
+    area: tax
+    name: { cs: "Vlastní daňová přiznání banky (DPPO, DPH, mzdy)", en: Own corporate tax filings }
+    authority: fs
+    legal_basis: zákony č. 586/1992 Sb., 235/2004 Sb., 280/2009 Sb.
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2009-280
+      spec: https://www.financnisprava.gov.cz/
+    cadence: Podle daně.
+    cadence_confidence: unverified
+    kind: periodic-aggregate
+    transport: EPO / MOJE daně
+    personal_data: "partial"
+    applicability: always
+    coverage: { status: data-only, reports: [], services: [openbank-tax-reporting-service], tracking: null }
+    note: Korporátní registr faktů (CorporateRegister) v tax-reporting-service; samotné přiznání mimo katalog.
+
+  # ── Requests from public bodies ───────────────────────────────────────────────────────────
+  - id: tax-authority-requests
+    area: requests
+    name: { cs: Sdělení údajů o účtech správci daně, en: Account information requests from tax authorities }
+    authority: fs
+    legal_basis: zákon č. 280/2009 Sb. § 57 a 58
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2009-280
+      spec: null
+    cadence: Při žádosti.
+    cadence_confidence: unverified
+    kind: event
+    transport: datová schránka
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: court-executor-requests
+    area: requests
+    name: { cs: "Součinnost exekutorům, soudům a orgánům činným v trestním řízení", en: "Court, bailiff and law-enforcement requests" }
+    authority: courts
+    legal_basis: zákon č. 120/2001 Sb. § 33; trestní řád § 8; zákon č. 21/1992 Sb. § 38
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2001-120
+      spec: null
+    cadence: Při žádosti; lhůty neověřeny.
+    cadence_confidence: unverified
+    kind: event
+    transport: datová schránka / elektronické rozhraní exekutorů
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: social-body-requests
+    area: requests
+    name: { cs: "Součinnost ČSSZ, zdravotním pojišťovnám a úřadům práce", en: Social security and health insurer requests }
+    authority: social
+    legal_basis: zákony č. 582/1991 Sb., 592/1992 Sb., 111/2006 Sb.
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/1991-582
+      spec: null
+    cadence: Při žádosti.
+    cadence_confidence: unverified
+    kind: event
+    transport: datová schránka
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: cnb-notifications
+    area: requests
+    name: { cs: "Oznámení ČNB (vedoucí osoby, kvalifikované účasti, outsourcing)", en: "Notifications to CNB (management, holdings, outsourcing)" }
+    authority: cnb
+    legal_basis: zákon č. 21/1992 Sb.; EBA GL o outsourcingu
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/1992-21
+      spec: null
+    cadence: Při události.
+    cadence_confidence: unverified
+    kind: event
+    transport: datová schránka / SDAT
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: external, reports: [], services: [], tracking: null }
+  - id: complaints-and-arbiter
+    area: requests
+    name: { cs: Stížnosti klientů a součinnost s finančním arbitrem, en: Complaints and Financial Arbiter cooperation }
+    authority: cnb
+    legal_basis: zákon č. 370/2017 Sb.; zákon č. 229/2002 Sb.
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2002-229
+      spec: null
+    cadence: Při žádosti; existence pravidelného výkazu neověřena.
+    cadence_confidence: unverified
+    kind: event
+    transport: datová schránka
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+
+  # ── Disclosure and client information ─────────────────────────────────────────────────────
+  - id: pillar3-disclosure
+    area: disclosure
+    name: { cs: Uveřejňování informací (Pilíř 3) včetně ESG, en: Pillar 3 disclosures incl. ESG }
+    authority: public
+    legal_basis: CRR část osmá čl. 431–455 a 449a; prováděcí nařízení (EU) 2024/3172
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2013/575/oj
+      spec: https://www.eba.europa.eu/
+    cadence: Ročně, pololetně nebo čtvrtletně podle velikosti.
+    cadence_confidence: unverified
+    kind: disclosure
+    transport: web banky; datový hub EBA
+    personal_data: "no"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: annual-report
+    area: disclosure
+    name: { cs: Výroční zpráva a účetní závěrka, en: Annual report and financial statements }
+    authority: public
+    legal_basis: zákon č. 563/1991 Sb. § 21; zákon č. 21/1992 Sb.
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/1991-563
+      spec: null
+    cadence: Ročně.
+    cadence_confidence: unverified
+    kind: disclosure
+    transport: Sbírka listin / web / datová schránka
+    personal_data: "no"
+    applicability: always
+    coverage: { status: external, reports: [], services: [], tracking: null }
+  - id: sustainability-statement
+    area: disclosure
+    name: { cs: Zpráva o udržitelnosti (CSRD/ESRS), en: Sustainability statement (CSRD) }
+    authority: public
+    legal_basis: zákon č. 563/1991 Sb.; směrnice (EU) 2022/2464 ve znění směrnice (EU) 2025/794
+    sources:
+      law: https://eur-lex.europa.eu/eli/dir/2022/2464/oj
+      spec: null
+    cadence: Ročně; rozsah a časování změněny balíčkem Omnibus.
+    cadence_confidence: unverified
+    kind: disclosure
+    transport: výroční zpráva
+    personal_data: "no"
+    applicability: "conditional: banka v rozsahu CSRD po změnách Omnibus"
+    coverage: { status: conditional, reports: [], services: [], tracking: null }
+  - id: annual-fee-statement
+    area: disclosure
+    name: { cs: Přehled poplatků za platební účet, en: Annual statement of fees (PAD) }
+    authority: public
+    legal_basis: zákon č. 370/2017 Sb.; směrnice 2014/92/EU čl. 5
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2017-370
+      spec: null
+    cadence: Ročně každému klientovi.
+    cadence_confidence: known-eu
+    kind: disclosure
+    transport: klientský kanál
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [], tracking: null }
+  - id: currency-conversion-charges
+    area: disclosure
+    name: { cs: Oznámení poplatků za převod měn, en: Currency-conversion charge disclosure }
+    authority: public
+    legal_basis: nařízení (EU) 2021/1230 čl. 4–5
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2021/1230/oj
+      spec: null
+    cadence: U každé transakce.
+    cadence_confidence: known-eu
+    kind: disclosure
+    transport: klientský kanál
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: missing, reports: [], services: [openbank-fx-service], tracking: null }
+
+  # ── Markets and distribution ──────────────────────────────────────────────────────────────
+  - id: emir-derivatives
+    area: markets
+    name: { cs: EMIR – hlášení derivátů, en: EMIR derivatives reporting }
+    authority: trade-repository
+    legal_basis: nařízení (EU) 648/2012 čl. 9; prováděcí nařízení (EU) 2022/1860
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2012/648/oj
+      spec: null
+    cadence: T+1.
+    cadence_confidence: known-eu
+    kind: granular-feed
+    transport: registr obchodních údajů
+    personal_data: "no"
+    applicability: "conditional: banka uzavírá derivátové obchody (např. zajištění)"
+    coverage: { status: missing, reports: [], services: [openbank-treasury-service], tracking: null }
+  - id: sftr
+    area: markets
+    name: { cs: SFTR – repo operace a půjčky cenných papírů, en: SFTR reporting }
+    authority: trade-repository
+    legal_basis: nařízení (EU) 2015/2365 čl. 4
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2015/2365/oj
+      spec: null
+    cadence: T+1.
+    cadence_confidence: known-eu
+    kind: granular-feed
+    transport: registr obchodních údajů
+    personal_data: "no"
+    applicability: "conditional: banka provádí repo obchody mimo výjimku pro centrální banku"
+    coverage: { status: conditional, reports: [], services: [], tracking: null }
+  - id: mifir-transactions
+    area: markets
+    name: { cs: Hlášení obchodů podle MiFIR čl. 26, en: MiFIR transaction reporting }
+    authority: cnb
+    legal_basis: nařízení (EU) 600/2014 čl. 26; zákon č. 256/2004 Sb.
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2014/600/oj
+      spec: null
+    cadence: T+1.
+    cadence_confidence: known-eu
+    kind: granular-feed
+    transport: ARM / ČNB
+    personal_data: "yes"
+    applicability: "conditional: banka poskytuje investiční služby ve finančních nástrojích"
+    coverage: { status: conditional, reports: [], services: [], tracking: null }
+  - id: pension-distribution
+    area: markets
+    name: { cs: Distribuce doplňkového penzijního spoření, en: Supplementary pension savings distribution }
+    authority: cnb
+    legal_basis: zákon č. 427/2011 Sb.
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2011-427
+      spec: null
+    cadence: Registrace distributorů při události; pravidelný výkaz neověřen.
+    cadence_confidence: unverified
+    kind: register
+    transport: registr ČNB
+    personal_data: "yes"
+    applicability: always
+    coverage: { status: data-only, reports: [], services: [openbank-pension-service, openbank-tax-reporting-service], tracking: ADR-0336 }
+    note: Výkazy za fondy penzijní společnosti jsou ve stránce Statutární výkazy (ADR-0336).
+  - id: consumer-credit-agents
+    area: markets
+    name: { cs: Registrace zprostředkovatelů spotřebitelského úvěru, en: Consumer credit intermediary registrations }
+    authority: cnb
+    legal_basis: zákon č. 257/2016 Sb.
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2016-257
+      spec: null
+    cadence: Při události.
+    cadence_confidence: unverified
+    kind: register
+    transport: registr ČNB
+    personal_data: "yes"
+    applicability: "conditional: banka využívá vázané zástupce"
+    coverage: { status: conditional, reports: [], services: [], tracking: null }
+  - id: cash-counterfeits
+    area: markets
+    name: { cs: Oběh hotovosti a zadržené padělky, en: Cash handling and counterfeit reporting }
+    authority: cnb
+    legal_basis: zákon č. 136/2011 Sb.
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2011-136
+      spec: null
+    cadence: Při zadržení padělku; periodická statistika neověřena.
+    cadence_confidence: unverified
+    kind: event
+    transport: neověřeno
+    personal_data: "partial"
+    applicability: "conditional: banka zpracovává hotovost"
+    coverage: { status: conditional, reports: [], services: [], tracking: null }

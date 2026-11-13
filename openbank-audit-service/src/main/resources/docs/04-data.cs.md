@@ -18,6 +18,7 @@
 | `V3__create_audit_outbox.sql` | Vytvoří `audit_outbox` (BIGSERIAL `id` PK, unikátní `event_id` UUID, `aggregate_id`, `event_type`, `payload`, `status`, `attempt_count`, `sent_at`, `last_error`, timestamps) plus indexy `(status, created_at)` a `aggregate_id`. **Odstraněno V16** — viz níže. |
 | `V4__hibernate_sequences.sql` | Vytvoří `audit_entries_seq` a `audit_outbox_seq` (`INCREMENT BY 50`) vyžadované alokací id PanacheEntity. Rollback: `DROP SEQUENCE audit_entries_seq, audit_outbox_seq;`. |
 | `V16__drop_audit_outbox.sql` | Odstraní `audit_outbox` a `audit_outbox_seq` — transakční-outbox aparatura nad ní postavená neměla nikde ve službě žádného writera (#5126). Rollback obnoví tabulku/indexy/sekvenci ve stavu V8 (viz komentář v migraci). |
+| `V17__widen_audit_identity_columns.sql` | Rozšíří `event_type`, `aggregate_id`, `actor_id`, `source_service`, `correlation_id` a `session_id` v `audit_entries` z `VARCHAR(100)` na `VARCHAR(512)`, takže dlouhá hodnota producenta se uloží doslovně, místo aby INSERT selhal a záznam skončil v dead-letter frontě. Mění jen metadata: tabulka se nepřepisuje a žádný uložený `record_hash` se nemění. Rollback: jen dopředu, jakmile některý řádek přesáhne 100 znaků. |
 
 ## Tabulky
 
@@ -27,18 +28,18 @@
 |---|---|---|
 | `id` | BIGSERIAL PK | Surrogate; id alokována z `audit_entries_seq` |
 | `entry_id` | UUID, unique, not null | Logické id záznamu (vystaveno v API) |
-| `event_type` | VARCHAR(100) | Název události producenta |
+| `event_type` | VARCHAR(512) | Název události producenta |
 | `aggregate_type` | VARCHAR(50) | ACCOUNT / PARTY / TRANSACTION / CONSENT / KYC_CASE / UNKNOWN |
-| `aggregate_id` | VARCHAR(100) | Indexováno; primární dotazovací klíč |
-| `actor_id` | VARCHAR(100), null | Kdo událost spustil |
+| `aggregate_id` | VARCHAR(512) | Indexováno; primární dotazovací klíč |
+| `actor_id` | VARCHAR(512), null | Kdo událost spustil |
 | `actor_type` | VARCHAR(50), null | Klasifikace aktéra |
 | `payload` | TEXT, not null | Původní JSON události, doslovně |
-| `source_service` | VARCHAR(100) | Zdrojová služba |
-| `correlation_id` | VARCHAR(100), null | Trace correlation |
+| `source_service` | VARCHAR(512) | Zdrojová služba |
+| `correlation_id` | VARCHAR(512), null | Trace correlation |
 | `occurred_at` | TIMESTAMPTZ | Business čas — skutečný jen když `occurred_at_source = 'EVENT'` |
 | `recorded_at` | TIMESTAMPTZ, default NOW() | Čas ingestu |
 | `occurred_at_source` | VARCHAR(8), null | (V11) `EVENT` = producent poslal `occurredAt`; `INGEST` = neposlal, takže `occurred_at` je čas příjmu (horní mez); NULL = řádek před V11, ber jako `INGEST` |
-| `session_id` | VARCHAR(100), null | (V2) |
+| `session_id` | VARCHAR(512), null | (V2) |
 | `user_agent` | VARCHAR(500), null | (V2) |
 | `ip_address` | VARCHAR(45), null | (V2) — IPv4/IPv6 |
 | `data_sensitivity` | VARCHAR(20), default INTERNAL | (V2) PUBLIC/INTERNAL/CONFIDENTIAL/RESTRICTED |
@@ -75,3 +76,5 @@ Viz [06 — Compliance](./06-compliance.md) pro analýzu právního základu a v
 ## Stav vlastních převodů banky (ADR-0344, fáze 1b)
 
 audit-service čte také `openbank.swift.institution-transfers`, stav každého vlastního převodu banky ze swift-service. Je to money-path: každý stav popisuje převod, který kanál provedl. Záznamy se přiřazují `swift-service` přes sdílenou tabulku `TopicProducers` a KafkaUser auditu má na topik oprávnění Read (`kafka-audit-mtls.yaml`).
+
+audit-service odebírá také `openbank.accounts.account.status-changed` a `openbank.accounts.savings-withdrawal.approved` (#9073); `TopicProducers` je přiřazuje službě `account-service`. Odběr vzniká dřív, než account-service tyto události přesune z `openbank.accounts.account.created`, takže při přepnutí se žádná neztratí; KafkaUser auditu má na obou topicích Read.

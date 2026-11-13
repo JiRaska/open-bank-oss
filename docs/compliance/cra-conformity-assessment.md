@@ -57,7 +57,7 @@ changes *who attests*, not *what must be true*:
 | Machine-readable SBOM, kept current | **Done** | `release-evidence` job in `release-please.yml`; signed CycloneDX on every GitHub Release |
 | Coordinated vulnerability disclosure (Art. 13, Annex I Part II) | **Done** | `SECURITY.md`, `security.txt` (RFC 9116) |
 | Art. 14 reporting pipeline (from 2026-09-11) | **Done, pending rehearsal** | runbooks 0017 + 0018; tabletop exercise due 2026-09-11 |
-| Support period ≥ 5 years, free security updates | Declared as commitment, formal value open | `SECURITY.md` "Supported Versions"; formal declaration before first production release |
+| Support period ≥ 5 years, free security updates | Policy declared; per-release 1.x end date and 0.x floor generated, recipient display pending release-run proof | `SECURITY.md` "Support period and end-of-support"; signed `<tag>.evidence.json` `support` block and GitHub Release page |
 | EU declaration of conformity + CE marking | Not applicable yet | required at first market placement |
 | Vulnerability handling docs public (free-OSS important products) | N/A while default | if a surface re-classifies to Class I, public technical documentation preserves the self-assessment path |
 

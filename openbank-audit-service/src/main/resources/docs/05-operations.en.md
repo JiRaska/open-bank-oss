@@ -91,6 +91,12 @@ to treasury-service) and `openbank.swift.institution-transfers` (bank-own transf
 ACCEPTED, SENT, SETTLED, REJECTED, attributed to swift-service). Both are money-path topics. A new
 topic has no committed offset, so the first subscription reads it from its retention start.
 
+## TPP register changes in the audit stream
+
+The consumer also subscribes to `openbank.tpp.registry.event` (`TPP_REGISTERED` / `TPP_BLACKLISTED`, attributed
+to tpp-registry-service). The audit KafkaUser holds Read on the topic. A new subscription has no committed offset,
+so the first one reads the topic from its retention start (#13177).
+
 ## Shared configuration defaults
 
 This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.

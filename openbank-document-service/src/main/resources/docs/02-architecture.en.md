@@ -70,7 +70,7 @@ reactive/JDBC reads from the migrated database, and HTTP 401 when an M2M identit
 
 Dedicated database `openbank_documents`, `generation: none`, Flyway V1..V3. Only the outbox entity
 extends `PanacheOutboxEntity` (Hibernate sequence `document_outbox_seq`, created in V3 — guarded by
-`HibernateSequenceGuardTest`); all other entities use application-assigned UUID/String ids.
+the CI gate `hibernate-sequence-guard`); all other entities use application-assigned UUID/String ids.
 
 ## Seeded pension templates
 
@@ -85,3 +85,32 @@ Live rendering also refuses any previously published template containing `LEGAL-
 ## Outbox trace propagation
 
 The outbox row stores the W3C `traceparent` of the request that wrote it (`document_outbox.trace_context`, migration `V16`, nullable). The dispatcher publishes the record with that `traceparent` header and parents its producer span on the stored context, so a consumer span links to the originating request instead of starting a trace at the scheduler thread. Rows written outside any span carry no value and are published as before.
+
+## Product-catalog reads use this service's own identity
+
+The product read (`ProductCatalogClient.getById`) is sent with the named OIDC client `m2m`, which authenticates as `openbank-document` (ROLE_API plus the
+`catalog:read` scope), not as the shared `openbank-services` client. product-catalog grants
+`catalog.read` to this identity by name (`service-named-catalog-read`); it deliberately refuses the
+shared client on ROLE_API alone. If the Keycloak client lacks the `catalog:read` scope, the read is
+denied once product-catalog enforces authorization. `M2mOidcClientIdentityWiringTest` pins the
+client selection.
+
+## Ownership projection (ADR-0375 D5)
+
+`GET /api/v1/documents/{id}/owner` answers one question — which party owns this document — and
+returns `{id, partyId}` and nothing else. delegation-service calls it before it mints an
+`OBJECT_READ` delegation over a document.
+
+It carries its own authorization action, `document.verifyOwnership`, rather than reusing
+`document.read`. `document.read` returns the whole metadata record (template, storage key, sha256,
+case and product refs) and is granted to other subjects; the authority needed to **mint** a
+delegation over a document must not also be able to read it. The OPA extension pins the new action
+to `service-account-openbank-delegation` and vetoes every other caller explicitly — the veto
+matters because base `rest.rego` grants the customer edge the whole `document.` family.
+
+A 404 covers both an unknown document and one with no `partyRef` recorded. A caller treats the two
+identically, and distinguishing them would tell someone enumerating ids which documents exist.
+
+What this unblocked: before it, delegation-service answered `UNVERIFIABLE` for every object
+resource type, its offer path refuses on that, and so no document could be shared at all — while
+customer-edge's reader for a shared document was already deployed.

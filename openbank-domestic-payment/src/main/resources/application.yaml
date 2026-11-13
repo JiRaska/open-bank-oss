@@ -163,6 +163,26 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.domestic-payment.delegated-spend-reservation-state-in
+      # #4403: an analyst's decision on a FRAUD_REVIEW case releases or rejects the held payment.
+      # Off until the activation PR, which turns it on with the enforcement flag. Nested keys, because
+      # a dotted leaf never reaches the connector. earliest is safe: the group is new, every other
+      # alert code is skipped, and a decision for a finished run is only counted.
+      fraud-hold-resolution-in:
+        enabled: ${DOMESTIC_FRAUD_HOLD_RESOLUTION_CONSUMER_ENABLED:false}
+        connector: smallrye-kafka
+        topic: openbank.aml.events
+        client:
+          id: domestic-payment-fraud-hold-resolution-${quarkus.uuid}
+        group:
+          id: domestic-payment-fraud-hold-resolution
+        auto:
+          offset:
+            reset: earliest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.domestic-payment.fraud-hold-resolution-in
 "%dev":
   quarkus:
     log:
@@ -282,6 +302,21 @@ authz:
       ssl:
         client-auth: required
       insecure-requests: enabled
+      # Listener parity (#12511, the #12506 pattern): with client-auth on, Quarkus ALSO registers its
+      # mTLS authentication mechanism, which turns any trusted client certificate into an authenticated
+      # SecurityIdentity of its own, on the TLS listener only. /api/* therefore accepts the bearer
+      # mechanism ONLY and demands authentication itself; the certificate stays transport authentication.
+      # DomesticPaymentListenerAuthParityIT holds both listeners to it with the production listener shape.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: authenticated
+            auth-mechanism: bearer
+          public-metadata:
+            paths: /api/v1/info,/api/v1/config
+            methods: GET
+            policy: permit
     # PaymentConfirmationRenderAdapter calls document-service. Production uses a named TLS bucket over
     # document-service's private-CA mTLS listener (8443, client auth REQUIRED), the same shape as
     # notification-service's party-authority bucket. Local/test fixtures speak plain HTTP, so this

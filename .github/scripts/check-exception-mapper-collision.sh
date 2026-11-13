@@ -79,8 +79,40 @@ if [ "${1:-}" = "--self-test" ]; then
   e="$td/empty"; mkdir -p "$e/openbank-x/src/main/kotlin"
   expect "an empty tree reports 0 checked" "$e" 0 "0 "
 
+  # Cross the bounded prefilter batch and retain exact diagnostics for names with
+  # spaces/colons and multiple hits. Every source still counts, including no-match files.
+  iroot="$td/batches"; mkdir -p "$iroot/openbank-x/src/main/kotlin"
+  for ((i=0; i<130; i++)); do
+    printf 'class Good%s : ExceptionMapper<OwnException> {}\n' "$i" > "$iroot/openbank-x/src/main/kotlin/$(printf '%03d' "$i").kt"
+  done
+  put "$iroot/openbank-x/src/main/kotlin/000.kt" 'class M : ExceptionMapper<Exception> {}\n'
+  put "$iroot/openbank-x/src/main/kotlin/z collision: 1.kt" 'class A : ExceptionMapper<DomainException> {}\n// : ExceptionMapper<Exception> is prose\nclass B : ExceptionMapper<IllegalStateException> {}\n'
+  expect "hits after a batch boundary retain their original lines" "$iroot" 1 "z collision: 1.kt,line=3::"
+  expect "candidate filtering does not reduce the subject count" "$iroot" 1 "SUBJECTS=131"
+
+  # An unreadable file or any other prefilter error must fall back to the original
+  # per-file inspection, never treat an inconclusive batch as having no collisions.
+  j="$td/fallback"; put "$(K "$j")" 'class M : ExceptionMapper<Exception> {}\n'
+  shim="$td/bin"; mkdir -p "$shim"
+  cat > "$shim/grep" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = "-lE" ]; then
+  printf 'called\n' >> "$OB_BATCH_PREFILTER_PROBE"
+  exit 2
+fi
+exec "$OB_REAL_GREP" "$@"
+SH
+  chmod +x "$shim/grep"
+  real_grep=$(command -v grep)
+  PATH="$shim:$PATH" OB_REAL_GREP="$real_grep" OB_BATCH_PREFILTER_PROBE="$j/probed" \
+    expect "an inconclusive prefilter still reports collisions" "$j" 1 "collides non-deterministically"
+  if [ ! -s "$j/probed" ]; then
+    echo "::error::self-test: the prefilter failure fixture never reached the prefilter" >&2
+    fails=$((fails+1))
+  fi
+
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: ExceptionMapper collision guard is falsifiable (8 cases)"
+  echo "self-test ok: ExceptionMapper collision guard is falsifiable (11 cases)"
   exit 0
 fi
 root="${1:-.}"
@@ -93,8 +125,8 @@ checked=0
 # reference these type names in prose and must not self-trigger.
 pattern=': *ExceptionMapper<(IllegalArgumentException|IllegalStateException|NoSuchElementException|Exception|WebApplicationException|SelfApprovalNotAllowedException|InvalidApprovalStateException|DomainException)>'
 
-while IFS= read -r f; do
-  checked=$((checked + 1))
+inspect_file() {
+  local f="$1" hits hit lineno
   # Exclude Kotlin line-comments (// ...) so prose mentioning the pattern doesn't self-trigger.
   hits=$(grep -nE "$pattern" "$f" | grep -vE '^[0-9]+:[[:space:]]*//' || true)
   if [ -n "$hits" ]; then
@@ -104,9 +136,41 @@ while IFS= read -r f; do
       echo "::error file=$f,line=$lineno::a service-local ExceptionMapper for a libs-runtime-owned JDK exception type collides non-deterministically (issue #526) — introduce a dedicated exception type + mapper instead."
     done <<< "$hits"
   fi
+}
+
+batch=()
+inspect_batch() {
+  local candidates rc f
+  [ "${#batch[@]}" -gt 0 ] || return 0
+  # Most files have no mapper. One grep per bounded batch avoids two process
+  # launches per source; matching files keep the original diagnostic pipeline.
+  if candidates=$(grep -lE -- "$pattern" "${batch[@]}" 2>/dev/null); then
+    :
+  else
+    rc=$?
+    if [ "$rc" -ne 1 ]; then
+      # Preserve the old reads and stderr when the prefilter cannot decide.
+      for f in "${batch[@]}"; do inspect_file "$f"; done
+      return 0
+    fi
+  fi
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    inspect_file "$f"
+  done <<< "$candidates"
+}
+
+while IFS= read -r f; do
+  checked=$((checked + 1))
+  batch+=("$f")
+  if [ "${#batch[@]}" -ge 128 ]; then
+    inspect_batch
+    batch=()
+  fi
 done < <(find "$root"/openbank-*/src/main/kotlin -name '*.kt' \
   -not -path '*/openbank-libs-runtime/*' \
   -not -path '*/build/*' | sort)
+inspect_batch
 
 echo "SUBJECTS=$checked"
 echo "check-exception-mapper-collision: $checked service source file(s) checked, $( [ "$fail" -eq 0 ] && echo "none collide with a libs-runtime-owned ExceptionMapper type." || echo "VIOLATIONS above." )"

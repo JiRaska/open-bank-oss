@@ -35,6 +35,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10  # measured max 6s
     steps:
+      # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
+      - name: quota-meter start
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB start $q"
+          echo "::notice title=quota-meter::$line"
+          echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
       - name: Lint PR "Linked issues"
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
@@ -119,3 +129,14 @@ jobs:
               'issue-hygiene: the PR "Linked issues" section is empty or still the template '
               + 'placeholder. Add `Closes #<n>` / `Refs #<n>`, or an explicit `N/A — <reason>`. '
               + '(ADR-0052; bypass with the `skip-hygiene` label.)')
+      # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
+      - name: quota-meter end
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB end $q"
+          echo "::notice title=quota-meter::$line"
+          echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true

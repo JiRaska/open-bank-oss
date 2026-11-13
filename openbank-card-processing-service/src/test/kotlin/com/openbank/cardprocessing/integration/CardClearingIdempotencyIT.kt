@@ -11,6 +11,7 @@ import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.cardprocessing.infrastructure.persistence.repository.CardAuthorizationRepositoryImpl
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -43,7 +44,10 @@ import java.util.concurrent.atomic.AtomicInteger
  * `card_clearings (authorization_id, idempotency_key)`, which only a real Postgres enforces.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.cardprocessing.it.PostgresTestResource::class)
+@QuarkusTestResource(
+    com.openbank.libs.testing.containers.PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_card_processing_it")],
+)
 @TestProfile(CardClearingIdempotencyIT.Profile::class)
 @TestSecurity(user = "card-processing-it", roles = ["ROLE_OPERATOR"])
 class CardClearingIdempotencyIT {

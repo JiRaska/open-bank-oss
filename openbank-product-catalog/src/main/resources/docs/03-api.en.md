@@ -141,8 +141,12 @@ GET /api/v1/fees?productCode=CURRENT_PERSONAL
 
 ## Error model
 
-Legacy v1 wire shapes remain compatible with the existing Pacts. v2 returns `ApiError`; schema
-validation uses 422 with ordered `{instancePath,schemaPath,keyword,message}` violations.
+Legacy v1 product-not-found responses retain `{ "error": "<message>" }` for existing Pacts.
+When banking compatibility is disabled, the six documented product detail, update, code lookup,
+activation, deactivation, and per-product fee 404 responses come from the shared mapper as
+`ApiError` (`traceId`, `status`, `code`, `message`, `timestamp`). Those six responses accept both
+bodies. V2 returns `ApiError`; schema validation uses 422 with ordered
+`{instancePath,schemaPath,keyword,message}` violations.
 
 ## Versioning
 
@@ -184,6 +188,13 @@ copy or invalid signature fails closed (no evaluation, no posting), each counted
 `outcome` of `openbank_product_revision_load_total` (`identity_mismatch` for a substituted
 revision); the catalog is a publication authority, never a dependency on
 the posting path. The API contract version is 2.9.0; the change is additive.
+
+In `openbao` mode the catalog logs in with Kubernetes auth role `product-catalog-ir-signing` as
+its own ServiceAccount `product-catalog`, and reaches OpenBao only over TLS
+(`https://openbao.vault.svc:8203`). `openbank.catalog.ir-signing.openbao.ca-file` names the PEM
+CA it trusts for that connection (the deployment points it at the private CA of `internal-tls`);
+unset, the JVM default trust store applies. The Transit key, policy and role are provisioned by
+runbook 0027, section "Product IR signing".
 
 ### Linting a product IR (ADR-0352 phase 5b)
 

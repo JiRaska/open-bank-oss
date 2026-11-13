@@ -129,3 +129,12 @@ sequenceDiagram
 3. **No remote calls in TX** — synchronous within request/response, async via outbox + Kafka.
 4. **Idempotence at issue** — `Idempotency-Key` is required on issue and de-duplicated by the unique `idempotency_key` column.
 5. **PCI scope minimisation** — only the masked PAN ever leaves the domain; no full PAN / CVV / PIN exists in the model.
+
+## Product-catalog reads use this service's own identity
+
+The product-configuration lookup (`ProductCatalogClient.getByCode`, `GET /api/v1/products/by-code/{code}`) is sent with the named OIDC client `m2m`, which authenticates as `openbank-card-issuance` (ROLE_API plus the
+`catalog:read` scope), not as the shared `openbank-services` client. product-catalog grants
+`catalog.read` to this identity by name (`service-named-catalog-read`); it deliberately refuses the
+shared client on ROLE_API alone. If the Keycloak client lacks the `catalog:read` scope, the read is
+denied once product-catalog enforces authorization. `M2mOidcClientIdentityWiringTest` pins the
+client selection.

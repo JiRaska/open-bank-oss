@@ -124,6 +124,35 @@ class DeployWindowMutateTest(unittest.TestCase):
         self.assertFalse(any(args[:2] == ("api", "graphql") for args in calls))
         return str(error)
 
+    def test_reselect_uses_the_same_per_kind_window_as_the_flush(self):
+        # A recent GitOps deploy and an armed GitOps PR close only the GitOps lane. The flush
+        # (per-kind) selects the admin-ui PR; a reselect that read ONE global window would see
+        # "last deploy 100 s ago", defer, and refuse every admin-ui arm while GitOps is busy.
+        branch = "chore/admin-ui-deploy-example"
+        prs = [{"number": 6, "head": "chore/gitops-auto-deploy-other", "head_sha": "c" * 40,
+                "created_at": "2025-12-31", "armed": True, "state": "open", "repair_priority": False},
+               {"number": 7, "head": branch, "head_sha": HEAD, "created_at": "2026-01-01",
+                "armed": False, "state": "open", "repair_priority": False}]
+        commits = [{"message": "chore(gitops): auto-deploy x", "epoch": 4900}]
+        error, calls, _ = self.execute(prs=prs, commits=commits, branch=branch)
+        self.assertIsNone(error)
+        self.assertTrue(any(args[:2] == ("api", "graphql") for args in calls))
+
+    def test_a_later_kind_is_armable_when_the_first_kind_was_refused(self):
+        # Both lanes open: the flush offers gitops first, the workflow refuses it (stale pin or
+        # hold) and falls through to admin-ui. The reselect must accept that second candidate,
+        # and still refuse a PR that is not offered at all.
+        branch = "chore/admin-ui-deploy-example"
+        prs = [{"number": 6, "head": "chore/gitops-auto-deploy-other", "head_sha": "c" * 40,
+                "created_at": "2025-12-30", "armed": False, "state": "open", "repair_priority": False},
+               {"number": 7, "head": branch, "head_sha": HEAD, "created_at": "2026-01-01",
+                "armed": False, "state": "open", "repair_priority": False}]
+        error, calls, _ = self.execute(prs=prs, branch=branch)
+        self.assertIsNone(error)
+        self.assertTrue(any(args[:2] == ("api", "graphql") for args in calls))
+        foreign = [dict(prs[0]), dict(prs[1], number=9)]
+        self.assertIn("deferred or changed", self.assert_refused(prs=foreign, branch=branch))
+
     def test_actual_workflow_arm_block_uses_current_policy_and_only_queues(self):
         workflow = Path(__file__).parents[1] / "workflows/deploy-window-flush.yml"
         # The arming step is the final workflow step; execute its actual Bash block.
@@ -173,6 +202,7 @@ if sys.argv[1] == 'rev-parse': print(os.environ['SELECTED_MAIN'])
             event = root / "event.json"
             event.write_text('{}')
             pr = pull()
+            pr["base"]["sha"] = "c" * 40  # historical REST base, live main stays BASE
             # Admin UI follows main's producer/contract checks; this fixture proves wiring,
             # not GitOps image ancestry. The service verifier has separate failure cases.
             pr["head"]["ref"] = "chore/admin-ui-deploy-example"
@@ -209,6 +239,16 @@ if sys.argv[1] == 'rev-parse': print(os.environ['SELECTED_MAIN'])
         self.assertTrue(any(args[1:3] == (str(mutator.SCRIPTS / "deploy-window.py"), "verify")
                             for args, _ in source_calls))
 
+    def test_creation_base_can_differ_from_unchanged_live_main(self):
+        # REST keeps the PR creation base; live-main reads and source verification
+        # independently prove that the selected current main has not moved.
+        pr = pull()
+        pr["base"]["sha"] = "c" * 40
+        error, calls, _ = self.execute(first=pr)
+        self.assertIsNone(error)
+        self.assertEqual(sum(args[:2] == ("api", "graphql") for args in calls), 1)
+        self.assertEqual(sum(args[-1].endswith("/git/ref/heads/main") for args in calls), 2)
+
     def test_clean_and_pending_statuses_only_arm(self):
         # Neither a green PR nor a pending one gives the flusher authority to merge.
         for status in ("clean", "blocked", "unstable", "unknown"):
@@ -240,7 +280,7 @@ if sys.argv[1] == 'rev-parse': print(os.environ['SELECTED_MAIN'])
         self.assert_refused(main=[BASE, "c" * 40])
 
     def test_changed_head_base_identity_or_repository_refused(self):
-        for field, value in (("head", "c" * 40), ("base", "c" * 40), ("node_id", "PR_other")):
+        for field, value in (("head", "c" * 40), ("base", "invalid"), ("node_id", "PR_other")):
             with self.subTest(field=field):
                 pr = pull()
                 if field == "node_id":
@@ -248,6 +288,12 @@ if sys.argv[1] == 'rev-parse': print(os.environ['SELECTED_MAIN'])
                 else:
                     pr[field]["sha"] = value
                 self.assert_refused(latest=pr)
+        pr = pull()
+        pr["base"]["ref"] = "other"
+        self.assert_refused(latest=pr)
+        pr = pull()
+        pr["base"]["repo"]["full_name"] = "fork/open-bank"
+        self.assert_refused(latest=pr)
         pr = pull()
         pr["head"]["repo"]["full_name"] = "fork/open-bank"
         self.assert_refused(latest=pr)

@@ -186,6 +186,13 @@ def overrides(root: Path) -> dict[tuple[str, str], dict[str, str]]:
     return out
 
 
+@lru_cache(maxsize=4)
+def kafka_topic_documents(gitops: str) -> tuple[str, ...]:
+    """Select topic documents once per corpus, preserving the detector's regex semantics."""
+    return tuple(doc for doc in re.split(r"(?m)^---\s*$", gitops)
+                 if re.search(r"(?m)^kind:\s*KafkaTopic\s*$", doc))
+
+
 def kafka_topic_cr(gitops: str, topic: str) -> bool:
     """True only if a `kind: KafkaTopic` document declares `metadata.name: <topic>`.
 
@@ -194,10 +201,8 @@ def kafka_topic_cr(gitops: str, topic: str) -> bool:
     `name: <topic>`, so deleting every KafkaTopic CR while keeping the ACLs left the CR branch
     green. Scoping to the document is what gives requirement 5 a failure it can actually reach.
     """
-    for doc in re.split(r"(?m)^---\s*$", gitops):
-        if re.search(r"(?m)^kind:\s*KafkaTopic\s*$", doc) and re.search(
-            r"(?m)^\s{0,4}name:\s*%s\s*$" % re.escape(topic), doc
-        ):
+    for doc in kafka_topic_documents(gitops):
+        if re.search(r"(?m)^\s{0,4}name:\s*%s\s*$" % re.escape(topic), doc):
             return True
     return False
 
@@ -343,6 +348,25 @@ def self_test() -> int:
         ("a real KafkaTopic document is found", with_cr, True),
     ):
         got = kafka_topic_cr(corpus, "openbank.dlq.x.y-in")
+        if got is not expect:
+            print(f"SELF-TEST FAIL: {name} (expected {expect}, got {got})")
+            failed += 1
+        else:
+            print(f"self-test ok: {name}")
+
+    # Corpus snapshots must remain isolated: a prior positive cannot hide a deleted CR,
+    # and regex metacharacters in topic names must still be matched literally.
+    for name, corpus, topic, expect in (
+        ("an unrelated CR does not satisfy this topic", with_cr, "openbank.dlq.x.other", False),
+        ("topic dots are literal", with_cr.replace("openbank.dlq.x.y-in", "openbankXdlqXxXy-in"),
+         "openbank.dlq.x.y-in", False),
+        ("a later corpus without the CR is rejected", acl_only, "openbank.dlq.x.y-in", False),
+        ("a later corpus with the CR is accepted", with_cr, "openbank.dlq.x.y-in", True),
+        ("name in a neighboring document is rejected",
+         "kind: KafkaTopic\nmetadata:\n  name: other\n---\nkind: KafkaUser\nmetadata:\n  name: target\n",
+         "target", False),
+    ):
+        got = kafka_topic_cr(corpus, topic)
         if got is not expect:
             print(f"SELF-TEST FAIL: {name} (expected {expect}, got {got})")
             failed += 1

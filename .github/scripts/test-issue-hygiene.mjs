@@ -11,7 +11,8 @@ const workflow = process.argv[2] ?? fileURLToPath(new URL('../workflows/issue-hy
 const text = readFileSync(workflow, 'utf8');
 const marker = '          script: |\n';
 assert.equal(text.split(marker).length, 2, 'fixture expects the single actual github-script body');
-const script = text.split(marker)[1].split(/\r?\n/).map(line => {
+// The script body ends where the next step (e.g. the quota-meter end step) begins.
+const script = text.split(marker)[1].split(/\r?\n      [-#]/)[0].split(/\r?\n/).map(line => {
   assert.ok(line.length === 0 || line.startsWith('            '), 'unexpected script block boundary');
   return line.slice(12);
 }).join('\n');

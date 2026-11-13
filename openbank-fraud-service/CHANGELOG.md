@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.18.3...fraud-service-v0.18.4) (2026-11-12)
+
+
+### Performance
+
+* **fraud:** move the outbox onto the kernel repository (ADR-0327 phase 2) ([#15535](https://github.com/JiRaska/open-bank-oss/issues/15535)) ([489f162](https://github.com/JiRaska/open-bank-oss/commit/489f1629c8afc3ba5bbb138bcb4f10c8a95cab28))
+
+## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.18.2...fraud-service-v0.18.3) (2026-11-06)
+
+
+### Bug Fixes
+
+* **fraud:** reject a null rule entry in a threshold proposal with 400 ([#14783](https://github.com/JiRaska/open-bank-oss/issues/14783)) ([44c2739](https://github.com/JiRaska/open-bank-oss/commit/44c2739c9acde34be41eaa87d1ed8196b1efbcf9))
+
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.18.1...fraud-service-v0.18.2) (2026-11-05)
+
+
+### Bug Fixes
+
+* **admin-ui:** tolerate slow fleet documentation probes and discover agent namespaces ([#14168](https://github.com/JiRaska/open-bank-oss/issues/14168)) ([7280f51](https://github.com/JiRaska/open-bank-oss/commit/7280f51d45c53706cbd910f78fc881c25c11290e))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.18.0...fraud-service-v0.18.1) (2026-10-29)
 
 

@@ -4,6 +4,7 @@
 
 package com.openbank.kyc.it
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.apache.kafka.clients.admin.Admin
@@ -12,7 +13,7 @@ import org.testcontainers.redpanda.RedpandaContainer
 import org.testcontainers.utility.DockerImageName
 import java.util.concurrent.TimeUnit
 
-class KycKafkaTestResource : QuarkusTestResourceLifecycleManager {
+open class KycKafkaTestResource : QuarkusTestResourceLifecycleManager {
     private val postgres = PostgresTestResource()
     private var broker: RedpandaContainer? = null
 
@@ -31,9 +32,13 @@ class KycKafkaTestResource : QuarkusTestResourceLifecycleManager {
             TestInfrastructureEvidence.record("redpanda", kafka.dockerImageName, "started")
             Admin.create(mapOf("bootstrap.servers" to kafka.bootstrapServers)).use { admin ->
                 admin.createTopics(
-                    listOf(TOPIC, "openbank.kyc.events", "openbank.dlq.kyc.party-events-in").map {
-                        NewTopic(it, 1, 1)
-                    },
+                    listOf(
+                        TOPIC,
+                        "openbank.kyc.events",
+                        "openbank.dlq.kyc.party-events-in",
+                        SANCTIONS_TOPIC,
+                        "openbank.dlq.kyc.sanctions-list-changes",
+                    ).map { NewTopic(it, 1, 1) },
                 )
                     .all().get(20, TimeUnit.SECONDS)
             }
@@ -50,12 +55,15 @@ class KycKafkaTestResource : QuarkusTestResourceLifecycleManager {
                 "quarkus.scheduler.enabled" to "false",
                 "quarkus.rest-client.sanctions-service.url" to "http://127.0.0.1:1",
                 "authz.enforce" to "false",
-            )
+            ) + overrides()
         } catch (failure: Exception) {
             stop()
             throw failure
         }
     }
+
+    /** Settings a subclass layers over the defaults (applied last, so they win). */
+    protected open fun overrides(): Map<String, String> = emptyMap()
 
     override fun stop() {
         try {
@@ -73,5 +81,6 @@ class KycKafkaTestResource : QuarkusTestResourceLifecycleManager {
     companion object {
         const val TOPIC = "openbank.party.events"
         const val GROUP = "kyc-business-source-it"
+        const val SANCTIONS_TOPIC = "openbank.sanctions.screening.event"
     }
 }

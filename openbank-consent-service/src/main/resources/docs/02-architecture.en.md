@@ -16,7 +16,7 @@ The service follows the OpenBank hexagonal architecture (ADR 0002): a framework-
         │     ┌───────────────────────┼───────────────────────┐    │
         │     ▼                       ▼                       ▼     │
         │ ConsentRepository    ConsentOutboxRepository ScaChallengeClient
-        │  (status + outbox,    (dispatch → Kafka)      (REST → sca)  │
+        │  (status + outbox,    (claim/mark rows)       (REST → sca)  │
         │   one transaction)                                          │
         └─────┬───────────────────────┬───────────────────┬─────────┘
               ▼                        ▼                   ▼
@@ -40,7 +40,7 @@ The service follows the OpenBank hexagonal architecture (ADR 0002): a framework-
 ### Application (`application/`)
 
 - **Inbound ports** (`port/in/ConsentUseCases.kt`): `CreateConsentUseCase`, `ActivateConsentUseCase`, `RevokeConsentUseCase`, `GetConsentUseCase`, `ValidateConsentUseCase`, with their command DTOs.
-- **Outbound ports** (`port/out/`): `ConsentRepository` (its `save(consent, event)` persists the status change and the outbox row in one transaction), `ScaChallengeClient`, plus the outbox ports (`ConsentOutboxRepository`, `ConsentOutboxEventPublisher`).
+- **Outbound ports** (`port/out/`): `ConsentRepository` (its `save(consent, event)` persists the status change and the outbox row in one transaction), `ScaChallengeClient`, and `ConsentOutboxRepository`. The dispatcher uses the shared `libs.persistence.outbox.OutboxEventPublisher` port for Kafka delivery.
 - `usecase/ConsentService.kt` — the single `@ApplicationScoped` implementation of all five inbound ports. It also re-applies the validity cap defensively and defines the typed domain exceptions (e.g. `ConsentNotFoundException`, `ConsentNotOwnedByPartyException`, `ConsentScaNotCompletedException`).
 
 ### Adapters (`infrastructure/`)
@@ -76,12 +76,12 @@ The SCA client is hardened with `@Timeout(2000)`, `@Retry(maxRetries=2)` and `@C
 Lifecycle events are written transactionally with the consent change (transactional outbox pattern):
 
 ```
-ConsentService.publish(event)
-   → insert row into consent_outbox (status PENDING)
+ConsentService → ConsentRepository.save(consent, event)
+   → persist consent + consent_outbox row (status PENDING) in one transaction
             │
             ▼  every 5s (ConsentOutboxDispatcher, @Scheduled, SKIP concurrent)
-   listProcessable(BATCH_SIZE=25)
-   → publishWithResilience(payload)        @Bulkhead @CircuitBreaker @Retry @Timeout(3000)
+   claimProcessable(BATCH_SIZE=25)
+   → publishWithResilience(entry)          @Bulkhead @CircuitBreaker @Retry @Timeout(3000)
        · success → markSent(eventId)
        · failure → markFailed(eventId, error)   (attempt_count++, retried next tick)
    → Kafka topic openbank.consent.events
@@ -95,7 +95,8 @@ The dispatcher swallows top-level errors so the scheduler never crashes; per-eve
 |---|---|---|
 | `CreateConsentUseCase` / `ActivateConsentUseCase` / `RevokeConsentUseCase` / `GetConsentUseCase` / `ValidateConsentUseCase` | in | `ConsentResource` |
 | `ConsentRepository` | out | `ConsentRepositoryImpl` (Panache reactive, PostgreSQL); `save(consent, event)` writes the status change + outbox row in one transaction (then dispatcher → Kafka) |
-| `ConsentOutboxRepository` / `ConsentOutboxEventPublisher` | out | `ConsentOutboxRepositoryImpl` / `KafkaConsentOutboxEventPublisher` |
+| `ConsentOutboxRepository` | out | `ConsentOutboxRepositoryImpl` (claims and marks outbox rows) |
+| shared `OutboxEventPublisher` | out | `KafkaConsentOutboxEventPublisher` (sends claimed entries to Kafka) |
 | `ScaChallengeClient` | out | `ResilientScaChallengeClient` → `sca-service` |
 | `PolicyDecisionPoint` | out | `OpaSidecarPolicyDecisionPoint` (OPA sidecar) |
 

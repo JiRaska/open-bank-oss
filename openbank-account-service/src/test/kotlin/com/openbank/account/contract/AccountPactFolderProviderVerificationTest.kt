@@ -14,6 +14,7 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.account.application.port.out.AccountRepository
@@ -123,7 +124,12 @@ class AccountPactFolderProviderVerificationTest {
         private val TAX_PROFILE_PARTY_ID = UUID.fromString("61000000-0000-0000-0000-000000000061")
     }
 
-    private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
+    // Quarkus' runtime ObjectMapper renders dates as ISO-8601 strings; a stock jacksonObjectMapper()
+    // would emit Instant as a numeric epoch and any datetime-matcher contract (referral-service's
+    // AccountCreated pact) would verify a wire shape the real producer never sends.
+    private val objectMapper = jacksonObjectMapper()
+        .registerModule(JavaTimeModule())
+        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
@@ -195,31 +201,12 @@ class AccountPactFolderProviderVerificationTest {
         // ADR-0340 B1 (mirror of the party twin): the CRS/FATCA roster replay must present the
         // verified service-account-openbank-tax-reporting identity — rego admits account.list
         // for that principal only, so the class-level pact-verifier identity would answer 403.
-        if (context != null && context.interaction.description.contains("CRS FATCA")) {
-            testIdentityAssociation.setTestIdentity(taxReportingIdentity())
+        // The GSFT deposit roster (#15356) is the same caller, and its resource additionally
+        // requires that verified service-account name.
+        if (context != null && TaxReportingReplayIdentity.appliesTo(context.interaction.description)) {
+            testIdentityAssociation.setTestIdentity(TaxReportingReplayIdentity.identity())
         }
         context?.verifyInteraction()
-    }
-
-    /**
-     * The replay identity for the CRS/FATCA roster interaction: the verified service-account JWT
-     * the rego rule admits (#12448 — name bound to the service-account username, azp present).
-     */
-    private fun taxReportingIdentity(): io.quarkus.security.runtime.QuarkusSecurityIdentity {
-        val name = "service-account-openbank-tax-reporting"
-        val jwt = object : org.eclipse.microprofile.jwt.JsonWebToken {
-            private val claims = mapOf(
-                "azp" to "openbank-tax-reporting",
-                "preferred_username" to name,
-                "sub" to "tax-reporting-sa-subject",
-            )
-
-            override fun getName(): String = name
-            override fun getClaimNames(): Set<String> = claims.keys
-            override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
-        }
-        return io.quarkus.security.runtime.QuarkusSecurityIdentity.builder().setPrincipal(jwt)
-            .addRole("ROLE_API").build()
     }
 
     /**
@@ -259,6 +246,16 @@ class AccountPactFolderProviderVerificationTest {
         )
         return objectMapper.writeValueAsString(event)
     }
+
+    /**
+     * Referral-service's consumer pact (`AccountCreatedMessagePactConsumerTest`, ADR-0310 D1)
+     * declares its own interaction description, so it needs its own producer — pact-jvm matches
+     * @PactVerifyProvider by the description string, not by the event type. The message is the
+     * SAME AccountCreatedEvent as above; only the consumer's contract (eventId as opaque text,
+     * partyId, occurredAt as the qualification inputs) differs.
+     */
+    @PactVerifyProvider("an AccountCreated event eligible for referral qualification")
+    fun produceAccountCreatedEventForReferralQualification(): String = produceAccountCreatedEvent()
 
     @State("account-service has posted an incoming credit")
     fun accountHasPostedIncomingCredit() {

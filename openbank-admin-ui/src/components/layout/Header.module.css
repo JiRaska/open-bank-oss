@@ -17,7 +17,9 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  min-width: 230px;
+  min-width: 0;
+  max-width: 480px;
+  flex: 1;
   padding: 8px 11px;
   color: var(--text-secondary);
   cursor: pointer;
@@ -30,8 +32,8 @@
 .searchTrigger:hover,
 .searchTrigger:focus-visible { background: var(--surface); border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1); outline: none; }
 
-.actions { display: flex; align-items: center; gap: 5px; }
-.headerLink { display: grid; width: 34px; height: 34px; place-items: center; color: var(--text-secondary); text-decoration: none; background: transparent; border-radius: 9px; transition: background 0.12s ease, color 0.12s ease; }
+.actions { display: flex; flex-shrink: 0; margin-left: auto; align-items: center; gap: 5px; }
+.headerLink { display: grid; width: 34px; height: 34px; place-items: center; color: var(--text-secondary); text-decoration: none; background: transparent; border: 0; cursor: pointer; border-radius: 9px; transition: background 0.12s ease, color 0.12s ease; }
 .headerLink:hover,
 .headerLink:focus-visible { color: var(--accent-text); background: var(--accent-light); outline: none; }
 
@@ -45,3 +47,8 @@
   .searchTrigger span,
   .searchTrigger kbd { display: none; }
 }
+
+.searchTrigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.header { gap: 12px; }
+.headerLink:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 860px) { .searchTrigger { flex: 0 0 auto; } }

@@ -339,8 +339,10 @@ const REPORT_CATALOG = [
     authority: bi('CNB', 'CNB'),
     regulation: bi('IAS/IFRS + EBA ITS', 'IAS/IFRS + EBA ITS'),
     frequency: bi('Čtvrtletně', 'Quarterly'),
-    deadline: bi('30 dní po konci čtvrtletí', '30 days after quarter end'),
-    deadlineRule: { kind: 'days-after-quarter', days: 30 } as DeadlineRule,
+    // EBA remittance dates 12 May / 11 Aug / 11 Nov / 11 Feb = 42 days after quarter end
+    // (register: cnb-finrep cadence).
+    deadline: bi('Podle remitenčních dat EBA (12. 5., 11. 8., 11. 11., 11. 2.)', 'Per EBA remittance dates (12 May, 11 Aug, 11 Nov, 11 Feb)'),
+    deadlineRule: { kind: 'days-after-quarter', days: 42 } as DeadlineRule,
     description: bi('Financial Reporting — rozvaha, výkaz zisku a ztráty, podrozvahové položky', 'Financial Reporting — balance sheet, profit and loss, off-balance-sheet items'),
     sdatCode: 'FINREP',
     fields: [bi('Aktiva celkem', 'Total assets'), bi('Závazky celkem', 'Total liabilities'), bi('Vlastní kapitál', 'Equity'), bi('Čistý úrokový výnos', 'Net interest income'), bi('Provozní náklady', 'Operating expenses')],
@@ -351,8 +353,8 @@ const REPORT_CATALOG = [
     authority: bi('CNB', 'CNB'),
     regulation: bi('CRR/CRD IV (EU 575/2013) + nařízení v přenesené pravomoci (EU) 2015/61', 'CRR/CRD IV (EU 575/2013) + Delegated Regulation (EU) 2015/61'),
     frequency: bi('Měsíčně', 'Monthly'),
-    deadline: bi('30 dní po konci měsíce', '30 days after month end'),
-    deadlineRule: { kind: 'days-after-month', days: 30 } as DeadlineRule,
+    deadline: bi('15 kalendářních dnů po referenčním dni', '15 calendar days after the reference date'),
+    deadlineRule: { kind: 'days-after-month', days: 15 } as DeadlineRule,
     description: bi('Liquidity Coverage Ratio — likvidní aktiva, odtoky, přítoky a výpočet ukazatele LCR', 'Liquidity Coverage Ratio — liquid assets, outflows, inflows and the LCR calculation'),
     sdatCode: 'LCR',
     // Per-template Czech labels rather than field names: this report is a bundle of four COREP
@@ -389,8 +391,8 @@ const REPORT_CATALOG = [
     name: bi('DORA — ICT Incident Reporting', 'DORA — ICT Incident Reporting'),
     authority: bi('CNB / EBA', 'CNB / EBA'),
     regulation: bi('DORA (EU 2022/2554) — od 17.1.2025', 'DORA (EU 2022/2554) — since 17 Jan 2025'),
-    frequency: bi('Ad-hoc (do 4h od zjištění)', 'Ad-hoc (within 4h of detection)'),
-    deadline: bi('Počáteční hlášení do 4 hodin', 'Initial report within 4 hours'),
+    frequency: bi('Ad-hoc (při závažném incidentu)', 'Ad-hoc (on a major incident)'),
+    deadline: bi('Počáteční hlášení do 4 h od klasifikace, nejpozději 24 h od zjištění', 'Initial report within 4h of classification, at the latest 24h from detection'),
     deadlineRule: { kind: 'ad-hoc' } as DeadlineRule,
     description: bi('Hlášení závažných ICT incidentů dle DORA — počáteční, průběžné a závěrečné hlášení', 'Reporting of major ICT incidents under DORA — initial, intermediate and final reports'),
     sdatCode: 'DORA-INC',
@@ -594,6 +596,16 @@ export default function RegulatoryPage() {
         </a>}
       />
 
+      <p style={{ marginBottom: 20 }}>
+        <Link href="/regulatory/statutory-returns" className="btn btn-secondary">
+          {t('Statutární výkazy a termíny', 'Statutory returns and deadlines')}
+        </Link>
+        {' '}
+        <Link href="/regulatory/obligations" className="btn btn-secondary">
+          {t('Regulatorní povinnosti a jejich zdroje', 'Regulatory obligations and their sources')}
+        </Link>
+      </p>
+
       {/* Summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
         {[
@@ -681,7 +693,7 @@ export default function RegulatoryPage() {
           const cfg = DATA_SOURCE_CONFIG[source]
           const isSelected = selected === report.id
           return (
-            <div key={report.id} className="card" style={{ overflow: 'hidden', borderLeft: `3px solid ${cfg.border}` }}>
+            <div key={report.id} id={report.id} className="card" style={{ overflow: 'hidden', borderLeft: `3px solid ${cfg.border}` }}>
               <div style={{ display: 'flex', alignItems: 'stretch', flexWrap: 'wrap' }}>
                 <button type="button" aria-expanded={isSelected} aria-controls={`regulatory-report-${report.id}`}
                   aria-label={`${report.name} — ${isSelected ? t('Sbalit detail', 'Collapse details') : t('Rozbalit detail', 'Expand details')}`}

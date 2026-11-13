@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { DATASETS, parseArgs, publishDataset } from './publish-admin-ui-evidence.mjs'
+import { TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES } from '../../openbank-admin-ui/src/lib/evidence/testIntelligenceSnapshot.ts'
+import { workspaceCase, workspaceReport } from '../../openbank-admin-ui/e2e/fixtures/test-intelligence-workspace.ts'
 import { collectAdminUiContent } from '../../openbank-admin-ui/scripts/collect-admin-ui-content.mjs'
 
 const sha = 'b'.repeat(40)
@@ -54,17 +56,18 @@ test('content dataset is bound to its reviewed-source collection time and SHA fi
   assert.equal(DATASETS.content.snapshotSourceSha({ sourceSha: sha }), sha)
 })
 
-test('content publication uses only the admin-ui/content prefix and preserves source provenance', async () => {
+test('content publication uses only the versioned content prefix and preserves source provenance', async () => {
   const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
   const snapshot = JSON.parse(collectAdminUiContent({ sourceSha }).toString('utf8'))
   const h = harness(snapshot, { ...env, EVIDENCE_SOURCE_SHA: sourceSha })
   try {
     await h.publish('content', { now: () => Date.now() + 1_000 })
     assert.equal(h.puts.length, 2)
-    assert.match(h.puts[0].key, /^admin-ui\/content\/snapshots\/123-1-[a-f0-9]{64}\.json$/)
-    assert.equal(h.puts[1].key, 'admin-ui/content/current.json')
+    assert.match(h.puts[0].key, /^admin-ui\/content\/domains-v1\/snapshots\/123-1-[a-f0-9]{64}\.json$/)
+    assert.equal(h.puts[1].key, 'admin-ui/content/domains-v1/current.json')
     assert.equal(h.puts[1].body.collectedAt, snapshot.collectedAt)
     assert.equal(h.puts[1].body.sourceSha, sourceSha)
+    assert.ok(h.puts.every(put => put.key !== 'admin-ui/content/current.json'), 'legacy reader pointer is untouched')
     assert.ok(h.puts.every(put => put.conditional === '*'))
   } finally { h.cleanup() }
 })
@@ -104,7 +107,7 @@ test('malformed data cannot publish into any dataset', async () => {
 })
 
 
-test('complete repository corpus above two MiB publishes only under the existing content prefix', async () => {
+test('complete repository corpus above two MiB publishes only under the versioned content prefix', async () => {
   const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
   const snapshot = JSON.parse(collectAdminUiContent({ sourceSha, includeRepositoryDocumentation: true }))
   assert.ok(Buffer.byteLength(JSON.stringify(snapshot)) > 2 * 1024 * 1024)
@@ -112,16 +115,16 @@ test('complete repository corpus above two MiB publishes only under the existing
   try {
     await h.publish('content', { now: () => Date.now() + 1_000 })
     assert.equal(h.puts.length, 2)
-    assert.match(h.puts[0].key, /^admin-ui\/content\/snapshots\//)
-    assert.equal(h.puts[1].key, 'admin-ui/content/current.json')
+    assert.match(h.puts[0].key, /^admin-ui\/content\/domains-v1\/snapshots\//)
+    assert.equal(h.puts[1].key, 'admin-ui/content/domains-v1/current.json')
     assert.equal(h.puts[1].body.sourceSha, sourceSha)
   } finally { h.cleanup() }
 })
 
-test('content remains bounded at eight MiB and all other datasets retain two MiB limits', async () => {
+test('content and test provenance remain bounded while small datasets retain two MiB limits', async () => {
   const tooLargeForOthers = harness({ padding: 'x'.repeat(2 * 1024 * 1024) })
   try {
-    for (const dataset of Object.keys(DATASETS).filter(name => name !== 'content')) {
+    for (const dataset of Object.keys(DATASETS).filter(name => !['content', 'test-intelligence'].includes(name))) {
       assert.throws(() => tooLargeForOthers.publish(dataset), /input exceeds size limit/)
     }
     assert.equal(tooLargeForOthers.puts.length, 0)
@@ -131,4 +134,30 @@ test('content remains bounded at eight MiB and all other datasets retain two MiB
     await assert.rejects(tooLargeForContent.publish('content'), /input exceeds size limit/)
     assert.equal(tooLargeForContent.puts.length, 0)
   } finally { tooLargeForContent.cleanup() }
+  const tooLargeForTests = harness({ padding: 'x'.repeat(TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES) })
+  try {
+    assert.throws(() => tooLargeForTests.publish('test-intelligence'), /input exceeds size limit/)
+    assert.equal(tooLargeForTests.puts.length, 0)
+  } finally { tooLargeForTests.cleanup() }
+})
+
+test('publishes the full test roster with bounded run provenance beyond two MiB', () => {
+  const snapshot = workspaceReport({ testCases: Array.from({ length: 2000 }, (_, index) => ({
+    ...workspaceCase, fingerprint: `capacity-${index}`, observations: 10,
+    recentRuns: Array.from({ length: 10 }, (_, runIndex) => ({ state: 'passed', durationMs: 12, run: {
+      ...workspaceCase.lastRun, id: String(101 - runIndex), url: `https://github.com/JiRaska/open-bank-oss/actions/runs/${101 - runIndex}`,
+      observedAt: new Date(Date.parse(workspaceCase.lastObservedAt) - runIndex * 60_000).toISOString(),
+    } })),
+  })) })
+  const bytes = Buffer.byteLength(JSON.stringify(snapshot))
+  assert.ok(bytes > 2 * 1024 * 1024)
+  assert.ok(bytes < TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES)
+  const h = harness(snapshot)
+  try {
+    h.publish('test-intelligence', { now: () => Date.now() + 1_000 })
+    assert.equal(h.puts.length, 2)
+    assert.match(h.puts[0].key, /^admin-ui\/test-intelligence\/snapshots\//)
+    assert.equal(h.puts[0].body.testCases.length, 2000)
+    assert.equal(h.puts[1].key, 'admin-ui/test-intelligence/current.json')
+  } finally { h.cleanup() }
 })

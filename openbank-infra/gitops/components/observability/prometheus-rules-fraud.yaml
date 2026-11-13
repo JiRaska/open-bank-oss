@@ -81,3 +81,38 @@ spec:
               rail (payments/sepa-instant/...) still producing scoreable events. verdict
               breakdown via sum by (verdict, rail) (increase(openbank_fraud_scores_total[6h]))
               shows which outcome class went quiet.
+        # Domestic fraud holds (#4403). A false hold is an enforced hold an analyst CLEARED; a
+        # timed-out hold was never judged, which is why it has its own alert below.
+        - alert: FraudHoldTimedOutUnreviewed
+          expr: sum(increase(openbank_fraud_enforcement_rejections_total{cause="HOLD_TIMED_OUT"}[1h])) > 0
+          labels:
+            severity: warning
+          annotations:
+            subject_period: continuous
+            summary: "A held domestic payment was rejected because nobody decided it within 48 h"
+            description: >-
+              The customer's payment was rejected with no analyst judgement. Check that
+              DOMESTIC_FRAUD_HOLD_RESOLUTION_CONSUMER_ENABLED is true and work the open
+              FRAUD_REVIEW cases in the AML case list.
+        - alert: FraudHoldScoringUnavailable
+          expr: sum(increase(openbank_fraud_enforcement_holds_total{basis="SCORING_UNAVAILABLE"}[15m])) > 0
+          labels:
+            severity: warning
+          annotations:
+            subject_period: continuous
+            summary: "Domestic payments are being held because fraud scoring is unreachable"
+            description: >-
+              Holds with this basis carry no fraud signal, so they measure the availability of
+              fraud-service and not the quality of its rules. Check fraud-service in the fraud
+              namespace and openbank_fraud_scoring_degraded.
+        - alert: FraudHoldDecisionMissedRun
+          expr: sum(increase(openbank_fraud_enforcement_hold_resolutions_total{delivery="NOT_WAITING"}[1h])) > 0
+          labels:
+            severity: warning
+          annotations:
+            subject_period: continuous
+            summary: "An analyst decision on a fraud hold found no waiting payment run"
+            description: >-
+              The decision came after the 48 h timeout, or the run was started by the screening
+              re-drive under another workflow id. The payment stays rejected, so a CLEARED case
+              here is a wrongful rejection to correct by hand.

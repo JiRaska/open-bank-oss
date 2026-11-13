@@ -7,6 +7,7 @@ import { parse as parseYaml } from 'yaml'
 import { createEvidenceSnapshotReader, type EvidenceSnapshotReaderOptions } from './publishedSnapshot.ts'
 import { parseBcpPolicy } from '../bcp/continuityModel.ts'
 import { BpmnProcessSchema } from '../docs/bpmn/schema.ts'
+import { isDomainId } from '../governance/domains.ts'
 
 export interface AdminUiContentSnapshot {
   schemaVersion: 1
@@ -87,7 +88,8 @@ function hasBaseGeneratedShape(value: unknown, schema: string): value is Record<
 }
 
 function validCatalog(value: unknown): value is Record<string, unknown> {
-  if (!hasBaseGeneratedShape(value, 'openbank.catalog/v1') || !Array.isArray(value.services)
+  if (!hasBaseGeneratedShape(value, 'openbank.catalog/v1')
+    || value.domainTaxonomy !== 'openbank.domain-taxonomy/v1' || !Array.isArray(value.services)
     || value.services.length === 0 || value.services.length > 500) return false
   const totals = value.totals as Record<string, unknown>
   if (!['modules', 'services', 'withOpenapi', 'moneyPath', 'withGaps'].every(key => nonNegativeInt(totals[key]))) return false
@@ -101,6 +103,7 @@ function validCatalog(value: unknown): value is Record<string, unknown> {
     if (!record(row) || !nonEmptyString(row.name) || !nonEmptyString(row.short) || names.has(row.name)
       || !['ui', 'library', 'service', 'component'].includes(String(row.kind))
       || typeof row.runnable !== 'boolean'
+      || !(isDomainId(row.dataDomain) || (row.runnable === false && row.dataDomain === null))
       || !(row.port === null || (Number.isInteger(row.port) && (row.port as number) >= 1 && (row.port as number) <= 65535))
       || !(row.mgmtPort === null || (Number.isInteger(row.mgmtPort) && (row.mgmtPort as number) >= 1 && (row.mgmtPort as number) <= 65535))
       || !(row.releaseVersion === null || nonEmptyString(row.releaseVersion))
@@ -177,7 +180,8 @@ function validServiceGraph(value: unknown): value is Record<string, unknown> {
 }
 
 function validGovernance(value: unknown): value is Record<string, unknown> {
-  if (!hasBaseGeneratedShape(value, 'openbank.governance/v1') || !Array.isArray(value.services)
+  if (!hasBaseGeneratedShape(value, 'openbank.governance/v1')
+    || value.domainTaxonomy !== 'openbank.domain-taxonomy/v1' || !Array.isArray(value.services)
     || value.services.length === 0 || value.services.length > 500 || !Array.isArray(value.gaps)
     || value.gaps.length > 20_000 || !value.gaps.every(nonEmptyString)) return false
   const totals = value.totals as Record<string, unknown>
@@ -186,6 +190,7 @@ function validGovernance(value: unknown): value is Record<string, unknown> {
   const names = new Set<string>()
   for (const row of value.services) {
     if (!record(row) || !nonEmptyString(row.serviceName) || names.has(row.serviceName)
+      || !isDomainId(row.dataDomain)
       || !['dataDomain', 'primaryDatastore', 'databaseName', 'dataLineageRole', 'flywayDeclaredVersion']
         .every(key => row[key] === undefined || row[key] === null || typeof row[key] === 'string')
       || ![row.ownsNoDatabase, row.evidenceExported].every(item => item === undefined || typeof item === 'boolean')
@@ -198,6 +203,18 @@ function validGovernance(value: unknown): value is Record<string, unknown> {
   return totals.withLineage === services.filter(row => record(row) && Boolean(row.lineage)).length
     && totals.evidenceExported === services.filter(row => record(row) && row.evidenceExported === true).length
     && totals.unverifiedDatabaseNames === services.filter(row => record(row) && row.databaseNameEvidence === 'declared-only').length
+}
+
+/** A source bundle must not publish competing ownership for the same module. */
+function matchingDomainOwnership(catalog: Record<string, unknown>, governance: Record<string, unknown>): boolean {
+  const canonicalName = (name: string) => name.replace(/^openbank-/, '')
+  const modules = catalog.services as Array<{ name: string; dataDomain: string | null }>
+  const declarations = governance.services as Array<{ serviceName: string; dataDomain: string }>
+  const owners = new Map(declarations.map(row => [canonicalName(row.serviceName), row.dataDomain]))
+  if (owners.size !== declarations.length) return false
+  const knownModules = new Map(modules.map(row => [canonicalName(row.name), row.dataDomain]))
+  return modules.every(row => row.dataDomain === null || owners.get(canonicalName(row.name)) === row.dataDomain)
+    && declarations.every(row => knownModules.get(canonicalName(row.serviceName)) === row.dataDomain)
 }
 
 function validSecurityGraph(value: unknown): value is Record<string, unknown> {
@@ -363,6 +380,7 @@ export function isAdminUiContentSnapshot(value: unknown, nowMs = Date.now()): va
     || !validCatalog(content.catalog)
     || !validServiceGraph(content.serviceGraph)
     || !validGovernance(content.governance)
+    || !matchingDomainOwnership(content.catalog, content.governance)
     || !validSecurityGraph(content.securityGraph)
     || (content.clusterTopology !== undefined && !validClusterTopology(content.clusterTopology, nowMs))
     || typeof content.bcpPolicyMarkdown !== 'string' || Buffer.byteLength(content.bcpPolicyMarkdown, 'utf8') > MAX_FILE_BYTES
@@ -391,7 +409,7 @@ export function adminUiContentCollectedAt(snapshot: AdminUiContentSnapshot): str
 export function adminUiContentSnapshotBaseUrl(): string | undefined {
   if (process.env.OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL !== undefined) return process.env.OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL
   const base = process.env.OPENBANK_EVIDENCE_STORE_URL
-  return base ? `${base.replace(/\/+$/, '')}/admin-ui/content` : undefined
+  return base ? `${base.replace(/\/+$/, '')}/admin-ui/content/domains-v1` : undefined
 }
 
 export function createAdminUiContentSnapshotReader(

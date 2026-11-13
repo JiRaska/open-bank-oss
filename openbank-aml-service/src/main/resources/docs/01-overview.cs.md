@@ -50,6 +50,7 @@
 - **admin-ui** (přes Keycloak token) — compliance analytici a MLRO zakládají případy a zaznamenávají rozhodnutí přes compliance cockpit.
 - **platební služby** (sepa-payment, sepa-instant, domestic-payment, swift-service) — zakládají screeningový případ jako součást své platební screening brány (deklarovaná upstream `api` linie v `governance.yaml`).
 - **party-service** (Kafka) — emituje `PARTY_CREATED` pro spuštění onboarding screeningu; konzumuje `aml.case.status_changed.v1` jako AML klíč své dvouklíčové aktivační brány KYC+AML.
+- **domestic-payment** (Kafka) — konzumuje `aml.case.status_changed.v1` pro případy `FRAUD_REVIEW` podle polí `transactionId` a `alertCode`: CLEARED uvolní zadrženou platbu, BLOCKED ji zamítne (#4403, ve výchozím stavu vypnuto).
 - **kyc-service / sanctions-service** (Kafka, deklarovaná `topic` linie) — spouštějí / dodávají screeningové signály.
 
 ## Závislosti

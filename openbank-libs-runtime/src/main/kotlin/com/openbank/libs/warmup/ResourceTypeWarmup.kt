@@ -79,8 +79,10 @@ internal object ResourceTypeWarmup {
         }
         var built = 0
         var failed = 0
-        out.forEach { t -> if (attempt { mapper.writerFor(javaType(mapper, t)) }) built++ else failed++ }
-        inp.forEach { t -> if (attempt { mapper.readerFor(javaType(mapper, t)) }) built++ else failed++ }
+        val outTypes = out.flatMap { expand(mapper.typeFactory.constructType(it)) }.distinct()
+        val inpTypes = inp.flatMap { expand(mapper.typeFactory.constructType(it)) }.distinct()
+        outTypes.forEach { t -> if (attempt { mapper.writerFor(t) }) built++ else failed++ }
+        inpTypes.forEach { t -> if (attempt { mapper.readerFor(t) }) built++ else failed++ }
         return "${resources.size} resources, $built (de)serializers built, $failed unbuildable"
     }
 
@@ -91,7 +93,24 @@ internal object ResourceTypeWarmup {
         false
     }
 
-    private fun javaType(mapper: ObjectMapper, t: Type): JavaType = mapper.typeFactory.constructType(t)
+    /**
+     * [t] plus every type nested in it: container content and key types and generic bindings,
+     * recursively (#12042). Prefetching `Book<List<Dto>>` builds `Book`'s serializer, but a
+     * property whose type is a type variable resolves its serializer on first write, so `Dto`
+     * stayed cold until the first request. Opaque leaves such as `String` are dropped.
+     */
+    internal fun expand(t: JavaType): List<JavaType> {
+        val seen = linkedSetOf<JavaType>()
+        fun visit(j: JavaType?) {
+            val leaf = j == null || j.rawClass.isPrimitive || j.rawClass.name in OPAQUE
+            if (leaf || !seen.add(j!!)) return
+            visit(j.contentType)
+            visit(j.keyType)
+            j.bindings.typeParameters.forEach(::visit)
+        }
+        visit(t)
+        return seen.toList()
+    }
 
     private fun Method.isEndpoint(): Boolean = Modifier.isPublic(modifiers) &&
         !isSynthetic &&

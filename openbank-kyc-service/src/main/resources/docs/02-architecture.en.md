@@ -36,8 +36,8 @@ The service follows the OpenBank hexagonal layout (ADR-0002): a framework-free d
 ### Key ports (`application.port.out`)
 
 - `KycCaseRepository` — `save`, `update`, `findById`, `findByPartyId`, `listAll`/`listByStatus`, `countAll`/`countByStatus`.
-- `KycOutboxPort` / `KycOutboxRepository` — append and drain outbox rows.
-- `KycOutboxEventPublisher` — publish an outbox payload to Kafka.
+- `KycOutboxRepository` — append and drain outbox rows.
+- `OutboxEventPublisher` (shared, `openbank-libs`) — publish an outbox payload to Kafka.
 
 ## Outbox → Kafka flow
 

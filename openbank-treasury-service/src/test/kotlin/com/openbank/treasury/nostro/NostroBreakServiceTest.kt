@@ -6,6 +6,7 @@ package com.openbank.treasury.nostro
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.openbank.treasury.application.port.`in`.NostroBreakSweep
 import com.openbank.treasury.application.port.out.NostroAccountNotFoundException
 import com.openbank.treasury.application.port.out.NostroBreakRepository
 import com.openbank.treasury.application.usecase.NostroBreakService
@@ -136,6 +137,64 @@ class NostroBreakServiceTest {
         assertThat(r.open).isEqualTo(1)
         assertThat(service().breaks(NostroFixtures.IBAN, includeResolved = true).map { it.brk.resolvedOn })
             .containsExactlyInAnyOrder(null, today)
+    }
+
+    @Test
+    fun `an open break on a statement past the lookback window still resolves on a late booking`() = runBlocking<Unit> {
+        NostroFixtures.ledgerLines().forEach { ledger.lines += "1001" to it }
+        upload()
+        service().sweep(today)
+        ledger.lines += "1001" to NostroFixtures.line("5000.00", Side.DEBIT, description = "SYNTH-SVCR-0003")
+
+        today = today.plusDays(60) // the statement is long out of the 31-day window
+        val r = service().sweep(today)
+        assertThat(r.observed).isEqualTo(1)
+        assertThat(r.open).isEqualTo(1)
+        assertThat(service().breaks(NostroFixtures.IBAN, includeResolved = true).map { it.brk.resolvedOn })
+            .containsExactlyInAnyOrder(null, today)
+
+        // Idempotent: the same pass again changes nothing it already recorded.
+        val again = service().sweep(today)
+        assertThat(again.open).isEqualTo(1)
+        assertThat(breakRepo.rows).hasSize(2)
+    }
+
+    @Test
+    fun `a statement past the window whose breaks are all resolved is not re-reconciled`() = runBlocking<Unit> {
+        upload() // no ledger lines at all: every statement line is an open break
+        service().sweep(today)
+        breakRepo.rows.replaceAll { it.copy(resolvedOn = today) }
+
+        today = today.plusDays(60)
+        val r = service().sweep(today)
+        assertThat(r.observed).isZero()
+        assertThat(r.open).isZero()
+    }
+
+    @Test
+    fun `past the per-pass bound the out-of-window statements rotate so none is starved`() = runBlocking<Unit> {
+        // 51 open breaks, each on its own old statement. The statements are not stored, so every
+        // visit surfaces as a StatementNotFound failure naming the statement: that is the probe.
+        val template = run {
+            upload()
+            service().sweep(today)
+            breakRepo.rows.first()
+        }
+        breakRepo.rows.clear()
+        val statementIds = (1..51).map { UUID.randomUUID() }.sorted()
+        statementIds.forEach { breakRepo.rows += template.copy(id = UUID.randomUUID(), statementUuid = it) }
+        statements.rows.clear()
+        today = today.plusDays(60)
+        val svc = service() // one instance, like the @ApplicationScoped producer
+
+        fun visited(r: NostroBreakSweep) =
+            r.failures.map { f -> statementIds.single { f.message!!.contains(it.toString()) } }.toSet()
+
+        val first = visited(svc.sweep(today))
+        assertThat(first).hasSize(50).doesNotContain(statementIds.last())
+        val second = visited(svc.sweep(today))
+        assertThat(second).contains(statementIds.last())
+        assertThat(first + second).containsExactlyInAnyOrderElementsOf(statementIds)
     }
 
     @Test

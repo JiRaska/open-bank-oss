@@ -69,7 +69,7 @@ com.openbank.ledger/
 ├── application/               ◄── orchestrace use-casů
 │   ├── port/in/               LedgerPorts (LedgerUseCase), FxRevaluationPorts
 │   ├── port/out/              GlAccountRepository, JournalRepository,
-│   │                          LedgerOutboxPort, CnbRateProvider
+│   │                          LedgerOutboxRepository, CnbRateProvider
 │   └── usecase/               LedgerService, FxRevaluationService
 │
 └── infrastructure/            ◄── adaptéry
@@ -92,7 +92,7 @@ com.openbank.ledger/
 | `FxRevaluationUseCase` (in) | `FxRevaluationService` | denní mark-to-ČNB revalvace |
 | `JournalRepository` (out) | `PanacheJournalRepository` | perzistence/čtení zápisů + řádků |
 | `GlAccountRepository` (out) | `PanacheGlAccountRepository` | vyhledávání v účtové osnově dle kódu/id |
-| `LedgerOutboxPort` (out) | `LedgerOutboxRepositoryImpl` | zařazení + nárokování outbox řádků |
+| `LedgerOutboxRepository` (out) | `LedgerOutboxRepositoryImpl` | zařazení + nárokování outbox řádků |
 | `CnbRateProvider` (out) | `FxServiceCnbRateAdapter` (→ `FxServiceClient`) | zákonný kurz ČNB |
 
 ## Outbox tok
@@ -123,7 +123,13 @@ sequenceDiagram
   end
 ```
 
-**Proč outbox (ADR-0050):** zápis do DB a publikace do Kafky musí být atomické. Doručení na money-path je regulatorní: jediný in-JVM zapisovatel (`concurrentExecution = SKIP`) plus `replicas: 1` garantují, že řádek nárokuje právě jeden dispatcher; selhání jednotlivých řádků jsou izolovaná a ohraničená přechodem do DEAD. Dispatcher běží plně na Vert.x event loopu (reaktivní Panache), aby se předešlo chybám session na worker vlákně.
+**Outbox (ADR-0050).** Účetní zápis a jeho outbox řádek se uloží v jedné transakci PostgreSQL.
+Dispatcher doručuje do Kafky alespoň jednou. Atomické nárokování přes
+`FOR UPDATE SKIP LOCKED` koordinuje souběžné repliky a plánovač v každé replice vynechá
+překrývající se spuštění. Dotaz vrací pouze mapované sloupce entity, takže tato verze
+může dál odesílat i po přidání sloupců v pozdější migraci. Po vyčerpání pokusů se vadný
+řádek přesune do stavu `DEAD`. Dispatcher běží na Vert.x event loopu kvůli zachování
+reaktivní Panache session.
 
 ## Životní cyklus partitionů
 

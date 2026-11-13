@@ -84,6 +84,7 @@ class StubUpstreamResource : QuarkusTestResourceLifecycleManager {
             "openbank.edge.standing-order-service-url" to base,
             "openbank.edge.fx-service-url" to base,
             "openbank.edge.card-issuance-service-url" to base,
+            "openbank.edge.wealth-service-url" to base,
             "openbank.edge.party-service-url" to base,
             "openbank.edge.product-catalog-url" to base,
             "openbank.edge.campaign-service-url" to base,
@@ -91,6 +92,7 @@ class StubUpstreamResource : QuarkusTestResourceLifecycleManager {
             "openbank.edge.pension-service-url" to base,
             "openbank.edge.sca-service-url" to base,
             "openbank.edge.delegation-service-url" to base,
+            "openbank.edge.domestic-payment-service-url" to base,
         )
     }
 

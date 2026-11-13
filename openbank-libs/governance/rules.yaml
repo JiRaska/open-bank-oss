@@ -22,11 +22,16 @@ related_adrs: [ADR-0005, ADR-0014, ADR-0020, ADR-0029, ADR-0030, ADR-0031, ADR-0
 # PR after its release condition is met; the gate also reads the base rules so a
 # single PR cannot remove a hold and advance the image together.
 deploy_holds:
+  # approved_image (optional, per service): the last image the owner approved while the service is
+  # held, as <service>:<tag>@sha256:<digest> or a bare sha256:<digest>. check-deploy-holds.py fails
+  # when ANY GitOps pin of a held service differs from it (whole tree, not only the PR diff); a hold
+  # without one is reported, not failed. Changing it is an owner approval: review it as one.
   services:
     openbank-analytics-sink:
       issue: "#13304"
       reason: "The consolidated deployment proposes an analytics-sink image that is not covered by an existing durable hold"
       release_condition: "The owner approves the exact image and rollout window after registry publication, provenance and signature, vulnerability scan, applicable contracts, and sandbox runtime capability are verified; remove this hold only in a separately reviewed change."
+      approved_image: 'openbank-analytics-sink:sandbox-8b2932e8@sha256:27a7a441a6b8af0fd97bd2c12f1bb85a2fc1d6fc5463ab65dff4e9308f4db198'
     openbank-transaction-service:
       all_of:
       - issue: "#13231"
@@ -35,38 +40,21 @@ deploy_holds:
       - issue: "#13888"
         reason: "Temporal SDK 1.40 requires retained versioned workers and an API-only rollout; the existing mixed worker image substitution is unsafe."
         release_condition: "Retain the original immutable SDK 1.25 worker, verify old-history migration and versioned workflow/activity pollers on the deployed server, prepare API replicas with their worker disabled, and approve routing rollback with both worker versions retained. Remove only this condition in a separately reviewed change after recording environment evidence."
+      approved_image: 'openbank-transaction-service:sandbox-9e765663@sha256:4098cd84fd6c5fd39351c9fe6b94d57bb482fcb1e6e3c7a6874cbc655b4305d1'
     openbank-card-processing-service:
       issue: "#13231"
       reason: "Automatic ledger posting re-drive must wait for verified provider-wide idempotency protection."
       release_condition: "The provider V22 migration is committed and its registry, partition triggers and cross-date idempotency checks are verified; the owner explicitly approves re-driving the existing clearing backlog."
+      approved_image: 'openbank-card-processing-service:sandbox-5cc84e19@sha256:d18fdaa8b58dd824bb7828b4c129d3ad8b56fbe657ea48f7fb3525084850af0f'
     # Migrated from deploy branches (issue #11503). Entries inherited from deploy PR #12948
     # recorded no reason and were released; money-path services carry a staged wave entry in
     # their place. Every entry with its own issue, reason or release condition is kept.
-    openbank-account-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 2a is healthy for 24h.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-billing-service:
       all_of:
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-    openbank-clearing-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-domestic-payment:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 2a is healthy for 24h.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-fx-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
+      approved_image: 'openbank-billing-service:sandbox-9e765663@sha256:d8a10ecfe6a6a0574f115234014a529665edec79e25b5e65da760b9dce6d928d'
     openbank-interest-service:
       all_of:
       - issue: "#13167"
@@ -75,48 +63,13 @@ deploy_holds:
       - issue: "#13173"
         reason: "Default-on catalog rate sync and V19/V20 account revision pinning require an owner-approved first deployment."
         release_condition: "The owner approves the exact interest image and deployment window after accepting V19/V20 backfill semantics, verifying catalog access, and defining rollback that preserves account revision pins."
-    openbank-ledger-service:
-      all_of:
-      - issue: '#13167'
-        reason: 'Day-close participation V33 and its API require owner-controlled first image delivery.'
-        release_condition: 'The owner approves the exact ledger image and deployment window, accepts V33 schema and audit-history retention, and verifies ledger-interest participant API and authorization compatibility. Bank participation remains shadow and pension-company participation remains off; enforcement, replay and financial operations require separate approval.'
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
+      approved_image: 'openbank-interest-service:sandbox-3b1311c5@sha256:27175d95e406371ea8f4a5e6ac8f3c9227502e654ead140943f4600cc44fe2fb'
     openbank-lending-service:
       all_of:
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-sdd-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-sepa-instant:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-sepa-payment:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-standing-order-service:
-      issue: '#11503'
-      reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-      release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-swift-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-treasury-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
+      approved_image: 'openbank-lending-service:sandbox-7f966f31@sha256:9c0a06e63cccbf2c13c4dd77e908cb4bbc06145cf212f22951e34e228524cb4a'
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).
 # ---------------------------------------------------------------------------------------
@@ -309,6 +262,15 @@ change_requirements:
     # the declaration cannot outlive the debt. The baseline does not narrow what the gate LOOKS
     # AT — every service is compared every run — which is what separates it from the
     # pact-drift-check scope bug (#2284). #2314 closes when the file is empty.
+  delegation_capability_enforcement_declared:
+    detect: ["DelegationGrant.CAPABILITY_MATRIX pairs vs rules.yaml delegation_capability_enforcement.declared vs production Kotlin under openbank-*/src/main"]
+    require:
+      - "every (resourceType, capability) pair the matrix permits has a declared enforcer, measured in both directions (ADR-0375 D4)"
+      - "an `unenforced` pair that gains an enforcer fails, so a known gap cannot rot into furniture nor close in silence"
+    gate: delegation-capability-enforcement
+    enforced: advisory
+    target_enforce_date: "2027-02-12"   # ADR-0375 D4: enforce in the PR that lands delegation-service's offer-time refusal, so the registry and the refusal cannot disagree
+    ci_producer: ".github/scripts/check-delegation-capability-enforcement.py"
   close_participants_declared:
     detect: ["rules.yaml close_participants vs openbank-ledger-service application.yaml openbank.ledger.close.participants vs services constructing a CloseParticipationReporter in src/main"]
     require:
@@ -317,6 +279,14 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2027-01-17"   # ADR-0342: enforce once billing and lending participants have landed through it
     ci_producer: ".github/scripts/check-close-participants.py"
+  ci_artifact_fetch_via_resolver:
+    detect: ["curl / wget / helm pull / helm repo add of github.com/*/releases/download, *.github.io or openpolicyagent.org/downloads under .github/, outside fetch-artifact.py"]
+    require:
+      - "external CI tools and charts are fetched through .github/scripts/fetch-artifact.py, sha256-verified against ci/artifacts.lock (#15216)"
+    gate: ci-artifact-fetch-via-resolver
+    enforced: advisory
+    target_enforce_date: "2027-02-08"   # #15216 rollout step 4: enforce once the remaining direct downloads are migrated
+    ci_producer: ".github/scripts/check-artifact-fetch-via-resolver.py"
   money_rounding_inline_construction:
     detect: ["RoundingMode.* / setScale(n, RoundingMode.*) inline in any openbank-*/src/main outside openbank-libs-*, in a money-path service"]
     require:
@@ -372,9 +342,9 @@ change_requirements:
     require:
       - "the cited test (or the tests declaring the row's verifies id) ran in the latest scheduled main run and every result is passed"
       - "a component with no envelope is unknown, never a verdict; an unreadable corpus is UNRESOLVED, not a failure"
+      - "a finding fails only if absent from .github/gates/baselines/threat-model-test-evidence.txt and in a threat-model row the PR adds or edits; the baseline only shrinks against the PR base (enforced)"
     gate: threat-model-test-evidence
-    enforced: advisory
-    target_enforce_date: "2027-01-31"   # ADR-0144: enforce after one full month of advisory output is triaged
+    enforced: enforce
     ci_producer: ".github/scripts/check-threat-model-test-evidence.py"
   resilience_profile_declaration:
     detect: ["@Timeout / @Retry / @CircuitBreaker / @Bulkhead in any openbank-*/src/main/*.kt outside openbank-libs-*"]
@@ -563,7 +533,7 @@ change_requirements:
     applies_to: "every CNPG Cluster manifest under openbank-infra/gitops"
     requires:
       - "spec.backup.barmanObjectStore.destinationPath is set, OR the cluster carries
-         openbank.io/backup-exempt-reason with a non-empty reason"
+         open-bank.tech/backup-exempt-reason with a non-empty reason"
     gate: cnpg-backup-declared-gate
     # GRADUATED EARLY, 13 days before its 2026-09-15 date, because the same PR made the gate
     # able to fail at all. It carried `mode: enforced` from the day it was added (#4993) while
@@ -711,8 +681,8 @@ change_requirements:
       # (BusinessOnboardingEventConsumer, channel kyb-events-in, ADR-0284 D6) and analytics-sink's
       # Customer 360 silver layer (D8). The entry said to remove it with the first consumer PR, and
       # the gate fails on a stale entry under --enforce, in both directions.
-      - topic: "openbank.tpp.registry.event"
-        reason: "tpp-registry-service writes TPP_REGISTERED / TPP_BLACKLISTED through its transactional outbox (#4007; proven by TppOutboxWriteIT) and no service consumes the topic yet. CORRECTED 2026-10-17: this entry used to say the publish side was dormant; it has been live since #4007. Not the #889 class by plan only if a consumer is picked — the decision (audit-service/analytics-sink subscribe, or drop the producer) is tracked. TRACKING (2026-10-17, #13168): #13177."
+      # openbank.tpp.registry.event left the allowlist in #13177: audit-service now consumes it
+      # (audit-events-in), recording TPP register changes on the audit trail.
       - topic: "proposal-events"
         reason: "ADR-0244 agent-swarm case workflow, first slice (#4181/#4215). The producer is now fully deployed and the exemption is about the CONSUMER side only: openbank-infra/gitops/components/case-coordinator/kafka-case-coordinator-mtls.yaml declares the KafkaUser with Write+Describe on this topic and says in words \"producer-only ... No consumer side\", and kafka-topic.yaml (the Strimzi KafkaTopic, which does exist) says \"Consumer: none yet\". The intended consumer is the oversight/review surface ADR-0244 D7 describes; the ADR-0031 approval queue reads proposals through agent-service's store/REST today. Same shape as the delegation.events and incentive.events entries above. CORRECTED 2026-08-31 (#7740): this reason previously rested on three facts that are all false on main — the topic IS declared under openbank-infra/ (kafka-topic.yaml + the mTLS ACL), openbank-case-coordinator-agent IS in auto-deploy.yml's ALL_SERVICES, and its KafkaUser DOES exist. The conclusion survived its own evidence, which is the failure mode: a stale justification reads as a verified one. Re-triage: remove this entry with the first real consumer PR, and rename the topic to the fleet's openbank.<domain>.<event> convention before the first deploy, while it is still free. TRACKING (2026-10-17, #13168): #3737."
       - topic: "openbank.loyalty.events"
@@ -737,6 +707,10 @@ change_requirements:
     consumer_allowlist:
       - topic: "openbank.treasury.payments"
         reason: "ADR-0344 split of #13413: swift-service's TreasuryPaymentReleasedConsumer and audit-service's subscription land first (bank-own transfer rail slice); the treasury-service producer arrives with the market-and-payments slice, which MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-10-23, #13698): #13698."
+      - topic: "openbank.accounts.account.status-changed"
+        reason: "#9073 stage 1 of 2, consumer-first: audit-service and analytics-sink subscribe, with the topic and ACLs, before account-service publishes there. Today AccountEventPublisher ignores the topic its callers name and emits status changes on account-events-out (account.created); the producer cutover is stage 2 and MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-11-02, #9073): #9073."
+      - topic: "openbank.accounts.savings-withdrawal.approved"
+        reason: "#9073 stage 1 of 2, consumer-first: same sequencing as account.status-changed above; the account-service producer cutover is stage 2 and MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-11-02, #9073): #9073."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
@@ -1797,9 +1771,7 @@ coverage:
     # Baseline for every entry in money_path_services (28 on 2026-10-17), ratchet-only. Enforced
     # per module by koverVerify against the minValue in its build.gradle.kts, and the direction
     # is enforced by gate `coverage-floor-ratchet` (a lowered minValue needs a
-    # `coverage-floor-lowered: #<issue>` trailer). Two services still sit BELOW it:
-    # standing-order 34 and sdd 38 — tracked in #13144; raise them there, do not read this
-    # number as already true of the whole list.
+    # `coverage-floor-lowered: #<issue>` trailer). Every entry is at or above it since #13144.
     money_path_floor: 40
     money_path_target: 70               # aspirational target; raise floor PRs as tests land
   money_path_depth:
@@ -2749,17 +2721,33 @@ ci_runners:
       # Hetzner-specific workflow) was deleted in the same PR as this entry.
     mac_mini:
       arch: arm64
-      labels: [openbank-build, openbank-sandbox]
+      labels: [openbank-mini]             # ephemeral Linux runner containers (OrbStack), one JIT runner per job
       count: 1
       role: owner_managed_accelerator     # NOT a FinOps line item (owner's own hardware, no cloud billing);
-      # kept in the label pool at the owner's discretion, independent of this
-      # governance decision. Native arm64 is otherwise served free by
-      # ubuntu-24.04-arm, so this is a pure opt-in accelerator (ADR-0053), never
-      # something CI depends on being online.
+      # Adds build slots beyond the 20-job hosted concurrency cap, which is what
+      # PR CI queues on (2026-11-03: Services CI builds = 57 % of hosted minutes,
+      # median queue 10 min). Only `_service-ci.yml` build routes here, only for
+      # services in the repo variable MINI_RUNNER_SERVICES, and only on schedule /
+      # workflow_dispatch: PRs, train carriers and main pushes always build hosted.
+      # Availability: a job routed here has no hosted fallback once queued, so the
+      # variable is the kill switch — empty it when the Mac is down.
+      # Second, separate use: merge-train.yml `settle` and `publish` route here when the repo
+      # variable MERGE_TRAIN_RUNNER names this label (never on pull_request_target). They run
+      # main's code only, never PR code, and carry the GitOps/branch-updater App keys in a fresh
+      # per-job container. Purpose: priority capacity for the train, whose ticks queued 3-14 min
+      # behind non-required PR jobs on the hosted cap (2026-11-11). `build` (PR heads) stays hosted.
+      # Trust boundary: because App keys now reach this host, EVERY route here requires
+      # github.ref == refs/heads/main (and, for _service-ci, no inputs.ref override); a branch
+      # dispatch builds hosted. A privileged dind build must never run branch code beside the keys.
+      allowed_refs: [refs/heads/main]
+      routing_variable: MINI_RUNNER_SERVICES
+      train_routing_variable: MERGE_TRAIN_RUNNER
+      fork_prs: never
+      ephemeral_per_job: true             # fresh runner + docker-in-docker container per job, removed after
   spot:
     provider: karpenter                 # diversified Graviton spot, price-capacity-optimized
     interruption: karpenter-managed     # no persistent spot request; node replaced on reclaim
-  pools:                                # three ARC scale sets: build/deploy TRUST split + build/batch CAPACITY split
+  pools:                                # four ARC scale sets: build/deploy trust, build/batch capacity, isolated DR
     build:                              # executes PR code, merge-required (compile, unit/IT tests, admin-ui, manifests)
       scale_set: openbank-build
       cloud_write_credentials: false    # no ECR push, no ArgoCD, no prod secrets
@@ -2793,7 +2781,7 @@ ci_runners:
   availability:
     merge_required_scale_set: openbank-build
     failure_domain: eks-multi-az        # not a laptop, not a single EC2 host
-    no_developer_workstation_in_critical_path: true   # Macs are opt-in accelerators only
+    no_developer_workstation_in_critical_path: true   # Mac mini is opt-in per service (MINI_RUNNER_SERVICES) with a kill switch; never merge-blocking when emptied
     warm_min_runners_lever: engaged     # build minRunners=1 since 2026-06-01: a per-service build queued ~45 min behind a push/PR workflow burst (p95 SLO miss); batch+deploy stay at 0
   stuck_runner_reaper:                  # self-heal guard, arc-runner-reaper.tf; ARC has no built-in idle/registration timeout for a registered-but-jobless runner
     why: "ARC won't reap a phase=Running runner (assumes mid-job); a cancelled/superseded queued job leaves an orphan that never gets work and pins a spot node until noticed (observed 2026-06-02, ~10h)"
@@ -2817,14 +2805,12 @@ ci_runners:
     sign_images: cosign
     deploy_only_signed_digests: true
   gate: ci-runner-governance
-  enforced: planned                     # ADR-0053 Accepted; lint + tofu enable land on rollout
+  enforced: planned                     # ADR-0053 Accepted; the full runtime/trust control remains pending
   target_enforce_date: "2026-11-30"   # ADR-0144. Moved from 2026-08-31, which passed with the
                                       # blocker unresolved and turned an enforced gate red on every
-                                      # PR regardless of its diff. Extending the horizon is the
-                                      # sanctioned move here; the alternative -- flipping `enforced`
-                                      # to satisfy the date -- would claim a control this repo does
-                                      # not have.
-  blocked_on: "RESOLVED for the lint half 2026-10-14: check-ci-runner-pools.py (enforced, gates.yaml ci-runner-pools) reads pr_jobs_allowed_pools straight from this file and rejects any pull_request/pull_request_target job on a non-allowed pool (fleet clean, self-test reachable). The OpenTofu half is unchanged: arc-runners.tf and arc-runner-reaper.tf are in the tree, but a committed .tf is not an applied one, and that is not checkable from this repository (#8388 is the measured case: batch/dr written in tofu, never applied, caught only because the gate subtracts KNOWN_UNAPPLIED). Corroborating evidence that the pools are not fully provisioned: #6458 records openbank-batch as a declared pool with no capacity and no consumer."
+                                      # PR regardless of its diff. The remaining runtime/trust
+                                      # assertions need proof before this umbrella rule can enforce.
+  blocked_on: "The enforced ci-runner-pool-capacity gate checks source declarations, OpenTofu resources, workflow labels, and pr_jobs_allowed_pools. Batch and DR scale sets and listeners were observed Ready in a read-only check for #6458, but neither that observation nor the source gate proves job pickup, ephemeral-per-job behavior, or credential isolation. The full ci-runner-governance rule remains planned until those runtime and trust claims have enforceable evidence."
 
 # ---------------------------------------------------------------------------------------
 # Infra apply (ADR-0060). Closes the "as-code without applied" gap: CI applies the
@@ -2868,6 +2854,20 @@ issues:
     - governance_followup                 # actionable tail of an ADR (rollout, reg condition, gate flip)
     - bug                                 # defect in shipped behavior
     - enhancement                         # proposed capability (asks "needs ADR?" before build)
+    - tech_debt                           # refactor / cleanup with no observable behavior change
+  # The KIND of an issue: exactly one of these labels per open issue. Native issue types are
+  # org-only and this repo is user-owned, so the kind is a label — and a label has no
+  # cardinality. Measured 2026-11-03: 242 of 397 open issues carried no kind, 27 carried two.
+  # A violation is flagged with `flag_label`, not blocked: GitHub cannot refuse an issue.
+  kinds:
+    labels: [bug, enhancement, governance, sweep, tech-debt]
+    cardinality: exactly_one
+    flag_label: needs-kind
+    # Opened AND closed by a generator; a kind would record no decision. Exempt from
+    # "missing" only — two kinds is still flagged.
+    generator_owned: [deploy-drift, deploy-code-lag, fleet-health, main-red, flaky-test,
+                      vex-triage, credential-inventory, deps-freshness, kev-listed]
+    enforced_by: .github/workflows/issue-kind.yml   # .github/scripts/issue-kind.py
   not_an_issue:
     - architectural decisions             # -> docs/adr (an Issue may TRACK an ADR's rollout, not replace it)
     - changelog entries                   # -> release-please derives these from Conventional Commits
@@ -3053,13 +3053,13 @@ finops_tiers:
 # FinOps cost-allocation groups — showback business flows (ADR-0062). The /api/finops/costs
 # snapshot is aggregated by AWS SERVICE (EC2, EKS, RDS); this section is the missing layer
 # that lets the admin-ui roll cloud spend up the BUSINESS taxonomy: service -> data domain
-# (cost-center, from admin-ui manifest.ts dataDomain) -> business flow (here). The allocator
+# (cost-center, from per-module governance.yaml dataDomain) -> business flow (here). The allocator
 # (admin-ui src/lib/finops/allocation.ts) splits the shared COMPUTE pool across services by
 # their declared resource requests (derive -> show, ADR-0029), then sums per group.
 #
 # Service ids use the CANONICAL key = the admin-ui manifest serviceName (NO `openbank-`
 # prefix), which also equals the gitops Deployment metadata.name (ledger-service,
-# account-service, ...). This is the stable join key across manifest.ts (domain source) and
+# account-service, ...). This is the stable join key across governance.yaml (ownership source) and
 # the gitops resource-request footprints; money_path_services uses a different `openbank-*`
 # convention and is intentionally NOT the join key here. A drift test (admin-ui
 # finops-taxonomy.test.ts) fails the build if any service below is unknown to manifest.ts.
@@ -3372,11 +3372,213 @@ enforcement_reachability:
         - openbank-account-service/src/main/kotlin/com/openbank/account/application/port/in/AccountPorts.kt
       why: >
         ADR-0232 D3's amount-aware guard and the only enforcer of perTransactionLimit in
-        account-service. Measured 2026-08-03: every call site is in AuthorizationServiceDelegationTest.
-        The endpoint that looks like its front door, GET /api/v1/accounts/{id}/authorizations/check,
-        calls the amount-free isAuthorized instead, and no money-moving service reads a delegation
-        grant at all — so there is no debit for a limit check to attach to yet. Flip to `reachable`
-        when the delegated payment path lands (#3615), not before.
+        account-service. Re-measured 2026-11-12: every call site is still in
+        AuthorizationServiceDelegationTest, and the endpoint that looks like its front door,
+        GET /api/v1/accounts/{id}/authorizations/check, still calls the amount-free isAuthorized.
+        So `unreachable` stays correct.
+        CORRECTION to the 2026-08-03 reason, which said "no money-moving service reads a delegation
+        grant at all": that stopped being true when the delegated DOMESTIC payment path landed.
+        customer-edge's resolveDebitAuthority does read a grant and does enforce an amount — over
+        HTTP and over the ADR-0249 spend reservation, never through this symbol, which is why the
+        mechanical verdict did not move while its stated reason went stale. The remaining five
+        PaymentRail values read no grant. Flip to `reachable` only when a production Kotlin caller
+        exists (#3615); ADR-0375 D1 retires the symbol instead, by moving the check into the
+        ADR-0374 admission chain.
+
+delegation_capability_enforcement:
+  principle: >
+    DelegationGrant.CAPABILITY_MATRIX says what a grantor may be OFFERED. Until this registry
+    existed nothing said what the platform will actually HONOUR, and the two drifted in silence:
+    measured 2026-11-12, 9 of 18 DelegationCapability values had no production reference anywhere
+    outside delegation-service. A capability compiles, persists, publishes over the outbox and
+    renders on the grant screen whether or not one line of code reads it, so the failure is a
+    promise the bank then refuses — 403 on five of six payment rails — with nothing red anywhere.
+    The rule already existed by hand for exactly one field (DelegationService.rejectUnsupportedExposure
+    refuses an offer carrying `exposure`) and for one capability (ADR-0249 D5 refuses
+    ACCOUNT_INITIATE_PAYMENT with no ceiling). ADR-0375 D4 generalises it: an entry declares what
+    was MEASURED, the gate derives its subject set from the matrix rather than a hand-kept list,
+    and it fails in both directions — an `enforced` entry whose file stops naming the capability,
+    and an `unenforced` entry that quietly gains an enforcer.
+  adr: ADR-0375
+  gate: delegation-capability-enforcement
+  scan_limit: >
+    The evidence scan is capability-keyed while a subject is a (resource_type, capability) PAIR, so
+    an `unenforced` pair whose capability is enforced for ANOTHER resource type cannot be falsified
+    by scanning. Such an entry must carry `shared_capability: true`, which the gate prints on every
+    run so a green is never read as more than it is. A pair-aware scan requiring the enforcer to
+    also name its resource type was measured and rejected: DelegatedCardGrant.kt is the genuine
+    enforcer of CARD_VIEW and never names a standalone CARD token, so the rule would have cried
+    wolf about correct code.
+  declared:
+    # --- enforced: a production guard reads the capability -----------------------------
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_READ_BALANCES
+      status: enforced
+      enforced_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/domain/model/DelegatedAccessGrant.kt
+      why: "DelegatedAccessGrant.satisfies(READ_ONLY) reads READ_CAPABILITIES; account-service owns the resource."
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_READ_TRANSACTIONS
+      status: enforced
+      enforced_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/domain/model/DelegatedAccessGrant.kt
+      why: "Same READ_ONLY guard as ACCOUNT_READ_BALANCES."
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_INITIATE_PAYMENT
+      status: enforced
+      enforced_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/domain/model/DelegatedAccessGrant.kt
+        - openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/CustomerEdgeResource.kt
+      why: >
+        DelegatedAccessGrant.satisfies(PAYMENT_ONLY) plus the edge's resolveDebitAuthority. Enforced
+        on the DOMESTIC rail only: the other five PaymentRail values answer
+        "Debtor account does not belong to caller" (fail-closed). ADR-0375 D1 moves this to the
+        ADR-0374 admission chain, which does not exist yet.
+    - resource_type: SAVINGS_GOAL
+      capability: SAVINGS_DEPOSIT
+      status: enforced
+      enforced_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/domain/model/DelegatedAccessGrant.kt
+      why: "DelegatedAccessGrant.satisfiesSavings(DEPOSIT)."
+    - resource_type: SAVINGS_GOAL
+      capability: SAVINGS_WITHDRAW
+      status: enforced
+      enforced_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/domain/model/DelegatedAccessGrant.kt
+      why: "DelegatedAccessGrant.satisfiesSavings(WITHDRAW); the SCA ceremony is sca-service's half."
+    - resource_type: SAVINGS_GOAL
+      capability: SAVINGS_PROPOSE_WITHDRAW
+      status: enforced
+      enforced_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/domain/model/DelegatedAccessGrant.kt
+      why: "DelegatedAccessGrant.satisfiesSavings(PROPOSE_WITHDRAW) — the propose-only variant."
+    - resource_type: CARD
+      capability: CARD_VIEW
+      status: enforced
+      enforced_in:
+        - openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/domain/model/DelegatedCardGrant.kt
+      why: "DelegatedCardGrant.satisfies(CardDelegationIntent.VIEW), via the CAP_CARD_VIEW constant."
+    - resource_type: CARD
+      capability: CARD_MANAGE_LIMITS
+      status: enforced
+      enforced_in:
+        - openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/domain/model/DelegatedCardGrant.kt
+      why: "DelegatedCardGrant.satisfies(CardDelegationIntent.MANAGE_LIMITS)."
+    - resource_type: DOCUMENT
+      capability: OBJECT_READ
+      status: enforced
+      enforced_in:
+        - openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/CustomerDocumentResource.kt
+      why: >
+        The only object reader in the fleet: documentContent and sharedDocuments ask
+        grants.has(party, "DOCUMENT", id, "OBJECT_READ"). Until ADR-0375 D5 the grant it reads
+        could not be MINTED at all — ResourceOwnershipClient answered UNVERIFIABLE for DOCUMENT and
+        the offer path fails closed on that — so a built reader guarded a grant nobody could
+        create, with both halves green because each side mocked the other. D5 closed it:
+        document-service exposes GET /api/v1/documents/{id}/owner under its own OPA action
+        document.verifyOwnership, pinned to service-account-openbank-delegation and vetoed for
+        every other caller (measured with opa eval against the generated bundle), and the
+        DOCUMENT branch resolves through it.
+    # --- unenforced: grantable today, honoured by nothing ------------------------------
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_VIEW_DETAILS
+      status: unenforced
+      issue: 3615
+      why: "No production reference outside delegation-service. Measured 2026-11-12 (ADR-0375 D4)."
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_DOWNLOAD_STATEMENTS
+      status: unenforced
+      issue: 3615
+      why: "No production reference; statement-service holds no delegation code at all."
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_PROPOSE_PAYMENT
+      status: unenforced
+      issue: 3615
+      why: >
+        ADR-0232 D3's propose-only payment flow. The savings propose variant is enforced; the
+        payment one has no reader, so a propose-only payment grant authorises nothing.
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_MANAGE_BENEFICIARIES
+      status: unenforced
+      issue: 3615
+      why: "No production reference; no beneficiary route consults a grant."
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_MANAGE_LIMITS
+      status: unenforced
+      issue: 3615
+      why: >
+        No production reference. ADR-0374 point 5 gives limits one model and one counter; this
+        capability's enforcer is that step, which does not exist yet.
+    - resource_type: ACCOUNT
+      capability: DELEGATION_MANAGE
+      status: unenforced
+      issue: 3615
+      why: >
+        Measured 2026-11-12: the ONLY two occurrences in the whole tree are the enum declaration
+        and this matrix entry — it is not enforced even inside delegation-service, which owns the
+        resource. ADR-0232 D5's retail-to-SME bridge ("the grantor-side actor must itself hold
+        delegation.manage on that entity") is implemented instead by GrantorAuthorityVerdict over
+        representation mandates, which never consults this capability. So a grant of
+        DELEGATION_MANAGE confers nothing, and the sub-delegation it appears to permit is in fact
+        governed by mandates alone.
+    - resource_type: CARD
+      capability: CARD_VIEW_TRANSACTIONS
+      status: unenforced
+      issue: 3615
+      why: >
+        Still unenforced after the ADR-0375 D7 sweep, and for a different reason than its two
+        siblings: there is no route to gate. The customer edge exposes no per-card transaction
+        list, so unlike freeze and the channel toggles there is no existing call site being guarded
+        by the wrong capability. Enforcing it means building the route first, which is product work.
+        Not papered over with a CardDelegationIntent member either — the check endpoint that would
+        consume one has no production caller, so the member would be a dead branch.
+    - resource_type: CARD
+      capability: CARD_MANAGE_STATUS
+      status: enforced
+      enforced_in:
+        - openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/CustomerEdgeResource.kt
+      why: >
+        ADR-0375 D7 correction. freeze, unfreeze and block all run through cardAction, which was
+        gated on CAP_CARD_MANAGE_LIMITS — so the status capability was grantable and read by
+        nothing while a different authority stood in for it. Now gated on CAP_CARD_MANAGE_STATUS.
+        Both card role presets (Majitel karty, Drzitel dodatkove karty) grant all five card
+        capabilities, so no preset-based delegate loses anything; a hand-built grant carrying
+        limits ALONE loses freeze, which is the correction.
+    - resource_type: CARD
+      capability: CARD_MANAGE_CHANNELS
+      status: enforced
+      enforced_in:
+        - openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/CustomerEdgeResource.kt
+      why: >
+        ADR-0375 D7 correction. PUT /customer/v1/cards/{id}/controls toggles contactless, online,
+        ATM and abroad — channels, not limits — and was gated on CAP_CARD_MANAGE_LIMITS. Now gated
+        on CAP_CARD_MANAGE_CHANNELS. Same preset reasoning as CARD_MANAGE_STATUS.
+    - resource_type: PAYMENT
+      capability: OBJECT_READ
+      status: unenforced
+      issue: 3615
+      shared_capability: true
+      why: >
+        The matrix permits sharing a single payment; no route serves a shared payment to a grantee
+        (the edge's payment reads are owner-only IDOR guards). Measured: no production file names
+        both OBJECT_READ and PAYMENT. Scan-unverifiable because OBJECT_READ is enforced for
+        DOCUMENT — see scan_limit above.
+        ADR-0375 D5 gave DOCUMENT an ownership oracle and deliberately did NOT give one to PAYMENT:
+        a payment id resolves in no single service — six rails own payments and nothing maps an id
+        to its rail — so there is no owner to ask. The honest fix is to remove this pair from
+        CAPABILITY_MATRIX, which is a behaviour change (it refuses offers the app makes today) and
+        belongs with the offer-time refusal, not here.
+    - resource_type: STATEMENT
+      capability: OBJECT_READ
+      status: unenforced
+      issue: 3615
+      shared_capability: true
+      why: >
+        As PAYMENT/OBJECT_READ: statement-service has no delegation code, and no production file
+        names both OBJECT_READ and STATEMENT. It also has no oracle to build — measured
+        2026-11-12, every statement-service route is addressed by accountId and there is no
+        statement object carrying an id of its own, so a STATEMENT resourceId refers to nothing
+        the owning service can resolve. Remove from CAPABILITY_MATRIX with the refusal slice.
 
 readiness_attestations:
   principle: >
@@ -3687,9 +3889,10 @@ authz:
         - lending.collateralDecide
         - lending.approval.read
         - lending.approval.decide
-    # ADR-0285 D6 — the Communication Studio checker role. D6 says the comms roles are declared
-    # here rather than only in the realm; this is that declaration, and it is deliberately ONE
-    # read action rather than the role's full duty set. What is missing is missing on purpose:
+    # ADR-0285 D6 — the Communication Studio checker role. Until ADR-0229 provides a safe
+    # single-source role pipeline, realm-template.json owns role membership; this matrix carries
+    # deliberately ONE read action rather than the role's full duty set. What is missing is
+    # missing on purpose:
     #
     #   commstyle.publish and commstyle.approval.decide are NOT here, and must not be added.
     #   `matrix-allows` (rest.rego) gates on `principal.type == "HUMAN"` and the role alone — it
@@ -3708,10 +3911,10 @@ authz:
     #   already, so this entry is a provable subset of today's effective grant and changes no
     #   decision — the same seeding property the matrix was built on.
     #
-    # ROLE_COMMS_EDITOR has no entry at all, and cannot have one yet: the maker endpoints
-    # (draft, submit, golden-set edits) carry `@RolesAllowed` only and no `@Authorize`, so the
-    # editor duty has no action name for the matrix to key on. Declaring the editor role here
-    # needs those endpoints to get `@Authorize` actions first — tracked on #9703.
+    # ROLE_COMMS_EDITOR has no entry at all: the maker endpoints (draft, submit, golden-set
+    # edits) carry `@RolesAllowed` only and no `@Authorize`, so the editor duty has no action
+    # name for the matrix to key on. A future single-source migration needs governed action
+    # names and must preserve the action-specific human-only write policy.
     ROLE_COMMS_APPROVER:
       grant:
         - commstyle.approval.read
@@ -3985,10 +4188,42 @@ product_ir_authoring_parity:
     - "every committed ir/<name>.json has a DSL product declared under that name, and every DSL product has a committed IR"
     - "ReferenceProductsTest compiles each DSL product and asserts its canonical JSON equals the committed file byte for byte (JVM half)"
     - "the parity test exists, is not disabled and iterates ReferenceProducts.all"
+    - "ProductIrAuthoringParityTest runs one fixture per reference product (keys reverse-ordered) through the obp CLI and the MCP handlers for lint, compile, simulate and explain, including invalid-IR and unknown-rule failures, and asserts identical raw bytes and that MCP isError holds exactly when the CLI exits non-zero (surface half, phase 5a)"
+    - "the Studio form surface is declared PENDING until product-catalog has a draft-from-form path (phase 6)"
   gate: product-ir-authoring-parity
   enforced: advisory
-  target_enforce_date: "2027-03-31"   # ADR-0144; enforce once the MCP/Studio authoring paths (phases 5-6) are in scope
+  target_enforce_date: "2026-12-31"   # ADR-0144; CLI+MCP surfaces in scope since phase 5a, Studio joins in phase 6
   ci_producer: ".github/scripts/check-product-ir-authoring-parity.py"
+
+product_ir_formal_properties:
+  # ADR-0352 §9 phase 6: formal properties of the pure interpreter, as property-based tests in CI
+  # over every reference product and over generated revisions (ProductArb). The gate checks the
+  # assertions are PRESENT; the module CI lane runs them.
+  detect: ["openbank-products/src/test/kotlin/com/openbank/products/ProductFormalPropertiesTest.kt"]
+  require:
+    - "termination: every evaluation emits at most maxInstructionsPerEvaluation (64) instructions, and one past it is refused with ProductEvaluationException"
+    - "balance conservation: every Post instruction balances per currency"
+    - "monotone tiers, reference products: on the interpreter's accrual Post, the marginal rate never falls from one tier to the next, sampled at every tier edge"
+    - "monotone accrual: for every revision ProductMonotonicity passes (all reference products; generated ones it passes), a higher balance never accrues less and no tier's marginal rate is lower than the one below; the check must flag some generated revisions and a known bonus-below-x revision. IR v1 itself does not guarantee monotone accrual (product-ir.md, #14210)"
+    - "determinism: the same input gives byte-identical canonical instructions"
+    - "purity: the compiled com.openbank.libs.product and com.openbank.libs.finance.deposit packages reference no ambient clock, I/O, randomness, logging or metrics"
+    - "v1 rounding is HALF_UP, pinned by golden accrual and capitalisation values that sit exactly on a half"
+  gate: product-ir-formal-properties
+  enforced: advisory
+  target_enforce_date: "2026-12-31"   # ADR-0144
+  ci_producer: ".github/scripts/check-product-ir-formal-properties.py"
+
+product_ir_version_lifecycle:
+  # ADR-0352 §1/§9 phase 6: a published revision is pinned to its irVersion and each schema is immutable.
+  detect: ["openbank-libs-domain/src/main/kotlin/com/openbank/libs/product/ir/ProductIr.kt"]
+  require:
+    - "IrVersion.SUPPORTED holds at most two versions"
+    - "every supported version has product-ir/v<N>.schema.json"
+    - "removing a supported version carries a breaking-change marker (`!:` title or BREAKING CHANGE body)"
+  gate: product-ir-version-lifecycle
+  enforced: advisory
+  target_enforce_date: "2026-12-31"   # ADR-0144
+  ci_producer: ".github/scripts/check-product-ir-version-lifecycle.py"
 
 product_bearing_services:
   # ADR-0341 D1 / ADR-0352 phase 3: a service that opens product-bearing contracts pins the PUBLISHED
@@ -4003,16 +4238,6 @@ product_bearing_services:
   # `adoption: pinned` arms the three structural checks (migration column, entity @Column, creation path
   # binds the pin); `pending` is reported, never failed, until that service's adoption PR flips it.
   services:
-    openbank-account-service:
-      adoption: pinned
-      contract_table: accounts
-      pin_column: product_revision_id
-      entity: openbank-account-service/src/main/kotlin/com/openbank/account/infrastructure/persistence/entity/AccountEntities.kt
-      creation:
-        file: openbank-account-service/src/main/kotlin/com/openbank/account/application/usecase/AccountService.kt
-        function: openAccount
-        aggregate: Account
-        pin_argument: productRevisionPin
     openbank-lending-service:
       adoption: pending
       reason: "loan_application.catalog_revision_id exists (ADR-0264) but is set only when a caller sends catalogOfferingId, which none does; ADR-0352 §9 defers lending's pin to IR v2 (#668)"
@@ -4659,8 +4884,10 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
       - "src/main/kotlin/com/openbank/fx/infrastructure/client/AmlServiceClient.kt"
+      - "src/main/kotlin/com/openbank/fx/infrastructure/client/PartyServiceClient.kt"
       - "src/main/kotlin/com/openbank/fx/infrastructure/client/FraudScoreClient.kt"
       - "src/main/kotlin/com/openbank/fx/infrastructure/client/SanctionsServiceClient.kt"
+      - "src/main/kotlin/com/openbank/fx/infrastructure/client/PartyServiceClient.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
@@ -4671,6 +4898,8 @@ security_sensitive_paths:
   openbank-ledger-service:
     auth_crypto_payment:
       - "src/main/kotlin/**/ApprovalResource.kt"
+      # ADR-0365: own-book posting, payload identity, startup binding and four-eyes controls.
+      - "src/main/kotlin/**/Pension*.kt"
       # ADR-0342 D2: binds each day-close participant report to one verified service-account
       # and records the operator `sub` on a waiver.
       - "src/main/kotlin/**/CloseParticipationResource.kt"
@@ -4698,6 +4927,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/ledger/application/usecase/FxRevaluationService.kt"
       - "src/main/kotlin/com/openbank/ledger/domain/model/ClosedPeriod.kt"
       - "src/main/kotlin/com/openbank/ledger/domain/model/YearClose.kt"
+      - "src/main/kotlin/com/openbank/ledger/domain/model/YearEndResultAllocation.kt"
       - "src/main/kotlin/com/openbank/ledger/infrastructure/client/FxServiceClient.kt"
       - "src/main/kotlin/com/openbank/ledger/infrastructure/rest/AccountingDayResource.kt"
       - "src/main/kotlin/com/openbank/ledger/infrastructure/rest/ClosedPeriodResource.kt"
@@ -4733,6 +4963,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*LedgerClient*.kt"
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/lending/application/usecase/CzCreditPolicyActivationService.kt"
       - "src/main/kotlin/com/openbank/lending/application/usecase/LedgerBackfillPlanner.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/AccountServiceClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/BorrowerCreditClient.kt"
@@ -4740,6 +4971,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerRestClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerCloseParticipationClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/ProductCatalogLoanProfileAdapter.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/rest/CzCreditPolicyResource.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
@@ -4787,6 +5019,9 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/entity/SanctionsCheckEntity.kt"
       - "src/main/resources/db/migration/V1__create_sanctions.sql"
       - "src/main/resources/db/migration/V5__create_sanctions_entries.sql"
+      - "src/main/kotlin/com/openbank/sanctions/application/port/in/SanctionsMonitoringPorts.kt"
+      - "src/main/kotlin/com/openbank/sanctions/domain/model/SanctionsMonitoring.kt"
+      - "src/main/resources/db/migration/V23__ongoing_monitoring.sql"
     cardholder: []
   openbank-psd2-service:
     auth_crypto_payment:
@@ -4877,7 +5112,7 @@ catalog_kernel_neutrality:
     - RelationshipKind     # offering graph edge semantics
     - PriceRole            # what a price component is (FEE/RATE/LIMIT/THRESHOLD, #13230); the kernel branches on it (a FEE must be an AMOUNT)
   # Words that occur in pack type names but are generic catalog/kernel language.
-  vocabulary_not_industry: [legacy, product, instrument, term]
+  vocabulary_not_industry: [legacy, product, instrument, term, count]
   # The /api/v1 banking compatibility vocabulary (ADR-0257 D3). Frozen: a pack schema is the
   # only place new vocabulary may land. Removal follows the v1 sunset in the ADR-0257 amendment.
   legacy_v1_frozen_enums:
@@ -4960,3 +5195,77 @@ pr_span_limits:
   gate: pr-component-span
   enforced: enforced
   ci_producer: ".github/scripts/check-pr-component-span.py"
+
+# ---------------------------------------------------------------------------------------
+# Demo-only switches - check-demo-only-flags.py (gate demo-only-flags, enforced, #15760).
+# A switch that turns a regulatory control into a no-op may be true only in an environment
+# listed here. The environment of a manifest is derived from its PATH: the gitops tree IS the
+# sandbox cluster (no per-environment overlay exists), the kustomize overlays are
+# k8s/overlays/{sandbox,local}. Two fail-closed rules, in this order:
+#   1. A path with a non-sandbox TOKEN (non_sandbox_path_tokens: prod, production, prd, live,
+#      staging, stage, uat, preprod - matched on any path segment split at - _ .) is never
+#      permitted, WHEREVER it sits - also under a permitted root such as
+#      openbank-infra/gitops/environments/production/ or .../values-prod.yaml. Today's repo has
+#      one deployed environment and it is the sandbox, so the classification is exact for the
+#      files that exist; this makes it fail closed for the ones that do not exist yet.
+#   2. A file under no declared environment is "unclassified" and never permitted, so a new
+#      tree (deploy/, charts/, gitops-prod/) fails until someone declares it here, on purpose.
+# The code default must be false and no profile other than permitted_profiles may set it.
+#
+# THE LIST BELOW IS CURATED AND PARTIAL. It names the switches somebody found and judged to
+# weaken a control; it does not discover them. A demo switch that is not listed is not
+# checked. Adding a flag is a deliberate review decision (service, property, env var, reason);
+# a switch that is an environment fact rather than a control weakening is NOT listed (for
+# example QUARKUS_MAILER_MOCK: the deployed notification-service mocks its mailer because the
+# sandbox has no SMTP, and records such mail as SUPPRESSED/mailer_mocked, never SENT, with an
+# alert on it - nothing is bypassed, nothing is reported as delivered).
+# Known limits are listed in the script docstring. Read by no .rego: editing this key
+# restamps no bundle.
+# ---------------------------------------------------------------------------------------
+demo_only_flags:
+  gate: demo-only-flags
+  enforced: enforced
+  ci_producer: ".github/scripts/check-demo-only-flags.py"
+  environments:
+    sandbox:
+      paths: ["openbank-infra/gitops/", "openbank-infra/k8s/overlays/sandbox/"]
+    local:
+      paths: ["openbank-infra/k8s/overlays/local/"]
+  non_sandbox_path_tokens: [prod, production, prd, live, staging, stage, uat, preprod]
+  permitted_profiles: [dev, test]
+  flags:
+    - env_var: OPENBANK_AML_AUTO_CLEAR
+      service: openbank-aml-service
+      config_property: openbank.aml.auto-clear
+      reason: "Clears onboarding AML screenings without an analyst decision; sandbox straight-through only."
+      permitted_environments: [sandbox]
+    - env_var: OPENBANK_KYC_AUTO_APPROVE
+      service: openbank-kyc-service
+      config_property: openbank.kyc.auto-approve
+      reason: "Approves KYC cases without four-eyes review (ADR-0116 section 4); sandbox straight-through only."
+      permitted_environments: [sandbox]
+    - env_var: LENDING_RISK_ALLOW_DEMONSTRATION_MODEL
+      service: openbank-lending-service
+      config_property: lending.risk.allow-demonstration-model
+      reason: "Posts IFRS 9 allowances from unvalidated placeholder PD/LGD parameters; sandbox demonstration only."
+      permitted_environments: [sandbox]
+    - env_var: LENDING_ORIGINATION_AUTO_APPROVE
+      service: openbank-lending-service
+      config_property: lending.origination.auto-approve
+      reason: "Drives a submitted loan application to READY_TO_DISBURSE as 'sandbox-auto-approval', bypassing the four-eyes gate (ADR-0211 D5). Unset in gitops today."
+      permitted_environments: [sandbox]
+    - env_var: OPENBANK_KYB_DEMO_ENTITY_ENABLED
+      service: openbank-kyb-service
+      config_property: openbank.kyb.demo-entity.enabled
+      reason: "Makes the company register answer for a fictitious company, an onboarding bypass anywhere but a sandbox."
+      permitted_environments: [sandbox]
+    - env_var: CARD_SANDBOX_ACQUIRER_ENABLED
+      service: openbank-card-processing-service
+      config_property: openbank.card-processing.sandbox-acquirer-enabled
+      reason: "Exposes an endpoint that authorises and clears card transactions end to end without a real acquirer (can move money). Not even the sandbox sets it: gitops pins CARD_SANDBOX_ACQUIRER_ENABLED=false, so only the local overlay may."
+      permitted_environments: [local]
+    - env_var: OPENBANK_PENSION_STUB_INTEGRATIONS_ENABLED
+      service: openbank-pension-service
+      config_property: openbank.pension.stub-integrations.enabled
+      reason: "Swaps the KYC, signature-verification (SCA), counterparty and fund-administration ports for stubs, so a signature check that never happened passes. %dev and %test only; unset in gitops."
+      permitted_environments: [local]

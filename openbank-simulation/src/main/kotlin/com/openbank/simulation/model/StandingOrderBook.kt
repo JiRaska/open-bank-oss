@@ -36,12 +36,17 @@ class StandingOrderBook {
 
     private val totals = mutableMapOf<UUID, Totals>()
 
-    /** One execution actually confirmed end-to-end (money moved) — resets the machine's streak. */
-    fun recordConfirmed(orderId: UUID, amount: BigDecimal) {
+    /**
+     * One execution actually confirmed end-to-end (money moved). The machine's streak resets only
+     * when the real `confirmExecution` applied ([machineConfirmed]): an order `recordExecution`
+     * already COMPLETED (its end date passed) cannot be confirmed, so its `failureCount` — and
+     * therefore the streak this book mirrors — stays where it was.
+     */
+    fun recordConfirmed(orderId: UUID, amount: BigDecimal, machineConfirmed: Boolean = true) {
         totals.computeIfAbsent(orderId) { Totals() }.let {
             it.confirmed += 1
             it.confirmedAmount = it.confirmedAmount.add(amount)
-            it.machineStreak = 0
+            if (machineConfirmed) it.machineStreak = 0
         }
     }
 

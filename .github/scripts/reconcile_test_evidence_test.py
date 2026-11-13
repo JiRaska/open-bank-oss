@@ -104,5 +104,17 @@ class GhJsonTests(unittest.TestCase):
         self.assertEqual(self.count_calls(), 1)
 
 
+
+
+class ScriptBudgetTests(unittest.TestCase):
+    def test_call_timeout_is_cut_to_the_remaining_budget(self) -> None:
+        deadline = RECONCILE._DEADLINE
+        self.assertEqual(RECONCILE.GH_API_TOTAL_TIMEOUT_SECONDS, RECONCILE.call_timeout(now=deadline - 5000))
+        self.assertEqual(100, RECONCILE.call_timeout(now=deadline - 100))
+
+    def test_call_timeout_refuses_once_the_budget_is_spent(self) -> None:
+        with self.assertRaises(RuntimeError):
+            RECONCILE.call_timeout(now=RECONCILE._DEADLINE - (RECONCILE.SCRIPT_MIN_CALL_SECONDS - 1))
+
 if __name__ == "__main__":
     unittest.main()

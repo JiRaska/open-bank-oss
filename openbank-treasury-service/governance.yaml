@@ -3,7 +3,7 @@
 #
 # Treasury (ADR-0315): the bank's own money-market deals with four-eyes booking. MONEY-PATH —
 # every settled/matured/reversed deal posts a journal to the ledger through its API.
-dataDomain: core
+dataDomain: treasury
 primaryDatastore: PostgreSQL
 databaseName: openbank_treasury
 dataLineageRole: producer

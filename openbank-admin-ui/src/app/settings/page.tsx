@@ -11,6 +11,8 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { ROLE_LABELS } from '@/lib/auth/roles'
 import { PageHeader, Tabs, type TabItem } from '@/components/ui'
 
+import { AccessPreview } from '@/components/settings/AccessPreview'
+
 type Tab = 'profile' | 'notifications' | 'security' | 'api' | 'regional'
 
 export default function SettingsPage() {
@@ -43,6 +45,7 @@ export default function SettingsPage() {
         <div id="settings-panel-regional" role="tabpanel" aria-labelledby="settings-tab-regional" hidden={tab !== 'regional'}><RegionalTab /></div>
       </div>
     </div>
+    <AccessPreview />
   </div></AuthGuard>
 }
 

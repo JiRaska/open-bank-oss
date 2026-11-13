@@ -6,6 +6,7 @@ package com.openbank.pensionfund.application.port
 
 import com.openbank.pensionfund.domain.model.Fund
 import com.openbank.pensionfund.domain.model.FundStrategy
+import com.openbank.pensionfund.domain.model.ManagementFeeAccrual
 import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.NavRecord
 import com.openbank.pensionfund.domain.model.PositionClassificationCorrection
@@ -43,6 +44,9 @@ data class StoreChanges(
     val navPositions: List<NavPosition> = emptyList(),
     /** Four-eyes reclassifications of recorded positions; the positions themselves are never rewritten. */
     val classificationCorrections: List<PositionClassificationCorrection> = emptyList(),
+    /** Source facts committed with publication, even while remote accounting delivery is disabled. */
+    val managementFees: List<ManagementFeeAccrual> = emptyList(),
+    val synthetic: Boolean = false,
 )
 
 // One read per query the use cases need; splitting it per aggregate would split the ONE commit too.
@@ -110,4 +114,20 @@ interface PensionFundStore {
  */
 interface MarketPricePort {
     suspend fun price(instrumentId: String, valuationDate: LocalDate, currency: String): BigDecimal?
+}
+
+/** The commercial terms of one published catalog revision, as a fund consumes them (ADR-0341). */
+data class PinnedFundTerms(
+    val revisionId: UUID,
+    /** Annual management fee as a fraction of net assets (the catalog stores a percent string). */
+    val managementFeeRate: BigDecimal,
+)
+
+/**
+ * Reads a fund's terms from an immutable published catalog revision, by id - never "whatever is
+ * currently published". Fails closed: a revision that is unknown, unpublished, or not a retirement
+ * product is an [IllegalArgumentException]; a catalog outage is not swallowed.
+ */
+interface FundTermsPort {
+    suspend fun resolve(revisionId: UUID): PinnedFundTerms
 }

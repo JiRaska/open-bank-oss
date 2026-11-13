@@ -101,6 +101,14 @@ charters:
     source: openbank-control-liveness-sentinel LlmDiagnosisAdapter.SYSTEM_PROMPT (loads system.v2)
     placeholders: []
 
+  - id: product-author
+    status: pending
+    reason: >-
+      ADR-0352 phase 5a registers the charter and its five MCP product tools; no in-repo loop sends a
+      system prompt on its behalf yet (an operator's MCP client drives the tools). The prompt is
+      authored in the change that wires a product-author loop into AgentChatService.
+    blocked_by: ADR-0352
+
   - id: rca-investigator
     status: external
     reason: >-
@@ -135,6 +143,14 @@ charters:
       that would draft a bundle out of an authorisation row and call it evidence. The prompt is
       authored in the PR that gives the agent something to read and flips `enabled`, so "it runs"
       and "there is a prompt" become true in the same change — the same shape as
+      card-scheme-bulletin-agent above.
+
+  - id: regulatory-obligations-watcher
+    status: pending
+    reason: >-
+      ADR-0367 decision 6. The charter is registered and ships DISABLED because no allow-listed
+      fetch of the cited legal sources exists yet, so a prompt now would be text that nothing
+      sends. It is authored in the PR that wires the fetch and flips `enabled` — the same shape as
       card-scheme-bulletin-agent above.
 
   - id: treasury-dealing-assistant

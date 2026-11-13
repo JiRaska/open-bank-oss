@@ -122,6 +122,43 @@ spec:
           annotations:
             summary: "Eligible parties have no KYC case at all"
             description: "openbank_kyc_orphaned_parties is {{ $value }} — that many parties, all past the detection grace period and all created after the auto-open consumer demonstrably worked, have NO kyc_cases row. Each is a customer stuck in PENDING_KYC, and nothing retries because the PARTY_CREATED event was acked and dropped (#5698). Not self-healing — the event is gone, so it needs a replay per party. Before remediating, CHECK what these parties are: parties that predate the consumer are already excluded (openbank_kyc_orphaned_parties_pre_consumer), but an e2e fixture party is indistinguishable from a real customer here, and a triage pass has twice ranked ineligible rows as the estate's top finding (#9726). The ids are logged by kyc-service under `[orphan-detection]`; openbank_kyc_orphaned_parties_oldest_age_seconds says how long the worst one has been waiting. Do not quote the party count as a customer-impact figure without confirming each id has an account."
+        - alert: KycSanctionsListChangeUnrecognised
+          # Issue #15908. kyc-service consumes the sanctions list-change events from a topic whose
+          # event type travels ONLY in the `ce-type` Kafka header. A consumer and a producer that
+          # disagree about that shape produce no error anywhere: the record is acked, no screening
+          # case is opened, lag reads zero and the pod is healthy. The one thing that moves is this
+          # counter's `unrecognised` outcome, and until now no rule read it.
+          #
+          # Any occurrence is the signal — one is enough, because the consumer already counts the
+          # sibling event types that legitimately share the topic as `ignored`. Hence no ratio
+          # against `handled`, which is zero by design while the trigger loop is switched off.
+          #
+          # TWO branches, because the counter is registered lazily, on the first record with that
+          # outcome. The series is therefore born already positive, and increase() cannot see a
+          # counter whose first observed sample is its first increment — so an increase-only rule
+          # would miss the first burst after every pod start, which for a wire-shape mismatch is
+          # every record there is. The second branch catches the birth: positive now, absent an
+          # hour ago.
+          #
+          # Cold-pod reading: on a fresh start the series does not exist, so neither branch has an
+          # operand and the rule cannot fire. It stays quiet if the counter is ever pre-registered
+          # at 0 as well — increase() is 0 and `> 0` rejects the birth. Both readings, and the two
+          # firing ones, are held by tests/promtool/kyc_sanctions_list_change_alerts_test.yaml.
+          expr: |
+            sum by (namespace, pod) (
+              (increase(openbank_kyc_sanctions_list_change_events_total{outcome="unrecognised"}[1h]) > 0)
+              or
+              (openbank_kyc_sanctions_list_change_events_total{outcome="unrecognised"} > 0
+                unless openbank_kyc_sanctions_list_change_events_total{outcome="unrecognised"} offset 1h)
+            ) > 0
+          labels:
+            severity: warning
+          annotations:
+            # Driven by Kafka consumption, not by a scheduler: there is no period to size the
+            # window against.
+            subject_period: continuous
+            summary: "kyc-service acked a sanctions list-change record it could not recognise"
+            description: "openbank_kyc_sanctions_list_change_events_total{outcome=\"unrecognised\"} moved on {{ $labels.pod }} within the last hour: a record on the sanctions screening topic carried a missing or unknown `ce-type` header and was acked without opening a screening case. Either sanctions-service changed how it types its events (header value, or type moved into the body) or a new event type joined the topic. Until it is resolved, list changes do not trigger re-screening and nothing else reports it — no lag, no dead-letter, no error. kyc-service logs the offending type under `[sanctions-list-changes-in]`; compare it with the `ce-type` values in the committed kyc-service/sanctions-service pact, then replay the affected publications."
         - alert: OnboardingProjectionWireFormatMismatch
           # #4353/#4692/#6248. sca-service published DEVICE_ENROLLED without the discriminator in
           # the payload body; onboarding's parser fell through to `?: return`, and 15 enrolments

@@ -19,7 +19,7 @@ export const pensionUrl = (path: string, query?: Record<string, string>) =>
   svcUrl(PENSION, `/api/v2/pension${path}`, query)
 
 export const fundUrl = (path: string, query?: Record<string, string>) =>
-  svcUrl(PENSION_FUND, `/api/v1${path}`, query)
+  svcUrl(PENSION_FUND, `/api/v2${path}`, query)
 
 /** A write's outcome. `code` is the service's own refusal (`{error}`), rendered readably. */
 export type WriteResult<T> =

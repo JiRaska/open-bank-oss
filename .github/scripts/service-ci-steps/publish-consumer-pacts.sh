@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 set -euo pipefail
+consumer_version="$(bash "${SERVICE_CI_HELPERS}/consumer-pact-handoff.sh" validate pacts)"
 shopt -s nullglob
 files=(pacts/"${SERVICE}"-*.json)
 if [ "${#files[@]}" -eq 0 ]; then
@@ -16,17 +17,18 @@ contracts="$(for f in "${files[@]}"; do
 done | jq -sc '.')"
 body="$(jq -nc \
   --arg name "${SERVICE}" \
-  --arg ver "$GITHUB_SHA" \
+  --arg ver "$consumer_version" \
   --arg branch "$BRANCH" \
   --arg build "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
   --argjson contracts "$contracts" \
   '{pacticipantName:$name, pacticipantVersionNumber:$ver, branch:$branch, tags:[$branch], buildUrl:$build, contracts:$contracts}')"
-echo "Publishing ${#files[@]} pact(s) for ${SERVICE} @ ${GITHUB_SHA::8} (branch ${BRANCH})"
+echo "Publishing ${#files[@]} pact(s) for ${SERVICE} @ ${consumer_version::8} (branch ${BRANCH})"
 body_file=$(mktemp)
-trap 'rm -f "$body_file"' EXIT
+response_file=$(mktemp)
+trap 'rm -f "$body_file" "$response_file"' EXIT
 printf '%s' "$body" > "$body_file"
 code="$(bash "$RUNNER_TEMP/pact-broker-post.sh" \
-  "${PACT_BROKER_URL%/}/contracts/publish" "$body_file" /tmp/pact-publish.json \
+  "${PACT_BROKER_URL%/}/contracts/publish" "$body_file" "$response_file" \
   'application/hal+json, application/json')"
-jq -r '.notices[]?.text // empty' /tmp/pact-publish.json 2>/dev/null || cat /tmp/pact-publish.json
+jq -r '.notices[]?.text // empty' "$response_file" 2>/dev/null || cat "$response_file"
 echo "Pact publication accepted (HTTP $code)."

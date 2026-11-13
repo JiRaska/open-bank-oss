@@ -10,6 +10,9 @@
       background:#0b1020; color:#fff; font-size:.9rem; }
     .ref-bar a { color:#9fc3ff; text-decoration:none; }
     .ref-bar .sp { flex:1; }
+    /* Redoc's default token/section colors miss AA contrast on their actual backgrounds. */
+    redoc code { color: #a22622 !important; }
+    redoc h5 { color: #5b6478 !important; }
   </style>
 </head>
 <body>
@@ -21,5 +24,6 @@
   <!-- Spec and renderer are served same-origin (no external CDN) so the strict CSP holds. -->
   <redoc spec-url="/api/psd2-xs2a-openapi.yaml" hide-download-button></redoc>
   <script src="/api/redoc.standalone.js"></script>
+  <script src="/api/accessibility.js"></script>
 </body>
 </html>

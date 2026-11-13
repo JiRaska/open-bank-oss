@@ -72,6 +72,13 @@ const PERSONAS: Record<string, PersonaDefinition> = {
     talents: [{ cs: 'Čtení provozních signálů', en: 'Signal analysis' }, { cs: 'Hledání souvislostí', en: 'Correlation' }, { cs: 'Hypotéza příčiny', en: 'Root-cause hypothesis' }],
     accent: '#0891b2', glow: '#a5f3fc', shell: '#ecfeff', variant: 'lens', icon: SearchCheck,
   },
+  'product-author': {
+    name: { cs: 'Tvora', en: 'Tvora' }, role: { cs: 'Autorka produktů', en: 'Product author' },
+    purpose: { cs: 'Navrhuje a kontroluje produkty jako kód stejnými nástroji jako CLI obp a předkládá je ke schválení.', en: 'Drafts and checks products as code with the same tools as the obp CLI and submits them for approval.' },
+    value: { cs: 'Zkracuje cestu od nápadu na produkt k ověřenému návrhu, aniž by sama cokoli publikovala.', en: 'Shortens the path from a product idea to a verified draft without ever publishing anything itself.' },
+    talents: [{ cs: 'Kontrola produktových pravidel', en: 'Product rule checks' }, { cs: 'Simulace portfolia', en: 'Portfolio simulation' }, { cs: 'Návrh revize ke schválení', en: 'Draft revision for review' }],
+    accent: '#7c3aed', glow: '#ddd6fe', shell: '#f5f3ff', variant: 'lens', icon: SearchCheck,
+  },
   'customer-copilot': {
     name: { cs: 'Kora', en: 'Cora' }, role: { cs: 'Klientská průvodkyně', en: 'Customer companion' },
     purpose: { cs: 'Pomáhá klientovi s jeho vlastními daty a připravuje návrhy, které vždy dokončí člověk přes SCA.', en: 'Helps customers with their own data and prepares proposals always completed by a human through SCA.' },
@@ -200,6 +207,15 @@ const PERSONAS: Record<string, PersonaDefinition> = {
     value: { cs: 'Zrychluje přípravu obchodu, ale nikdy ho sama nepodá, neschválí ani nezaúčtuje.', en: 'Speeds up deal preparation without ever submitting, approving or booking it itself.' },
     talents: [{ cs: 'Čtení pozic', en: 'Position reading' }, { cs: 'Kontrola limitu', en: 'Limit checks' }, { cs: 'Návrh obchodu', en: 'Deal drafting' }],
     accent: '#0e7490', glow: '#a5f3fc', shell: '#ecfeff', variant: 'lens', icon: ChartNoAxesCombined,
+  },
+  // The regulatory obligations watcher ships enabled:false and proposal-only; the persona exists
+  // so the charter does not render as "Nový kolega".
+  'regulatory-obligations-watcher': {
+    name: { cs: 'Lex', en: 'Lex' }, role: { cs: 'Hlídač regulatorních povinností', en: 'Regulatory obligations watcher' },
+    purpose: { cs: 'Porovnává registr povinností s citovaným zákonem a zadáním úřadu a navrhuje opravy, když se zdroj změní.', en: 'Compares the obligations register with the cited law and the authority specification, and proposes corrections when a source changes.' },
+    value: { cs: 'Změna vyhlášky nebo formátu se objeví jako návrh, ne až jako zmeškaný termín; o změně rozhoduje člověk.', en: 'An amended decree or format surfaces as a proposal, not as a missed deadline; a human decides the change.' },
+    talents: [{ cs: 'Čtení předpisů', en: 'Reading legislation' }, { cs: 'Ověření lhůt', en: 'Deadline verification' }, { cs: 'Návrh opravy registru', en: 'Register corrections' }],
+    accent: '#4338ca', glow: '#c7d2fe', shell: '#eef2ff', variant: 'lens', icon: Scale,
   },
 }
 

@@ -40,61 +40,60 @@ interface Props {
 type Copy = { icon: ReactNode; title: string; detail: string }
 
 function copyFor(kind: UnavailableKind, service: string, feature: string, lang: 'cs' | 'en'): Copy {
-  const cs = lang === 'cs'
   switch (kind) {
     case 'not_deployed':
       return {
         icon: <ServerOff size={28} style={{ color: 'var(--text-tertiary)' }} />,
-        title: cs ? `${service} není v tomto prostředí nasazená` : `${service} is not deployed in this environment`,
-        detail: cs
+        title: lang === 'cs' ? `${service} není v tomto prostředí nasazená` : `${service} is not deployed in this environment`,
+        detail: lang === 'cs'
           ? `Tato obrazovka vyžaduje běžící ${service}. V tomto prostředí zatím nasazená není — jakmile ji ArgoCD nasadí, data se načtou automaticky.`
           : `This screen needs a running ${service}. It isn't deployed here yet — once ArgoCD rolls it out, the data loads automatically.`,
       }
     case 'discovery_unavailable':
       return {
         icon: <HelpCircle size={28} style={{ color: 'var(--warning)' }} />,
-        title: cs ? 'Stav nasazení nelze ověřit' : 'Deployment status is unknown',
-        detail: cs
+        title: lang === 'cs' ? 'Stav nasazení nelze ověřit' : 'Deployment status is unknown',
+        detail: lang === 'cs'
           ? 'Inventář služeb Kubernetes se nepodařilo načíst úplně. Tento výsledek nepotvrzuje, zda je služba nasazená nebo zdravá. Zkuste to znovu, až bude zjišťování dostupné.'
           : 'The Kubernetes service inventory could not be read completely. This result does not establish whether the service is deployed or healthy. Retry when discovery is available.',
       }
     case 'scaled_to_zero':
       return {
         icon: <Moon size={28} style={{ color: 'var(--text-tertiary)' }} />,
-        title: cs ? `${service} právě spí (scale-to-zero)` : `${service} is idle (scaled to zero)`,
-        detail: cs
+        title: lang === 'cs' ? `${service} právě spí (scale-to-zero)` : `${service} is idle (scaled to zero)`,
+        detail: lang === 'cs'
           ? `Služba je nasazená, ale je uspaná do nuly replik kvůli úspoře zdrojů (KEDA scale-to-zero). Probudí se automaticky, jakmile přijde požadavek — zkuste obrazovku načíst za chvíli.`
           : `The service is deployed but scaled to zero to save resources (KEDA). It wakes automatically on the next request — reload in a moment.`,
       }
     case 'unreachable':
       return {
         icon: <ServerOff size={28} style={{ color: 'var(--warning)' }} />,
-        title: cs ? `${service} neodpovídá` : `${service} is not responding`,
-        detail: cs
+        title: lang === 'cs' ? `${service} neodpovídá` : `${service} is not responding`,
+        detail: lang === 'cs'
           ? 'Služba je nasazená, ale na požadavek neodpověděla (timeout nebo chyba upstreamu). Zkuste to prosím za chvíli znovu.'
           : 'The service is deployed but did not answer (timeout or upstream error). Please try again shortly.',
       }
     case 'unauthorized':
       return {
         icon: <ShieldAlert size={28} style={{ color: 'var(--danger)' }} />,
-        title: cs ? 'Vypršela relace' : 'Session expired',
-        detail: cs
+        title: lang === 'cs' ? 'Vypršela relace' : 'Session expired',
+        detail: lang === 'cs'
           ? 'Vaše přihlášení vypršelo nebo chybí oprávnění. Přihlaste se prosím znovu.'
           : 'Your session has expired or you lack permission. Please sign in again.',
       }
     case 'not_found':
       return {
         icon: <SearchX size={28} style={{ color: 'var(--text-tertiary)' }} />,
-        title: cs ? 'Nic nenalezeno' : 'Nothing found',
-        detail: cs
+        title: lang === 'cs' ? 'Nic nenalezeno' : 'Nothing found',
+        detail: lang === 'cs'
           ? 'Pro zadané parametry nebyl nalezen žádný odpovídající záznam.'
           : 'No matching record was found for the given parameters.',
       }
     case 'no_data':
       return {
         icon: <Inbox size={28} style={{ color: 'var(--text-tertiary)' }} />,
-        title: cs ? `Zatím žádná data${feature ? `: ${feature}` : ''}` : `No data yet${feature ? `: ${feature}` : ''}`,
-        detail: cs
+        title: lang === 'cs' ? `Zatím žádná data${feature ? `: ${feature}` : ''}` : `No data yet${feature ? `: ${feature}` : ''}`,
+        detail: lang === 'cs'
           ? 'Zdroj dat je dostupný, ale zatím neobsahuje žádné záznamy.'
           : 'The data source is available but does not contain any records yet.',
       }
@@ -102,8 +101,8 @@ function copyFor(kind: UnavailableKind, service: string, feature: string, lang: 
     default:
       return {
         icon: <AlertTriangle size={28} style={{ color: 'var(--danger)' }} />,
-        title: cs ? `Načtení selhalo${feature ? `: ${feature}` : ''}` : `Failed to load${feature ? `: ${feature}` : ''}`,
-        detail: cs
+        title: lang === 'cs' ? `Načtení selhalo${feature ? `: ${feature}` : ''}` : `Failed to load${feature ? `: ${feature}` : ''}`,
+        detail: lang === 'cs'
           ? 'Při zpracování požadavku došlo k neočekávané chybě. Zkuste to prosím znovu.'
           : 'An unexpected error occurred while processing the request. Please try again.',
       }

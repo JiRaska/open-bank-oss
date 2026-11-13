@@ -62,10 +62,14 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import selftest_input_trace as sit  # noqa: E402  (sibling module; see its header)
 
 try:
     import yaml
@@ -120,6 +124,7 @@ CI_ONLY_ENV = (
     "GITHUB_WORKSPACE",
     "PR_BODY",
     "PR_NUMBER",
+    "PR_TITLE",
 )
 
 
@@ -383,6 +388,15 @@ class Result:
         # none of the gate's declared inputs changed. Distinct from `selftest_declared`
         # being false: the falsification EXISTS and simply did not need re-proving here.
         self.selftest_skipped = False
+        # User+system CPU of the gate's process tree (self-test + run:), from wait4. With
+        # `seconds` (wall) it decides a budget overrun: see the budget block in execute().
+        self.cpu_seconds = 0.0
+        # Wall time over budget while CPU was not: the runner was loaded, or the gate waited
+        # on I/O. Reported (annotation + JSON), never a failure.
+        self.wall_over_budget = False
+        # Repo files the traced self-test read without declaring them in `selftest_inputs`
+        # (selftest_input_trace.py), baselined ones included. None = not traced this run.
+        self.selftest_undeclared_reads = None
 
     @property
     def id(self):
@@ -410,7 +424,19 @@ def git_index_path(root: pathlib.Path):
     return idx if idx.is_file() else None
 
 
-def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: pathlib.Path = None):
+def _read_streams(*files) -> str:
+    # Each stream decoded INDEPENDENTLY, with replacement: a gate (or a timeout cutting one
+    # off mid-character) can emit bytes that are not UTF-8, and that must never turn a
+    # verdict into a stack trace that takes the whole shard down.
+    parts = []
+    for f in files:
+        f.seek(0)
+        parts.append(f.read().decode("utf-8", "replace"))
+    return "".join(parts)
+
+
+def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: pathlib.Path = None,
+         trace_file: str = None):
     env = dict(os.environ)
     for k, v in (extra_env or {}).items():
         env[k] = str(v)
@@ -427,33 +453,47 @@ def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: path
         scratch.close()
         shutil.copyfile(index, scratch.name)
         env["GIT_INDEX_FILE"] = scratch.name
+    if trace_file:
+        # A traced tree must not start a nested tracer: ptrace cannot attach twice, so an inner
+        # run-gates in `require` mode would fail every gate as untraceable.
+        env.pop(sit.TRACE_ENV, None)
+    # Popen + os.wait4 rather than subprocess.run, for ONE reason: wait4 hands back the
+    # rusage of the reaped child, which includes every descendant it waited for. That is the
+    # gate's CPU time, measured per gate even though gates run concurrently in threads
+    # (RUSAGE_CHILDREN is process-wide and would mix them). Output goes to temp files, not
+    # pipes, so a chatty gate cannot block on a full pipe while nobody reads it.
+    out_f = tempfile.TemporaryFile()
+    err_f = tempfile.TemporaryFile()
     try:
-        p = subprocess.run(
-            ["bash", "-euo", "pipefail", "-c", cmd],
-            cwd=cwd,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
+        proc = subprocess.Popen(
+            (sit.strace_argv(trace_file) if trace_file else [])
+            + ["bash", "-euo", "pipefail", "-c", cmd],
+            cwd=cwd, env=env, stdout=out_f, stderr=err_f, stdin=subprocess.DEVNULL,
+            start_new_session=True,  # own process group, so a timeout kills the whole tree
         )
-        return p.returncode, p.stdout + p.stderr
-    except subprocess.TimeoutExpired as exc:
-        # Decode each stream INDEPENDENTLY, before concatenating. Even with text=True,
-        # TimeoutExpired can carry one stream as str and the other as bytes, so the obvious
-        # `(exc.stdout or "") + (exc.stderr or "")` raises `TypeError: can't concat str to
-        # bytes` — swallowing the real output and turning a timeout into a stack trace that
-        # takes the whole shard down. Reached only on an actual timeout with output on both
-        # streams, which is why the `slow` self-test case below now writes to both.
-        def _text(stream):
-            if not stream:
-                return ""
-            if isinstance(stream, (bytes, bytearray)):
-                return stream.decode("utf-8", "replace")
-            return stream
-
-        got = _text(exc.stdout) + _text(exc.stderr)
-        return 124, got + f"\n[run-gates] TIMEOUT after {timeout}s\n"
+        deadline = time.monotonic() + timeout
+        status = ru = None
+        while True:
+            pid, status, ru = os.wait4(proc.pid, os.WNOHANG)
+            if pid:
+                break
+            if time.monotonic() >= deadline:
+                # The HARD bound, independent of any budget: a hung gate is killed and fails.
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                _, status, ru = os.wait4(proc.pid, 0)
+                proc.returncode = -9
+                return 124, _read_streams(out_f, err_f) + f"\n[run-gates] TIMEOUT after {timeout}s\n", \
+                    ru.ru_utime + ru.ru_stime
+            time.sleep(0.02)
+        proc.returncode = os.waitstatus_to_exitcode(status)
+        rc = proc.returncode if proc.returncode >= 0 else 128 - proc.returncode
+        return rc, _read_streams(out_f, err_f), ru.ru_utime + ru.ru_stime
     finally:
+        out_f.close()
+        err_f.close()
         if scratch is not None:
             try:
                 os.unlink(scratch.name)
@@ -497,6 +537,9 @@ UNIVERSAL_SELFTEST_INPUTS = (
     ".github/gates/gates.yaml",
     ".github/scripts/run-gates.py",
     ".github/scripts/gatelib.py",
+    # Decides whether a traced self-test passes (undeclared-input findings + its baseline).
+    ".github/scripts/selftest_input_trace.py",
+    ".github/gates/selftest-undeclared-inputs.baseline",
 )
 
 
@@ -557,6 +600,66 @@ def selftest_is_needed(gate, changed):
     return False, "no declared input changed on this pull request"
 
 
+def _trace_mode() -> str:
+    return os.environ.get(sit.TRACE_ENV, "").strip().lower()
+
+
+def _selftest_trace_file(gate, is_pr: bool):
+    """(trace_file or None, note). Tracing is opt-in via OB_SELFTEST_TRACE (CI sets `require`)."""
+    mode = _trace_mode()
+    # Pull requests only. A finding fails only there (see execute), and tracing costs ~2x the
+    # self-test time (measured over the estate: 420 s -> 919 s), which main need not pay to
+    # produce warnings: the PR that introduces an undeclared read is where it is caught.
+    if mode not in ("1", "true", "require") or not gate.get("selftest_inputs") or not is_pr:
+        return None, ""
+    # A self-test that drives Gradle (a daemon plus forked JVMs) does not finish under `strace -f`
+    # within the shard timeout: test-provenance-cache's ran >10 min traced and the shard was
+    # cancelled at 15 min, twice. Such a gate opts out with `selftest_trace: false` and a reason;
+    # its declaration is then reviewed by hand. The skip is printed, never silent.
+    if gate.get("selftest_trace") is False:
+        return None, (f"[run-gates] {gate['id']}: self-test NOT traced (selftest_trace: false); "
+                      f"undeclared inputs are not checked for this gate.\n")
+    ok, why = sit.strace_usable()
+    if not ok:
+        return None, (f"[run-gates] {sit.TRACE_ENV}={mode} but the self-test cannot be traced: "
+                      f"{why}. Undeclared self-test inputs are NOT being checked on this run.\n")
+    f = tempfile.NamedTemporaryFile(prefix="selftest-trace-", delete=False,
+                                    dir=os.environ.get("RUNNER_TEMP") or None)
+    f.close()
+    return f.name, ""
+
+
+def _trace_refused(gate, trace_file) -> bool:
+    """`require` mode fails a self-test that could not be traced — but not one that opted out."""
+    return trace_file is None and _trace_mode() == "require" and gate.get("selftest_trace") is not False
+
+
+_BASELINE_CACHE = {}
+
+
+def _judge_trace(gate, root: pathlib.Path, trace_file: str, r, buf) -> bool:
+    """True when the self-test read a repo file it neither declares nor has baselined."""
+    key = str(root)
+    if key not in _BASELINE_CACHE:
+        _BASELINE_CACHE[key] = sit.load_baseline(root)
+    entries = _BASELINE_CACHE[key].get(gate["id"], [])
+    new, based, stale = sit.analyse(trace_file, str(root), gate, entries)
+    r.selftest_undeclared_reads = sorted(new + based)
+    if stale:
+        buf.append("\n[run-gates] notice: baselined undeclared self-test input(s) not read on this "
+                   f"run (drop from {sit.BASELINE} if that holds on main): {', '.join(stale)}\n")
+    if not new:
+        return False
+    buf.append(
+        "\n[run-gates] this gate's self-test READ repo file(s) its `selftest_inputs` does not "
+        "declare:\n" + "".join(f"    {p}\n" for p in new)
+        + "A pull request changing one of them would SKIP this self-test, and the breakage would "
+        "surface on main instead (2026-11-09: mermaid-parses and admin-ui's package-lock.json). "
+        "Add them to `selftest_inputs` in gates.yaml (a directory prefix ending in `/` is fine).\n"
+    )
+    return True
+
+
 def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, changed=None) -> Result:
     r = Result(gate)
     if gate["when"] == "pull_request" and not is_pr:
@@ -586,6 +689,8 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
 
     t0 = time.monotonic()
     buf = []
+    undeclared_fail = False
+    traced_cost = (0.0, 0.0)  # (wall, cpu) of a TRACED self-test, excluded from the budget
 
     selftest = gate.get("selftest")
     needed, why = selftest_is_needed(gate, changed)
@@ -604,9 +709,39 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
     if selftest:
         want_pass = gate.get("selftest_expect", "pass") == "pass"
         st0 = time.monotonic()
-        rc, out = _run(selftest, root, gate.get("env"), timeout, index)
-        r.selftest_seconds = time.monotonic() - st0
-        buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
+        trace_file, trace_note = _selftest_trace_file(gate, is_pr)
+        if trace_note:
+            buf.append(trace_note)
+            if _trace_refused(gate, trace_file):
+                r.status, r.failure_kind = "failed", "setup"
+                r.output = "".join(buf)
+                return r
+        try:
+            # A traced self-test gets twice the hard timeout: ptrace roughly doubles a fork-heavy
+            # self-test (merge-train-declaration: 176 s untraced, 351 s traced, against 420 s).
+            rc, out, cpu = _run(selftest, root, gate.get("env"), timeout * 2 if trace_file else timeout,
+                                index, trace_file)
+            r.cpu_seconds += cpu
+            r.selftest_seconds = time.monotonic() - st0
+            if trace_file:
+                # strace is now the reaped process, so its own CPU and the ptrace stops land in
+                # this figure. Kept out of the budget comparison below: the budget measures the
+                # gate's work, not the tracer's (a traced run must not redden main on budget).
+                traced_cost = (r.selftest_seconds, cpu)
+            buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
+            if trace_file and (rc == 0) == want_pass:
+                found = _judge_trace(gate, root, trace_file, r, buf)
+                # Tracing happens only on a pull request (_selftest_trace_file), where a self-test
+                # runs because the gate or its declared inputs changed — the moment a new
+                # undeclared read is introduced. Never on main: there a scanning self-test's
+                # corpus grows with no one touching the gate, and that must not turn main red.
+                undeclared_fail = found
+        finally:
+            if trace_file:
+                try:
+                    os.unlink(trace_file)
+                except OSError:
+                    pass
         if (rc == 0) != want_pass:
             r.status, r.failure_kind = "unfalsified", "unfalsified"
             buf.append(
@@ -626,7 +761,8 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
             r.seconds = time.monotonic() - t0
             return r
 
-    rc, out = _run(gate["run"], root, gate.get("env"), timeout, index)
+    rc, out, cpu = _run(gate["run"], root, gate.get("env"), timeout, index)
+    r.cpu_seconds += cpu
     buf.append("--- gate ---\n" + out)
     # NOT EVALUATED is only ever a non-zero exit: a gate that could not read its subject must never
     # read as PASS (#13400), and it must not be mistaken for a finding either.
@@ -666,15 +802,30 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
             )
 
     r.seconds = time.monotonic() - t0
+    if undeclared_fail and rc == 0:
+        rc = 1
 
-    # Wall-time budget. Nothing here ever went red for being slow, and that is how `ci.yml`'s
-    # required check went from a 0.7 min median to 2.4 min in four weeks — each gate cheap,
-    # the total unbounded, and no single change big enough to argue with.
+    # Budget. Nothing here ever went red for being slow, and that is how `ci.yml`'s required
+    # check went from a 0.7 min median to 2.4 min in four weeks — each gate cheap, the total
+    # unbounded, and no single change big enough to argue with (ADR-0255).
     #
-    # ENFORCED ONLY UNDER CI, deliberately. A developer laptop running eight gates across four
-    # cores is not a measurement: this repo's own audit read check-adr-registry.sh at 60.4s
-    # locally against a whole shard of 20s in CI. Off the runner the overrun is printed and
-    # nothing fails.
+    # The budget FAILS only when BOTH wall time and CPU time exceed it. Wall time alone measures
+    # the shared 20-slot hosted pool, not the gate: measured 2026-11-02/03, service-ci-explicit-jobs
+    # went red at 10.0-10.4s against 10s, merge-train-declaration at 134.8s/182.5s against
+    # 120/180s (77-109s on main), and msg-channel-image-parity at 172.9s ON MAIN — which turned
+    # main red and stalled the whole strict merge-train lane on a timing artifact. Contention
+    # stretches wall time and leaves CPU time nearly untouched; a genuine regression (more work)
+    # raises both. CPU alone is not the test either: a gate fanning out to parallel workers can
+    # burn more CPU than wall, so a min() of the two is the measure that is inflated by neither
+    # load nor parallelism.
+    #
+    # Wall over budget with CPU under it is REPORTED — a ::warning annotation and
+    # `wall_over_budget` in --json — not failed. That includes a regression that only waits
+    # (a new network call): such a gate is still bounded by the per-gate hard --timeout, which
+    # kills it and FAILS regardless of any budget, so a hang cannot pass.
+    #
+    # ENFORCED ONLY UNDER CI. A developer laptop running eight gates across four cores is not a
+    # measurement; off the runner the overrun is printed and nothing fails.
     budget = gate.get("budget_seconds")
     content_rc = rc
     over_budget = False
@@ -684,19 +835,26 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
         # timing worth profiling).
         buf.append("\n[run-gates] this gate is NOT EVALUATED on this run: it could not read its "
                    "subject. Not a pass and not a finding — re-run the job.\n")
-    elif budget is not None and r.seconds > budget:
+    elif budget is not None and content_rc != 124 and r.seconds - traced_cost[0] > budget:
         on_ci = os.environ.get("CI") == "true"
-        note = (
-            f"\n[run-gates] this gate took {r.seconds:.1f}s against a budget of {budget}s. "
-            f"Budgets are set well above the observed CI time, so this is a regression rather "
-            f"than noise — profile it, or raise the number in gates.yaml deliberately.\n"
-        )
-        buf.append(note)
-        if on_ci:
-            over_budget = content_rc == 0
-            rc = rc or 1
+        if r.cpu_seconds - traced_cost[1] > budget:
+            buf.append(
+                f"\n[run-gates] this gate took {r.seconds:.1f}s wall and {r.cpu_seconds:.1f}s CPU "
+                f"against a budget of {budget}s. CPU over budget is work, not runner load — "
+                f"profile it, or raise the number in gates.yaml deliberately.\n"
+            )
+            if on_ci:
+                over_budget = content_rc == 0
+                rc = rc or 1
+            else:
+                buf.append("[run-gates] not on CI (CI != true), so the overrun does not fail.\n")
         else:
-            buf.append("[run-gates] not on CI (CI != true), so the overrun does not fail.\n")
+            r.wall_over_budget = True
+            buf.append(
+                f"\n[run-gates] wall time {r.seconds:.1f}s exceeded the budget of {budget}s but CPU "
+                f"time was {r.cpu_seconds:.1f}s: the runner was loaded or the gate waited on I/O. "
+                f"Reported, not failed (the hard --timeout still bounds a hang).\n"
+            )
 
     r.output = "".join(buf)
     if rc != 0:
@@ -720,7 +878,22 @@ ICON = {
 }
 
 
-def report(results, jobs):
+# A shard whose ONLY failures are NOT EVALUATED gates found nothing: every red row means "could
+# not read its subject" (an exhausted installation API quota, an unreachable endpoint), not "found
+# a defect". Measured 2026-11-10..12: `pdp-flag-rollout-complete` and `ruleset-bypass-actors` went
+# red that way in every quota burst, and the job summary read exactly like a real finding. This
+# line (stdout) plus the job-summary block make the two distinguishable, and
+# `spot-kill-retry.sh` keys its quota-reset re-run on the verdict roster this report prints.
+ONLY_NOT_EVALUATED_LINE = "GATES_RUN_VERDICT=NOT_EVALUATED_ONLY"
+
+
+def only_not_evaluated(failed) -> bool:
+    return bool(failed) and all(
+        r.status == "failed" and r.failure_kind == "not_evaluated" for r in failed
+    )
+
+
+def report(results, jobs, summary_path=None):
     # ZERO GATES IS NOT A PASS (#6068). Without this, report([]) printed "0 gates" and
     # returned 0 — the one line in this file that could answer "everything is fine" about
     # a run that evaluated nothing. Every other vacuity guard here (empty manifest, empty
@@ -769,11 +942,33 @@ def report(results, jobs):
               f"  {r.seconds:6.1f}s  [{r.gate.get('group')}]"
               + (f"  ({r.failure_kind.replace('_', ' ')})" if r.failure_kind in ("budget", "not_evaluated") else ""))
 
+    for r in results:
+        if r.wall_over_budget:
+            print(f"::warning title={r.gate['id']}::wall {r.seconds:.1f}s over budget "
+                  f"{r.gate.get('budget_seconds')}s, CPU {r.cpu_seconds:.1f}s under it — runner load, not failed")
     for r in warned:
         print(f"::warning title={r.gate['id']}::advisory gate failed: {r.gate['name']}")
     for r in failed:
         why = "self-test verdict wrong — gate is unfalsified" if r.status == "unfalsified" else "gate failed"
         print(f"::error title={r.gate['id']}::{why}: {r.gate['name']}")
+    if only_not_evaluated(failed):
+        ids = ", ".join(r.gate["id"] for r in failed)
+        print(ONLY_NOT_EVALUATED_LINE)
+        print(f"::notice title=gates NOT EVALUATED, no finding::{len(failed)} gate(s) could not "
+              f"read their subject ({ids}); none reported a finding. Usually the installation "
+              "API quota; the auto-retry re-runs this after the quota resets.")
+        if summary_path:
+            try:
+                with open(summary_path, "a", encoding="utf-8") as fh:
+                    fh.write(
+                        "\n### Gates NOT EVALUATED, no finding\n\n"
+                        f"Every failing gate in this shard ({ids}) is NOT EVALUATED: it could not "
+                        "read its subject (usually an exhausted GitHub API quota). No gate "
+                        "reported a finding. Re-run once the quota has reset; "
+                        "`auto-retry-cancelled.yml` does that automatically for attempt 1.\n"
+                    )
+            except OSError as exc:
+                sys.stderr.write(f"::warning::run-gates: could not write the job summary: {exc}\n")
     return 1 if failed else 0
 
 
@@ -821,7 +1016,14 @@ def json_records(results) -> list[dict]:
             # keep the three apart or the estate's coverage reads higher than it is.
             "selftest_skipped": r.selftest_skipped,
             "budget_seconds": g.get("budget_seconds"),
+            # CPU time of the gate's process tree, and whether wall alone overran the budget
+            # (a load artifact, warned not failed). Additive fields.
+            "cpu_seconds": round(r.cpu_seconds, 3),
+            "wall_over_budget": r.wall_over_budget,
             "min_subjects": g.get("min_subjects"),
+            # Additive. Repo files the traced self-test read but did not declare (baselined
+            # ones included); null when this run did not trace it.
+            "selftest_undeclared_reads": r.selftest_undeclared_reads,
         })
     return out
 
@@ -959,7 +1161,7 @@ def main(argv=None):
             pathlib.Path(args.json).write_text(json.dumps(json_records(results), indent=2))
         except OSError as exc:
             sys.stderr.write(f"::warning::run-gates: could not write --json {args.json}: {exc}\n")
-    return report(results, jobs)
+    return report(results, jobs, os.environ.get("GITHUB_STEP_SUMMARY"))
 
 
 # ---------------------------------------------------------------------------
@@ -1035,10 +1237,15 @@ gates:
     min_subjects: 5
     run: "echo 'SUBJECTS=1  # a self-test fixture'; echo SUBJECTS=9"
   - id: over-budget
-    name: "a gate slower than its declared budget"
+    name: "a gate whose CPU (and wall) time exceed its budget: real work, FAILS"
     group: t
     budget_seconds: 0.2
-    run: "sleep 0.5"
+    run: "python3 -c 'import time; t=time.process_time(); any(time.process_time()-t>0.6 for _ in iter(int, 1))'"
+  - id: wall-over-budget
+    name: "a gate long in wall time but idle on CPU (a loaded runner): reported, PASSES"
+    group: t
+    budget_seconds: 0.2
+    run: "sleep 0.6"
   - id: not-evaluated
     name: "a gate that could not read its subject (#13400): red, never PASS, never a budget overrun"
     group: t
@@ -1052,7 +1259,7 @@ gates:
     name: "a gate that found something AND was slow is a finding, not a budget overrun"
     group: t
     budget_seconds: 0.2
-    run: "sleep 0.5; exit 1"
+    run: "python3 -c 'import time; t=time.process_time(); any(time.process_time()-t>0.6 for _ in iter(int, 1))'; exit 1"
   - id: within-budget
     name: "a gate inside its budget"
     group: t
@@ -1067,6 +1274,8 @@ gates:
     run: "echo on-stdout; echo on-stderr >&2; sleep 30"
 """
 
+BUSY_LOOP = "python3 -c 'import time; t=time.process_time(); any(time.process_time()-t>0.6 for _ in iter(int, 1))'"
+
 EXPECTED = {
     "passing": "ok",
     "floor-met": "ok",
@@ -1075,6 +1284,7 @@ EXPECTED = {
     "floor-unreported": "failed",
     "floor-last-wins": "ok",
     "over-budget": "failed",
+    "wall-over-budget": "ok",
     "not-evaluated": "failed",
     "not-evaluated-exit-zero": "ok",
     "over-budget-and-finding": "failed",
@@ -1129,6 +1339,11 @@ def self_test():
             # timeout path that raises instead of reporting.
             if r.id == "over-budget" and "against a budget of" not in r.output:
                 bad.append("over-budget: failed, but not for the budget reason")
+            if r.id == "over-budget" and r.cpu_seconds < 0.4:
+                bad.append(f"over-budget: CPU not measured ({r.cpu_seconds:.2f}s for a 0.6s busy loop)")
+            if r.id == "wall-over-budget" and not (r.wall_over_budget and r.cpu_seconds < 0.2
+                                                    and json_records([r])[0]["wall_over_budget"]):
+                bad.append("wall-over-budget: wall-only overrun not reported as such")
             # failure_kind is the machine-readable WHY that merge-train settle reads (#13400).
             want_kind = {"over-budget": "budget", "not-evaluated": "not_evaluated",
                          "over-budget-and-finding": "content", "failing": "content", "slow": "timeout",
@@ -1197,6 +1412,10 @@ def self_test():
                         bad.append(f"slow: timeout output dropped {stream}")
                 if "TIMEOUT after" not in r.output:
                     bad.append("slow: timeout not reported in the output")
+                # The hard bound must actually KILL the tree: a timeout that waits for the hung
+                # gate to finish on its own is no bound at all (the fixture sleeps 30s).
+                if r.seconds > 10:
+                    bad.append(f"slow: hung gate not killed at the timeout (took {r.seconds:.1f}s)")
 
         # The report() contract too: a failed gate must make the runner exit non-zero, and
         # an advisory-only failure must NOT. Checking the statuses alone would miss a
@@ -1207,11 +1426,23 @@ def self_test():
         expected_errors = {
             r.id for r in results if r.status in ("failed", "unfalsified")
         }
-        expected_warnings = {r.id for r in results if r.status == "warned"}
+        expected_warnings = {r.id for r in results if r.status == "warned" or r.wall_over_budget}
         if annotation_ids(report_output, "error") != expected_errors:
             bad.append("report() did not emit the expected fixture error annotations")
         if annotation_ids(report_output, "warning") != expected_warnings:
             bad.append("report() did not emit the expected fixture warning annotations")
+        # NOT EVALUATED ONLY (quota burst) must be told apart from a finding, in both directions.
+        ne_only = [r for r in results if r.id in ("passing", "not-evaluated")]
+        summary_file = tmp / "summary.md"
+        rc_ne, ne_output = capture_fixture_output(lambda: report(ne_only, 1, str(summary_file)))
+        if rc_ne != 1:
+            bad.append(f"report() returned {rc_ne!r} for a NOT EVALUATED shard, want 1 (never a pass)")
+        if ONLY_NOT_EVALUATED_LINE not in ne_output.splitlines():
+            bad.append("report() did not mark a NOT-EVALUATED-only shard as such")
+        if not summary_file.exists() or "NOT EVALUATED, no finding" not in summary_file.read_text():
+            bad.append("report() did not write the NOT-EVALUATED-only job summary")
+        if ONLY_NOT_EVALUATED_LINE in report_output.splitlines():
+            bad.append("report() marked a shard with a real finding as NOT-EVALUATED-only")
         rc_advisory, advisory_output = capture_fixture_output(
             lambda: report([r for r in results if r.id in ("passing", "advisory-failing")], 1)
         )
@@ -1261,7 +1492,7 @@ def self_test():
         os.environ["CI"] = "false"
         (tmp / ".github" / "gates" / "gates.yaml").write_text(
             "gates:\n  - id: x\n    name: x\n    group: t\n    budget_seconds: 0.2\n"
-            '    run: "sleep 0.5"\n'
+            f'    run: "{BUSY_LOOP}"\n'
         )
         g = load(tmp)[0]
         r = execute(g, tmp, is_pr=False, timeout=5)
@@ -1683,6 +1914,33 @@ def self_test():
             if not want_refused and rc != 0:
                 bad.append(f"load() rejected a valid selftest_inputs ({body!r})")
         man.write_text(SELF_TEST_MANIFEST)   # restore for anything after this block
+
+        # selftest_trace: false opts a gate out of tracing (Gradle under strace outran the shard
+        # timeout); without it the same gate must still be traced, or the opt-out is the default.
+        saved_mode = os.environ.get(sit.TRACE_ENV)
+        saved_usable = sit.strace_usable
+        try:
+            os.environ[sit.TRACE_ENV] = "require"
+            sit.strace_usable = lambda: (True, "")
+            g = {"id": "t", "selftest_inputs": ["x"]}
+            traced, _ = _selftest_trace_file(g, True)
+            optout, note = _selftest_trace_file({**g, "selftest_trace": False}, True)
+            if not traced:
+                bad.append("a gate without selftest_trace: false was not traced on a PR")
+            else:
+                os.unlink(traced)
+            if optout or "NOT traced" not in note:
+                bad.append("selftest_trace: false was traced, or skipped without saying so")
+            if _trace_refused({**g, "selftest_trace": False}, optout):
+                bad.append("require mode fails a gate that opted out with selftest_trace: false")
+            if not _trace_refused(g, None):
+                bad.append("require mode no longer fails a gate whose self-test could not be traced")
+        finally:
+            sit.strace_usable = saved_usable
+            if saved_mode is None:
+                os.environ.pop(sit.TRACE_ENV, None)
+            else:
+                os.environ[sit.TRACE_ENV] = saved_mode
 
         if bad:
             print("\n::error::run-gates self-test FAILED:")

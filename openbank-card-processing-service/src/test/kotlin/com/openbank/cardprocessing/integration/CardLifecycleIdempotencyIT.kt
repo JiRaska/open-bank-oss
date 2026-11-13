@@ -22,6 +22,7 @@ import com.openbank.libs.domain.cards.scheme.SchemeResult
 import com.openbank.libs.domain.cards.scheme.TokenRequestor
 import com.openbank.libs.domain.cards.scheme.TokenisationPort
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -61,7 +62,10 @@ import java.util.concurrent.atomic.AtomicInteger
  * counter: what is under test is this service's own path.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.cardprocessing.it.PostgresTestResource::class)
+@QuarkusTestResource(
+    com.openbank.libs.testing.containers.PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_card_processing_it")],
+)
 @TestProfile(CardLifecycleIdempotencyIT.SlowNetworkProfile::class)
 @TestSecurity(user = "card-lifecycle-it", roles = ["ROLE_OPERATOR"])
 class CardLifecycleIdempotencyIT {

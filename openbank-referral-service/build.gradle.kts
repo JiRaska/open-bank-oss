@@ -24,6 +24,12 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    // Consumer-driven contract test: the account.created message contract that triggers
+    // referral qualification (ADR-0310 D1).
+    testImplementation(libs.pact.consumer)
+    // Provider side: referral.qualified.v1 is pacted against — loyalty-service earns Lístky from
+    // the Qualified event, replayed by ReferralEventPactFolderProviderVerificationTest.
+    testImplementation(libs.pact.provider)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)

@@ -4,6 +4,7 @@
 
 'use client'
 
+import { useViewFilters } from '@/lib/navigation/viewFilters'
 import { useRef, useState } from 'react'
 import Link from 'next/link'
 import { Landmark, Search, Plus, Filter } from 'lucide-react'
@@ -50,6 +51,7 @@ export default function AccountsPage() {
   const [selectedParty, setSelectedParty] = useState<PartyHit | null>(null)
   const [statusFilter, setStatusFilter] = useState('')
   const [typeFilter, setTypeFilter]     = useState('')
+  useViewFilters({ query: [query, setQuery], status: [statusFilter, setStatusFilter], type: [typeFilter, setTypeFilter] })
   const [result, setResult]             = useState<CursorPage<Account> | null>(null)
   const [loading, setLoading]           = useState(false)
   // Typed unavailable reason → renders the calm <DataUnavailable> panel instead
@@ -212,7 +214,7 @@ export default function AccountsPage() {
           setQuery(party.id)
           void search(party.id)
         }}
-        placeholder={t('Jméno, příjmení, rodné číslo nebo e-mail klienta…', 'Client name, surname, birth number or e-mail…')}
+        placeholder={t('Jméno nebo obchodní název klienta', 'Client name or trading name')}
       />
 
       <div className="card">

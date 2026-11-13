@@ -12,7 +12,9 @@ info:
   # action catalog.publish-ir). The plain publish refuses an IR-bearing revision with 409.
   # 2.9.0 -> 2.10.0 (ADR-0352 phase 5b): additive POST /api/v2/product-ir/lint, the Studio IR editor's
   # dry-run of the same parser a revision write runs; stores nothing.
-  version: 2.10.0
+  # 2.10.0 -> 2.11.0 (#12078): correction. The six v1 404s also document the ApiError body the
+  # disabled banking-compatibility routes answer with; served behaviour is unchanged.
+  version: 2.11.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -113,10 +115,13 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Product' }
         '404':
-          description: Not found
+          description: Product not found, or banking compatibility API disabled
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/LegacyError' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/LegacyError' }
+                  - { $ref: '#/components/schemas/ApiError' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
     put:
@@ -141,10 +146,13 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Product' }
         '404':
-          description: Not found
+          description: Product not found, or banking compatibility API disabled
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/LegacyError' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/LegacyError' }
+                  - { $ref: '#/components/schemas/ApiError' }
         '400':
           description: Invalid product definition or precondition
           content:
@@ -177,10 +185,13 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Product' }
         '404':
-          description: Not found
+          description: Product not found, or banking compatibility API disabled
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/LegacyError' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/LegacyError' }
+                  - { $ref: '#/components/schemas/ApiError' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/products/{id}/activate:
@@ -201,10 +212,13 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Product' }
         '404':
-          description: Not found
+          description: Product not found, or banking compatibility API disabled
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/LegacyError' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/LegacyError' }
+                  - { $ref: '#/components/schemas/ApiError' }
         '400':
           description: Invalid product definition or precondition
           content:
@@ -240,10 +254,13 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Product' }
         '404':
-          description: Not found
+          description: Product not found, or banking compatibility API disabled
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/LegacyError' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/LegacyError' }
+                  - { $ref: '#/components/schemas/ApiError' }
         '400':
           description: Invalid precondition
           content:
@@ -276,10 +293,13 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/Fee' } }
         '404':
-          description: Not found
+          description: Product not found, or banking compatibility API disabled
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/LegacyError' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/LegacyError' }
+                  - { $ref: '#/components/schemas/ApiError' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/fees:

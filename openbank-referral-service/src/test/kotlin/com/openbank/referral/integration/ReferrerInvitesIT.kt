@@ -3,8 +3,8 @@
 
 package com.openbank.referral.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.referral.application.ReferralService
-import com.openbank.referral.it.ReferralPostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -33,7 +33,7 @@ import javax.sql.DataSource
  * ever asserted with `findAll { it.id == ... }`, never an exact size.
  */
 @QuarkusTest
-@QuarkusTestResource(ReferralPostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_OPERATOR"])
 class ReferrerInvitesIT {
     @Inject

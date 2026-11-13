@@ -39,4 +39,15 @@ class TieOutRunEntity : PanacheEntityBase {
 
     @Column(name = "errors", nullable = false)
     var errors: Int = 0
+
+    /** Legacy nulls are not qualification evidence. */
+    @Column(name = "started_at")
+    var startedAt: Instant? = null
+
+    @Column(name = "journal_count")
+    var journalCount: Long? = null
+
+    /** Old runs have an unknown source set and cannot establish qualification evidence. */
+    @Column(name = "journal_fingerprint")
+    var journalFingerprint: String? = null
 }

@@ -10,13 +10,13 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.risk.application.port.out.TreasuryDealBook
 import com.openbank.risk.application.port.out.TreasuryDealEvent
 import com.openbank.risk.domain.Fixtures
 import com.openbank.risk.domain.valuation.DealKind
 import com.openbank.risk.integration.FakeLedgerPort
 import com.openbank.risk.integration.RiskSnapshotApiIT
-import com.openbank.risk.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation

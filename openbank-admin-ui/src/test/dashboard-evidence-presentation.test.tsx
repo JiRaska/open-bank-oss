@@ -55,6 +55,21 @@ describe('dashboard evidence presentation', () => {
     expect(screen.queryByText('Current platform state cannot be verified')).not.toBeInTheDocument()
   })
 
+  it('keeps canonical pension ownership when a live namespace reports a legacy platform group', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(
+      url.endsWith('/governance')
+        ? { ...governance, items: [{ serviceName: 'pension-service', dataDomain: 'pensions' }] }
+        : { source: 'kubernetes', discoveryStatus: 'complete', services: [{
+          name: 'pension-service', label: 'Pension', namespace: 'platform', group: 'platform',
+          status: 'UP', latencyMs: 1,
+        }] },
+    ))))
+    render(wrap(<DashboardPage />))
+    expect(await screen.findByRole('heading', { name: 'Pensions', exact: true })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Technical platform', exact: true })).not.toBeInTheDocument()
+    expect(screen.getByTitle('UP')).toBeInTheDocument()
+  })
+
   it('does not treat an incomplete Kubernetes inventory as undeployed services', async () => {
     const twoServices = {
       ...governance,

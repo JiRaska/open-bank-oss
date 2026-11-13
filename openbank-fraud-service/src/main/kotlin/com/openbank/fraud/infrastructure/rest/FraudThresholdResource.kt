@@ -57,7 +57,7 @@ class FraudThresholdResource {
             version = requireNotNull(body.version) { "version is required" },
             thresholds = requireNotNull(body.thresholds) { "thresholds is required" }
                 .mapValues { (rule, byCcy) ->
-                    byCcy.mapValues { (ccy, amount) ->
+                    requireNotNull(byCcy) { "rule '$rule': amounts are required" }.mapValues { (ccy, amount) ->
                         requireNotNull(amount?.takeIf { it.matches(PLAIN_DECIMAL) }?.toBigDecimal()) {
                             "rule '$rule' $ccy: amount must be a plain decimal string (no exponent, <= 16.4 digits)"
                         }
@@ -102,7 +102,7 @@ class FraudThresholdResource {
 data class ProposeThresholdsRequest(
     val version: Int? = null,
     val effectiveFrom: Instant? = null,
-    val thresholds: Map<String, Map<String, String?>>? = null,
+    val thresholds: Map<String, Map<String, String?>?>? = null,
 )
 
 data class DecideThresholdsRequest(val approve: Boolean? = null, val reason: String? = null)

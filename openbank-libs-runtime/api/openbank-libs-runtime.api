@@ -623,24 +623,34 @@ public final class com/openbank/libs/close/CloseParticipationAssembler {
 	public static final field INSTANCE Lcom/openbank/libs/close/CloseParticipationAssembler;
 	public final fun assemble (Ljava/time/LocalDate;Ljava/util/Set;Ljava/util/Collection;Ljava/lang/String;)Lcom/openbank/libs/close/CloseParticipationReport;
 	public static synthetic fun assemble$default (Lcom/openbank/libs/close/CloseParticipationAssembler;Ljava/time/LocalDate;Ljava/util/Set;Ljava/util/Collection;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/close/CloseParticipationReport;
+	public final fun incomplete (Ljava/time/LocalDate;Ljava/lang/String;Ljava/util/Collection;)Lcom/openbank/libs/close/CloseParticipationReport;
+	public final fun reportingFrom (Ljava/time/LocalDate;J)Ljava/time/LocalDate;
 }
 
 public final class com/openbank/libs/close/CloseParticipationReport {
 	public fun <init> (Ljava/time/LocalDate;Lcom/openbank/libs/close/CloseOutcome;IILjava/lang/String;)V
 	public synthetic fun <init> (Ljava/time/LocalDate;Lcom/openbank/libs/close/CloseOutcome;IILjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/time/LocalDate;Lcom/openbank/libs/close/CloseOutcome;IILjava/lang/String;Ljava/util/Set;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/time/LocalDate;Lcom/openbank/libs/close/CloseOutcome;IILjava/lang/String;Ljava/util/Set;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/time/LocalDate;
 	public final fun component2 ()Lcom/openbank/libs/close/CloseOutcome;
 	public final fun component3 ()I
 	public final fun component4 ()I
 	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/util/Set;
+	public final fun component7 ()Ljava/lang/String;
 	public final fun copy (Ljava/time/LocalDate;Lcom/openbank/libs/close/CloseOutcome;IILjava/lang/String;)Lcom/openbank/libs/close/CloseParticipationReport;
+	public final fun copy (Ljava/time/LocalDate;Lcom/openbank/libs/close/CloseOutcome;IILjava/lang/String;Ljava/util/Set;Ljava/lang/String;)Lcom/openbank/libs/close/CloseParticipationReport;
 	public static synthetic fun copy$default (Lcom/openbank/libs/close/CloseParticipationReport;Ljava/time/LocalDate;Lcom/openbank/libs/close/CloseOutcome;IILjava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/close/CloseParticipationReport;
+	public static synthetic fun copy$default (Lcom/openbank/libs/close/CloseParticipationReport;Ljava/time/LocalDate;Lcom/openbank/libs/close/CloseOutcome;IILjava/lang/String;Ljava/util/Set;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/close/CloseParticipationReport;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getBusinessDate ()Ljava/time/LocalDate;
+	public final fun getExercisedJobs ()Ljava/util/Set;
 	public final fun getItemsProcessed ()I
 	public final fun getJournalsPosted ()I
 	public final fun getOutcome ()Lcom/openbank/libs/close/CloseOutcome;
 	public final fun getReason ()Ljava/lang/String;
+	public final fun getSourceRunId ()Ljava/lang/String;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
@@ -1216,6 +1226,19 @@ public final class com/openbank/libs/persistence/lock/PostgresClusterLock : com/
 	public fun tryRunExclusively (Ljava/lang/String;Lkotlin/jvm/functions/Function1;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
+public abstract class com/openbank/libs/persistence/outbox/AbstractClaimFencedOutboxRepository : com/openbank/libs/persistence/outbox/AbstractPanacheOutboxRepository, com/openbank/libs/persistence/outbox/ClaimFencedOutboxRepositoryV2 {
+	protected fun <init> ()V
+	public fun <init> (Lcom/openbank/libs/persistence/outbox/OutboxTableShape;Ljava/lang/Class;Ljava/time/Clock;)V
+	public synthetic fun <init> (Lcom/openbank/libs/persistence/outbox/OutboxTableShape;Ljava/lang/Class;Ljava/time/Clock;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun claimProcessable (ILjava/time/Duration;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun claimWithTokens (ILjava/time/Duration;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun markClaimFailed (Lcom/openbank/libs/persistence/outbox/OutboxClaim;Ljava/lang/String;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun markClaimsSent (Ljava/util/List;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun markFailed (Ljava/util/UUID;Ljava/lang/String;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun markSent (Ljava/util/UUID;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun markSentBatch (Ljava/util/Collection;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
 public abstract class com/openbank/libs/persistence/outbox/AbstractOutboxBacklogGauge {
 	protected fun <init> ()V
 	public fun <init> (Lcom/openbank/libs/observability/DomainMetrics;)V
@@ -1324,6 +1347,7 @@ public abstract class com/openbank/libs/persistence/outbox/AbstractPanacheOutbox
 	public fun oldestProcessableAge (Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public fun purgeDead (Ljava/time/Duration;ILjava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public fun purgeSent (Ljava/time/Duration;ILjava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	protected final fun recordFailure (Ljava/util/UUID;Ljava/lang/String;Ljava/time/Instant;Ljava/util/UUID;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public final class com/openbank/libs/persistence/outbox/AbstractPanacheOutboxRepository$Companion {
@@ -1382,6 +1406,12 @@ public final class com/openbank/libs/persistence/outbox/OutboxTableShape {
 	public final fun getTable ()Ljava/lang/String;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
+}
+
+public class com/openbank/libs/persistence/outbox/PanacheClaimFencedOutboxEntityV2 : com/openbank/libs/persistence/outbox/PanacheOutboxEntityV2 {
+	public fun <init> ()V
+	public final fun getClaimToken ()Ljava/util/UUID;
+	public final fun setClaimToken (Ljava/util/UUID;)V
 }
 
 public class com/openbank/libs/persistence/outbox/PanacheOutboxEntity : io/quarkus/hibernate/reactive/panache/kotlin/PanacheEntity {
@@ -1856,6 +1886,7 @@ public final class com/openbank/libs/security/OpenBaoTransport$Companion {
 	public static synthetic fun boundedBody$default (Lcom/openbank/libs/security/OpenBaoTransport$Companion;IILjava/lang/Object;)Ljava/net/http/HttpResponse$BodyHandler;
 	public final fun defaultHttpClient (Ljavax/net/ssl/SSLContext;)Ljava/net/http/HttpClient;
 	public static synthetic fun defaultHttpClient$default (Lcom/openbank/libs/security/OpenBaoTransport$Companion;Ljavax/net/ssl/SSLContext;ILjava/lang/Object;)Ljava/net/http/HttpClient;
+	public final fun pemTrustSslContext (Ljava/nio/file/Path;)Ljavax/net/ssl/SSLContext;
 }
 
 public final class com/openbank/libs/security/ResponseTooLargeException : java/io/IOException {

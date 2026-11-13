@@ -10,6 +10,18 @@ on:
 
 permissions: {}
 
+# GitHub delivers `workflow_run: in_progress` several times for ONE CI attempt
+# (measured 2026-11-02: ~183 collector runs for ~40 CI runs that started), and every
+# delivery took a GitHub-hosted runner — 54 of the first 100 queued runs repo-wide were
+# this workflow, starving the merge train. Collapse deliveries per CI run ATTEMPT: one
+# collector runs, at most one waits, the rest are dropped while still queued. Never
+# cancel in progress, and never key coarser than the attempt — the receiver in ci.yml
+# accepts only `ruleset-bypass-<run_id>-a<run_attempt>`, so each attempt (every main
+# commit, every rerun) still gets its own successful collector run.
+concurrency:
+  group: ruleset-bypass-evidence-${{ github.event.workflow_run.id }}-a${{ github.event.workflow_run.run_attempt }}
+  cancel-in-progress: false
+
 jobs:
   collect:
     name: Read ruleset bypass configuration

@@ -31,7 +31,7 @@ metadata:
   namespace: pension
   labels:
     app.kubernetes.io/part-of: pension
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

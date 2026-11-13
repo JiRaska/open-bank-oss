@@ -12,8 +12,9 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
-import com.openbank.pensionfund.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
@@ -27,7 +28,10 @@ import org.junit.jupiter.api.extension.ExtendWith
  * which a recorded 401 could never verify; the two classes' `@PactFilter`s are disjoint.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_pension_fund_it")],
+)
 @Provider("openbank-pension-fund-service")
 @PactFolder("../pacts")
 @PactFilter(NEGATIVE_AUTH_STATE)

@@ -167,6 +167,20 @@ spec:
               It authenticates as the synthetic-only client openbank-synthetic-fx-read
               (fx:read scope → FX_SCOPE_READ); until the Vault KV entry is seeded the runs go
               red with an explicit "credential absent" error rather than green.
+        - alert: JourneyFxRatesCustomerReadMissing
+          expr: |
+            absent(kube_cronjob_status_last_successful_time{namespace="observability", cronjob="journey-fx-rates-customer-read"})
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The fx-rates-customer-read journey has never succeeded, or its CronJob is gone"
+            description: >-
+              No kube-state-metrics series exists for journey-fx-rates-customer-read. The
+              canary customer's rate sheet / pair quote / ČNB reference history path through the
+              public customer edge is deleted, renamed, or has never completed successfully.
+              Check the canary identity first (ADR-0331, provision-synthetic-customer.sh): a
+              missing secret shows in the Job log as "credential absent".
         - alert: JourneyWealthDeclaredHoldingMissing
           expr: |
             absent(kube_cronjob_status_last_successful_time{namespace="observability", cronjob="journey-wealth-declared-holding"})

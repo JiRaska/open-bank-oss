@@ -69,6 +69,7 @@ The converting party's **name (`partyName`) is not stored** in `fx_conversions` 
 ### Data flows out
 
 - → **sanctions-service** (sync REST): `partyName` for screening — same controller, intra-OpenBank.
+- → **party-service** (sync REST, read-only): both screens of a conversion (the synchronous `POST /convert` and the conversion workflow) send the party id and read back the party's legal name, trading name and party type. A name supplied by the caller is never screened, and a stored conversion carries the id only. The names are used for the sanctions screen and are not stored. If no name can be read, the conversion is held for review and an AML case is opened; neither the id nor a caller-supplied name is screened in its place. Same controller.
 - → **aml-service** (sync REST, best-effort): party/conversion details + matched entity when a case is opened — same controller.
 - → **Kafka** (`openbank.fx.conversion.completed`): conversion event for downstream (transaction/audit) — same controller.
 - → **ČNB** (external, inbound only): the daily fixing feed is read; **no customer data is sent outbound** to ČNB.
@@ -101,4 +102,4 @@ Each conversion is a financial record (`fx_conversions`) pinning `rate_id`/`appl
 - ✅ Transport hardening: HSTS, CSP, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy (set in `application.yaml`); mTLS in-cluster.
 - ✅ Secrets: dev placeholders must be overridden in prod via Vault (ADR 0017).
 - ⚠️ Rate-source integrity is the dominant residual risk (threat model §5): a manipulated/stale rate is a silent financial-loss vector — mitigated by rate provenance/timestamp, validity (`isValid`) checks, and `rate_id` pinning; bounds/sanity limits tracked as a follow-up.
-- ⚠️ Domain-event Kafka publisher (`KafkaFxEventPublisher`) is currently a stub; the live event path is the outbox dispatcher — wiring is a tracked follow-up.
+- ✅ Conversion events go through the transactional outbox (`FxOutboxRepository` → `KafkaFxOutboxEventPublisher`, channel `fx-events-out`); the former stub publisher `KafkaFxEventPublisher` was removed (#1033).

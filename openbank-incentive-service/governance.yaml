@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-dataDomain: open-banking
+dataDomain: engagement
 primaryDatastore: PostgreSQL
 databaseName: openbank_incentive
 dataLineageRole: both

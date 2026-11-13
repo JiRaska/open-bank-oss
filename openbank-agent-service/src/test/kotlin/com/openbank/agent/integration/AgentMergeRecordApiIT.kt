@@ -13,10 +13,11 @@ import com.openbank.agent.domain.mergerecord.MergeAuthorization
 import com.openbank.agent.domain.mergerecord.MergeAuthorizationKind
 import com.openbank.agent.domain.mergerecord.MergeAuthorizationScope
 import com.openbank.agent.infrastructure.audit.AgentAuditOutbox
-import com.openbank.agent.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.mockk.every
 import io.mockk.spyk
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -45,7 +46,11 @@ import javax.sql.DataSource
 // PostgresTestResource's injected `agent.model.openai.api-key=test-not-used` placeholder can leak
 // into other @QuarkusTest classes sharing this test JVM whose own @TestProfile expects a
 // different value.
-@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    restrictToAnnotatedClass = true,
+    initArgs = [ResourceArg(name = "db", value = "openbank_agent_it")],
+)
 class AgentMergeRecordApiIT {
 
     @Inject

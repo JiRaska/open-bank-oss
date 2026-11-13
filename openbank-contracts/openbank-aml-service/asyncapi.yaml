@@ -5,7 +5,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank AML Service — events
-  version: 1.0.0
+  version: 1.1.0
   description: |
     AML case lifecycle events on openbank.aml.events and minimal, non-PII oversight wake-ups
     for HIGH or CRITICAL case creation (ADR-0031 D9). Both are relayed from the durable outbox.
@@ -38,6 +38,8 @@ channels:
         $ref: '#/components/messages/amlCaseCreated'
       amlCaseStatusChanged:
         $ref: '#/components/messages/amlCaseStatusChanged'
+      amlReportStateChanged:
+        $ref: '#/components/messages/amlReportStateChanged'
 
   oversightTriggers:
     address: openbank.oversight-triggers
@@ -70,6 +72,14 @@ operations:
     summary: Publish an AML analyst-decision event.
     messages:
       - $ref: '#/channels/amlEvents/messages/amlCaseStatusChanged'
+
+  publishAmlReportStateChanged:
+    action: send
+    channel:
+      $ref: '#/channels/amlEvents'
+    summary: Publish that a suspicious-transaction report changed state (identifier and state only).
+    messages:
+      - $ref: '#/channels/amlEvents/messages/amlReportStateChanged'
 
   publishOversightCaseCreated:
     action: send
@@ -119,6 +129,18 @@ components:
         - $ref: '#/components/messageTraits/outboxHeaders'
       payload:
         $ref: '#/components/schemas/AmlCaseStatusChangedPayload'
+
+    amlReportStateChanged:
+      name: aml.report.state_changed.v1
+      x-openbank-payload-class: AmlReportStateChangedEvent
+      contentType: application/json
+      description: |
+        Identifier and state only (ADR-0371). It deliberately contains no party id, case id,
+        movement, narrative, filing reference or actor, and must never gain one.
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/AmlReportStateChangedPayload'
 
     oversightCaseCreated:
       name: aml.case.created.v1
@@ -170,6 +192,21 @@ components:
           type: string
           format: date-time
 
+    AmlReportStateChangedPayload:
+      type: object
+      additionalProperties: false
+      required: [reportId, state, occurredAt]
+      properties:
+        reportId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum: [DRAFT, APPROVED, FILED, WITHDRAWN]
+        occurredAt:
+          type: string
+          format: date-time
+
     AmlCaseStatusChangedPayload:
       type: object
       additionalProperties: false
@@ -196,6 +233,18 @@ components:
         occurredAt:
           type: string
           format: date-time
+        transactionId:
+          type: [string, 'null']
+          format: uuid
+          description: Additive (#4403). The payment the case was opened for, when there is one.
+        alertCode:
+          type: [string, 'null']
+          description: Additive (#4403). The case's alert code, so a consumer can act on one kind of case.
+        idempotencyKey:
+          type: [string, 'null']
+          description: >-
+            Additive (#4403). The key the case was created with. alertCode and transactionId are free
+            text any case creator sets, so a consumer binds a decision to the case it opened by this key.
 
     OversightTriggerPayload:
       type: object

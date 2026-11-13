@@ -63,6 +63,17 @@ describe('reviewed content consumers', () => {
     expect(fallback).not.toHaveBeenCalled()
   })
 
+  it('uses coherent image ownership when the published bundle predates the taxonomy contract', async () => {
+    readSnapshot.mockResolvedValue({ status: 'unavailable', snapshot: null, provenance: null, error: 'snapshot schema validation failed' })
+    const catalog = { domainTaxonomy: 'openbank.domain-taxonomy/v1', services: [
+      { name: 'openbank-pension-service', dataDomain: 'pensions' },
+      { name: 'openbank-wealth-service', dataDomain: 'wealth' },
+    ] }
+    const result = await resolveAdminUiContent(snapshot => snapshot.content.catalog, async () => catalog)
+    expect(result.value).toEqual(catalog)
+    expect(result.contentSource).toMatchObject({ source: 'image-baked', status: 'stale', detail: 'snapshot schema validation failed' })
+  })
+
   it('labels bundled fallback stale and separates image time from request fetch time', async () => {
     readSnapshot.mockResolvedValue({ status: 'unavailable', snapshot: null, provenance: null, error: 'manifest HTTP 503' })
     const result = await resolveAdminUiContent(

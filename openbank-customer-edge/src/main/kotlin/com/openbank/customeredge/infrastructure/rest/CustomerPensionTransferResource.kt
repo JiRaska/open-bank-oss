@@ -94,7 +94,8 @@ class CustomerPensionTransferResource(
     @Blocking
     fun transferStatus(@PathParam("transferId") id: String?): Response {
         val transferId = uuid(id) ?: return transferNotFound()
-        return transfer(upstream.get("${api()}/transfers/$transferId", party()))
+        val response = upstream.get("${api()}/transfers/$transferId", party())
+        return if (response.status == FORBIDDEN) PensionFailure.ofRead(response) else transfer(response)
     }
 
     /** SCA consent to a transfer-out a receiving provider requested for the caller's contract. */
@@ -154,7 +155,7 @@ class CustomerPensionTransferResource(
             if (dir != null) append("&direction=").append(dir)
         }
         val response = upstream.get("${api()}/transfers$query", party())
-        if (response.status != OK) return PensionFailure.of(response)
+        if (response.status != OK) return PensionFailure.ofRead(response)
         val list = EdgeJson.parse(response)?.takeIf { it.isArray } ?: return badUpstream()
         return EdgeJson.ok(list.map { project(it) }, OK)
     }
@@ -300,6 +301,7 @@ class CustomerPensionTransferResource(
         const val ACCEPTED = 202
         const val BAD_REQUEST = 400
         const val NOT_FOUND = 404
+        const val FORBIDDEN = 403
         const val BAD_GATEWAY = 502
         val DIRECTIONS = setOf("IN", "OUT")
         val TOKEN = Regex("^[A-Za-z0-9_./-]{1,64}$")

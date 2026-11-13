@@ -35,6 +35,13 @@ data class AmlCaseStatusChangedEvent(
     val assignedAnalyst: String?,
     val decidedBy: String?,
     val occurredAt: Instant,
+    // Additive (#4403): what a decision applies to. A consumer that acts on one kind of case, such
+    // as a payment rail releasing a fraud hold, cannot otherwise tell which case or payment it is.
+    val transactionId: UUID? = null,
+    val alertCode: String? = null,
+    // Additive (#4403): binds a decision to the case a rail opened, since alertCode and
+    // transactionId are free text any case creator may set.
+    val idempotencyKey: String? = null,
 )
 
 fun AmlCase.toCreatedEvent(now: Instant) = AmlCaseCreatedEvent(

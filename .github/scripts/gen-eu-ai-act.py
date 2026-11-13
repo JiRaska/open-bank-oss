@@ -68,7 +68,8 @@ OBLIGATIONS = [
     ("Art. 14 Human oversight",
      "requires_human on every write; approver_must_differ_from author (segregation of duties)."),
     ("Art. 15 Accuracy, robustness, cybersecurity",
-     "Prompt-injection guard; evals gate (ADR-0148) blocks a regressing model/prompt; SPIFFE identity."),
+     "Prompt-injection guard; evals gate (ADR-0148) blocks a regressing model/prompt. "
+     "SPIFFE/SPIRE workload identity is deferred (#1914); no credit is taken for it."),
 ]
 
 
@@ -127,8 +128,9 @@ def main():
     w("*Proposed* and unbuilt. The customer- and operator-facing agents are")
     w("proposal-only — a human dispositions every effect — which keeps them out of the")
     w("autonomous-decision-making category. The one ML system near the money path, the fraud")
-    w("scoring plane (ADR-0084), runs its model in **shadow mode** — the verdict is logged, never")
-    w("enforced — and fraud detection is not Annex III creditworthiness. This document is (a) the")
+    w("scoring plane (ADR-0084), runs its ONNX model in **shadow mode** — that verdict is logged, never")
+    w("enforced; the separate rule-based fraud verdict IS enforced on the domestic payment rail")
+    w("(automatic rejection of a DECLINE, #15751) — and fraud detection is not Annex III creditworthiness. This document is (a) the")
     w("standing AI-system inventory a deployer must keep — LLM agents *and* the non-agent ML")
     w("systems below — and (b) the precondition ADR-0142 must satisfy article-by-article before")
     w("it can move past *Proposed*.")
@@ -175,15 +177,17 @@ def main():
 
     w("## Obligation coverage (Art. 9–15) for a high-risk system")
     w("")
-    w("The controls below already exist and satisfy each obligation *in substance* for the day")
-    w("a high-risk system (credit decisioning) ships. What is open is the article-by-article")
-    w("*evidence*, not the mechanism.")
+    w("The controls below are current or planned. Each obligation needs article-by-article")
+    w("evidence before a high-risk system (credit decisioning) ships; Art. 15 still has an")
+    w("unbuilt workload-identity control (#1914).")
     w("")
     w("| Obligation | Existing control | Status |")
     w("|---|---|---|")
     live_high_risk = high_risk or ml_high_risk_live
     for art, control in OBLIGATIONS:
         status = "control exists; evidence pack open" if not live_high_risk else "APPLIES NOW — verify per system"
+        if art.startswith("Art. 15") and not live_high_risk:
+            status = "partial; evidence pack open"
         w(f"| {art} | {control} | {status} |")
     w("")
     if live_high_risk:
@@ -192,8 +196,8 @@ def main():
           "Every obligation above APPLIES from 2026-08-02; this table must be reviewed per system, "
           "and ADR-0142's preconditions confirmed, before deploy.")
     else:
-        w("> No high-risk system is declared today, so the obligations are pre-satisfied in")
-        w("> substance and tracked here in advance. The first `HIGH-RISK` row that appears in the")
+        w("> No high-risk system is declared today. The obligations are tracked in advance,")
+        w("> but Art. 15 is incomplete (#1914). The first `HIGH-RISK` row that appears in the")
         w("> inventory above (via a new/changed charter) flips every status to APPLIES NOW.")
     w("")
 

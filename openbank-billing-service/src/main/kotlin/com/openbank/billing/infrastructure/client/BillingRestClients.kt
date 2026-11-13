@@ -69,7 +69,7 @@ data class AccountPageDto(
  */
 @RegisterRestClient(configKey = "product-catalog")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@OidcClientFilter("m2m")
 @RegisterProvider(ProductCatalogHostHeaderFilter::class)
 @Path("/api/v2")
 @Produces(MediaType.APPLICATION_JSON)

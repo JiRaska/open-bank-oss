@@ -4,6 +4,7 @@
 
 package com.openbank.sdd.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -26,7 +27,7 @@ import org.junit.jupiter.api.Test
  */
 @QuarkusTest
 @QuarkusTestResource(SddBootSmokeIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.sdd.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class SddBootSmokeIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {

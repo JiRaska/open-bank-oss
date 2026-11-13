@@ -15,6 +15,7 @@ import com.openbank.tax.application.port.out.StatutoryReturnMetricsPort
 import com.openbank.tax.application.port.out.StatutoryReturnRepository
 import com.openbank.tax.domain.model.TaxConflictException
 import com.openbank.tax.domain.model.TaxValidationException
+import com.openbank.tax.domain.returns.DeadlineBasis
 import com.openbank.tax.domain.returns.Periodicity
 import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.domain.returns.ReturnCatalogue
@@ -24,6 +25,7 @@ import com.openbank.tax.domain.returns.ReturnStatus
 import com.openbank.tax.domain.returns.StatutoryReturn
 import com.openbank.tax.domain.returns.ValidationRule
 import com.openbank.tax.infrastructure.returns.StatutoryReturnDeadlineScheduler
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -187,6 +189,91 @@ class StatutoryReturnServiceTest {
     }
 
     @Test
+    fun `an on-demand return is never expected, so no un-named day is NOT_ASSEMBLED`(): Unit = runBlocking {
+        val onDemand = ReturnDefinition(
+            code = "D-EVENT",
+            name = "on demand",
+            scope = ReturnScope.COMPANY,
+            periodicity = Periodicity.DAY,
+            deadlineDaysAfterPeriodEnd = 3,
+            datapoints = listOf("units"),
+            rules = emptyList(),
+            legalBasis = "test",
+            deadlineBasis = DeadlineBasis.WORKING_DAYS,
+            onDemand = true,
+        )
+        val svc = StatutoryReturnService(
+            catalogues = object : ReturnCatalogueSource {
+                override fun catalogues() = listOf(ReturnCatalogue("ev", 1, "XX", false, listOf(onDemand)))
+            },
+            data = data,
+            repository = repo,
+            entities = ReportingEntities("company", emptyList(), LocalDate.of(2026, 6, 30)),
+            accountingClock = AccountingClock.bank(clock),
+            clock = clock,
+        )
+        assertThat(svc.breaches()).isEmpty()
+        // A stored revision of a named day still breaches once its working-day deadline passes.
+        svc.assemble("ev", "D-EVENT", "company", "2026-08-14", "maker")
+        assertThat(svc.breaches().map { "${it.period}/${it.dueDate}/${it.kind}" })
+            .containsExactly("2026-08-14/2026-08-19/NOT_SUBMITTED")
+    }
+
+    @Test
+    fun `the onStored hook runs only after the return validated and was stored`(): Unit = runBlocking {
+        val seen = mutableListOf<UUID>()
+        val hooked = object : ReturnDataPort {
+            var units = BigDecimal("-1")
+            override val available = true
+            override suspend fun fetch(
+                catalogue: ReturnCatalogue,
+                definition: ReturnDefinition,
+                entityId: String,
+                period: ReportingPeriod,
+            ) = ReturnAssemblyData(mapOf("units" to units), onStored = {
+                assertThat(repo.rows).containsKey(it.id)
+                seen += it.id
+            })
+        }
+        val svc = service(d = hooked)
+        assertThatThrownBy { runBlocking { svc.assemble("test-cat", "M-FUND", "fund-a", "2026-07", "maker") } }
+            .isInstanceOf(com.openbank.tax.domain.returns.ReturnValidationException::class.java)
+        assertThat(seen).isEmpty()
+        hooked.units = BigDecimal("5")
+        val stored = svc.assemble("test-cat", "M-FUND", "fund-a", "2026-07", "maker")
+        assertThat(seen).containsExactly(stored.id)
+    }
+
+    @Test
+    fun `a return with no filing obligation is never a breach, stored and overdue or not`(): Unit = runBlocking {
+        val dryRun = ReturnDefinition(
+            code = "D-TEST",
+            name = "dry run",
+            scope = ReturnScope.COMPANY,
+            periodicity = Periodicity.DAY,
+            deadlineDaysAfterPeriodEnd = 3,
+            datapoints = listOf("units"),
+            rules = emptyList(),
+            legalBasis = "test",
+            deadlineBasis = DeadlineBasis.WORKING_DAYS,
+            onDemand = true,
+            filingObligation = false,
+        )
+        val svc = StatutoryReturnService(
+            catalogues = object : ReturnCatalogueSource {
+                override fun catalogues() = listOf(ReturnCatalogue("ev", 1, "XX", false, listOf(dryRun)))
+            },
+            data = data,
+            repository = repo,
+            entities = ReportingEntities("company", emptyList(), LocalDate.of(2026, 6, 30)),
+            accountingClock = AccountingClock.bank(clock),
+            clock = clock,
+        )
+        svc.assemble("ev", "D-TEST", "company", "2026-08-14", "maker")
+        assertThat(svc.breaches()).isEmpty()
+    }
+
+    @Test
     fun `an assembled but unsubmitted return past its deadline is a breach until submitted`(): Unit = runBlocking {
         val svc = service()
         val ret = svc.assemble("test-cat", "M-FUND", "fund-a", "2026-07", "maker")
@@ -229,14 +316,19 @@ class StatutoryReturnServiceTest {
         val domainMetrics = mockk<DomainMetrics> {
             every { registerWorkflowLiveness(any(), any()) } returns liveness
         }
-        StatutoryReturnDeadlineScheduler(service(start = LocalDate.of(2026, 6, 30)), metrics, domainMetrics)
-            .also { it.registerLiveness() }
+        StatutoryReturnDeadlineScheduler(
+            service(start = LocalDate.of(2026, 6, 30)),
+            metrics,
+            domainMetrics,
+            SimpleMeterRegistry(),
+            ReportingEntities("company", listOf("fund-a", "fund-b"), LocalDate.of(2026, 6, 30)),
+        ).also { it.registerLiveness() }
             .refresh()
         assertThat(published).isEqualTo(5)
     }
 
     @Test
-    fun `the scheduler cannot record success or zero breaches without reporting configuration`(): Unit = runBlocking {
+    fun `the scheduler is skipped as unconfigured without reporting configuration`(): Unit = runBlocking {
         var published = -1
         val metrics = object : StatutoryReturnMetricsPort {
             override fun recordBreaches(count: Int) {
@@ -247,12 +339,20 @@ class StatutoryReturnServiceTest {
         val domainMetrics = mockk<DomainMetrics> {
             every { registerWorkflowLiveness(any(), any()) } returns liveness
         }
-        val scheduler = StatutoryReturnDeadlineScheduler(service(start = null), metrics, domainMetrics)
-            .also { it.registerLiveness() }
+        val registry = SimpleMeterRegistry()
+        val scheduler = StatutoryReturnDeadlineScheduler(
+            service(start = null),
+            metrics,
+            domainMetrics,
+            registry,
+            ReportingEntities("company", listOf("fund-a", "fund-b"), null),
+        ).also { it.registerLiveness() }
 
-        assertThatThrownBy { runBlocking { scheduler.refresh() } }
-            .isInstanceOf(ReturnDataUnavailableException::class.java)
+        scheduler.refresh()
+
+        // Skipped, not failed: no zero breach count, no success, and the unconfigured flag says why.
         assertThat(published).isEqualTo(-1)
+        assertThat(registry.find("openbank_workflow_unconfigured").gauge()?.value()).isEqualTo(1.0)
         verify(exactly = 0) { liveness.recordSuccess() }
     }
 }
