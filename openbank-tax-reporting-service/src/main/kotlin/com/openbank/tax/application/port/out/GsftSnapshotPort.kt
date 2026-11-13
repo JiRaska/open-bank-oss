@@ -38,7 +38,13 @@ data class GsftSnapshot(
     val specialShares: List<SpecialRegimeShare>,
     /** § 41e odst. 3 credits a depositor has claimed; claim-based, so empty until one is filed. */
     val qualifyingCredits: List<QualifyingCredit>,
+    /** Unique synthetic roster accounts removed before fetching principal, outside [accounts]. */
+    val syntheticAccountsDroppedAtSource: Int = 0,
 ) {
+    init {
+        require(syntheticAccountsDroppedAtSource >= 0) { "Synthetic account count cannot be negative" }
+    }
+
     val complete: Boolean get() = gaps.isEmpty()
 
     /** Refuses a snapshot that still carries an unsourced field — the GSFT delivery must not use it. */

@@ -133,7 +133,8 @@ Content-Type: application/json
 ```
 
 - `targetStatus` must be a valid transition from the current status (see the state machine in [02 — Architecture](./02-architecture.md)).
-- `decidedBy` is mandatory; `decisionReason` is mandatory when `targetStatus = BLOCKED`.
+- `decidedBy` in the body is **ignored** (deprecated): the decider is the authenticated caller (ADR-0371). `decisionReason` is mandatory when `targetStatus = BLOCKED`.
+- A case opened by the pack evaluation (a pack-monitoring case; not a `TRANSACTION_MONITORING` case a payment rail opened) can only be moved to `UNDER_REVIEW` here; closing or escalating it answers 409 and goes through a disposition proposal (below). To a caller without `ROLE_COMPLIANCE` such a case answers 404 and is absent from the list.
 - **Side-effects:** the transition + an `aml.case.status_changed.v1` event commit atomically via the outbox.
 
 ## Error model
@@ -173,3 +174,23 @@ Events are **append-only**; corrections are made through a follow-up transition 
 The `POST /api/v1/aml/cases` role gate admits `ROLE_API` for the named domestic-payment, SEPA-payment, SEPA-instant and FX service accounts. The resource then binds each machine caller to its verified JWT `azp`, subject and Keycloak service-account username; a role or username alone does not authorize case creation. Staff roles remain usable from verified interactive user sessions.
 
 HTTP authentication fixtures exercise interactive staff JWT claims alongside their roles. Negative unauthenticated Pact interactions remain in their separate provider test without a synthetic identity.
+
+
+## Monitoring dispositions and the suspicious-transaction report (ADR-0371)
+
+`ROLE_COMPLIANCE` only, human principals only. Every actor is the authenticated caller. Full schemas are in `openapi.yaml`.
+
+| Method and path | Action | Notes |
+|---|---|---|
+| `POST /api/v1/aml/monitoring/cases/{caseId}/disposition-proposals` | `amlMonitoring.propose` | `disposition` `CLEAR` or `REPORT`, `outcomeCode` from the outcome vocabulary; one open proposal per case |
+| `POST /api/v1/aml/monitoring/disposition-proposals/{proposalId}/decision` | `amlMonitoring.decide` | a second, different person; the proposer gets 422 |
+| `GET /api/v1/aml/monitoring/disposition-proposals` | `amlMonitoring.inspect` | proposals awaiting a decision |
+| `POST /api/v1/aml/reports` | `amlReport.draft` | links the party's own monitoring cases and booked movements |
+| `GET /api/v1/aml/reports`, `GET /api/v1/aml/reports/{reportId}` | `amlReport.inspect` | |
+| `POST /api/v1/aml/reports/{reportId}/approval` | `amlReport.approve` | a second, different person; the drafter gets 422 |
+| `POST /api/v1/aml/reports/{reportId}/filing` | `amlReport.file` | records a filing made **outside** this system: reference, instant, outcome code |
+| `POST /api/v1/aml/reports/{reportId}/withdrawal` | `amlReport.withdraw` | only before filing; needs an outcome code |
+
+- An unknown `outcomeCode` answers 400. The codes are data (`aml/decision-outcomes.provisional.json`), not an enum in the API.
+- The service submits nothing to any authority. `FILED` means a named officer recorded a filing.
+- `aml.report.state_changed.v1` on `openbank.aml.events` carries `reportId`, `state` and `occurredAt` only.
