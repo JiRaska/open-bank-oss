@@ -5,6 +5,7 @@ package com.openbank.kyc.infrastructure.persistence.repository
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.kyc.application.port.out.KycOutboxRepository
+import com.openbank.kyc.application.port.out.ScreeningTriggerBacklog
 import com.openbank.kyc.application.port.out.ScreeningTriggerRepository
 import com.openbank.kyc.domain.model.ScreeningTrigger
 import com.openbank.kyc.domain.model.ScreeningTriggerDiff
@@ -146,12 +147,33 @@ class ScreeningTriggerRepositoryImpl(private val outboxRepository: KycOutboxRepo
             }
         }.awaitSuspending() == 1
 
+    override suspend fun backlog(): ScreeningTriggerBacklog = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery<Array<Any?>>(BACKLOG).singleResult
+        }
+    }.awaitSuspending().let { row ->
+        ScreeningTriggerBacklog(
+            pending = (row[0] as Number).toLong(),
+            oldestAgeSeconds = (row[1] as Number).toLong(),
+        )
+    }
+
     override suspend fun findByTriggerId(triggerId: UUID): ScreeningTrigger? = Panache.withSession {
         find("triggerId", triggerId).firstResult()
     }.awaitSuspending()?.toDomain(objectMapper)
 
     private companion object {
         const val LEASE_SECONDS = 600L
+
+        // Leading column of ix_kyc_screening_triggers_retry is `state`, so the filter is an index
+        // range over the undrained states only; OPENED rows (the whole history) are never read.
+        // GREATEST(0, ..) guards a created_at written by a clock ahead of the database's.
+        const val BACKLOG = """
+            SELECT COUNT(*)::bigint,
+                   COALESCE(GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - MIN(created_at))))), 0)::bigint
+            FROM kyc_screening_triggers
+            WHERE state IN ('PENDING', 'OPEN_FAILED')
+        """
 
         const val INSERT_IF_ABSENT = """
             INSERT INTO kyc_screening_triggers
