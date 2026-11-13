@@ -20,6 +20,10 @@ const proposal = {
   note: 'Salary from a known employer', state: 'PROPOSED', proposedBy: 'alice', proposedAt: '2026-11-12T10:00:00Z',
 }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
+const vocabulary = { vocabularyId: 'v', vocabularyRevision: 1, vocabularyHash: 'h', entries: [
+  { code: 'FALSE_POSITIVE_EXPLAINED_ACTIVITY', label: 'False positive: activity explained', meaning: 'm' },
+  { code: 'CONFIRMED_SUSPICION', label: 'Suspicion confirmed', meaning: 'm' },
+] }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
@@ -32,6 +36,7 @@ describe('AML four-eyes panel', () => {
 
   it('shows the pending proposal and approves it with the checker reason, then refreshes the case', async () => {
     const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/outcomes')) return json(vocabulary)
       if (String(url).includes('disposition-proposals?')) return json([proposal, { ...proposal, caseId: 'other' }])
       if (String(url).includes('/reports?')) return json([])
       if (init?.method === 'POST') return json({ ...proposal, state: 'EXECUTED', decidedBy: 'bob' })
@@ -42,6 +47,7 @@ describe('AML four-eyes panel', () => {
     render(<LanguageProvider initialLanguage="en"><AmlFourEyesPanel amlCase={amlCase} onCaseChanged={changed} /></LanguageProvider>)
     expect(await screen.findByText('Awaiting second approval')).toBeInTheDocument()
     expect(screen.getByText('Salary from a known employer')).toBeInTheDocument()
+    expect(await screen.findByText(/activity explained/)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText("Approver's reason"), { target: { value: 'Payslips checked' } })
     fireEvent.click(screen.getByRole('button', { name: /Approve$/ }))
     await waitFor(() => expect(changed).toHaveBeenCalled())
@@ -53,10 +59,23 @@ describe('AML four-eyes panel', () => {
   it('surfaces the maker-checker refusal instead of a generic error', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return json({ message: 'the approver is the maker' }, 422)
+      if (String(url).endsWith('/outcomes')) return json(vocabulary)
       return json(String(url).includes('disposition-proposals?') ? [proposal] : [])
     }))
     render(<LanguageProvider initialLanguage="en"><AmlFourEyesPanel amlCase={amlCase} onCaseChanged={() => {}} /></LanguageProvider>)
     fireEvent.click(await screen.findByRole('button', { name: /Approve$/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('someone other than the maker')
+  })
+
+  it('offers no outcome to choose, and cannot send a proposal, when the vocabulary is unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).endsWith('/outcomes')) return json({ error: 'upstream_error' }, 502)
+      return json([])
+    }))
+    render(<LanguageProvider initialLanguage="en"><AmlFourEyesPanel amlCase={amlCase} onCaseChanged={() => {}} /></LanguageProvider>)
+    const send = await screen.findByRole('button', { name: 'Send for approval' })
+    expect(send).toBeDisabled()
+    expect(screen.getByLabelText('Assessment outcome *').querySelectorAll('option')).toHaveLength(1)
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
   })
 })

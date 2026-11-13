@@ -19,8 +19,8 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { StatusBadge } from '@/components/ui'
 import type { AmlCase } from '@/lib/aml/amlCaseContract'
 import {
-  DISPOSITIONS, OUTCOME_CODES, describeFailure, outcomesFor, parseList, parseProposal, parseReport,
-  type Disposition, type DispositionProposal, type StrReport,
+  DISPOSITIONS, describeFailure, outcomeLabel as labelFor, outcomesFor, parseList, parseOutcomeCatalogue,
+  parseProposal, parseReport, type Disposition, type DispositionProposal, type OutcomeEntry, type StrReport,
 } from '@/lib/aml/fourEyes'
 
 const MONITORING = '/api/v1/aml/monitoring'
@@ -39,10 +39,8 @@ export function AmlFourEyesPanel({ amlCase, onCaseChanged }: { amlCase: AmlCase;
   const { t, language } = useLanguage()
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString(locale) : '—')
-  const outcomeLabel = (code: string | null) => {
-    const o = OUTCOME_CODES.find(x => x.code === code)
-    return o ? (language === 'cs' ? o.cs : o.en) : code ?? '—'
-  }
+  const [vocabulary, setVocabulary] = useState<OutcomeEntry[] | null>(null)
+  const outcomeLabel = (code: string | null) => labelFor(vocabulary?.find(v => v.code === code), code, language)
 
   const fourEyes = amlCase.requiresFourEyesDisposition
   const monitoring = amlCase.screeningType === 'TRANSACTION_MONITORING'
@@ -66,10 +64,15 @@ export function AmlFourEyesPanel({ amlCase, onCaseChanged }: { amlCase: AmlCase;
 
   const load = useCallback(async () => {
     try {
-      const [p, r] = await Promise.all([
+      const [p, r, v] = await Promise.all([
         fourEyes ? call(`${MONITORING}/disposition-proposals?limit=200`, 'GET') : Promise.resolve(null),
         monitoring ? call(`${REPORTS}?limit=200`, 'GET') : Promise.resolve(null),
+        call(`${MONITORING}/outcomes`, 'GET'),
       ])
+      // The choosable outcomes are the service's own vocabulary; without it nothing is offered,
+      // rather than a guessed list the service might reject.
+      if (v.ok) setVocabulary(parseOutcomeCatalogue(await v.json()))
+      else setListError(await describeFailure(v, t))
       if (p) {
         if (p.ok) setProposals(parseList(await p.json(), parseProposal).filter(x => x.caseId === amlCase.id))
         else setListError(await describeFailure(p, t))
@@ -106,7 +109,7 @@ export function AmlFourEyesPanel({ amlCase, onCaseChanged }: { amlCase: AmlCase;
 
   const pending = proposals?.find(p => p.state === 'PROPOSED') ?? null
   const decided = (proposals ?? []).filter(p => p.state !== 'PROPOSED')
-  const outcomeChoices = outcomesFor(disposition)
+  const outcomeChoices = vocabulary ? outcomesFor(disposition, vocabulary) : []
   const label = { fontSize: 12, fontWeight: 600 } as const
   const muted = { fontSize: 12, color: 'var(--text-secondary)', margin: '4px 0' } as const
 
@@ -154,12 +157,12 @@ export function AmlFourEyesPanel({ amlCase, onCaseChanged }: { amlCase: AmlCase;
           <label htmlFor="aml-outcome" style={label}>{t('Výsledek posouzení *', 'Assessment outcome *')}</label>
           <select id="aml-outcome" className="input" value={outcome} onChange={e => setOutcome(e.target.value)}>
             <option value="">{t('— vyberte —', '— choose —')}</option>
-            {outcomeChoices.map(o => <option key={o.code} value={o.code}>{language === 'cs' ? o.cs : o.en}</option>)}
+            {outcomeChoices.map(o => <option key={o.code} value={o.code} title={o.meaning}>{outcomeLabel(o.code)}</option>)}
           </select>
           <label htmlFor="aml-proposal-note" style={label}>{t('Odůvodnění návrhu *', 'Rationale *')}</label>
           <textarea id="aml-proposal-note" className="input" rows={3} maxLength={2000} value={note} onChange={e => setNote(e.target.value)} placeholder={t('Co jste ověřili a proč navrhujete toto uzavření…', 'What you verified and why you propose this…')} />
           <div>
-            <button type="button" className="btn btn-primary btn-sm" disabled={busy || !outcome || note.trim().length < 10} onClick={() => void act(`${MONITORING}/cases/${amlCase.id}/disposition-proposals`, { disposition, outcomeCode: outcome, note: note.trim() }, t('Návrh odeslán ke druhému schválení.', 'Proposal sent for second approval.')).then(() => { setNote(''); setOutcome('') })}>
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy || !vocabulary || !outcome || note.trim().length < 10} onClick={() => void act(`${MONITORING}/cases/${amlCase.id}/disposition-proposals`, { disposition, outcomeCode: outcome, note: note.trim() }, t('Návrh odeslán ke druhému schválení.', 'Proposal sent for second approval.')).then(() => { setNote(''); setOutcome('') })}>
               {t('Odeslat ke schválení', 'Send for approval')}
             </button>
           </div>
@@ -195,11 +198,11 @@ export function AmlFourEyesPanel({ amlCase, onCaseChanged }: { amlCase: AmlCase;
             <input id={`at-${r.reportId}`} type="datetime-local" className="input" value={filedAt} onChange={e => setFiledAt(e.target.value)} />
             <label htmlFor={`oc-${r.reportId}`} style={label}>{t('Výsledek', 'Outcome')}</label>
             <select id={`oc-${r.reportId}`} className="input" value={closeOutcome} onChange={e => setCloseOutcome(e.target.value)}>
-              {OUTCOME_CODES.map(o => <option key={o.code} value={o.code}>{language === 'cs' ? o.cs : o.en}</option>)}
+              {(vocabulary ?? []).map(o => <option key={o.code} value={o.code} title={o.meaning}>{outcomeLabel(o.code)}</option>)}
             </select>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" className="btn btn-primary btn-sm" disabled={busy || !filingRef.trim() || !filedAt} onClick={() => void act(`${REPORTS}/${r.reportId}/filing`, { filingReference: filingRef.trim(), filedAt: new Date(filedAt).toISOString(), outcomeCode: closeOutcome }, t('Podání FAÚ zaznamenáno.', 'FAU filing recorded.'))}>{t('Zaznamenat podání', 'Record filing')}</button>
-              <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void act(`${REPORTS}/${r.reportId}/withdrawal`, { outcomeCode: closeOutcome }, t('Oznámení staženo.', 'Report withdrawn.'))}>{t('Stáhnout', 'Withdraw')}</button>
+              <button type="button" className="btn btn-primary btn-sm" disabled={busy || !vocabulary || !filingRef.trim() || !filedAt} onClick={() => void act(`${REPORTS}/${r.reportId}/filing`, { filingReference: filingRef.trim(), filedAt: new Date(filedAt).toISOString(), outcomeCode: closeOutcome }, t('Podání FAÚ zaznamenáno.', 'FAU filing recorded.'))}>{t('Zaznamenat podání', 'Record filing')}</button>
+              <button type="button" className="btn btn-secondary btn-sm" disabled={busy || !vocabulary} onClick={() => void act(`${REPORTS}/${r.reportId}/withdrawal`, { outcomeCode: closeOutcome }, t('Oznámení staženo.', 'Report withdrawn.'))}>{t('Stáhnout', 'Withdraw')}</button>
             </div>
           </div>}
         </div>)}

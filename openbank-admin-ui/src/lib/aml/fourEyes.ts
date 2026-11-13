@@ -11,25 +11,50 @@
 export const DISPOSITIONS = ['CLEAR', 'REPORT'] as const
 export type Disposition = (typeof DISPOSITIONS)[number]
 
-/**
- * The outcome vocabulary aml-service resolves `outcomeCode` against
- * (`openbank-aml-service/src/main/resources/aml/decision-outcomes.provisional.json`). Held here
- * because the service exposes no endpoint for it; `aml-four-eyes-contract.test.ts` reads that
- * file and fails when the two disagree, so this cannot drift unnoticed.
- */
-export const OUTCOME_CODES = [
-  { code: 'CONFIRMED_SUSPICION', cs: 'Podezření potvrzeno', en: 'Suspicion confirmed' },
-  { code: 'FALSE_POSITIVE_EXPLAINED_ACTIVITY', cs: 'Falešný poplach: aktivita vysvětlena', en: 'False positive: activity explained' },
-  { code: 'FALSE_POSITIVE_DATA_QUALITY', cs: 'Falešný poplach: kvalita dat', en: 'False positive: data quality' },
-  { code: 'FALSE_POSITIVE_SCENARIO_TOO_BROAD', cs: 'Falešný poplach: scénář je příliš široký', en: 'False positive: scenario too broad' },
-  { code: 'INSUFFICIENT_INFORMATION', cs: 'Nedostatek informací', en: 'Insufficient information' },
-] as const
+/** One outcome the officer can choose, as aml-service serves it at `/api/v1/aml/monitoring/outcomes`. */
+export interface OutcomeEntry { code: string; label: string; meaning: string }
 
-/** Outcomes that make sense for a disposition; REPORT with a false-positive outcome is incoherent. */
-export function outcomesFor(disposition: Disposition): readonly (typeof OUTCOME_CODES)[number][] {
+/**
+ * Czech display labels by code. The SET of choosable codes always comes from aml-service (the
+ * vocabulary `outcomeCode` is resolved against); this only translates. A code the service adds
+ * without a translation is still offered, under the service's own English label.
+ * `aml-four-eyes-contract.test.ts` reads aml-service's vocabulary file and fails on a missing
+ * translation, so the gap is noticed rather than shipped.
+ */
+export const OUTCOME_LABELS_CS: Record<string, string> = {
+  CONFIRMED_SUSPICION: 'Podezření potvrzeno',
+  FALSE_POSITIVE_EXPLAINED_ACTIVITY: 'Falešný poplach: aktivita vysvětlena',
+  FALSE_POSITIVE_DATA_QUALITY: 'Falešný poplach: kvalita dat',
+  FALSE_POSITIVE_SCENARIO_TOO_BROAD: 'Falešný poplach: scénář je příliš široký',
+  INSUFFICIENT_INFORMATION: 'Nedostatek informací',
+}
+
+export function outcomeLabel(entry: OutcomeEntry | undefined, code: string | null, language: 'cs' | 'en'): string {
+  if (!code) return '—'
+  if (language === 'cs' && OUTCOME_LABELS_CS[code]) return OUTCOME_LABELS_CS[code]
+  return entry?.label ?? code
+}
+
+export function parseOutcomeCatalogue(raw: unknown): OutcomeEntry[] {
+  const entries = obj(raw)?.entries
+  if (!Array.isArray(entries)) throw new Error('Invalid outcome vocabulary')
+  const parsed = entries.map(e => {
+    const o = obj(e)
+    const code = str(o?.code), label = str(o?.label)
+    return code && label ? { code, label, meaning: str(o?.meaning) ?? '' } : null
+  }).filter((e): e is OutcomeEntry => e !== null)
+  if (parsed.length === 0) throw new Error('Empty outcome vocabulary')
+  return parsed
+}
+
+/**
+ * Outcomes that make sense for a disposition: REPORT with a false-positive outcome, or CLEAR
+ * with confirmed suspicion, is incoherent. Codes outside both families are offered for both.
+ */
+export function outcomesFor(disposition: Disposition, all: readonly OutcomeEntry[]): OutcomeEntry[] {
   return disposition === 'REPORT'
-    ? OUTCOME_CODES.filter(o => o.code === 'CONFIRMED_SUSPICION' || o.code === 'INSUFFICIENT_INFORMATION')
-    : OUTCOME_CODES.filter(o => o.code !== 'CONFIRMED_SUSPICION')
+    ? all.filter(o => !o.code.startsWith('FALSE_POSITIVE'))
+    : all.filter(o => o.code !== 'CONFIRMED_SUSPICION')
 }
 
 export interface DispositionProposal {

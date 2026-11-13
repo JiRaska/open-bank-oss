@@ -5,21 +5,29 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { OUTCOME_CODES, describeFailure, outcomesFor, parseProposal, parseReport } from '@/lib/aml/fourEyes'
+import { OUTCOME_LABELS_CS, describeFailure, outcomeLabel, outcomesFor, parseOutcomeCatalogue, parseProposal, parseReport } from '@/lib/aml/fourEyes'
 import { parseAmlCase } from '@/lib/aml/amlCaseContract'
 
 const t = (_cs: string, en: string) => en
 
 describe('AML four-eyes client contract', () => {
-  it('offers exactly the outcome codes aml-service resolves (no silent drift)', () => {
+  it('has a Czech label for every code aml-service can serve', () => {
     const file = join(__dirname, '../../../openbank-aml-service/src/main/resources/aml/decision-outcomes.provisional.json')
     const vocab = JSON.parse(readFileSync(file, 'utf8')) as { entries: { code: string }[] }
-    expect(OUTCOME_CODES.map(o => o.code).sort()).toEqual(vocab.entries.map(e => e.code).sort())
+    expect(Object.keys(OUTCOME_LABELS_CS).sort()).toEqual(vocab.entries.map(e => e.code).sort())
   })
 
-  it('never pairs a REPORT with a false-positive outcome, nor a CLEAR with confirmed suspicion', () => {
-    expect(outcomesFor('REPORT').every(o => !o.code.startsWith('FALSE_POSITIVE'))).toBe(true)
-    expect(outcomesFor('CLEAR').some(o => o.code === 'CONFIRMED_SUSPICION')).toBe(false)
+  it('takes the choosable set from the served vocabulary, including a code it has no translation for', () => {
+    const served = parseOutcomeCatalogue({ entries: [
+      { code: 'CONFIRMED_SUSPICION', label: 'Suspicion confirmed', meaning: 'm' },
+      { code: 'FALSE_POSITIVE_DATA_QUALITY', label: 'False positive: data quality', meaning: 'm' },
+      { code: 'NEW_CODE', label: 'Brand new', meaning: 'm' },
+    ] })
+    expect(outcomesFor('REPORT', served).map(o => o.code)).toEqual(['CONFIRMED_SUSPICION', 'NEW_CODE'])
+    expect(outcomesFor('CLEAR', served).map(o => o.code)).toEqual(['FALSE_POSITIVE_DATA_QUALITY', 'NEW_CODE'])
+    expect(outcomeLabel(served[2], 'NEW_CODE', 'cs')).toBe('Brand new')
+    expect(outcomeLabel(served[0], 'CONFIRMED_SUSPICION', 'cs')).toBe('Podezření potvrzeno')
+    expect(() => parseOutcomeCatalogue({ entries: [] })).toThrow()
   })
 
   it('parses proposals and reports and drops malformed rows', () => {
