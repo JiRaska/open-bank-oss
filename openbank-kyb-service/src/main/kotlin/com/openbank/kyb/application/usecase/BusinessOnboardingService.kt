@@ -8,6 +8,7 @@ import com.openbank.kyb.application.port.`in`.AcceptDisclosuresCommand
 import com.openbank.kyb.application.port.`in`.AnswerQuestionnaireCommand
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
+import com.openbank.kyb.application.port.`in`.DisposeFindingCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.LookupCommand
 import com.openbank.kyb.application.port.`in`.MakeDeclarationsCommand
@@ -27,6 +28,7 @@ import com.openbank.kyb.application.port.out.BusinessOnboardingCaseRepository
 import com.openbank.kyb.application.port.out.BusinessOnboardingSettings
 import com.openbank.kyb.application.port.out.BusinessOnboardingWorkflowPort
 import com.openbank.kyb.application.port.out.CeremonySignerStatus
+import com.openbank.kyb.application.port.out.ConcurrentCaseUpdateException
 import com.openbank.kyb.application.port.out.DocumentGateway
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.InvitationTokens
@@ -87,6 +89,8 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     @Inject lateinit var settings: BusinessOnboardingSettings
 
     @Inject lateinit var ubo: BeneficialOwnershipPort
+
+    @Inject lateinit var screening: RelatedPartyScreeningService
 
     private val log = Logger.getLogger(BusinessOnboardingService::class.java)
 
@@ -195,9 +199,12 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         // The people a PEP entry must cover: every natural-person beneficial owner the register
         // reports (a corporate owner is not a person and has no PEP status of its own), plus every
         // listed representative, which the aggregate adds from the extract.
-        val uboNames = ubo.lookup(case.identifier).reportableOwners.filter { !it.corporate }.map { it.fullName }
+        val finding = ubo.lookup(case.identifier)
+        val uboNames = finding.reportableOwners.filter { !it.corporate }.map { it.fullName }
         val made = case.declarationsMade(cmd.declarations, uboNames, knownPersons(case), cmd.callerPartyId, now)
-        return cases.update(made, null).also(::armTimers)
+        // The related parties are known from here on, so this is where they are screened. An
+        // outage does not fail the customer's step: the subjects stay pending and approval waits.
+        return cases.update(screening.screened(made, finding), null).also(::armTimers)
     }
 
     override suspend fun questionnairePrefill(caseId: UUID, callerPartyId: UUID): QuestionnairePrefill {
@@ -283,7 +290,9 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
             )
         }
         val now = Instant.now(clock)
-        val signed = case.signed(cmd.signerPartyId, cmd.signatureRef, now, settings.highRiskCountries)
+        // Only a caller who passed every check above can cause a screen to be attempted.
+        val signed = screenedBeforeApproval(case)
+            .signed(cmd.signerPartyId, cmd.signatureRef, now, settings.highRiskCountries, screening.required)
         val event = when (signed.status) {
             CaseStatus.SIGNED, CaseStatus.ACTIVE -> KybEvents.agreementSigned(signed, now, cmd.signerPartyId.toString())
             CaseStatus.MANUAL_REVIEW -> KybEvents.reviewRequired(signed, now)
@@ -303,9 +312,9 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     }
 
     override suspend fun resolveReview(cmd: ResolveReviewCommand): BusinessOnboardingCase {
-        val case = get(cmd.caseId)
+        val case = screenedBeforeApproval(get(cmd.caseId))
         val now = Instant.now(clock)
-        var resolved = case.reviewResolved(cmd.requiredSignatures, now, cmd.requiredSignerRoles)
+        var resolved = case.reviewResolved(cmd.requiredSignatures, now, cmd.requiredSignerRoles, screening.required)
         if (resolved.entityPartyId == null && resolved.extract != null) {
             resolved =
                 resolved.entityPartyCreated(
@@ -341,7 +350,37 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         return cases.update(rejected, KybEvents.rejected(rejected, now, cmd.operator)).also(::armTimers)
     }
 
+    override suspend fun disposeFinding(cmd: DisposeFindingCommand): BusinessOnboardingCase {
+        val case = get(cmd.caseId)
+        val now = Instant.now(clock)
+        val disposed = case.findingDisposed(cmd.subjectKey, cmd.disposition, cmd.operator, cmd.reason, now)
+        log.infof(
+            "kyb case %s: screening finding %s set to %s by %s",
+            cmd.caseId,
+            cmd.subjectKey,
+            cmd.disposition,
+            cmd.operator,
+        )
+        return cases.update(disposed, null)
+    }
+
+    /**
+     * An event, not a request: nobody is there to retry a conflict, and a nacked record is
+     * dead-lettered — so a write that lost the race is re-read and re-applied here. The transition
+     * is idempotent, and the last attempt lets the conflict propagate.
+     */
     override suspend fun entityPartyActivated(entityPartyId: UUID) {
+        repeat(ACTIVATION_ATTEMPTS - 1) {
+            try {
+                return activateOnce(entityPartyId)
+            } catch (e: ConcurrentCaseUpdateException) {
+                log.infof("kyb case of entity party %s changed concurrently; re-reading (%s)", entityPartyId, e.message)
+            }
+        }
+        activateOnce(entityPartyId)
+    }
+
+    private suspend fun activateOnce(entityPartyId: UUID) {
         val case = cases.findByEntityPartyId(entityPartyId) ?: return
         if (case.status.isTerminal) return
         val now = Instant.now(clock)
@@ -358,6 +397,16 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         cases.update(abandoned, KybEvents.abandoned(abandoned, now, actor))
         log.infof("kyb case %s abandoned by %s after idling in %s", caseId, actor, expectedState)
         return true
+    }
+
+    /**
+     * Both approvals (the completing signature, an operator resolving a review) first give the
+     * screening a chance to finish, and PERSIST what it learned before the transition is tried —
+     * so an answer obtained on an attempt the aggregate then refuses is not asked for again.
+     */
+    private suspend fun screenedBeforeApproval(case: BusinessOnboardingCase): BusinessOnboardingCase {
+        val screened = screening.screened(case)
+        return if (screened === case) case else cases.update(screened, null)
     }
 
     /**
@@ -486,6 +535,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
 
     private companion object {
         val AGREEMENT_LANGS = setOf("cs", "en")
+        const val ACTIVATION_ATTEMPTS = 3
     }
 
     private fun entityPartyRequest(caseId: UUID, extract: RegistryExtract) = EntityPartyRequest(

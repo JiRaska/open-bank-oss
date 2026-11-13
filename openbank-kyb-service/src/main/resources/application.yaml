@@ -112,6 +112,12 @@ quarkus:
       url: ${DOCUMENT_SERVICE_URL:http://localhost:8143}
       connect-timeout: 2000
       read-timeout: 10000
+    # Sanctions / PEP screening of the entity and its related parties (CUSTOMER profile of the v3
+    # screen). Only called while openbank.kyb.screening.enabled is true.
+    sanctions-service:
+      url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
+      connect-timeout: 2000
+      read-timeout: 5000
     # Public registers (ADR-0284 D1). Free, no key. Egress from the pod goes through the NAT
     # gateway; the NetworkPolicy generator sees these as external edges.
     ares:
@@ -216,6 +222,17 @@ openbank:
       code: ${OPENBANK_KYB_BUSINESS_PRODUCT_CODE:prod-004}
       name: ${OPENBANK_KYB_BUSINESS_PRODUCT_NAME:Business Current Account}
       currency: ${OPENBANK_KYB_BUSINESS_PRODUCT_CURRENCY:EUR}
+    screening:
+      # Screens the entity, every listed representative and every reportable beneficial owner
+      # against the sanctions, terrorist and PEP lists, and refuses approval (the completing
+      # signature, an operator resolving a review) while any of them has no answer.
+      #
+      # OFF by default, and that is a deployment fact rather than a preference: with the switch on
+      # and no route to sanctions-service every business case stops at its last signature. Turn it
+      # on in the SAME change that supplies SANCTIONS_SERVICE_URL and the network path. While it is
+      # off the service logs a warning at boot and records no screening at all — an unscreened case
+      # never reads as a screened one.
+      enabled: ${OPENBANK_KYB_SCREENING_ENABLED:false}
     representation:
       # A single statutory member with a SOLE rule is confirmed without an operator (no second
       # signatory can exist). Kill switch: false sends every rule to human confirmation.
@@ -296,3 +313,32 @@ authz:
       # No Temporal frontend in @QuarkusTest: the workflow test drives its own TestWorkflowEnvironment.
       worker:
         enabled: false
+      # The related-party screening gate is ON for every @QuarkusTest in this module, against the
+      # StubRelatedPartyScreening double (clear unless a test names someone). It ships OFF; running
+      # the ITs with it on is what proves the journeys still complete once it is switched on. Set
+      # HERE and not in src/test/resources/application.properties: measured twice, a key in that
+      # file (plain or %test-prefixed) did not reach the application and every IT ran with the
+      # gate off, reading green about a control that was not there.
+      screening:
+        enabled: true
+"%prod":
+  quarkus:
+    # The sanctions-service rest-client uses a named TLS bucket over sanctions-service's
+    # private-CA mTLS listener (8443, client auth REQUIRED), the same shape as every other new
+    # east-west edge (#15723). Local/test fixtures speak plain HTTP, so this stays under %prod:
+    # the client certificate (kyb-internal-tls, mounted at /mnt/sanctions-tls) only exists in the
+    # cluster. The certificate is transport authentication; the OIDC bearer stays the identity.
+    tls:
+      sanctions-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/sanctions-tls/tls.crt
+              key: /mnt/sanctions-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/sanctions-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      sanctions-service:
+        tls-configuration-name: sanctions-authority
