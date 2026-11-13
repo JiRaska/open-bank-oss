@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
-import { expect, test, type Route } from '@playwright/test'
+import { expect, test, type Route } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 import { waitForSettledShell } from './helpers/shell'
 

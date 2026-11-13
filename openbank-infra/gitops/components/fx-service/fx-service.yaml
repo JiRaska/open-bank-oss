@@ -32,7 +32,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: fx-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fx-service:sandbox-27e19a17@sha256:237ec0a9dc52055545dcb125417b3c9bb06b08038241beeb8239d6852165f597
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fx-service:sandbox-548fa683@sha256:60f1cebb05a5e66b6044eae2c0824a660f8eb7d66cdac2fffe9316f83edd21be
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8119}
@@ -95,6 +95,16 @@ spec:
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: SANCTIONS_SERVICE_URL
               value: http://sanctions-service.sanctions.svc:8123
+            # The sanctions screen of a conversion screens the names the bank holds for the party,
+            # read from party-service (#15723). A new east-west edge, so it takes party-service's
+            # private-CA mTLS listener (8443, TLSv1.3, client auth REQUIRED, %prod bucket
+            # party-authority, client certificate fx-internal-tls mounted at /mnt/party-tls) like
+            # sca-service and delegation-service, not :8111. Declared in this env so that
+            # gen-network-policies.py derives the party-namespace ingress edge for fx; without it
+            # the rest-client would dial its localhost dev default inside this pod and every
+            # conversion would be held as un-screenable.
+            - name: PARTY_SERVICE_URL
+              value: https://party-service.party.svc:8443
             # aml-service's private-CA mTLS listener (8443, client auth REQUIRED, %prod bucket
             # aml-authority, client certificate fx-internal-tls mounted at /mnt/aml-tls).
             - name: AML_SERVICE_URL
@@ -154,6 +164,7 @@ spec:
           volumeMounts:
             - {name: internal-tls, mountPath: /mnt/internal-tls, readOnly: true}
             - {name: aml-tls, mountPath: /mnt/aml-tls, readOnly: true}
+            - {name: party-tls, mountPath: /mnt/party-tls, readOnly: true}
             - {name: tmp, mountPath: /tmp}
             - {name: kafka-keystore, mountPath: /mnt/kafka-keystore, readOnly: true}
             - {name: kafka-truststore, mountPath: /mnt/kafka-truststore, readOnly: true}
@@ -240,6 +251,12 @@ spec:
             secretName: fx-service-internal-tls
             optional: false
         - name: aml-tls
+          secret:
+            secretName: fx-internal-tls
+            optional: false
+        # The same CLIENT certificate, projected a second time for the read of party-service, so
+        # each outbound mTLS edge has its own mount and %prod TLS bucket.
+        - name: party-tls
           secret:
             secretName: fx-internal-tls
             optional: false

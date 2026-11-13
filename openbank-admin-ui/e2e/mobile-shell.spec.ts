@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 async function holdClientSession(page: Page, replacement?: object) {

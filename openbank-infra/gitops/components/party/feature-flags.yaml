@@ -10,7 +10,7 @@ metadata:
   labels:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
-    openbank.io/config: feature-flags
+    open-bank.tech/config: feature-flags
 data:
   flags.json: |
     {

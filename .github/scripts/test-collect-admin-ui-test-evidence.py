@@ -7,6 +7,7 @@ import json
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stdout
 from unittest.mock import patch
 from pathlib import Path
 
@@ -778,6 +779,9 @@ class RateLimitRetryTest(unittest.TestCase):
             msg[key] = value
         return COLLECTOR.HTTPError("https://api.github.com/x", code, "limited", msg, io.BytesIO(b""))
 
+    class Response(str):
+        headers = {}
+
     class Opener:
         def __init__(self, errors):
             self.errors, self.calls = list(errors), 0
@@ -786,12 +790,24 @@ class RateLimitRetryTest(unittest.TestCase):
             self.calls += 1
             if self.errors:
                 raise self.errors.pop(0)
-            return "ok"
+            return RateLimitRetryTest.Response("ok")
+
+    def test_core_quota_warns_once_at_eighty_percent(self):
+        output = io.StringIO()
+        headers = {"x-ratelimit-resource": "core", "x-ratelimit-limit": "5000"}
+        with patch.object(COLLECTOR, "_CORE_QUOTA_WARNED", False), redirect_stdout(output):
+            COLLECTOR.warn_on_core_quota({**headers, "x-ratelimit-used": "3999"})
+            COLLECTOR.warn_on_core_quota({**headers, "x-ratelimit-used": "4000"})
+            COLLECTOR.warn_on_core_quota({**headers, "x-ratelimit-used": "4500"})
+        self.assertIn("4000/5000", output.getvalue())
+        self.assertEqual(1, output.getvalue().count("::warning"))
 
     def test_secondary_limit_honours_retry_after_then_succeeds(self):
         opener = self.Opener([self.http_error(403, {"Retry-After": "75"})])
         sleeps = []
-        result = COLLECTOR.open_with_rate_limit_retry(opener, COLLECTOR.Request("https://api.github.com/x"), 30, sleeps.append)
+        with patch.object(COLLECTOR, "_GITHUB_API_ATTEMPTS", 0):
+            result = COLLECTOR.open_with_rate_limit_retry(opener, COLLECTOR.Request("https://api.github.com/x"), 30, sleeps.append)
+            self.assertEqual(2, COLLECTOR._GITHUB_API_ATTEMPTS)
         self.assertEqual(("ok", 2, [75.0]), (result, opener.calls, sleeps))
 
     def test_shared_budget_fails_before_a_wait_it_cannot_cover(self):

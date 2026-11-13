@@ -4,6 +4,7 @@
 
 package com.openbank.transaction.infrastructure.client
 
+import com.openbank.libs.synthetic.SyntheticTaint
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
@@ -18,7 +19,11 @@ class LedgerCallGuard(@RestClient private val ledgerClient: LedgerRestClient) {
     @Retry(maxRetries = 3, delay = 500, jitter = 100)
     @Timeout(2000)
     @CircuitBreaker(requestVolumeThreshold = 5, failureRatio = 0.5, delay = 10000)
-    fun postJournal(request: PostJournalRequest): Uni<JournalResponse> = ledgerClient.postJournal(request)
+    fun postJournal(request: PostJournalRequest, synthetic: Boolean = false): Uni<JournalResponse> = if (synthetic) {
+        ledgerClient.postSyntheticJournal(request, SyntheticTaint.headerValue())
+    } else {
+        ledgerClient.postJournal(request)
+    }
 
     @Retry(maxRetries = 2, delay = 300)
     @Timeout(2000)
