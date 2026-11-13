@@ -38,6 +38,8 @@ Assets protected, in priority order:
 4. **Import provenance** — which URL was fetched, when, and how many entries were upserted
    (`last_updated_at`, `last_entry_count`) — the audit trail for "was the fleet's sanctions data
    current when a given screening decision was made."
+5. **The monitored-subject registry and its findings** (ADR-0376, section 6b) — personal data of
+   the subjects other services asked this one to keep screening, and the fact that one matched.
 
 ## 2. Data-flow diagram (textual)
 
@@ -175,7 +177,55 @@ repository port, so it asserted a call that in production always threw; no UI ex
 distinguishes from noise. The only signal available anywhere was `listPending()` never shrinking —
 and nothing alerts on a queue that fails to drain (the same class as #3273).
 
+## 6b. Ongoing monitoring of registered subjects (ADR-0376)
+
+Off by default (`openbank.sanctions.monitoring.enabled=false`). This section describes the
+surface that exists once an environment switches it on.
+
+**New asset: the monitored-subject registry.** `sanctions_monitored_subjects` (V23) is the first
+store in this service that holds a standing population of the bank's own customers rather than
+one row per screening request: name, aliases, date of birth, nationality, country and entity
+type per subject, keyed by the owning service and its reference.
+`sanctions_monitored_subject_names` repeats each subject's normalised names, one row per name,
+for the index the delta match reads; it is deleted with the subject. `sanctions_monitoring_findings` links
+a subject to the list entries it matched, which is the more sensitive fact: that a named
+customer is, or resembles, a sanctioned or politically exposed person.
+
+**New inbound operations.** `PUT` and `DELETE /api/v3/sanctions/monitored-subjects/{subjectRef}`
+(`SanctionsMonitoringResource`), for `ROLE_API` with the `sanctions.create` action of
+`POST /api/v3/sanctions/screen`. The owner of a registration is not a request value: it is the
+client the caller's service-account token was issued to (`MonitoringCallerIdentity`). There is no
+read operation.
+
+**New internal flows.** A trigger on `sanctions_change_journal` queues each committed list-entry
+change (only while the registry is non-empty); a scheduled delta matches queued entries against
+the registry; a scheduled sweep re-evaluates whole subjects; a finding and its outbox event are
+written in one transaction and leave on `openbank.sanctions.screening.event` as
+`MONITORED_SUBJECT_MATCHED`.
+
+| # | Threat | Mitigation | Residual risk |
+|---|---|---|---|
+| M1 | **Tipping-off (information disclosure)** — a customer, or a service facing one, learns that the customer matched a list | A finding is never returned over REST: the resource has no read operation, and a registration response carries the registration only. An integration test in this module registers over real HTTP and asserts the exact set of response fields; it is cited in this row only once scheduled evidence on main shows it green. The event names the subject by reference and goes to the internal screening topic, which no customer-facing service consumes | The topic is shared: `audit-service` archives it, so the pair (subject reference, matched entry) is also stored there. Nothing enforces that a future consumer keeps it off a customer surface; ADR-0371 names a gate for that class of event, which does not cover this one yet |
+| M2 | **Personal data at rest** — the registry concentrates customer identity data in a service that did not hold a customer population before | Minimum fields: exactly what the CUSTOMER screening profile reads, no document identifiers, no contact data. Stored under the service's existing `restricted` classification and database encryption | Names and dates of birth are stored in clear in the column, as `sanctions_checks` already does; no field-level encryption (ADR-0189 position) |
+| M3 | **Erasure not honoured** — a subject is offboarded or erased and stays monitored | Deregistration issues a `DELETE`; the subject's indexed names and its findings go with it by `ON DELETE CASCADE`. It is idempotent and is not gated on the feature flag, so erasure works where monitoring is switched off. An integration test in this module deletes a registered subject with the flag off; it is cited in this row only once scheduled evidence on main shows it green | Events already published remain in the outbox until its retention purge and in the audit archive under its own retention. Deregistration is the caller's duty: nothing here learns of an erasure by itself |
+| M4 | **Monitoring evasion by deregistration (tampering)** — a caller withdraws a subject so that a later listing is never matched, or replaces its attributes with ones that match nothing | The owner is resolved server-side from the verified service-account token (`MonitoringCallerIdentity`, on `ServiceAccountIdentity`: a verified JWT whose `azp` is bound to that client's service-account username) and is part of the key of every read, replace and delete, so a caller reaches only the subjects it registered; the same reference under another owner is a different row. A person's token, a principal that is not a verified service-account token, and the fleet's shared client are refused with 403 before anything is read. Integration tests in this module plant another owner's subject under the caller's own reference and assert it survives the caller's delete, and cover each refusal; they are cited in this row only once scheduled evidence on main shows them green | A service can still withdraw or overwrite its OWN subjects: a compromised or defective owner evades monitoring of its own customers. Each deregistration is logged with the owning client (no name), but nothing alerts on deregistration volume. The binding is as strong as the realm's client separation: where two services are issued the same client id they are one owner. A caller that still authenticates through the shared client cannot register at all; kyc-service does today and needs its own client first |
+| M5 | **Names in logs** — the registry's content leaks through log lines | Monitoring code logs the registry row id, the owning service and list-entry references only, never a subject's name or reference | Convention, checked by review; no gate inspects log arguments |
+| M6 | **A missed delta (silent false negative)** — a list change is never matched against the registry | The queue row commits in the transaction of the list change itself. A delta too large to match entry by entry is replaced, in one transaction, by a request to re-sweep every subject. The periodic sweep re-evaluates every subject through the live screen's own evaluation whatever the deltas did | Bounded by the sweep interval (default 30 days) for anything only the sweep can see, which includes jurisdiction reference data: a newly listed country reaches a registered subject at its next sweep, not immediately |
+| M7 | **Duplicate or replayed findings (DoS of the review queue)** | A finding is unique per subject, list entry and version of the entry's names (partial unique index); the version ignores alias order, so a feed that reorders names raises nothing | An entry whose names genuinely change raises a new finding for a subject already found against it |
+| M8 | **A clearance silences a true match** | Monitoring calls the live screen's own clearance rule: same subject reference, same attributes, unexpired, covering the exact entry identity. PEP and jurisdiction matches are never covered. An integration test in this module records a clearance and asserts which later findings it does and does not silence; it is cited in this row only once scheduled evidence on main shows it green | The registry holds no document identifiers, so a clearance recorded on a screen that carried identifiers is not honoured here and the finding is raised: the safe direction |
+| M9 | **Resource exhaustion** — the delta matches every changed entry against the registry and shares the database with payment screening | The match is index-driven: each entry probes the partial trigram indexes of `sanctions_monitored_subject_names` and scores only the candidates (`MonitoringNameIndex`), measured at 0.3 s per entry on one million synthetic subjects against 7.3 s for a full scan. Both paths are bounded per tick (entries per run, subjects per batch), one entry may raise at most a bounded number of findings, and the delta falls back to the sweep above a backlog bound | The cost still grows with the registry and with how common an entry's trigrams are: 5,000 changed entries a day are about 25 minutes of one database core at one million subjects. The figures come from synthetic names; no measurement on production-shaped data exists. A caller can register subjects without a quota, so one owner can grow the registry for every other |
+| M10 | **A disabled feature read as a working one** | Registration is refused with 503 while disabled; a disabled run reports `DISABLED`, counted apart from `completed`; the registry gauges read NaN until a run has observed the registry | None known |
+
 ## 7. Change log
+
+- **2026-11-12** — **Ongoing monitoring of registered subjects (ADR-0376), shipped disabled.**
+  New store of personal data (`sanctions_monitored_subjects`, `sanctions_monitoring_findings`,
+  `sanctions_monitored_subject_names`, V23), two new inbound operations (`PUT`/`DELETE
+  /api/v3/sanctions/monitored-subjects/{subjectRef}`, owner taken from the caller's
+  service-account token) and one new outbound event (`MONITORED_SUBJECT_MATCHED`). See section 6b for the threats: tipping-off (M1), the registry
+  as a personal-data store (M2), erasure (M3), evasion by deregistration (M4), missed deltas (M6)
+  and clearances (M8). With the flag off, which is the default, registration answers 503, no run
+  matches anything and the queue trigger writes nothing because the registry is empty.
 
 - **2026-11-12** — **Reviewer identity comes from the token (#15748, C8).** The review endpoints no longer bind a client-supplied `reviewedBy`; it is ignored and the authenticated principal is recorded. This also fixes the admin-ui decision action, whose body never carried the field and was answered 400.
 - **2026-11-11** — **Jurisdiction reference data loaded, its ageing made observable, and a
