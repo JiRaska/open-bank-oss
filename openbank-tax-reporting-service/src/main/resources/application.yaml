@@ -50,12 +50,6 @@ quarkus:
   dev-ui:
     enabled: false
 
-# Read by the Kafka connector as the default broker config; the deployed value (Strimzi mTLS
-# bootstrap) comes from KAFKA_BOOTSTRAP_SERVERS in the gitops manifest.
-kafka:
-  bootstrap:
-    servers: localhost:9092
-
   # #12425: tax-reporting-service's OWN machine identity — Keycloak client `openbank-tax-reporting`,
   # ROLE_API only — for the pension reporting read models. pension-service and pension-fund-service
   # admit their aggregate routes for service-account-openbank-tax-reporting and staff alone; never
@@ -108,6 +102,12 @@ kafka:
       url: ${BALANCE_SERVICE_URL:http://localhost:8103}
       connect-timeout: 2000
       read-timeout: 10000
+
+# Read by the Kafka connector as the default broker config; the deployed value (Strimzi mTLS
+# bootstrap) comes from KAFKA_BOOTSTRAP_SERVERS in the gitops manifest.
+kafka:
+  bootstrap:
+    servers: localhost:9092
 
 mp:
   messaging:
