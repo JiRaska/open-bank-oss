@@ -4,9 +4,13 @@
 
 package com.openbank.domestic.infrastructure.kafka
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.domestic.application.usecase.FraudHoldResolutionService
+import com.openbank.domestic.application.usecase.PaymentHoldResolutionService
 import com.openbank.domestic.application.workflow.FraudReviewDecision
+import com.openbank.domestic.application.workflow.PaymentHoldDecision
+import com.openbank.domestic.application.workflow.PaymentHoldPolicy
 import com.openbank.domestic.application.workflow.fraudReviewCaseKey
 import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
@@ -17,7 +21,9 @@ import org.jboss.logging.Logger
 import java.util.UUID
 
 /**
- * Turns an analyst's decision on a `FRAUD_REVIEW` case into the held payment's workflow signal (#4403).
+ * Turns an analyst's decision on a `FRAUD_REVIEW` case into the held payment's workflow signal (#4403),
+ * and the decision on a `PAYMENT_HELD` case into the admission hold's (ADR-0374 D3). One channel and
+ * one consumer group for both, because both read the same decisions off the same topic.
  *
  * Only CLEARED and BLOCKED are decisions. ESCALATED and UNDER_REVIEW keep the payment waiting, and the
  * hold then ends by its own timeout, in rejection. Every other case on the shared topic is skipped.
@@ -31,12 +37,14 @@ import java.util.UUID
 class FraudHoldResolutionConsumer(
     private val objectMapper: ObjectMapper,
     private val resolution: FraudHoldResolutionService,
+    private val holdResolution: PaymentHoldResolutionService,
 ) {
     private val log = Logger.getLogger(FraudHoldResolutionConsumer::class.java)
 
     @Incoming(CHANNEL)
     suspend fun consume(payload: String) {
         val node = objectMapper.readTree(payload)
+        if (node.path("alertCode").asText() == PaymentHoldPolicy.CASE_ALERT_CODE) return consumePaymentHold(node)
         if (node.path("alertCode").asText() != FRAUD_REVIEW_ALERT) return
         val decision = when (node.path("newStatus").asText()) {
             "CLEARED" -> FraudReviewDecision.RELEASE
@@ -66,6 +74,42 @@ class FraudHoldResolutionConsumer(
         ) {
             // The Temporal client blocks, and this handler runs on the event loop.
             withContext(Dispatchers.IO) { resolution.resolve(paymentId, decision, caseKey) }
+        }
+    }
+
+    /**
+     * ADR-0374 D3: the decision on the case of an admission hold. Same rules as the fraud hold it
+     * generalises: only CLEARED and BLOCKED decide, and only from the case the hold itself opened
+     * ([PaymentHoldPolicy.caseKey]); alert code and transaction id are free text any case creator
+     * may set.
+     */
+    private suspend fun consumePaymentHold(node: JsonNode) {
+        val decision = when (node.path("newStatus").asText()) {
+            "CLEARED" -> PaymentHoldDecision.RELEASE
+            "BLOCKED" -> PaymentHoldDecision.REJECT
+            else -> return
+        }
+        val paymentId = runCatching { UUID.fromString(node.path("transactionId").asText("")) }.getOrNull()
+        if (paymentId == null) {
+            log.warnf("PAYMENT_HELD case %s decided without a payment id", node.path("caseId").asText())
+            return
+        }
+        val caseKey = node.path("idempotencyKey").asText("")
+        if (caseKey != PaymentHoldPolicy.caseKey(paymentId)) {
+            log.warnf(
+                "PAYMENT_HELD case %s is not the hold's own case for payment %s; ignored",
+                node.path("caseId").asText(),
+                paymentId,
+            )
+            return
+        }
+        EventRetry.withRetry(
+            log = log,
+            what = "payment hold resolution",
+            key = paymentId,
+            isRetryable = EventRetry.RETRY_UNLESS_DETERMINISTIC,
+        ) {
+            withContext(Dispatchers.IO) { holdResolution.resolve(paymentId, decision, caseKey) }
         }
     }
 

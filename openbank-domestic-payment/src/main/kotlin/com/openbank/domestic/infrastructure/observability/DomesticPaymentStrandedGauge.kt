@@ -142,6 +142,7 @@ class DomesticPaymentStrandedGauge(
          */
         val NON_TERMINAL: List<DomesticPaymentStatus> = listOf(
             DomesticPaymentStatus.RECEIVED,
+            DomesticPaymentStatus.HELD,
             DomesticPaymentStatus.VALIDATED,
             DomesticPaymentStatus.SENT_TO_CLEARING,
         )

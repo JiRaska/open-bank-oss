@@ -5,6 +5,9 @@
 package com.openbank.domestic.infrastructure.client
 
 import com.openbank.domestic.application.port.out.AccountLookupPort
+import com.openbank.domestic.application.port.out.AccountStandingLookup
+import com.openbank.domestic.application.port.out.AccountStandingPort
+import com.openbank.libs.fincrime.admission.UnavailableCause
 import io.quarkus.oidc.client.OidcClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -37,7 +40,10 @@ interface AccountServiceRestClient {
     ): io.smallrye.mutiny.Uni<AccountDto>
 }
 
-data class AccountDto(val id: String, val partyId: String)
+data class AccountDto(val id: String, val partyId: String, val standing: AccountStandingDto? = null)
+
+/** account-service's `AccountStandingResponse`; the rail reads whether the account may be debited. */
+data class AccountStandingDto(val mayDebit: Boolean? = null, val reason: String? = null)
 
 private const val HTTP_NOT_FOUND = 404
 
@@ -49,7 +55,8 @@ class AccountServiceClient(
         defaultValue = "http://account-service.accounts.svc:8100",
     )
     private val baseUrl: String,
-) : AccountLookupPort {
+) : AccountLookupPort,
+    AccountStandingPort {
 
     private val log = Logger.getLogger(AccountServiceClient::class.java)
 
@@ -89,6 +96,34 @@ class AccountServiceClient(
     } catch (ex: Exception) {
         log.warnf("Party lookup failed (%s)", ex.javaClass.simpleName)
         null
+    }
+
+    /**
+     * Standing, read with the account (ADR-0374 D4). Every way of not getting a usable answer is
+     * [AccountStandingLookup.Unavailable], never "may debit": an unknown account, a response
+     * without `standing` (an account-service older than the field) and a failed call alike.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    override suspend fun debtorStanding(accountId: UUID): AccountStandingLookup = try {
+        val token = oidcClient.get().tokens.awaitSuspending().accessToken
+        val dto = httpClient.getById("Bearer $token", accountId.toString()).awaitSuspending()
+        val mayDebit = dto.standing?.mayDebit
+        if (mayDebit == null) {
+            log.warnf("Account lookup answered without standing — treating standing as unavailable")
+            AccountStandingLookup.Unavailable(UnavailableCause.MISSING_DATA)
+        } else {
+            AccountStandingLookup.Known(UUID.fromString(dto.partyId), mayDebit, dto.standing.reason)
+        }
+    } catch (ex: jakarta.ws.rs.WebApplicationException) {
+        if (ex.response.status == HTTP_NOT_FOUND) {
+            AccountStandingLookup.Unavailable(UnavailableCause.MISSING_DATA)
+        } else {
+            log.warnf("Standing lookup failed with HTTP %d", ex.response.status)
+            AccountStandingLookup.Unavailable(UnavailableCause.DEPENDENCY_DOWN)
+        }
+    } catch (ex: Exception) {
+        log.warnf("Standing lookup failed (%s)", ex.javaClass.simpleName)
+        AccountStandingLookup.Unavailable(UnavailableCause.DEPENDENCY_DOWN)
     }
 
     @Suppress("TooGenericExceptionCaught")

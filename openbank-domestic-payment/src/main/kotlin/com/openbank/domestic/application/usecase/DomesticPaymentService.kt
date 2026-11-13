@@ -90,6 +90,10 @@ class DomesticPaymentService(
         Clock.systemUTC(),
     )
 
+    /** Field-injected so neither constructor, nor any test that calls one, changes shape. */
+    @ConfigProperty(name = "openbank.domestic.admission.enabled", defaultValue = "false")
+    var admissionEnabled: Boolean = false
+
     companion object {
         private const val PAYMENT_CREATED_EVENT = "domestic.payment.created"
         private const val PAYMENT_STATUS_CHANGED_EVENT = "domestic.payment.status-changed"
@@ -366,6 +370,19 @@ class DomesticPaymentService(
     override suspend fun transitionStatus(command: TransitionDomesticPaymentStatusCommand): DomesticPayment {
         val payment = paymentRepository.findById(command.paymentId)
             ?: throw DomesticPaymentNotFoundException(command.paymentId)
+
+        // ADR-0374 D13: leaving HELD is the admission chain's and the case decision's alone, and
+        // with the chain on so is leaving RECEIVED. A status written here restarts no workflow, so
+        // it would move a payment past controls that never ran, or orphan the run waiting on it.
+        // While the chain is off a RECEIVED payment keeps this exit: it is the only one a payment
+        // left by an exhausted screening re-drive has.
+        val ownedByAdmission = payment.status == DomesticPaymentStatus.HELD ||
+            (admissionEnabled && payment.status == DomesticPaymentStatus.RECEIVED)
+        if (ownedByAdmission) {
+            throw InvalidDomesticPaymentStateTransitionException(
+                "A ${payment.status} domestic payment leaves that status only through payment admission",
+            )
+        }
 
         if (!payment.canTransitionTo(command.targetStatus)) {
             throw InvalidDomesticPaymentStateTransitionException(

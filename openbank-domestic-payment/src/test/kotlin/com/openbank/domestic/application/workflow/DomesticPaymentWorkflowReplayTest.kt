@@ -71,6 +71,8 @@ class PreFraudGateDomesticPaymentWorkflow : DomesticPaymentWorkflow {
 
     override fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?) = Unit
 
+    override fun resolvePaymentHold(decision: PaymentHoldDecision, caseKey: String?) = Unit
+
     override fun process(paymentId: UUID): DomesticPaymentStatus = when (activities.screenPayment(paymentId)) {
         ScreeningDecision.BLOCK -> {
             activities.rejectPayment(paymentId)

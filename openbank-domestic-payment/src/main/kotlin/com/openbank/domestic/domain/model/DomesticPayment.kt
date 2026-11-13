@@ -11,6 +11,13 @@ import java.util.UUID
 
 enum class DomesticPaymentStatus {
     RECEIVED,
+
+    /**
+     * Parked by the admission chain before anything irrevocable happened (ADR-0374 D3): a control
+     * wants a human, or could not answer. Left only by the chain's re-evaluation, a case decision or
+     * the hold's expiry, never by the operator status endpoint.
+     */
+    HELD,
     VALIDATED,
     SENT_TO_CLEARING,
     SETTLED,
@@ -32,6 +39,9 @@ enum class DomesticRejectReason {
     AML_HOLD,
     SANCTIONS_HIT,
     FRAUD_SUSPECTED,
+
+    /** The debtor account may not be debited: frozen, closed, dormant or not yet active (ADR-0374 D4). */
+    DEBTOR_ACCOUNT_BLOCKED,
     TECHNICAL_ERROR,
 }
 
@@ -132,7 +142,7 @@ data class DomesticPayment(
                 DomesticPaymentStatus.RETURNED,
                 DomesticPaymentStatus.CANCELLED,
                 -> submittedAt ?: now
-                DomesticPaymentStatus.RECEIVED -> submittedAt
+                DomesticPaymentStatus.RECEIVED, DomesticPaymentStatus.HELD -> submittedAt
             },
             settledAt = when (targetStatus) {
                 DomesticPaymentStatus.SETTLED,
@@ -148,9 +158,16 @@ data class DomesticPayment(
 
     fun canTransitionTo(targetStatus: DomesticPaymentStatus): Boolean = when (status) {
         DomesticPaymentStatus.RECEIVED -> targetStatus in setOf(
+            DomesticPaymentStatus.HELD,
             DomesticPaymentStatus.VALIDATED,
             DomesticPaymentStatus.REJECTED,
             DomesticPaymentStatus.CANCELLED,
+        )
+
+        // Nothing has left the bank yet, so a hold ends in exactly two ways: admitted or refused.
+        DomesticPaymentStatus.HELD -> targetStatus in setOf(
+            DomesticPaymentStatus.VALIDATED,
+            DomesticPaymentStatus.REJECTED,
         )
 
         DomesticPaymentStatus.VALIDATED -> targetStatus in setOf(

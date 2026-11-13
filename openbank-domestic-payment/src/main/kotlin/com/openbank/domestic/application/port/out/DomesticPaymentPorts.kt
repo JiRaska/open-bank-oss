@@ -4,6 +4,7 @@
 
 package com.openbank.domestic.application.port.out
 
+import com.openbank.domestic.domain.event.PaymentHeldEvent
 import com.openbank.domestic.domain.model.DelegatedSpendBinding
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
@@ -128,6 +129,13 @@ interface DomesticPaymentEventPublisher {
     fun statusChangedPayload(previous: DomesticPayment, current: DomesticPayment): String
 
     fun delegatedSpendFinalizedAbsentPayload(binding: DelegatedSpendBinding): String
+
+    /**
+     * Body of the `PAYMENT_HELD` event (ADR-0374 D13). Defaulted so the hand-written publishers in
+     * tests that never hold a payment need not change; the one production publisher overrides it.
+     */
+    fun paymentHeldPayload(event: PaymentHeldEvent): String =
+        throw UnsupportedOperationException("This publisher does not serialise PAYMENT_HELD")
 }
 
 sealed interface DelegatedPaymentSaveOutcome {

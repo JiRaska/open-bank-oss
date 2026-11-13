@@ -26,6 +26,18 @@ interface DomesticPaymentWorkflow {
      */
     @SignalMethod
     fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?)
+
+    /**
+     * ADR-0374 D3: release or reject a payment the admission chain HELD. With no signal before the
+     * hold expires the payment is REJECTED; a hold never expires into a release.
+     *
+     * Accepted only while the run is waiting on a hold whose case was requested, and only for that
+     * case: [caseKey] must equal [PaymentHoldPolicy.caseKey] for this payment. A signal that
+     * arrives before the hold, during an automatic re-evaluation, after the hold ended, or that
+     * names another case is ignored and counted.
+     */
+    @SignalMethod
+    fun resolvePaymentHold(decision: PaymentHoldDecision, caseKey: String?)
 }
 
 /**

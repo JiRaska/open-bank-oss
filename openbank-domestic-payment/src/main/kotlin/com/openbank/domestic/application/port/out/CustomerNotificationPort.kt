@@ -57,6 +57,8 @@ fun customerSafeReason(reason: DomesticRejectReason?): String = when (reason) {
     DomesticRejectReason.SANCTIONS_HIT,
     DomesticRejectReason.AML_HOLD,
     DomesticRejectReason.FRAUD_SUSPECTED,
+    // A freeze can be an AML block on the party; saying "your account is frozen" would say so.
+    DomesticRejectReason.DEBTOR_ACCOUNT_BLOCKED,
     null,
     -> "we could not complete it"
 }

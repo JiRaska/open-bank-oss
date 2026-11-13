@@ -20,6 +20,9 @@ class DomesticPaymentWorkerRegistrar(
     private val taskQueue: String,
     private val workflowClient: WorkflowClient,
     private val activities: DomesticPaymentActivitiesImpl,
+    private val admissionActivities: PaymentAdmissionActivitiesImpl,
+    @ConfigProperty(name = "openbank.domestic.admission.enabled", defaultValue = "false")
+    private val admissionEnabled: Boolean,
 ) {
 
     private val log = Logger.getLogger(DomesticPaymentWorkerRegistrar::class.java)
@@ -35,11 +38,13 @@ class DomesticPaymentWorkerRegistrar(
             log.info("Temporal domestic worker registration disabled (openbank.domestic.worker.enabled=false)")
             return
         }
-        log.infof("Registering Temporal worker on task queue '%s'", taskQueue)
+        // Before the worker exists, so no run can read the switch ahead of its configured value.
+        PaymentAdmissionSwitch.enabled = admissionEnabled
+        log.infof("Registering Temporal worker on task queue '%s' (admission chain %s)", taskQueue, admissionEnabled)
         val factory = WorkerFactory.newInstance(workflowClient)
         val worker = factory.newWorker(taskQueue)
         worker.registerWorkflowImplementationTypes(DomesticPaymentWorkflowImpl::class.java)
-        worker.registerActivitiesImplementations(activities)
+        worker.registerActivitiesImplementations(activities, admissionActivities)
         factory.start()
         log.infof("Temporal worker started on task queue '%s'", taskQueue)
     }

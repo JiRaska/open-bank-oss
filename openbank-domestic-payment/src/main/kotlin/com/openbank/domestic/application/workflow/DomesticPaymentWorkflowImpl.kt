@@ -57,6 +57,18 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
         const val FRAUD_ENFORCEMENT_CHANGE_ID = "fraud-enforcement"
         private const val FRAUD_ENFORCEMENT_VERSION = 1
 
+        /**
+         * Workflow.getVersion change id gating the ADR-0374 admission chain for in-flight runs. A run
+         * that started before it replays the steps it recorded; a run after it records whether the
+         * chain was switched on ([PaymentAdmissionSwitch]) and, when it was, asks the admission
+         * activity first.
+         */
+        const val ADMISSION_CHAIN_CHANGE_ID = "admission-chain"
+        private const val ADMISSION_CHAIN_VERSION = 1
+
+        /** A hold signal the run refused (not holding, another case, already decided). */
+        const val IGNORED_HOLD_SIGNAL_METRIC = "openbank_domestic_payment_hold_signal_ignored"
+
         /** A fraud-hold signal the run refused (not holding, another case, already decided). */
         const val IGNORED_FRAUD_SIGNAL_METRIC = "openbank_domestic_fraud_hold_signal_ignored"
 
@@ -86,6 +98,15 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
     private val settlementActivities: DomesticPaymentActivities =
         Workflow.newActivityStub(DomesticPaymentActivities::class.java, settlementActivityOptions)
 
+    private val admission: PaymentAdmissionActivities =
+        Workflow.newActivityStub(PaymentAdmissionActivities::class.java, activityOptions)
+
+    private var holdDecision: PaymentHoldDecision? = null
+
+    /** True only while the run waits on a hold whose case was requested. */
+    private var awaitingHoldDecision = false
+    private var expectedHoldCaseKey: String? = null
+
     private var fraudReviewDecision: FraudReviewDecision? = null
 
     /** True only between the HOLD and its end; a decision outside that window is not a decision. */
@@ -114,9 +135,47 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
             .inc(1)
     }
 
+    override fun resolvePaymentHold(decision: PaymentHoldDecision, caseKey: String?) {
+        // Deterministic for the same reason as resolveFraudHold: the window flag is set by workflow
+        // code and signal order is in history.
+        val ignoredBecause = when {
+            !awaitingHoldDecision -> "not_holding"
+            caseKey == null || caseKey != expectedHoldCaseKey -> "case_mismatch"
+            holdDecision != null -> "already_decided"
+            else -> null
+        }
+        if (ignoredBecause == null) {
+            holdDecision = decision
+            return
+        }
+        Workflow.getLogger(DomesticPaymentWorkflowImpl::class.java)
+            .warn("Ignored payment hold signal $decision: $ignoredBecause")
+        Workflow.getMetricsScope()
+            .tagged(mapOf("reason" to ignoredBecause))
+            .counter(IGNORED_HOLD_SIGNAL_METRIC)
+            .inc(1)
+    }
+
     override fun process(paymentId: UUID): DomesticPaymentStatus {
         // Known from the start, so the case binding and the holding window are independent guards.
         expectedFraudCaseKey = fraudReviewCaseKey(paymentId)
+        expectedHoldCaseKey = PaymentHoldPolicy.caseKey(paymentId)
+        val admissionVersion = Workflow.getVersion(
+            ADMISSION_CHAIN_CHANGE_ID,
+            Workflow.DEFAULT_VERSION,
+            ADMISSION_CHAIN_VERSION,
+        )
+        // The switch is read once and recorded, so a replay follows the branch the run took whatever
+        // the configuration says by then. While it is off the run schedules nothing it did not
+        // schedule before the chain existed: no admission activity, so a worker that predates this
+        // change can still serve every task of the run during a rolling deployment.
+        val chainSwitchedOn = admissionVersion != Workflow.DEFAULT_VERSION &&
+            Workflow.sideEffect(Boolean::class.javaObjectType) { PaymentAdmissionSwitch.enabled }
+        if (chainSwitchedOn) {
+            val first = admission.admit(paymentId, false)
+            // NOT_ENABLED here means the activity ran on a worker that has the chain off.
+            if (first != AdmissionAction.NOT_ENABLED) return processAdmission(paymentId, first)
+        }
         val decision = activities.screenPayment(paymentId)
 
         return when (decision) {
@@ -165,6 +224,57 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
             ScreeningDecision.REVIEW -> {
                 // Payment is held in RECEIVED for human decision via the AML case lifecycle.
                 DomesticPaymentStatus.RECEIVED
+            }
+        }
+    }
+
+    /**
+     * ADR-0374: the chain decided [first]. Follow it to the scheme, to a rejection, or through the
+     * hold. Nothing here screens, scores or validates: the admission activity did, in chain order.
+     */
+    private fun processAdmission(paymentId: UUID, first: AdmissionAction): DomesticPaymentStatus {
+        val heldAtMillis = Workflow.currentTimeMillis()
+        var action = first
+        var reevaluations = 0
+        // A control that could not answer is asked again on a bounded schedule; the last attempt
+        // turns a persisting outage into a case instead of another wait (ADR-0374 D13).
+        while (action == AdmissionAction.HELD_UNAVAILABLE) {
+            Workflow.sleep(PaymentHoldPolicy.REEVALUATION_INTERVAL)
+            reevaluations++
+            action = admission.admit(paymentId, reevaluations >= PaymentHoldPolicy.MAX_REEVALUATIONS)
+        }
+        val admitted = when (action) {
+            AdmissionAction.ADMITTED -> true
+            AdmissionAction.HELD_FOR_REVIEW -> awaitHoldDecision(paymentId, heldAtMillis)
+            // NOT_ENABLED cannot follow a first answer that was not NOT_ENABLED (a HELD payment is
+            // always evaluated); treated as a refusal so an impossible answer cannot send money.
+            AdmissionAction.REJECTED, AdmissionAction.HELD_UNAVAILABLE, AdmissionAction.NOT_ENABLED -> false
+        }
+        if (!admitted) return DomesticPaymentStatus.REJECTED
+        val schemeStatus = activities.submitScheme(paymentId)
+        return if (schemeStatus == DomesticPaymentStatus.SENT_TO_CLEARING) {
+            settlementActivities.settlePayment(paymentId)
+        } else {
+            schemeStatus
+        }
+    }
+
+    /** Waits for the case decision until the hold expires. True only when the payment was released. */
+    private fun awaitHoldDecision(paymentId: UUID, heldAtMillis: Long): Boolean {
+        // The expiry counts from the moment the payment was first held, not from the case.
+        val remaining = PaymentHoldPolicy.EXPIRY.minusMillis(Workflow.currentTimeMillis() - heldAtMillis)
+        awaitingHoldDecision = true
+        val answered = !remaining.isNegative && !remaining.isZero && Workflow.await(remaining) { holdDecision != null }
+        awaitingHoldDecision = false
+        return when {
+            !answered -> {
+                admission.rejectHeld(paymentId, HoldRejectCause.EXPIRED)
+                false
+            }
+            holdDecision == PaymentHoldDecision.RELEASE -> admission.releaseHeld(paymentId)
+            else -> {
+                admission.rejectHeld(paymentId, HoldRejectCause.REVIEW_REJECTED)
+                false
             }
         }
     }

@@ -6,6 +6,7 @@ package com.openbank.domestic.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.domestic.application.usecase.FraudHoldResolutionService
+import com.openbank.domestic.application.usecase.PaymentHoldResolutionService
 import com.openbank.domestic.application.workflow.FraudHoldDelivery
 import com.openbank.domestic.application.workflow.FraudReviewDecision
 import com.openbank.domestic.application.workflow.fraudReviewCaseKey
@@ -19,7 +20,8 @@ import java.util.UUID
 
 class FraudHoldResolutionConsumerTest {
     private val resolution: FraudHoldResolutionService = mockk()
-    private val consumer = FraudHoldResolutionConsumer(ObjectMapper(), resolution)
+    private val holdResolution: PaymentHoldResolutionService = mockk()
+    private val consumer = FraudHoldResolutionConsumer(ObjectMapper(), resolution, holdResolution)
     private val paymentId = UUID.randomUUID()
 
     private fun event(

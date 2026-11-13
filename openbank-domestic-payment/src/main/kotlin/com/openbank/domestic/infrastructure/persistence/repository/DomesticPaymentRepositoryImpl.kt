@@ -7,6 +7,7 @@ package com.openbank.domestic.infrastructure.persistence.repository
 import com.openbank.domestic.application.port.out.DelegatedPaymentSaveOutcome
 import com.openbank.domestic.application.port.out.DomesticBookingWrites
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
+import com.openbank.domestic.application.port.out.PaymentAdmissionWrites
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DelegatedSpendReservationSnapshot
 import com.openbank.domestic.domain.model.DelegatedSpendReservationState
@@ -19,6 +20,7 @@ import com.openbank.domestic.infrastructure.persistence.mapper.toEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.LockModeType
@@ -33,6 +35,7 @@ import java.util.UUID
 class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymentOutboxRepositoryImpl) :
     DomesticPaymentRepository,
     DomesticBookingWrites,
+    PaymentAdmissionWrites,
     PanacheRepository<DomesticPaymentEntity> {
 
     override suspend fun save(payment: DomesticPayment, outboxMessage: OutboxMessage): DomesticPayment = try {
@@ -182,20 +185,43 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
     }
 
     override suspend fun update(payment: DomesticPayment, outboxMessage: OutboxMessage): DomesticPayment =
-        writeLifecycle(payment, outboxMessage)
+        writeLifecycle(payment, listOf(outboxMessage))
+
+    override suspend fun transition(payment: DomesticPayment, events: List<OutboxMessage>): DomesticPayment =
+        writeLifecycle(payment, events)
+
+    // Locks the row so the check and the insert are one decision: a concurrent release or reject
+    // either commits first (and this writes nothing) or waits for this event to be written.
+    override suspend fun appendWhileHeld(paymentId: UUID, event: OutboxMessage): Boolean = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "FROM DomesticPaymentEntity WHERE paymentId = :paymentId",
+                DomesticPaymentEntity::class.java,
+            ).setParameter("paymentId", paymentId)
+                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                .singleResultOrNull
+                .flatMap { entity ->
+                    if (entity?.status == DomesticPaymentStatus.HELD.name) {
+                        outboxRepository.persistWithinCurrentTransaction(event).replaceWith(true)
+                    } else {
+                        Uni.createFrom().item(false)
+                    }
+                }
+        }
+    }.awaitSuspending()
 
     override suspend fun acceptForBooking(payment: DomesticPayment, outbox: OutboxMessage): DomesticPayment =
-        writeLifecycle(payment, outbox, acceptedBooking = true)
+        writeLifecycle(payment, listOf(outbox), acceptedBooking = true)
 
     override suspend fun completeBooking(
         payment: DomesticPayment,
         transactionId: UUID,
         outbox: OutboxMessage,
-    ): DomesticPayment = writeLifecycle(payment, outbox, provenTransactionId = transactionId)
+    ): DomesticPayment = writeLifecycle(payment, listOf(outbox), provenTransactionId = transactionId)
 
     private suspend fun writeLifecycle(
         payment: DomesticPayment,
-        outboxMessage: OutboxMessage,
+        outboxMessages: List<OutboxMessage>,
         acceptedBooking: Boolean = false,
         provenTransactionId: UUID? = null,
     ): DomesticPayment = Panache.withTransaction {
@@ -221,7 +247,12 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
                     entity.updatedAt = payment.updatedAt
                     entity.aggregateRevision = payment.aggregateRevision
                 }
-                .flatMap { outboxRepository.persistWithinCurrentTransaction(outboxMessage).replaceWith(payment) }
+                // One after another on the one session; every row is part of this transaction.
+                .flatMap {
+                    outboxMessages.fold(Uni.createFrom().voidItem()) { written, message ->
+                        written.flatMap { outboxRepository.persistWithinCurrentTransaction(message).replaceWithVoid() }
+                    }.replaceWith(payment)
+                }
         }
     }.awaitSuspending()
 
