@@ -46,6 +46,7 @@ class GsftSnapshotAdapterTest {
     private val aEur = UUID.fromString("00000000-0000-0000-0000-000000000002")
     private val botAcc = UUID.fromString("00000000-0000-0000-0000-000000000003")
     private val gl = UUID.fromString("00000000-0000-0000-0000-000000000004")
+    private val bothTainted = UUID.fromString("00000000-0000-0000-0000-000000000005")
 
     private fun account(id: UUID, party: UUID, iban: String, ccy: String, type: String?) =
         DepositRosterAccountDto(id, iban, party, ccy, type)
@@ -72,22 +73,27 @@ class GsftSnapshotAdapterTest {
             listOf(
                 account(aEur, alice, "CZ6508000000192000145400", "EUR", "TERM_DEPOSIT"),
                 account(botAcc, bot, "CZ6508000000192000145401", "CZK", "SAVINGS"),
+                account(bothTainted, bot, "CZ6508000000192000145402", "CZK", "SAVINGS"),
             ),
             PageInfo(limit = 200, hasNextPage = false, nextCursor = null),
         )
         coEvery { sources.bookedBalanceStrict(aCzk, "CZK", day) } returns BigDecimal("1500.25")
-        coEvery { sources.bookedBalanceStrict(aEur, "EUR", day) } returns BigDecimal("200.00")
-        coEvery { sources.bookedBalanceStrict(botAcc, "CZK", day) } returns BigDecimal("10.00")
+        coEvery { sources.bookedBalanceStrict(aEur, "EUR", day) } throws missingBalance()
+        coEvery { sources.bookedBalanceStrict(botAcc, "CZK", day) } throws missingBalance()
+        coEvery { sources.bookedBalanceStrict(bothTainted, "CZK", day) } throws missingBalance()
         coEvery { register.syntheticParties(now) } returns setOf(bot)
         // A REAL holder (alice) whose EUR account's opening event was tainted: the account is synthetic.
         coEvery { register.factsUpTo(LocalDate.of(2026, 11, 3), now) } returns listOf(
             opened(aCzk, "CZK", synthetic = false),
-            opened(aEur, "EUR", synthetic = true),
+            opened(aEur, "EUR", synthetic = true).copy(recordedAt = now.minusSeconds(1)),
+            opened(bothTainted, "CZK", synthetic = true),
         )
     }
 
+    private fun missingBalance() = ReturnDataUnavailableException("balance-service answered 404")
+
     @Test
-    fun `maps the walked deposit roster to exact domain inputs and flags every unsourced field`(): Unit = runBlocking {
+    fun `all synthetic taint paths are counted once before strict balance reads`(): Unit = runBlocking {
         stubRoster()
 
         val snapshot = adapter.snapshot(day)
@@ -103,25 +109,8 @@ class GsftSnapshotAdapterTest {
                 listOf(Holding(alice, null)),
                 false,
             ),
-            DepositAccount(
-                aEur,
-                "CZ6508000000192000145400",
-                "EUR",
-                BigDecimal("200.00"),
-                BigDecimal.ZERO,
-                listOf(Holding(alice, null)),
-                true,
-            ),
-            DepositAccount(
-                botAcc,
-                "CZ6508000000192000145401",
-                "CZK",
-                BigDecimal("10.00"),
-                BigDecimal.ZERO,
-                listOf(Holding(bot, null)),
-                true,
-            ),
         )
+        assertThat(snapshot.syntheticAccountsDroppedAtSource).isEqualTo(3)
         assertThat(snapshot.depositors).containsExactly(
             Depositor(alice, null, false),
             Depositor(bot, null, true),
@@ -138,8 +127,9 @@ class GsftSnapshotAdapterTest {
             GsftDataGap.FX_RATES,
         )
         assertThat(snapshot.complete).isFalse()
-        // The GL account is the bank's own: never a deposit, never a balance read.
-        coVerify(exactly = 0) { sources.bookedBalanceStrict(gl, any(), any()) }
+        coVerify(exactly = 1) { sources.bookedBalanceStrict(aCzk, "CZK", day) }
+        // Neither the GL account nor any synthetic account is ever balance-read.
+        coVerify(exactly = 0) { sources.bookedBalanceStrict(match { it != aCzk }, any(), any()) }
     }
 
     @Test
@@ -213,13 +203,12 @@ class GsftSnapshotAdapterTest {
     }
 
     @Test
-    fun `a balance-service failure fails the snapshot`() {
+    fun `a missing balance for a genuine deposit still fails the snapshot`() {
         stubRoster()
-        coEvery { sources.bookedBalanceStrict(aEur, "EUR", day) } throws
-            ReturnDataUnavailableException("balance-service answered 503")
+        coEvery { sources.bookedBalanceStrict(aCzk, "CZK", day) } throws missingBalance()
 
         assertThatThrownBy { runBlocking { adapter.snapshot(day) } }
             .isInstanceOf(ReturnDataUnavailableException::class.java)
-            .hasMessageContaining("503")
+            .hasMessageContaining("404")
     }
 }
