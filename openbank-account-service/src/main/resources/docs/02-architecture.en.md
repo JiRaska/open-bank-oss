@@ -144,3 +144,29 @@ sequenceDiagram
 true. An unknown IBAN and another party's IBAN both answer `owned=false`, so the endpoint is not an
 existence oracle. Its declared callers are pension-service and sdd-service; neither holds
 `account.read`.
+
+## Delegation authority facts (ADR-0375 D1)
+
+`GET /api/v1/accounts/{accountId}/delegation/authority-facts` (action `account.read`) answers with
+the ACTIVE, in-window, ACCOUNT-scoped grants a party holds over the account: grant id, grantor,
+capabilities, validity window.
+
+It sits next to `delegation/payment-authorization`, which answers the whole question, and the
+difference is the point. That endpoint hard-codes `PAYMENT_ONLY`, which is right for the edge
+pre-flight it was built for and structurally wrong for a payment rail's admission chain: the
+chain's authority step is a pure function whose **capability is an argument**, so a rail asking
+about the capability its own action names cannot be served by a fixed verdict. Handing over the
+facts lets one pure kernel (`DelegatedDebitAuthority` in `openbank-libs-fincrime`) serve every rail.
+
+Ownership is applied here and cannot be pushed to the caller: a projection row keyed on
+(accountId, granteePartyId) alone is authority in itself, and the caller does not know the account's
+owner. Resource type is pinned to `ACCOUNT`, so a `SAVINGS_GOAL` grant is never read as account
+authority.
+
+An unknown account answers `200` with an empty list, never `404` — a distinguishable not-found would
+make the endpoint an existence oracle for other people's accounts.
+
+**Stated gap.** These are grants only. The legacy `account_authorizations` arm that
+`authorizeDelegatedPayment` still ORs in is not represented, so a party permitted solely by a legacy
+row is absent from these facts. That divergence is already measured by the dual-run disagreement
+counter rather than being discovered later from a refusal.
