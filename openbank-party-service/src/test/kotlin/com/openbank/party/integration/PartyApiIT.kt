@@ -182,6 +182,28 @@ class PartyApiIT {
 
     @Test
     @Order(5)
+    @TestSecurity(user = "aml-officer", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "aml-officer"),
+            Claim(key = "preferred_username", value = "aml-officer"),
+        ],
+    )
+    fun `ROLE_COMPLIANCE reads the AML subject's name on the detail but not the search or the list`() {
+        val id = createdPartyId ?: error("order 4 must have created a party")
+        Given { this } When { get("/api/v1/parties/$id") } Then {
+            statusCode(200)
+            body("legalName", equalTo("Jan Novak"))
+            body("piiMasked", equalTo(true))
+            body("piiRevealAllowed", equalTo(false))
+        }
+        Given { queryParam("q", "Jan") } When { get("/api/v1/parties/search") } Then { statusCode(403) }
+        Given { this } When { get("/api/v1/parties") } Then { statusCode(403) }
+    }
+
+    @Test
+    @Order(5)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
     @OidcSecurity(
         claims = [

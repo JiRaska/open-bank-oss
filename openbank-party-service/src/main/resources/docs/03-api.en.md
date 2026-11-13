@@ -18,7 +18,7 @@ In production, `/api/*` selects the bearer authentication mechanism on both the 
 |---|---|
 | `GET /parties`, `GET /parties/{id}/documents` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_KYC`, `ROLE_API` |
 | `GET /parties/search` | Verified service account, or `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_KYC` |
-| `GET /parties/{id}` | Same roles as list, plus `ROLE_RISK` for obligor name |
+| `GET /parties/{id}` | Same roles as list, plus `ROLE_RISK` (obligor name) and `ROLE_COMPLIANCE` (AML case subject name) |
 | `POST /parties/{id}/pii-reveal` | Interactive `ROLE_ADMIN` or `ROLE_KYC`, with `party.pii.reveal` authorization |
 | `POST /parties`, `POST /parties/{id}/documents` | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_KYC` |
 | `PATCH /parties/{id}` | `ROLE_OPERATOR`, `ROLE_ADMIN` (+ `@Authorize(action="party.update")` via OPA, advisory) |
