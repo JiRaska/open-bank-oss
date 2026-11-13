@@ -258,6 +258,14 @@ components:
           description: >-
             Additive (#4403). The key the case was created with. alertCode and transactionId are free
             text any case creator sets, so a consumer binds a decision to the case it opened by this key.
+        origin:
+          type: string
+          enum: [PAYMENT_HOLD_INTAKE]
+          description: >-
+            Additive (ADR-0374). Present only on a status change of a case the held-payment intake
+            opened, and absent on every other case, whose events are unchanged. A payment rail acts on
+            a hold decision only when this says PAYMENT_HOLD_INTAKE, so a case opened any other way,
+            or published by an aml-service that predates this field, can never release a payment.
 
     OversightTriggerPayload:
       type: object

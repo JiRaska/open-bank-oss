@@ -5,6 +5,7 @@
 package com.openbank.aml.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.port.`in`.CreateAmlCaseCommand
 import com.openbank.aml.application.port.`in`.ListAmlCasesQuery
@@ -97,7 +98,7 @@ class AmlCaseService(
 
         // ADR-0050: the aggregate and its domain event commit atomically via the outbox.
         return try {
-            amlCaseRepository.save(amlCase, caseCreatedEvent(amlCase, now))
+            amlCaseRepository.save(amlCase) { stored -> caseCreatedEvent(stored, now) }
         } catch (e: Exception) {
             log.errorf(
                 "createCase save failed: %s: %s | cause: %s",
@@ -200,7 +201,7 @@ class AmlCaseService(
         eventId = UUID.randomUUID(),
         aggregateId = current.id,
         eventType = EVENT_STATUS_CHANGED,
-        payload = objectMapper.writeValueAsString(
+        payload = statusChangedPayload(
             AmlCaseStatusChangedEvent(
                 caseId = current.id,
                 partyId = current.partyId,
@@ -214,12 +215,29 @@ class AmlCaseService(
                 alertCode = current.alertCode,
                 idempotencyKey = current.idempotencyKey,
             ),
+            current.origin,
         ),
     )
+
+    /**
+     * ADR-0374: a rail releases a held payment only on a decision whose event proves the case was
+     * opened by the hold intake, so `origin` is put on the wire for exactly that case. Every other
+     * case serialises without the field, byte-identical to the event before this change, and a
+     * consumer that requires `origin` therefore fails closed against any aml-service that predates it.
+     */
+    private fun statusChangedPayload(event: AmlCaseStatusChangedEvent, origin: CaseOrigin?): String {
+        if (origin != CaseOrigin.PAYMENT_HOLD_INTAKE) return objectMapper.writeValueAsString(event)
+        val tree = objectMapper.valueToTree<ObjectNode>(event)
+        tree.put(ORIGIN_FIELD, origin.name)
+        return objectMapper.writeValueAsString(tree)
+    }
 
     companion object {
         const val EVENT_CASE_CREATED = "aml.case.created.v1"
         const val EVENT_STATUS_CHANGED = "aml.case.status_changed.v1"
+
+        /** Present on a status change only for a case the held-payment intake opened. */
+        const val ORIGIN_FIELD = "origin"
 
         /** Counts holds refused because another case held their key. Any increment is worth a look: the key is reserved. */
         const val FOREIGN_KEY_CLAIM_METRIC = "openbank.aml.payment_held.foreign_key_claims"

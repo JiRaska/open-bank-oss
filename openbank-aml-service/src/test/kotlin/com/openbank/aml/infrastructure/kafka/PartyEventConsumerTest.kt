@@ -154,9 +154,9 @@ class PartyEventConsumerTest {
             coEvery { repo.findById(any()) } answers { stored[firstArg()] }
             val saved = slot<AmlCase>()
             val msg = slot<OutboxMessage>()
-            coEvery { repo.save(capture(saved), capture(msg)) } answers {
+            coEvery { repo.save(capture(saved), any()) } answers {
                 stored[saved.captured.id] = saved.captured
-                outbox += msg.captured
+                outbox += secondArg<(AmlCase) -> OutboxMessage>()(saved.captured)
                 saved.captured
             }
             coEvery { repo.update(capture(saved), capture(msg)) } answers {

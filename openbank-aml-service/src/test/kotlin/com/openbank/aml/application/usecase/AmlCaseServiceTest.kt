@@ -53,7 +53,11 @@ class AmlCaseServiceTest {
         val command = createCommand(riskLevel = AmlRiskLevel.HIGH)
 
         coEvery { amlCaseRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
-        coEvery { amlCaseRepository.save(any(), any()) } answers { firstArg() }
+        val built = mutableListOf<OutboxMessage>()
+        coEvery { amlCaseRepository.save(any(), any()) } answers {
+            built += secondArg<(AmlCase) -> OutboxMessage>()(firstArg())
+            firstArg()
+        }
 
         val result = service.createCase(command)
 
@@ -72,13 +76,14 @@ class AmlCaseServiceTest {
                         it.status == AmlCaseStatus.UNDER_REVIEW &&
                         it.alertDetail == "Multiple rapid inbound transfers"
                 },
-                match {
-                    it.aggregateId == result.id &&
-                        it.eventType == AmlCaseService.EVENT_CASE_CREATED &&
-                        it.payload.contains(result.id.toString())
-                },
+                any(),
             )
         }
+        assertThat(built).singleElement().satisfies({
+            assertThat(it.aggregateId).isEqualTo(result.id)
+            assertThat(it.eventType).isEqualTo(AmlCaseService.EVENT_CASE_CREATED)
+            assertThat(it.payload).contains(result.id.toString())
+        })
     }
 
     @Test
@@ -245,35 +250,55 @@ class AmlCaseServiceTest {
             // The party was never established: the event publishes none, not a stand-in for one.
             assertThat(payload.has("partyId")).isTrue()
             assertThat(payload.get("partyId").isNull).isTrue()
+            // ADR-0374: provenance on the wire, so a rail acts only on the intake's own case.
+            assertThat(payload.get("origin").asText()).isEqualTo("PAYMENT_HOLD_INTAKE")
         }
+
+    @Test
+    fun `a decision on a case the intake did not open carries no origin`(): Unit = runBlocking {
+        val rest = amlCase(AmlCaseStatus.UNDER_REVIEW).copy(origin = CaseOrigin.REST)
+        val event = slot<OutboxMessage>()
+        coEvery { amlCaseRepository.findById(rest.id) } returns rest
+        coEvery { amlCaseRepository.update(any(), capture(event)) } answers { firstArg() }
+
+        service.updateDecision(UpdateAmlDecisionCommand(rest.id, AmlCaseStatus.CLEARED, "false positive", null, "analyst"))
+
+        assertThat(objectMapper.readTree(event.captured.payload).has("origin")).isFalse()
+    }
 
     @Test
     fun `a case opened without a party is stored without one and its created event says so`(): Unit = runBlocking {
         val saved = slot<AmlCase>()
-        val event = slot<OutboxMessage>()
+        val event = mutableListOf<OutboxMessage>()
         coEvery { amlCaseRepository.findByIdempotencyKey(holdKey) } returns null
-        coEvery { amlCaseRepository.save(capture(saved), capture(event)) } answers { firstArg() }
+        coEvery { amlCaseRepository.save(capture(saved), any()) } answers {
+            event += secondArg<(AmlCase) -> OutboxMessage>()(firstArg())
+            firstArg()
+        }
 
         service.createCase(holdCommand(partyId = null))
 
         assertThat(saved.captured.partyId).isNull()
         assertThat(saved.captured.partyEstablished).isFalse()
         assertThat(saved.captured.accountId).isNotNull()
-        val payload = objectMapper.readTree(event.captured.payload)
+        val payload = objectMapper.readTree(event.single().payload)
         assertThat(payload.has("partyId")).isTrue()
         assertThat(payload.get("partyId").isNull).isTrue()
     }
 
     @Test
     fun `a case with a party publishes it`(): Unit = runBlocking {
-        val event = slot<OutboxMessage>()
+        val event = mutableListOf<OutboxMessage>()
         val command = createCommand()
         coEvery { amlCaseRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
-        coEvery { amlCaseRepository.save(any(), capture(event)) } answers { firstArg() }
+        coEvery { amlCaseRepository.save(any(), any()) } answers {
+            event += secondArg<(AmlCase) -> OutboxMessage>()(firstArg())
+            firstArg()
+        }
 
         val created = service.createCase(command)
 
-        val payload = objectMapper.readTree(event.captured.payload)
+        val payload = objectMapper.readTree(event.single().payload)
         assertThat(payload.get("partyId").asText()).isEqualTo(created.partyId.toString())
     }
 
@@ -289,7 +314,7 @@ class AmlCaseServiceTest {
     fun `a case whose party is the account id publishes the same two events it always did`(): Unit = runBlocking {
         val account = UUID.fromString("00000000-0000-4000-8000-0000000000a1")
         val payment = UUID.fromString("00000000-0000-4000-8000-0000000000d1")
-        val created = slot<OutboxMessage>()
+        val created = mutableListOf<OutboxMessage>()
         val changed = slot<OutboxMessage>()
         val command = createCommand(idempotencyKey = "aml-$payment-SANCTIONS").copy(
             partyId = account,
@@ -300,7 +325,10 @@ class AmlCaseServiceTest {
             matchedEntity = "Listed Merchant",
         )
         coEvery { amlCaseRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
-        coEvery { amlCaseRepository.save(any(), capture(created)) } answers { firstArg() }
+        coEvery { amlCaseRepository.save(any(), any()) } answers {
+            created += secondArg<(AmlCase) -> OutboxMessage>()(firstArg())
+            firstArg()
+        }
         coEvery { amlCaseRepository.update(any(), capture(changed)) } answers { firstArg() }
 
         val case = service.createCase(command)
@@ -309,7 +337,7 @@ class AmlCaseServiceTest {
 
         // 2024-01-15T12:00:00Z, as this mapper writes an Instant.
         val at = "1705320000.000000000"
-        assertThat(objectMapper.readTree(created.captured.payload)).isEqualTo(
+        assertThat(objectMapper.readTree(created.single().payload)).isEqualTo(
             objectMapper.readTree(
                 """
                 {"caseId":"${case.id}","idempotencyKey":"aml-$payment-SANCTIONS","partyId":"$account",

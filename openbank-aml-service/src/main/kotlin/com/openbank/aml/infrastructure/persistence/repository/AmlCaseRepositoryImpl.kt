@@ -30,11 +30,18 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
     AmlCaseRepository,
     PanacheRepository<AmlCaseEntity> {
 
-    // ADR-0050: case row + outbox row persist in ONE transaction (atomic write-then-publish).
-    override suspend fun save(amlCase: AmlCase, event: OutboxMessage): AmlCase = Panache.withTransaction {
-        persist(amlCase.toEntity())
-            .chain { _ -> outboxRepository.persistInTransaction(event) }
-            .replaceWith(amlCase)
+    // ADR-0050: case row + outbox row persist in ONE transaction (atomic write-then-publish). The
+    // event is built from the row as stored, after the party (if any) is attached against erasure.
+    override suspend fun save(amlCase: AmlCase, event: (AmlCase) -> OutboxMessage): AmlCase = Panache.withTransaction {
+        val entity = amlCase.toEntity()
+        val partyId = amlCase.partyId
+        val attached = if (partyId == null) Uni.createFrom().voidItem() else attachParty(entity, partyId)
+        attached
+            .chain { _ -> persist(entity) }
+            .chain { stored ->
+                val domain = stored.toDomain()
+                outboxRepository.persistInTransaction(event(domain)).replaceWith(domain)
+            }
     }.awaitSuspending()
 
     override suspend fun findById(caseId: UUID): AmlCase? =
@@ -114,17 +121,8 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
                     Uni.createFrom().item(false)
                 } else {
                     val event = owed(entity.toDomain())
-                    // Taken before the erasure record is read, and taken by the erasure before it
-                    // writes one: whichever of the two commits first, the other sees it.
-                    lockParty(partyId)
-                        .chain { _ -> select(ERASED, mapOf("partyId" to partyId)) }
-                        .chain { erased ->
-                            entity.partyId = partyId
-                            if (erased.isNotEmpty()) {
-                                entity.customerReference = erasedReference(partyId)
-                                entity.matchedEntity = null
-                                entity.alertDetail = null
-                            }
+                    attachParty(entity, partyId)
+                        .chain { _ ->
                             if (event ==
                                 null
                             ) {
@@ -157,6 +155,24 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
                 mutate(ANONYMIZE, mapOf("partyId" to partyId, "reference" to erasedReference(partyId)))
             }
     }.awaitSuspending()
+
+    /**
+     * The one way a party is attached to a case, used by [save] and [resolveParty]. The party's lock
+     * is taken before the erasure record is read, and taken by [anonymizeByPartyId] before it writes
+     * one: whichever of the two commits first, the other sees it. An erased party's case is
+     * anonymised exactly as [anonymizeByPartyId] does it (same fields, same sentinel).
+     */
+    private fun attachParty(entity: AmlCaseEntity, partyId: UUID): Uni<Unit> =
+        lockParty(partyId)
+            .chain { _ -> select(ERASED, mapOf("partyId" to partyId)) }
+            .map { erased ->
+                entity.partyId = partyId
+                if (erased.isNotEmpty()) {
+                    entity.customerReference = erasedReference(partyId)
+                    entity.matchedEntity = null
+                    entity.alertDetail = null
+                }
+            }
 
     private companion object {
         fun erasedReference(partyId: UUID): String = "ERASED-$partyId"

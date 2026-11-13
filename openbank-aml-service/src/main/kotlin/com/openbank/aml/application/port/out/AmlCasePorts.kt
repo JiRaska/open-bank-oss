@@ -26,7 +26,13 @@ class CaseChangedConcurrentlyException(caseId: UUID) :
  */
 interface AmlCaseRepository {
 
-    suspend fun save(amlCase: AmlCase, event: OutboxMessage): AmlCase
+    /**
+     * Stores a new case and the event [event] builds from the case AS STORED. When the case names a
+     * party, the party is attached the one way every writer attaches one (see [resolveParty]): under
+     * the party's lock, against the erasure record, so a case for an erased party is stored, and
+     * announced, already anonymised.
+     */
+    suspend fun save(amlCase: AmlCase, event: (AmlCase) -> OutboxMessage): AmlCase
 
     suspend fun findById(caseId: UUID): AmlCase?
 
