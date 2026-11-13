@@ -139,7 +139,10 @@ paths:
       tags: [COREP]
       summary: Render a COREP template as of a reporting date
       description: >-
-        `C_01.00` (Own Funds) is derived from the ledger GL trial balance as of `asOf`. `C_02.00`
+        `C_01.00` (Own Funds) is derived from the ledger GL trial balance as of `asOf`. EBA 4.2 row
+        r0200 carries other reserves. Row r0160 (profit or loss attributable to owners of the parent)
+        and row r0300 (goodwill) are flagged source gaps. Unconverted capital is also a source gap.
+        `C_02.00`
         (Own Funds Requirements, EBA framework 4.0 CA2 layout, column c0010) is read from the risk
         engine's Pillar 1 standardised-approach result for the most recent TIED_OUT snapshot at
         exactly `asOf` (ADR-0313 D6); `evidence` does not apply to it. Row r0010 (TREA), the classes
@@ -624,6 +627,10 @@ components:
           type: string
           format: date
           description: The reporting reference date the template was rendered as of
+        sourceEvidence:
+          type: string
+          enum: [FROZEN, LIVE_PREVIEW]
+          description: The ledger evidence mode used to produce the response.
         cells:
           type: array
           items: { $ref: '#/components/schemas/FinrepCell' }

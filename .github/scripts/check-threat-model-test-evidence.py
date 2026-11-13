@@ -111,11 +111,73 @@ def blames_row(finding: tuple, rows: set[tuple[str, str]]) -> bool:
                for row, mitigation in rows)
 
 
-def ratchet_failures(findings: list, baseline: set[str], touched: dict[str, set[tuple[str, str]]] | None) -> list:
+def _mentioned_at(ref: str, root: pathlib.Path, comp: str, cls: str, run=subprocess.run) -> bool:
+    """Fail closed, no parsing: does ANY file under `<comp>/src/test` at `ref` have the stem `cls` or contain
+    it as a whole word? A truly new class is mentioned nowhere, so this never refuses a real new test."""
+    tree = run(["git", "-C", str(root), "ls-tree", "-r", "--name-only", ref, "--", f"{comp}/src/test"],
+               capture_output=True, text=True, timeout=60, check=True).stdout
+    if any(pathlib.PurePosixPath(f).stem == cls for f in tree.splitlines()):
+        return True
+    hit = run(["git", "-C", str(root), "grep", "-l", "-w", "-F", "-e", cls, ref, "--", f"{comp}/src/test"],
+              capture_output=True, text=True, timeout=60)
+    if hit.returncode not in (0, 1):
+        raise subprocess.SubprocessError(hit.stderr)
+    return hit.returncode == 0
+
+
+def _declaring_files_head(root: pathlib.Path, comp: str, cls: str, claims) -> set[str]:
+    """Files at HEAD that declare `cls` by the claims module's own test: stem == class, masked `class <cls>`."""
+    out = set()
+    for path in (root / comp / "src/test").rglob("*"):
+        if path.suffix not in (".kt", ".java") or path.stem != cls:
+            continue
+        code = claims.evidence_collector().mask_kotlin_comments(path.read_text(encoding="utf-8"), mask_strings=True)
+        if re.search(r"\bclass\s+" + re.escape(cls) + r"\b", code):
+            out.add(path.relative_to(root).as_posix())
+    return out
+
+
+def added_test_classes(base: str, root: pathlib.Path, run=subprocess.run) -> set[tuple[str, str]]:
+    """(component, class) for classes that are truly NEW in this diff: a file under `<component>/src/test/`
+    is added, no file in that component has the class as stem or whole word at the merge-base, and at HEAD exactly one file
+    declares it (an added one). A second file reusing an existing class's name must not launder its result."""
+    if not base:
+        return set()
+    try:
+        diff = run(["git", "-C", str(root), "diff", "--name-only", "--diff-filter=A", f"{base}...HEAD"],
+                   capture_output=True, text=True, timeout=60, check=True).stdout
+        point = run(["git", "-C", str(root), "merge-base", base, "HEAD"],
+                    capture_output=True, text=True, timeout=60, check=True).stdout.strip()
+        added: dict[tuple[str, str], set[str]] = {}
+        for line in diff.splitlines():
+            m = re.fullmatch(r"([^/]+)/src/test/(?:.+/)?([^/]+)\.(?:kt|java)", line.strip())
+            if m:
+                added.setdefault((m.group(1), m.group(2)), set()).add(line.strip())
+        out = set()
+        for (comp, cls), files in added.items():
+            if _mentioned_at(point, root, comp, cls, run):
+                continue
+            if len(heads := _declaring_files_head(root, comp, cls, _claims_module())) == 1 and heads <= files:
+                out.add((comp, cls))
+        return out
+    except (OSError, subprocess.SubprocessError):
+        return set()
+
+
+def is_pending_new_test(finding: tuple, added: set[tuple[str, str]]) -> bool:
+    """A cited test this very diff adds cannot appear in an earlier run: the PR's own CI is its evidence."""
+    _kind, svc, _rid, detail = finding
+    cited = re.search(r"`([^`]+)`", detail)
+    return bool(cited and "has no result in the latest" in detail and (svc, cited.group(1)) in added)
+
+
+def ratchet_failures(findings: list, baseline: set[str], touched: dict[str, set[tuple[str, str]]] | None,
+                     added: set[tuple[str, str]] | None = None) -> list:
     if touched is None:
         return []
     return [f for f in findings
-            if blames_row(f, touched.get(f[1], set())) and finding_key(f[1], f[2], f[3]) not in baseline]
+            if blames_row(f, touched.get(f[1], set())) and finding_key(f[1], f[2], f[3]) not in baseline
+            and not is_pending_new_test(f, added or set())]
 
 
 def baseline_growth(base: str, root: pathlib.Path, ratchet: pathlib.Path, run=subprocess.run) -> list[str] | None:
@@ -195,6 +257,8 @@ def ratchet_self_test() -> int:
     unrelated_edit = {"m": {("T9", "`AnotherTest` asserts it")}}
     same_id_other_table = {"m": {("T1", "`AnotherTest` asserts it")}}
     declared = ("UNVERIFIED", "m", "T1", "`verifies:m/T1` ran but not green (failed)")
+    nores = ("UNVERIFIED", "m", "T1", "cites test `SkippedGuardTest`, which exists but has no result in the latest m run (not executed)")
+    redres = ("UNVERIFIED", "m", "T1", "cites test `SkippedGuardTest`, whose latest result is failed")
     cases = [
         ("new finding in a touched row fails", ratchet_failures([new], base, edited), [new]),
         ("baselined finding passes", ratchet_failures([old], base, {"m": {("T2", "`OldTest`")}}), []),
@@ -203,6 +267,13 @@ def ratchet_self_test() -> int:
         ("a same-id row citing something else cannot fail it", ratchet_failures([new], base, same_id_other_table), []),
         ("a touched row's declared verifies id fails", ratchet_failures([declared], base, same_id_other_table), [declared]),
         ("no diff (a push to main) cannot fail", ratchet_failures([new], base, None), []),
+        ("a touched row citing a test added by the diff is pending, not failing",
+         ratchet_failures([nores], base, edited, {("m", "SkippedGuardTest")}), []),
+        ("a touched row citing an existing test with no result still fails", ratchet_failures([nores], base, edited, set()), [nores]),
+        ("a test added in a different component still fails",
+         ratchet_failures([nores], base, edited, {("n", "SkippedGuardTest")}), [nores]),
+        ("an added test with a red result still fails",
+         ratchet_failures([redres], base, edited, {("m", "SkippedGuardTest")}), [redres]),
         ("key ignores the wording of the verdict", finding_key("m", "T2", old[3]), "m|T2|OldTest"),
         ("skipped in one lane survives a pass in the other", kept[DEPLOYED_COMPONENT]["verifies"]["a/b"], {"passed", "skipped"}),
         ("an unreadable lane makes the component unknown", popped, {}),
@@ -251,6 +322,53 @@ def git_ratchet_self_test(parse) -> int:
         new_model.write_text(table + "| T1 | Replay | `RedTest` asserts it |\n")
         git("add", "."); git("commit", "-qm", "model")
         cases.append(("every row of a new model is touched", touched_rows("base", root, parse)["n"], {("T1", "`RedTest` asserts it")}))
+        git("branch", "pre")
+        files = {"m/src/test/kotlin/x/AddedIT.kt": "class AddedIT {}\n",
+                 "m/src/main/kotlin/x/NotATest.kt": "class NotATest {}\n",
+                 "m/src/test/kotlin/x/Sub/Dup.kt": "class Dup {}\n",
+                 "m/src/test/kotlin/y/Dup.kt": "internal class Dup {}\n",
+                 "m/src/test/kotlin/x/Mention.kt": "class Other { val a = ReusedIT() }\n"}
+        for rel, body in files.items():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(body)
+        git("add", "."); git("commit", "-qm", "tests")
+        cases.append(("single new class passes; main source, duplicate declarations excluded",
+                      added_test_classes("pre", root), {("m", "AddedIT")}))
+        (root / "m/src/test/kotlin/z").mkdir()
+        (root / "m/src/test/kotlin/z/Existing.kt").write_text("class Existing {}\n")
+        git("add", "."); git("commit", "-qm", "existing")
+        git("branch", "pre2")
+        (root / "m/src/test/kotlin/w").mkdir()
+        (root / "m/src/test/kotlin/w/Existing.kt").write_text("class Existing {}\n")
+        git("add", "."); git("commit", "-qm", "reuse name")
+        cases.append(("an added file reusing an existing class name is not new",
+                      added_test_classes("pre2", root), set()))
+        git("branch", "pre3")
+        (root / "m/src/test/kotlin/z/Existing.kt").unlink()
+        git("add", "."); git("commit", "-qm", "move away")
+        git("branch", "pre4")
+        git("rm", "-q", "m/src/test/kotlin/w/Existing.kt")
+        (root / "m/src/test/kotlin/v").mkdir()
+        (root / "m/src/test/kotlin/v/Existing.kt").write_text("class Existing { fun other() = 1 }\n")
+        git("add", "."); git("commit", "-qm", "re-add under same name")
+        cases.append(("a class declared at the base is not new even when only one declaration remains",
+                      added_test_classes("pre4", root), set()))
+        for i, (label, body) in enumerate((
+                ("an annotated declaration", '@Tag("x") class N0 {}\n'),
+                ("an enum declaration", "internal enum class N1 { A }\n"),
+                ("an inner declaration", "class O { inner class N2 }\n"),
+                ("only a mention", "class Other { val a = N3() }\n"),
+                ("a new, unmentioned class (control)", "class Unrelated\n"))):
+            name = f"N{i}"
+            (root / "m/src/test/kotlin/q").mkdir(exist_ok=True)
+            (root / f"m/src/test/kotlin/q/Holder{i}.kt").write_text(body)
+            git("add", "."); git("commit", "-qm", "holder")
+            git("branch", "-f", f"pre{i}x")
+            (root / f"m/src/test/kotlin/q/{name}.kt").write_text(f"class {name} {{ fun n() = 2 }}\n")
+            git("add", "."); git("commit", "-qm", "name")
+            want = {("m", name)} if i == 4 else set()
+            cases.append((f"base with {label}: {'exempt' if want else 'not new'}", added_test_classes(f"pre{i}x", root), want))
+        cases.append(("no base knows no added tests", added_test_classes("", root), set()))
     bad = [name for name, got, want in cases if got != want]
     print(f"git ratchet self-test: {len(cases)} cases, failed={bad}")
     return 1 if bad else 0
@@ -317,14 +435,18 @@ def main() -> int:
     baseline = load_baseline(a.ratchet) if a.ratchet else set()
     failing = findings if a.enforce else []
     if a.ratchet:
-        failing = ratchet_failures(findings, baseline, touched_rows(a.pr_base, root, m.claims))
+        added = added_test_classes(a.pr_base, root)
+        failing = ratchet_failures(findings, baseline, touched_rows(a.pr_base, root, m.claims), added)
         stale = sorted(baseline - {finding_key(s, r, d) for _k, s, r, d in findings})
         if stale:
             print(f"::notice title=test evidence::{len(stale)} baseline entr(ies) no longer reported; remove: {stale}")
     for finding in findings:
         kind, svc, rid, detail = finding
         level = "error" if finding in failing else "warning"
-        print(f"::{level} file=docs/threat-models/{svc}.md,title=threat-model claim ({kind})::{svc} {rid}: {detail}")
+        note = ""
+        if a.ratchet and is_pending_new_test(finding, added):
+            note = " (test is added by this PR; its own Services CI runs it, the first scheduled main run after merge judges it)"
+        print(f"::{level} file=docs/threat-models/{svc}.md,title=threat-model claim ({kind})::{svc} {rid}: {detail}{note}")
     return 1 if failing else 0
 
 

@@ -89,6 +89,45 @@ Authorization: Bearer <token>
 - Staré záznamy bez `subjectId` nelze nově označit `WHITELISTED`. Subjekt znovu prověř s explicitním
   ID a přezkum proveď nad tímto novým záznamem.
 
+### Profily prověření, země a identifikátor banky (v3)
+
+`POST /api/v3/sanctions/screen` přijímá tři volitelné vstupy. Požadavek bez nich se chová
+a odpovídá přesně jako dosud.
+
+| Pole | Význam |
+|---|---|
+| `profile` | `PAYMENT` nebo `CUSTOMER`. Určuje sadu listin; nelze kombinovat s `listTypes` (400). |
+| `country` | Země protistrany, ISO 3166-1 alpha-2. |
+| `bankIdentifier` | BIC (8 nebo 11 znaků) banky protistrany; kód země v něm se kontroluje stejně jako `country`. |
+
+| Profil | Prověřované listiny | PEP |
+|---|---|---|
+| `PAYMENT` | `OFAC_SDN`, `EU_CONSOLIDATED`, `UN_CONSOLIDATED`, `HM_TREASURY`, `CNB_DOMESTIC`, `CZ_TERRORISTS`, data jurisdikcí | neprověřuje se — jméno PEP platbu nezastaví |
+| `CUSTOMER` | sada `PAYMENT` a navíc `PEP_GLOBAL` | hlásí se zvlášť: `matchKind: PEP` a `pepStatus`; nikdy nezvyšuje `status` ani `overallScore` |
+| *(žádný)* | `listTypes`, nebo všechny povolené listiny | počítá se do `status` jako dosud |
+
+U prověření s profilem nese každá shoda `matchKind` (`SANCTIONS`, `TERRORIST`, `PEP`,
+`JURISDICTION`).
+
+**Jurisdikce.** `country` (nebo země uvnitř `bankIdentifier`), která je v referenčních datech
+jurisdikcí, je shodou bez ohledu na jméno: záznam `EMBARGO` dává `HIT`, záznam `HIGH_RISK`
+`POTENTIAL_HIT` se skóre 0,65, které volající se sdílenou politikou prověřování pošlou k ručnímu
+přezkumu. `programs` u shody nesou opatření s verzí dat a vydání, ze kterého řádek pochází
+(například `HIGH_RISK:v1`, `EU_HIGH_RISK_THIRD_COUNTRIES`). `matchedId` je `country:<kód>:<vydání>:<opatření>:v<verze>`. Rozhodnutí analytika
+(`WHITELISTED`) shodu jurisdikce nikdy nepokrývá: může vyřadit shody jména téhož prověření a
+stav pak určuje sama shoda jurisdikce. Tato data **nemají automatický
+zdroj** — co je načteno, viz `04-data` — a země, která v nich není, se nikdy neshoduje. BIC se
+neporovnává s entitami na listinách, protože importované zdroje identifikátory bank neobsahují.
+
+**Přibližná shoda jména.** Jméno se skóre alespoň 0,85 vůči záznamu listiny je `HIT` v každém
+profilu. Jen profil `CUSTOMER` vrací i jména se skóre 0,65–0,85, jako `POTENTIAL_HIT` (nebo
+`pepStatus: POTENTIAL_HIT` u záznamu PEP): onboarding má pracovníka, kterému lze podobné jméno
+poslat k přezkumu. `PAYMENT` a prověření bez profilu pod 0,85 nehledají, takové jméno tam vyjde
+`CLEAR` — platba zatím nemá stav, ve kterém by na přezkum počkala (#15724).
+
+`/api/v1` je zmrazené: všechny tři vstupy odmítá s 400 a prověření vytvořené s nimi přes
+`/api/v1` nelze číst.
+
 ### Odeslat rozhodnutí o ručním přezkumu
 
 ```http
@@ -189,7 +228,7 @@ POST /api/v1/sanctions/lists/refresh-all
 | `EU_CONSOLIDATED` | EU Rada | Konsolidovaný seznam sankcí EU |
 | `UN_CONSOLIDATED` | Rada bezpečnosti OSN | Konsolidovaný seznam OSN |
 | `HM_TREASURY` | UK HM Treasury | UK finanční sankce |
-| `FATF_HIGH_RISK` | FATF | Vysoce rizikové a sledované jurisdikce |
+| `FATF_HIGH_RISK` | FATF | Vysoce rizikové a sledované jurisdikce — bez zdroje entit; země jsou vedeny jako referenční data jurisdikcí |
 | `CNB_DOMESTIC` | Ministerstvo zahraničních věcí (MZV) | Vnitrostátní sankční seznam ČR (zákon č. 1/2023 Sb.) |
 | `CZ_TERRORISTS` | Česká e-Sbírka | Protiteroristická označení (nařízení vlády č. 210/2008 Sb.), import z oficiálních SPARQL otevřených dat |
 

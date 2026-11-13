@@ -4,4 +4,4 @@ metadata:
   name: governance-auditor
   labels:
     app.kubernetes.io/part-of: openbank
-    openbank.io/component: governance-auditor
+    open-bank.tech/component: governance-auditor
