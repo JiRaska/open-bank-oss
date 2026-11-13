@@ -102,8 +102,22 @@
 # it, the call reaches the API. Do not drop the flag, and do not "fix" this by adding a
 # checkout — cloning the repo to make one API call is pure waste.
 #
+# GITHUB-SIDE TRANSIENTS (installation quota, artifact service)
+# A `failure` whose every failed job died on `API rate limit exceeded for installation`, on a
+# gate shard that is NOT EVALUATED only, or on the artifact service (`Failed to CreateArtifact`
+# with its `Artifact not found` consumers) is re-run once too — but only after the cause can have
+# cleared: the quota must be above 20% again (GET /rate_limit, free) and an artifact outage must
+# be 30 minutes old. Until then the decision is `deferred-*` and a later tick (the hourly deep
+# scan re-reads three hours of completions) decides again. Measured 2026-11-10..12 over 747
+# failed runs, these were the largest causes nothing re-ran. Logs are read only for jobs that
+# already failed, once per decision, capped per decision. Rationale and fixtures:
+# `spot-kill-retry.sh`.
+#
 # WATCH LIST
-# The expensive services, security and dependency-submission lanes. A cancelled PR attempt is
+# The expensive services, security and dependency-submission lanes, plus `CI` for FAILURES only
+# (its quota-starved gate shards; a cancelled CI run is a concurrency supersession on a hosted
+# runner, never a reclaim, so `select-ci-reconcile-candidates.py` does not select it). A
+# cancelled PR attempt is
 # retried only while it remains the live PR head; an old retry can cancel a newer attempt.
 # Do NOT add auto-deploy here — it has its own reconcile tick.
 name: Auto-retry spot-killed CI runs
@@ -156,7 +170,7 @@ jobs:
       # The wait is capped short on purpose: the frequent 30-minute scan overlaps six ticks,
       # and the hourly deep scan overlaps three hours of completions. A quota-limited tick can
       # be re-covered without leaving a runner asleep for the whole installation reset window.
-      - name: Read recent completions from the three watched workflows
+      - name: Read recent completions from the four watched workflows
         id: read-runs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -203,7 +217,7 @@ jobs:
             echo "workflow=$workflow runs=$total requests=$expected" >> "$GITHUB_STEP_SUMMARY"
             rm -rf "$dir"
           }
-          for workflow in services-ci.yml security.yml dependency-submission.yml; do
+          for workflow in services-ci.yml security.yml dependency-submission.yml ci.yml; do
             # A fixed created range prevents page drift from NEW runs, but GitHub can
             # index an already-created run between pages and change total_count. Re-read
             # the entire snapshot, never accept a partial page set as "no spot kills".

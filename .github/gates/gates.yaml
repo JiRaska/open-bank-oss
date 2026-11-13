@@ -3407,7 +3407,7 @@ gates:
     rationale: "Without it the script's error paths are exercised only when a real spot reclaim coincides with a real API failure — which is how #6255 shipped a detection call with no transient handling at all, stranding a reclaimed run at attempt 1 and telling nobody."
     review_after: "2027-02-23"
     # Subjects are assertions, not files: the floor drops the day someone deletes a case.
-    min_subjects: 52   # every case incl. the Gradle-distribution outage recogniser
+    min_subjects: 78   # every case incl. the Gradle-distribution and GitHub-transient recognisers
     run: |
       bash .github/scripts/spot-kill-retry.sh --self-test
 
@@ -3438,7 +3438,7 @@ gates:
     budget_seconds: 10
     rationale: "The scheduled reconciler replaces a per-completion listener; a broad or duplicate candidate set would recreate the API and runner amplification it removes."
     review_after: "2027-03-11"
-    min_subjects: 16
+    min_subjects: 19
     run: |
       python3 .github/scripts/select-ci-reconcile-candidates.py --self-test
 
