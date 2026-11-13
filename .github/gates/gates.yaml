@@ -6314,7 +6314,7 @@ gates:
     group: security
     mode: enforced
     needs_base: optional
-    verified: "2026-11-06 — self-test pins red, absent, skipped, stale-green-masking, no-envelope, per-row attribution and baseline-growth cases; CLI run red on a skipped cited id and on an added baseline line"
+    verified: "2026-11-06 — self-test pins red, absent, skipped, stale-green-masking, no-envelope, per-row attribution and baseline-growth cases; CLI run red on a skipped cited id and on an added baseline line. 2026-11-12 — a cited test class ADDED by the diff under the same component's src/test is a warning (its own PR CI runs it); self-test red without the exemption, CLI run on the sanctions branch warns on C8"
     min_subjects: 23
     budget_seconds: 180
     rationale: "Resolving a cited test class by name proves it exists, not that it ran or passed: a class excluded from its CI task, skipped for a month or red on main still credited a mitigation. The next-latest envelope answers it."
@@ -6811,6 +6811,34 @@ gates:
     selftest_inputs: [".github/scripts/check-container-listen-port-collisions.py"]
     run: |
       python3 .github/scripts/check-container-listen-port-collisions.py --root .
+  - id: delegation-capability-enforcement
+    name: "a grantable delegation capability has a declared enforcer (ADR-0375 D4)"
+    group: kotlin
+    mode: advisory
+    rationale: "CAPABILITY_MATRIX says what a grantor may be offered; nothing said what the platform will honour. Measured 2026-11-12, 9 of 18 capabilities had no production reference at all, so a grant promised what the bank then refused with nothing red anywhere. Advisory until the delegation-service offer-time refusal lands, so the registry and the refusal cannot disagree."
+    review_after: "2027-02-12"
+    verified: "2026-11-12 — falsified seven ways against the real tree (missing entry, enforced->unenforced with the enforcer still reading it, enforced_in not naming the capability, a pair the matrix forbids, the shared_capability opt-out removed, a stale opt-out, an unknown status); each produced findings rather than a traceback. Advisory because the matching offer-time refusal in delegation-service is not written yet; enforcing a registry the service does not honour would make the two drift. Flip to enforced in the PR that lands the refusal."
+    budget_seconds: 30
+    min_subjects: 15
+    selftest: python3 .github/scripts/check-delegation-capability-enforcement.py --self-test
+    selftest_expect: pass
+    selftest_inputs:
+      - ".github/scripts/check-delegation-capability-enforcement.py"
+      - "openbank-libs/governance/rules.yaml"
+    run: |
+      # The subject set is DERIVED from DelegationGrant.CAPABILITY_MATRIX, never hand-kept: a gate
+      # whose scope is a hand-maintained list of the thing it checks reads as PASSING when the list
+      # is short. Fails in both directions, so an `unenforced` entry can neither rot into permanent
+      # furniture nor be silently closed on the day its enforcement lands.
+      #
+      # Falsified against the REAL tree, seven ways, before wiring in: a missing entry for a
+      # grantable pair; an enforced pair flipped to unenforced while its enforcer still reads it;
+      # an enforced_in path that does not name the capability; an entry for a pair the matrix does
+      # not permit; the shared_capability opt-out removed; a stale shared_capability opt-out on a
+      # pair the scan CAN verify; and an unknown status. Each produces findings, not a traceback —
+      # the first run of these probes reported "rejected" on a YAML error in the fixture itself,
+      # which is why the output is read and not the exit code.
+      python3 .github/scripts/check-delegation-capability-enforcement.py --enforce
   - id: enforcement-reachability
     name: "a declared enforcement function has a production caller (ADR-0232, issue #3615)"
     group: kotlin
@@ -7655,6 +7683,22 @@ gates:
     run: |
       python3 .github/scripts/check-admin-ui-module-coverage-ratchet.py --base "${PR_DIFF_BASE}" --body="${PR_BODY:-}"
 
+  - id: admin-ui-mutation-ratchet
+    name: "Admin UI mutation floor and scope only go up (ADR-0370 U5, enforced)"
+    group: supplychain
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    rationale: "Stryker enforces thresholds.break but cannot see a PR lowering it or dropping a decision module from the mutate scope; either needs a mutation-floor-lowered trailer naming an issue."
+    review_after: "2027-05-31"
+    min_subjects: 10  # 17 modules + the break floor on 2026-11-11
+    budget_seconds: 10
+    selftest: python3 .github/scripts/check-admin-ui-mutation-ratchet.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-admin-ui-mutation-ratchet.py"]
+    run: |
+      python3 .github/scripts/check-admin-ui-mutation-ratchet.py --base "${PR_DIFF_BASE}" --body="${PR_BODY:-}"
+
   - id: admin-ui-request-trace-fixtures
     name: "Admin UI request tracing preserves sends, outputs, and diagnostic privacy"
     group: supplychain
@@ -8109,3 +8153,27 @@ gates:
       - settings.gradle.kts
       - .github/scripts/check-test-provenance-cache.py
     min_subjects: 6
+
+  # Demo-only switches (#15760): curated flags that disable a control, three of them true in the
+  # sandbox. The registry and the environment mechanism live in rules.yaml: demo_only_flags.
+  - id: demo-only-flags
+    name: "demo-only regulatory switches true only in permitted environments (#15760, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 60
+    rationale: >-
+      OPENBANK_AML_AUTO_CLEAR, OPENBANK_KYC_AUTO_APPROVE and LENDING_RISK_ALLOW_DEMONSTRATION_MODEL
+      disable AML clearing review, KYC four-eyes and risk-parameter validation. Each manifest comment
+      said "MUST be false in production" and nothing enforced it. The gate scans every manifest-shaped
+      file in the repo (not src/test) and fails when a registered flag is true (or unresolvable) in an
+      environment not on its permitted list (a path with prod/uat/... in it is never permitted, and
+      neither is an undeclared tree), when its code default is not false, when it is set by a
+      non-permitted profile, or when the registry entry is stale. The registry is curated and
+      partial and the script docstring lists the known limits.
+    review_after: "2027-05-11"
+    min_subjects: 800   # 1650 measured 2026-11-12 (1650 files + flags); under half
+    selftest: python3 .github/scripts/check-demo-only-flags.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-demo-only-flags.py"]
+    run: |
+      python3 .github/scripts/check-demo-only-flags.py --root .
