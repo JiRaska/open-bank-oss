@@ -9,7 +9,7 @@ describe('party PII links respect the party-service role boundary', () => {
   it('keeps route roles aligned with PartyResource and gates cross-page links', () => {
     const roles = read('lib/auth/roles.ts')
     expect(roles).toContain('"parties:view":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.KYC]')
-    expect(roles).toContain('"parties:view-detail":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.KYC, ROLES.RISK]')
+    expect(roles).toContain('"parties:view-detail":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.KYC, ROLES.RISK, ROLES.COMPLIANCE]')
     expect(read('components/balance-sheet/InstrumentsPanel.tsx')).toContain("'parties:view-detail'")
     // The detail permission must equal getParty's @RolesAllowed (minus ROLE_API, a machine role),
     // and the broad directory permission must NOT admit RISK, which search/list refuse.
