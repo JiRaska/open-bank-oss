@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.0.1...transaction-service-v2.1.0) (2026-11-12)
+
+
+### Features
+
+* **transaction,ledger:** preserve synthetic origin across transfer booking ([#15651](https://github.com/JiRaska/open-bank-oss/issues/15651)) ([598e95a](https://github.com/JiRaska/open-bank-oss/commit/598e95a8b82d024258202d5bd176b57b089c7913))
+
 ## [2.0.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.0.0...transaction-service-v2.0.1) (2026-10-28)
 
 

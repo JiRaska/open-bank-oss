@@ -8,6 +8,7 @@ import com.fasterxml.jackson.annotation.JsonInclude
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.PocketStatus
+import com.openbank.account.domain.model.StandingReason
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -57,7 +58,15 @@ data class AccountResponse(
     val termsEffectiveFrom: LocalDate? = null,
     /** Published catalog revision the account was opened under (ADR-0341 D1). Absent = opened before V33. */
     val productRevision: ProductRevisionPinResponse? = null,
+    /**
+     * Whether money may leave or enter the account now (ADR-0374 D4). Payment rails read this
+     * instead of interpreting [status] themselves. Always present on a response this service wrote.
+     */
+    val standing: AccountStandingResponse,
 )
+
+/** `reason` is null exactly when the account is in good standing. */
+data class AccountStandingResponse(val mayDebit: Boolean, val mayCredit: Boolean, val reason: StandingReason?)
 
 /** The pinned revision; `irRevisionHash`/`irVersion` are absent for a revision that carries no product IR. */
 @JsonInclude(JsonInclude.Include.NON_NULL)

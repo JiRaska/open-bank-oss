@@ -23,7 +23,7 @@ WHAT THIS ASSERTS
 For every CNPG Cluster manifest under gitops, one of:
   * `spec.backup.barmanObjectStore.destinationPath` is set -- the other gate takes over
     from there and checks it is actually wired; or
-  * the metadata carries `openbank.io/backup-exempt-reason: "<why>"`, non-empty.
+  * the metadata carries `open-bank.tech/backup-exempt-reason: "<why>"`, non-empty.
 
 The exemption is an ANNOTATION ON THE CLUSTER, deliberately, not an entry in a list
 kept beside the manifests. A separate list is free to drift from the thing it
@@ -48,7 +48,7 @@ import sys
 import yaml
 
 CNPG_API_PREFIX = "postgresql.cnpg.io/"
-EXEMPT_ANNOTATION = "openbank.io/backup-exempt-reason"
+EXEMPT_ANNOTATION = "open-bank.tech/backup-exempt-reason"
 
 
 def cnpg_resources(gitops_dir: pathlib.Path):

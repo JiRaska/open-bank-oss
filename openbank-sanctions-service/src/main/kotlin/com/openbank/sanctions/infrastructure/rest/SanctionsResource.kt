@@ -5,10 +5,11 @@
 package com.openbank.sanctions.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
-import com.openbank.sanctions.application.port.`in`.ReviewCommand
 import com.openbank.sanctions.application.port.`in`.SanctionsUseCase
 import com.openbank.sanctions.application.port.`in`.ScreenEntityCommand
+import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
+import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.NotFoundException
@@ -24,6 +25,9 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 class SanctionsResource(private val useCase: SanctionsUseCase) {
+
+    @Inject
+    lateinit var identity: SecurityIdentity
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
@@ -59,10 +63,10 @@ class SanctionsResource(private val useCase: SanctionsUseCase) {
     // policy layer: `matrix-allows` (the rule that grants sanctions.clear) keys on principal type,
     // roles and action only, and no deny rule reads input.resource — verified before changing this.
     @Authorize(action = "sanctions.clear", resource = "#cmd.checkId")
-    suspend fun review(cmd: ReviewCommand) =
+    suspend fun review(cmd: ReviewRequest) =
         useCase.getById(cmd.checkId)
             ?.takeIf { it.isV1Compatible() }
-            ?.let { useCase.review(cmd) }
+            ?.let { useCase.review(cmd.toCommand(identity)) }
             ?: throw NotFoundException()
 
     @GET

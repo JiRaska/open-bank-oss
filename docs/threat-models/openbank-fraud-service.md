@@ -213,6 +213,7 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   they do not establish deployed enforcement or replace required review. Rollback:
   revert the source change and regenerate the fraud bundle and checksum.
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `fraud_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+- **2026-11-10** — **`fraud_outbox` moves onto the kernel outbox repository** (ADR-0327 phase 2). Claim, markSent, markFailed, count and purge now run the shared `AbstractPanacheOutboxRepository` SQL instead of a service-local copy. Two behaviour changes: events of one party are claimed head-first, so a failed `fraud.hold_changed` blocks later events for that party until it is retried or goes DEAD (ordering preserved under several replicas); and retries back off exponentially via `next_attempt_at` instead of every poll. Tampering/DoS (T5): unchanged. The event is still written only in the hold transaction and the trigger is still server-computed. A poisoned row now parks one party's events, not the whole batch, and `OutboxDeadRate` alerts on it. No new endpoint, caller, privilege or data field.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
@@ -377,3 +378,13 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
 
 - **2026-11-04** — **Null rule entry in a threshold proposal answers 400 (#14783).** `POST /api/v1/fraud/thresholds/proposals` (inbound REST, `FraudThresholdResource`) now rejects a rule whose currency map is JSON `null` with 400 via `requireNotNull`, instead of a 500 from a Kotlin null dereference. Input validation only: no new endpoint, role, data flow or trust boundary; authorization (`ROLE_RISK`/`ROLE_COMPLIANCE`, four-eyes decide) is unchanged. **STRIDE:** D (malformed input no longer produces an unhandled server error; nothing is persisted). Rollback: revert the commit; no data or config change.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

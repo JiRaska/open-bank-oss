@@ -20,7 +20,9 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.TestMethodOrder
+import java.time.Instant
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -105,6 +107,27 @@ class OriginationCommandsIT {
             ps.executeQuery().use { rs ->
                 check(rs.next()) { "application $id not stored" }
                 rs.getString(1)
+            }
+        }
+    }
+
+    private fun assertSignatureEvidence(id: String, signedAt: Instant) = dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            """
+            SELECT a.signature_recorded_at, a.xmin::text, o.xmin::text, o.payload::jsonb ->> 'occurredAt'
+              FROM loan_application a
+              JOIN lending_outbox o ON o.aggregate_id = a.id
+             WHERE a.id = ? AND o.event_type = 'credit.application.transition'
+               AND o.payload::jsonb ->> 'toState' = 'SIGNED'
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setObject(1, UUID.fromString(id))
+            statement.executeQuery().use { rows ->
+                assertThat(rows.next()).isTrue()
+                assertThat(rows.getObject(1, OffsetDateTime::class.java).toInstant()).isEqualTo(signedAt)
+                assertThat(rows.getString(2)).isEqualTo(rows.getString(3))
+                assertThat(Instant.parse(rows.getString(4))).isEqualTo(signedAt)
+                assertThat(rows.next()).isFalse()
             }
         }
     }
@@ -227,16 +250,35 @@ class OriginationCommandsIT {
     @Test
     @Order(6)
     @TestSecurity(user = PROPOSER, roles = ["ROLE_LENDING_OFFICER", "ROLE_ADMIN"])
-    fun `6 - sign moves to SIGNED and persists the artefact hash in the same claim`() {
-        Given {
+    fun `6 - sign commits the state receipt time and outbox evidence together`() {
+        val before = Instant.now()
+        val key = UUID.randomUUID().toString()
+        val signedAt = Given {
             contentType("application/json")
-            header("Idempotency-Key", UUID.randomUUID().toString())
+            header("Idempotency-Key", key)
             body("""{"artefactHash":"$ARTEFACT_HASH"}""")
         } When {
             post("/api/v1/lending/applications/$signatureApplicationId/sign")
         } Then {
             statusCode(200)
+        } Extract {
+            OffsetDateTime.parse(path<String>("signatureRecordedAt")).toInstant()
         }
+        assertThat(signedAt).isBetween(before, Instant.now())
+        val replayedAt = Given {
+            contentType("application/json")
+            header("Idempotency-Key", key)
+            body("""{"artefactHash":"$ARTEFACT_HASH"}""")
+        } When {
+            post("/api/v1/lending/applications/$signatureApplicationId/sign")
+        } Then {
+            statusCode(200)
+            header("X-Idempotency-Replayed", "true")
+        } Extract {
+            OffsetDateTime.parse(path<String>("signatureRecordedAt")).toInstant()
+        }
+        assertThat(replayedAt).isEqualTo(signedAt)
+        assertSignatureEvidence(signatureApplicationId, signedAt)
         assertThat(storedStatus(signatureApplicationId)).isEqualTo("SIGNED")
         assertThat(storedArtefactHash(signatureApplicationId)).isEqualTo(ARTEFACT_HASH)
         assertThat(transitionsTo(signatureApplicationId, "SIGNED")).isEqualTo(1)

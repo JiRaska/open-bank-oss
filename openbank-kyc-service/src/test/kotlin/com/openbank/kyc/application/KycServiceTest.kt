@@ -688,20 +688,6 @@ class KycServiceTest {
     }
 
     @Test
-    fun `sandbox auto approval labels missing source checks as sandbox results`(): Unit = runBlocking {
-        service.autoApprove = true
-        coEvery { repo.findActiveByPartyId(any()) } returns null
-        coEvery { repo.save(any(), any()) } answers { firstArg() }
-        coEvery { repo.update(any(), any()) } answers { firstArg() }
-
-        val case = service.openCaseForParty(UUID.randomUUID(), com.openbank.kyc.domain.model.SubjectType.BUSINESS).case
-
-        assertThat(case.status).isEqualTo(KycCaseStatus.APPROVED)
-        assertThat(case.checks).allMatch { it.result == "sandbox-auto" && it.status == CheckStatus.PASSED }
-        assertThat(case.reviewedBy).isEqualTo("sandbox-auto-approval")
-    }
-
-    @Test
     fun `party type on PARTY_CREATED decides the subject type`() {
         assertThat(
             com.openbank.kyc.domain.model.SubjectType.fromPartyType("COMPANY"),

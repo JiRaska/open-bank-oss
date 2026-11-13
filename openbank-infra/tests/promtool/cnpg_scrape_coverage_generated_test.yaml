@@ -154,9 +154,13 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-3",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-3",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
@@ -612,9 +616,13 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-3",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-3",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
@@ -1047,9 +1055,13 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-3",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-3",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
@@ -1488,9 +1500,13 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-3",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-3",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
@@ -1932,9 +1948,13 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-3",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-3",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
@@ -2367,9 +2387,13 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-3",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-3",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
