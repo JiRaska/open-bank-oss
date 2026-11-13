@@ -49,6 +49,21 @@ class DomesticPaymentTest {
     }
 
     @Test
+    fun `a payment is held only from RECEIVED and a hold ends admitted or rejected, nothing else`() {
+        val clock = java.time.Clock.systemUTC()
+        assertThat(DomesticPaymentStatus.entries.filter { payment(it).canTransitionTo(DomesticPaymentStatus.HELD) })
+            .containsExactly(DomesticPaymentStatus.RECEIVED)
+        assertThat(DomesticPaymentStatus.entries.filter { payment(DomesticPaymentStatus.HELD).canTransitionTo(it) })
+            .containsExactly(DomesticPaymentStatus.VALIDATED, DomesticPaymentStatus.REJECTED)
+
+        val held = payment().transitionTo(DomesticPaymentStatus.HELD, clock = clock)
+        // Nothing was submitted: a held payment has not passed the controls yet.
+        assertThat(held.submittedAt).isNull()
+        assertThat(held.aggregateRevision).isEqualTo(2)
+        assertThat(held.transitionTo(DomesticPaymentStatus.VALIDATED, clock = clock).submittedAt).isNotNull()
+    }
+
+    @Test
     fun `delegation and reservation form an indivisible pair`() {
         assertThatThrownBy {
             payment().copy(delegationId = UUID.randomUUID())

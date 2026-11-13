@@ -177,3 +177,25 @@ Po zapnutí workflow aktivita `fraudGate` selhává uzavřeně: pokračuje jen s
 ## Identita API na mTLS listeneru
 
 V produkci `/api/*` přijímá pouze bearer autentizaci, a to na prostém HTTP listeneru i na mTLS listeneru s ověřením klienta, a vyžaduje přihlášeného volajícího. Důvěryhodný klientský certifikát je na mTLS listeneru podmínkou TLS spojení, ale slouží jen k autentizaci transportu: nenahrazuje OIDC bearer token volajícího, takže certifikát bez beareru dostane HTTP 401. `GET /api/v1/info` a `GET /api/v1/config` zůstávají veřejná metadata. Role endpointu a OPA nadále rozhodují, co smí přihlášený volající dělat. `DomesticPaymentListenerAuthParityIT` používá produkční podobu listenerů a přes skutečné HTTP ověřuje, že požadavek pouze s certifikátem dostane 401.
+
+## Řetězec přijetí platby (ADR-0374)
+
+`openbank.domestic.admission.enabled` (env `OPENBANK_DOMESTIC_ADMISSION_ENABLED`) je ve výchozím stavu **vypnutý**. Dokud je vypnutý, každá platba jde cestou popsanou výše a žádná platba nikdy není ve stavu `HELD`.
+
+Po zapnutí novou platbu jako první posoudí jedna aktivita. Kontroly běží v pevném pořadí a první zamítnutí posuzování ukončí, takže platba, která má být zamítnuta, nestojí žádné další volání:
+
+1. **Způsobilost účtu**: `standing.mayDebit` účtu plátce z account-service. Hodnota `false` platbu zamítne jako `DEBTOR_ACCOUNT_BLOCKED`.
+2. **Sankce**: screening podle ADR-0032. Shoda platbu zamítne jako `SANCTIONS_HIT`, možná shoda ji pozdrží.
+3. **Podvod**: skóre podle ADR-0084, vynucované jen při zapnutém `openbank.domestic.fraud.enforcement-enabled`. DECLINE zamítá jako `FRAUD_SUSPECTED`, REVIEW a CHALLENGE pozdrží.
+
+Oprávnění, limity, AML riziko destinace a ověření příjemce na této platební cestě zatím neběží a každé posouzení to zaznamená i s důvodem.
+
+Kontrola, která **nemůže odpovědět** (timeout, nedostupná závislost, dotaz na účet bez `standing`), platbu nikdy nepustí. Platba je ihned `HELD` a posuzuje se znovu každých 15 minut, nejvýše pětkrát. Pokud kontrola odpoví a platbu pustí, platba pokračuje bez zásahu člověka. Pokud neodpoví ani po pátém pokusu, stane se z pozdržení případ.
+
+**Pozdržení, které potřebuje člověka**, zapíše událost `PAYMENT_HELD` ve stejné transakci jako přechod do `HELD`. aml-service z ní otevře právě jeden případ (kód `PAYMENT_HELD`, idempotency klíč `payment-hold:domestic:<paymentId>`). Platební cesta pro pozdržení nevolá žádný endpoint případů. Rozhodnutí o tomto případu pozdržení ukončí: `CLEARED` platbu uvolní, `BLOCKED` ji zamítne jako `AML_HOLD`, jiný stav nechává platbu čekat. Uvolnění nejprve znovu načte způsobilost účtu a platba, jejíž účet byl během pozdržení zmrazen, se zamítne místo odeslání. Pozdržení, o kterém nikdo nerozhodl, se zamítne 48 hodin od prvního pozdržení platby. Rozhodnutí přichází kanálem `fraud-hold-resolution-in` (env `DOMESTIC_FRAUD_HOLD_RESOLUTION_CONSUMER_ENABLED`), který musí být zapnutý vždy, když je zapnutý řetězec, jinak každé pozdržení skončí vypršením. Zapnutý musí být i kanál `payment-held-in` v aml-service (env `AML_PAYMENT_HELD_CONSUMER_ENABLED`), jinak se neotevře žádný případ.
+
+`PATCH /api/v1/domestic-payments/{id}/status` odpovídá 409 pro platbu ve stavu `HELD` vždy a pro platbu ve stavu `RECEIVED` při zapnutém řetězci. Nespouští žádné workflow a pozdržení jím uvolnit nelze.
+
+Metriky: `openbank_payment_admission_decisions_total{rail,decision}`, `openbank_payment_admission_step_unavailable_total{rail,step,cause}` (výpadek, nikoli podezřelá platba), `openbank_payment_admission_hold_ends_total{rail,end}`, `openbank_payment_admission_hold_resolutions_total{rail,decision,delivery}`, `openbank_domestic_payment_hold_signal_ignored{reason}` a `status="HELD"` na ukazatelích neterminálních plateb. `delivery="NOT_WAITING"` znamená, že o případu bylo rozhodnuto až po skončení pozdržení; platí aktuální stav platby.
+
+Rollback: nastavte příznak na `false`. Nové platby jdou původní cestou; platby již ve stavu `HELD` zůstávají na cestě pozdržení, dokud nejsou uvolněny, zamítnuty nebo nevyprší.

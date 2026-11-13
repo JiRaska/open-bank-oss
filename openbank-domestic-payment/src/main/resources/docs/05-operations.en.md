@@ -177,3 +177,25 @@ With the flag on, the `fraudGate` workflow activity fails closed: only a real AL
 ## API identity on the mTLS listener
 
 In production, `/api/*` accepts only bearer authentication, on both the plain HTTP listener and the client-authenticated mTLS listener, and requires an authenticated caller. A trusted client certificate is required for the TLS handshake on the mTLS listener but is transport authentication only: it cannot replace the caller's OIDC bearer token, so a certificate without a bearer receives HTTP 401. `GET /api/v1/info` and `GET /api/v1/config` remain public metadata. Route roles and OPA still decide what an authenticated caller may do. `DomesticPaymentListenerAuthParityIT` uses the production listener shape and verifies over real HTTP that a certificate-only request receives 401.
+
+## Payment admission chain (ADR-0374)
+
+`openbank.domestic.admission.enabled` (env `OPENBANK_DOMESTIC_ADMISSION_ENABLED`) is **off by default**. While off, every payment follows the path described above and no payment is ever `HELD`.
+
+With the flag on, a new payment is admitted by one activity before anything else runs. The controls run in a fixed order and the first refusal ends the admission, so a payment that must be refused costs no later call:
+
+1. **Standing**: account-service's `standing.mayDebit` for the debtor account. `false` rejects the payment as `DEBTOR_ACCOUNT_BLOCKED`.
+2. **Sanctions**: the ADR-0032 screen. A hit rejects as `SANCTIONS_HIT`; a potential match holds.
+3. **Fraud**: the ADR-0084 score, enforced only while `openbank.domestic.fraud.enforcement-enabled` is on. DECLINE rejects as `FRAUD_SUSPECTED`; REVIEW and CHALLENGE hold.
+
+Authority, limits, AML destination risk and payee verification are not run on this rail yet and each admission records that, with the reason.
+
+A control that **cannot answer** (timeout, dependency down, an account lookup without `standing`) never admits the payment. The payment is `HELD` at once and evaluated again every 15 minutes, up to five times. If the control answers and admits, the payment proceeds with no human involved. If it still cannot answer after the fifth attempt, the hold becomes a case.
+
+A **hold that needs a human** writes a `PAYMENT_HELD` event in the same transaction as the move to `HELD`. aml-service opens exactly one case from it (alert code `PAYMENT_HELD`, idempotency key `payment-hold:domestic:<paymentId>`). The rail calls no case endpoint. Deciding that case ends the hold: `CLEARED` releases, `BLOCKED` rejects as `AML_HOLD`; any other status keeps the payment waiting. A release re-reads standing first, and a payment whose account was frozen during the hold is rejected instead of sent. A hold nobody decides is rejected 48 hours after the payment was first held. The decision arrives on `fraud-hold-resolution-in` (env `DOMESTIC_FRAUD_HOLD_RESOLUTION_CONSUMER_ENABLED`), which must be on whenever the chain is on, or every hold ends by expiry. aml-service's `payment-held-in` (env `AML_PAYMENT_HELD_CONSUMER_ENABLED`) must be on too, or no case is opened.
+
+`PATCH /api/v1/domestic-payments/{id}/status` answers 409 for a `HELD` payment always and for a `RECEIVED` payment while the chain is on. It starts no workflow and cannot be used to release a hold.
+
+Metrics: `openbank_payment_admission_decisions_total{rail,decision}`, `openbank_payment_admission_step_unavailable_total{rail,step,cause}` (an outage, as opposed to a suspicious payment), `openbank_payment_admission_hold_ends_total{rail,end}`, `openbank_payment_admission_hold_resolutions_total{rail,decision,delivery}`, `openbank_domestic_payment_hold_signal_ignored{reason}`, and `status="HELD"` on the non-terminal payment gauges. `delivery="NOT_WAITING"` means a case was decided after its hold had already ended; the payment's current status stands.
+
+Rollback: set the flag to `false`. New payments take the previous path; payments already `HELD` keep their hold path until released, rejected or expired.

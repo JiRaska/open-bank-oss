@@ -101,6 +101,16 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
     private val admission: PaymentAdmissionActivities =
         Workflow.newActivityStub(PaymentAdmissionActivities::class.java, activityOptions)
 
+    /**
+     * Everything that happens to a payment once it is HELD keeps retrying, like settlement: a run
+     * that gave up there would leave the payment HELD with no timer and no reader, and the
+     * screening re-drive only picks up RECEIVED. Safe because each of those activities is
+     * re-entrant on the payment's status. The FIRST admission keeps the bounded policy: if it
+     * fails the payment is still RECEIVED and the re-drive starts a new run.
+     */
+    private val heldAdmission: PaymentAdmissionActivities =
+        Workflow.newActivityStub(PaymentAdmissionActivities::class.java, settlementActivityOptions)
+
     private var holdDecision: PaymentHoldDecision? = null
 
     /** True only while the run waits on a hold whose case was requested. */
@@ -241,7 +251,7 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
         while (action == AdmissionAction.HELD_UNAVAILABLE) {
             Workflow.sleep(PaymentHoldPolicy.REEVALUATION_INTERVAL)
             reevaluations++
-            action = admission.admit(paymentId, reevaluations >= PaymentHoldPolicy.MAX_REEVALUATIONS)
+            action = heldAdmission.admit(paymentId, reevaluations >= PaymentHoldPolicy.MAX_REEVALUATIONS)
         }
         val admitted = when (action) {
             AdmissionAction.ADMITTED -> true
@@ -268,12 +278,12 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
         awaitingHoldDecision = false
         return when {
             !answered -> {
-                admission.rejectHeld(paymentId, HoldRejectCause.EXPIRED)
+                heldAdmission.rejectHeld(paymentId, HoldRejectCause.EXPIRED)
                 false
             }
-            holdDecision == PaymentHoldDecision.RELEASE -> admission.releaseHeld(paymentId)
+            holdDecision == PaymentHoldDecision.RELEASE -> heldAdmission.releaseHeld(paymentId)
             else -> {
-                admission.rejectHeld(paymentId, HoldRejectCause.REVIEW_REJECTED)
+                heldAdmission.rejectHeld(paymentId, HoldRejectCause.REVIEW_REJECTED)
                 false
             }
         }

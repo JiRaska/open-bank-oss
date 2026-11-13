@@ -74,7 +74,7 @@ class DomesticAdmissionChain(
     private val chain: PaymentAdmissionChain<DomesticPayment> =
         PaymentAdmissionChain.Builder<DomesticPayment>(budget, UnavailablePolicy.HOLD)
             .unbound(AdmissionStep.AUTHORITY, AUTHORITY_DECIDED_AT_EDGE)
-            .check(AdmissionStep.STANDING) { payment, remaining -> standing(payment, remaining) }
+            .check(AdmissionStep.STANDING) { payment, remaining -> standingWithin(payment, remaining) }
             .unbound(AdmissionStep.LIMITS, LIMITS_NOT_DELIVERED)
             .check(AdmissionStep.SANCTIONS) { payment, remaining -> sanctions(payment, remaining) }
             .unbound(AdmissionStep.AML_DESTINATION_RISK, AML_DESTINATION_RISK_NOT_DELIVERED)
@@ -84,8 +84,15 @@ class DomesticAdmissionChain(
 
     suspend fun admit(payment: DomesticPayment): AdmissionResult = chain.admit(payment)
 
-    /** The standing step alone, for the re-run a release makes before it lets a payment go. */
-    suspend fun standing(payment: DomesticPayment, remaining: Duration = budget): StepOutcome {
+    /**
+     * The standing step alone, for the re-run a release makes before it lets a payment go.
+     *
+     * Not a default argument on [standingWithin]: this bean is called through a client proxy, and a
+     * default that reads a field is evaluated on the PROXY, whose fields are null.
+     */
+    suspend fun standing(payment: DomesticPayment): StepOutcome = standingWithin(payment, budget)
+
+    private suspend fun standingWithin(payment: DomesticPayment, remaining: Duration): StepOutcome {
         val lookup = withTimeoutOrNull(remaining.toMillis()) { standingPort.debtorStanding(payment.debtorAccountId) }
             ?: return StepOutcome.Unavailable(UnavailableCause.BUDGET_EXCEEDED)
         return when (lookup) {

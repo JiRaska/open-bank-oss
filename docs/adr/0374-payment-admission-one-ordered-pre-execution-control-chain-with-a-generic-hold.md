@@ -133,6 +133,37 @@ Delivery order, each a separately approved release: (A) chain types, HELD and re
 domestic and SEPA, with standing; (B) limits; (C) sanctions coverage and inputs;
 (D) remaining rails; (E) AML destination risk; (F) fraud enforcement per rail.
 
+**Delivery note, step A on the domestic rail (2026-11-13).** Points 3 and 13 left five things to
+the first rail that adopts the chain. They are recorded here because the next rail must make the
+same choices, not new ones.
+
+- *The switch.* The chain is off by default per rail (`openbank.<rail>.admission.enabled`). The
+  workflow records the switch as it was when the run started, and with the switch off a run
+  schedules nothing it did not schedule before, so workers from before the change can serve it
+  during a rolling deployment. A payment already HELD is evaluated whatever the switch says.
+- *The case request travels on the rail's own event topic.* `PAYMENT_HELD` is one rail-neutral
+  event type carrying `rail`; aml-service reads the rails' topics on one channel and ignores every
+  other type. No new topic. The case key is `payment-hold:<rail>:<paymentId>`, derived by the
+  consumer, never taken from the event; the alert code is `PAYMENT_HELD`. A rail accepts a decision
+  only from the case with that key, and only while it waits on a requested case.
+- *Terms of a hold.* It expires 48 hours after the payment was first held, the value the domestic
+  fraud hold already used. An unavailable control is asked again every 15 minutes, five times,
+  before the hold becomes a case.
+- *The manual status change* (point 13) refuses a transition out of HELD always, and out of
+  RECEIVED only while the chain is on for the rail. With the chain off a RECEIVED payment keeps
+  that exit: it is the only one a payment left by an exhausted screening re-drive has.
+- *What a rail may leave unbound.* A step whose facts or owner do not exist yet is declared unbound
+  with its reason, which every admission records. On domestic that is authority (the customer edge
+  still decides it, ADR-0375 D1), limits (step B), AML destination risk (step E) and payee
+  verification (not required by the scheme). Fraud is bound, and reports itself not applicable
+  while its own per-rail enforcement is off (point 8).
+
+Not delivered by step A on domestic, and a precondition of switching it on in production: the
+four-eyes decision on a hold's case (point 3; the case keeps aml-service's single-analyst
+decision), funds reservation for a held payment (point 13; the release re-runs standing only),
+and party standing read by the rail (point 4; the rail reads account standing, which lags a
+party's suspension by the propagation delay).
+
 ## Alternatives considered
 
 - **Keep per-rail controls and close the gaps one by one.** Smallest change per PR.

@@ -212,6 +212,51 @@ class DomesticPaymentServiceTest {
     }
 
     @Test
+    fun `the status endpoint cannot move a HELD payment, whatever the target (ADR-0374 D13)`() {
+        val held = payment(status = DomesticPaymentStatus.HELD)
+        coEvery { paymentRepository.findById(held.id) } returns held
+
+        for (target in listOf(DomesticPaymentStatus.VALIDATED, DomesticPaymentStatus.REJECTED)) {
+            assertThatThrownBy {
+                runBlocking {
+                    service.transitionStatus(
+                        TransitionDomesticPaymentStatusCommand(
+                            paymentId = held.id,
+                            targetStatus = target,
+                            rejectReason = com.openbank.domestic.domain.model.DomesticRejectReason.AML_HOLD,
+                            rejectDetail = null,
+                        ),
+                    )
+                }
+            }
+                .isInstanceOf(InvalidDomesticPaymentStateTransitionException::class.java)
+                .hasMessageContaining("only through payment admission")
+        }
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+    }
+
+    @Test
+    fun `with the chain on the status endpoint cannot move a RECEIVED payment, and with it off it still can`() {
+        val received = payment(status = DomesticPaymentStatus.RECEIVED)
+        coEvery { paymentRepository.findById(received.id) } returns received
+        val command = TransitionDomesticPaymentStatusCommand(
+            paymentId = received.id,
+            targetStatus = DomesticPaymentStatus.VALIDATED,
+            rejectReason = null,
+            rejectDetail = null,
+        )
+
+        service.admissionEnabled = true
+        assertThatThrownBy { runBlocking { service.transitionStatus(command) } }
+            .isInstanceOf(InvalidDomesticPaymentStateTransitionException::class.java)
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+
+        service.admissionEnabled = false
+        runBlocking { service.transitionStatus(command) }
+        coVerify(exactly = 1) { paymentRepository.update(any(), any()) }
+    }
+
+    @Test
     fun `transition to rejected requires reject reason`() {
         val existing = payment(status = DomesticPaymentStatus.RECEIVED)
         coEvery { paymentRepository.findById(existing.id) } returns existing

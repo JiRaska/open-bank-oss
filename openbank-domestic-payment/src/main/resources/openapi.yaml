@@ -11,13 +11,19 @@ info:
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
   # 1.12.0 -> 1.13.0: additive durable company-scoped business payment batch drafts.
-  version: 1.14.0
+  # 1.14.0 -> 1.15.0 (ADR-0374): additive. Payment status gains HELD, reported only while the
+  # admission chain is switched on for this rail; the status transition answers 409 for a payment
+  # that payment admission owns. No request shape changes.
+  version: 1.15.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
     VALIDATED, a sanctions hit is returned REJECTED (SANCTIONS_HIT) with an AML case opened, and a
     sub-threshold potential hit or a screening-service outage holds the payment in RECEIVED for review
-    (fail-closed).
+    (fail-closed). With the payment admission chain switched on (ADR-0374, off by default) the
+    controls run in one fixed order before the payment is sent (account standing, sanctions, fraud)
+    and a payment that needs a decision, or whose control could not answer, is HELD: it leaves HELD
+    only by the decision on its case, by a later automatic re-evaluation, or by expiring into REJECTED.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -231,6 +237,16 @@ paths:
           description: Updated payment
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: >-
+            The transition is not allowed from the payment's current status. Always the answer for
+            a HELD payment, and for a RECEIVED payment while the admission chain is switched on:
+            those statuses are left only through payment admission (ADR-0374), never through this
+            endpoint, which starts no workflow.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /api/v1/domestic-payments/approvals:
     get:
@@ -570,7 +586,7 @@ components:
             paymentId: {type: string, format: uuid}
             status:
               type: string
-              enum: [RECEIVED, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
+              enum: [RECEIVED, HELD, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
           additionalProperties: false
 
     CreateDomesticPaymentRequest:

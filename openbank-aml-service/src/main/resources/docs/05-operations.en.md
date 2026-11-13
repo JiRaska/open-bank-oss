@@ -144,3 +144,12 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 - `openbank.aml.monitoring.evaluation.*`: `enabled`, `cron`, `page-size`, `open-cases` (default `false` = SHADOW).
 - Metrics: `openbank_aml_monitoring_evaluations_total{outcome}`, `openbank_aml_monitoring_hits_total{scenario}`, `openbank_aml_monitoring_cases_opened_total{scenario}`, `openbank_aml_monitoring_cases_oldest_undecided_age_seconds`, and the workflow-liveness gauges for `aml-monitoring-evaluation`.
 - Liveness is recorded only by a tick that reached every active party. A stale gauge while movements are being counted means evaluation is not running.
+
+## Held-payment case intake (ADR-0374)
+
+- Channel `payment-held-in` (env `AML_PAYMENT_HELD_CONSUMER_ENABLED`, **off by default**) reads the event topic of each payment rail that has adopted the admission chain, today `openbank.domestic.payment.events`, and opens one case per held payment from the rail's `PAYMENT_HELD` event. Every other event type on the topic is ignored.
+- The case: screening type `TRANSACTION_MONITORING`, risk `HIGH` (so it opens `UNDER_REVIEW`), alert code `PAYMENT_HELD`, idempotency key `payment-hold:<rail>:<paymentId>`, `transactionId` = the payment. The alert detail lists why the payment is held, when the hold expires and what each control answered.
+- Deciding the case ends the hold on the rail: `CLEARED` releases the payment, `BLOCKED` rejects it. `ESCALATED` and `UNDER_REVIEW` leave it waiting, and it is then rejected when the hold expires.
+- An event that cannot be read, a debtor whose party cannot be resolved and a failed write go to `openbank.dlq.aml.payment-held-in`. A record there is a payment held with no case: replay it or decide the payment on the rail before its hold expires.
+- Metric: `openbank_aml_payment_held_events_total{outcome}` with `case_opened`, `ignored` (another event type) and `rejected`.
+- Switch it on together with the rail's chain, never the rail alone: a hold whose case is never opened ends by expiry, in rejection.

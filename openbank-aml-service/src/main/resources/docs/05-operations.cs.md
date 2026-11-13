@@ -131,3 +131,12 @@ Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTT
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Příjem případů pozdržených plateb (ADR-0374)
+
+- Kanál `payment-held-in` (env `AML_PAYMENT_HELD_CONSUMER_ENABLED`, ve výchozím stavu **vypnutý**) čte topic událostí každé platební cesty, která přijala řetězec přijetí platby, dnes `openbank.domestic.payment.events`, a z události `PAYMENT_HELD` otevře jeden případ na pozdrženou platbu. Ostatní typy událostí na topicu ignoruje.
+- Případ: typ screeningu `TRANSACTION_MONITORING`, riziko `HIGH` (otevře se tedy jako `UNDER_REVIEW`), kód `PAYMENT_HELD`, idempotency klíč `payment-hold:<rail>:<paymentId>`, `transactionId` je platba. Detail uvádí, proč je platba pozdržena, kdy pozdržení vyprší a co odpověděla každá kontrola.
+- Rozhodnutí o případu ukončí pozdržení na platební cestě: `CLEARED` platbu uvolní, `BLOCKED` ji zamítne. `ESCALATED` a `UNDER_REVIEW` ji nechávají čekat a platba se pak zamítne vypršením pozdržení.
+- Událost, kterou nelze přečíst, plátce, jehož stranu nelze dohledat, a neúspěšný zápis končí v `openbank.dlq.aml.payment-held-in`. Záznam tam znamená pozdrženou platbu bez případu: přehrajte jej, nebo o platbě rozhodněte na platební cestě dřív, než pozdržení vyprší.
+- Metrika: `openbank_aml_payment_held_events_total{outcome}` s hodnotami `case_opened`, `ignored` (jiný typ události) a `rejected`.
+- Zapínejte spolu s řetězcem platební cesty, nikdy jen platební cestu: pozdržení, jehož případ se neotevře, skončí vypršením, tedy zamítnutím.

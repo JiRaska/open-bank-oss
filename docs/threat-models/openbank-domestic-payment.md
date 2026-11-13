@@ -114,6 +114,15 @@ The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit ma
 - **Finalizer availability trade-off:** a disabled/stalled finalizer retains PENDING rows and reserved
   headroom rather than releasing funds without proof. This fail-closed strand is observable/retryable
   and is safer than a time-only release; the callback is a transactional domestic outbox event.
+- **Admission chain, not delivered with step A (ADR-0374):** (1) the decision on a hold's case is a
+  single analyst's in aml-service, where ADR-0374 D3 asks for four eyes; (2) a hold reserves no funds, so
+  the release re-runs standing only and balance is checked where it always was, at booking; (3) the
+  chain's `AUTHORITY` step is unbound on this rail and delegated authority is still decided by the
+  customer edge (ADR-0375 D1/D3); (4) between a party's suspension and account-service consuming it the
+  accounts still report `mayDebit`, because the rail reads account standing and not party standing;
+  (5) no alert watches the age of the oldest HELD payment yet, only the gauge
+  `openbank_domestic_payments_non_terminal_oldest_age_seconds{status="HELD"}` exists. Each is a
+  precondition of switching the chain on in production, not of merging it off.
 - SCA (sca-service) must gate customer-initiated transfers.
 - **Four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent audit
   trail** (ADR-0155) — a durable-audit requirement for "who approved what, forever" would
@@ -121,6 +130,45 @@ The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit ma
 
 ## 6. Change log
 
+- **2026-11-13** — **Payment admission chain on the domestic rail (ADR-0374 delivery step A, default
+  off).** With `openbank.domestic.admission.enabled` the workflow asks `PaymentAdmissionActivitiesImpl`
+  before anything else; `DomesticAdmissionChain` binds account standing, the ADR-0032 sanctions screen and
+  the ADR-0084 fraud score to the shared chain kernel, which fixes their order and maps a control that
+  cannot answer to a hold. Off, a run schedules nothing it did not schedule before.
+  - **New outbound read (trust boundary):** `GET /api/v1/accounts/{id}` on account-service is now read
+    for `standing.mayDebit`, under the M2M identity the rail already uses for that route. **Tampering /
+    spoofing:** the answer decides whether a payment is rejected, so the rail treats every unusable answer
+    as *unavailable*, never as "may debit": an unknown account, a response without `standing`, a non-2xx
+    and a timeout all hold the payment (`AccountServiceClient.debtorStanding`, `toStandingLookup`).
+    A consumer pact pins the field and account-service replays it on a pull request.
+  - **Elevation of privilege, release path:** a HELD payment is released only by `resolvePaymentHold`,
+    which the workflow accepts while it waits on a requested case and only for the key
+    `PaymentHoldPolicy.caseKey` (`payment-hold:domestic:<paymentId>`). `FraudHoldResolutionConsumer`
+    checks the same key before signalling, so a case somebody else created for the payment, the fraud
+    hold's case, and a decision that arrives during the automatic re-evaluation decide nothing. Whoever
+    may decide that case in aml-service can release the payment; that decision is a single analyst's
+    today (see residual risks).
+  - **Elevation of privilege, status endpoint:** `PATCH /{id}/status` answers 409 for a HELD payment
+    always, and for a RECEIVED payment while the chain is on (ADR-0374 D13). It starts no workflow, so it
+    could otherwise move a payment past controls that never ran. With the chain off a RECEIVED payment
+    keeps that exit: it is the only one a payment left behind by an exhausted screening re-drive has.
+  - **Repudiation / lost hold:** the move to HELD, its status event and the `PAYMENT_HELD` case request
+    are one transaction (`PaymentAdmissionWrites.transition`), so a hold that needs a human cannot exist
+    without its case request, and no case endpoint is called for a hold.
+  - **Information disclosure:** `PAYMENT_HELD` travels on `openbank.domestic.payment.events`, which
+    audit, context and pension also read. It carries the debtor's party id and account reference (both
+    already on that topic) and, as evidence, statuses, scores and the matched list entry; never the
+    debtor or creditor name. The customer is told nothing: no rejection this chain makes sends a
+    notification, and `customerSafeReason` renders `DEBTOR_ACCOUNT_BLOCKED` without naming a control,
+    because a freeze can be an AML block on the party.
+  - **Denial of service:** an outage of account-service, sanctions-service or (with fraud enforcement on)
+    fraud-service now HOLDS every payment instead of leaving it RECEIVED. Each is re-evaluated every
+    15 minutes, five times, and only then becomes a case, so a short outage heals with no human and a
+    long one becomes review-queue load: 75 minutes of outage turns every payment submitted in it into one
+    case. A hold nobody decides is rejected after 48 hours, never released. Watch
+    `openbank_payment_admission_step_unavailable_total{step,cause}`.
+  - **Rollback:** set the flag to `false`. Payments already HELD keep their hold path (the activity
+    evaluates a HELD payment whatever the flag says); no schema changes with the flag.
 - **2026-11-08** — **Fraud hold enforced in SANDBOX (#4403).** The sandbox deployment sets
   `OPENBANK_DOMESTIC_FRAUD_ENFORCEMENT_ENABLED` and `DOMESTIC_FRAUD_HOLD_RESOLUTION_CONSUMER_ENABLED`
   together; application defaults stay `false`. New availability exposure, not a new trust boundary: while

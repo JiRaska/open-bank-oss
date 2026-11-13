@@ -34,6 +34,16 @@ Telling a customer that they are monitored or reported is the worst outcome here
 - **A pack or scheme is swapped (tampering).** Counter scheme, features, vocabularies and pack are compiled at startup and pinned by content hash (`MonitoringPackLoader`); a mismatch stops the boot. Accepted limitation: the shipped files are synthetic and unsigned. Signature, approval and activation belong to the ADR-0354 pack lifecycle, and case opening stays off until then.
 - **Account-service unavailable.** Intake never calls it. Attribution retries; unresolved movements stay uncounted and visible.
 
+## Held-payment case intake (ADR-0374 D13, tampering, elevation of privilege, denial of service)
+
+`PaymentHeldConsumer` (channel `payment-held-in`, off by default) reads the event topic of each payment rail that has adopted the admission chain, today `openbank.domestic.payment.events`, and opens the one case of a held payment from the rail's `PAYMENT_HELD` event. This is a new inbound trust boundary: a rail can now create a case without calling the case endpoint.
+
+- **A producer forges a case (tampering, elevation of privilege).** Only the rail's own Kafka identity may write its topic. The consumer does not take the case key from the event: it derives `payment-hold:<rail>:<paymentId>` and refuses an event that claims any other key, so an event cannot create a case under a pack-monitoring key (`tm:`) or under the key of another payment. The case carries alert code `PAYMENT_HELD`; a rail releases a hold only on a decision of the case with exactly its derived key. Accepted limitation: the payload is not signed, so a compromised rail identity is trusted for cases about that rail's own payments.
+- **A hold loses its case (denial of service, repudiation).** The rail writes the event in the transaction that holds the payment, and this consumer is idempotent on the case key, so redelivery opens nothing twice. An event that cannot be read, a debtor whose party cannot be resolved and a failed write are rethrown to `openbank.dlq.aml.payment-held-in`; acking them would leave a payment held with nobody asked to decide it until it expires into a rejection.
+- **A hold floods the review queue.** A rail requests a case for an unavailable control only after its own bounded re-evaluation, so an outage of minutes opens no case. An outage longer than that opens one case per payment submitted in it; the queue's capacity is the operational limit ADR-0374 names.
+- **Information disclosure.** The event carries no name. The case stores the party id, the account reference and, as alert detail, the reason codes and the evidence of the controls: statuses, scores and a matched list entry.
+- **Not delivered: four eyes on the decision.** A hold's case is a rail-opened `TRANSACTION_MONITORING` case and keeps the single-analyst decision of `AmlCaseService.updateDecision`; ADR-0374 D3 asks for a four-eyes decision. Until that exists one analyst can release a held payment. Open item before the chain is switched on in production.
+
 ## Data
 
 Monitoring tables hold party and account identifiers, amounts and decisions. Classification is `restricted`. Retention overrides erasure for these records (ADR-0118); the period is not asserted in this document.

@@ -47,6 +47,15 @@ data class AccountStandingDto(val mayDebit: Boolean? = null, val reason: String?
 
 private const val HTTP_NOT_FOUND = 404
 
+/**
+ * What an account lookup says about standing. A response with no `standing`, or a `standing` with
+ * no `mayDebit`, is NOT "may debit": it is an answer the rail cannot use (ADR-0374 D4).
+ */
+fun AccountDto.toStandingLookup(): AccountStandingLookup {
+    val mayDebit = standing?.mayDebit ?: return AccountStandingLookup.Unavailable(UnavailableCause.MISSING_DATA)
+    return AccountStandingLookup.Known(UUID.fromString(partyId), mayDebit, standing.reason)
+}
+
 @ApplicationScoped
 class AccountServiceClient(
     private val oidcClient: Instance<OidcClient>,
@@ -106,13 +115,10 @@ class AccountServiceClient(
     @Suppress("TooGenericExceptionCaught")
     override suspend fun debtorStanding(accountId: UUID): AccountStandingLookup = try {
         val token = oidcClient.get().tokens.awaitSuspending().accessToken
-        val dto = httpClient.getById("Bearer $token", accountId.toString()).awaitSuspending()
-        val mayDebit = dto.standing?.mayDebit
-        if (mayDebit == null) {
-            log.warnf("Account lookup answered without standing — treating standing as unavailable")
-            AccountStandingLookup.Unavailable(UnavailableCause.MISSING_DATA)
-        } else {
-            AccountStandingLookup.Known(UUID.fromString(dto.partyId), mayDebit, dto.standing.reason)
+        httpClient.getById("Bearer $token", accountId.toString()).awaitSuspending().toStandingLookup().also {
+            if (it is AccountStandingLookup.Unavailable) {
+                log.warnf("Account lookup answered without standing — treating standing as unavailable")
+            }
         }
     } catch (ex: jakarta.ws.rs.WebApplicationException) {
         if (ex.response.status == HTTP_NOT_FOUND) {

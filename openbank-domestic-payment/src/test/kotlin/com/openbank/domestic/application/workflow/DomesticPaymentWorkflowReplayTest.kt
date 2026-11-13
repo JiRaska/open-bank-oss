@@ -54,6 +54,45 @@ class DomesticPaymentWorkflowReplayTest {
         }
     }
 
+    /**
+     * ADR-0374: a run recorded by the implementation as it stood before the admission chain has the
+     * `fraud-enforcement` and `settlement-unbounded-retry` markers and no `admission-chain` one. It
+     * must replay without a non-determinism error whether the chain is now on or off.
+     */
+    @Test
+    fun `a pre-admission-chain history replays against the current workflow, chain on or off`() {
+        TestWorkflowEnvironment.newInstance().use { env ->
+            val worker = env.newWorker(QUEUE)
+            worker.registerWorkflowImplementationTypes(PreAdmissionChainDomesticPaymentWorkflow::class.java)
+            val activities = mockk<DomesticPaymentActivities>(relaxed = true)
+            every { activities.screenPayment(any()) } returns ScreeningDecision.CLEAR
+            every { activities.fraudGate(any()) } returns FraudGateAction.PROCEED
+            every { activities.submitScheme(any()) } returns DomesticPaymentStatus.SENT_TO_CLEARING
+            every { activities.settlePayment(any()) } returns DomesticPaymentStatus.SETTLED
+            worker.registerActivitiesImplementations(activities)
+            env.start()
+
+            val stub = WorkflowStub.fromTyped(
+                env.workflowClient.newWorkflowStub(
+                    DomesticPaymentWorkflow::class.java,
+                    WorkflowOptions.newBuilder().setTaskQueue(QUEUE).build(),
+                ),
+            )
+            val execution = stub.start(UUID.randomUUID())
+            assertThat(stub.getResult(DomesticPaymentStatus::class.java)).isEqualTo(DomesticPaymentStatus.SETTLED)
+            val history = env.getWorkflowExecutionHistory(execution)
+
+            try {
+                for (switchedOn in listOf(false, true)) {
+                    PaymentAdmissionSwitch.enabled = switchedOn
+                    WorkflowReplayer.replayWorkflowExecution(history, DomesticPaymentWorkflowImpl::class.java)
+                }
+            } finally {
+                PaymentAdmissionSwitch.enabled = false
+            }
+        }
+    }
+
     private companion object {
         const val QUEUE = "replay-domestic-payments"
     }
@@ -95,5 +134,30 @@ class PreFraudGateDomesticPaymentWorkflow : DomesticPaymentWorkflow {
             }
         }
         ScreeningDecision.REVIEW -> DomesticPaymentStatus.RECEIVED
+    }
+}
+
+/**
+ * The command sequence of `DomesticPaymentWorkflowImpl.process` as it stood before ADR-0374 (fraud
+ * gate and unbounded settlement retry, no admission chain), for the clear-and-proceed path.
+ */
+class PreAdmissionChainDomesticPaymentWorkflow : DomesticPaymentWorkflow {
+    private val activities: DomesticPaymentActivities = Workflow.newActivityStub(
+        DomesticPaymentActivities::class.java,
+        ActivityOptions.newBuilder().setScheduleToCloseTimeout(Duration.ofMinutes(10)).build(),
+    )
+
+    override fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?) = Unit
+
+    override fun resolvePaymentHold(decision: PaymentHoldDecision, caseKey: String?) = Unit
+
+    override fun process(paymentId: UUID): DomesticPaymentStatus {
+        check(activities.screenPayment(paymentId) == ScreeningDecision.CLEAR) { "fixture covers the CLEAR path" }
+        activities.validatePayment(paymentId)
+        Workflow.getVersion(DomesticPaymentWorkflowImpl.FRAUD_ENFORCEMENT_CHANGE_ID, Workflow.DEFAULT_VERSION, 1)
+        check(activities.fraudGate(paymentId) == FraudGateAction.PROCEED) { "fixture covers PROCEED" }
+        check(activities.submitScheme(paymentId) == DomesticPaymentStatus.SENT_TO_CLEARING) { "fixture covers ACSC" }
+        Workflow.getVersion(DomesticPaymentWorkflowImpl.SETTLEMENT_RETRY_CHANGE_ID, Workflow.DEFAULT_VERSION, 1)
+        return activities.settlePayment(paymentId)
     }
 }

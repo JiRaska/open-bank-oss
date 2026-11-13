@@ -9,6 +9,8 @@ import com.openbank.domestic.application.usecase.FraudHoldResolutionService
 import com.openbank.domestic.application.usecase.PaymentHoldResolutionService
 import com.openbank.domestic.application.workflow.FraudHoldDelivery
 import com.openbank.domestic.application.workflow.FraudReviewDecision
+import com.openbank.domestic.application.workflow.PaymentHoldDecision
+import com.openbank.domestic.application.workflow.PaymentHoldPolicy
 import com.openbank.domestic.application.workflow.fraudReviewCaseKey
 import io.mockk.every
 import io.mockk.mockk
@@ -67,6 +69,36 @@ class FraudHoldResolutionConsumerTest {
         consumer.consume(event("CLEARED", key = "attacker-chosen-key"))
         consumer.consume(event("CLEARED", key = null))
         consumer.consume(event("CLEARED", key = fraudReviewCaseKey(UUID.randomUUID())))
+        verify(exactly = 0) { resolution.resolve(any(), any(), any()) }
+    }
+
+    @Test
+    fun `the decision of an admission hold's own case releases or rejects it (ADR-0374)`() {
+        every { holdResolution.resolve(any(), any(), any()) } returns true
+        val key = PaymentHoldPolicy.caseKey(paymentId)
+
+        runBlocking { consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = key)) }
+        runBlocking { consumer.consume(event("BLOCKED", alert = "PAYMENT_HELD", key = key)) }
+
+        verify(exactly = 1) { holdResolution.resolve(paymentId, PaymentHoldDecision.RELEASE, key) }
+        verify(exactly = 1) { holdResolution.resolve(paymentId, PaymentHoldDecision.REJECT, key) }
+        verify(exactly = 0) { resolution.resolve(any(), any(), any()) }
+    }
+
+    @Test
+    fun `no other case can decide an admission hold`(): Unit = runBlocking {
+        val key = PaymentHoldPolicy.caseKey(paymentId)
+        consumer.consume(event("ESCALATED", alert = "PAYMENT_HELD", key = key))
+        consumer.consume(event("UNDER_REVIEW", alert = "PAYMENT_HELD", key = key))
+        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = "attacker-chosen-key"))
+        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = null))
+        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = PaymentHoldPolicy.caseKey(UUID.randomUUID())))
+        // The fraud hold's key does not open an admission hold, and the other way round.
+        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = fraudReviewCaseKey(paymentId)))
+        consumer.consume(event("CLEARED", alert = "FRAUD_REVIEW", key = key))
+        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", tx = null, key = key))
+        consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", tx = "not-a-uuid", key = key))
+        verify(exactly = 0) { holdResolution.resolve(any(), any(), any()) }
         verify(exactly = 0) { resolution.resolve(any(), any(), any()) }
     }
 
