@@ -290,27 +290,6 @@ authz:
       worker:
         enabled: false
 
-"%prod":
-  quarkus:
-    http:
-      # Only an image with the required client-auth setting reads these certificate aliases.
-      # An older image can receive the GitOps config without opening a server-only TLS listener.
-      ssl:
-        client-auth: required
-        port: 8443
-        protocols: TLSv1.3
-        certificate:
-          files: ${KYB_INTERNAL_TLS_CERT_FILES:}
-          key-files: ${KYB_INTERNAL_TLS_KEY_FILES:}
-          trust-store-files: ${KYB_INTERNAL_TLS_TRUST_FILES:}
-      insecure-requests: enabled
-      auth:
-        permission:
-          bearer-only:
-            paths: /api/*
-            policy: permit
-            auth-mechanism: bearer
-
 "%test":
   quarkus:
     datasource:
@@ -344,6 +323,24 @@ authz:
         enabled: true
 "%prod":
   quarkus:
+    http:
+      # Only an image with the required client-auth setting reads these certificate aliases.
+      # An older image can receive the GitOps config without opening a server-only TLS listener.
+      ssl:
+        client-auth: required
+        port: 8443
+        protocols: TLSv1.3
+        certificate:
+          files: ${KYB_INTERNAL_TLS_CERT_FILES:}
+          key-files: ${KYB_INTERNAL_TLS_KEY_FILES:}
+          trust-store-files: ${KYB_INTERNAL_TLS_TRUST_FILES:}
+      insecure-requests: enabled
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
     # The sanctions-service rest-client uses a named TLS bucket over sanctions-service's
     # private-CA mTLS listener (8443, client auth REQUIRED), the same shape as every other new
     # east-west edge (#15723). Local/test fixtures speak plain HTTP, so this stays under %prod:
