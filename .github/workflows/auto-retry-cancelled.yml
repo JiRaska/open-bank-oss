@@ -19,7 +19,15 @@
 # scan also reads runs CREATED up to 24 hours ago, because GitHub's `created` query cannot filter
 # by completion time: a long matrix run can finish now after starting hours ago (#10262). The
 # deep scan retains a three-hour completion overlap; `run_attempt == 1` and the flake ledger marker
-# make repeated scans idempotent. Before #9645, `workflow_run: completed`
+# make repeated scans idempotent.
+#
+# Two bounds, not one (#15962). The frequent scan used a single 30-minute bound for creation
+# AND completion, so it saw only runs that started and finished inside one half hour — never a
+# main Services CI run that fans out to the self-hosted pool. And the deep scan was reachable
+# only from the hourly cron, which is delivered far less often than hourly. The frequent scan
+# now reads four hours of creations for the same 30-minute completion lookback, and a
+# dispatched tick takes the deep window once an hour. Both rules live in
+# `select-ci-reconcile-candidates.py` with their fixtures. Before #9645, `workflow_run: completed`
 # created a new Actions run for every watched completion, including ordinary successes whose
 # jobs were all skipped. A PR burst exhausted the installation's 5,000-call API quota and made
 # unrelated security gates fail with rate-limit 403s.
@@ -133,8 +141,9 @@ on:
       scan_mode:
         description: "Reconciliation query window"
         type: choice
-        options: [short, deep]
-        default: short
+        # auto: deep when the tick starts in the first 25 minutes of the hour, else short.
+        options: [auto, short, deep]
+        default: auto
 
 concurrency:
   group: ci-reconcile
@@ -181,12 +190,13 @@ jobs:
           set -euo pipefail
           source .github/scripts/gh-retry.sh
           started_at=$(date +%s)
-          mode=short
-          if [[ "$RECONCILE_SCHEDULE" == '7 * * * *' || "$RECONCILE_DISPATCH_MODE" == deep ]]; then
-            mode=deep
-          fi
+          # The window is decided by the script (resolve_mode, self-tested), not here: the
+          # hourly cron is delivered too rarely to be the only path to the deep scan (#15962).
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          mode=$(python3 .github/scripts/select-ci-reconcile-candidates.py --resolve-mode \
+            --schedule "$RECONCILE_SCHEDULE" --dispatch-mode "$RECONCILE_DISPATCH_MODE" --now "$now")
           plan=$(python3 .github/scripts/select-ci-reconcile-candidates.py \
-            --query-mode "$mode" --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+            --query-mode "$mode" --now "$now")
           created_query=$(jq -r '.created_query' <<< "$plan")
           lookback=$(jq -r '.updated_lookback_minutes' <<< "$plan")
           echo "mode=$mode created_range=$created_query updated_lookback_minutes=$lookback" >> "$GITHUB_STEP_SUMMARY"
