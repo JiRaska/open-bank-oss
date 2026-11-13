@@ -36,7 +36,6 @@ class RescreenBacklogGaugeIT {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "openbank.kyc.screening-triggers.backlog-sample-interval" to "1s",
             "openbank.kyc.screening-triggers.enabled" to "false",
-            "openbank.kyc.screening-triggers.retry-enabled" to "false",
             "openbank.outbox.dispatch-enabled" to "false",
             "authz.enforce" to "false",
         )

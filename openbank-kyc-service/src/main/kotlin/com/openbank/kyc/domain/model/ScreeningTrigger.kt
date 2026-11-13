@@ -13,9 +13,20 @@ import java.util.UUID
  * for a party through the case coordinator. Triggers only ever OPEN a case — disposition stays
  * with a human (ADR-0256 D2), so there is no terminal "concluded" state here; [OPENED] means the
  * coordinator accepted the case (or already had one), [OPEN_FAILED] means the open is outstanding
- * and owned by the retry job.
+ * and owned by the retry job, [DEFERRED] means it was recorded while the loop was switched off.
  */
-enum class ScreeningTriggerState { PENDING, OPENED, OPEN_FAILED }
+enum class ScreeningTriggerState {
+    PENDING,
+    OPENED,
+    OPEN_FAILED,
+
+    /**
+     * Recorded while the master switch was off: no attempt made, no coordinator call. A state of
+     * its own (not PENDING with attempts 0) so that code predating it, which selects only
+     * PENDING/OPEN_FAILED, cannot claim it after an image rollback (issue #15961).
+     */
+    DEFERRED,
+}
 
 /** Why an open failed, carried on the row and on the KYC_COORDINATOR_OPEN_FAILED event. */
 enum class ScreeningTriggerFailure {
