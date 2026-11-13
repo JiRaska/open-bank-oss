@@ -71,6 +71,8 @@ class AmlCountShadowEpochStore(private val pool: PgPool, private val mapper: Obj
     }
 
     private suspend fun followsPredecessor(record: RecordedCountShadowEpoch): Boolean {
+        // Mirror the chain CHECK so a mis-linked record answers CONFLICT instead of a constraint error.
+        if (record.previousNumber != (record.envelope.epoch.number - 1).takeIf { it > 0 }) return false
         val previousNumber = record.previousNumber ?: return true
         val previous = recorded(record.domain, previousNumber)?.envelope?.epoch ?: return false
         val epoch = record.envelope.epoch
