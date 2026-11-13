@@ -42,21 +42,38 @@ interface PaymentAdmissionWrites {
     suspend fun transition(payment: DomesticPayment, events: List<OutboxMessage>): DomesticPayment
 
     /**
-     * Request the case of a payment that is still HELD: write [event] and mark the case as
-     * requested at [requestedAt], in one transaction. A payment whose case was already requested
-     * is left as it is, so a repeat writes no second event. Returns false, and writes nothing,
-     * when the payment has left HELD in the meantime.
+     * Request the case of a payment that is still HELD: write [event], mark the case as requested
+     * at [requestedAt] and record the [reasons] it is asked to decide, in one transaction. A payment
+     * whose case was already requested is left as it is, so a repeat writes no second event.
+     * Returns false, and writes nothing, when the payment has left HELD in the meantime.
      */
-    suspend fun requestCaseWhileHeld(paymentId: UUID, event: OutboxMessage, requestedAt: Instant): Boolean
+    suspend fun requestCaseWhileHeld(
+        paymentId: UUID,
+        event: OutboxMessage,
+        requestedAt: Instant,
+        reasons: Set<String>,
+    ): Boolean
 
     /**
-     * Accept [decision] as the decision of the payment's hold, once. It is accepted only for a
-     * payment that is HELD with its case requested, that has no decision yet, and whose hold has
-     * not reached [expiresAfter] since it began: expiry wins over a decision that comes later.
+     * Ask for another review of a hold whose review [fromReview] was decided: in one transaction
+     * the review number goes up by one, the decision of the earlier review is cleared from the row
+     * (its case keeps it), [reasons] become what the new case is asked to decide, and [event]
+     * requests that case. Nothing about the hold's start or expiry changes. Returns false, and
+     * writes nothing, when the payment is no longer HELD on review [fromReview]: another attempt
+     * already asked.
+     */
+    suspend fun requestNextReview(paymentId: UUID, fromReview: Int, reasons: Set<String>, event: OutboxMessage): Boolean
+
+    /**
+     * Accept [decision] as the decision of review [review] of the payment's hold, once. It is
+     * accepted only for a payment that is HELD with its case requested, whose current review is
+     * [review], that has no decision yet, and whose hold has not reached [expiresAfter] since it
+     * began: expiry wins over a decision that comes later.
      * The answer says which of those it was; nothing else about the payment changes.
      */
     suspend fun recordHoldDecision(
         paymentId: UUID,
+        review: Int,
         decision: HoldDecision,
         at: Instant,
         expiresAfter: Duration,
@@ -76,6 +93,9 @@ enum class HoldDecisionRecord {
 
     /** The hold already has a decision; the first one stands. */
     ALREADY_DECIDED,
+
+    /** The decision is of another review than the hold's current one; it decides nothing. */
+    OTHER_REVIEW,
 
     /** The hold has reached its expiry; it ends in rejection whatever the case says now. */
     EXPIRED,

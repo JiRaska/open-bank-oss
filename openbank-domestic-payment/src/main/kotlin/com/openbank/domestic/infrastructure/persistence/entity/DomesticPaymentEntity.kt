@@ -152,6 +152,14 @@ class DomesticPaymentEntity : PanacheEntity() {
     @Column(name = "hold_case_requested_at")
     var holdCaseRequestedAt: Instant? = null
 
+    /** ADR-0374: which review of the hold is current; null reads as the first. */
+    @Column(name = "hold_review")
+    var holdReview: Int? = null
+
+    /** ADR-0374: the `STEP:REASON` pairs the current review's case was asked to decide, comma-separated. */
+    @Column(name = "hold_case_reasons")
+    var holdCaseReasons: String? = null
+
     /** ADR-0374: the accepted decision of the hold's case (RELEASE or REJECT); null until one is. */
     @Column(name = "hold_decision")
     var holdDecision: String? = null

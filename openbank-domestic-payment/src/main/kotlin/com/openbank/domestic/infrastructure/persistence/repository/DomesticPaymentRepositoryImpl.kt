@@ -19,6 +19,7 @@ import com.openbank.domestic.domain.model.HoldDecision
 import com.openbank.domestic.domain.model.RecordedFraudScore
 import com.openbank.domestic.infrastructure.persistence.entity.DelegatedSpendBindingEntity
 import com.openbank.domestic.infrastructure.persistence.entity.DomesticPaymentEntity
+import com.openbank.domestic.infrastructure.persistence.mapper.toColumn
 import com.openbank.domestic.infrastructure.persistence.mapper.toDomain
 import com.openbank.domestic.infrastructure.persistence.mapper.toEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -225,33 +226,67 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
 
     // Locks the row so the check and the insert are one decision: a concurrent release or reject
     // either commits first (and this writes nothing) or waits for this event to be written.
-    override suspend fun requestCaseWhileHeld(paymentId: UUID, event: OutboxMessage, requestedAt: Instant): Boolean =
-        Panache.withTransaction {
-            Panache.getSession().flatMap { session ->
-                session.createQuery(
-                    "FROM DomesticPaymentEntity WHERE paymentId = :paymentId",
-                    DomesticPaymentEntity::class.java,
-                ).setParameter("paymentId", paymentId)
-                    .setLockMode(LockModeType.PESSIMISTIC_WRITE)
-                    .singleResultOrNull
-                    .flatMap { entity ->
-                        when {
-                            entity?.status != DomesticPaymentStatus.HELD.name -> Uni.createFrom().item(false)
-                            // Already requested: the hold has its case, a second event would say nothing new.
-                            entity.holdCaseRequestedAt != null -> Uni.createFrom().item(true)
-                            else -> {
-                                entity.holdCaseRequestedAt = requestedAt
-                                outboxRepository.persistWithinCurrentTransaction(event).replaceWith(true)
-                            }
+    override suspend fun requestCaseWhileHeld(
+        paymentId: UUID,
+        event: OutboxMessage,
+        requestedAt: Instant,
+        reasons: Set<String>,
+    ): Boolean = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "FROM DomesticPaymentEntity WHERE paymentId = :paymentId",
+                DomesticPaymentEntity::class.java,
+            ).setParameter("paymentId", paymentId)
+                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                .singleResultOrNull
+                .flatMap { entity ->
+                    when {
+                        entity?.status != DomesticPaymentStatus.HELD.name -> Uni.createFrom().item(false)
+                        // Already requested: the hold has its case, a second event would say nothing new.
+                        entity.holdCaseRequestedAt != null -> Uni.createFrom().item(true)
+                        else -> {
+                            entity.holdCaseRequestedAt = requestedAt
+                            entity.holdCaseReasons = reasons.toColumn()
+                            outboxRepository.persistWithinCurrentTransaction(event).replaceWith(true)
                         }
                     }
-            }
-        }.awaitSuspending()
+                }
+        }
+    }.awaitSuspending()
+
+    // Locks the row, so two attempts of one release cannot both ask: the second finds the review
+    // already moved on and writes nothing.
+    override suspend fun requestNextReview(
+        paymentId: UUID,
+        fromReview: Int,
+        reasons: Set<String>,
+        event: OutboxMessage,
+    ): Boolean = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "FROM DomesticPaymentEntity WHERE paymentId = :paymentId",
+                DomesticPaymentEntity::class.java,
+            ).setParameter("paymentId", paymentId)
+                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                .singleResultOrNull
+                .flatMap { entity ->
+                    if (entity?.status == DomesticPaymentStatus.HELD.name && (entity.holdReview ?: 1) == fromReview) {
+                        entity.holdReview = fromReview + 1
+                        entity.holdDecision = null
+                        entity.holdCaseReasons = reasons.toColumn()
+                        outboxRepository.persistWithinCurrentTransaction(event).replaceWith(true)
+                    } else {
+                        Uni.createFrom().item(false)
+                    }
+                }
+        }
+    }.awaitSuspending()
 
     // One guarded bulk update decides acceptance, so two deliveries of a decision, or a decision
     // racing the expiry, cannot both win. When it changes nothing the row says why.
     override suspend fun recordHoldDecision(
         paymentId: UUID,
+        review: Int,
         decision: HoldDecision,
         at: Instant,
         expiresAfter: Duration,
@@ -260,11 +295,12 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
         // the move to HELD.
         update(
             "holdDecision = ?1 where paymentId = ?2 and status = ?3 and holdCaseRequestedAt is not null " +
-                "and holdDecision is null and coalesce(heldAt, updatedAt) > ?4",
+                "and holdDecision is null and coalesce(heldAt, updatedAt) > ?4 and coalesce(holdReview, 1) = ?5",
             decision.name,
             paymentId,
             DomesticPaymentStatus.HELD.name,
             at.minus(expiresAfter),
+            review,
         ).flatMap { changed ->
             if (changed == 1) {
                 Uni.createFrom().item(HoldDecisionRecord.ACCEPTED)
@@ -273,6 +309,7 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
                     when {
                         entity?.status != DomesticPaymentStatus.HELD.name || entity.holdCaseRequestedAt == null ->
                             HoldDecisionRecord.NO_HOLD
+                        (entity.holdReview ?: 1) != review -> HoldDecisionRecord.OTHER_REVIEW
                         entity.holdDecision != null -> HoldDecisionRecord.ALREADY_DECIDED
                         else -> HoldDecisionRecord.EXPIRED
                     }
@@ -335,7 +372,10 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
                     // Hold facts only ever go from unset to set; a writer holding an older read of
                     // the payment must not clear what another transaction recorded meanwhile.
                     entity.heldAt = entity.heldAt ?: payment.heldAt
-                    entity.holdCaseRequestedAt = entity.holdCaseRequestedAt ?: payment.holdCaseRequestedAt
+                    if (entity.holdCaseRequestedAt == null && payment.holdCaseRequestedAt != null) {
+                        entity.holdCaseRequestedAt = payment.holdCaseRequestedAt
+                        entity.holdCaseReasons = payment.holdCaseReasons.toColumn()
+                    }
                     // holdDecision is written by recordHoldDecision alone and never by a lifecycle write.
                 }
                 // One after another on the one session; every row is part of this transaction.

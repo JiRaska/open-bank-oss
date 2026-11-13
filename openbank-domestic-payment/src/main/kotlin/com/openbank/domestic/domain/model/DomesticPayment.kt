@@ -203,6 +203,17 @@ data class DomesticPayment(
      */
     val holdCaseRequestedAt: Instant? = null,
     /**
+     * Which review of this hold is the current one, counted from 1. A hold normally has one. It gets
+     * another when, at release, a control reports something no reviewer has seen.
+     */
+    val holdReview: Int = 1,
+    /**
+     * What the current review's case was asked to decide: one `STEP:REASON` for every control that
+     * answered "review" when the case was requested. A case decision covers exactly these and
+     * nothing else. Empty for a case requested only because a control could not answer.
+     */
+    val holdCaseReasons: Set<String> = emptySet(),
+    /**
      * What the hold's case decided, recorded on the row when the decision is accepted and applied
      * by whichever workflow run reaches it. Null until a decision is accepted. The row is the only
      * place the decision lives, so a run that dies after the decision loses nothing.
@@ -274,10 +285,10 @@ data class DomesticPayment(
     fun holdExpiresAt(term: Duration): Instant? =
         if (status == DomesticPaymentStatus.HELD) (heldAt ?: updatedAt).plus(term) else null
 
-    /** The same held payment with its case marked as requested at [at]. */
-    fun withHoldCaseRequested(at: Instant): DomesticPayment {
+    /** The same held payment with its case marked as requested at [at] for [reasons]. */
+    fun withHoldCaseRequested(at: Instant, reasons: Set<String>): DomesticPayment {
         require(status == DomesticPaymentStatus.HELD) { "Only a HELD payment has a case to request, not $status" }
-        return copy(holdCaseRequestedAt = holdCaseRequestedAt ?: at)
+        return if (holdCaseRequestedAt != null) this else copy(holdCaseRequestedAt = at, holdCaseReasons = reasons)
     }
 
     fun canTransitionTo(targetStatus: DomesticPaymentStatus): Boolean = when (status) {

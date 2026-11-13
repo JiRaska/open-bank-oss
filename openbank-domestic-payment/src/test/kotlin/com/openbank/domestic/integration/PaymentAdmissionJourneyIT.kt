@@ -592,13 +592,7 @@ class PaymentAdmissionJourneyIT {
         world.screeningDown.set(true)
         val clean = create(creditorName = "Brno Waterworks")
         val listed = create(creditorName = "SANCTIONED Trading")
-        for (payment in listOf(clean, listed)) awaitStatus(payment, "HELD")
-        repeat(PaymentHoldPolicy.MAX_REEVALUATIONS) {
-            runtime.advance(PaymentHoldPolicy.REEVALUATION_INTERVAL.plusMinutes(1))
-        }
-        for (payment in listOf(clean, listed)) {
-            await("the outage to become the case of $payment") { heldEvents(payment).size == 1 }
-        }
+        heldByOutage(clean, listed)
 
         // The reviewer clears both. Neither was ever screened.
         kafkaProducer().use { producer ->
@@ -629,6 +623,117 @@ class PaymentAdmissionJourneyIT {
         assertThat(rejectReason(listed)).isEqualTo("SANCTIONS_HIT")
         assertThat(world.submissions(clean)).isEqualTo(1)
         assertThat(world.submissions(listed)).isZero()
+    }
+
+    /** A hold that became a case only because sanctions screening was down: nothing was ever screened. */
+    private fun heldByOutage(vararg payments: UUID) {
+        for (payment in payments) awaitStatus(payment, "HELD")
+        repeat(PaymentHoldPolicy.MAX_REEVALUATIONS) {
+            runtime.advance(PaymentHoldPolicy.REEVALUATION_INTERVAL.plusMinutes(1))
+        }
+        for (payment in payments) {
+            await("the outage to become the case of $payment") { heldEvents(payment).size == 1 }
+        }
+    }
+
+    private fun clear(payment: UUID, review: Int = 1) {
+        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment, review)) }
+        await("the release of $payment to be recorded") { column(payment, "hold_decision") == "RELEASE" }
+    }
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR", "ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "sub", value = OPERATOR),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `a case cleared for an outage does not clear the match the control reports when it comes back`() {
+        world.screeningDown.set(true)
+        val key = "admission-edge-${UUID.randomUUID()}"
+        val payment = create(creditorName = "REVIEW Nobody Saw", idempotencyKey = key, customerScope = SCOPE)
+        heldByOutage(payment)
+        assertThat(
+            column(payment, "hold_case_reasons"),
+        ).describedAs("the case was asked about no control").isEqualTo("none")
+
+        // The reviewer clears "sanctions was unavailable". Then sanctions answers: a potential match.
+        clear(payment)
+        world.screeningDown.set(false)
+        runtime.advance(PaymentHoldPolicy.HOLD_CHECK_INTERVAL.plusMinutes(1))
+
+        // Nobody reviewed that match. The payment is not sent; a review of its own is requested.
+        await("the second review to be requested") { heldEvents(payment).size == 2 }
+        val second = heldEvents(payment).last().payload
+        assertThat(second.path("caseKey").asText()).isEqualTo(PaymentHoldPolicy.caseKey(payment, 2))
+        assertThat(second.path("review").asInt()).isEqualTo(2)
+        assertThat(second.path("reasons").map { it.asText() }).containsExactly("SANCTIONS_POTENTIAL_MATCH")
+        assertThat(status(payment)).isEqualTo("HELD")
+        assertThat(column(payment, "hold_review")).isEqualTo("2")
+        assertThat(column(payment, "hold_decision")).isEqualTo("none")
+        assertThat(column(payment, "hold_case_reasons")).isEqualTo("SANCTIONS:SANCTIONS_POTENTIAL_MATCH")
+        assertThat(world.submissions(payment)).isZero()
+        // The customer still reads what they read before: received, no reason.
+        RestAssured.given().get("/api/v1/domestic-payments/$payment").then().statusCode(200)
+            .body("status", equalTo("RECEIVED")).body("rejectReason", nullValue())
+
+        // The first case deciding again changes nothing; the second review's decision releases.
+        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment)) }
+        runtime.advance(PaymentHoldPolicy.HOLD_CHECK_INTERVAL.plusMinutes(1))
+        assertThat(status(payment)).isEqualTo("HELD")
+        assertThat(column(payment, "hold_decision")).isEqualTo("none")
+
+        clear(payment, review = 2)
+        awaitStatus(payment, "SETTLED")
+        assertThat(world.submissions(payment)).isEqualTo(1)
+        assertThat(heldEvents(payment)).hasSize(2)
+    }
+
+    @Test
+    fun `a case cleared for a fraud review releases the payment - what the case decided does not block it`() {
+        val payment = create(amount = FakeFraud.REVIEW_AMOUNT)
+        awaitStatus(payment, "HELD")
+        assertThat(column(payment, "hold_case_reasons")).isEqualTo("FRAUD:FRAUD_REVIEW")
+
+        clear(payment)
+
+        awaitStatus(payment, "SETTLED")
+        assertThat(heldEvents(payment)).hasSize(1)
+        assertThat(column(payment, "hold_review")).isIn("1", "none")
+    }
+
+    @Test
+    fun `a case cleared for a fraud review does not clear a sanctions match that appears during the hold`() {
+        val payment = create(creditorName = "Newly Listed Ltd", amount = FakeFraud.REVIEW_AMOUNT)
+        awaitStatus(payment, "HELD")
+        assertThat(column(payment, "hold_case_reasons")).isEqualTo("FRAUD:FRAUD_REVIEW")
+
+        // The list changes while the payment is held.
+        world.newlyListed += "Newly Listed Ltd"
+        // Not `clear`: the decision is taken off the row again as soon as the second review is
+        // requested, which can be before a poll sees it.
+        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment)) }
+
+        await("the second review to be requested") { heldEvents(payment).size == 2 }
+        assertThat(status(payment)).isEqualTo("HELD")
+        assertThat(column(payment, "hold_review")).isEqualTo("2")
+        assertThat(
+            column(payment, "hold_case_reasons"),
+        ).isEqualTo("FRAUD:FRAUD_REVIEW,SANCTIONS:SANCTIONS_POTENTIAL_MATCH")
+        assertThat(world.submissions(payment)).isZero()
+
+        // The second review does not restart the clock: 48 hours from the FIRST hold, it is rejected.
+        shiftHold(payment, PaymentHoldPolicy.EXPIRY.plusHours(1))
+        runtime.advance(PaymentHoldPolicy.HOLD_CHECK_INTERVAL.plusMinutes(1))
+        awaitStatus(payment, "REJECTED")
+        assertThat(rejectReason(payment)).isEqualTo("AML_HOLD")
+        // And a clearance of the second review that comes after that is not accepted.
+        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment, 2)) }
+        runtime.advance(Duration.ofMinutes(2))
+        assertThat(status(payment)).isEqualTo("REJECTED")
+        assertThat(world.submissions(payment)).isZero()
     }
 
     @Test
@@ -902,6 +1007,9 @@ class AdmissionWorld {
     val scoreCalls = ConcurrentHashMap<UUID, AtomicInteger>()
     val screenings = AtomicInteger()
     val standingUnanswered = AtomicInteger()
+
+    /** Names sanctions screening reports as a potential match from now on: a list that changed. */
+    val newlyListed: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val submitted = ConcurrentHashMap<UUID, AtomicInteger>()
 
     fun submitted(paymentId: UUID) {
@@ -917,6 +1025,7 @@ class AdmissionWorld {
         standingGate.getAndSet(null)?.complete(Unit)
         standingWaiters.set(0)
         standingUnanswered.set(0)
+        newlyListed.clear()
     }
 }
 
@@ -953,7 +1062,7 @@ class FakeScreening(private val world: AdmissionWorld) : SanctionsScreeningPort 
         world.screened += idempotencyKey
         world.screenings.incrementAndGet()
         val status = when {
-            name.startsWith("REVIEW") -> ScreeningMatchStatus.POTENTIAL_HIT
+            name.startsWith("REVIEW") || name in world.newlyListed -> ScreeningMatchStatus.POTENTIAL_HIT
             name.startsWith("SANCTIONED") -> ScreeningMatchStatus.HIT
             else -> ScreeningMatchStatus.CLEAR
         }

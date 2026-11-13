@@ -7,7 +7,10 @@
 --    set in the same transaction as that event. A repeated admission of the payment (a retried
 --    activity attempt, or a run started to recover a hold whose run died) reads it and answers
 --    "held for review" without asking any control again and without a second event.
--- 3. hold_decision: what the hold's case decided (RELEASE or REJECT), recorded when the decision is
+-- 3. hold_review, hold_case_reasons: which review of the hold is current (NULL reads as the
+--    first), and what its case was asked to decide, as STEP:REASON pairs. A case decision covers
+--    exactly those; a control that reports something else at release gets a review of its own.
+-- 3b. hold_decision: what the hold's case decided (RELEASE or REJECT), recorded when the decision is
 --    accepted. The workflow run reads it from the row, so a run that dies after the decision was
 --    accepted loses nothing and the run that recovers the hold applies it.
 -- 4. run_checked_at: when the sweep last offered the payment a workflow run. Ordering only, so the
@@ -17,7 +20,7 @@
 --    later evaluation. fraud-service keeps and counts every score it gives, so scoring one payment
 --    on each re-evaluation would add to what it holds against the account.
 --
--- All seven columns are nullable with no default: metadata-only, no rewrite, no backfill. A pod from
+-- All nine columns are nullable with no default: metadata-only, no rewrite, no backfill. A pod from
 -- before this migration neither reads nor writes them and is unaffected; rows it writes carry NULL,
 -- which every reader treats as "not held / not requested / not scored".
 --
@@ -25,6 +28,7 @@
 -- payment HELD, then
 --   ALTER TABLE domestic_payments
 --       DROP COLUMN held_at, DROP COLUMN hold_case_requested_at, DROP COLUMN hold_decision,
+--       DROP COLUMN hold_review, DROP COLUMN hold_case_reasons,
 --       DROP COLUMN run_checked_at, DROP COLUMN admission_fraud_verdict,
 --       DROP COLUMN admission_fraud_score, DROP COLUMN admission_fraud_rule_version;
 --   DROP INDEX IF EXISTS idx_domestic_payments_held;
@@ -33,6 +37,8 @@
 ALTER TABLE domestic_payments
     ADD COLUMN held_at TIMESTAMPTZ,
     ADD COLUMN hold_case_requested_at TIMESTAMPTZ,
+    ADD COLUMN hold_review INTEGER,
+    ADD COLUMN hold_case_reasons VARCHAR(512),
     ADD COLUMN hold_decision VARCHAR(16),
     ADD COLUMN run_checked_at TIMESTAMPTZ,
     ADD COLUMN admission_fraud_verdict VARCHAR(32),

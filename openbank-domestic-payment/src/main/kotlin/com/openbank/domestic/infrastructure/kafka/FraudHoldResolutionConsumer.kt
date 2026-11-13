@@ -94,10 +94,12 @@ class FraudHoldResolutionConsumer(
             log.warnf("PAYMENT_HELD case %s decided without a payment id", node.path("caseId").asText())
             return
         }
-        val caseKey = node.path("idempotencyKey").asText("")
-        if (caseKey != PaymentHoldPolicy.caseKey(paymentId)) {
+        // The key says which hold and which of its reviews the decision belongs to; the row then
+        // says whether that review is the current one.
+        val review = PaymentHoldPolicy.reviewOf(node.path("idempotencyKey").asText(""), paymentId)
+        if (review == null) {
             log.warnf(
-                "PAYMENT_HELD case %s is not the hold's own case for payment %s; ignored",
+                "PAYMENT_HELD case %s is not a case of the hold of payment %s; ignored",
                 node.path("caseId").asText(),
                 paymentId,
             )
@@ -109,7 +111,7 @@ class FraudHoldResolutionConsumer(
             key = paymentId,
             isRetryable = EventRetry.RETRY_UNLESS_DETERMINISTIC,
         ) {
-            withContext(Dispatchers.IO) { holdResolution.resolve(paymentId, decision) }
+            withContext(Dispatchers.IO) { holdResolution.resolve(paymentId, review, decision) }
         }
     }
 

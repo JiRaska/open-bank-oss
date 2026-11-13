@@ -115,6 +115,23 @@ object PaymentHoldPolicy {
      */
     fun caseKey(paymentId: UUID): String = "payment-hold:domestic:$paymentId"
 
+    /**
+     * Key of the case of review [review] of the hold. The first review keeps the plain key; a later
+     * one carries its number, so its case cannot be the earlier, already decided one.
+     */
+    fun caseKey(paymentId: UUID, review: Int): String =
+        if (review <= 1) caseKey(paymentId) else "${caseKey(paymentId)}:$review"
+
+    /** Which review of [paymentId]'s hold [caseKey] is the case of, or null when it is not one. */
+    fun reviewOf(caseKey: String, paymentId: UUID): Int? {
+        val first = caseKey(paymentId)
+        return when {
+            caseKey == first -> 1
+            caseKey.startsWith("$first:") -> caseKey.removePrefix("$first:").toIntOrNull()?.takeIf { it > 1 }
+            else -> null
+        }
+    }
+
     /** Alert code of that case; with [caseKey] it binds a decision to the hold. */
     const val CASE_ALERT_CODE = "PAYMENT_HELD"
 }

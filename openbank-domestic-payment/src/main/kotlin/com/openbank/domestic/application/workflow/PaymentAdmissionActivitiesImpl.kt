@@ -156,16 +156,17 @@ open class PaymentAdmissionActivitiesImpl(
                 record.outcome is StepOutcome.Decided &&
                     (record.effective ?: AdmissionDecision.ALLOW) > AdmissionDecision.ALLOW
             }
+        val reasons = result.reviewReasons()
         if (payment.status == DomesticPaymentStatus.RECEIVED) {
             val held = payment.transitionTo(DomesticPaymentStatus.HELD, clock = clock)
-            val updated = if (wantsReview) held.withHoldCaseRequested(Instant.now(clock)) else held
+            val updated = if (wantsReview) held.withHoldCaseRequested(Instant.now(clock), reasons) else held
             val events = buildList {
                 add(eventPublisher.statusChanged(payment, updated))
                 if (wantsReview) add(heldEvent(updated, result))
             }
             writes.transition(updated, events)
         } else if (wantsReview &&
-            !writes.requestCaseWhileHeld(payment.id, heldEvent(payment, result), Instant.now(clock))
+            !writes.requestCaseWhileHeld(payment.id, heldEvent(payment, result), Instant.now(clock), reasons)
         ) {
             // It left HELD between the read and the write; the workflow's next step reads the truth.
             log.warnf("Payment %s left HELD while its review was being requested", payment.id)
@@ -202,25 +203,28 @@ open class PaymentAdmissionActivitiesImpl(
 
     /**
      * The one place a HELD payment becomes VALIDATED on a case decision, and so the one place that
-     * holds the rule: a payment is sent only if every control bound on this rail ANSWERED for it
-     * and none refuses.
+     * holds the rule: a payment is sent only if every control bound on this rail answered for it,
+     * none refuses, and every "review" among the answers is one the released case was asked about.
      *
-     * The case decided what a control asked a human about. It did not answer for a control that
-     * never spoke: a hold that became a case because sanctions screening was down has no screening
-     * result, and releasing it on the case alone would send an unscreened payment. So the whole
-     * chain is evaluated again here. Hours may also have passed, and the account may have been
-     * frozen since; that is the standing step of the same evaluation.
+     * A case decision covers exactly what the case was opened for ([DomesticPayment.holdCaseReasons],
+     * recorded with the case request) and nothing else. It does not answer for a control that never
+     * spoke, and it does not answer a question nobody put to the reviewer. So the whole chain is
+     * evaluated again here, hours after the hold began:
      *
      *  - a control refuses: REJECTED;
      *  - a control still cannot answer: the payment stays HELD and the run looks again later;
-     *  - every control answered, some with "review": the case decision is the answer to that, and
-     *    the payment is VALIDATED.
+     *  - a control asks for a review the case did not cover (a control that was down when the case
+     *    was opened and now reports a match; a list that changed during the hold): the payment
+     *    stays HELD and a new review is requested for what the controls say now, as a case of its
+     *    own, inside the same hold and the same expiry;
+     *  - every control allows, or asks for a review this case already decided: VALIDATED.
      */
     private suspend fun release(payment: DomesticPayment): HoldState {
         var freshFraudScore: RecordedFraudScore? = null
         val result = chain.admit(payment) { freshFraudScore = it }
         freshFraudScore?.let { writes.rememberFraudScore(payment.id, it) }
         val unanswered = result.steps.filter { it.outcome is StepOutcome.Unavailable }
+        val uncovered = result.reviewReasons() - payment.holdCaseReasons
         return when {
             result.decision == AdmissionDecision.REJECT -> {
                 rejected(payment, result)
@@ -235,6 +239,24 @@ open class PaymentAdmissionActivitiesImpl(
                     "Held payment %s was released by its case but %s could not answer; it stays HELD",
                     payment.id,
                     unanswered.map { it.step },
+                )
+                HoldState.WAITING
+            }
+            uncovered.isNotEmpty() -> {
+                val next = payment.copy(holdReview = payment.holdReview + 1, holdCaseReasons = result.reviewReasons())
+                val asked = writes.requestNextReview(
+                    payment.id,
+                    fromReview = payment.holdReview,
+                    reasons = next.holdCaseReasons,
+                    event = heldEvent(next, result),
+                )
+                log.warnf(
+                    "Held payment %s was released by its case, but %s was not what that case decided; " +
+                        "it stays HELD and review %d is requested (written by this attempt: %s)",
+                    payment.id,
+                    uncovered,
+                    next.holdReview,
+                    asked,
                 )
                 HoldState.WAITING
             }
@@ -306,6 +328,17 @@ private fun DomesticPaymentEventPublisher.statusChanged(previous: DomesticPaymen
         payload = statusChangedPayload(previous, current),
     )
 
+/**
+ * What a reviewer is asked to decide: one `STEP:REASON` for every control that answered and wants a
+ * human. A control that could not answer is not in it; nobody can decide for a control that did not
+ * speak.
+ */
+private fun AdmissionResult.reviewReasons(): Set<String> = steps.mapNotNull { record ->
+    val outcome = record.outcome as? StepOutcome.Decided
+    val wantsHuman = outcome?.decision == AdmissionDecision.HOLD || outcome?.decision == AdmissionDecision.CHALLENGE
+    if (outcome != null && wantsHuman) "${record.step.name}:${outcome.reason.value}" else null
+}.toSet()
+
 /** The reject reason a refusing step maps to. Top-level, after the class, for detekt's function count. */
 private fun rejectReasonFor(step: AdmissionStep): DomesticRejectReason = when (step) {
     AdmissionStep.STANDING -> DomesticRejectReason.DEBTOR_ACCOUNT_BLOCKED
@@ -326,7 +359,8 @@ private fun paymentHeldEvent(held: DomesticPayment, result: AdmissionResult, now
     return PaymentHeldEvent(
         paymentId = held.id,
         rail = PaymentHeldEvent.RAIL,
-        caseKey = PaymentHoldPolicy.caseKey(held.id),
+        caseKey = PaymentHoldPolicy.caseKey(held.id, held.holdReview),
+        review = held.holdReview,
         debtorAccountId = held.debtorAccountId,
         debtorPartyId = debtorPartyId,
         customerReference = "${held.debtorAccountNumber}/${held.debtorBankCode}",

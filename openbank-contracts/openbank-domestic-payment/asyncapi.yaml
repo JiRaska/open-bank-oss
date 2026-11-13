@@ -138,7 +138,8 @@ components:
         ADR-0374 D13. Written in the transaction that moves the payment to HELD (or, for a hold
         caused by an unavailable control, when its automatic re-evaluation is exhausted), so a hold
         that needs a human always has this event. aml-service opens the hold's one case from it,
-        idempotent on caseKey, and the rail accepts a release or a reject only from that case. The
+        idempotent on caseKey, and the rail accepts a release or a reject only from the case of the
+        hold's current review. The
         eventType is rail-neutral; rail names the producer. Carries no name: evidence holds list
         entries, statuses and scores, never the screened names. May be delivered more than once.
       traits:
@@ -164,7 +165,17 @@ components:
           rail: {type: string, const: DOMESTIC}
           caseKey:
             type: string
-            description: Always payment-hold:domestic:<paymentId>; a consumer derives it and refuses any other value.
+            description: >-
+              payment-hold:domestic:<paymentId> for the first review of the hold, and
+              payment-hold:domestic:<paymentId>:<review> for a later one. A consumer derives it from
+              rail, paymentId and review and refuses any other value.
+          review:
+            type: integer
+            minimum: 1
+            description: >-
+              Which review of the hold this requests; absent means 1. A hold has one review unless,
+              at release, a control reports something the decided case was not asked about. Then a
+              further review is requested, as a case of its own, within the same hold and expiry.
           debtorAccountId: {type: string, format: uuid}
           debtorPartyId:
             type: [string, 'null']

@@ -31,7 +31,8 @@ import java.util.UUID
  * dies right after being told.
  *
  * The row decides whether the decision counts, in one guarded write: it is accepted only for a
- * payment that is HELD with its case requested, once, and only before the hold's expiry. A decision
+ * payment that is HELD with its case requested, for the hold's current review, once, and only
+ * before the hold's expiry. A decision
  * that comes after the expiry is refused: a hold never expires into a release.
  *
  * Then the payment's run is nudged so it does not wait for its next check, and a HELD payment that
@@ -53,16 +54,16 @@ class PaymentHoldResolutionService(
 ) {
     private val log = Logger.getLogger(PaymentHoldResolutionService::class.java)
 
-    private fun record(paymentId: UUID, decision: HoldDecision): HoldDecisionRecord =
+    private fun record(paymentId: UUID, review: Int, decision: HoldDecision): HoldDecisionRecord =
         VertxContextSupport.subscribeAndAwait {
             CoroutineScope(Dispatchers.Unconfined).async {
-                writes.recordHoldDecision(paymentId, decision, Instant.now(clock), PaymentHoldPolicy.EXPIRY)
+                writes.recordHoldDecision(paymentId, review, decision, Instant.now(clock), PaymentHoldPolicy.EXPIRY)
             }.asUni()
         }
 
     /** True when the payment has a hold this decision was, or already had been, offered to. */
-    fun resolve(paymentId: UUID, decision: HoldDecision): Boolean {
-        val record = record(paymentId, decision)
+    fun resolve(paymentId: UUID, review: Int, decision: HoldDecision): Boolean {
+        val record = record(paymentId, review, decision)
         metrics.recordResolution(
             release = decision == HoldDecision.RELEASE,
             delivered =

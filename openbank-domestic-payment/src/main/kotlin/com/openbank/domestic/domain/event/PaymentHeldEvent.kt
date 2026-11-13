@@ -24,6 +24,8 @@ data class PaymentHeldEvent(
     val rail: String,
     /** Idempotency key of the hold's case. A decision counts only when it comes from this case. */
     val caseKey: String,
+    /** Which review of the hold this requests, from 1. A later review is a new case with its own key. */
+    val review: Int,
     val debtorAccountId: UUID,
     /** The account's owning party when the standing step could read it; aml-service resolves it otherwise. */
     val debtorPartyId: UUID?,

@@ -74,14 +74,14 @@ class FraudHoldResolutionConsumerTest {
 
     @Test
     fun `the decision of an admission hold's own case releases or rejects it (ADR-0374)`() {
-        every { holdResolution.resolve(any(), any()) } returns true
+        every { holdResolution.resolve(any(), any(), any()) } returns true
         val key = PaymentHoldPolicy.caseKey(paymentId)
 
         runBlocking { consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", key = key)) }
         runBlocking { consumer.consume(event("BLOCKED", alert = "PAYMENT_HELD", key = key)) }
 
-        verify(exactly = 1) { holdResolution.resolve(paymentId, HoldDecision.RELEASE) }
-        verify(exactly = 1) { holdResolution.resolve(paymentId, HoldDecision.REJECT) }
+        verify(exactly = 1) { holdResolution.resolve(paymentId, 1, HoldDecision.RELEASE) }
+        verify(exactly = 1) { holdResolution.resolve(paymentId, 1, HoldDecision.REJECT) }
         verify(exactly = 0) { resolution.resolve(any(), any(), any()) }
     }
 
@@ -98,7 +98,7 @@ class FraudHoldResolutionConsumerTest {
         consumer.consume(event("CLEARED", alert = "FRAUD_REVIEW", key = key))
         consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", tx = null, key = key))
         consumer.consume(event("CLEARED", alert = "PAYMENT_HELD", tx = "not-a-uuid", key = key))
-        verify(exactly = 0) { holdResolution.resolve(any(), any()) }
+        verify(exactly = 0) { holdResolution.resolve(any(), any(), any()) }
         verify(exactly = 0) { resolution.resolve(any(), any(), any()) }
     }
 

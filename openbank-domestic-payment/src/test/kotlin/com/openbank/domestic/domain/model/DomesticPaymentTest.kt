@@ -93,12 +93,14 @@ class DomesticPaymentTest {
         assertThat(held.heldAt).isEqualTo(clock.instant())
         assertThat(held.holdCaseRequestedAt).isNull()
 
-        val requested = held.withHoldCaseRequested(clock.instant())
-        assertThat(requested.withHoldCaseRequested(later.instant()).holdCaseRequestedAt).isEqualTo(clock.instant())
+        val requested = held.withHoldCaseRequested(clock.instant(), setOf("SANCTIONS:SANCTIONS_POTENTIAL_MATCH"))
+        val again = requested.withHoldCaseRequested(later.instant(), setOf("FRAUD:FRAUD_REVIEW"))
+        assertThat(again.holdCaseRequestedAt).isEqualTo(clock.instant())
+        assertThat(again.holdCaseReasons).containsExactly("SANCTIONS:SANCTIONS_POTENTIAL_MATCH")
 
         val released = requested.transitionTo(DomesticPaymentStatus.VALIDATED, clock = later)
         assertThat(released.heldAt).isEqualTo(clock.instant())
-        assertThatThrownBy { released.withHoldCaseRequested(later.instant()) }
+        assertThatThrownBy { released.withHoldCaseRequested(later.instant(), emptySet()) }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
 

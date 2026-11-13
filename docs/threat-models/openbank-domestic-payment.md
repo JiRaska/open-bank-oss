@@ -164,8 +164,16 @@ The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit ma
     screened. Releasing one on the case decision alone would send an unscreened payment.
     `PaymentAdmissionActivitiesImpl.release` is the one place a HELD payment becomes VALIDATED, and
     it evaluates the whole chain again: every bound control must answer and none may refuse. A
-    refusal rejects; a control that still cannot answer leaves the payment HELD. The case decision
-    overrides a control that asked for a review, never one that did not answer.
+    refusal rejects; a control that still cannot answer leaves the payment HELD.
+  - **Elevation of privilege, a clearance applied to something nobody reviewed:** a case opened
+    for an outage, or for a fraud review, says nothing about a sanctions match that the control
+    reports only at release. A case decision covers exactly the reasons the case was opened for.
+    They are recorded on the row with the case request (`hold_case_reasons`, one `STEP:REASON` per
+    control that asked for a human), and `release` validates only if every "review" in the fresh
+    evaluation is among them. Anything else keeps the payment HELD and requests a further review as
+    a case of its own (`hold_review`, key `payment-hold:domestic:<paymentId>:<n>`); a decision is
+    accepted only for the hold's current review, and the expiry still runs from the first
+    `held_at`. The customer view does not change while this happens.
   - **Elevation of privilege, a hold released after its term:** a hold ends in rejection 48 hours
     after `held_at`. Expiry is checked first and from the row (`concludeHold`), and a decision is
     not accepted after it, so a late decision, or one accepted while no run was alive to apply it,

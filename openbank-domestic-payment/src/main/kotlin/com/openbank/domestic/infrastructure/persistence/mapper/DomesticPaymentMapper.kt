@@ -52,6 +52,8 @@ fun DomesticPayment.toEntity() = DomesticPaymentEntity().also {
     it.heldAt = heldAt
     it.holdCaseRequestedAt = holdCaseRequestedAt
     it.holdDecision = holdDecision?.name
+    it.holdReview = holdReview
+    it.holdCaseReasons = holdCaseReasons.toColumn()
     it.admissionFraudVerdict = admissionFraudScore?.verdict
     it.admissionFraudScore = admissionFraudScore?.score
     it.admissionFraudRuleVersion = admissionFraudScore?.ruleVersion
@@ -97,7 +99,14 @@ fun DomesticPaymentEntity.toDomain() = DomesticPayment(
     heldAt = heldAt,
     holdCaseRequestedAt = holdCaseRequestedAt,
     holdDecision = holdDecision?.let(HoldDecision::valueOf),
+    holdReview = holdReview ?: 1,
+    holdCaseReasons = holdCaseReasons.toReasons(),
     admissionFraudScore = admissionFraudVerdict?.let { verdict ->
         RecordedFraudScore(verdict, admissionFraudScore ?: 0, admissionFraudRuleVersion.orEmpty())
     },
 )
+
+/** The covered reasons of a hold's case as one column: sorted, comma-separated; null when there are none. */
+fun Set<String>.toColumn(): String? = sorted().joinToString(",").ifEmpty { null }
+
+fun String?.toReasons(): Set<String> = this?.split(",")?.filter { it.isNotBlank() }?.toSet().orEmpty()
