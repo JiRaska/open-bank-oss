@@ -668,7 +668,7 @@ Addendum (2026-11-05, #14888): test code under `.github/` — a Python file whos
 
 ### Amendment (2026-11-13) — PROPOSED: the expedite lane, a second carrier that does not wait for the one in flight
 
-**Status: proposed.** The implementation is a separate PR (#15979) and stays off behind its switch until this text is accepted.
+**Status: proposed.** The implementation is a separate PR (tracked in #15979) and stays off behind its switch until this text is accepted.
 
 Measured 2026-11-08..13. `merge-priority:expedite` reorders candidates (`serving_order`) but cannot overtake a carrier that is already open, because the bound "only one carrier of any kind open" (speculative-stacking amendment above) holds for every lane. On the 16 merged expedite PRs, label-to-merge was p50 70 min, p90 227 min, max 340 min, against p50 74 min for a random sample of 30 non-expedite train merges (queries: `gh pr list --state merged --search "merged:>=2026-11-08"`, then `repos/{repo}/issues/{n}/timeline` per PR). The median did not move. Carriers themselves are not the cost: 183 carriers in the same window lived p50 14 min, p90 40 min. In 133 sampled settle ticks (every sixth successful `merge-train.yml` run), 87 reported `in_flight: True` and built nothing, one bisected, and one named a culprit. #15302 shows the shape: it was `CANDIDATE armed + all required green` on every tick from 06:36Z to 09:01Z on 2026-11-09, behind another carrier that went stale on `main moved since publish` and then a rejected publish. It merged at 09:25Z, 24 min after its own carrier was published.
 
