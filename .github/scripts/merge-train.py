@@ -5395,7 +5395,9 @@ def retry_planner_self_test(check) -> None:
 # ceiling 19,700 (~2.3 %).
 # #15827 (moved member re-derived in publish, fast path held under a carrier, strict-ready hold): 12 cases,
 # ~6 more ticks: spawns=19,929 at 708 cases, measured locally on 2026-11-12; ceiling 20,400 (~2.4 %).
-SELF_TEST_SPAWN_CEILING = 20400
+# Expedite lane (ADR-0343 amendment 2026-11-13): ten cases E1-E10, ~14 more ticks: spawns=20,917 at 719 cases,
+# measured locally on 2026-11-13; ceiling 21,400 (~2.3 %).
+SELF_TEST_SPAWN_CEILING = 21400
 
 # A green carrier and a green, up-to-date strict holder cannot both keep their verification: whichever
 # merges first moves main under the other. Strict first voids the carrier (rebuild ~50 min, measured
