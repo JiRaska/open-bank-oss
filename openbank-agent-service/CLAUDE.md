@@ -80,6 +80,9 @@ JAVA_HOME=$(/usr/libexec/java_home -v 25) ./gradlew :openbank-agent-service:test
   `llama-3.3-70b-versatile` model; omit for mock-echo. Deployed, that key is the LiteLLM
   *virtual* key and `AGENT_MODEL_ENDPOINT` points at the in-cluster gateway — the provider
   key never lands in this pod (ADR-0174/0175).
-- `AGENT_POLICY_ENFORCEMENT=block` requires a running OPA sidecar — without it the gate
-  degrades to advisory and logs a WARN (fail-open by design).
+- `AGENT_POLICY_ENFORCEMENT=block` requires a running OPA sidecar — it FAILS CLOSED: any
+  decision-point error (unreachable sidecar, missing/malformed answer) denies every tool call and
+  counts as `pdp_unavailable_denied`; pods stay Ready while all tool calls halt. `advisory` is
+  unchanged (audit only, call proceeds). An UNSET value means `advisory`; a SET but unrecognised
+  value is treated as `block` and logged at ERROR.
 - `AGENT_OVERSIGHT_ENABLED=true` enables the scheduled compliance-officer sweep (every 30 min).

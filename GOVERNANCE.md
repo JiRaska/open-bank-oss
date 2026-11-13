@@ -3,34 +3,42 @@
 ## Current status (as of 2026)
 
 OpenBank is now public (Apache-2.0, launched June 2026) and in a **single-maintainer beta phase**.
-All decisions and merge rights are held by [@JiRaska](https://github.com/JiRaska). This document is
+All decisions and merge rights are held by the single maintainer. This document is
 a living record of the interim governance model and the path to a distributed one.
 
 ## Roles
 
 | Role | Who | Responsibilities |
 |------|-----|-----------------|
-| **Maintainer** | @JiRaska | Architecture, security review, release gating, merge rights |
+| **Maintainer** | The single maintainer | Architecture, security review, release gating, merge rights |
 | **Contributor** | Open to anyone | PRs, issues, discussions — see [CONTRIBUTING.md](CONTRIBUTING.md) |
 
 ## How the 2-approval rule is satisfied today
 
 [ADR-0030](docs/adr/0030-supply-chain-security-and-ssdlc-hardening.md) and
-[`openbank-libs/governance/rules.yaml`](openbank-libs/governance/rules.yaml) require **two distinct
-reviewers** for every money-path change (the services listed under `money_path_services`). With a
-single full-time maintainer this cannot be met structurally by GitHub's branch-protection alone.
+[`openbank-libs/governance/rules.yaml`](openbank-libs/governance/rules.yaml) state a goal of **two
+distinct reviewers** for every money-path change (the services listed under `money_path_services`).
+**That goal is not met and is not enforced.** `rules.yaml` records it as
+`enforcement_status: aspirational_not_enforced` (tracked in #2183): the repository has one account
+with write access, and GitHub does not allow approving your own pull request, so requiring an approval
+would only make `main` unmergeable without an administrator bypass.
 
-**Interim model:**
+**What is actually in force:**
 
-1. Money-path PRs are reviewed by the maintainer (@JiRaska) **and** by an external technical reviewer
-   invited via the PR's `Reviewers` field. External reviewers are invited from a rotation of security
-   and fintech engineers with domain expertise. Their approval is recorded on the PR before merge.
-2. The threat model (`docs/threat-models/<service>.md`) for money-path changes is written before the
-   PR is opened, not after — so the external reviewer has a concrete security surface to validate.
-3. PRs are kept open for a minimum of 24 hours to allow async review, even when CI is green.
+1. **Required status checks** on the `main-protection` ruleset are the enforced control. A change
+   cannot merge until they pass. Nothing blocks a merge on approvals today.
+2. **Human review by a second person is a stated goal, not a control.** It happens only when a
+   reviewer is available, and no merge depends on it. Do not read the two-approval number in
+   `rules.yaml` as a gate.
+3. The threat model (`docs/threat-models/<service>.md`) for money-path changes is required by
+   ADR-0030 and checked by a diff gate; it is meant to be written before the PR is opened.
+4. The money-path-only gates in `.github/gates/gates.yaml` are further independent controls,
+   separate from GitHub review. The runtime four-eyes control on money-path verbs is built but
+   **not enforcing** in any deployed service today (tracked in #15748), so it does not
+   compensate for the missing review.
 
-This is explicitly a stop-gap. It works while the contributor base is small and every PR is known to
-the maintainer. It does not scale to a high-volume open-source project.
+This is explicitly a stop-gap tied to a capacity limit, not a policy decision. It expires when a
+second account holds write access (see the revisit trigger in `rules.yaml`).
 
 ## Path to distributed governance
 

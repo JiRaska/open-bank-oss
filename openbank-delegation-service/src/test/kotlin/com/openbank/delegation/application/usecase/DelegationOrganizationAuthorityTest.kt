@@ -114,6 +114,19 @@ class DelegationOrganizationAuthorityTest {
     }
 
     @Test
+    fun `organization offer requires sole authority before consuming SCA or saving a grant`() {
+        coEvery { authorityClient.authorityFor(grantor, organizationActor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.MANDATE_ONLY)
+
+        assertThatThrownBy {
+            runBlocking { service.offer(offerCommand().copy(actorPartyId = organizationActor)) }
+        }.isInstanceOf(DelegationGrantorAuthorityException::class.java)
+
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
     fun `organization authority outage is retryable and happens before SCA or ownership`() {
         coEvery { authorityClient.authorityFor(grantor, organizationActor) } returns
             GrantorAuthority(GrantorAuthorityVerdict.UNVERIFIABLE)

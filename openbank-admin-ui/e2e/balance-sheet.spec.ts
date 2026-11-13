@@ -2,7 +2,7 @@
 // #10618 smoke: the finance persona reaches the Balance sheet & risk section, and the ledger
 // backfill lists its four-eyes requests. Backends are mocked (as in every spec here); the
 // hide-approve-from-the-proposer rule is covered by balance-sheet-pages.test.tsx.
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInWithRoles } from './helpers/auth'
 
 const request = (id: string, state: string, proposedBy: string) => ({

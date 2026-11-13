@@ -58,7 +58,7 @@ metadata:
   name: ecr-pull-through-rewrite-cel
   labels:
     app.kubernetes.io/part-of: kyverno-policies
-    openbank.io/plane: platform
+    open-bank.tech/plane: platform
   annotations:
     policies.kyverno.io/title: "Rewrite public registry images to ECR pull-through cache — CEL"
     policies.kyverno.io/category: "FinOps"
