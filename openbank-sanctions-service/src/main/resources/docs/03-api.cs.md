@@ -137,13 +137,14 @@ Authorization: Bearer <token>
 
 {
   "checkId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "reviewedBy": "compliance@openbank.example",
   "note": "Jiná osoba potvrzena kontrolou pasu — čisto.",
   "newStatus": "CLEAR"
 }
 ```
 
 `newStatus` ∈ `CLEAR | HIT | POTENTIAL_HIT | WHITELISTED | ESCALATED`
+
+Přezkoumávající zaznamenaný u rozhodnutí je přihlášený principal (`preferred_username` z tokenu). Přezkoumávajícího v těle neposílejte: pole `reviewedBy` se z důvodu kompatibility přijme, ale ignoruje se.
 
 ### Získat konkrétní prověření
 
@@ -257,7 +258,7 @@ Eventy jsou append-only; následný přezkum vytváří nový event `sanctions.r
 
 ## Průběžný monitoring (ADR-0376)
 
-Dostupné od verze API kontraktu 3.3.0. Chráněno stejně jako `POST /api/v3/sanctions/screen`: role `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` a akce `sanctions.create`.
+Dostupné od verze API kontraktu 3.4.0. Chráněno stejně jako `POST /api/v3/sanctions/screen`: role `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` a akce `sanctions.create`.
 
 ### Registrace nebo aktualizace sledovaného subjektu
 

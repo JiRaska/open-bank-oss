@@ -590,32 +590,50 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
 
 A decision-engine decline is terminal (`DECLINED`, ADR-0211 D1). GDPR Art. 22(3), EU AI Act Art. 86
 and EBA/GL/2020/06 par. 54 require a route to a human, so the applicant can request one
-(`POST /api/v1/lending/intake/applications/{id}/decline-review`, customer-edge principal only). The
-declined application never leaves its terminal state and the shared origination graph is untouched:
-the review is its own record (`loan_decline_review`, one per application). This slice records the
-request; the staff decision (confirm, or overturn into a successor application that enters four-eyes)
-is a separate change and gets its own supplement.
+(`POST /api/v1/lending/intake/applications/{id}/decline-review`, customer-edge principal only) and
+staff decide it (`/api/v1/lending/decline-reviews`). The declined application never leaves its
+terminal state and the shared origination graph is untouched: the review is its own record
+(`loan_decline_review`), and an overturn opens a *successor* application in `FOUR_EYES`, so the
+credit decision itself is still the existing four-eyes decision.
 
-**What it is not.** It decides nothing and moves no money: a request only records that the customer
-asked, with the engine's reasons snapshotted for the future reviewer.
+**What it is not.** It cannot approve credit. An overturn creates an application waiting for a
+second, different human; no money moves and no loan exists until the existing decision and
+disbursement controls (§7) are passed.
 
 | STRIDE | Threat | Mitigation |
 |---|---|---|
 | **S**poofing | A caller asks for a review of someone else's decline | Customer route is the named customer-edge principal only (the §9 check); the party is `X-Customer-Party-Id`, never a body field, and the application is read filtered by owner, so a foreign id answers 404, indistinguishable from an absent one. |
+| **S**poofing | A service account decides reviews | `@RolesAllowed` is `ROLE_CREDIT_RISK`/`ROLE_ADMIN`; the actions `lending.declineReview.*` are deliberately NOT in `rules.yaml: role_action_matrix` (a matrix line is a grant to any HUMAN-typed principal, machines included), and `lending_rest_ext.rego` carries an explicit machine veto, proved by a negative OPA test. |
 | **T**ampering | A decline made by a person is re-opened, or an engine decline is re-reviewed in a loop | Reviewable only when `DECLINED` with a stored engine outcome and no recorded human decider; a human decision records `decidedBy`, which ends it. One review per application (unique constraint), repeats are idempotent. |
-| **T**ampering | Two first requests race | Serialised under the application row lock; the unique constraint is the backstop. The review row and its event commit in one transaction. |
-| **R**epudiation | "What did the engine say that the reviewer will see?" | The engine's reason codes, policy versions and decision time are snapshotted on the review at request time; the event carries ids and machine codes only. |
-| **I**nformation disclosure | The customer reads internal data | The customer DTO carries status and timestamps only; the engine's own reason codes are already on the journey projection. The event carries no free-text personal data. |
-| **D**oS | Review requests flood the future staff queue | Bounded by construction to one review per application and by the window (`lending.decline-review.window-days`, default 30); a request needs an engine-declined application of the caller. The edge's rate limiting sits in front. |
-| **E**oP | A request becomes a credit approval | It cannot: nothing in this slice changes the application or creates one. |
+| **T**ampering | Two reviewers decide the same review, or an overturn leaves a half-written state | The decision is one conditional UPDATE (`where status = REQUESTED`); the loser gets 409 and writes no successor or event. Claim, successor and events commit in one transaction under the application row lock. |
+| **T**ampering | An overturn opens an application intake would refuse today | Before anything is written, the overturn re-runs intake's refusal gates against today — origination allowed for the product (compliance pack, when enforced), the FLOATING-rate switch, rate terms against the new first due date — and answers 409 `SUCCESSOR_NOT_ORIGINABLE`, leaving the review `REQUESTED`. The successor's first due date is recomputed with intake's own rule (`FirstDueDate`) and its compliance pack is the one active today. |
+| **R**epudiation | A reviewer overturns a decline without a recorded reason | Impossible: the request type rejects a reason under 10 characters, the schema CHECK rejects a decided row without reviewer and reason, and the reviewer is the JWT subject, never client-supplied. The reason is kept on the review row and never published. |
+| **R**epudiation | "What did the engine say that the reviewer saw?" | The engine's reason codes, policy versions and decision time are snapshotted on the review at request time; events carry ids and machine codes only. |
+| **I**nformation disclosure | The customer reads an officer's note or the reviewer's reason | The customer DTO carries status and timestamps only; the engine's own reason codes are already on the journey projection. Events carry no free-text personal data. |
+| **D**oS | Review requests flood the staff queue | Bounded by construction to one review per application and by the window (`lending.decline-review.window-days`, default 30); a request needs an engine-declined application of the caller. The edge's rate limiting sits in front. |
+| **E**oP | A reviewer approves the credit they overturned | The successor's proposer is the reviewer, and the existing four-eyes `decide` refuses an approver equal to the proposer (`SEGREGATION_OF_DUTIES`). |
+| **E**oP | A member of staff reviews their own decline | **Only partly mitigated.** `SELF_REVIEW` refuses a reviewer whose principal name equals the applicant's party id, and nothing more: staff principals are not party ids, and the platform has no staff-to-party identity mapping (the `party_id` claim exists only in the customers realm), so an employee reviewing their own decline is not detected. The four-eyes approval by a second person is the remaining control. |
 
 **Residual risks / gaps:**
 
-- **Not yet reachable by a customer**: no customer-edge proxy route exists in this change.
-- **Reviews stay `REQUESTED`** until the staff decision lands; there is no SLA timer on a pending review.
+- **Not yet reachable by a customer**: no customer-edge proxy route or admin-ui screen exists in
+  this change, so the control is not live end to end until both land.
+- **No staff-to-party conflict-of-interest check** (see the EoP row): needs an identity mapping the
+  platform does not have. Follow-up.
+- **The successor is not re-priced and not re-evaluated.** It keeps the declined application's
+  nominal rate and catalog snapshot (up to the review window old), and there is no fresh engine
+  evaluation: its engine fields are null and `predecessorApplicationId` names the declined row,
+  which is what the four-eyes approver sees. Re-pricing needs the intake pricing path (catalog
+  profile resolution, or the intake-configured rate) reachable from a non-request context; that is a
+  restructuring of intake, not part of this change. Follow-up.
+- **No SLA timer on a pending review**; only the successor's four-eyes wait has the 5-day escalation.
 
 ## 10. Change log
 
+- **2026-11-12** — **Staff decision on a decline review (#15751).** `loan_application.predecessor_application_id`
+  (V34), events `credit.decline_review.confirmed|overturned`, endpoints `GET /api/v1/lending/decline-reviews`
+  and `POST /api/v1/lending/decline-reviews/{id}/decision`, actions `lending.declineReview.read|decide`
+  (human-only, OPA machine veto). See §9g.
 - **2026-11-12** — **Customer request for human review of an engine decline (#15751).** New table
   `loan_decline_review` (V32), outbox event `credit.decline_review.requested`, endpoint
   `POST /api/v1/lending/intake/applications/{id}/decline-review` (customer-edge only, action
@@ -1090,6 +1108,13 @@ The migration briefly excludes writers/retention while establishing this boundar
 under the retained deployment hold. Rollback retains receipts, coverage and financial history.
 
 - **2026-11-09 — Missing-job obligation review correction (#13167).** A missing run cannot be erased by disabling its scheduler after REFUSED: observed `(business_date, job)` obligations are insert-only and retained independently of real run receipts. The observation transaction reads the retained union and all legacy run keys before reporting. It creates no completion, journal, or new authorization. Run completion or an attributable ledger waiver is still required; never infer unobserved historical schedules. Rollback retains both evidence tables. Existing holds and shadow/off defaults remain.
+
+### Recorded signature receipt
+
+The explicit signature command persists the artefact hash, receipt timestamp, `SIGNED` state and
+matching outbox evidence in the application transaction (#9890). A competing sign cannot replace
+the recorded value. Earlier rows have unknown receipt time. Lending retains the existing
+application-based access boundary for the timestamp.
 
 ## 2026-11-11 - Label key domain rename (no reach change)
 

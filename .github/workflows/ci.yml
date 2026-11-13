@@ -81,9 +81,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
-          line="$GITHUB_WORKFLOW/$GITHUB_JOB end $q"
+          q=$(gh api rate_limit --jq '
+            .resources.core
+            | "used=\(.used) remaining=\(.remaining) reset=\(.reset)",
+              (select((.limit | type) == "number" and (.remaining | type) == "number")
+               | select(.limit > 0 and .remaining >= 0 and .remaining * 5 <= .limit)
+               | "low")' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB end ${q%%$'\n'*}"
           echo "::notice title=quota-meter::$line"
+          if [[ "$q" == *$'\n'low ]]; then
+            echo "::warning title=GitHub API quota nearing exhaustion::$line (20% or less remaining)"
+          fi
           echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
 
   # ---------------------------------------------------------------------------
@@ -261,6 +269,23 @@ jobs:
         # health-route integration tests all run here via Vitest.
         # Coverage floors are enforced by the parallel `ui-coverage` job (ADR-0370 U3).
 
+      # ADR-0370 U5: mutation testing on the decision-module files this PR changed. Coverage says
+      # a line ran; a surviving mutant says no test would notice if it were wrong. ADVISORY while
+      # the floor (stryker.config.mjs thresholds.break) rests on one measured module; the floor
+      # itself is ratcheted by gate admin-ui-mutation-ratchet. Skips in seconds when no file in
+      # scope changed, which is most PRs.
+      - name: Mutation testing (changed decision modules)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          MUTATION_FILES="$(gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --name-only)"
+          export MUTATION_FILES
+          bash scripts/mutation-changed.sh
+
       - name: Build
         run: npm run build
         env:
@@ -322,6 +347,24 @@ jobs:
           OPENBANK_E2E_PREBUILT: "true"
           OPENBANK_E2E_QUARANTINE: "only"
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e-quarantine/playwright.xml"
+
+      # ADR-0370 U6: per-route client-JS and LCP budgets (e2e/route-performance-budget.json),
+      # measured in the browser on the production build already served above. ADVISORY until ten
+      # consecutive runs show the numbers are stable (the ADR-0359 graduation rule).
+      - name: Route performance measurement (non-gating)
+        if: always() && steps.browser_e2e.outcome != 'skipped'
+        continue-on-error: true
+        timeout-minutes: 10
+        run: npx playwright test --workers 1
+        env:
+          CI: "true"
+          NEXTAUTH_URL: "http://localhost:3001"
+          NEXTAUTH_SECRET: "ci-e2e-secret"
+          OPENBANK_REPO_ROOT: "${{ github.workspace }}"
+          OPENBANK_E2E_SERVER: "production"
+          OPENBANK_E2E_PREBUILT: "true"
+          OPENBANK_E2E_PERF: "only"
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e-perf/playwright.xml"
 
       # ADR-0370 U2: a test that passed only on retry is otherwise invisible behind `retries: 1`.
       # Advisory until the flake rate has a measured baseline: warns and writes the step summary.
@@ -923,9 +966,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
-          line="$GITHUB_WORKFLOW/$GITHUB_JOB start $q"
+          q=$(gh api rate_limit --jq '
+            .resources.core
+            | "used=\(.used) remaining=\(.remaining) reset=\(.reset)",
+              (select((.limit | type) == "number" and (.remaining | type) == "number")
+               | select(.limit > 0 and .remaining >= 0 and .remaining * 5 <= .limit)
+               | "low")' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB start ${q%%$'\n'*}"
           echo "::notice title=quota-meter::$line"
+          if [[ "$q" == *$'\n'low ]]; then
+            echo "::warning title=GitHub API quota nearing exhaustion::$line (20% or less remaining)"
+          fi
           echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1071,9 +1122,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
-          line="$GITHUB_WORKFLOW/$GITHUB_JOB end $q"
+          q=$(gh api rate_limit --jq '
+            .resources.core
+            | "used=\(.used) remaining=\(.remaining) reset=\(.reset)",
+              (select((.limit | type) == "number" and (.remaining | type) == "number")
+               | select(.limit > 0 and .remaining >= 0 and .remaining * 5 <= .limit)
+               | "low")' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB end ${q%%$'\n'*}"
           echo "::notice title=quota-meter::$line"
+          if [[ "$q" == *$'\n'low ]]; then
+            echo "::warning title=GitHub API quota nearing exhaustion::$line (20% or less remaining)"
+          fi
           echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
 
   # ---------------------------------------------------------------------------

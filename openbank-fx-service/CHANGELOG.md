@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.20.1...fx-service-v0.20.2) (2026-11-13)
+
+
+### Bug Fixes
+
+* **fx:** screen the party's held names on both conversion paths, not an id or a caller-supplied name ([#15767](https://github.com/JiRaska/open-bank-oss/issues/15767)) ([bc71355](https://github.com/JiRaska/open-bank-oss/commit/bc71355a5afc6be355c8c513786d5d2b1e461d64))
+
 ## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.20.0...fx-service-v0.20.1) (2026-11-06)
 
 

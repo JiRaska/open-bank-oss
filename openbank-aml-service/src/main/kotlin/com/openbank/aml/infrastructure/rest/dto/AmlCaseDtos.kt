@@ -43,14 +43,18 @@ data class UpdateAmlDecisionRequest(
     val targetStatus: String,
     val decisionReason: String?,
     val assignedAnalyst: String?,
-    val decidedBy: String,
+    /**
+     * Ignored (ADR-0371 §5). Who decided is the authenticated caller; a name in the body was a field
+     * anyone could fill with someone else's. Still accepted so existing clients keep working.
+     */
+    val decidedBy: String? = null,
 ) {
-    fun toCommand(caseId: UUID) = UpdateAmlDecisionCommand(
+    fun toCommand(caseId: UUID, authenticatedCaller: String) = UpdateAmlDecisionCommand(
         caseId = caseId,
         targetStatus = AmlCaseStatus.valueOf(targetStatus),
         decisionReason = decisionReason,
         assignedAnalyst = assignedAnalyst,
-        decidedBy = decidedBy,
+        decidedBy = authenticatedCaller,
     )
 }
 

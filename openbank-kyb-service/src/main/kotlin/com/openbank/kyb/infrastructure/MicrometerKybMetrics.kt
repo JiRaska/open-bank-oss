@@ -22,4 +22,8 @@ class MicrometerKybMetrics(private val registry: MeterRegistry) : KybMetricsPort
     override fun timerArmingFailed(state: String) {
         registry.counter("openbank.kyb.timers.arming_failed", "state", state).increment()
     }
+
+    override fun relatedPartyScreened(outcome: String) {
+        registry.counter("openbank.kyb.screening.subjects", "outcome", outcome).increment()
+    }
 }

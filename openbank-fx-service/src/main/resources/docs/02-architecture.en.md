@@ -90,15 +90,17 @@ The conversion decision is the heart of the service. `FxService.convert` resolve
 sequenceDiagram
   participant C as Caller
   participant FX as FxService
+  participant P as party-service
   participant S as sanctions-service
   participant A as aml-service
   participant DB as PostgreSQL
 
-  C->>FX: POST /convert (partyName, Idempotency-Key)
+  C->>FX: POST /convert (partyId, Idempotency-Key)
   FX->>DB: findByIdempotencyKey → return if present
   FX->>FX: resolve SPOT rate, assert valid, compute amounts + fee
-  FX->>S: screen(partyName, DEBTOR)
-  alt screening unavailable
+  FX->>P: GET party by id (held names and party type)
+  FX->>S: screen(held names, DEBTOR)
+  alt party name or screening unavailable
     FX->>DB: save PENDING
     FX-->>A: open AML case (MEDIUM, SCREENING_UNAVAILABLE)
   else CLEAR

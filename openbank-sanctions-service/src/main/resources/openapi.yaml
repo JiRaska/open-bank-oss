@@ -21,12 +21,14 @@ info:
   # them behaves and answers exactly as before. /api/v1 is frozen and rejects the new inputs (400);
   # its request schema names the three fields only to say so, because the shared request type
   # parses them and a parsed field that is not published is a contract gap.
-  # 3.2.0 -> 3.3.0 (ADR-0376): ADDITIVE. PUT and DELETE
+  # 3.2.0 -> 3.3.0 (#15748): `ReviewCommand.reviewedBy` became optional and deprecated; the
+  # reviewer recorded on a decision is the authenticated principal. Non-breaking.
+  # 3.3.0 -> 3.4.0 (ADR-0376): ADDITIVE. PUT and DELETE
   # /api/v3/sanctions/monitored-subjects/{subjectRef} register a subject for ongoing monitoring
   # and withdraw it. The owner of a registration is the calling service, taken from its token and
   # from no request value. No existing operation, schema or response changes. Registration
   # answers 503 while `openbank.sanctions.monitoring.enabled` is false, which is the default.
-  version: 3.3.0
+  version: 3.4.0
   # 1.4.0 -> 2.0.0 (#9048, ADR-0048): POST /lists/refresh-all could not keep answering 200 — that
   # required the whole external-feed fan-out to finish inside the request, which was the defect.
   # oasdiff classifies 200 -> 202 as breaking, and a breaking change here means a new URL major:
@@ -878,13 +880,17 @@ components:
           description: When the stored attributes last changed; unchanged by an identical registration.
     ReviewCommand:
       type: object
-      required: [checkId, reviewedBy, note, newStatus]
+      required: [checkId, note, newStatus]
       properties:
         checkId:
           type: string
           format: uuid
         reviewedBy:
           type: string
+          deprecated: true
+          description: >-
+            Ignored. The reviewer recorded on the decision is the authenticated principal; a
+            value supplied here is never stored. Accepted only so existing callers keep working.
         note:
           type: string
         newStatus:

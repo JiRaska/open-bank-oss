@@ -98,17 +98,28 @@ GDPR Art. 22(3), EU AI Act Art. 86 and EBA/GL/2020/06 par. 54: a customer whose 
 | Endpoint | Method | Caller | Notes |
 |---|---|---|---|
 | `/intake/applications/{id}/decline-review` | `POST` | customer-edge principal only (`lending.intake`) | The applicant (from `X-Customer-Party-Id`) asks; `Idempotency-Key` required. 201 first request, 200 repeat (same review), 404 not the caller's application, 409 `NOT_ENGINE_DECLINE` / `REVIEW_WINDOW_ELAPSED` |
-| `/decline-reviews/{id}/decision` | `POST` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` (humans) | `{outcome: CONFIRMED\|OVERTURNED, reason}`. Reason mandatory (10-512 chars). 409 `REVIEW_ALREADY_DECIDED` / `SELF_REVIEW` |
+| `/decline-reviews` | `GET` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` (humans) | Pending reviews, oldest first, each with the engine's recorded reason codes and policy versions |
+| `/decline-reviews/{id}/decision` | `POST` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` (humans) | `{outcome: CONFIRMED\|OVERTURNED, reason}`. Reason mandatory (10-512 chars). `Idempotency-Key` required (a retry answers 409 `REVIEW_ALREADY_DECIDED`). 409 `REVIEW_ALREADY_DECIDED` / `SELF_REVIEW` (principal name equals the party id only; no staff-to-party mapping exists) / `SUCCESSOR_NOT_ORIGINABLE` (an overturn intake would refuse today; the review stays open). The successor gets a recomputed first due date and today's compliance pack, but keeps the original rate and has no engine evaluation of its own |
 
 - **Only an engine decline is reviewable**: `DECLINED` with a stored engine outcome `DECLINE` and no recorded human decider. A decline a person made or confirmed is never looped back.
 - **At most once per application** (unique in the schema); a repeat returns the existing review. The window is `lending.decline-review.window-days` (env `LENDING_DECLINE_REVIEW_WINDOW_DAYS`, **default 30**), counted from the engine's evaluation time.
-- **The engine's reasons are kept for the reviewer**: reason codes, policy versions and decision time are snapshotted on the review when it is requested; a reviewer is not bound by the engine outcome.
-- **Event** (outbox, `schemaVersion` 1, identifiers and machine codes only): `credit.decline_review.requested`.
-- **Not yet reachable by a customer**: the customer-edge proxy route is a follow-up, and the staff decision (confirm, or overturn into a successor application that enters four-eyes) arrives in a separate change; until then a requested review stays `REQUESTED`.
+- **The reviewer is not bound by the engine outcome** but sees it: the engine's reason codes and policy versions are snapshotted on the review when it is requested. The reviewer is the JWT subject and must not be the applicant.
+- **CONFIRMED** records the human decision; nothing else changes. **OVERTURNED** does not resurrect the declined application: it opens a *successor* application in `FOUR_EYES` (carried-forward facts, no engine evidence copied), linked both ways (`loan_decline_review.successor_application_id`, `loan_application.predecessor_application_id`) with the reviewer recorded as proposer. The credit decision is then made by the existing four-eyes decision, whose approver must differ from the proposer, so the reviewer cannot approve it.
+- **Events** (outbox, `schemaVersion` 1, identifiers and machine codes only, never the reviewer's free text): `credit.decline_review.requested`, `credit.decline_review.confirmed`, `credit.decline_review.overturned`; an overturn also emits `credit.application.transition` for the successor.
+- **Not yet reachable by a customer**: the customer-edge proxy route and the admin-ui review screen are follow-ups.
 
 ## Customer-edge caller identity
 
 Customer intake, quote, credit journey and financial-health routes bind their configured customer-edge workload to the verified JWT client id (`azp`), subject and matching Keycloak service-account username. A username or role alone cannot authorize an M2M request; missing caller configuration fails closed.
+
+### Recorded signature receipt
+
+The explicit `POST /api/v1/lending/applications/{id}/sign` command stores `signatureRecordedAt`
+with the signature artefact hash, `SIGNED` state and `credit.application.transition` outbox row
+in one PostgreSQL transaction. The event's `occurredAt` equals the stored receipt instant.
+An existing loan's `applicationId` links the loan back to its application evidence. Earlier or
+implicitly advanced applications can have an unknown receipt time. The field attests the time
+Lending recorded the receipt and has no legal inception semantics for AnaCredit (#9890).
 
 ## Czech consumer credit policy revisions
 

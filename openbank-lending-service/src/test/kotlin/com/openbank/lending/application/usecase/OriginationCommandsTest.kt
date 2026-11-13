@@ -110,6 +110,9 @@ class OriginationCommandsTest {
             Uni.createFrom().item(Unit)
         }
         every { applications.compareAndSetSignature(any(), any()) } returns Uni.createFrom().item(1)
+        every { applications.withLocked<LoanApplication>(any(), any()) } answers {
+            applications.findById(firstArg()).flatMap(secondArg<(LoanApplication?) -> Uni<LoanApplication>>())
+        }
         every { applications.compareAndSetStatus(any(), any(), any(), any(), any(), any()) } returns
             Uni.createFrom().item(1)
     }
@@ -307,6 +310,7 @@ class OriginationCommandsTest {
             .await().indefinitely()
 
         assertThat(result.status).isEqualTo(OriginationState.SIGNED)
+        assertThat(result.signatureRecordedAt?.toInstant()).isEqualTo(clock.instant())
         verify(exactly = 1) {
             applications.compareAndSetSignature(
                 match { it.status == OriginationState.SIGNED && it.signatureArtefactHash == "a".repeat(64) },
@@ -316,7 +320,7 @@ class OriginationCommandsTest {
         verify(exactly = 0) { applications.compareAndSetStatus(any(), any(), any(), any(), any(), any()) }
         val evidence = evidence("credit.application.transition")
         assertThat(evidence).isNotNull
-        assertThat(evidence!!.payload).contains("\"toState\":\"SIGNED\"")
+        assertThat(evidence!!.payload).contains("\"toState\":\"SIGNED\"", "\"occurredAt\":\"${clock.instant()}\"")
     }
 
     @Test
