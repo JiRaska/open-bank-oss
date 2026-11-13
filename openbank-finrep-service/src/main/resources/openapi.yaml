@@ -24,7 +24,9 @@ info:
     fails closed with `UNCLASSIFIED_GL_ACCOUNT` when a new active code has no mapping. Zero-only
     official facts are not emitted by this structured preview. COREP derives its subtotals from
     explicit capital source accounts; missing source data remains a flagged zero (`isDataGap`).
-  version: 1.16.0
+  # 1.16.0 -> 1.17.0 (#15671): COREP LCR preview rows move to EBA 4.2 coordinates; 1.16.0 was
+  # taken on main by #15666 after this branch was cut.
+  version: 1.17.0
 tags:
   - name: FINREP
   - name: COREP
