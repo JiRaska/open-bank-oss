@@ -3284,8 +3284,8 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     # merge would hold the strict lane, which is the lane that serves the fix, for TRAIN_TURN_S with nobody
     # using it; every further strict or bot merge restarted that wait (2026-11-13: fixes #15991/#15987 sat
     # behind "train's turn" for ~2 h of red main). An open carrier still keeps its turn.
-    yield_why = train_turn(gh, git, base, [] if main_red else train_waiting,
-                           any(is_carrier(p, repo) and carrier_holds_strict(p) for p in gh.open_prs()))
+    yield_why = train_turn(gh, git, base, train_waiting,
+                           any(is_carrier(p, repo) and carrier_holds_strict(p) for p in gh.open_prs()), main_red=main_red)
     if holder is None and not yield_why and not main_red:
         # A reservation already running is never affected; the fast lane only gets the gap between two.
         yield_why = fast_turn(gh, git, base,
@@ -3532,7 +3532,34 @@ def carrier_holds_strict(p: dict, now: float | None = None) -> bool:
     return age is None or age <= CARRIER_PRIORITY_S
 
 
-def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now: float | None = None) -> str | None:
+def train_turn_main_red_self_test(check) -> None:
+    """The train's turn after a strict merge, with a red main and without (2026-11-13: fixes #15991/#15987
+    waited ~2 h behind "train's turn" while no train could be built over the red main)."""
+    mod = globals()
+    saved = mod["last_merge_was_strict"]
+    mod["last_merge_was_strict"] = lambda *_a, **_k: True
+    try:
+        git = lambda *_a, **_k: subprocess.CompletedProcess([], 0, stdout="1000\n", stderr="")
+        waiting = [object()]
+        green = train_turn(None, git, "b", waiting, False, now=1001)
+        red = train_turn(None, git, "b", waiting, False, now=1001, main_red={"Validate manifests": "failure"})
+        red_carrier = train_turn(None, git, "b", waiting, True, now=1001, main_red={"Validate manifests": "failure"})
+    finally:
+        mod["last_merge_was_strict"] = saved
+    check("train's turn: green main, strict merge just landed, a train candidate waits -> the train goes next",
+          bool(green) and "train's turn" in green, f"{green!r}")
+    check("train's turn: red main -> no turn, the strict lane serves the fix at once",
+          red is None, f"{red!r}")
+    check("train's turn: red main with an open carrier -> the carrier still keeps its turn",
+          red_carrier == "a train carrier is open over main", f"{red_carrier!r}")
+    settle_src = inspect.getsource(mode_settle)
+    call = settle_src[settle_src.find("train_turn("):][:400]
+    check("train's turn: settle hands main_red to train_turn (the call site is the fix as much as the rule)",
+          "main_red=main_red" in call.split("\n\n")[0], call[:200])
+
+
+def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now: float | None = None,
+               main_red: dict | None = None) -> str | None:
     """Why the strict lane must not START a reservation (update-branch) this tick, or None. Lane
     fairness (ADR-0343): (1) an open carrier is the train's in-flight turn — a reservation started
     under it holds the carrier once green and then voids it by merging (#13529, 2026-10-21); (2) right
@@ -3541,6 +3568,10 @@ def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now:
     longer a strict merge), or the turn expires. A reservation already running is never affected."""
     if carrier_open:
         return "a train carrier is open over main"
+    if main_red:
+        # No train is built over a red main (plan_train serves only fixes), so this turn would hold the
+        # strict lane that serves the fix for TRAIN_TURN_S with nobody using it.
+        return None
     if not train_waiting or not last_merge_was_strict(gh, git, base):
         return None
     now = time.time() if now is None else now
@@ -5485,6 +5516,7 @@ def self_test() -> int:
             fails.append(f"{label}: {detail} [clock: time.time={time.time():.0f} last_reservation={last_reservation}]")
 
     retry_planner_self_test(check)
+    train_turn_main_red_self_test(check)
     branch_updater_self_test(check)
     git_memo_self_test(check)
     packed_fixture_self_test(check)
@@ -8971,22 +9003,6 @@ def self_test() -> int:
                 else:
                     gh.head_checks[gh.prs[fn]["head"]["sha"]] = combined
                 return first, settle_now()
-
-            # Main red right after a strict merge, a train candidate waiting: the train cannot take its turn (no
-            # train over a red main), so the fix is still update-branched in this tick (2026-11-13).
-            mod = globals()
-            saved_lmws, saved_turn_s = mod["last_merge_was_strict"], TRAIN_TURN_S
-            mod["last_merge_was_strict"], TRAIN_TURN_S = (lambda *_a, **_k: True), 10 ** 9
-            try:
-                open_only("p1")
-                s1, _s2 = fix_behind(None)
-            finally:
-                mod["last_merge_was_strict"], TRAIN_TURN_S = saved_lmws, saved_turn_s
-            check("main red: the train's turn after a strict merge does not hold the fix (no train over a red main)",
-                  gh.updates == [36] and gh.merged == [] and s1.get("main_red", []) == [MR],
-                  f"updates={gh.updates} merged={gh.merged} {s1}")
-            gh.pending_shas.clear()
-            main_red_done()
 
             s1, s2 = fix_behind(None)
             check("main red: a fix behind main is update-branched, not merged, and holds main while its combined CI runs",
