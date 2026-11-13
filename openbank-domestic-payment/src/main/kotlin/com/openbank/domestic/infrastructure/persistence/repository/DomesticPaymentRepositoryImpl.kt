@@ -30,8 +30,8 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.LockModeType
-import java.time.Duration
 import java.sql.SQLException
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
