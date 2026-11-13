@@ -8,8 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.kyb.application.usecase.MonitoringFindingOutcome
 import com.openbank.kyb.application.usecase.MonitoringFindingService
 import com.openbank.kyb.application.usecase.MonitoringSettings
-import com.openbank.kyb.domain.model.MonitoringMatch
-import com.openbank.kyb.domain.model.ScreeningVerdict
+import com.openbank.kyb.application.usecase.ReportedFinding
 import com.openbank.kyb.infrastructure.MicrometerKybMonitoringMetrics
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
@@ -24,10 +23,7 @@ import org.junit.jupiter.api.assertThrows
 import org.yaml.snakeyaml.Yaml
 import java.nio.file.Files
 import java.nio.file.Path
-import java.time.Clock
 import java.time.Duration
-import java.time.Instant
-import java.time.ZoneOffset
 import java.util.UUID
 
 /** Named so detekt's TooGenericExceptionThrown does not have to be suppressed at the throw site. */
@@ -53,7 +49,6 @@ class MonitoredSubjectMatchedConsumerTest {
             it.settings = settings
             it.metrics = MicrometerKybMonitoringMetrics(registry, settings).apply { register() }
             it.objectMapper = ObjectMapper()
-            it.clock = Clock.fixed(Instant.parse("2026-11-13T12:00:05Z"), ZoneOffset.UTC)
         }
         coEvery { findings.handle(any(), any()) } returns MonitoringFindingOutcome.REVIEW_OPENED
     }
@@ -99,14 +94,14 @@ class MonitoredSubjectMatchedConsumerTest {
 
         consumer.consume(matched(MonitoredSubjectMatchedWire.body(subjectRef, findingId, matchStatus = "HIT")))
 
-        val match = slot<MonitoringMatch>()
+        val match = slot<ReportedFinding>()
         coVerify(exactly = 1) { findings.handle(subjectRef, capture(match)) }
         assertThat(match.captured.findingId).isEqualTo(findingId)
         assertThat(match.captured.matchKind).isEqualTo("SANCTIONS")
         assertThat(match.captured.listType).isEqualTo("EU_CONSOLIDATED")
         assertThat(match.captured.listEntryRef).isEqualTo("id:synthetic-entry-1")
         assertThat(match.captured.matchScore).isEqualTo(0.93)
-        assertThat(match.captured.verdict).isEqualTo(ScreeningVerdict.HIT)
+        assertThat(match.captured.matchStatus).isEqualTo("HIT")
         assertThat(match.captured.detection).isEqualTo("LIST_DELTA")
         assertThat(counted("review_opened")).isEqualTo(1.0)
         assertThat(counted("unrecognised")).isEqualTo(0.0)

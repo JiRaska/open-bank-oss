@@ -33,7 +33,10 @@ import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.everyItem
+import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.hasSize
+import org.hamcrest.Matchers.not
 import org.hamcrest.Matchers.notNullValue
 import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.AfterEach
@@ -68,6 +71,8 @@ import java.util.concurrent.TimeUnit
 @QuarkusTestResource(KybBootSmokeIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresTestResource::class)
 @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API", "ROLE_KYC"])
+// One application, one database and one set of doubles: splitting the class would copy the fixture, not the tests.
+@Suppress("LargeClass")
 class KybOngoingMonitoringIT {
 
     @Inject lateinit var parties: StubPartyGateway
@@ -97,17 +102,23 @@ class KybOngoingMonitoringIT {
     fun setUp() {
         journey = KybMonitoringJourney(parties, documents, jdbcUrl)
         registry.failWith = null
+        registry.slowBy = 0
+        registry.holdRegistration.clear()
+        registry.entered.clear()
         switch(enabled = true)
-        // Rows other tests of the module left owed or refused would be sent by this test's runs.
+        // What other tests of the module left owed, refused or unreconciled would be handled by this test's runs.
         journey.execute(
-            "update kyb_monitored_subjects set sync_state = 'SYNCED', pending_since = null, updated_at = now() " +
-                "where sync_state <> 'SYNCED'",
+            "update kyb_monitored_subjects set sync_state = 'SYNCED', pending_since = null, claimed_until = null, " +
+                "updated_at = now() where sync_state <> 'SYNCED'",
         )
+        journey.execute("update kyb_cases set monitoring_synced_version = version")
     }
 
     @AfterEach
     fun tearDown() {
         registry.failWith = null
+        registry.slowBy = 0
+        registry.holdRegistration.values.forEach { it.complete(Unit) }
         journey.execute("drop trigger if exists monitoring_it_refuse on kyb_monitored_subjects")
         journey.execute("drop trigger if exists monitoring_it_refuse on kyb_outbox")
     }
@@ -128,6 +139,9 @@ class KybOngoingMonitoringIT {
     private fun registeredFor(caseId: String) =
         journey.rows(caseId).map { it.subjectRef }.let { refs -> registry.registered.filter { it.subjectRef in refs } }
 
+    private fun withdrawnFor(caseId: String) =
+        journey.rows(caseId).map { it.subjectRef }.let { refs -> registry.withdrawn.filter { it in refs } }
+
     /** Refuses every insert into [table] for this case, from inside whichever transaction attempts it. */
     private fun refuseInserts(table: String, column: String, caseId: String) {
         journey.execute(
@@ -141,32 +155,36 @@ class KybOngoingMonitoringIT {
         )
     }
 
-    private fun finding(subjectRef: String, findingId: UUID = UUID.randomUUID(), status: String = "POTENTIAL_HIT") =
+    /** A finding as the producer puts it on the wire, through the real consumer. */
+    private fun finding(subjectRef: String, findingId: UUID = UUID.randomUUID(), kind: String = "SANCTIONS") =
         onEventLoop {
             consumer.consume(
                 MonitoredSubjectMatchedWire.record(
                     MonitoredSubjectMatchedWire.EVENT_TYPE,
                     MonitoredSubjectMatchedWire.json(
-                        MonitoredSubjectMatchedWire.body(subjectRef, findingId, matchStatus = status),
+                        MonitoredSubjectMatchedWire.body(subjectRef, findingId, matchKind = kind),
                     ),
                 ),
             )
         }
 
-    private fun personRef(caseId: String): String =
-        journey.rows(caseId).single { it.subjectRef != journey.stored(caseId).entityPartyId }.subjectRef
-
     private fun representativeKey(caseId: String): String = journey.operator().get("/api/v1/kyb/cases/$caseId")
         .then().statusCode(200).extract().path("screening.subjects.find { it.kind == 'REPRESENTATIVE' }.key")
 
-    private fun dispose(caseId: String, disposition: String) {
+    private fun personRef(caseId: String): String =
+        journey.rows(caseId).single { it.subjectKey == representativeKey(caseId) }.subjectRef
+
+    private fun entityRef(caseId: String): String =
+        journey.rows(caseId).single { it.subjectKey != representativeKey(caseId) }.subjectRef
+
+    private fun decide(caseId: String, findingId: UUID, disposition: String) =
         journey.operator().body("""{"disposition":"$disposition","reason":"decided in the monitoring IT"}""")
-            .post("/api/v1/kyb/cases/$caseId/screening/findings/${representativeKey(caseId)}/disposition")
-            .then().statusCode(200)
-    }
+            .post("/api/v1/kyb/cases/$caseId/monitoring/findings/$findingId/disposition")
+
+    private fun stats() = onEventLoop { store.stats(Instant.now()) }
 
     @Test
-    fun `approval and what it owes the registry commit in one transaction, under opaque references`() {
+    fun `approval and what it owes the registry commit in one transaction, under references that say nothing`() {
         switch(enabled = false)
         val (caseId, ceremonyId) = journey.readyToSign("71000054")
         assertThat(journey.rows(caseId)).describedAs("nobody is owed to the registry before approval").isEmpty()
@@ -180,16 +198,17 @@ class KybOngoingMonitoringIT {
         assertThat(rows).allMatch { it.desired == "REGISTERED" && it.syncState == "PENDING" }
         // One transaction id on the case row and on both rows: they committed together or not at all.
         assertThat(rows.map { it.xmin }.toSet()).containsExactly(case.xmin)
+        assertThat(case.syncedVersion).describedAs("the case says its store is in step").isEqualTo(case.version)
 
-        // The entity is registered under its party id, the person under a random UUID, and both
-        // are what the onboarding screen sent as subjectId — so a clearance binds in the registry.
-        val person = rows.single { it.subjectRef != case.entityPartyId }.subjectRef
-        assertThat(rows.map { it.subjectRef }).contains(case.entityPartyId)
-        assertThat(UUID.fromString(person).version()).isEqualTo(4)
-        val screened = screening.requests.filter { it.subjectId in rows.map { r -> r.subjectRef } }
-        assertThat(screened.map { it.name }.toSet()).containsExactlyInAnyOrder("Příklad s.r.o.", "Marek Sledovaný")
-        assertThat(screened).allMatch { it.idempotencyKey == "kyb-screen:${it.subjectId}" }
-        // The store itself holds no name at all.
+        // The reference is random and belongs to nothing: not the party, not the id the screen
+        // used, not the subject key (which is derived from the name).
+        assertThat(rows.map { it.subjectRef }).allMatch { UUID.fromString(it).version() == 4 }
+        assertThat(rows.map { it.subjectRef }).doesNotContain(case.entityPartyId)
+        val screened = screening.requests.filter { it.idempotencyKey.startsWith("kyb-screen:$caseId:") }
+        assertThat(screened).hasSize(2)
+        assertThat(rows.map { it.subjectRef }).doesNotContainAnyElementsOf(screened.map { it.subjectId })
+        rows.forEach { assertThat(it.subjectRef).doesNotContain(it.subjectKey) }
+        // The store holds no name.
         assertThat(
             journey.query(
                 "select row_to_json(m)::text from kyb_monitored_subjects m where case_id = ?",
@@ -233,18 +252,16 @@ class KybOngoingMonitoringIT {
     fun `a writer that finds the row already being written waits and yields, it does not fail`() {
         val (caseId, ceremonyId) = journey.readyToSign("71000186")
         val id = UUID.fromString(caseId)
-        val entityRef = journey.stored(caseId).entityPartyId
-        // Another writer of the same case (the backfill, a second request) has inserted the
-        // entity's row and not committed yet.
+        val key = representativeKey(caseId)
+        // Another writer of the same case has inserted that subject's row and not committed yet.
         DriverManager.getConnection(jdbcUrl, "openbank", "openbank_secret").use { other ->
             other.autoCommit = false
             other.prepareStatement(
-                "insert into kyb_monitored_subjects (id, case_id, subject_ref, desired, sync_state, " +
-                    "next_attempt_at, pending_since, created_at, updated_at) " +
-                    "values (nextval('kyb_monitored_subjects_seq'), ?, ?, 'REGISTERED', 'PENDING', now(), now(), now(), now())",
+                "insert into kyb_monitored_subjects (id, case_id, subject_key, next_attempt_at, pending_since, " +
+                    "created_at, updated_at) values (nextval('kyb_monitored_subjects_seq'), ?, ?, now(), now(), now(), now())",
             ).use {
                 it.setObject(1, id)
-                it.setString(2, entityRef)
+                it.setString(2, key)
                 it.executeUpdate()
             }
             val signing = CompletableFuture.supplyAsync { journey.sign(caseId, ceremonyId) }
@@ -288,9 +305,8 @@ class KybOngoingMonitoringIT {
             id,
         )
         run()
-        val case = journey.stored(caseId)
         assertThat(registeredFor(caseId)).containsExactlyInAnyOrder(
-            StubMonitoredSubjectRegistry.Registration(case.entityPartyId!!, true, "Příklad s.r.o."),
+            StubMonitoredSubjectRegistry.Registration(entityRef(caseId), true, "Příklad s.r.o."),
             StubMonitoredSubjectRegistry.Registration(personRef(caseId), false, "Oskar Opakovaný"),
         )
         assertThat(journey.rows(caseId)).allMatch { it.syncState == "SYNCED" && it.lastError == null }
@@ -311,18 +327,14 @@ class KybOngoingMonitoringIT {
     }
 
     @Test
-    fun `a subject the registry refuses leaves the backlog, is shown to the operator, and is tried again later`() {
+    fun `a subject the registry refuses is parked, shown to the operator, and sent again when its case is written`() {
         val caseId = journey.approved("71000194")
         val id = UUID.fromString(caseId)
-        val refusedBefore =
-            counted(MicrometerKybMonitoringMetrics.REGISTRATIONS, "outcome", "refused", "reason", "http_400")
 
-        // The registry will not take the subject as it is: a retry cannot change that.
+        // The registry's validation will not take the subject as it is: a retry cannot change that.
         registry.failWith = MonitoredSubjectRegistryException("http_400", RegistryFailure.REFUSED, null)
         run()
         assertThat(journey.rows(caseId)).allMatch { it.syncState == "REFUSED" && it.lastError == "http_400" }
-        assertThat(counted(MicrometerKybMonitoringMetrics.REGISTRATIONS, "outcome", "refused", "reason", "http_400"))
-            .isEqualTo(refusedBefore + 2)
         // Out of the retry loop and out of the backlog the critical alert reads ...
         journey.execute(
             "update kyb_monitored_subjects set next_attempt_at = now() - interval '1 hour' where case_id = ?",
@@ -330,30 +342,22 @@ class KybOngoingMonitoringIT {
         )
         run()
         assertThat(journey.rows(caseId)).allMatch { it.attemptCount == 1 }
-        val stats = onEventLoop { store.stats(Instant.now()) }
-        assertThat(stats.pending).isZero()
-        assertThat(stats.oldestPendingAgeSeconds).isZero()
-        assertThat(stats.refused).isEqualTo(2)
+        assertThat(stats().pending).isZero()
+        assertThat(stats().oldestPendingAgeSeconds).isZero()
+        assertThat(stats().refused).isEqualTo(2)
         // ... and in front of an operator, on the case; never in front of the customer.
         journey.operator().get("/api/v1/kyb/cases/$caseId").then().statusCode(200)
             .body("screening.subjects.find { it.kind == 'REPRESENTATIVE' }.monitoringState", equalTo("REFUSED"))
         journey.customer().get("/api/v1/kyb/cases/$caseId").then().statusCode(200).body("screening", nullValue())
 
-        // A wrong caller is a different thing: it stays owed, because fixing the caller fixes it.
-        journey.execute(
-            "update kyb_monitored_subjects set updated_at = now() - interval '8 days' where case_id = ?",
-            id,
-        )
-        registry.failWith = MonitoredSubjectRegistryException("http_403", RegistryFailure.UNAUTHORISED, null)
-        run()
-        assertThat(journey.rows(caseId)).allMatch { it.syncState == "PENDING" && it.lastError == "http_403" }
-
-        // Control: once the registry accepts, the same rows are delivered.
+        // What the alert promises: a write of the case makes its refused rows due again.
         registry.failWith = null
-        journey.execute(
-            "update kyb_monitored_subjects set next_attempt_at = now() - interval '1 second' where case_id = ?",
-            id,
-        )
+        val disclosures = StubDocumentGateway.DISCLOSURES.joinToString(",") {
+            """{"code":"${it.code}","version":"${it.version}","sha256":"${it.sha256}"}"""
+        }
+        journey.customer().body("""{"disclosures":[$disclosures]}""")
+            .post("/api/v1/kyb/cases/$caseId/agreement/accept").then().statusCode(200)
+        assertThat(journey.rows(caseId)).allMatch { it.syncState == "PENDING" && it.desired == "REGISTERED" }
         run()
         assertThat(journey.rows(caseId)).allMatch { it.syncState == "SYNCED" }
         journey.operator().get("/api/v1/kyb/cases/$caseId").then().statusCode(200)
@@ -361,10 +365,9 @@ class KybOngoingMonitoringIT {
     }
 
     @Test
-    fun `rejecting a signed case that has no monitoring review withdraws everyone, in the same transaction`() {
+    fun `rejecting a signed case that has no finding withdraws everyone, in the same transaction`() {
         val caseId = journey.approved("71000089")
         run()
-        val refs = journey.rows(caseId).map { it.subjectRef }
         assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" && it.syncState == "SYNCED" }
 
         journey.operator().body("""{"reason":"withdrawn before activation"}""")
@@ -373,136 +376,296 @@ class KybOngoingMonitoringIT {
         val case = journey.stored(caseId)
         assertThat(journey.rows(caseId)).allMatch { it.desired == "WITHDRAWN" && it.syncState == "PENDING" }
         assertThat(journey.rows(caseId).map { it.xmin }.toSet()).containsExactly(case.xmin)
-        assertThat(registry.withdrawn).doesNotContainAnyElementsOf(refs)
+        assertThat(withdrawnFor(caseId)).isEmpty()
 
         run()
-        assertThat(registry.withdrawn).containsAll(refs)
+        assertThat(withdrawnFor(caseId)).hasSize(2)
         assertThat(journey.rows(caseId)).allMatch { it.desired == "WITHDRAWN" && it.syncState == "SYNCED" }
     }
 
-    @Test
-    fun `a subject screened and decided by an earlier release keeps its id, its decision and its registration`() {
-        // What the release before this one leaves behind once screening is on: an approved case
-        // whose subjects were screened under the old subjectId and carry no reference.
-        screening.answers["Viktor Doplněný"] =
-            com.openbank.kyb.application.port.out.RelatedPartyScreeningResult(
-                com.openbank.kyb.domain.model.ScreeningVerdict.CLEAR,
-                true,
-                "DOPLNENY Viktor",
+    /**
+     * What a pod of the previous release does to a case during a rolling deploy or after a
+     * rollback: it reads the row, knows nothing of monitoring, and writes back every column IT
+     * maps — the status, the version, and `screening_json` re-serialised through its own
+     * document shape, which drops whatever it does not know.
+     */
+    private fun writtenByThePreviousRelease(caseId: String, status: String) {
+        val json = journey.stored(caseId).screeningJson
+        val asThePreviousReleaseWritesIt =
+            com.openbank.kyb.infrastructure.persistence.repository.KybScreeningJson.write(
+                com.openbank.kyb.infrastructure.persistence.repository.KybScreeningJson.read(json),
             )
-        val (caseId, ceremonyId) = journey.readyToSign("71000097")
-        assertThat(journey.sign(caseId, ceremonyId)).isEqualTo(200)
-        dispose(caseId, "CONFIRMED")
-        journey.operator().body("""{"requiredSignatures":1}""").post("/api/v1/kyb/cases/$caseId/review/resolve")
-            .then().statusCode(200).body("status", equalTo("SIGNED"))
-        val id = UUID.fromString(caseId)
-        val key = representativeKey(caseId)
-        journey.execute("delete from kyb_monitored_subjects where case_id = ?", id)
         journey.execute(
-            "update kyb_cases set screening_json = " +
-                "regexp_replace(screening_json, '\"ref\":\"[^\"]*\"', '\"ref\":null', 'g') where case_id = ?",
-            id,
+            "update kyb_cases set status = ?, screening_json = ?, version = version + 1, updated_at = now() where case_id = ?",
+            status,
+            asThePreviousReleaseWritesIt,
+            UUID.fromString(caseId),
         )
-        val before = journey.stored(caseId)
-        assertThat(before.screeningJson).doesNotContain("\"ref\":\"")
-        val screensBefore = screening.requests.size
+    }
+
+    @Test
+    fun `a write by the previous release loses no reference, no finding and no decision, and withdraws nobody`() {
+        val caseId = journey.approved("71000224")
+        run()
+        val refsBefore = journey.rows(caseId).associate { it.subjectKey to it.subjectRef }
+        val first = UUID.randomUUID()
+        val second = UUID.randomUUID()
+        finding(personRef(caseId), first, kind = "PEP")
+        finding(personRef(caseId), second)
+        decide(caseId, first, "CONFIRMED").then().statusCode(200)
+        val callsBefore = registry.calls.size
+
+        // The entity party becomes active, and a pod of the previous release handles the event.
+        writtenByThePreviousRelease(caseId, "ACTIVE")
+        val after = journey.stored(caseId)
+        assertThat(after.syncedVersion).describedAs("the stale writer is visible").isNotEqualTo(after.version)
+        assertThat(stats().unreconciledCases).isGreaterThanOrEqualTo(1)
 
         run()
 
-        // Registered under exactly the two ids the old screen used, so the check and any
-        // clearance recorded on it in sanctions-service still bind.
-        val case = journey.stored(caseId)
-        assertThat(journey.rows(caseId).map { it.subjectRef })
-            .containsExactlyInAnyOrder(case.entityPartyId, "kyb-case:$caseId:$key")
+        // Nobody was withdrawn, nothing was deleted, every reference is the one it was.
         assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" && it.syncState == "SYNCED" }
-        assertThat(registeredFor(caseId).map { it.name }).containsExactlyInAnyOrder("Příklad s.r.o.", "Viktor Doplněný")
-        // Nobody is screened again, nothing the operator decided is lost, nothing is re-flagged,
-        // and the applicant's case has not moved.
-        assertThat(screening.requests).hasSize(screensBefore)
-        assertThat(case.screeningJson).contains("\"disposition\":\"CONFIRMED\"", "decided in the monitoring IT")
-        assertThat(case.reviewOpened).isFalse()
-        assertThat(case.status).isEqualTo("SIGNED")
-        assertThat(case.updatedAt).isEqualTo(before.updatedAt)
+        assertThat(journey.rows(caseId).associate { it.subjectKey to it.subjectRef }).isEqualTo(refsBefore)
+        assertThat(registry.calls.drop(callsBefore)).noneMatch { it.startsWith("DELETE") }
+        // The findings and the decision are where the previous release cannot reach them.
+        assertThat(
+            journey.findings(caseId),
+        ).containsEntry(first.toString(), "CONFIRMED").containsEntry(second.toString(), "OPEN")
+        val reconciled = journey.stored(caseId)
+        assertThat(reconciled.findingCount).isEqualTo(2)
+        assertThat(reconciled.reviewOpen).isTrue()
+        assertThat(reconciled.syncedVersion).isEqualTo(reconciled.version)
+        journey.operator().get("/api/v1/kyb/cases/$caseId").then().statusCode(200)
+            .body("monitoring.findings", hasSize<Any>(2))
+        // And a finding still reaches the case under the same reference.
+        val third = UUID.randomUUID()
+        finding(refsBefore.getValue(representativeKey(caseId)), third)
+        assertThat(journey.findings(caseId)).containsKey(third.toString())
+    }
+
+    @Test
+    fun `a case the previous release approved or ended is brought into step without anyone asking`() {
+        // Approved by the previous release: SIGNED, and no row at all.
+        val (approvedByOld, _) = journey.readyToSign("71000232")
+        writtenByThePreviousRelease(approvedByOld, "SIGNED")
+        assertThat(journey.rows(approvedByOld)).isEmpty()
+        // Ended by the previous release: REJECTED, with its rows still wanting registration.
+        val endedByOld = journey.approved("71000259")
+        run()
+        assertThat(journey.rows(endedByOld)).allMatch { it.desired == "REGISTERED" && it.syncState == "SYNCED" }
+        writtenByThePreviousRelease(endedByOld, "REJECTED")
+
+        run()
+
+        assertThat(journey.rows(approvedByOld)).hasSize(2)
+        assertThat(journey.rows(approvedByOld)).allMatch { it.desired == "REGISTERED" && it.syncState == "SYNCED" }
+        assertThat(
+            registeredFor(approvedByOld).map {
+                it.name
+            },
+        ).containsExactlyInAnyOrder("Příklad s.r.o.", "Nina Dvojitá")
+        assertThat(journey.rows(endedByOld)).allMatch { it.desired == "WITHDRAWN" }
+        run()
+        assertThat(withdrawnFor(endedByOld)).hasSize(2)
     }
 
     @Test
     @Suppress("LongMethod") // one continuous journey over one stored case, as in KybCaseApiIT
-    fun `a finding opens a review beside the status and an operator closes it with the existing routes`() {
+    fun `a finding waits beside an unchanged case, in its own queue, and is decided by its own route`() {
         val caseId = journey.approved("71000101")
         run()
         val before = journey.stored(caseId)
-        val person = personRef(caseId)
         val eventsBefore = journey.events(caseId)
-        val mandatesBefore = parties.mandates.count { it.evidenceRef.contains(caseId) }
         val findingId = UUID.randomUUID()
         val opened = counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "review_opened")
         val duplicates = counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "duplicate")
 
-        finding(person, findingId)
+        finding(personRef(caseId), findingId)
 
-        val reviewed = journey.stored(caseId)
-        // The status is what it was: nothing downstream, and no applicant, can read the review off it.
-        assertThat(reviewed.status).isEqualTo("SIGNED")
-        assertThat(reviewed.updatedAt).isEqualTo(before.updatedAt)
-        assertThat(reviewed.reviewOpened).isTrue()
-        assertThat(reviewed.screeningJson).contains(findingId.toString(), "id:synthetic-entry-1", "POTENTIAL_HIT")
-        assertThat(counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "review_opened")).isEqualTo(opened + 1)
-        // Nobody is withdrawn because a finding arrived, and no event tells anyone outside.
-        assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" && it.syncState == "SYNCED" }
+        val found = journey.stored(caseId)
+        // Nothing an applicant, an event or another service reads has moved.
+        assertThat(found.status).isEqualTo("SIGNED")
+        assertThat(found.updatedAt).isEqualTo(before.updatedAt)
+        assertThat(
+            found.screeningJson,
+        ).describedAs("the onboarding screening is not rewritten").isEqualTo(before.screeningJson)
         assertThat(journey.events(caseId)).isEqualTo(eventsBefore)
+        assertThat(found.reviewOpen).isTrue()
+        assertThat(journey.findings(caseId)).containsEntry(findingId.toString(), "OPEN")
+        assertThat(counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "review_opened")).isEqualTo(opened + 1)
+        assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" && it.syncState == "SYNCED" }
 
         // The same finding again: counted as a duplicate, and the row is not written.
-        finding(person, findingId)
-        assertThat(journey.stored(caseId).xmin).isEqualTo(reviewed.xmin)
+        finding(personRef(caseId), findingId)
+        assertThat(journey.stored(caseId).xmin).isEqualTo(found.xmin)
         assertThat(counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "duplicate")).isEqualTo(duplicates + 1)
 
-        // The operator finds it in the existing review queue although its status is SIGNED.
-        journey.operator().get("/api/v1/kyb/cases?status=MANUAL_REVIEW&size=100").then().statusCode(200)
+        // Its own queue; a status filter answers that status only.
+        journey.operator().get("/api/v1/kyb/cases?monitoring=open&size=100").then().statusCode(200)
+            .body("id", hasItem(caseId))
             .body("find { it.id == '$caseId' }.status", equalTo("SIGNED"))
-            .body("find { it.id == '$caseId' }.monitoringReview.openedAt", notNullValue())
-        journey.operator().get("/api/v1/kyb/cases/$caseId").then().statusCode(200)
-            .body("screening.openFindings", equalTo(1))
-            .body("screening.subjects.find { it.kind == 'REPRESENTATIVE' }.monitoringFindings", hasSize<Any>(1))
-            .body(
-                "screening.subjects.find { it.kind == 'REPRESENTATIVE' }.monitoringFindings[0].listEntryRef",
-                equalTo("id:synthetic-entry-1"),
-            )
+            .body("find { it.id == '$caseId' }.monitoring.findings[0].listEntryRef", equalTo("id:synthetic-entry-1"))
+        journey.operator().get("/api/v1/kyb/cases?status=MANUAL_REVIEW&size=100").then().statusCode(200)
+            .body("id", not(hasItem(caseId)))
+            .body("status", everyItem(equalTo("MANUAL_REVIEW")))
+        journey.operator().get("/api/v1/kyb/cases?monitoring=open&status=SIGNED").then().statusCode(400)
+        journey.operator().get("/api/v1/kyb/cases?monitoring=closed").then().statusCode(400)
+        // The applicant has no such queue and no such field.
+        journey.customer().get("/api/v1/kyb/cases/$caseId").then().statusCode(200).body("monitoring", nullValue())
 
-        // Must-refuse: resolving the review does not decide the finding.
-        journey.operator().body("""{"requiredSignatures":1}""").post("/api/v1/kyb/cases/$caseId/review/resolve")
-            .then().statusCode(422).body("error", equalTo("SCREENING_FINDING_OPEN"))
-        assertThat(journey.stored(caseId).reviewOpened).isTrue()
+        decide(caseId, findingId, "CLEARED_FALSE_POSITIVE").then().statusCode(200)
+            .body("status", equalTo("SIGNED"))
+            .body("monitoring.reviewSince", nullValue())
+            .body("monitoring.findings[0].disposition", equalTo("CLEARED_FALSE_POSITIVE"))
+            .body("monitoring.findings[0].decidedBy", equalTo("service-account-openbank-edge"))
+        // A decision is made once.
+        decide(caseId, findingId, "CONFIRMED").then().statusCode(409)
 
-        dispose(caseId, "CLEARED_FALSE_POSITIVE")
-        journey.operator().body("""{"requiredSignatures":1}""").post("/api/v1/kyb/cases/$caseId/review/resolve")
-            .then().statusCode(200).body("status", equalTo("SIGNED")).body("monitoringReview", nullValue())
-
-        // Closed, and nothing of the approval was repeated or moved.
-        val resolved = journey.stored(caseId)
-        assertThat(resolved.reviewOpened).isFalse()
-        assertThat(resolved.updatedAt).isEqualTo(before.updatedAt)
+        val decided = journey.stored(caseId)
+        assertThat(decided.reviewOpen).isFalse()
+        assertThat(decided.updatedAt).isEqualTo(before.updatedAt)
         assertThat(journey.events(caseId)).isEqualTo(eventsBefore)
-        assertThat(parties.mandates.count { it.evidenceRef.contains(caseId) }).isEqualTo(mandatesBefore)
         assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" }
-        assertThat(
-            journey.operator().get("/api/v1/kyb/cases?status=MANUAL_REVIEW&size=100").then().extract().asString(),
-        )
-            .doesNotContain(caseId)
+        journey.operator().get("/api/v1/kyb/cases?monitoring=open&size=100").then().body("id", not(hasItem(caseId)))
+    }
+
+    @Test
+    fun `a confirmed sanctions match stands whatever a later finding brings, and is an exit, published once`() {
+        val caseId = journey.approved("71000178")
+        onEventLoop { onboarding.entityPartyActivated(UUID.fromString(journey.stored(caseId).entityPartyId)) }
+        run()
+        val before = journey.stored(caseId)
+        assertThat(before.status).isEqualTo("ACTIVE")
+        val eventsBefore = journey.events(caseId)
+        val sanctions = UUID.randomUUID()
+        val pep = UUID.randomUUID()
+        val later = UUID.randomUUID()
+        finding(personRef(caseId), sanctions)
+        finding(personRef(caseId), pep, kind = "PEP")
+
+        // A confirmed PEP match is a risk fact: no exit, no event.
+        decide(caseId, pep, "CONFIRMED").then().statusCode(200).body("monitoring.exitOwedSince", nullValue())
+        assertThat(journey.events(caseId)).isEqualTo(eventsBefore)
+
+        decide(caseId, sanctions, "CONFIRMED").then().statusCode(200)
+            .body("status", equalTo("ACTIVE"))
+            .body("monitoring.exitOwedSince", notNullValue())
+        // A second finding on the same person, cleared: the confirmed one is untouched.
+        finding(personRef(caseId), later)
+        decide(caseId, later, "CLEARED_FALSE_POSITIVE").then().statusCode(200)
+            .body("monitoring.exitOwedSince", notNullValue())
+            .body("monitoring.reviewSince", nullValue())
+        assertThat(journey.findings(caseId)).containsEntry(sanctions.toString(), "CONFIRMED")
+            .containsEntry(later.toString(), "CLEARED_FALSE_POSITIVE")
+
+        val owed = journey.stored(caseId)
+        // Still an active customer, still monitored, and nothing the applicant reads has moved.
+        assertThat(owed.status).isEqualTo("ACTIVE")
+        assertThat(owed.updatedAt).isEqualTo(before.updatedAt)
+        assertThat(owed.exitOwed).isTrue()
+        assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" && it.syncState == "SYNCED" }
+        // Its own event, exactly once, and not the onboarding rejection; it says nothing of why.
+        assertThat(journey.events(caseId) - eventsBefore.toSet()).containsExactly("BUSINESS_RELATIONSHIP_EXIT_REQUIRED")
+        val payload = journey.query(
+            "select payload from kyb_outbox where aggregate_id = ? and event_type = 'BUSINESS_RELATIONSHIP_EXIT_REQUIRED'",
+            UUID.fromString(caseId),
+        ) { it.getString(1) }.single()
+        assertThat(payload).contains("\"status\":\"ACTIVE\"")
+            .doesNotContain("sanction", "confirmed", "reviewReason", "HIT", "finding", "decided")
+        assertThat(stats().exitsOwed).isGreaterThanOrEqualTo(1)
+    }
+
+    @Test
+    fun `only a recorded exit ends monitoring of a confirmed match, and it withdraws the subjects`() {
+        val caseId = journey.approved("71000216")
+        run()
+        val confirmed = UUID.randomUUID()
+        val open = UUID.randomUUID()
+        finding(personRef(caseId), confirmed)
+        decide(caseId, confirmed, "CONFIRMED").then().statusCode(200)
+        finding(entityRef(caseId), open)
+        fun complete(evidence: String) = journey.operator().body("""{"evidence":"$evidence"}""")
+            .post("/api/v1/kyb/cases/$caseId/monitoring/exit/complete")
+
+        // Must-refuse: a finding nobody decided, and evidence that says nothing.
+        complete("accounts closed, mandates revoked on 13 November").then().statusCode(409)
+        decide(caseId, open, "CLEARED_FALSE_POSITIVE").then().statusCode(200)
+        complete("done").then().statusCode(400)
+        assertThat(journey.stored(caseId).exitOwed).isTrue()
+        assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" }
+
+        complete("accounts closed, mandates revoked on 13 November").then().statusCode(200)
+            .body("status", equalTo("SIGNED"))
+            .body("monitoring.exitOwedSince", nullValue())
+            .body("monitoring.exitCompleted.completedBy", equalTo("service-account-openbank-edge"))
+            .body("monitoring.exitCompleted.evidence", equalTo("accounts closed, mandates revoked on 13 November"))
+
+        val exited = journey.stored(caseId)
+        assertThat(exited.exitOwed).isFalse()
+        assertThat(exited.exitCompleted).isTrue()
+        // The same write withdrew everyone; the relay then tells the registry.
+        assertThat(journey.rows(caseId)).allMatch { it.desired == "WITHDRAWN" && it.syncState == "PENDING" }
+        assertThat(journey.rows(caseId).map { it.xmin }.toSet()).containsExactly(exited.xmin)
+        run()
+        assertThat(withdrawnFor(caseId)).hasSize(2)
+        // Completed once; and a case that owes nothing has nothing to complete.
+        complete("accounts closed, mandates revoked on 13 November").then().statusCode(409)
+    }
+
+    @Test
+    fun `the applicant cannot end monitoring while a finding holds the case, and the abandon succeeds as ever`() {
+        val caseId = journey.approved("71000267")
+        run()
+        val findingId = UUID.randomUUID()
+        finding(personRef(caseId), findingId)
+
+        journey.customer().post("/api/v1/kyb/cases/$caseId/abandon").then().statusCode(200)
+            .body("status", equalTo("ABANDONED"))
+
+        // The case ended for the applicant; its subjects are still registered.
+        assertThat(journey.stored(caseId).status).isEqualTo("ABANDONED")
+        assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" && it.syncState == "SYNCED" }
+        run()
+        assertThat(withdrawnFor(caseId)).isEmpty()
+        // The finding is still there for the operator, in the monitoring queue.
+        journey.operator().get("/api/v1/kyb/cases?monitoring=open&size=100").then().body("id", hasItem(caseId))
+
+        // Decided clean: nothing holds the ended case any more, and that write withdraws.
+        decide(caseId, findingId, "CLEARED_FALSE_POSITIVE").then().statusCode(200)
+        assertThat(journey.rows(caseId)).allMatch { it.desired == "WITHDRAWN" }
+        run()
+        assertThat(withdrawnFor(caseId)).hasSize(2)
+    }
+
+    /** Headers that belong to one request, not to the case. */
+    private val perRequestHeaders = setOf("date", "traceparent", "tracestate", "x-correlation-id", "x-request-id")
+
+    /** Status code, headers and body, with only the per-request parts of the fleet's error body blanked. */
+    private fun whole(response: io.restassured.response.Response, blank: Regex? = null): String {
+        val perRequest = Regex(""""(traceId|timestamp)":"[^"]*"""")
+        val headers = response.headers.asList()
+            .filter { it.name.lowercase() !in perRequestHeaders }
+            .map { "${it.name.lowercase()}=${it.value}" }.sorted()
+        var body = response.body.asString().replace(perRequest, "\"$1\":\"-\"")
+        if (blank != null) body = body.replace(blank, "-")
+        return "${response.statusCode} $headers $body"
     }
 
     /**
      * Every route an applicant can reach, asked the same thing before a monitoring finding, while
-     * its review is open, after the operator decided it, and after an exit was required. The
-     * answers must be byte-equal: status code and body, `updatedAt` included (only the per-request
-     * trace id and timestamp of the fleet's generic error body are blanked).
+     * it is open, after it is confirmed (an exit owed) and after a second finding: status code,
+     * headers and body must be equal, byte for byte, `updatedAt` included.
      *
-     * Not in the list, and why: `agreement/accept` and `abandon` succeed on an approved case and
-     * write it, so two calls differ whatever monitoring did; `abandon` has its own test below.
+     * `agreement/accept` is the one route that writes an approved case. So each phase first
+     * compares every other route, unblanked, with what the same routes answered right after the
+     * applicant's own last write; then calls `accept` and compares its answer with only the
+     * timestamps that call itself writes blanked. `abandon` ends the case and is compared across
+     * two cases in the test below.
      */
-    @ParameterizedTest(name = "an applicant cannot tell a monitoring review from none on a {0} case")
+    @ParameterizedTest(name = "an applicant cannot tell a monitoring finding from none on a {0} case")
     @ValueSource(strings = ["SIGNED", "ACTIVE"])
     @Suppress("LongMethod") // the route list IS the test: every applicant route in one place
-    fun `applicant-facing answers are byte-equal with and without a monitoring review`(status: String) {
+    fun `applicant-facing answers are equal with and without monitoring findings`(status: String) {
         val ico = if (status == "SIGNED") "71000135" else "71000143"
         val caseId = journey.approved(ico)
         if (status == "ACTIVE") {
@@ -512,11 +675,15 @@ class KybOngoingMonitoringIT {
         run()
         val stranger = UUID.randomUUID()
         val start = """{"scheme":"CZ_ICO","identifier":"$ico","initiatorPartyId":"%s"}"""
+        val disclosures = StubDocumentGateway.DISCLOSURES.joinToString(",") {
+            """{"code":"${it.code}","version":"${it.version}","sha256":"${it.sha256}"}"""
+        }
         fun other() = journey.operator().header(KybMonitoringJourney.PARTY, stranger.toString())
         val routes: Map<String, () -> io.restassured.response.Response> = linkedMapOf(
             "GET case" to { journey.customer().get("/api/v1/kyb/cases/$caseId") },
             "GET case as a stranger" to { other().get("/api/v1/kyb/cases/$caseId") },
             "GET my cases" to { journey.customer().get("/api/v1/kyb/cases?partyId=${journey.initiator}") },
+            "GET the monitoring queue as a customer" to { journey.customer().get("/api/v1/kyb/cases?monitoring=open") },
             "POST start again" to {
                 journey.customer().body(start.format(journey.initiator)).post("/api/v1/kyb/cases")
             },
@@ -542,120 +709,73 @@ class KybOngoingMonitoringIT {
             },
             "POST agreement" to { journey.customer().post("/api/v1/kyb/cases/$caseId/agreement?lang=cs") },
             "POST sign" to {
-                journey.customer().body(
-                    """{"signatureRef":"${UUID.randomUUID()}"}""",
-                ).post("/api/v1/kyb/cases/$caseId/sign")
+                journey.customer().body("""{"signatureRef":"00000000-0000-4000-8000-000000000000"}""")
+                    .post("/api/v1/kyb/cases/$caseId/sign")
             },
         )
-        // The fleet's generic error body carries a per-REQUEST trace id and timestamp; those two
-        // are blanked. Nothing of the case is: `updatedAt` and every other field must match.
-        val perRequest = Regex(""""(traceId|timestamp)":"[^"]*"""")
-        fun answers() = routes.map { (name, call) ->
-            call().let { "$name -> ${it.statusCode} ${it.body.asString().replace(perRequest, "\"$1\":\"-\"")}" }
+        val accept = {
+            journey.customer().body(
+                """{"disclosures":[$disclosures]}""",
+            ).post("/api/v1/kyb/cases/$caseId/agreement/accept")
         }
+        // What `accept` itself writes on every call: the case's `updatedAt` and its own acceptance times.
+        val ownWrite = Regex(""""(updatedAt|acceptedAt|at)":"[^"]*"""")
+        fun reads(): List<String> = routes.map { (name, call) -> "$name -> ${whole(call())}" }
+        fun accepted(): String = whole(accept(), blank = ownWrite)
 
-        // Named first, so a failure says WHICH route moved before it prints two whole bodies.
-        fun assertUnmoved(phase: String, reference: List<String>) {
-            val now = answers()
-            assertThat(routes.keys.filterIndexed { i, _ -> now[i] != reference[i] }).describedAs(phase).isEmpty()
-            assertThat(now).describedAs(phase).containsExactlyElementsOf(reference)
+        // Once to settle the routes that create something on first use.
+        reads()
+        val acceptReference = accepted()
+        var afterOwnWrite = reads()
+        assertThat(afterOwnWrite.first()).startsWith("GET case -> 200").contains("\"status\":\"$status\"")
+        assertThat(acceptReference).startsWith("200")
+
+        fun assertUnmoved(phase: String) {
+            val now = reads()
+            assertThat(routes.keys.filterIndexed { i, _ -> now[i] != afterOwnWrite[i] }).describedAs(phase).isEmpty()
+            assertThat(accepted()).describedAs("$phase: agreement/accept").isEqualTo(acceptReference)
+            afterOwnWrite = reads()
         }
-        // Once to settle the routes that create something on first use, then the reference reading.
-        answers()
-        val before = answers()
-        assertUnmoved("control: the routes are stable when nothing happens", before)
-        assertThat(before.first()).startsWith("GET case -> 200").contains("\"status\":\"$status\"")
+        assertUnmoved("control: the routes are stable when nothing happens")
 
-        finding(personRef(caseId))
-        assertThat(journey.stored(caseId).reviewOpened).isTrue()
-        assertUnmoved("while the review is open", before)
+        val findingId = UUID.randomUUID()
+        finding(personRef(caseId), findingId)
+        assertThat(journey.stored(caseId).reviewOpen).isTrue()
+        assertUnmoved("while a finding is open")
 
-        dispose(caseId, "CONFIRMED")
-        assertUnmoved("after the operator decided the finding", before)
+        decide(caseId, findingId, "CONFIRMED").then().statusCode(200)
+        assertThat(journey.stored(caseId).exitOwed).isTrue()
+        assertUnmoved("after it was confirmed and an exit is owed")
 
-        journey.operator().body("""{"reason":"confirmed match"}""").post("/api/v1/kyb/cases/$caseId/reject")
-            .then().statusCode(200)
-        assertThat(journey.stored(caseId).exitRequired).isTrue()
-        assertUnmoved("after an exit was required", before)
-        // An applicant who then abandons a signed case sees it end as any other would — and stays
-        // monitored: the exit decision, not the case status, is what holds the registration.
-        if (status == "SIGNED") {
-            journey.customer().post("/api/v1/kyb/cases/$caseId/abandon").then().statusCode(200)
-                .body("status", equalTo("ABANDONED"))
-            assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" }
-            return
-        }
-        // And the timers see what they saw: an idle check for the approved status behaves as before.
+        finding(entityRef(caseId))
+        assertUnmoved("after a second finding")
         assertThat(journey.stored(caseId).status).isEqualTo(status)
     }
 
     @Test
-    fun `abandoning a signed case answers the same with and without a monitoring review`() {
+    fun `abandoning a signed case answers the same, whole, with and without an open finding`() {
         val plain = journey.approved("71000160")
-        val reviewed = journey.approved("71000151")
+        val watched = journey.approved("71000151")
         run()
-        finding(personRef(reviewed))
-        assertThat(journey.stored(reviewed).reviewOpened).isTrue()
-        fun abandon(caseId: String) = journey.customer().post("/api/v1/kyb/cases/$caseId/abandon").let {
-            "${it.statusCode} ${it.body.jsonPath().getString("status")} ${it.body.jsonPath().getString("reviewReason")}"
-        }
+        finding(personRef(watched))
+        assertThat(journey.stored(watched).reviewOpen).isTrue()
+        // Everything that names one case rather than the other, and nothing else. The two
+        // representatives' names are the same length in bytes, so `content-length` is compared too.
+        val perCase = Regex(
+            """[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{4}-\d{2}-\d{2}T[0-9:.]+Z|""" +
+                """7100016\d|7100015\d|""" +
+                """Bohdana Kontrolovaná|Ctibor Odcházející|[0-9a-f]{64}""",
+        )
+        fun abandon(caseId: String) =
+            whole(journey.customer().post("/api/v1/kyb/cases/$caseId/abandon"), blank = perCase)
 
-        assertThat(abandon(reviewed)).isEqualTo(abandon(plain)).isEqualTo("200 ABANDONED null")
-        // The relationship never became active and is over: both are withdrawn alike.
-        assertThat(journey.rows(reviewed)).allMatch { it.desired == "WITHDRAWN" }
-        assertThat(journey.rows(plain)).allMatch { it.desired == "WITHDRAWN" }
-    }
+        val withFinding = abandon(watched)
+        val without = abandon(plain)
 
-    @Test
-    @Suppress("LongMethod") // one continuous journey over one stored case
-    fun `a confirmed match on an approved customer is an exit that stays monitored, never a rejection`() {
-        val caseId = journey.approved("71000178")
-        onEventLoop { onboarding.entityPartyActivated(UUID.fromString(journey.stored(caseId).entityPartyId)) }
-        run()
-        val before = journey.stored(caseId)
-        assertThat(before.status).isEqualTo("ACTIVE")
-        val eventsBefore = journey.events(caseId)
-        val refs = journey.rows(caseId).map { it.subjectRef }
-        finding(personRef(caseId), status = "HIT")
-        dispose(caseId, "CONFIRMED")
-
-        // Must-refuse: a confirmed sanctions match cannot be resolved away.
-        journey.operator().body("""{"requiredSignatures":1}""").post("/api/v1/kyb/cases/$caseId/review/resolve")
-            .then().statusCode(422).body("error", equalTo("SCREENING_FINDING_CONFIRMED"))
-
-        journey.operator().body("""{"reason":"confirmed sanctions match on a director"}""")
-            .post("/api/v1/kyb/cases/$caseId/reject").then().statusCode(200)
-            .body("status", equalTo("ACTIVE"))
-            .body("monitoringReview.exitRequiredAt", notNullValue())
-            .body("monitoringReview.exitReason", equalTo("confirmed sanctions match on a director"))
-
-        val exiting = journey.stored(caseId)
-        // Still an active customer, still monitored: nothing is withdrawn by the decision.
-        assertThat(exiting.status).isEqualTo("ACTIVE")
-        assertThat(exiting.updatedAt).isEqualTo(before.updatedAt)
-        assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" && it.syncState == "SYNCED" }
-        run()
-        assertThat(registry.withdrawn).doesNotContainAnyElementsOf(refs)
-        // Its own event, once, and not the onboarding rejection; it says nothing of why.
-        assertThat(journey.events(caseId) - eventsBefore.toSet()).containsExactly("BUSINESS_RELATIONSHIP_EXIT_REQUIRED")
-        val payload = journey.query(
-            "select payload from kyb_outbox where aggregate_id = ? and event_type = 'BUSINESS_RELATIONSHIP_EXIT_REQUIRED'",
-            UUID.fromString(caseId),
-        ) { it.getString(1) }.single()
-        assertThat(payload).contains("\"status\":\"ACTIVE\"")
-            .doesNotContain("sanction", "confirmed", "director", "reviewReason", "HIT", "finding")
-        assertThat(onEventLoop { store.stats(Instant.now()) }.exitsRequired).isGreaterThanOrEqualTo(1)
-
-        // The decision is made once; a later finding is still recorded on the monitored case.
-        journey.operator().body(
-            """{"reason":"a second decision"}""",
-        ).post("/api/v1/kyb/cases/$caseId/reject").then().statusCode(409)
-        journey.operator().body("""{"requiredSignatures":1}""").post("/api/v1/kyb/cases/$caseId/review/resolve")
-            .then().statusCode(409)
-        val later = UUID.randomUUID()
-        finding(exiting.entityPartyId!!, later)
-        assertThat(journey.stored(caseId).screeningJson).contains(later.toString())
-        assertThat(journey.stored(caseId).exitRequired).isTrue()
+        assertThat(withFinding).isEqualTo(without)
+        assertThat(without).startsWith("200").contains("\"status\":\"ABANDONED\"")
+        // Control: the comparison is not blind — a second abandon is a different answer.
+        assertThat(abandon(plain)).isNotEqualTo(without)
     }
 
     @Test
@@ -682,21 +802,21 @@ class KybOngoingMonitoringIT {
         // This service's finding about a reference it never registered.
         send(MonitoredSubjectMatchedWire.body(UUID.randomUUID().toString()))
 
-        assertThat(journey.stored(caseId).reviewOpened).isFalse()
+        assertThat(journey.stored(caseId).findingCount).isZero()
         assertThat(journey.stored(caseId).xmin).isEqualTo(case.xmin)
         assertThat(counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "foreign_owner")).isEqualTo(foreign + 1)
         assertThat(
             counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "unknown_subject"),
         ).isEqualTo(unknown + 1)
 
-        // Control: the same reference under this service's own name does open the review.
+        // Control: the same reference under this service's own name is recorded.
         send(MonitoredSubjectMatchedWire.body(person))
-        assertThat(journey.stored(caseId).reviewOpened).isTrue()
+        assertThat(journey.stored(caseId).findingCount).isEqualTo(1)
     }
 
     @Test
     fun `a re-assertion does not overwrite a withdrawal that commits while it runs`() {
-        val caseId = journey.approved("71000216")
+        val caseId = journey.approved("71000208")
         run()
         val id = UUID.fromString(caseId)
         journey.execute(
@@ -724,61 +844,60 @@ class KybOngoingMonitoringIT {
         }
         // The withdrawal stands, at its new generation: the re-assertion re-checked and stepped aside.
         assertThat(journey.rows(caseId)).allMatch {
-            it.desired == "WITHDRAWN" &&
-                it.syncState == "PENDING" &&
-                it.generation == 1L
+            it.desired == "WITHDRAWN" && it.syncState == "PENDING" && it.generation == 1L
         }
     }
 
     @Test
-    fun `a reference two cases share is not deleted while one needs it, and the one that needs it is sent again`() {
-        val keeper = journey.approved("71000208")
-        run()
-        val shared = journey.stored(keeper).entityPartyId!!
-        val keeperRow = { journey.rows(keeper).single { it.subjectRef == shared } }
-        assertThat(keeperRow().syncState).isEqualTo("SYNCED")
-        // A registration of the keeper that is in flight right now, as the relay holds it.
-        journey.execute(
-            "update kyb_monitored_subjects set sync_state = 'PENDING' where case_id = ? and subject_ref = ?",
-            UUID.fromString(keeper),
-            shared,
-        )
-        val inFlight = onEventLoop { store.findBySubjectRef(shared) }.single()
-        // Another case of the same entity (screened under the same party id) has ended.
-        val leaver = UUID.randomUUID()
-        journey.execute(
-            "insert into kyb_monitored_subjects (id, case_id, subject_ref, desired, sync_state, " +
-                "next_attempt_at, pending_since, created_at, updated_at) " +
-                "values (nextval('kyb_monitored_subjects_seq'), ?, ?, 'WITHDRAWN', 'PENDING', " +
-                "now() - interval '1 minute', now(), now(), now())",
-            leaver,
-            shared,
-        )
-        journey.execute(
-            "update kyb_monitored_subjects set next_attempt_at = now() + interval '1 hour' where case_id = ?",
-            UUID.fromString(keeper),
-        )
-        val registeredBefore = registry.registered.count { it.subjectRef == shared }
+    fun `two relays running at once deliver each row once`() {
+        val caseId = journey.approved("71000097")
+        val registeredBefore = counted(MicrometerKybMonitoringMetrics.REGISTRATIONS, "outcome", "registered")
+        // Slow enough that the second relay arrives while the first is inside its call.
+        registry.slowBy = SLOW_CALL_MS
 
+        val relays = (1..2).map { CompletableFuture.supplyAsync { run() } }
+        relays.forEach { it.get(WAIT_SECONDS, TimeUnit.SECONDS) }
+
+        assertThat(registeredFor(caseId)).describedAs("one PUT per subject, not one per relay").hasSize(2)
+        assertThat(journey.rows(caseId)).allMatch { it.syncState == "SYNCED" }
+        assertThat(counted(MicrometerKybMonitoringMetrics.REGISTRATIONS, "outcome", "registered"))
+            .isEqualTo(registeredBefore + 2)
+    }
+
+    @Test
+    fun `a withdrawal is never sent while the registration before it is still in flight`() {
+        val caseId = journey.approved("71000241")
+        val refs = journey.rows(caseId).map { it.subjectRef }
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        refs.forEach {
+            registry.holdRegistration[it] = gate
+            registry.entered[it] = java.util.concurrent.CountDownLatch(1)
+        }
+        // One relay is inside the registration of the first row ...
+        val first = CompletableFuture.supplyAsync { run() }
+        assertThat(refs.any { registry.entered.getValue(it).await(WAIT_SECONDS, TimeUnit.SECONDS) }).isTrue()
+        // ... when the case ends, and a second relay comes by.
+        journey.operator().body("""{"reason":"withdrawn before activation"}""")
+            .post("/api/v1/kyb/cases/$caseId/reject").then().statusCode(200)
+        run()
+        val inFlight = refs.first { registry.entered.getValue(it).count == 0L }
+        assertThat(registry.calls).describedAs("the row in flight is leased: no DELETE overtakes its PUT")
+            .doesNotContain("DELETE $inFlight")
+
+        gate.complete(Unit)
+        first.get(WAIT_SECONDS, TimeUnit.SECONDS)
         run()
 
-        // Not deleted: the keeper still needs it.
-        assertThat(registry.withdrawn).doesNotContain(shared)
-        assertThat(journey.rows(leaver.toString()).single().syncState).isEqualTo("SYNCED")
-        // The keeper's in-flight delivery can no longer be recorded: had a delete landed after
-        // its PUT, it would otherwise read as registered with nothing in the registry.
-        assertThat(onEventLoop { store.markSynced(inFlight, Instant.now()) }).isFalse()
-        assertThat(keeperRow().syncState).isEqualTo("PENDING")
-        assertThat(keeperRow().generation).isEqualTo(inFlight.generation + 1)
-        run()
-        assertThat(registry.registered.count { it.subjectRef == shared }).isEqualTo(registeredBefore + 1)
-        assertThat(keeperRow().syncState).isEqualTo("SYNCED")
+        // The PUT landed first and the DELETE after it, so the registry ends without the subject.
+        assertThat(registry.calls.filter { it.endsWith(inFlight) }).containsExactly("PUT $inFlight", "DELETE $inFlight")
+        assertThat(journey.rows(caseId)).allMatch { it.desired == "WITHDRAWN" && it.syncState == "SYNCED" }
     }
 
     private companion object {
         const val OWNER = "openbank-kyb"
         const val BATCH = 200
         const val BLOCKED_FOR_MS = 700L
+        const val SLOW_CALL_MS = 400L
         const val WAIT_SECONDS = 30L
     }
 }

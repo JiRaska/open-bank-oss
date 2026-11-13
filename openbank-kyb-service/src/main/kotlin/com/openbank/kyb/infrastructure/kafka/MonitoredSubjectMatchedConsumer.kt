@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.kyb.application.port.out.KybMonitoringMetricsPort
 import com.openbank.kyb.application.usecase.MonitoringFindingService
 import com.openbank.kyb.application.usecase.MonitoringSettings
-import com.openbank.kyb.domain.model.MonitoringMatch
+import com.openbank.kyb.application.usecase.ReportedFinding
 import com.openbank.kyb.infrastructure.MicrometerKybMonitoringMetrics
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
@@ -18,14 +18,12 @@ import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
 import java.nio.charset.StandardCharsets
-import java.time.Clock
-import java.time.Instant
 import java.util.UUID
 
 /**
  * Consumes `MONITORED_SUBJECT_MATCHED` from `openbank.sanctions.screening.event`: one finding of
  * ongoing monitoring about a subject some service registered (ADR-0376 D6). For a subject THIS
- * service registered, the business case it belongs to goes to review ([MonitoringFindingService]).
+ * service registered, the finding is recorded on its business case ([MonitoringFindingService]).
  *
  * **The event type is the `ce-type` Kafka HEADER, never a body field.** The topic is
  * outbox-relayed: sanctions-service keeps the type in the outbox row's `event_type` column and
@@ -52,9 +50,11 @@ import java.util.UUID
  * rethrown; like a malformed finding, the record is nacked and the channel's configured
  * `failure-strategy` decides what follows.
  *
- * Not gated on `openbank.kyb.monitoring.enabled`. That switch stops this service from REGISTERING;
- * a finding about a subject it registered earlier is still a finding, and dropping it because the
- * switch was later turned off would be a match nobody reviews.
+ * The channel itself exists only while `openbank.kyb.monitoring.enabled` is true (application.yaml
+ * binds the channel's `enabled` to it). Switched off, the pod opens no consumer for this topic at
+ * all, so it needs neither the topic's ACL nor the dead-letter topic to start, and a deploy does
+ * not depend on those having been applied first. Findings published meanwhile wait on the topic
+ * for the consumer group and are read when the switch is turned on again.
  */
 /** A record typed as a monitoring finding that cannot be one. Carries nothing of the record. */
 class MalformedFindingException : RuntimeException("malformed MONITORED_SUBJECT_MATCHED record")
@@ -69,8 +69,6 @@ class MonitoredSubjectMatchedConsumer {
     @Inject lateinit var metrics: KybMonitoringMetricsPort
 
     @Inject lateinit var objectMapper: ObjectMapper
-
-    @Inject lateinit var clock: Clock
 
     private val log = Logger.getLogger(MonitoredSubjectMatchedConsumer::class.java)
 
@@ -126,7 +124,7 @@ class MonitoredSubjectMatchedConsumer {
         metrics.findingHandled(outcome.tag)
     }
 
-    private class Finding(val owner: String, val subjectRef: String, val match: MonitoringMatch)
+    private class Finding(val owner: String, val subjectRef: String, val match: ReportedFinding)
 
     @Suppress("ReturnCount") // one early return per missing required part
     private fun parse(record: ConsumerRecord<String, String>): Finding? {
@@ -139,7 +137,7 @@ class MonitoredSubjectMatchedConsumer {
         return Finding(
             owner,
             subjectRef,
-            MonitoringMatch(
+            ReportedFinding(
                 findingId = findingId,
                 matchKind = node.path("matchKind").asText(UNKNOWN),
                 listType = node.path("listType").asText(UNKNOWN),
@@ -148,7 +146,6 @@ class MonitoredSubjectMatchedConsumer {
                 matchScore = node.path("matchScore").asDouble(0.0),
                 matchStatus = node.path("matchStatus").asText(UNKNOWN),
                 detection = node.path("detection").asText(UNKNOWN),
-                receivedAt = Instant.now(clock),
             ),
         )
     }

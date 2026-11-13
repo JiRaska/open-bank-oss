@@ -28,8 +28,10 @@ import java.util.concurrent.atomic.AtomicReference
  *  - [REGISTERED] — rows the registry has confirmed.
  *  - [FINDINGS] — records on the findings channel by what became of them.
  *  - [REFUSED] — subjects the registry refuses as they are: approved and NOT monitored.
- *  - [EXITS_REQUIRED] — approved cases whose relationship an operator decided has to end.
- *  - [REVIEWS_OPEN] / [REVIEW_AGE] — approved cases under a monitoring review, and the oldest.
+ *  - [EXITS_OWED] / [EXIT_AGE] — cases with a confirmed sanctions match whose exit has not been
+ *    recorded as carried out, and the age of the oldest.
+ *  - [UNRECONCILED] — cases last written by a release that did not synchronise the store.
+ *  - [REVIEWS_OPEN] / [REVIEW_AGE] — cases with an undecided monitoring finding, and the oldest.
  *  - [UNSCREENED] — approved cases with no screening at all, so nobody on them can be registered.
  *
  * The gauges are read from stored timestamps by the scheduled run, so they survive a restart, and
@@ -52,14 +54,16 @@ class MicrometerKybMonitoringMetrics(private val registry: MeterRegistry, privat
     @PostConstruct
     fun register() {
         gauge(ENABLED) { if (settings.enabled) 1.0 else 0.0 }
-        gauge(REGISTERED) { observed.get()?.registered?.toDouble() ?: Double.NaN }
-        gauge(PENDING) { observed.get()?.pending?.toDouble() ?: Double.NaN }
-        gauge(PENDING_AGE) { observed.get()?.oldestPendingAgeSeconds?.toDouble() ?: Double.NaN }
-        gauge(REVIEWS_OPEN) { observed.get()?.openReviews?.toDouble() ?: Double.NaN }
-        gauge(REVIEW_AGE) { observed.get()?.oldestOpenReviewAgeSeconds?.toDouble() ?: Double.NaN }
-        gauge(REFUSED) { observed.get()?.refused?.toDouble() ?: Double.NaN }
-        gauge(EXITS_REQUIRED) { observed.get()?.exitsRequired?.toDouble() ?: Double.NaN }
-        gauge(UNSCREENED) { observed.get()?.unscreenedApprovedCases?.toDouble() ?: Double.NaN }
+        stat(REGISTERED) { it.registered }
+        stat(PENDING) { it.pending }
+        stat(PENDING_AGE) { it.oldestPendingAgeSeconds }
+        stat(REVIEWS_OPEN) { it.openReviews }
+        stat(REVIEW_AGE) { it.oldestOpenReviewAgeSeconds }
+        stat(REFUSED) { it.refused }
+        stat(EXITS_OWED) { it.exitsOwed }
+        stat(EXIT_AGE) { it.oldestExitOwedAgeSeconds }
+        stat(UNRECONCILED) { it.unreconciledCases }
+        stat(UNSCREENED) { it.unscreenedApprovedCases }
         listOf(
             MonitoringRegistrationService.REGISTERED,
             MonitoringRegistrationService.WITHDRAWN,
@@ -72,6 +76,10 @@ class MicrometerKybMonitoringMetrics(private val registry: MeterRegistry, privat
         listOf(OUTCOME_FOREIGN_OWNER, OUTCOME_IGNORED, OUTCOME_MALFORMED, OUTCOME_UNRECOGNISED)
             .forEach { registry.counter(FINDINGS, "outcome", it) }
     }
+
+    /** A value the scheduled run read from the store; NaN until the first run has looked. */
+    private fun stat(name: String, read: (MonitoringStats) -> Long) =
+        gauge(name) { observed.get()?.let(read)?.toDouble() ?: Double.NaN }
 
     private fun gauge(name: String, value: () -> Double) {
         Gauge.builder(name, value).strongReference(true).register(registry)
@@ -103,7 +111,9 @@ class MicrometerKybMonitoringMetrics(private val registry: MeterRegistry, privat
         const val REVIEWS_OPEN = "openbank.kyb.monitoring.reviews.open"
         const val REVIEW_AGE = "openbank.kyb.monitoring.reviews.oldest_open_age_seconds"
         const val REFUSED = "openbank.kyb.monitoring.registrations.refused"
-        const val EXITS_REQUIRED = "openbank.kyb.monitoring.exits.required"
+        const val EXITS_OWED = "openbank.kyb.monitoring.exits.owed"
+        const val EXIT_AGE = "openbank.kyb.monitoring.exits.oldest_owed_age_seconds"
+        const val UNRECONCILED = "openbank.kyb.monitoring.cases.unreconciled"
         const val UNSCREENED = "openbank.kyb.monitoring.cases.unscreened"
         const val RUNS = "openbank.kyb.monitoring.runs"
 

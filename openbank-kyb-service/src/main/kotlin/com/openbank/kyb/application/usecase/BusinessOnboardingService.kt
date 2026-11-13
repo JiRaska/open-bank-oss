@@ -8,6 +8,8 @@ import com.openbank.kyb.application.port.`in`.AcceptDisclosuresCommand
 import com.openbank.kyb.application.port.`in`.AnswerQuestionnaireCommand
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
+import com.openbank.kyb.application.port.`in`.CompleteExitCommand
+import com.openbank.kyb.application.port.`in`.DecideMonitoringFindingCommand
 import com.openbank.kyb.application.port.`in`.DisposeFindingCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.LookupCommand
@@ -141,8 +143,6 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
 
     override suspend fun get(caseId: UUID): BusinessOnboardingCase =
         cases.findById(caseId) ?: throw CaseNotFoundException(caseId)
-
-    override suspend fun monitoringStates(caseId: UUID): Map<String, String> = monitoringStore.statesOf(caseId)
 
     override suspend fun listForParty(partyId: UUID): List<BusinessOnboardingCase> = cases.findInvolving(partyId)
 
@@ -317,26 +317,8 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     }
 
     override suspend fun resolveReview(cmd: ResolveReviewCommand): BusinessOnboardingCase {
-        val stored = get(cmd.caseId)
-        // A monitoring review is about an APPROVED case: nothing is re-screened, re-approved or published.
-        if (stored.monitoringReview != null) {
-            log.infof("kyb case %s monitoring review resolved by %s", cmd.caseId, cmd.operator)
-            return cases.update(stored.monitoringReviewResolved(), null)
-        }
+        val case = screenedBeforeApproval(get(cmd.caseId))
         val now = Instant.now(clock)
-        // The entity is screened under its party id, so a case that started in review gets its
-        // party BEFORE the screen below, not after it. Creation is idempotent on the case id.
-        val withParty = if (stored.status == CaseStatus.MANUAL_REVIEW && stored.entityPartyId == null) {
-            stored.extract?.let { extract ->
-                cases.update(
-                    stored.entityPartyCreated(parties.createEntityParty(entityPartyRequest(stored.id, extract)), now),
-                    null,
-                )
-            } ?: stored
-        } else {
-            stored
-        }
-        val case = screenedBeforeApproval(withParty)
         var resolved = case.reviewResolved(cmd.requiredSignatures, now, cmd.requiredSignerRoles, screening.required)
         if (resolved.entityPartyId == null && resolved.extract != null) {
             resolved =
@@ -369,13 +351,6 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     override suspend fun reject(cmd: RejectCaseCommand): BusinessOnboardingCase {
         val case = get(cmd.caseId)
         val now = Instant.now(clock)
-        // The same operator act on an APPROVED case is a different decision with a different
-        // event: the relationship has to end, and until it has, the case stays what it is.
-        if (case.monitoringReview != null) {
-            val exiting = case.exitRequired(cmd.reason, now)
-            log.infof("kyb case %s: exit of the relationship required by %s", cmd.caseId, cmd.operator)
-            return cases.update(exiting, KybEvents.exitRequired(exiting, now, cmd.operator))
-        }
         val rejected = case.rejected(cmd.reason, now)
         return cases.update(rejected, KybEvents.rejected(rejected, now, cmd.operator)).also(::armTimers)
     }
@@ -393,6 +368,40 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         )
         return cases.update(disposed, null)
     }
+
+    /**
+     * One monitoring finding on an approved case is decided. Nothing an applicant can read
+     * changes, and nothing is published — unless this is the decision that makes an exit owed (the
+     * first confirmed sanctions match): then `BUSINESS_RELATIONSHIP_EXIT_REQUIRED` goes out, once,
+     * with the write that records the decision.
+     */
+    override suspend fun decideMonitoringFinding(cmd: DecideMonitoringFindingCommand): BusinessOnboardingCase {
+        val case = get(cmd.caseId)
+        val now = Instant.now(clock)
+        val decided = case.monitoringFindingDecided(cmd.findingId, cmd.disposition, cmd.operator, cmd.reason, now)
+        log.infof(
+            "kyb case %s: monitoring finding %s set to %s by %s",
+            cmd.caseId,
+            cmd.findingId,
+            cmd.disposition,
+            cmd.operator,
+        )
+        val exitNowOwed = case.monitoring.exitOwedSince == null && decided.monitoring.exitOwedSince != null
+        return cases.update(decided, if (exitNowOwed) KybEvents.exitRequired(decided, now, cmd.operator) else null)
+    }
+
+    /** The exit has been carried out: monitoring ends, and the same write withdraws the subjects. */
+    override suspend fun completeExit(cmd: CompleteExitCommand): BusinessOnboardingCase {
+        val case = get(cmd.caseId)
+        val completed = case.exitCompleted(cmd.operator, cmd.evidence, Instant.now(clock))
+        log.infof("kyb case %s: exit recorded as completed by %s", cmd.caseId, cmd.operator)
+        return cases.update(completed, null)
+    }
+
+    override suspend fun listMonitoringHolds(page: Int, size: Int): List<BusinessOnboardingCase> =
+        cases.listMonitoringHolds(page, size)
+
+    override suspend fun monitoringStates(caseId: UUID): Map<String, String> = monitoringStore.statesOf(caseId)
 
     /**
      * An event, not a request: nobody is there to retry a conflict, and a nacked record is
@@ -435,9 +444,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
      * so an answer obtained on an attempt the aggregate then refuses is not asked for again.
      */
     private suspend fun screenedBeforeApproval(case: BusinessOnboardingCase): BusinessOnboardingCase {
-        // Whoever is screened carries a reference by now; this covers a screening recorded before
-        // references existed, so the approval that follows has someone to register for monitoring.
-        val screened = screening.screened(case).withMonitoringRefs(MonitoringRegistrationService::newSubjectRef)
+        val screened = screening.screened(case)
         return if (screened === case) case else cases.update(screened, null)
     }
 

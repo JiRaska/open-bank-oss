@@ -82,6 +82,7 @@ class KybMonitoringJourney(
 
     /** One row of `kyb_monitored_subjects`, with the transaction that last wrote it. */
     data class Row(
+        val subjectKey: String,
         val subjectRef: String,
         val desired: String,
         val syncState: String,
@@ -92,7 +93,7 @@ class KybMonitoringJourney(
     )
 
     fun rows(caseId: String): List<Row> = query(
-        "select subject_ref, desired, sync_state, attempt_count, last_error, xmin::text, generation " +
+        "select subject_key, subject_ref, desired, sync_state, attempt_count, last_error, xmin::text, generation " +
             "from kyb_monitored_subjects where case_id = ? order by id",
         UUID.fromString(caseId),
     ) {
@@ -100,29 +101,34 @@ class KybMonitoringJourney(
             it.getString(1),
             it.getString(2),
             it.getString(3),
-            it.getInt(4),
-            it.getString(5),
+            it.getString(4),
+            it.getInt(5),
             it.getString(6),
-            it.getLong(7),
+            it.getString(7),
+            it.getLong(8),
         )
     }
 
-    /** The stored case: status, the transaction that last wrote the row, the monitoring review, screening. */
+    /** The stored case: what an applicant can read off it, and the monitoring columns beside it. */
     data class Stored(
         val status: String,
         val xmin: String,
-        val reviewOpened: Boolean,
-        val exitRequired: Boolean,
-        val exitReason: String?,
+        val reviewOpen: Boolean,
+        val exitOwed: Boolean,
+        val exitCompleted: Boolean,
+        val findingCount: Int,
         val screeningJson: String,
         val entityPartyId: String?,
         val updatedAt: String,
+        val version: Long,
+        val syncedVersion: Long?,
     )
 
     fun stored(caseId: String): Stored = query(
-        "select status, xmin::text, monitoring_review_opened_at is not null, " +
-            "monitoring_exit_required_at is not null, monitoring_exit_reason, screening_json, " +
-            "entity_party_id::text, updated_at::text from kyb_cases where case_id = ?",
+        "select status, xmin::text, monitoring_review_since is not null, monitoring_exit_owed_since is not null, " +
+            "monitoring_exit_completed_at is not null, monitoring_finding_count, screening_json, " +
+            "entity_party_id::text, updated_at::text, version, monitoring_synced_version " +
+            "from kyb_cases where case_id = ?",
         UUID.fromString(caseId),
     ) {
         Stored(
@@ -130,12 +136,21 @@ class KybMonitoringJourney(
             it.getString(2),
             it.getBoolean(3),
             it.getBoolean(4),
-            it.getString(5),
-            it.getString(6).orEmpty(),
-            it.getString(7),
+            it.getBoolean(5),
+            it.getInt(6),
+            it.getString(7).orEmpty(),
             it.getString(8),
+            it.getString(9),
+            it.getLong(10),
+            it.getObject(11) as? Long,
         )
     }.single()
+
+    /** The stored findings of a case: id to disposition. */
+    fun findings(caseId: String): Map<String, String> = query(
+        "select finding_id::text, disposition from kyb_monitoring_findings where case_id = ?",
+        UUID.fromString(caseId),
+    ) { it.getString(1) to it.getString(2) }.toMap()
 
     fun events(caseId: String): List<String> = query(
         "select event_type from kyb_outbox where aggregate_id = ? order by id",

@@ -110,7 +110,7 @@ class CaseScreeningTest {
     }
 
     @Test
-    fun `a rebuilt subject list keeps the answers already obtained, adds newcomers as pending, retires leavers`() {
+    fun `a rebuilt subject list keeps the answers already obtained, adds newcomers as pending, drops leavers`() {
         val before = CaseScreening(
             CaseScreening.subjectsOf(
                 extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
@@ -125,20 +125,41 @@ class CaseScreeningTest {
             declaredPersons = listOf("Jana Nováková", "Tichý Společník"),
         )
         val rebuilt = before.rebuilt(fresh, UboSource.REGISTER)
-        // The owner who left is kept, marked no longer current, so the same person is the same
-        // subject if they return; nothing that counts toward approval reads a non-current subject.
-        assertThat(rebuilt.subjects.filter { !it.current }.map { it.name }).containsExactly("Karel Vlastník")
-        val current = rebuilt.subjects.filter { it.current }
-        assertThat(current.map { it.name })
+        assertThat(rebuilt.subjects.map { it.name })
             .containsExactly("Příklad s.r.o.", "Jana Nováková", "Nový Majitel", "Tichý Společník")
-        assertThat(current.map { it.sanctions }).containsExactly(
+        assertThat(rebuilt.subjects.map { it.sanctions }).containsExactly(
             ScreeningVerdict.CLEAR,
             ScreeningVerdict.CLEAR,
             ScreeningVerdict.PENDING,
             ScreeningVerdict.PENDING,
         )
-        assertThat(current.last().kind).isEqualTo(ScreeningSubjectKind.DECLARED_PERSON)
+        assertThat(rebuilt.subjects.last().kind).isEqualTo(ScreeningSubjectKind.DECLARED_PERSON)
         assertThat(rebuilt.complete).isFalse()
+    }
+
+    @Test
+    fun `an ownership lookup that could not be made removes nobody from the subject list`() {
+        val before = CaseScreening(
+            CaseScreening.subjectsOf(
+                extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
+                listOf(owner("Karel Vlastník")),
+            ).map { it.copy(sanctions = ScreeningVerdict.CLEAR) },
+            UboSource.REGISTER,
+        )
+        // What an outage of the register produces: the same case, no owners.
+        val withoutOwners = CaseScreening.subjectsOf(
+            extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
+            emptyList(),
+        )
+
+        val duringOutage = before.rebuilt(withoutOwners, UboSource.UNAVAILABLE)
+
+        // The owner is still a current subject (and so still monitored), and nothing is approvable.
+        assertThat(duringOutage.subjects.filter { it.current }.map { it.name }).contains("Karel Vlastník")
+        assertThat(duringOutage.complete).isFalse()
+        // Control: when the register ANSWERS without the owner, the owner has left.
+        assertThat(before.rebuilt(withoutOwners, UboSource.REGISTER).subjects.map { it.name })
+            .doesNotContain("Karel Vlastník")
     }
 
     @Test

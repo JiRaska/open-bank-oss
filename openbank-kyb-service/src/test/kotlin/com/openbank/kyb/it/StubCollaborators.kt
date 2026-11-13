@@ -160,12 +160,17 @@ class StubAresAdapter : RegistryAdapter {
             "71000135" to "Nora Neviditelná",
             "71000143" to "Alois Aktivní",
             "71000151" to "Ctibor Odcházející",
-            "71000160" to "Bohdana Kontrolní",
+            "71000160" to "Bohdana Kontrolovaná",
             "71000178" to "Hynek Ukončený",
             "71000186" to "Radka Souběžná",
             "71000194" to "Jitka Odmítnutá",
             "71000208" to "Kamil Sdílený",
             "71000216" to "Lada Druhá",
+            "71000224" to "Matyáš Starý",
+            "71000232" to "Nina Dvojitá",
+            "71000241" to "Otto Držený",
+            "71000259" to "Pavla Vypnutá",
+            "71000267" to "Roman Opuštěný",
         )
     }
 
@@ -305,8 +310,12 @@ class StubDocumentGateway : DocumentGateway {
 
 /**
  * Monitored-subject registry double. It accepts everything unless a test sets [failWith], which
- * makes every call fail the way the adapter reports a failure: by throwing, with a reason and a kind.
- * Calls are recorded per reference, so a test asserts on its own subjects only.
+ * makes every call fail the way the adapter reports a failure: by throwing, with a reason and a
+ * kind. Calls are recorded per reference and in order, so a test asserts on its own subjects only.
+ *
+ * [holdRegistration] keeps the registration of one reference open until the test releases it, so
+ * a test can put a case write or a second relay BETWEEN a call and its recording; [entered] says
+ * the call began. [slowBy] makes every call take that long, so two relays really overlap.
  */
 @Alternative
 @Priority(1)
@@ -317,15 +326,29 @@ class StubMonitoredSubjectRegistry : MonitoredSubjectRegistryPort {
     val registered = CopyOnWriteArrayList<Registration>()
     val withdrawn = CopyOnWriteArrayList<String>()
 
+    /** Every call in arrival order: `PUT <ref>` / `DELETE <ref>`. */
+    val calls = CopyOnWriteArrayList<String>()
+
     @Volatile var failWith: MonitoredSubjectRegistryException? = null
+
+    @Volatile var slowBy: Long = 0
+
+    val holdRegistration = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+    val entered = ConcurrentHashMap<String, CountDownLatch>()
 
     override suspend fun register(subjectRef: String, organisation: Boolean, name: String) {
         failWith?.let { throw it }
+        entered[subjectRef]?.countDown()
+        holdRegistration[subjectRef]?.await()
+        if (slowBy > 0) kotlinx.coroutines.delay(slowBy)
+        calls += "PUT $subjectRef"
         registered += Registration(subjectRef, organisation, name)
     }
 
     override suspend fun withdraw(subjectRef: String) {
         failWith?.let { throw it }
+        if (slowBy > 0) kotlinx.coroutines.delay(slowBy)
+        calls += "DELETE $subjectRef"
         withdrawn += subjectRef
     }
 }

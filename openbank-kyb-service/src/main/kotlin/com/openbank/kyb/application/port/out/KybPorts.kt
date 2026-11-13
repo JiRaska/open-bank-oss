@@ -75,8 +75,8 @@ interface BusinessOnboardingCaseRepository {
      * returns the case at its NEW version — a caller that writes twice must write the returned copy.
      *
      * The same transaction brings the ongoing-monitoring registration store to
-     * [BusinessOnboardingCase.monitoredSubjects], so no path that approves, ends or changes a case
-     * can do so without its registrations following ([MonitoringRegistrationStore]).
+     * [BusinessOnboardingCase.monitoredSubjects] and stores the case's monitoring findings, so no
+     * path that approves, ends or changes a case can do so without them following.
      *
      * @throws ConcurrentCaseUpdateException when the row has moved on
      */
@@ -89,6 +89,9 @@ interface BusinessOnboardingCaseRepository {
     /** Cases the party initiated OR is a signer on. */
     suspend fun findInvolving(partyId: UUID): List<BusinessOnboardingCase>
     suspend fun listByStatus(status: CaseStatus, page: Int, size: Int): List<BusinessOnboardingCase>
+
+    /** Cases with an undecided monitoring finding or an exit owed, longest-waiting first. */
+    suspend fun listMonitoringHolds(page: Int, size: Int): List<BusinessOnboardingCase>
 }
 
 /**

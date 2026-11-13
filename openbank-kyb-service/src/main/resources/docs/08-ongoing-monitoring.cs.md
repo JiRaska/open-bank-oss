@@ -1,100 +1,113 @@
 # Průběžné monitorování schválených firemních případů — openbank-kyb-service
 
-Subjekt a osoby s ním spojené se prověřují při schválení firemního případu. Sankční seznam nebo
-seznam PEP se ale může změnit i později. Tato stránka popisuje, jak služba drží schválené případy
-pod monitorováním ve službě `openbank-sanctions-service` a co se stane, když je nahlášena shoda
-(ADR-0376).
+Entita a její spřízněné osoby se prověřují při schválení firemního případu. Sankční nebo PEP seznam
+se může změnit i potom. Tato stránka popisuje, jak služba drží schválené případy pod monitoringem
+služby `openbank-sanctions-service` a co se stane, když je nahlášena shoda (ADR-0376).
 
-Funkce je ve výchozím stavu vypnutá: `openbank.kyb.monitoring.enabled=false`.
+Funkce je ve výchozím stavu vypnutá: `openbank.kyb.monitoring.enabled=false`. Je to jeden přepínač.
+Když je vypnutý, služba nic nevolá a neotevírá konzumenta nálezů.
 
 ## Kdo je monitorován
 
-Každý aktuální prověřený subjekt schváleného případu: samotný subjekt, každý zástupce uvedený
-v rejstříku, každý vykazovaný skutečný majitel a každá osoba uvedená v prohlášeních. Případ je
-schválený, pokud je ve stavu `SIGNED` nebo `ACTIVE`. U případu v jiném stavu není monitorován
-nikdo. Revize kvůli monitorování stav nemění, takže monitorování nikdy neukončí.
+Každý aktuální prověřený subjekt schváleného případu: entita, každý zástupce uvedený v rejstříku,
+každý vykazovaný skutečný majitel a každá osoba uvedená v prohlášeních.
 
-Každý subjekt má referenci. Prověření při onboardingu ji posílá jako `subjectId` a registr je podle
-ní klíčován, takže výjimka, kterou analytik zaznamená ve službě sanctions-service, platí i pro
-monitorování.
+Rozhoduje o tom jedno pravidlo na jednom místě. Případ je monitorován, dokud:
 
-- Samotný subjekt: identifikátor jeho strany (party id). Subjekt se neprověřuje dříve, než stranu má.
-- Osoba prověřená touto nebo novější verzí: náhodné UUID. Není odvozeno ze jména.
-- Osoba prověřená starší verzí: identifikátor, který tehdy prověření použilo
-  (`kyb-case:<případ>:<klíč>`). Pod ním je ve službě sanctions-service uložena kontrola i její
-  výjimka, proto zůstává.
+- je ve stavu `SIGNED` nebo `ACTIVE`, nebo má nález z monitoringu, který není rozhodnutý nebo je
+  potvrzenou sankční shodou, a
+- nebylo zaznamenáno, že vztah byl ukončen.
 
-Reference se nikdy nemění. Subjekt, který z případu odejde, zůstává uložen s příznakem
-`current: false` a se svou referencí. Pokud není dostupný rejstřík skutečných majitelů, žádný
-subjekt se nepovažuje za odešlý.
+Žadatel, který případ opustí, časovač ani zamítnutí tedy ukončí monitoring jen tehdy, když případ
+nedrží žádný nález. Případ s otevřeným nálezem nebo potvrzenou sankční shodou zůstává monitorován,
+dokud operátor nezaznamená ukončení vztahu.
+
+Když není dostupný rejstřík skutečných majitelů, žádný subjekt se nepovažuje za odešlý z případu.
+
+## Reference v registru
+
+Registru se pro každý subjekt posílá reference. Je to náhodné UUID, které vygeneruje databáze ve
+chvíli, kdy subjekt poprvé dlužíme registru. Není odvozená ze jména ani z identifikátoru, nikdy se
+nemění a případy ji nesdílejí. Prověrka při onboardingu se nemění: posílá stejné id subjektu a
+ukládá stejná data jako před touto funkcí.
+
+Důsledek: vyjasnění, které analytik zaznamená v sanctions-service k prověrce při onboardingu, je
+uloženo pod id prověrky, ne pod referencí v registru. První vyhodnocení subjektu registrem proto
+může zopakovat nález, který byl při onboardingu už vyjasněn. Operátor o něm na případu rozhodne
+znovu.
 
 ## Jak se registrace doručuje
 
-1. Každý zápis schváleného nebo ukončeného případu upraví ve stejné transakci tabulku
-   `kyb_monitored_subjects`, a to jedním příkazem SQL. Subjekt, který
-   má být monitorován, dostane řádek s požadovaným stavem `REGISTERED`. Subjekt případu, který
-   skončil, nebo subjekt, který z případu odešel, dostane `WITHDRAWN`. Schválení se proto nemůže
-   potvrdit, aniž by vznikl závazek registrace.
-2. Plánované relé běží každých 30 sekund. Pro každý dlužný řádek pošle `PUT` nebo `DELETE
-   /api/v3/sanctions/monitored-subjects/{subjectRef}` pod vlastním klientem služby `openbank-kyb`.
-   Tělo obsahuje typ subjektu a jméno, které se v tu chvíli přečte z případu.
-3. Výsledek volání určí další postup:
+1. Každý zápis případu, který byl někdy schválen, upraví ve stejné transakci tabulku
+   `kyb_monitored_subjects`, jedním SQL příkazem. Subjekt, který má být monitorován, má požadovaný
+   stav `REGISTERED`; každý jiný řádek případu má `WITHDRAWN`. Schválení se nemůže potvrdit, aniž
+   by vznikl dluh registrací. Případ, který nikdy schválen nebyl, nestojí žádný příkaz navíc.
+2. Plánované relé běží každých 30 sekund. Bere vždy jeden dlužný řádek pod 60sekundovou výpůjčkou
+   a posílá `PUT` nebo `DELETE /api/v3/sanctions/monitored-subjects/{subjectRef}` jako vlastní
+   klient služby `openbank-kyb`. Tělo nese typ entity a jméno, přečtené z případu v tom okamžiku.
+   Dvě relé nemohou poslat stejný řádek současně a výsledek se zapíše jen tehdy, když řádek stále
+   nese stejné přání a stejnou výpůjčku.
+3. Výsledek volání rozhodne, co bude dál:
    - Přijato: řádek je `SYNCED`.
-   - Žádná odpověď, vypršení času, 5xx, 408 nebo 429: řádek zůstává `PENDING` a volání se opakuje po
-     30 sekundách, pak s dvojnásobnou prodlevou až do jedné hodiny, potom každou hodinu. Počet
-     pokusů není omezen.
-   - 401 nebo 403: registr volajícího nepřijímá. Řádek zůstává `PENDING` a volání se opakuje stejně.
-     Spustí se kritická výstraha.
-   - Jiná odpověď 4xx: registr tento subjekt odmítá. Řádek přejde do stavu `REFUSED` a neopakuje se,
-     dokud se případ nezmění nebo dokud není řádek znovu potvrzován. Subjekt je schválený a není
-     monitorován. Pohled operátora na případ ukazuje u subjektu `monitoringState: REFUSED`.
+   - 400 nebo 422: validace registru tento subjekt odmítá. Řádek přejde do `REFUSED`. Pošle se
+     znovu při příštím zápisu případu a při příštím opětovném potvrzení. Subjekt je schválen a není
+     monitorován; pohled operátora ukazuje `monitoringState: REFUSED`.
+   - 401 nebo 403: registr nepřijímá volajícího. Řádek zůstává `PENDING` a zkouší se znovu. Spustí
+     se kritický alert.
+   - Cokoli jiného (žádná odpověď, timeout, 404, 409, 429, 5xx): řádek zůstává `PENDING` a zkouší
+     se znovu po 30 sekundách, pak se zdvojnásobující se prodlevou až do jedné hodiny. Limit pokusů
+     není.
 
-Tabulka obsahuje reference a stav doručení. Neobsahuje žádné jméno.
+Tabulka drží referenci, klíč subjektu uvnitř případu a stav doručení. Klíč osoby je odvozen ze
+jména a je osobním údajem. Zůstává v této databázi a registru se neposílá.
 
 ## Oprava
 
-- **Případy schválené před touto funkcí.** Každý běh najde schválené případy, které mají prověření
-  a žádné řádky, přidělí jejich subjektům reference a zaregistruje je.
-- **Registr, který ztratil stav.** Potvrzená nebo odmítnutá registrace se pošle znovu po uplynutí
-  `openbank.kyb.monitoring.reassert-after` (výchozí hodnota 7 dní). Registrace je idempotentní.
-  Chcete-li znovu zaregistrovat všechny subjekty dříve, snižte tuto hodnotu, počkejte, až se
-  `openbank_kyb_monitoring_registrations_pending` vrátí na 0, a pak ji vraťte zpět.
+- **Případ zapsaný předchozím vydáním.** Každý zápis tímto vydáním zaznamená verzi případu, se
+  kterou nechal řádky v souladu. Relé najde schválené nebo ukončené případy, kde se tento záznam
+  liší od verze případu, a zapíše je znovu. To pokrývá případy schválené před touto funkcí i každý
+  případ, který pod předchozího vydání zapsal během postupného nasazení nebo po rollbacku.
+  Předchozí vydání nemůže data monitoringu odstranit: reference a nálezy jsou v tabulkách, do
+  kterých nezapisuje.
+- **Registr, který ztratil stav.** Potvrzená nebo odmítnutá registrace se pošle znovu po
+  `openbank.kyb.monitoring.reassert-after` (výchozí 7 dní). Registrace je idempotentní. Chcete-li
+  všechny subjekty zaregistrovat dříve, snižte tuto hodnotu, počkejte, až se
+  `openbank_kyb_monitoring_registrations_pending` vrátí na 0, a hodnotu vraťte.
 
-## Co způsobí nález
+## Co udělá nález
 
-Služba čte téma `openbank.sanctions.screening.event` a typ události bere z hlavičky Kafka `ce-type`.
-Událost `MONITORED_SUBJECT_MATCHED`, jejíž `ownerService` je `openbank-kyb`, se použije na případ,
-který referenci drží:
+Služba konzumuje `openbank.sanctions.screening.event` ve skupině konzumentů
+`kyb-service-sanctions-monitoring` a typ události čte z Kafka hlavičky `ce-type`. Událost
+`MONITORED_SUBJECT_MATCHED`, jejíž `ownerService` je `openbank-kyb`, se zaznamená na případ, který
+drží referenci, do tabulky `kyb_monitoring_findings`.
 
-- Nález se uloží k prověřenému subjektu: seznam, reference položky seznamu, skóre a způsob zjištění.
-  Shoda typu PEP nastaví příznak PEP. Každý jiný typ se uloží jako shoda se sankčním seznamem.
-- Rozhodnutí o subjektu se změní na `OPEN`. Dřívější rozhodnutí zůstane v historii.
-- Na případu se otevře revize kvůli monitorování (`monitoringReview.openedAt`).
+Každý nález má vlastní rozhodnutí. Pozdější nález o stejném subjektu dřívější rozhodnutí neotevírá
+ani nenahrazuje. Stejný nález doručený dvakrát nic nezmění.
 
-Stav případu se nemění. Zůstává `SIGNED` nebo `ACTIVE`, hodnota `updatedAt` se neposune a
-nepublikuje se žádná událost životního cyklu. Zákazník i všechny ostatní služby čtou stejný případ
-jako předtím. `GET /api/v1/kyb/cases?status=MANUAL_REVIEW` vrací také schválené případy s otevřenou
-revizí kvůli monitorování, takže je operátoři najdou ve stávající frontě revizí.
+Případ se nemění: `status` zůstává, `updatedAt` se neposune a nepublikuje se žádná událost
+životního cyklu. Každá cesta, kterou může volat žadatel, odpovídá stejně jako předtím.
 
-Operátor potom použije stávající operace:
+Operátoři pracují třemi cestami:
 
-1. Rozhodne o nálezu: `POST /api/v1/kyb/cases/{id}/screening/findings/{subjectKey}/disposition`.
-2. Pokud není potvrzen žádný sankční nález, uzavře revizi:
-   `POST /api/v1/kyb/cases/{id}/review/resolve`. Nic dalšího se nezmění.
-3. Pokud má vztah skončit, zavolá `POST /api/v1/kyb/cases/{id}/reject`. U případu s revizí kvůli
-   monitorování tato operace případ nezamítne. Zaznamená, že je vyžadováno ukončení vztahu
-   (`monitoringReview.exitRequiredAt` a `exitReason`), a jednou publikuje událost
-   `BUSINESS_RELATIONSHIP_EXIT_REQUIRED`.
+1. `GET /api/v1/kyb/cases?monitoring=open` vypíše případy, které čekají na operátora: nález
+   k rozhodnutí nebo ukončení vztahu k zaznamenání. `status=MANUAL_REVIEW` vrací jen případy ve
+   stavu `MANUAL_REVIEW`.
+2. `POST /api/v1/kyb/cases/{id}/monitoring/findings/{findingId}/disposition` rozhodne jeden nález:
+   `CLEARED_FALSE_POSITIVE` nebo `CONFIRMED`, s odůvodněním. Rozhoduje se jednou.
+3. `POST /api/v1/kyb/cases/{id}/monitoring/exit/complete` zaznamená, s důkazem, že vztah byl
+   ukončen. Přijme se, když je ukončení dlužné a žádný nález není nerozhodnutý.
 
-Po vyžádání ukončení si případ ponechá svůj stav a zůstává monitorován. Na událost zatím žádná
-služba nereaguje. Výstraha `KybMonitoringExitRequired` trvá, dokud ukončení někdo neprovede ručně.
+Potvrzená PEP shoda je rizikový fakt. Nevyžaduje ukončení vztahu a nic nepublikuje.
 
-Stejný nález doručený dvakrát nic nezmění: jeho identifikátor už na případu je.
+Potvrzená shoda jakéhokoli jiného druhu znamená, že vztah musí skončit. První taková nastaví
+`monitoring.exitOwedSince` a jednou publikuje `BUSINESS_RELATIONSHIP_EXIT_REQUIRED`. Tento stav
+nikdo nenastavuje ručně: čte se z nálezů. Případ si ponechá stav a zůstává monitorován. Na událost
+zatím žádná služba nereaguje, takže se vztah ukončuje ručně. Zaznamenání ukončení ukončí monitoring
+a odhlásí subjekty z registru.
 
-Záznam označený jako nález, který nemá použitelné `ownerService`, `findingId` nebo `subjectRef`, se
-započítá jako `malformed` a odešle se do tématu `openbank.dlq.kyb.sanctions-monitoring-in`.
-
-Nálezy se zpracovávají při zapnutém i vypnutém přepínači. Přepínač zastavuje pouze relé.
+Záznam typovaný jako nález bez použitelného `ownerService`, `findingId` nebo `subjectRef` se
+započítá jako `malformed` a pošle se do dead-letter topicu
+`openbank.dlq.kyb.sanctions-monitoring-in`.
 
 ## Metriky
 
@@ -102,57 +115,64 @@ Nálezy se zpracovávají při zapnutém i vypnutém přepínači. Přepínač z
 |---|---|
 | `openbank_kyb_monitoring_enabled` | 1 nebo 0: přepínač |
 | `openbank_kyb_monitoring_registrations_total{outcome,reason}` | pokusy relé: `registered`, `withdrawn`, `failed`, `unauthorised`, `refused` |
-| `openbank_kyb_monitoring_registrations_refused` | subjekty, které registr odmítá: schválené a nemonitorované |
-| `openbank_kyb_monitoring_exits_required` | schválené případy, u kterých má vztah skončit |
-| `openbank_kyb_monitoring_registrations_pending` | řádky, které registr ještě nedostal |
+| `openbank_kyb_monitoring_registrations_pending` | řádky, které registru stále dlužíme |
 | `openbank_kyb_monitoring_registrations_oldest_pending_age_seconds` | stáří nejstaršího dlužného řádku |
+| `openbank_kyb_monitoring_registrations_refused` | subjekty, které registr odmítá: schválené a nemonitorované |
 | `openbank_kyb_monitoring_subjects_registered` | řádky, které registr potvrdil |
 | `openbank_kyb_monitoring_findings_total{outcome}` | záznamy na kanálu nálezů podle výsledku |
-| `openbank_kyb_monitoring_reviews_open` | schválené případy v revizi kvůli monitorování |
-| `openbank_kyb_monitoring_reviews_oldest_open_age_seconds` | stáří nejstarší takové revize |
-| `openbank_kyb_monitoring_cases_unscreened` | schválené případy bez prověření, které nelze zaregistrovat |
+| `openbank_kyb_monitoring_reviews_open` | případy s nerozhodnutým nálezem |
+| `openbank_kyb_monitoring_reviews_oldest_open_age_seconds` | stáří nejstaršího nerozhodnutého nálezu |
+| `openbank_kyb_monitoring_exits_owed` | případy s potvrzenou sankční shodou a bez zaznamenaného ukončení |
+| `openbank_kyb_monitoring_exits_oldest_owed_age_seconds` | stáří nejstaršího takového případu |
+| `openbank_kyb_monitoring_cases_unreconciled` | schválené nebo ukončené případy, jejichž řádky nejsou v souladu s případem |
+| `openbank_kyb_monitoring_cases_unscreened` | schválené případy bez prověrky, které nelze zaregistrovat |
 | `openbank_kyb_monitoring_runs_total{outcome}` | běhy relé: `completed`, `disabled`, `failed` |
 
-Hodnoty ukazatelů čte plánovaný běh z databáze. Do prvního běhu mají hodnotu NaN.
+Měřidla čte z databáze plánovaný běh. Do prvního běhu ukazují NaN.
 
-`registered` znamená, že registr subjekt přijal. Vyhodnotí ho až při vlastním průchodu.
+`registered` znamená, že registr subjekt přijal. Vyhodnotí ho ve vlastním průchodu.
 
-Výsledky v `openbank_kyb_monitoring_findings_total`: `review_opened`, `duplicate`, `not_monitored`,
+Výsledky `openbank_kyb_monitoring_findings_total`: `review_opened`, `duplicate`, `not_monitored`,
 `unknown_subject`, `foreign_owner`, `ignored`, `malformed`, `unrecognised`.
 
-## Výstrahy
+## Alerty
 
-- `KybMonitoringRegistrationStuck` (critical): nejstarší dlužný řádek je starší než 30 minut a
+- `KybMonitoringRegistrationStuck` (kritický): nejstarší dlužný řádek je starší než 30 minut a
   přepínač je zapnutý.
-- `KybMonitoringReviewUnresolved` (warning): revize kvůli monitorování je otevřená jeden den.
-- `KybMonitoringFindingNotRouted` (warning): záznam měl výsledek `unrecognised`, `malformed`,
-  `unknown_subject` nebo `not_monitored`.
-- `KybMonitoringRegistryUnauthorised` (critical): registr odpověděl 401 nebo 403.
-- `KybMonitoringSubjectRefused` (warning): registr odmítá alespoň jeden subjekt.
-- `KybMonitoringApprovedCaseUnscreened` (warning): schválený případ nemá prověření a přepínač je
+- `KybMonitoringRegistryUnauthorised` (kritický): registr odpověděl 401 nebo 403.
+- `KybMonitoringSubjectRefused` (varování): registr odmítá alespoň jeden subjekt.
+- `KybMonitoringCaseUnreconciled` (varování): případ zůstal 30 minut mimo soulad a přepínač je
   zapnutý.
-- `KybMonitoringExitRequired` (critical): ukončení vztahu je vyžadováno a ještě nebylo provedeno.
-- `KybMonitoringFindingDeadLettered` (critical): nález se dostal do tématu nedoručených zpráv.
+- `KybMonitoringReviewUnresolved` (varování): nález je den nerozhodnutý.
+- `KybMonitoringExitOwed` (kritický): ukončení vztahu je dlužné a není zaznamenané.
+- `KybMonitoringFindingNotRouted` (varování): záznam skončil výsledkem `unrecognised`, `malformed`,
+  `unknown_subject` nebo `not_monitored`.
+- `KybMonitoringFindingDeadLettered` (kritický): nález skončil v dead-letter topicu.
+- `KybMonitoringApprovedCaseUnscreened` (varování): schválený případ nemá prověrku a přepínač je
+  zapnutý.
 
 ## Zapnutí
 
-1. Nasaďte image. Konzument nálezů se pak připojí k náhradní skupině konzumentů.
-2. V samostatné změně přidejte do `kyb-service-msg-override` dva řádky pro kanál
-   `sanctions-monitoring-in`. Pokud tam kanál uvedete dříve, než ho běžící image obsahuje, služba
-   se při startu zastaví.
-3. Ve službě sanctions-service nastavte `openbank.sanctions.monitoring.enabled=true`. Bez toho je
-   každá registrace odmítnuta s kódem 503.
-4. Nastavte `openbank.kyb.screening.enabled=true`. Případ schválený bez prověření nemá žádné
-   subjekty.
-5. Nastavte `openbank.kyb.monitoring.enabled=true`.
+Image, Kafka ACL a dead-letter topic lze nasadit v libovolném pořadí, dokud je přepínač vypnutý.
+Skupina konzumentů a politika offsetu jsou v image, takže není potřeba žádný override ConfigMap.
 
-Vypnutí: nastavte `openbank.kyb.monitoring.enabled=false`. Již zaregistrované subjekty zůstanou
-zaregistrované.
+1. Nastavte `openbank.sanctions.monitoring.enabled=true` v sanctions-service. Bez toho je každá
+   registrace odmítnuta s 503 a zůstává dlužná.
+2. Nastavte `openbank.kyb.screening.enabled=true`. Případ schválený bez prověrky nemá subjekty.
+3. Nastavte `openbank.kyb.monitoring.enabled=true`.
+
+Vypnutí: nastavte `openbank.kyb.monitoring.enabled=false`. Už zaregistrované subjekty zůstávají
+zaregistrované a nálezy o nich počkají v topicu, dokud přepínač znovu nezapnete.
+
+Rollback na předchozí vydání nevyžaduje žádnou změnu dat. Předchozí vydání nové tabulky a sloupce
+ignoruje. Případy, které zapíše, se uvedou do souladu, až toto vydání znovu poběží.
 
 ## Omezení
 
-- Registr dostává pouze jméno a typ subjektu. Shoda se hledá podle jména.
-- První vyhodnocení subjektu v registru může zopakovat nález, který už vznikl při onboardingu.
-  Každý takový nález otevře revizi.
-- Ukončení vztahu není automatizováno. Tato služba zaznamená rozhodnutí a publikuje událost.
-- Případ schválený při vypnutém prověřování není monitorován.
+- Registru se posílá jen jméno a typ entity. Shoda je podle jména.
+- Vyjasnění zaznamenané v sanctions-service k prověrce při onboardingu se na referenci v registru
+  nevztahuje (viz výše).
+- Ukončení vztahu není automatizované. Tato služba zaznamená rozhodnutí, publikuje událost a
+  zaznamená, že ukončení proběhlo.
+- Případ schválený při vypnuté prověrce není monitorován.
+- V admin UI zatím není obrazovka pro operátora. Operátorským rozhraním jsou tři cesty výše.

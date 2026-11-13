@@ -58,12 +58,11 @@ spec:
           name: openbank.dlq.kyb.sanctions-monitoring-in
           patternType: literal
         operations: [Write, Describe]
-      # Granted TWICE on purpose (#8877 pattern): `kyb-service-sanctions-monitoring` is the group
-      # the msg-override ConfigMap sets in the follow-up that lands once an image carrying the
-      # `sanctions-monitoring-in` channel is deployed; `openbank-kyb-service` is the fallback group
-      # id SmallRye uses until then (quarkus.application.name). Without the fallback grant every
-      # poll answers GroupAuthorizationException in that window — silently, since a consumer that
-      # cannot join a group looks exactly like a topic with nothing on it.
+      # `kyb-service-sanctions-monitoring` is the group the image itself names for the channel
+      # (nested `group: id:` in application.yaml, so no override ConfigMap is involved).
+      # `openbank-kyb-service` is granted as well: it is the group SmallRye falls back to
+      # (quarkus.application.name) if that name ever fails to reach the connector, and a consumer
+      # that cannot join a group looks exactly like a topic with nothing on it.
       - resource:
           type: group
           name: kyb-service-sanctions-monitoring

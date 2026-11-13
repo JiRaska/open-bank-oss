@@ -107,34 +107,29 @@ is a bug — that is the drift ADR-0212 already paid for once.
 
 - **Who is monitored is DERIVED from the case, in the transaction that writes it — never called
   from a use case.** `BusinessOnboardingCaseRepositoryImpl.update` brings `kyb_monitored_subjects`
-  to `BusinessOnboardingCase.monitoredSubjects` on every write (ADR-0376). There are three paths
-  into an approved state and three out of it; a registration one of them forgot is a customer
-  nobody monitors, with nothing reporting it. If you add a status or a path, change `monitored`,
-  not a call site. It is ONE SQL statement, run only for a case that is or was approved, and its
-  insert is `ON CONFLICT DO NOTHING`; every other write to that table is one conditional
-  statement too — there is no entity to load and write back. The relay (`MonitoringRegistrationService`) only sends what the store owes, and
-  it runs under the service's OWN OIDC client: the registry refuses the shared one with 403.
-- **A monitoring review is a fact BESIDE the status, never a status.** A finding on an approved
-  case sets `monitoringReview`; `status` stays SIGNED/ACTIVE and `updatedAt` does not move. That is
-  the whole tipping-off defence: the applicant routes, the events, the timers and
-  `findOpenByIdentifier` all read `status`, so none of them has anything to hide. Do not add a
-  status for it, and do not touch `updatedAt` from a monitoring transition.
-- **An approved case is EXITED, not rejected.** `reject` on a case with a monitoring review calls
-  `exitRequired`: the case keeps its status, stays monitored, and publishes
-  `BUSINESS_RELATIONSHIP_EXIT_REQUIRED`. `rejected()` refuses such a case, so the onboarding
-  rejection event cannot be emitted for a customer who has a party, mandates and accounts — and
-  monitoring cannot be withdrawn by a confirmed finding. Nothing consumes the exit event yet.
-- **A subject's `ref` is the id it is screened AND registered under, and it never changes.** The
-  entity's is its party id (an entity without a party is not screened); a person's is a random
-  UUID; a person screened before references existed keeps `kyb-case:<case>:<key>`, because the
-  check and its clearance in sanctions-service live under that id. The idempotency key of a
-  screen is derived from the `ref`. Never build an outbound identifier from `key`, and never
-  drop a subject from the list: a leaver is `current = false`, and an unavailable ownership
-  lookup makes nobody a leaver.
-- **A new Kafka channel is two deploys.** `sanctions-monitoring-in` has no `group.id` in
-  `application.yaml` and none in `kyb-service-msg-override.yaml` until the image carrying the
-  channel is deployed; naming it there earlier is a boot failure. The KafkaUser is granted both
-  the intended group and the fallback one for the window in between.
+  to `BusinessOnboardingCase.monitoredSubjects` on every write (ADR-0376), and
+  `BusinessOnboardingCase.monitored` is the ONE place that says when a case is monitored. If you
+  add a status or a path, change `monitored`, not a call site. It is one SQL statement, run only
+  for a case that was ever approved; every other write to that table names one row and repeats the
+  condition it relies on. The relay (`MonitoringRegistrationService`) only sends what the store
+  owes, under a lease, as the service's OWN OIDC client: the registry refuses the shared one.
+- **Monitoring state lives in its own tables and is DERIVED, never set.** Findings are rows of
+  `kyb_monitoring_findings`, each with its own decision; "under review" and "exit owed" are read
+  off them (`CaseMonitoring`). Nothing monitoring does changes `status`, `updatedAt` or
+  `screening_json`. That is the whole tipping-off defence, and it is also why a pod of the previous
+  release cannot erase anything: it rewrites the case row and its JSON, and neither holds
+  monitoring data. Do not put monitoring data into `screening_json` or add a status for it.
+- **The registry reference is minted by the DATABASE** (`subject_ref DEFAULT gen_random_uuid()`),
+  one per (case, subject), never shared and never derived from a name. `subject_key` is
+  name-derived personal data and never leaves the database. The onboarding screen's `subjectId`
+  is a different identifier and is unchanged; a clearance recorded under it does not bind the
+  registry reference.
+- **A case the previous release wrote is repaired by version, not by a migration.** Every write by
+  this release sets `monitoring_synced_version = version + 1`; the relay rewrites approved or
+  ended cases where the two differ. Do not write `kyb_cases` around the repository.
+- **The findings channel follows the monitoring switch** (`enabled: ${openbank.kyb.monitoring.enabled}`),
+  and its `group.id` / `auto.offset.reset` are NESTED YAML keys so the image carries them: no
+  override ConfigMap, no second deploy. Do not flatten them to the dotted form.
 
 ## Authorization
 

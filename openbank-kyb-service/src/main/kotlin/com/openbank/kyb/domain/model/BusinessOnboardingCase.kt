@@ -53,28 +53,6 @@ data class Signer(
 class CaseTransitionException(message: String) : IllegalStateException(message)
 
 /**
- * Ongoing monitoring reported a match on an APPROVED case (ADR-0376 D6, ADR-0256 D2) and an
- * operator has to decide it. It is a fact BESIDE the case's status, never a status: the status
- * of an approved case is what the applicant, the events and every other service read, and none
- * of them may be able to tell that a review is running. Because the status does not move, no
- * applicant-facing path has anything to hide.
- *
- * [exitRequiredAt] is set when the operator decided the relationship has to end. The case then
- * stays approved AND monitored until an exit actually happens: ending the relationship is a
- * workflow outside this service, and withdrawing monitoring before it ran would leave a confirmed
- * match active and unwatched.
- */
-data class MonitoringReview(
-    val openedAt: Instant,
-    val exitRequiredAt: Instant? = null,
-    /** The operator's reason for the exit. Operators only. */
-    val exitReason: String? = null,
-) {
-    /** Still waiting for an operator: findings may be decided, and the review resolved or escalated. */
-    val open: Boolean get() = exitRequiredAt == null
-}
-
-/**
  * The multi-party business onboarding aggregate (ADR-0284 D1). Every transition is a pure function
  * returning a new copy; the use case persists it together with the event it produced.
  */
@@ -105,8 +83,8 @@ data class BusinessOnboardingCase(
     val agreement: AgreementRecord? = null,
     /** Sanctions / PEP screening of the entity and its related parties; null until first attempted. */
     val screening: CaseScreening? = null,
-    /** Set while a monitoring finding on this approved case awaits, or received, an operator's decision. */
-    val monitoringReview: MonitoringReview? = null,
+    /** What ongoing monitoring reported about this case after approval, and what was decided. */
+    val monitoring: CaseMonitoring = CaseMonitoring(),
     /**
      * The row version this copy was read at. The repository refuses to write a copy whose version
      * is no longer the stored one, so a decision made in between is never overwritten.
@@ -123,96 +101,65 @@ data class BusinessOnboardingCase(
     private val signedSigners: List<Signer> get() = signers.filter { it.status == SignerStatus.SIGNED }
 
     /**
-     * The case was approved and has not ended: the bank has, or is about to have, a relationship
-     * with the entity, so the entity and its related parties are under ongoing monitoring. This is
-     * the ONE definition of who is monitored; nothing sets or clears monitoring anywhere else.
+     * Whether the entity and its related parties must be registered for ongoing monitoring. This
+     * is the ONE definition; nothing sets or clears monitoring anywhere else.
      *
-     * A case whose exit an operator required stays monitored WHATEVER its status becomes: the
-     * relationship ends when the exit is carried out, not when the applicant abandons the case or
-     * a timer does, and until then a confirmed match must not drop out of monitoring.
+     *  - an approved case (SIGNED, ACTIVE) is monitored;
+     *  - a case with a monitoring [CaseMonitoring.hold] stays monitored WHATEVER its status
+     *    becomes — an applicant who abandons it, an idle timer and an operator's rejection all
+     *    change the status as they always did, and none of them ends monitoring while a finding
+     *    is undecided or a confirmed match has not been exited;
+     *  - a completed exit ends it, and is the only thing that does for a case that owed one.
      */
     val monitored: Boolean
-        get() = status == CaseStatus.SIGNED ||
-            status == CaseStatus.ACTIVE ||
-            monitoringReview?.exitRequiredAt != null
+        get() = monitoring.exitCompleted == null &&
+            (status == CaseStatus.SIGNED || status == CaseStatus.ACTIVE || monitoring.hold)
 
     /**
-     * Whether this case can have rows in the monitoring registration store at all: only a case
-     * that is or was approved. The repository skips the store for every other write.
+     * Whether this case can have registrations at all: only one that is or was approved. The
+     * repository skips the registration store for every other write.
      */
     val everApproved: Boolean
-        get() = monitored || status == CaseStatus.REJECTED || status == CaseStatus.ABANDONED
+        get() = status == CaseStatus.SIGNED ||
+            status == CaseStatus.ACTIVE ||
+            status == CaseStatus.REJECTED ||
+            status == CaseStatus.ABANDONED
 
     /**
-     * Who must be registered for ongoing monitoring right now: every current screened subject of a
-     * [monitored] case, and nobody for any other case. The registration store is brought to this
-     * set in the transaction of every write of the case, so it is the single definition of both
-     * "register" and "withdraw".
+     * Who must be registered right now: every current screened subject of a [monitored] case, and
+     * nobody for any other case. The registration store is brought to this set in the
+     * transaction of every write of the case, so it defines both "register" and "withdraw".
      */
     val monitoredSubjects: List<ScreeningSubject>
-        get() = if (monitored) screening?.monitorable.orEmpty() else emptyList()
-
-    /** A human may decide screening findings now: an onboarding review, or an open monitoring review. */
-    private val findingsDecidable: Boolean
-        get() = status == CaseStatus.MANUAL_REVIEW || monitoringReview?.open == true
+        get() = if (monitored) screening?.subjects.orEmpty().filter { it.current } else emptyList()
 
     /**
-     * Gives the screened subjects their references; see [CaseScreening.withRefs]. `updatedAt` is
-     * not moved: a reference is bookkeeping, and the applicant must not see a case change because
-     * the bank registered it somewhere.
+     * Ongoing monitoring reports a match on the subject [MonitoringFinding.subjectKey]. It is
+     * recorded for an operator and changes nothing an applicant can read: not the status, not
+     * `updatedAt`. Returns the SAME instance for a finding already recorded. Refused for a case
+     * that is not [monitored] and for a subject the case does not currently carry.
      */
-    fun withMonitoringRefs(mint: () -> String): BusinessOnboardingCase {
-        val current = screening ?: return this
-        val next = current.withRefs(id, entityPartyId, mint)
-        return if (next === current) this else copy(screening = next)
+    fun monitoringMatched(finding: MonitoringFinding): BusinessOnboardingCase {
+        if (!monitored) throw CaseTransitionException("case is not under ongoing monitoring (status $status)")
+        if (monitoredSubjects.none { it.key == finding.subjectKey }) {
+            throw CaseTransitionException("no current subject of this case has that key")
+        }
+        val next = monitoring.recorded(finding)
+        return if (next === monitoring) this else copy(monitoring = next)
     }
 
-    /**
-     * Ongoing monitoring reports that the subject registered under [subjectRef] matches a list
-     * entry. The finding is recorded on that subject and a monitoring review opens for an
-     * operator. It decides nothing about the customer, and it changes nothing an applicant can
-     * read: not the status, not `updatedAt`.
-     *
-     * Returns the SAME instance for a finding already recorded, so a redelivered event writes
-     * nothing. Refused for a case that is not [monitored] and for a reference no current subject
-     * carries; the caller counts both, it does not guess.
-     */
-    fun monitoringMatched(subjectRef: String, match: MonitoringMatch, at: Instant): BusinessOnboardingCase {
-        val current = screening?.takeIf { monitored }
-            ?: throw CaseTransitionException("case is not under ongoing monitoring (status $status)")
-        val next = current.monitoringMatched(subjectRef, match)
-            ?: throw CaseTransitionException("no current subject of this case is registered under that reference")
-        if (next === current) return this
-        // A finding that arrives after an exit was required is recorded; the exit decision stands.
-        return copy(screening = next, monitoringReview = monitoringReview ?: MonitoringReview(openedAt = at))
-    }
+    /** An operator decides ONE monitoring finding. See [MonitoringFinding.decided]. */
+    fun monitoringFindingDecided(
+        findingId: UUID,
+        disposition: FindingDisposition,
+        operator: String,
+        reason: String,
+        at: Instant,
+    ): BusinessOnboardingCase = copy(monitoring = monitoring.decided(findingId, disposition, operator, reason, at))
 
-    /**
-     * Every finding of the monitoring review has a disposition and none is a confirmed sanctions
-     * match: the review closes and the case is what it was all along. Nothing of the approval is
-     * revisited and nothing is published.
-     */
-    fun monitoringReviewResolved(): BusinessOnboardingCase {
-        requireOpenMonitoringReview()
-        requireFindingsDecided(true)
-        return copy(monitoringReview = null)
-    }
-
-    /**
-     * The operator decided that the relationship with this APPROVED customer has to end — the
-     * only way out of a confirmed sanctions match. Deliberately not [rejected]: an approved case
-     * has a party, mandates and possibly accounts, and "onboarding rejected" would tell every
-     * consumer that none of that exists. The case keeps its status and so stays [monitored]; what
-     * changes is that an exit is owed, which is published as its own event.
-     */
-    fun exitRequired(reason: String, at: Instant): BusinessOnboardingCase {
-        val review = requireOpenMonitoringReview()
-        require(reason.isNotBlank()) { "an exit needs a reason" }
-        return copy(monitoringReview = review.copy(exitRequiredAt = at, exitReason = reason.trim()))
-    }
-
-    private fun requireOpenMonitoringReview(): MonitoringReview = monitoringReview?.takeIf { it.open }
-        ?: throw CaseTransitionException("this case has no open monitoring review")
+    /** The exit a confirmed sanctions match requires has been carried out; monitoring ends with it. */
+    fun exitCompleted(operator: String, evidence: String, at: Instant): BusinessOnboardingCase =
+        copy(monitoring = monitoring.exitCompleted(operator, evidence, at))
 
     /**
      * The register record has been fetched. Decides between the automatic path and manual review.
@@ -647,13 +594,11 @@ data class BusinessOnboardingCase(
     ): BusinessOnboardingCase {
         // Only under review. Decided anywhere else, the decision would be followed by the last
         // signature and the case would be approved with no review step between the two.
-        if (!findingsDecidable) {
+        if (status != CaseStatus.MANUAL_REVIEW) {
             throw CaseTransitionException("a screening finding can be decided only while the case is under review")
         }
         val current = screening ?: throw CaseTransitionException("this case has no screening")
-        val disposed = current.disposed(subjectKey, disposition, operator, reason, at)
-        // On an approved case the decision is the operator's business only: `updatedAt` stays.
-        return copy(screening = disposed, updatedAt = if (monitoringReview != null) updatedAt else at)
+        return copy(screening = current.disposed(subjectKey, disposition, operator, reason, at), updatedAt = at)
     }
 
     private fun requireScreened(required: Boolean) {
@@ -800,10 +745,6 @@ data class BusinessOnboardingCase(
     }
 
     fun rejected(reason: String, at: Instant): BusinessOnboardingCase {
-        // An approved customer under a monitoring review is exited, never "rejected": [exitRequired].
-        if (monitoringReview != null) {
-            throw CaseTransitionException("a case under a monitoring review is exited, not rejected")
-        }
         require(!status.isTerminal) { "case is already $status" }
         return copy(status = CaseStatus.REJECTED, reviewReason = reason, updatedAt = at)
     }

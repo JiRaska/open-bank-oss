@@ -10,11 +10,13 @@ import com.openbank.kyb.application.port.out.KybOutboxRepository
 import com.openbank.kyb.application.port.out.MonitoringRegistrationStore
 import com.openbank.kyb.application.port.out.RegistryExtractCache
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
+import com.openbank.kyb.domain.model.CaseMonitoring
 import com.openbank.kyb.domain.model.CaseStatus
+import com.openbank.kyb.domain.model.ExitCompletion
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.KybEvent
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
-import com.openbank.kyb.domain.model.MonitoringReview
+import com.openbank.kyb.domain.model.MonitoringFinding
 import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.infrastructure.persistence.entity.BusinessOnboardingCaseEntity
 import com.openbank.kyb.infrastructure.persistence.entity.RegistryExtractEntity
@@ -44,7 +46,7 @@ class BusinessOnboardingCaseRepositoryImpl(
         val e = BusinessOnboardingCaseEntity().apply {
             caseId = case.id
             createdAt = case.createdAt
-        }.fill(case)
+        }.fill(case, syncedVersion = 0)
         Panache.withTransaction { persist(e).flatMap { withEvent(event) } }.awaitSuspending()
         return case
     }
@@ -54,11 +56,6 @@ class BusinessOnboardingCaseRepositoryImpl(
      * being written was read before somebody else's committed write (the row is loaded fresh here,
      * so `@Version` alone would see the NEW version and happily overwrite). `@Version` then covers
      * the window between this load and the flush, where two transactions hold the same version.
-     *
-     * The ongoing-monitoring registrations are brought to the case's desired set HERE, inside the
-     * transaction and for every write, not by the use cases: there are several paths into and out
-     * of an approved case, and a registration that one of them forgot is a customer nobody
-     * monitors, with nothing anywhere reporting it.
      */
     override suspend fun update(case: BusinessOnboardingCase, event: KybEvent?): BusinessOnboardingCase {
         val written = Panache.withTransaction {
@@ -67,7 +64,8 @@ class BusinessOnboardingCaseRepositoryImpl(
                 if (row.version != case.version) {
                     Uni.createFrom().failure(ConcurrentCaseUpdateException(case.id))
                 } else {
-                    row.fill(case)
+                    // The version this write produces: the store is in step with the case at it.
+                    row.fill(case, syncedVersion = row.version + 1)
                     withEvent(event)
                         .flatMap { withMonitoring(case) }
                         .flatMap { Panache.getSession() }
@@ -80,17 +78,25 @@ class BusinessOnboardingCaseRepositoryImpl(
     }
 
     /**
-     * One statement, and only for a case that is or was approved: no other case can have a row
-     * to add or to turn, so the writes of the whole onboarding journey pay nothing for this.
+     * Brings the monitoring store to the case, inside this transaction and for EVERY write, not
+     * from the use cases: there are several paths into and out of an approved case, and a
+     * registration one of them forgot is a customer nobody monitors, with nothing reporting it.
+     *
+     * At most two statements, and none for a case that was never approved: such a case can have
+     * neither a registration nor a finding, so the whole onboarding journey pays nothing.
      */
-    private fun withMonitoring(case: BusinessOnboardingCase): Uni<Void> = if (!case.everApproved) {
-        Uni.createFrom().voidItem()
-    } else {
-        monitoring.syncInTransaction(
-            case.id,
-            case.monitoredSubjects.mapNotNull { it.ref }.toSet(),
-            Instant.now(clock),
-        )
+    private fun withMonitoring(case: BusinessOnboardingCase): Uni<Void> {
+        if (!case.everApproved) return Uni.createFrom().voidItem()
+        val keys = case.monitoredSubjects.map { it.key }.toSet()
+        val synced = monitoring.syncInTransaction(case.id, keys, Instant.now(clock))
+        val findings = case.monitoring.findings
+        return if (findings.isEmpty()) {
+            synced
+        } else {
+            synced.flatMap {
+                monitoring.saveFindingsInTransaction(case.id, findings)
+            }
+        }
     }
 
     private fun isStaleWrite(failure: Throwable): Boolean = generateSequence(failure) { it.cause }
@@ -101,7 +107,7 @@ class BusinessOnboardingCaseRepositoryImpl(
         if (event == null) Uni.createFrom().voidItem() else outbox.persistInTransaction(event.toOutboxMessage())
 
     override suspend fun findById(id: UUID): BusinessOnboardingCase? =
-        Panache.withSession { find("caseId", id).firstResult() }.awaitSuspending()?.toDomain()
+        Panache.withSession { find("caseId", id).firstResult() }.awaitSuspending()?.hydrated()
 
     override suspend fun findOpenByIdentifier(identifier: LegalEntityIdentifier): BusinessOnboardingCase? =
         Panache.withSession {
@@ -113,36 +119,45 @@ class BusinessOnboardingCaseRepositoryImpl(
                 CaseStatus.REJECTED.name,
                 CaseStatus.ABANDONED.name,
             ).firstResult()
-        }.awaitSuspending()?.toDomain()
+        }.awaitSuspending()?.hydrated()
 
     override suspend fun findByInvitationToken(token: String): BusinessOnboardingCase? = Panache.withSession {
         find("invitationTokens like ?1", "%|$token|%").firstResult()
-    }.awaitSuspending()?.toDomain()
+    }.awaitSuspending()?.hydrated()
 
     override suspend fun findByEntityPartyId(entityPartyId: UUID): BusinessOnboardingCase? = Panache.withSession {
         find("entityPartyId = ?1 order by createdAt desc", entityPartyId).firstResult()
-    }.awaitSuspending()?.toDomain()
+    }.awaitSuspending()?.hydrated()
 
     override suspend fun findInvolving(partyId: UUID): List<BusinessOnboardingCase> = Panache.withSession {
         find("initiatorPartyId = ?1 or signerPartyIds like ?2 order by createdAt desc", partyId, "%|$partyId|%").list()
-    }.awaitSuspending().map { it.toDomain() }
+    }.awaitSuspending().map { it.hydrated() }
+
+    override suspend fun listMonitoringHolds(page: Int, size: Int): List<BusinessOnboardingCase> = Panache.withSession {
+        find(
+            "monitoringReviewSince is not null or monitoringExitOwedSince is not null " +
+                "order by coalesce(monitoringExitOwedSince, monitoringReviewSince), id",
+        ).page(page, size).list()
+    }.awaitSuspending().map { it.hydrated() }
+
+    /**
+     * The findings live in their own table, which a release that does not know monitoring never
+     * writes. They are read only for a case that has any.
+     */
+    private suspend fun BusinessOnboardingCaseEntity.hydrated(): BusinessOnboardingCase {
+        val findings = if (monitoringFindingCount > 0) monitoring.findingsOf(caseId) else emptyList()
+        return toDomain(findings)
+    }
 
     override suspend fun listByStatus(status: CaseStatus, page: Int, size: Int): List<BusinessOnboardingCase> =
         Panache.withSession {
-            // The review queue also holds approved cases with an OPEN monitoring review: their
-            // status does not say so, on purpose, and an operator must still find them here.
-            if (status == CaseStatus.MANUAL_REVIEW) {
-                find(
-                    "status = ?1 or (monitoringReviewOpenedAt is not null and monitoringExitRequiredAt is null) " +
-                        "order by updatedAt desc",
-                    status.name,
-                )
-            } else {
-                find("status = ?1 order by updatedAt desc", status.name)
-            }.page(page, size).list()
-        }.awaitSuspending().map { it.toDomain() }
+            find("status = ?1 order by updatedAt desc", status.name).page(page, size).list()
+        }.awaitSuspending().map { it.hydrated() }
 
-    private fun BusinessOnboardingCaseEntity.fill(case: BusinessOnboardingCase): BusinessOnboardingCaseEntity = apply {
+    private fun BusinessOnboardingCaseEntity.fill(
+        case: BusinessOnboardingCase,
+        syncedVersion: Long,
+    ): BusinessOnboardingCaseEntity = apply {
         identifierScheme = case.identifier.scheme.name
         identifierValue = case.identifier.value
         initiatorPartyId = case.initiatorPartyId
@@ -161,13 +176,17 @@ class BusinessOnboardingCaseRepositoryImpl(
         declarationsJson = case.declarations?.let { KybJson.write(it) }
         agreementJson = case.agreement?.let { KybJson.write(it) }
         screeningJson = case.screening?.let { KybScreeningJson.write(it) }
-        monitoringReviewOpenedAt = case.monitoringReview?.openedAt
-        monitoringExitRequiredAt = case.monitoringReview?.exitRequiredAt
-        monitoringExitReason = case.monitoringReview?.exitReason
+        monitoringFindingCount = case.monitoring.findings.size
+        monitoringReviewSince = case.monitoring.reviewSince
+        monitoringExitOwedSince = case.monitoring.exitOwedSince
+        monitoringExitCompletedAt = case.monitoring.exitCompleted?.completedAt
+        monitoringExitCompletedBy = case.monitoring.exitCompleted?.completedBy
+        monitoringExitEvidence = case.monitoring.exitCompleted?.evidence
+        monitoringSyncedVersion = syncedVersion
         updatedAt = case.updatedAt
     }
 
-    private fun BusinessOnboardingCaseEntity.toDomain() = BusinessOnboardingCase(
+    private fun BusinessOnboardingCaseEntity.toDomain(findings: List<MonitoringFinding>) = BusinessOnboardingCase(
         id = caseId,
         identifier = LegalEntityIdentifier.of(IdentifierScheme.valueOf(identifierScheme), identifierValue),
         initiatorPartyId = initiatorPartyId,
@@ -183,9 +202,12 @@ class BusinessOnboardingCaseRepositoryImpl(
         declarations = declarationsJson?.let { KybJson.readDeclarations(it) },
         agreement = agreementJson?.let { KybJson.readAgreement(it) },
         screening = screeningJson?.let { KybScreeningJson.read(it) },
-        monitoringReview = monitoringReviewOpenedAt?.let { opened ->
-            MonitoringReview(opened, monitoringExitRequiredAt, monitoringExitReason)
-        },
+        monitoring = CaseMonitoring(
+            findings,
+            monitoringExitCompletedAt?.let { at ->
+                ExitCompletion(at, monitoringExitCompletedBy.orEmpty(), monitoringExitEvidence.orEmpty())
+            },
+        ),
         version = version,
         createdAt = createdAt,
         updatedAt = updatedAt,

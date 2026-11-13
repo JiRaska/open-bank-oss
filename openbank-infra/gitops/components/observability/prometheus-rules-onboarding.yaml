@@ -244,22 +244,22 @@ spec:
             summary: "kyb-service cannot register approved business customers for sanctions monitoring"
             description: "The oldest registration kyb-service owes the monitored-subject registry has been pending for {{ $value | humanizeDuration }} in {{ $labels.namespace }}. Until it is delivered, the entity, representatives or beneficial owners of at least one APPROVED business case are not under ongoing monitoring: a new sanctions or PEP listing of them raises nothing. `openbank_kyb_monitoring_registrations_total{outcome=\"failed\"}` carries the reason: `http_503` means sanctions-service has `openbank.sanctions.monitoring.enabled` off, `http_403` means kyb-service is not calling as its own client, `unavailable` means the route or the mTLS path. Nothing is lost while this fires — the rows stay owed and are sent once the registry accepts them — but nothing is monitored either."
         - alert: KybMonitoringReviewUnresolved
-          # An approved case that a monitoring finding sent back to review has waited a day for an
-          # operator. The case stays as it was for the customer on purpose, so nothing else in
-          # the system pushes anyone to look: no customer is blocked, no timer abandons it.
+          # A monitoring finding on an approved case has waited a day for an operator's decision.
+          # The case stays as it was for the customer on purpose, so nothing else in the system
+          # pushes anyone to look: no customer is blocked, no timer abandons it.
           #
           # Read whatever the registration switch says: a finding about a subject registered
           # earlier is still a finding.
           #
           # Cold-pod reading: NaN until the first scheduled run, then the age of
-          # `monitoring_review_opened_at` in the database — 0 when no such case exists.
+          # `monitoring_review_since` in the database — 0 when no such case exists.
           expr: max by (namespace) (openbank_kyb_monitoring_reviews_oldest_open_age_seconds) > 86400
           for: 15m
           labels:
             severity: warning
           annotations:
             summary: "a sanctions-monitoring finding on an approved business customer has waited a day for review"
-            description: "The oldest monitoring review in {{ $labels.namespace }} has been open for {{ $value | humanizeDuration }} (`openbank_kyb_monitoring_reviews_open` says how many there are). Ongoing monitoring matched the entity or a related party of an APPROVED business case against a sanctions, terrorist or PEP list entry, and the case is in MANUAL_REVIEW waiting for an operator: decide the finding on the case's screening view, then resolve the review or reject the case. The customer sees no change in the meantime, so nobody will chase it from that side."
+            description: "The oldest undecided monitoring finding in {{ $labels.namespace }} has waited {{ $value | humanizeDuration }} (`openbank_kyb_monitoring_reviews_open` says how many cases have one). Ongoing monitoring matched the entity or a related party of an approved business case against a sanctions, terrorist or PEP list entry. The case keeps its status and appears in no status queue: list such cases with `GET /api/v1/kyb/cases?monitoring=open` and decide each finding with `POST /api/v1/kyb/cases/{id}/monitoring/findings/{findingId}/disposition`. The customer sees no change in the meantime, so nobody will chase it from that side."
         - alert: KybMonitoringFindingNotRouted
           # A record on the findings channel that this service could not turn into a review of one
           # of its cases: an unknown or missing `ce-type` header (`unrecognised` — the wire-shape
@@ -304,8 +304,8 @@ spec:
             summary: "the monitored-subject registry does not accept kyb-service as a caller"
             description: "`openbank_kyb_monitoring_registrations_total{outcome=\"unauthorised\"}` moved in {{ $labels.namespace }}: sanctions-service answered 401 or 403 to a registration or withdrawal. `http_403` is the registry refusing the client (kyb-service must call as its OWN client, not the fleet's shared one); `http_401` is no valid token at all. No approved business customer is being registered for monitoring while this lasts. The rows stay owed and are sent once the caller is accepted."
         - alert: KybMonitoringSubjectRefused
-          # The registry refuses a subject as it is (a 4xx that is not about the caller), so
-          # retrying cannot help and the row left the retry loop. Each one is an approved party
+          # The registry's validation rejects a subject as it is (400 or 422 — nothing else is
+          # read as a refusal), so retrying cannot help and the row left the retry loop. Each one is an approved party
           # that is NOT monitored. Kept out of the backlog age on purpose: a permanent refusal
           # there would hold the critical alert lit and hide the next real outage behind it.
           #
@@ -316,7 +316,7 @@ spec:
             severity: warning
           annotations:
             summary: "sanctions-service refuses to monitor {{ $value }} approved business subject(s)"
-            description: "{{ $value }} subject(s) of approved business cases in {{ $labels.namespace }} were refused by the monitored-subject registry for a reason a retry cannot change (`openbank_kyb_monitoring_registrations_total{outcome=\"refused\"}` carries the HTTP status). They are approved and NOT monitored. The operator view of a case (`GET /api/v1/kyb/cases/{id}`) shows `monitoringState: REFUSED` on the subject: correct what the registry rejects (usually the name as the register spells it), or decide the relationship without monitoring. A refused row is tried again when its case changes and at the next re-assertion."
+            description: "{{ $value }} subject(s) of approved business cases in {{ $labels.namespace }} were rejected by the monitored-subject registry's validation with 400 or 422 (`openbank_kyb_monitoring_registrations_total{outcome=\"refused\"}` carries the status). They are approved and NOT monitored. The operator view of a case (`GET /api/v1/kyb/cases/{id}`) shows `monitoringState: REFUSED` on the subject. The registry rejects a name with no searchable character or over its length limit: the name comes from the register extract, so the fix is in the registry's validation or in the extract. A refused row is sent again at every write of its case and at the next re-assertion."
         - alert: KybMonitoringApprovedCaseUnscreened
           # An approved case that carries no screening at all has nobody to register: it was
           # approved while related-party screening was switched off. Only while monitoring is on —
@@ -332,18 +332,41 @@ spec:
           annotations:
             summary: "{{ $value }} approved business case(s) were never screened and are not monitored"
             description: "{{ $value }} business case(s) in {{ $labels.namespace }} are SIGNED or ACTIVE with no related-party screening, so ongoing monitoring has no subject to register for them. They were approved while `openbank.kyb.screening.enabled` was off. Nothing screens an approved case after the fact today; until something does, these customers are outside both the onboarding screen and ongoing monitoring."
-        - alert: KybMonitoringExitRequired
-          # An operator decided that the relationship with an approved business customer has to
-          # end. kyb-service keeps the case approved and monitored and publishes
-          # BUSINESS_RELATIONSHIP_EXIT_REQUIRED; nothing consumes that event yet, so this alert is
-          # what makes somebody carry the exit out.
-          expr: max by (namespace) (openbank_kyb_monitoring_exits_required) > 0
+        - alert: KybMonitoringExitOwed
+          # An operator confirmed a sanctions match on an approved business customer, so the
+          # relationship has to end, and nobody has recorded that it did. kyb-service keeps the
+          # case monitored and publishes BUSINESS_RELATIONSHIP_EXIT_REQUIRED; nothing consumes that
+          # event yet, so this alert is what makes somebody carry the exit out. It clears when an
+          # operator records the exit (`monitoring/exit/complete`).
+          #
+          # Cold-pod reading: NaN until the first scheduled run, then a count from the database.
+          expr: max by (namespace) (openbank_kyb_monitoring_exits_owed) > 0
           for: 5m
           labels:
             severity: critical
           annotations:
-            summary: "an approved business relationship must be exited and nothing carries the exit out"
-            description: "{{ $value }} approved business case(s) in {{ $labels.namespace }} carry an operator's decision that the relationship has to end (typically a confirmed sanctions match found by ongoing monitoring). The customer is still active: the party, its mandates and its accounts are untouched, and the case stays monitored. No service acts on `BUSINESS_RELATIONSHIP_EXIT_REQUIRED` yet — restrict and exit the relationship by hand. The review queue's operator view shows `monitoringReview.exitRequiredAt` and the reason."
+            summary: "an approved business relationship must be exited and the exit is not recorded"
+            description: "{{ $value }} business case(s) in {{ $labels.namespace }} carry a CONFIRMED sanctions match found by ongoing monitoring and no record that the relationship was ended (`openbank_kyb_monitoring_exits_oldest_owed_age_seconds` says for how long). The customer is still active: the party, its mandates and its accounts are untouched, and the case stays monitored. No service acts on `BUSINESS_RELATIONSHIP_EXIT_REQUIRED` yet — restrict and exit the relationship by hand, then record it with `POST /api/v1/kyb/cases/{id}/monitoring/exit/complete`, which clears this alert. `GET /api/v1/kyb/cases?monitoring=open` lists the cases."
+        - alert: KybMonitoringCaseUnreconciled
+          # A case's registrations are written in the same transaction as the case — by this
+          # release. A pod of the previous release (a rolling deploy, a rollback) writes the case
+          # and not the registrations, and the relay brings such a case into step on its next run.
+          # This is that repair not happening: a rejected case whose subjects stay registered, or
+          # an approved one whose subjects are not owed.
+          #
+          # Only while the switch is on: the repair is part of the relay's run.
+          # Cold-pod reading: NaN until the first scheduled run, then a count from the database.
+          expr: |
+            max by (namespace) (
+              openbank_kyb_monitoring_cases_unreconciled
+              and on (namespace, pod) (openbank_kyb_monitoring_enabled == 1)
+            ) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $value }} business case(s) are out of step with their monitoring registrations"
+            description: "{{ $value }} approved or ended business case(s) in {{ $labels.namespace }} were last written without their monitoring registrations being brought into step, and the relay has not repaired them for half an hour. Until it does, a subject of such a case can be approved and not owed to the registry, or ended and still registered. Expected for a minute or two while pods of two releases run side by side; lasting, it means the relay's repair step fails — `openbank_kyb_monitoring_runs_total{outcome=\"failed\"}` and the log of `KybMonitoringScheduler` say why."
         - alert: KybMonitoringFindingDeadLettered
           # A finding that could not be applied after its retries, or that was malformed, is in the
           # channel's dead-letter topic: a sanctions or PEP match nobody has reviewed.

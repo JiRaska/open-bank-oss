@@ -6,7 +6,6 @@ package com.openbank.kyb.domain.model
 
 import java.security.MessageDigest
 import java.time.Instant
-import java.util.UUID
 
 /** Why a subject is on the case. A person who is both keeps the first role found; see [CaseScreening.subjectsOf]. */
 enum class ScreeningSubjectKind {
@@ -54,21 +53,6 @@ data class ScreeningSubject(
     val disposedBy: String? = null,
     val dispositionReason: String? = null,
     val disposedAt: Instant? = null,
-    /**
-     * The identity this subject is screened and monitored under: what the screen sends as
-     * `subjectId` and what the monitored-subject registry is keyed by, so that an analyst's
-     * clearance of the subject binds in both (ADR-0376 D1). The entity's is its party id, always:
-     * an entity is not screened before it has a party, so a clearance follows the party. Everyone
-     * else first screened from this release on has a random UUID — a reference travels in a URL
-     * path and comes back on an event, so nothing about a person may be derivable from it. A
-     * person screened by an earlier release keeps the id that screen used
-     * ([CaseScreening.withRefs]). Never changed once given; null means "cannot be screened yet".
-     */
-    val ref: String? = null,
-    /** What ongoing monitoring reported about this subject after approval. Operators only. */
-    val monitoringFindings: List<MonitoringMatch> = emptyList(),
-    /** Decisions that a later monitoring finding reopened; kept because a decision is evidence. */
-    val pastDispositions: List<PastDisposition> = emptyList(),
 ) {
     val sanctionsHit: Boolean
         get() = sanctions == ScreeningVerdict.HIT || sanctions == ScreeningVerdict.POTENTIAL_HIT
@@ -87,72 +71,7 @@ data class ScreeningSubject(
         val next = copy(sanctions = verdict, pep = pep, matchedName = matchedName, screenedAt = at)
         return if (next.finding) next.copy(disposition = FindingDisposition.OPEN) else next
     }
-
-    /**
-     * Ongoing monitoring matched this subject against a list entry. The finding is recorded once
-     * per [MonitoringMatch.findingId] — a redelivered event returns the SAME instance — and it
-     * always opens a decision: an earlier disposition was about an earlier match and is moved to
-     * [pastDispositions], never reused. A PEP match sets the PEP fact and leaves the sanctions
-     * verdict alone; every other kind, including one this service does not know, is read as a
-     * sanctions-list match, which is the direction that cannot approve by mistake.
-     */
-    fun monitoringMatched(match: MonitoringMatch): ScreeningSubject {
-        if (monitoringFindings.any { it.findingId == match.findingId }) return this
-        val decided = disposition?.takeIf { it != FindingDisposition.OPEN }?.let {
-            PastDisposition(it, disposedBy, dispositionReason, disposedAt)
-        }
-        return copy(
-            sanctions = if (match.pep) sanctions else worseOf(sanctions, match.verdict),
-            pep = pep || match.pep,
-            monitoringFindings = monitoringFindings + match,
-            pastDispositions = pastDispositions + listOfNotNull(decided),
-            disposition = FindingDisposition.OPEN,
-            disposedBy = null,
-            dispositionReason = null,
-            disposedAt = null,
-        )
-    }
-
-    private fun worseOf(a: ScreeningVerdict, b: ScreeningVerdict): ScreeningVerdict =
-        if (a == ScreeningVerdict.HIT || b == ScreeningVerdict.HIT) ScreeningVerdict.HIT else b
 }
-
-/**
- * One finding of ongoing monitoring (ADR-0376 D6) as kyb keeps it: which list entry, how strongly,
- * and how it was detected. It carries no name. [matchKind], [listType] and [detection] are the
- * producer's vocabulary kept verbatim as text: a value added upstream must still open a review
- * here, so nothing in this service enumerates them.
- */
-data class MonitoringMatch(
-    val findingId: UUID,
-    val matchKind: String,
-    val listType: String,
-    val listEntryRef: String,
-    val listEntryVersion: String,
-    val matchScore: Double,
-    val matchStatus: String,
-    val detection: String,
-    val receivedAt: Instant,
-) {
-    val pep: Boolean get() = matchKind == PEP_KIND
-
-    /** Only an explicit `HIT` is a hit; anything else, known or not, is a potential one. */
-    val verdict: ScreeningVerdict
-        get() = if (matchStatus == HIT_STATUS) ScreeningVerdict.HIT else ScreeningVerdict.POTENTIAL_HIT
-
-    private companion object {
-        const val PEP_KIND = "PEP"
-        const val HIT_STATUS = "HIT"
-    }
-}
-
-/** A disposition that a later monitoring finding reopened. */
-data class PastDisposition(
-    val disposition: FindingDisposition,
-    val disposedBy: String?,
-    val reason: String?,
-    val disposedAt: Instant?,
-)
 
 /**
  * What an operator decided about one finding. There is no implicit way out of [OPEN]: resolving a
@@ -235,61 +154,21 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
 
     /**
      * [fresh] is the case's CURRENT subject list. Answers already obtained for people still on it
-     * are kept. A subject that LEFT is never forgotten: it stays, marked no longer current. That
-     * keeps a finding counting until an operator decides it, and it keeps the subject's reference,
-     * so a person who comes back is the same subject to sanctions-service and not a new one.
-     *
-     * With [UboSource.UNAVAILABLE] nobody could say who owns the entity, so the absence of a
-     * subject from [fresh] proves nothing and NOBODY is marked as having left: an outage of the
-     * ownership register may add subjects, it never removes one.
+     * are kept. A subject that LEFT is dropped only if it was clear or never answered; one that
+     * carries a finding stays, marked no longer current, and keeps counting until an operator
+     * decides it — otherwise taking a listed person off the declarations would approve the case.
      */
     fun rebuilt(fresh: List<ScreeningSubject>, ownerSource: UboSource): CaseScreening {
         val known = subjects.associateBy { it.key }
         val freshKeys = fresh.map { it.key }.toSet()
         val now = fresh.map { known[it.key]?.copy(kind = it.kind, name = it.name, current = true) ?: it }
         val absent = subjects.filter { it.key !in freshKeys }
-        val kept = if (ownerSource == UboSource.UNAVAILABLE) absent else absent.map { it.copy(current = false) }
-        return CaseScreening(now + kept, ownerSource)
-    }
-
-    /** The current subjects that carry a reference: the set ongoing monitoring is registered for. */
-    val monitorable: List<ScreeningSubject> get() = subjects.filter { it.current && it.ref != null }
-
-    /**
-     * Gives every current subject that has none its reference; a reference is never changed.
-     *
-     * The entity takes its party id and nothing else; while it has no party it gets no reference,
-     * is therefore not screened, and the case cannot be approved. A person with NO answer yet
-     * takes a value from [mint], which must be random. A person who already HAS an answer was
-     * screened by a release that had no references, under an id built from the case and the
-     * subject key, and keeps exactly that id: the check, and any clearance an analyst recorded on
-     * it, are keyed by it in sanctions-service, and a new id would orphan both and re-flag a
-     * cleared subject.
-     */
-    fun withRefs(caseId: UUID, entityPartyId: UUID?, mint: () -> String): CaseScreening {
-        if (subjects.none { it.current && it.ref == null }) return this
-        return copy(
-            subjects = subjects.map {
-                when {
-                    !it.current || it.ref != null -> it
-                    it.kind == ScreeningSubjectKind.ENTITY -> it.copy(ref = entityPartyId?.toString())
-                    it.sanctions == ScreeningVerdict.PENDING -> it.copy(ref = mint())
-                    else -> it.copy(ref = "kyb-case:$caseId:${it.key}")
-                }
-            },
-        )
-    }
-
-    /**
-     * Records a monitoring finding on the subject registered under [subjectRef]. Returns the SAME
-     * instance when that finding is already recorded, and null when no current subject carries the
-     * reference — the caller must tell the two apart.
-     */
-    fun monitoringMatched(subjectRef: String, match: MonitoringMatch): CaseScreening? {
-        val subject = subjects.firstOrNull { it.current && it.ref == subjectRef } ?: return null
-        val next = subject.monitoringMatched(match)
-        if (next === subject) return this
-        return copy(subjects = subjects.map { if (it === subject) next else it })
+        // The ownership lookup could not be made, so a subject's absence from [fresh] proves
+        // nothing: NOBODY is treated as having left. An outage may add subjects, never remove one
+        // — a removal would also withdraw that person from ongoing monitoring.
+        if (ownerSource == UboSource.UNAVAILABLE) return CaseScreening(now + absent, ownerSource)
+        val leftWithFinding = absent.filter { it.finding }.map { it.copy(current = false) }
+        return CaseScreening(now + leftWithFinding, ownerSource)
     }
 
     /**
@@ -303,11 +182,7 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
         reason: String,
         at: Instant,
     ): CaseScreening {
-        require(disposition != FindingDisposition.OPEN) { "a disposition must be CLEARED_FALSE_POSITIVE or CONFIRMED" }
-        require(operator.isNotBlank()) { "the deciding operator must be identified" }
-        require(reason.trim().length >= MIN_REASON) {
-            "a disposition needs a reason of at least $MIN_REASON characters"
-        }
+        val checked = DispositionRule.checked(disposition, operator, reason)
         val subject = subjects.firstOrNull { it.key == subjectKey }
             ?: throw IllegalArgumentException("no screened subject '$subjectKey' on this case")
         if (!subject.findingOpen) throw CaseTransitionException("subject '$subjectKey' has no open finding")
@@ -319,7 +194,7 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
                     it.copy(
                         disposition = disposition,
                         disposedBy = operator,
-                        dispositionReason = reason.trim(),
+                        dispositionReason = checked,
                         disposedAt = at,
                     )
                 }
@@ -329,7 +204,7 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
 
     companion object {
         private const val KEY_HEX_CHARS = 24
-        const val MIN_REASON = 10
+        const val MIN_REASON = DispositionRule.MIN_REASON
 
         /**
          * The people and the entity to screen. A beneficial owner that is itself a company is

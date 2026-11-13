@@ -155,6 +155,7 @@ class BusinessOnboardingServiceTest {
             it.status ==
                 status
         }
+        override suspend fun listMonitoringHolds(page: Int, size: Int) = store.values.filter { it.monitoring.hold }
     }
 
     private lateinit var service: BusinessOnboardingService
@@ -899,8 +900,7 @@ class BusinessOnboardingServiceTest {
         assertThat(byName.getValue("Holding Alfa a.s.").organisation).isTrue()
         // One idempotency key per (case, subject): four subjects, four keys, all scoped to the case.
         assertThat(screeningPort.requests.map { it.idempotencyKey }.toSet()).hasSize(4)
-        // One key per subject reference: the check a replay returns is the one made under that reference.
-        assertThat(screeningPort.requests).allMatch { it.idempotencyKey == "kyb-screen:${it.subjectId}" }
+        assertThat(screeningPort.requests).allMatch { it.idempotencyKey.startsWith("kyb-screen:$id:") }
         assertThat(service.get(id).screening!!.complete).isTrue()
     }
 

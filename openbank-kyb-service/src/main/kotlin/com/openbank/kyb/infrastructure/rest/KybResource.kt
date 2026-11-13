@@ -9,6 +9,8 @@ import com.openbank.kyb.application.port.`in`.AnswerQuestionnaireCommand
 import com.openbank.kyb.application.port.`in`.AttestRepresentationCommand
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
+import com.openbank.kyb.application.port.`in`.CompleteExitCommand
+import com.openbank.kyb.application.port.`in`.DecideMonitoringFindingCommand
 import com.openbank.kyb.application.port.`in`.DisposeFindingCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.LookupCommand
@@ -36,6 +38,7 @@ import com.openbank.kyb.infrastructure.rest.dto.AttestationResponse
 import com.openbank.kyb.infrastructure.rest.dto.BusinessAgreementResponse
 import com.openbank.kyb.infrastructure.rest.dto.CaseResponse
 import com.openbank.kyb.infrastructure.rest.dto.ClaimInvitationRequest
+import com.openbank.kyb.infrastructure.rest.dto.CompleteExitRequest
 import com.openbank.kyb.infrastructure.rest.dto.DeclarationsRequest
 import com.openbank.kyb.infrastructure.rest.dto.DisposeFindingRequest
 import com.openbank.kyb.infrastructure.rest.dto.ExtractResponse
@@ -245,6 +248,7 @@ class KybResource {
     suspend fun list(
         @QueryParam("partyId") partyId: UUID?,
         @QueryParam("status") status: String?,
+        @QueryParam("monitoring") monitoring: String?,
         @QueryParam("page") @DefaultValue("0") page: Int,
         @QueryParam("size") @DefaultValue("20") size: Int,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
@@ -253,7 +257,23 @@ class KybResource {
             requireCaller(customerPartyId, partyId)
             return Response.ok(onboarding.listForParty(partyId).map { CaseResponse.from(it, partyId) }).build()
         }
+        // The queue of monitoring holds is its own filter, never a status: such a case keeps the
+        // status it was approved in, and a `status=` answer must contain only that status. It is
+        // refused for ANY request made on a customer's behalf, before anything is looked up, so
+        // its answer to an applicant cannot depend on whether a finding exists.
+        if (monitoring != null && customerPartyId != null) {
+            throw CaseCallerMismatchException("the monitoring queue is an operator route")
+        }
         requireOperator()
+        if (monitoring != null) {
+            require(monitoring == MONITORING_OPEN) { "unknown monitoring filter '$monitoring'" }
+            require(status == null) { "monitoring and status cannot be combined" }
+            return Response.ok(
+                onboarding.listMonitoringHolds(page.coerceAtLeast(0), size.coerceIn(1, MAX_PAGE)).map {
+                    CaseResponse.from(it, null)
+                },
+            ).build()
+        }
         // #9038: absent status means the operator review queue (MANUAL_REVIEW), but an UNPARSEABLE
         // one used to silently substitute MANUAL_REVIEW too — a typo answered the WRONG list with
         // a 200. libs-runtime maps IllegalArgumentException to 400; never a service-local mapper
@@ -281,9 +301,9 @@ class KybResource {
         } else {
             requireOperator()
         }
-        // The registry state of each subject is the operator's to see, and only on this one-case read.
-        val monitoring = if (customerPartyId == null) onboarding.monitoringStates(id) else emptyMap()
-        return Response.ok(CaseResponse.from(case, customerPartyId, monitoring)).build()
+        // Where each subject stands with the registry is the operator's to see, on this one-case read only.
+        val registry = if (customerPartyId == null) onboarding.monitoringStates(id) else emptyMap()
+        return Response.ok(CaseResponse.from(case, customerPartyId, registry)).build()
     }
 
     @POST
@@ -570,6 +590,55 @@ class KybResource {
     }
 
     @POST
+    @Path("/cases/{id}/monitoring/findings/{findingId}/disposition")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    // The same act as the route above — an operator deciding a screening finding — so the same
+    // action: the policy grants staff exactly that and excludes service accounts.
+    @Authorize(action = "kyb.case.review.resolve", resource = "#id")
+    @Operation(summary = "Operator decides one finding of ongoing monitoring on an approved case")
+    suspend fun decideMonitoringFinding(
+        @PathParam("id") id: UUID,
+        @PathParam("findingId") findingId: UUID,
+        request: DisposeFindingRequest?,
+    ): Response {
+        requireOperator()
+        val disposition = requireNotNull(request?.disposition) { "disposition is required" }.let {
+            runCatching { FindingDisposition.valueOf(it.uppercase()) }
+                .getOrElse { _ -> throw IllegalArgumentException("unknown disposition '$it'") }
+        }
+        val case = onboarding.decideMonitoringFinding(
+            DecideMonitoringFindingCommand(
+                id,
+                findingId,
+                disposition,
+                requireNotNull(request.reason) { "reason is required" },
+                operator(),
+            ),
+        )
+        return Response.ok(CaseResponse.from(case, null, onboarding.monitoringStates(id))).build()
+    }
+
+    @POST
+    @Path("/cases/{id}/monitoring/exit/complete")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    // Authorised as the bank's decision to end a case: recording that the relationship HAS been
+    // ended is that decision carried through, and the policy grants it to the same staff and to
+    // no service account. A dedicated action would be more exact; it needs a line in rules.yaml.
+    @Authorize(action = "kyb.case.reject", resource = "#id")
+    @Operation(summary = "Operator records that the exit a confirmed sanctions match requires has been carried out")
+    suspend fun completeExit(@PathParam("id") id: UUID, request: CompleteExitRequest?): Response {
+        requireOperator()
+        val evidence = requireNotNull(request?.evidence) { "evidence is required" }
+        val case = onboarding.completeExit(CompleteExitCommand(id, evidence, operator()))
+        return Response.ok(CaseResponse.from(case, null, onboarding.monitoringStates(id))).build()
+    }
+
+    /** The decider is the authenticated principal. No identity, no decision. */
+    private fun operator(): String = requireNotNull(identity.principal?.name?.takeIf { it.isNotBlank() }) {
+        "an authenticated operator is required"
+    }
+
+    @POST
     @Path("/cases/{id}/reject")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
     @Authorize(action = "kyb.case.reject", resource = "#id")
@@ -620,6 +689,7 @@ class KybResource {
     companion object {
         const val CUSTOMER_PARTY_HEADER = "X-Customer-Party-Id"
         private const val MAX_PAGE = 100
+        private const val MONITORING_OPEN = "open"
         private const val MIN_REASON = 10
         private const val DEFAULT_LANG = "cs"
     }

@@ -13,8 +13,6 @@ import com.openbank.kyb.application.port.out.MonitoringDesired
 import com.openbank.kyb.application.port.out.MonitoringRegistration
 import com.openbank.kyb.application.port.out.MonitoringRegistrationStore
 import com.openbank.kyb.application.port.out.RegistryFailure
-import com.openbank.kyb.domain.model.BusinessOnboardingCase
-import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.runtime.Startup
 import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
@@ -34,20 +32,19 @@ enum class MonitoringRunOutcome { COMPLETED, DISABLED }
  *
  * The mechanism is a desired-state store plus a relay, not a call from the approval request:
  *
- *  1. every write of a case brings `kyb_monitored_subjects` to the case's monitored subjects in
- *     the SAME transaction (`BusinessOnboardingCaseRepository.update`), so an approval cannot
- *     commit without its registrations being owed, and a rejection cannot commit without its
- *     withdrawals being owed;
- *  2. [run] sends what is owed. `PUT` and `DELETE` are idempotent in the registry, so a row that
- *     failed for a reason that may pass (outage, timeout, a caller the registry does not accept
- *     yet) is retried with backoff for as long as it takes. A subject the registry REFUSES as it
- *     is leaves the retry loop into its own state, counted and shown to an operator: retrying it
- *     hourly forever would only hide the next real backlog behind a permanent one;
- *  3. [run] also repairs: cases approved before this existed are backfilled, and a confirmed
- *     registration is sent again once it is older than `reassert-after`.
+ *  1. every write of an approved case brings `kyb_monitored_subjects` to the case's monitored
+ *     subjects in the SAME transaction (`BusinessOnboardingCaseRepository.update`), so an approval
+ *     cannot commit without its registrations being owed;
+ *  2. [run] sends what is owed, one claimed row at a time. `PUT` and `DELETE` are idempotent in
+ *     the registry, so a failure that may pass is retried with backoff for as long as it takes;
+ *     a subject the registry's validation REFUSES leaves the retry loop into its own state;
+ *  3. [run] also repairs: a case whose last writer did not synchronise the store (an older
+ *     release during a rolling deploy or after a rollback, or a case approved before the store
+ *     existed) is written again, and a settled registration is sent again once it is older than
+ *     `reassert-after`.
  *
- * The store holds references only. The name the registry needs is read from the case at send
- * time, so it is the name on the case NOW and no second copy of it exists here.
+ * A subject is registered under a random reference the store mints. The name the registry needs
+ * is read from the case at send time, so no second copy of it exists here.
  *
  * `@Startup` so the "switched off" warning is printed at boot and not on the first run of a lazy
  * bean.
@@ -82,20 +79,26 @@ class MonitoringRegistrationService {
         }
     }
 
-    /** One bounded pass: backfill, re-assert, then send what is due. */
+    /** One bounded pass: reconcile, re-assert, then send what is due. */
     suspend fun run(): MonitoringRunOutcome {
         if (!settings.enabled) return MonitoringRunOutcome.DISABLED
         val now = Instant.now(clock)
-        store.casesToBackfill(settings.batchSize).forEach { id -> isolated("backfill of case $id") { backfill(id) } }
+        store.casesToReconcile(settings.batchSize).forEach { id -> isolated("reconciling case $id") { reconcile(id) } }
         store.requeueSettledBefore(now.minus(settings.reassertAfter), now, settings.batchSize)
-        // Read the clock again: a row the backfill just created is due from the moment it was written.
-        store.due(Instant.now(clock), settings.batchSize).forEach { row -> isolated("row ${row.id}") { deliver(row) } }
+        repeat(settings.batchSize) {
+            // Claimed one at a time, and the clock read each time: a row the reconciliation
+            // just created is due from the moment it was written.
+            val claimedAt = Instant.now(clock)
+            val row = store.claimNext(claimedAt, claimedAt.plus(LEASE)) ?: return MonitoringRunOutcome.COMPLETED
+            isolated("row ${row.id}") { deliver(row) }
+        }
         return MonitoringRunOutcome.COMPLETED
     }
 
     /**
      * One case or one row failing must not cost the others their turn: the next run would start
-     * with the same one and never get past it. The failure is counted; the row stays owed.
+     * with the same one and never get past it. The failure is counted; the row stays owed and its
+     * lease runs out.
      */
     @Suppress("TooGenericExceptionCaught")
     private suspend fun isolated(what: String, step: suspend () -> Unit) {
@@ -108,73 +111,47 @@ class MonitoringRegistrationService {
     }
 
     /**
-     * An approved case with no row in the store: approved before registration shipped. Writing
-     * the case through the repository is what creates the rows; nothing is inserted from here.
+     * Writing the case through the repository is what brings the store to it; nothing is derived
+     * here. A case somebody else writes in the meantime was synchronised by that write.
      */
-    private suspend fun backfill(id: UUID) {
-        val case = cases.findById(id)?.takeIf { it.monitored } ?: return
-        rewrite(case.withMonitoringRefs(::newSubjectRef))
+    private suspend fun reconcile(id: UUID) {
+        val case = cases.findById(id) ?: return
+        try {
+            cases.update(case, null)
+        } catch (e: ConcurrentCaseUpdateException) {
+            log.debugf("kyb case %s changed while it was being reconciled (%s)", id, e.message)
+        }
     }
 
     private suspend fun deliver(row: MonitoringRegistration) {
         val now = Instant.now(clock)
-        val case = cases.findById(row.caseId)
-        val subject = case?.monitoredSubjects?.firstOrNull { it.ref == row.subjectRef }
         try {
-            when {
-                row.desired == MonitoringDesired.WITHDRAWN -> withdraw(row, now)
-                subject != null -> {
-                    registry.register(row.subjectRef, subject.organisation, subject.name)
-                    if (store.markSynced(row, now)) metrics.registrationAttempted(REGISTERED)
-                }
-                else -> driftFound(row, case, now)
+            if (row.desired == MonitoringDesired.WITHDRAWN) {
+                registry.withdraw(row.subjectRef)
+                if (store.markSynced(row, now)) metrics.registrationAttempted(WITHDRAWN)
+                return
             }
+            val subject = cases.findById(row.caseId)?.monitoredSubjects?.firstOrNull { it.key == row.subjectKey }
+            if (subject == null) {
+                // The store wants a subject registered that the case does not carry: the case was
+                // last written by something that did not synchronise. The registry is NOT touched
+                // on this evidence; the reconciliation above settles what the row should be.
+                store.markFailed(row, now, now.plus(backoff(row.attemptCount)), REASON_DRIFT)
+                metrics.registrationAttempted(FAILED, REASON_DRIFT)
+                return
+            }
+            registry.register(row.subjectRef, subject.organisation, subject.name)
+            if (store.markSynced(row, now)) metrics.registrationAttempted(REGISTERED)
         } catch (e: MonitoredSubjectRegistryException) {
             // Only the row id and the reason: a reference or a name in a log line is a finding waiting to leak.
             log.warnf("monitoring registration row %d (%s) failed: %s", row.id, row.desired, e.reason)
             when (e.kind) {
-                // The registry will not take this subject as it is. Repeating the call hourly
-                // would only keep the backlog alert lit over something a retry cannot fix.
+                // The registry's validation will not take this subject as it is. Repeating the
+                // call would only keep the backlog alert lit over something a retry cannot fix.
                 RegistryFailure.REFUSED -> store.markRefused(row, now, e.reason)
                 else -> store.markFailed(row, now, now.plus(backoff(row.attemptCount)), e.reason)
             }
             metrics.registrationAttempted(e.kind.outcome, e.reason)
-        }
-    }
-
-    /**
-     * The registry keys a subject by reference alone, and a subject screened by an earlier
-     * release can share its reference with another case of the same entity. Such a reference is
-     * not deleted while another case wants it; and because that other case's registration may be
-     * in flight right now, every one of them is sent again afterwards, at a new generation, so a
-     * delete that landed after its PUT cannot leave it recorded as delivered.
-     */
-    private suspend fun withdraw(row: MonitoringRegistration, now: Instant) {
-        if (!store.wantedElsewhere(row.subjectRef, row.caseId)) registry.withdraw(row.subjectRef)
-        store.reassertElsewhere(row.subjectRef, row.caseId, now)
-        if (store.markSynced(row, now)) metrics.registrationAttempted(WITHDRAWN)
-    }
-
-    /**
-     * The store wants a subject registered that the case does not carry. The case is the
-     * authority, so it is written again: that brings the row to WITHDRAWN (or keeps it, if a
-     * concurrent write just added the subject), and the next run sends whichever it is. Nothing
-     * is deleted from the registry on this evidence alone.
-     */
-    private suspend fun driftFound(row: MonitoringRegistration, case: BusinessOnboardingCase?, now: Instant) {
-        log.warnf("monitoring registration row %d has no subject on its case; re-deriving", row.id)
-        val reason = if (case == null) REASON_CASE_MISSING else REASON_DRIFT
-        if (case != null) rewrite(case)
-        store.markFailed(row, now, now.plus(backoff(row.attemptCount)), reason)
-        metrics.registrationAttempted(FAILED, reason)
-    }
-
-    private suspend fun rewrite(case: BusinessOnboardingCase) {
-        try {
-            cases.update(case, null)
-        } catch (e: ConcurrentCaseUpdateException) {
-            // Somebody else wrote the case, and that write synchronised the store. Next run looks again.
-            log.debugf("kyb case %s changed while its monitoring rows were re-derived (%s)", case.id, e.message)
         }
     }
 
@@ -193,14 +170,13 @@ class MonitoringRegistrationService {
         const val REFUSED = "refused"
         const val REASON_INTERNAL = "internal"
         const val REASON_DRIFT = "desired_state_drift"
-        const val REASON_CASE_MISSING = "case_missing"
 
         private const val BACKOFF_BASE_SECONDS = 30L
         private const val BACKOFF_MAX_SECONDS = 3600L
         private const val BACKOFF_MAX_SHIFT = 7
 
-        /** A random UUID (ADR-0106): the reference must reveal neither who the subject is nor when it was first screened. */
-        fun newSubjectRef(): String = Ids.randomId().toString()
+        /** Well over the registry call's own timeout: a lease never runs out under a call in flight. */
+        val LEASE: Duration = Duration.ofSeconds(60)
 
         /** 30 s doubling to one hour, and then hourly for as long as it takes. */
         fun backoff(attemptsSoFar: Int): Duration = Duration.ofSeconds(

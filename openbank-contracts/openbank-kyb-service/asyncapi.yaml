@@ -116,10 +116,11 @@ components:
     BusinessRelationshipExitRequired:
       name: BUSINESS_RELATIONSHIP_EXIT_REQUIRED
       summary: >-
-        An operator decided that the relationship with an APPROVED business customer has to end.
-        `status` is the case's unchanged status (SIGNED or ACTIVE): the case stays approved and
-        monitored until the exit happens. No reason and no finding is carried. It must not reach
-        a customer-facing surface before the bank has acted.
+        The relationship with an approved business customer has to end: an operator confirmed a
+        sanctions match that ongoing monitoring found. Published once per case. `status` is the
+        case's status as it was, unchanged by this event; the case stays monitored until an
+        operator records that the exit was carried out. No reason and no finding is carried. It
+        must not reach a customer-facing surface before the bank has acted.
       payload:
         $ref: '#/components/schemas/CaseEnvelope'
     BusinessOnboardingAbandoned:

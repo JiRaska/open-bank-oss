@@ -100,17 +100,19 @@ class SanctionsMonitoredSubjectRegistryAdapter : MonitoredSubjectRegistryPort {
     }
 
     /**
-     * What the relay must do is decided here, by status: 401/403 is this caller not being
-     * accepted, 408/429 and everything that is not an HTTP answer may pass on its own, and any
-     * other 4xx is the registry refusing this subject as it is. 5xx is transient.
+     * What the relay must do is decided here, by status. 401/403 is this caller not being
+     * accepted. 400 and 422 are the registry's validation rejecting THIS subject (it answers 400
+     * for a name with no searchable character or over its length limit): repeating that cannot
+     * work. Everything else may pass on its own or with a deployment and is retried — including
+     * 404 and 409, which a route miss or a rolled-back registry image produces, and which must
+     * not park a subject as unregistrable.
      */
     private fun failureOf(e: Exception): MonitoredSubjectRegistryException {
         val status = (e as? WebApplicationException)?.response?.status
             ?: return MonitoredSubjectRegistryException(REASON_UNAVAILABLE, RegistryFailure.TRANSIENT, e)
         val kind = when (status) {
             HTTP_UNAUTHORIZED, HTTP_FORBIDDEN -> RegistryFailure.UNAUTHORISED
-            HTTP_REQUEST_TIMEOUT, HTTP_TOO_MANY_REQUESTS -> RegistryFailure.TRANSIENT
-            in CLIENT_ERRORS -> RegistryFailure.REFUSED
+            HTTP_BAD_REQUEST, HTTP_UNPROCESSABLE -> RegistryFailure.REFUSED
             else -> RegistryFailure.TRANSIENT
         }
         return MonitoredSubjectRegistryException("http_$status", kind, e)
@@ -119,9 +121,8 @@ class SanctionsMonitoredSubjectRegistryAdapter : MonitoredSubjectRegistryPort {
     private companion object {
         const val HTTP_UNAUTHORIZED = 401
         const val HTTP_FORBIDDEN = 403
-        const val HTTP_REQUEST_TIMEOUT = 408
-        const val HTTP_TOO_MANY_REQUESTS = 429
-        val CLIENT_ERRORS = 400..499
+        const val HTTP_BAD_REQUEST = 400
+        const val HTTP_UNPROCESSABLE = 422
         const val REASON_UNAVAILABLE = "unavailable"
         const val REASON_UNEXPECTED = "unexpected_response"
     }

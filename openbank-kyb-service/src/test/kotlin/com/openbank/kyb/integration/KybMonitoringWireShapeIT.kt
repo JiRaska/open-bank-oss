@@ -60,8 +60,6 @@ class KybMonitoringWireShapeIT {
             "openbank.kyb.monitoring.enabled" to "true",
             "openbank.kyb.monitoring.relay.every" to "1s",
             "openbank.kyb.monitoring.relay.initial-delay" to "1s",
-            "mp.messaging.incoming.sanctions-monitoring-in.group.id" to "kyb-monitoring-wire-it",
-            "mp.messaging.incoming.sanctions-monitoring-in.auto.offset.reset" to "earliest",
             "mp.messaging.incoming.sanctions-monitoring-in.auto.commit.interval.ms" to "100",
             "mp.messaging.incoming.party-events-in.group.id" to "kyb-monitoring-wire-it-party",
         )
@@ -98,13 +96,9 @@ class KybMonitoringWireShapeIT {
         await("the schedule to register both subjects") {
             journey.rows(caseId).size == 2 && journey.rows(caseId).all { it.syncState == "SYNCED" }
         }
-        val case = journey.stored(caseId)
-        val person = journey.rows(caseId).single { it.subjectRef != case.entityPartyId }.subjectRef
-        assertThat(
-            registry.registered.filter {
-                it.subjectRef == person
-            }.map { it.name },
-        ).containsOnly("Emil Plánovaný")
+        // The registry reference is minted by the database: the person's is the one registered under a person's name.
+        val person = registry.registered.single { it.name == "Emil Plánovaný" }.subjectRef
+        assertThat(journey.rows(caseId).map { it.subjectRef }).contains(person)
         assertThat(meters.find("openbank.kyb.monitoring.runs").tag("outcome", "completed").counter()?.count())
             .isGreaterThanOrEqualTo(1.0)
 
@@ -129,13 +123,19 @@ class KybMonitoringWireShapeIT {
             producer.send(record(MonitoredSubjectMatchedWire.EVENT_TYPE, finding)).get(SEND_SECONDS, TimeUnit.SECONDS)
         }
 
-        await("the case to be under a monitoring review") { journey.stored(caseId).reviewOpened }
+        await("the finding to be waiting for an operator") { journey.stored(caseId).reviewOpen }
+        // The group and the offset policy are the image's own (nested YAML keys), not this profile's:
+        // the records above were on the topic before or while the consumer joined, and were read.
+        assertThat(
+            Admin.create(mapOf<String, Any>("bootstrap.servers" to bootstrap)).use { admin ->
+                admin.listConsumerGroups().all().get(SEND_SECONDS, TimeUnit.SECONDS).map { it.groupId() }
+            },
+        ).contains("kyb-service-sanctions-monitoring")
         await("the redelivery to be counted") { counted("duplicate") == 1.0 }
-        val reviewed = journey.stored(caseId)
-        assertThat(reviewed.status).describedAs("the review sits beside the status").isEqualTo("SIGNED")
-        assertThat(reviewed.screeningJson).contains(findingId.toString())
+        val found = journey.stored(caseId)
+        assertThat(found.status).describedAs("the finding sits beside the status").isEqualTo("SIGNED")
         // Exactly one finding recorded, although it was delivered twice and a foreign one named the same subject.
-        assertThat(Regex("\"findingId\"").findAll(reviewed.screeningJson).count()).isEqualTo(1)
+        assertThat(journey.findings(caseId)).containsOnlyKeys(findingId.toString())
         assertThat(counted("review_opened")).isEqualTo(1.0)
         assertThat(counted("foreign_owner")).isEqualTo(1.0)
         assertThat(counted("unrecognised")).isEqualTo(1.0)

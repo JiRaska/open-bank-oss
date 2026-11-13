@@ -7,14 +7,11 @@ package com.openbank.kyb.infrastructure.persistence.repository
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.kyb.domain.model.CaseScreening
 import com.openbank.kyb.domain.model.FindingDisposition
-import com.openbank.kyb.domain.model.MonitoringMatch
-import com.openbank.kyb.domain.model.PastDisposition
 import com.openbank.kyb.domain.model.ScreeningSubject
 import com.openbank.kyb.domain.model.ScreeningSubjectKind
 import com.openbank.kyb.domain.model.ScreeningVerdict
 import com.openbank.kyb.domain.model.UboSource
 import java.time.Instant
-import java.util.UUID
 
 /** The persisted JSON shape of `kyb_cases.screening_json`. Separate from [KybJson] only for its size. */
 internal object KybScreeningJson {
@@ -38,29 +35,6 @@ internal object KybScreeningJson {
         val disposedBy: String? = null,
         val dispositionReason: String? = null,
         val disposedAt: Instant? = null,
-        val ref: String? = null,
-        val monitoringFindings: List<MonitoringMatchDoc> = emptyList(),
-        val pastDispositions: List<PastDispositionDoc> = emptyList(),
-    )
-
-    /** Explicit, like the rest: [MonitoringMatch] has derived properties that are not facts to store. */
-    data class MonitoringMatchDoc(
-        val findingId: UUID,
-        val matchKind: String,
-        val listType: String,
-        val listEntryRef: String,
-        val listEntryVersion: String,
-        val matchScore: Double,
-        val matchStatus: String,
-        val detection: String,
-        val receivedAt: Instant,
-    )
-
-    data class PastDispositionDoc(
-        val disposition: String,
-        val disposedBy: String?,
-        val reason: String?,
-        val disposedAt: Instant?,
     )
 
     data class ScreeningDoc(val subjects: List<ScreeningSubjectDoc>, val ownerSource: String? = null)
@@ -82,16 +56,6 @@ internal object KybScreeningJson {
                     disposedBy = it.disposedBy,
                     dispositionReason = it.dispositionReason,
                     disposedAt = it.disposedAt,
-                    ref = it.ref,
-                    monitoringFindings = it.monitoringFindings.map { m ->
-                        MonitoringMatchDoc(
-                            m.findingId, m.matchKind, m.listType, m.listEntryRef, m.listEntryVersion,
-                            m.matchScore, m.matchStatus, m.detection, m.receivedAt,
-                        )
-                    },
-                    pastDispositions = it.pastDispositions.map { p ->
-                        PastDispositionDoc(p.disposition.name, p.disposedBy, p.reason, p.disposedAt)
-                    },
                 )
             },
             screening.ownerSource?.name,
@@ -117,15 +81,5 @@ internal object KybScreeningJson {
         disposedBy = doc.disposedBy,
         dispositionReason = doc.dispositionReason,
         disposedAt = doc.disposedAt,
-        ref = doc.ref,
-        monitoringFindings = doc.monitoringFindings.map {
-            MonitoringMatch(
-                it.findingId, it.matchKind, it.listType, it.listEntryRef, it.listEntryVersion,
-                it.matchScore, it.matchStatus, it.detection, it.receivedAt,
-            )
-        },
-        pastDispositions = doc.pastDispositions.map {
-            PastDisposition(FindingDisposition.valueOf(it.disposition), it.disposedBy, it.reason, it.disposedAt)
-        },
     )
 }

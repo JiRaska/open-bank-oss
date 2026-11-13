@@ -179,22 +179,33 @@ mp:
         dead-letter-queue:
           topic: openbank.dlq.kyb.party-events-in
       # Findings of ongoing monitoring (ADR-0376 D6): MONITORED_SUBJECT_MATCHED about a subject
-      # this service registered sends its business case to review. The topic is shared with every
-      # other sanctions event, which the consumer tells apart by the `ce-type` HEADER and acks.
+      # this service registered is recorded on its business case for an operator. The topic is
+      # shared with every other sanctions event, which the consumer tells apart by the `ce-type`
+      # HEADER and acks.
       #
-      # No `group.id` / `auto.offset.reset` here, on purpose. Written as YAML keys they would be
-      # inert in the deployed pod (see party-events-in above), and a new channel is two deploys:
-      # the override ConfigMap may name this channel only once the running image carries it, or
-      # the service refuses to boot. Until that second step the consumer joins the fallback
-      # group (the application name), which the KafkaUser is granted next to the intended one,
-      # `kyb-service-sanctions-monitoring`. The consumer is idempotent on the finding id, so
-      # either offset policy is safe to choose there.
+      # The channel exists only while monitoring is switched on (`enabled` below). Switched off,
+      # the pod opens no consumer for this topic, so it starts whether or not the topic's ACL and
+      # the dead-letter topic have been applied yet: the deploy does not depend on their order.
       #
-      # The dead-letter topic is the NESTED form on purpose: the dotted one-liner would be quoted
-      # the same way and the connector would fall back to a topic name derived from the channel.
+      # `group.id`, `auto.offset.reset` and the dead-letter topic are the NESTED form on purpose.
+      # The dotted one-liner (as on party-events-in above) is quoted by the YAML source and never
+      # reaches the connector in the deployed pod; nested, each resolves to the plain property. So
+      # this channel needs no override ConfigMap and no second deploy: the image carries its own
+      # consumer group, and KybMonitoringWireShapeIT asserts that name on a real broker.
+      #
+      # `earliest`, because the group is new and the alternative loses findings: with `latest` a
+      # finding produced between the first registration and the consumer's first assignment is
+      # never read. From the beginning of the topic everything that is not a finding for this
+      # service is acked by header, and a finding is idempotent on its id.
       sanctions-monitoring-in:
+        enabled: ${openbank.kyb.monitoring.enabled}
         connector: smallrye-kafka
         topic: openbank.sanctions.screening.event
+        group:
+          id: kyb-service-sanctions-monitoring
+        auto:
+          offset:
+            reset: earliest
         value:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
         failure-strategy: dead-letter-queue
@@ -264,8 +275,10 @@ openbank:
       # `openbank.sanctions.monitoring.enabled` (registration is answered 503 without it), the
       # route to sanctions-service that `screening.enabled` above also needs, and that switch
       # itself — a case approved with screening off carries nobody to register. Turn them on in
-      # that order. While this is off the service logs a warning at boot, calls nothing, and keeps
-      # recording what it owes the registry, which is sent once it is on.
+      # that order. While this is off the service logs a warning at boot, calls nothing, opens no
+      # consumer for the findings topic, and keeps recording what it owes the registry, which is
+      # sent once it is on. Nothing is registered while it is off, so no finding for this service
+      # is produced; after an off/on cycle the consumer group resumes where it stopped.
       enabled: ${OPENBANK_KYB_MONITORING_ENABLED:false}
       # A confirmed registration is sent again after this long. Lower it to re-assert the whole
       # book after the registry lost state, then restore it.

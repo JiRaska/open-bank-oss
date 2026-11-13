@@ -21,13 +21,12 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.kyb.application.usecase.MonitoringFindingOutcome
 import com.openbank.kyb.application.usecase.MonitoringFindingService
 import com.openbank.kyb.application.usecase.MonitoringSettings
-import com.openbank.kyb.domain.model.MonitoringMatch
+import com.openbank.kyb.application.usecase.ReportedFinding
 import com.openbank.kyb.infrastructure.MicrometerKybMonitoringMetrics
 import com.openbank.kyb.infrastructure.client.MonitoredSubjectAck
 import com.openbank.kyb.infrastructure.client.MonitoredSubjectBody
 import com.openbank.kyb.infrastructure.client.SanctionsMonitoringRestClient
 import com.openbank.kyb.infrastructure.kafka.MonitoredSubjectMatchedConsumer
-import com.openbank.kyb.infrastructure.kafka.MonitoredSubjectMatchedWire
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -38,11 +37,11 @@ import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import kotlinx.coroutines.runBlocking
+import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
-import java.time.Clock
 import java.time.Duration
 import java.util.UUID
 
@@ -87,7 +86,6 @@ class KybSanctionsMonitoringPactConsumerTest {
             it.settings = settings
             it.metrics = MicrometerKybMonitoringMetrics(registry, settings).apply { register() }
             it.objectMapper = mapper
-            it.clock = Clock.systemUTC()
         }
         coEvery { findings.handle(any(), any()) } returns MonitoringFindingOutcome.REVIEW_OPENED
     }
@@ -248,9 +246,9 @@ class KybSanctionsMonitoringPactConsumerTest {
         assertThat(headersOf(message)["ce-type"]).isEqualTo("MONITORED_SUBJECT_MATCHED")
         assertThat(body(message).has("eventType")).isFalse()
 
-        consumer.consume(MonitoredSubjectMatchedWire.record(json(message), headersOf(message)))
+        consumer.consume(record(json(message), headersOf(message)))
 
-        val match = slot<MonitoringMatch>()
+        val match = slot<ReportedFinding>()
         coVerify(exactly = 1) { findings.handle(MATCHED_REF, capture(match)) }
         assertThat(match.captured.findingId).isEqualTo(UUID.fromString(body(message).path("findingId").asText()))
         assertThat(match.captured.matchKind).isEqualTo("SANCTIONS")
@@ -270,7 +268,7 @@ class KybSanctionsMonitoringPactConsumerTest {
     fun `the same body without the ce-type header is unrecognised`(
         messages: List<V4Interaction.AsynchronousMessage>,
     ): Unit = runBlocking {
-        consumer.consume(MonitoredSubjectMatchedWire.record(json(messages.single()), emptyMap()))
+        consumer.consume(record(json(messages.single()), emptyMap()))
 
         coVerify(exactly = 0) { findings.handle(any(), any()) }
         assertThat(counted("unrecognised")).isEqualTo(1.0)
@@ -283,7 +281,7 @@ class KybSanctionsMonitoringPactConsumerTest {
         runBlocking {
             val withBodyType = (body(messages.single()) as ObjectNode).put("eventType", "MONITORED_SUBJECT_MATCHED")
 
-            consumer.consume(MonitoredSubjectMatchedWire.record(mapper.writeValueAsString(withBodyType), emptyMap()))
+            consumer.consume(record(mapper.writeValueAsString(withBodyType), emptyMap()))
 
             coVerify(exactly = 0) { findings.handle(any(), any()) }
             assertThat(counted("unrecognised")).isEqualTo(1.0)
@@ -297,7 +295,7 @@ class KybSanctionsMonitoringPactConsumerTest {
             val message = messages.single()
             val foreign = (body(message) as ObjectNode).put("ownerService", "openbank-kyc")
 
-            consumer.consume(MonitoredSubjectMatchedWire.record(mapper.writeValueAsString(foreign), headersOf(message)))
+            consumer.consume(record(mapper.writeValueAsString(foreign), headersOf(message)))
 
             coVerify(exactly = 0) { findings.handle(any(), any()) }
             assertThat(counted("foreign_owner")).isEqualTo(1.0)
@@ -311,6 +309,15 @@ class KybSanctionsMonitoringPactConsumerTest {
     private fun headersOf(message: V4Interaction.AsynchronousMessage): Map<String, String> =
         message.contents.metadata.filterKeys { !it.equals("contentType", ignoreCase = true) }
             .mapValues { (_, value) -> value.toString() }
+
+    /**
+     * A record as the consumer receives it. Built here, not taken from a shared test helper: this
+     * class is compiled alone in the consumer-pact source set, which sees production code only.
+     */
+    private fun record(body: String, headers: Map<String, String>): ConsumerRecord<String, String> =
+        ConsumerRecord("openbank.sanctions.screening.event", 0, 0L, "key", body).also { record ->
+            headers.forEach { (name, value) -> record.headers().add(name, value.toByteArray()) }
+        }
 
     private fun counted(outcome: String): Double =
         registry.find(MicrometerKybMonitoringMetrics.FINDINGS).tag("outcome", outcome).counter()?.count() ?: -1.0
