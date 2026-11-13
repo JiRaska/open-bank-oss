@@ -72,12 +72,16 @@ class BusinessOnboardingCaseEntity : PanacheEntity() {
     @Column(name = "screening_json", columnDefinition = "TEXT")
     var screeningJson: String? = null
 
-    /** The status the case held when ongoing monitoring sent it to review; null when it did not. */
-    @Column(name = "monitoring_review_from")
-    var monitoringReviewFrom: String? = null
-
+    /** Set while a monitoring finding on this approved case awaits, or received, an operator's decision. */
     @Column(name = "monitoring_review_opened_at")
     var monitoringReviewOpenedAt: Instant? = null
+
+    /** When an operator decided the relationship has to end; the case stays approved and monitored. */
+    @Column(name = "monitoring_exit_required_at")
+    var monitoringExitRequiredAt: Instant? = null
+
+    @Column(name = "monitoring_exit_reason", columnDefinition = "TEXT")
+    var monitoringExitReason: String? = null
 
     /** Optimistic lock: bumped by Hibernate on every write of the row. */
     @Version
@@ -155,53 +159,6 @@ class RepresentationAttestationEntity : PanacheEntity() {
 
     @Column(name = "note", columnDefinition = "TEXT")
     var note: String? = null
-}
-
-/**
- * Desired registration state of one screened subject of an approved case in the monitored-subject
- * registry (ADR-0376), and whether it was delivered. No personal data: the reference is opaque.
- */
-@Entity
-@Table(name = "kyb_monitored_subjects")
-class MonitoredSubjectEntity : PanacheEntity() {
-    @Column(name = "case_id", nullable = false)
-    lateinit var caseId: UUID
-
-    @Column(name = "subject_ref", nullable = false)
-    lateinit var subjectRef: String
-
-    @Column(name = "desired", nullable = false)
-    lateinit var desired: String
-
-    @Column(name = "sync_state", nullable = false)
-    lateinit var syncState: String
-
-    /** Moves on every change of [desired]; a delivery is recorded only against its own generation. */
-    @Column(name = "generation", nullable = false)
-    var generation: Long = 0
-
-    @Column(name = "attempt_count", nullable = false)
-    var attemptCount: Int = 0
-
-    @Column(name = "next_attempt_at", nullable = false)
-    lateinit var nextAttemptAt: Instant
-
-    /** When the row last became PENDING; the age the registration alert reads. */
-    @Column(name = "pending_since")
-    var pendingSince: Instant? = null
-
-    @Column(name = "synced_at")
-    var syncedAt: Instant? = null
-
-    /** A short machine reason of the last failed attempt, never a response body. */
-    @Column(name = "last_error")
-    var lastError: String? = null
-
-    @Column(name = "created_at", nullable = false)
-    lateinit var createdAt: Instant
-
-    @Column(name = "updated_at", nullable = false)
-    lateinit var updatedAt: Instant
 }
 
 /**

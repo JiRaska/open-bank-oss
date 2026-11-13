@@ -97,14 +97,15 @@ class RelatedPartyScreeningService {
             case.declarations?.peps.orEmpty().map { it.name },
         )
         val now = Instant.now(clock)
-        // Every subject gets its opaque reference BEFORE it is screened: the screen sends it as
+        // Every subject gets its reference BEFORE it is screened: the screen sends it as
         // `subjectId`, and ongoing monitoring later registers the subject under the same value,
         // which is what lets an analyst's clearance of the subject be honoured there (ADR-0376 D1).
         val current = (case.screening ?: CaseScreening(emptyList())).rebuilt(fresh, finding.source)
-            .withRefs(case.entityPartyId?.toString(), MonitoringRegistrationService::newSubjectRef)
+            .withRefs(case.id, case.entityPartyId, MonitoringRegistrationService::newSubjectRef)
         val next = current.copy(
             subjects = current.subjects.map { subject ->
-                if (!subject.current || subject.sanctions != ScreeningVerdict.PENDING) {
+                // No reference means an entity without a party: it stays PENDING, which refuses approval.
+                if (!subject.current || subject.sanctions != ScreeningVerdict.PENDING || subject.ref == null) {
                     subject
                 } else {
                     screenOne(case, subject, now)
@@ -124,7 +125,9 @@ class RelatedPartyScreeningService {
                 name = subject.name,
                 subjectId = subjectId(subject),
                 organisation = subject.organisation,
-                idempotencyKey = "kyb-screen:${case.id}:${subject.key}",
+                // One key per reference, so a retry replays and the check a replay returns is
+                // always the one made under THIS reference.
+                idempotencyKey = "kyb-screen:${subjectId(subject)}",
             ),
         )
         metrics.relatedPartyScreened(outcome(result.sanctions, result.pep))
@@ -137,11 +140,7 @@ class RelatedPartyScreeningService {
         subject
     }
 
-    /**
-     * The subject's opaque reference: the entity's party id where it had one when the reference
-     * was given, a random UUID otherwise. It used to be `kyb-case:<case>:<key>`, whose key is a
-     * hash of the person's name — a pseudonym, not an opaque id, and unfit for a URL path.
-     */
+    /** The subject's reference; see [ScreeningSubject.ref]. */
     private fun subjectId(subject: ScreeningSubject): String =
         requireNotNull(subject.ref) { "a subject is given its reference before it is screened" }
 

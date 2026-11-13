@@ -156,13 +156,23 @@ class MonitoredSubjectMatchedConsumerTest {
     }
 
     @Test
-    fun `a finding that cannot be read is acked as malformed`(): Unit = runBlocking {
-        consumer.consume(MonitoredSubjectMatchedWire.record(MonitoredSubjectMatchedWire.EVENT_TYPE, "{not json"))
-        consumer.consume(matched(MonitoredSubjectMatchedWire.body(subjectRef) + ("findingId" to "not-a-uuid")))
-        consumer.consume(matched(MonitoredSubjectMatchedWire.body("")))
+    fun `a record typed as a finding that cannot be one is malformed and nacked, never foreign`(): Unit = runBlocking {
+        val broken = listOf(
+            MonitoredSubjectMatchedWire.record(MonitoredSubjectMatchedWire.EVENT_TYPE, "{not json"),
+            MonitoredSubjectMatchedWire.record(MonitoredSubjectMatchedWire.EVENT_TYPE, "[]"),
+            matched(MonitoredSubjectMatchedWire.body(subjectRef) + ("findingId" to "not-a-uuid")),
+            matched(MonitoredSubjectMatchedWire.body("")),
+            // The producer dropped, renamed or blanked the owner: every finding of this service
+            // would arrive like this, so it must not be counted as somebody else's.
+            matched(MonitoredSubjectMatchedWire.body(subjectRef) - "ownerService"),
+            matched(MonitoredSubjectMatchedWire.body(subjectRef, ownerService = " ")),
+        )
+
+        broken.forEach { record -> assertThrows<MalformedFindingException> { consumer.consume(record) } }
 
         coVerify(exactly = 0) { findings.handle(any(), any()) }
-        assertThat(counted("malformed")).isEqualTo(3.0)
+        assertThat(counted("malformed")).isEqualTo(broken.size.toDouble())
+        assertThat(counted("foreign_owner")).isEqualTo(0.0)
     }
 
     @Test

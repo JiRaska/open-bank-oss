@@ -110,7 +110,7 @@ class CaseScreeningTest {
     }
 
     @Test
-    fun `a rebuilt subject list keeps the answers already obtained, adds newcomers as pending, drops leavers`() {
+    fun `a rebuilt subject list keeps the answers already obtained, adds newcomers as pending, retires leavers`() {
         val before = CaseScreening(
             CaseScreening.subjectsOf(
                 extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
@@ -125,15 +125,19 @@ class CaseScreeningTest {
             declaredPersons = listOf("Jana Nováková", "Tichý Společník"),
         )
         val rebuilt = before.rebuilt(fresh, UboSource.REGISTER)
-        assertThat(rebuilt.subjects.map { it.name })
+        // The owner who left is kept, marked no longer current, so the same person is the same
+        // subject if they return; nothing that counts toward approval reads a non-current subject.
+        assertThat(rebuilt.subjects.filter { !it.current }.map { it.name }).containsExactly("Karel Vlastník")
+        val current = rebuilt.subjects.filter { it.current }
+        assertThat(current.map { it.name })
             .containsExactly("Příklad s.r.o.", "Jana Nováková", "Nový Majitel", "Tichý Společník")
-        assertThat(rebuilt.subjects.map { it.sanctions }).containsExactly(
+        assertThat(current.map { it.sanctions }).containsExactly(
             ScreeningVerdict.CLEAR,
             ScreeningVerdict.CLEAR,
             ScreeningVerdict.PENDING,
             ScreeningVerdict.PENDING,
         )
-        assertThat(rebuilt.subjects.last().kind).isEqualTo(ScreeningSubjectKind.DECLARED_PERSON)
+        assertThat(current.last().kind).isEqualTo(ScreeningSubjectKind.DECLARED_PERSON)
         assertThat(rebuilt.complete).isFalse()
     }
 

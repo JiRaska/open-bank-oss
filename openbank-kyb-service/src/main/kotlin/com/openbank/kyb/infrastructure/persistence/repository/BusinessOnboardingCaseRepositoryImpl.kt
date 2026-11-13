@@ -69,7 +69,7 @@ class BusinessOnboardingCaseRepositoryImpl(
                 } else {
                     row.fill(case)
                     withEvent(event)
-                        .flatMap { monitoring.syncInTransaction(case.id, monitoredRefs(case), Instant.now(clock)) }
+                        .flatMap { withMonitoring(case) }
                         .flatMap { Panache.getSession() }
                         .flatMap { session -> session.flush() }
                         .map { row.version }
@@ -79,8 +79,19 @@ class BusinessOnboardingCaseRepositoryImpl(
         return case.copy(version = written)
     }
 
-    private fun monitoredRefs(case: BusinessOnboardingCase): Set<String> =
-        case.monitoredSubjects.mapNotNull { it.ref }.toSet()
+    /**
+     * One statement, and only for a case that is or was approved: no other case can have a row
+     * to add or to turn, so the writes of the whole onboarding journey pay nothing for this.
+     */
+    private fun withMonitoring(case: BusinessOnboardingCase): Uni<Void> = if (!case.everApproved) {
+        Uni.createFrom().voidItem()
+    } else {
+        monitoring.syncInTransaction(
+            case.id,
+            case.monitoredSubjects.mapNotNull { it.ref }.toSet(),
+            Instant.now(clock),
+        )
+    }
 
     private fun isStaleWrite(failure: Throwable): Boolean = generateSequence(failure) { it.cause }
         .take(MAX_CAUSE_DEPTH)
@@ -118,7 +129,17 @@ class BusinessOnboardingCaseRepositoryImpl(
 
     override suspend fun listByStatus(status: CaseStatus, page: Int, size: Int): List<BusinessOnboardingCase> =
         Panache.withSession {
-            find("status = ?1 order by updatedAt desc", status.name).page(page, size).list()
+            // The review queue also holds approved cases with an OPEN monitoring review: their
+            // status does not say so, on purpose, and an operator must still find them here.
+            if (status == CaseStatus.MANUAL_REVIEW) {
+                find(
+                    "status = ?1 or (monitoringReviewOpenedAt is not null and monitoringExitRequiredAt is null) " +
+                        "order by updatedAt desc",
+                    status.name,
+                )
+            } else {
+                find("status = ?1 order by updatedAt desc", status.name)
+            }.page(page, size).list()
         }.awaitSuspending().map { it.toDomain() }
 
     private fun BusinessOnboardingCaseEntity.fill(case: BusinessOnboardingCase): BusinessOnboardingCaseEntity = apply {
@@ -140,8 +161,9 @@ class BusinessOnboardingCaseRepositoryImpl(
         declarationsJson = case.declarations?.let { KybJson.write(it) }
         agreementJson = case.agreement?.let { KybJson.write(it) }
         screeningJson = case.screening?.let { KybScreeningJson.write(it) }
-        monitoringReviewFrom = case.monitoringReview?.from?.name
         monitoringReviewOpenedAt = case.monitoringReview?.openedAt
+        monitoringExitRequiredAt = case.monitoringReview?.exitRequiredAt
+        monitoringExitReason = case.monitoringReview?.exitReason
         updatedAt = case.updatedAt
     }
 
@@ -162,7 +184,7 @@ class BusinessOnboardingCaseRepositoryImpl(
         agreement = agreementJson?.let { KybJson.readAgreement(it) },
         screening = screeningJson?.let { KybScreeningJson.read(it) },
         monitoringReview = monitoringReviewOpenedAt?.let { opened ->
-            MonitoringReview(opened, CaseStatus.valueOf(requireNotNull(monitoringReviewFrom)))
+            MonitoringReview(opened, monitoringExitRequiredAt, monitoringExitReason)
         },
         version = version,
         createdAt = createdAt,

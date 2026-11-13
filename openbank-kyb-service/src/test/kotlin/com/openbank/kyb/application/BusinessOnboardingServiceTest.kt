@@ -899,7 +899,8 @@ class BusinessOnboardingServiceTest {
         assertThat(byName.getValue("Holding Alfa a.s.").organisation).isTrue()
         // One idempotency key per (case, subject): four subjects, four keys, all scoped to the case.
         assertThat(screeningPort.requests.map { it.idempotencyKey }.toSet()).hasSize(4)
-        assertThat(screeningPort.requests).allMatch { it.idempotencyKey.startsWith("kyb-screen:$id:") }
+        // One key per subject reference: the check a replay returns is the one made under that reference.
+        assertThat(screeningPort.requests).allMatch { it.idempotencyKey == "kyb-screen:${it.subjectId}" }
         assertThat(service.get(id).screening!!.complete).isTrue()
     }
 

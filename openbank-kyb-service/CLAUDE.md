@@ -110,18 +110,27 @@ is a bug — that is the drift ADR-0212 already paid for once.
   to `BusinessOnboardingCase.monitoredSubjects` on every write (ADR-0376). There are three paths
   into an approved state and three out of it; a registration one of them forgot is a customer
   nobody monitors, with nothing reporting it. If you add a status or a path, change `monitored`,
-  not a call site. The relay (`MonitoringRegistrationService`) only sends what the store owes, and
+  not a call site. It is ONE SQL statement, run only for a case that is or was approved, and its
+  insert is `ON CONFLICT DO NOTHING`; every other write to that table is one conditional
+  statement too — there is no entity to load and write back. The relay (`MonitoringRegistrationService`) only sends what the store owes, and
   it runs under the service's OWN OIDC client: the registry refuses the shared one with 403.
-- **A monitoring finding puts an APPROVED case back in `MANUAL_REVIEW`, and the customer must not
-  be able to tell.** Customer responses read `applicantStatus` / `applicantReviewReason`, no
-  lifecycle event is published for the review, and neither the applicant nor an idle timer can
-  abandon the case. Anything new that a customer can read off a case goes through those two
-  properties. Resolving such a review returns the case to where it stood and repeats nothing of
-  the approval — no mandates, no `AGREEMENT_SIGNED`.
-- **The screen's `subjectId` is the subject's opaque `ref`, not the name-derived `key`.** The key
-  is a hash of the normalised name: fine as a map key, a pseudonym in a URL path. The registry is
-  keyed by the same `ref`, which is what lets a clearance recorded in sanctions-service apply to
-  monitoring. Never build an outbound identifier from `key`.
+- **A monitoring review is a fact BESIDE the status, never a status.** A finding on an approved
+  case sets `monitoringReview`; `status` stays SIGNED/ACTIVE and `updatedAt` does not move. That is
+  the whole tipping-off defence: the applicant routes, the events, the timers and
+  `findOpenByIdentifier` all read `status`, so none of them has anything to hide. Do not add a
+  status for it, and do not touch `updatedAt` from a monitoring transition.
+- **An approved case is EXITED, not rejected.** `reject` on a case with a monitoring review calls
+  `exitRequired`: the case keeps its status, stays monitored, and publishes
+  `BUSINESS_RELATIONSHIP_EXIT_REQUIRED`. `rejected()` refuses such a case, so the onboarding
+  rejection event cannot be emitted for a customer who has a party, mandates and accounts — and
+  monitoring cannot be withdrawn by a confirmed finding. Nothing consumes the exit event yet.
+- **A subject's `ref` is the id it is screened AND registered under, and it never changes.** The
+  entity's is its party id (an entity without a party is not screened); a person's is a random
+  UUID; a person screened before references existed keeps `kyb-case:<case>:<key>`, because the
+  check and its clearance in sanctions-service live under that id. The idempotency key of a
+  screen is derived from the `ref`. Never build an outbound identifier from `key`, and never
+  drop a subject from the list: a leaver is `current = false`, and an unavailable ownership
+  lookup makes nobody a leaver.
 - **A new Kafka channel is two deploys.** `sanctions-monitoring-in` has no `group.id` in
   `application.yaml` and none in `kyb-service-msg-override.yaml` until the image carrying the
   channel is deployed; naming it there earlier is a boot failure. The KafkaUser is granted both

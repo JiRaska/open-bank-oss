@@ -328,47 +328,52 @@ data class CaseResponse(
      */
     val screening: ScreeningResponse?,
     /**
-     * Set while an approved case is back under review because ongoing monitoring reported a match.
-     * OPERATOR view only, for the same reason as [screening].
+     * Set while a monitoring finding on this approved case awaits, or received, an operator's
+     * decision. OPERATOR view only, for the same reason as [screening].
      */
     val monitoringReview: MonitoringReviewResponse?,
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
     companion object {
-        fun from(c: BusinessOnboardingCase, viewerPartyId: UUID?) = CaseResponse(
-            id = c.id,
-            // A review opened by ongoing monitoring is not visible to the applicant: they keep
-            // reading the status the case held when it was approved.
-            status = (if (viewerPartyId == null) c.status else c.applicantStatus).name,
-            scheme = c.identifier.scheme.name,
-            identifier = c.identifier.value,
-            country = c.identifier.country ?: c.extract?.registeredAddress?.countryCode,
-            initiatorPartyId = c.initiatorPartyId,
-            entityPartyId = c.entityPartyId,
-            requiredSignatures = c.requiredSignatures,
-            requiredSignerRoles = c.requiredSignerRoles,
-            signedCount = c.signedCount,
-            extract = c.extract?.let { ExtractResponse.from(it) },
-            signers = c.signers.map { SignerResponse.from(it, revealToken = viewerPartyId == c.initiatorPartyId) },
-            // The operator reads the flags; the applicant reads wording that cannot tell why.
-            reviewReason = if (viewerPartyId == null) c.reviewReason else c.applicantReviewReason,
-            questionnaire = c.questionnaire,
-            declarations = c.declarations?.let { DeclarationsResponse.from(it) },
-            agreement = c.agreement?.let { AgreementSummary.from(it) },
-            // viewerPartyId is null only on the operator routes (each calls requireOperator first).
-            screening = c.screening?.takeIf { viewerPartyId == null }?.let { ScreeningResponse.from(it) },
-            monitoringReview = c.monitoringReview?.takeIf { viewerPartyId == null }?.let {
-                MonitoringReviewResponse(openedAt = it.openedAt, from = it.from.name)
-            },
-            createdAt = c.createdAt,
-            updatedAt = c.updatedAt,
-        )
+        fun from(c: BusinessOnboardingCase, viewerPartyId: UUID?, monitoring: Map<String, String> = emptyMap()) =
+            CaseResponse(
+                id = c.id,
+                status = c.status.name,
+                scheme = c.identifier.scheme.name,
+                identifier = c.identifier.value,
+                country = c.identifier.country ?: c.extract?.registeredAddress?.countryCode,
+                initiatorPartyId = c.initiatorPartyId,
+                entityPartyId = c.entityPartyId,
+                requiredSignatures = c.requiredSignatures,
+                requiredSignerRoles = c.requiredSignerRoles,
+                signedCount = c.signedCount,
+                extract = c.extract?.let { ExtractResponse.from(it) },
+                signers = c.signers.map { SignerResponse.from(it, revealToken = viewerPartyId == c.initiatorPartyId) },
+                // The operator reads the flags; the applicant reads wording that cannot tell why.
+                reviewReason = if (viewerPartyId == null) c.reviewReason else c.applicantReviewReason,
+                questionnaire = c.questionnaire,
+                declarations = c.declarations?.let { DeclarationsResponse.from(it) },
+                agreement = c.agreement?.let { AgreementSummary.from(it) },
+                // viewerPartyId is null only on the operator routes (each calls requireOperator first).
+                screening = c.screening?.takeIf {
+                    viewerPartyId == null
+                }?.let { ScreeningResponse.from(it, monitoring) },
+                monitoringReview = c.monitoringReview?.takeIf { viewerPartyId == null }?.let {
+                    MonitoringReviewResponse(it.openedAt, it.exitRequiredAt, it.exitReason)
+                },
+                createdAt = c.createdAt,
+                updatedAt = c.updatedAt,
+            )
     }
 }
 
-/** When ongoing monitoring sent an approved case to review, and the status it returns to. */
-data class MonitoringReviewResponse(val openedAt: Instant, val from: String)
+/**
+ * A monitoring finding on an approved case awaits an operator ([exitRequiredAt] null), or the
+ * operator decided the relationship has to end (set, with the reason). The case's status is the
+ * same either way.
+ */
+data class MonitoringReviewResponse(val openedAt: Instant, val exitRequiredAt: Instant?, val exitReason: String?)
 
 /**
  * One finding of ongoing monitoring on a subject: which list entry matched and how it was found.
@@ -407,6 +412,12 @@ data class ScreeningSubjectResponse(
     val disposedAt: Instant?,
     /** What ongoing monitoring reported about this subject after approval; empty when nothing. */
     val monitoringFindings: List<MonitoringFindingResponse>,
+    /**
+     * Where the subject stands with the monitored-subject registry: PENDING | SYNCED | REFUSED, null
+     * when it is not to be registered or on a list response. REFUSED is an approved subject that is
+     * NOT monitored: the registry will not take it as it is.
+     */
+    val monitoringState: String?,
 )
 
 /** An operator's decision about one finding. Who decides is the authenticated principal, not a field here. */
@@ -421,7 +432,7 @@ data class ScreeningResponse(
     val subjects: List<ScreeningSubjectResponse>,
 ) {
     companion object {
-        fun from(s: CaseScreening) = ScreeningResponse(
+        fun from(s: CaseScreening, monitoring: Map<String, String> = emptyMap()) = ScreeningResponse(
             complete = s.complete,
             openFindings = s.openFindings.size,
             ownerSource = s.ownerSource?.name,
@@ -440,6 +451,7 @@ data class ScreeningResponse(
                     disposedBy = it.disposedBy,
                     dispositionReason = it.dispositionReason,
                     disposedAt = it.disposedAt,
+                    monitoringState = it.ref?.takeIf { _ -> it.current }?.let(monitoring::get),
                     monitoringFindings = it.monitoringFindings.map { m ->
                         MonitoringFindingResponse(
                             findingId = m.findingId,

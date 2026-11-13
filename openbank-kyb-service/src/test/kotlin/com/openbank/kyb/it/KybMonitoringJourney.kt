@@ -88,28 +88,54 @@ class KybMonitoringJourney(
         val attemptCount: Int,
         val lastError: String?,
         val xmin: String,
+        val generation: Long,
     )
 
     fun rows(caseId: String): List<Row> = query(
-        "select subject_ref, desired, sync_state, attempt_count, last_error, xmin::text " +
+        "select subject_ref, desired, sync_state, attempt_count, last_error, xmin::text, generation " +
             "from kyb_monitored_subjects where case_id = ? order by id",
         UUID.fromString(caseId),
-    ) { Row(it.getString(1), it.getString(2), it.getString(3), it.getInt(4), it.getString(5), it.getString(6)) }
+    ) {
+        Row(
+            it.getString(1),
+            it.getString(2),
+            it.getString(3),
+            it.getInt(4),
+            it.getString(5),
+            it.getString(6),
+            it.getLong(7),
+        )
+    }
 
-    /** The stored case: status, the transaction that last wrote the row, monitoring review, screening. */
+    /** The stored case: status, the transaction that last wrote the row, the monitoring review, screening. */
     data class Stored(
         val status: String,
         val xmin: String,
-        val reviewFrom: String?,
+        val reviewOpened: Boolean,
+        val exitRequired: Boolean,
+        val exitReason: String?,
         val screeningJson: String,
         val entityPartyId: String?,
+        val updatedAt: String,
     )
 
     fun stored(caseId: String): Stored = query(
-        "select status, xmin::text, monitoring_review_from, screening_json, entity_party_id::text " +
-            "from kyb_cases where case_id = ?",
+        "select status, xmin::text, monitoring_review_opened_at is not null, " +
+            "monitoring_exit_required_at is not null, monitoring_exit_reason, screening_json, " +
+            "entity_party_id::text, updated_at::text from kyb_cases where case_id = ?",
         UUID.fromString(caseId),
-    ) { Stored(it.getString(1), it.getString(2), it.getString(3), it.getString(4).orEmpty(), it.getString(5)) }.single()
+    ) {
+        Stored(
+            it.getString(1),
+            it.getString(2),
+            it.getBoolean(3),
+            it.getBoolean(4),
+            it.getString(5),
+            it.getString(6).orEmpty(),
+            it.getString(7),
+            it.getString(8),
+        )
+    }.single()
 
     fun events(caseId: String): List<String> = query(
         "select event_type from kyb_outbox where aggregate_id = ? order by id",

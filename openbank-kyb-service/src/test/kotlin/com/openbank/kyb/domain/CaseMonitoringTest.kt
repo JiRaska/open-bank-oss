@@ -122,18 +122,25 @@ class CaseMonitoringTest {
             CaseStatus.ABANDONED,
         ).forEach { assertThat(case(it).monitoredSubjects).describedAs(it.name).isEmpty() }
         assertThat(case(CaseStatus.ACTIVE, screening = null).monitoredSubjects).isEmpty()
+        // The registration store is touched only for a case that is or was approved.
+        assertThat(CaseStatus.entries.filter { case(it).everApproved }).containsExactlyInAnyOrder(
+            CaseStatus.SIGNED,
+            CaseStatus.ACTIVE,
+            CaseStatus.REJECTED,
+            CaseStatus.ABANDONED,
+        )
     }
 
     @Test
-    fun `references are opaque, the entity takes its party id, and a reference is never replaced`() {
+    fun `a person not yet screened gets a random reference, the entity its party id, and neither is replaced`() {
         val bare = CaseScreening(
-            screening().subjects.map { it.copy(ref = null) } +
+            screening().subjects.map { it.copy(ref = null, sanctions = ScreeningVerdict.PENDING) } +
                 subject(ScreeningSubjectKind.BENEFICIAL_OWNER, "Former Owner", null, current = false),
             UboSource.REGISTER,
         )
         val minted = mutableListOf<String>()
         val mint = { UUID.randomUUID().toString().also { minted += it } }
-        val withRefs = case(CaseStatus.READY_TO_SIGN, bare).withMonitoringRefs(mint, t1)
+        val withRefs = case(CaseStatus.READY_TO_SIGN, bare).withMonitoringRefs(mint)
 
         val subjects = requireNotNull(withRefs.screening).subjects
         assertThat(subjects[0].ref).isEqualTo(entityParty.toString())
@@ -141,31 +148,61 @@ class CaseMonitoringTest {
         // Nothing of the person is in the reference: not the name, not the name-derived key.
         assertThat(subjects[1].ref).doesNotContain("Quentin", "Example", subjects[1].key)
         assertThat(subjects[2].ref).describedAs("a subject that left the case is not given one").isNull()
+        assertThat(withRefs.updatedAt).describedAs("a reference is not a change the applicant sees").isEqualTo(t0)
 
-        val again = withRefs.withMonitoringRefs({ error("nothing left to mint") }, t1.plusSeconds(1))
-        assertThat(again).isSameAs(withRefs)
+        assertThat(withRefs.withMonitoringRefs { error("nothing left to mint") }).isSameAs(withRefs)
     }
 
     @Test
-    fun `a finding sends an approved case to review, records the entry, and leaves the applicant's view as it was`() {
+    fun `an entity without a party has no reference, so it cannot be screened or registered`() {
+        val bare = CaseScreening(screening().subjects.map { it.copy(ref = null) }, UboSource.REGISTER)
+
+        val noParty = case(CaseStatus.MANUAL_REVIEW, bare).copy(entityPartyId = null).withMonitoringRefs { "minted" }
+
+        assertThat(requireNotNull(noParty.screening).subjects[0].ref).isNull()
+        assertThat(requireNotNull(noParty.screening).monitorable.map { it.kind })
+            .doesNotContain(ScreeningSubjectKind.ENTITY)
+        // Once the party exists the reference is the party id, and only then.
+        val withParty = noParty.copy(entityPartyId = entityParty).withMonitoringRefs { "minted" }
+        assertThat(requireNotNull(withParty.screening).subjects[0].ref).isEqualTo(entityParty.toString())
+    }
+
+    @Test
+    fun `a person screened by an earlier release keeps the id that screen used`() {
+        // Answered, and no reference: what a release without references left behind.
+        val legacy = CaseScreening(screening().subjects.map { it.copy(ref = null) }, UboSource.REGISTER)
+
+        val withRefs = case(CaseStatus.ACTIVE, legacy).withMonitoringRefs {
+            error("an answered subject is never re-identified")
+        }
+
+        val subjects = requireNotNull(withRefs.screening).subjects
+        // Exactly the two forms the old screen sent as subjectId, so its check and any clearance still bind.
+        assertThat(subjects[0].ref).isEqualTo(entityParty.toString())
+        assertThat(subjects[1].ref).isEqualTo("kyb-case:${withRefs.id}:k-Quentin Example")
+    }
+
+    @Test
+    fun `a finding opens a review beside the status, and changes nothing an applicant can read`() {
         val active = case(CaseStatus.ACTIVE, active = true)
 
         val reviewed = active.monitoringMatched(personRef, match(), t1)
 
-        assertThat(reviewed.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
-        assertThat(reviewed.monitoringReview?.from).isEqualTo(CaseStatus.ACTIVE)
+        // The whole point: status, reason and updatedAt are exactly what they were.
+        assertThat(reviewed.status).isEqualTo(CaseStatus.ACTIVE)
+        assertThat(reviewed.reviewReason).isNull()
+        assertThat(reviewed.applicantReviewReason).isNull()
+        assertThat(reviewed.updatedAt).isEqualTo(active.updatedAt)
+        assertThat(reviewed.copy(screening = active.screening, monitoringReview = null)).isEqualTo(active)
+
         assertThat(reviewed.monitoringReview?.openedAt).isEqualTo(t1)
+        assertThat(reviewed.monitoringReview?.open).isTrue()
         val person = requireNotNull(reviewed.screening).subjects[1]
         assertThat(person.sanctions).isEqualTo(ScreeningVerdict.POTENTIAL_HIT)
         assertThat(person.disposition).isEqualTo(FindingDisposition.OPEN)
         assertThat(person.monitoringFindings.single().listEntryRef).isEqualTo("id:synthetic-1")
         assertThat(requireNotNull(reviewed.screening).subjects[0].monitoringFindings).isEmpty()
-        // Still monitored while under review: nothing is withdrawn because a finding arrived.
         assertThat(reviewed.monitoredSubjects).hasSize(2)
-        // The applicant sees an active case and no reason; the operator sees the review.
-        assertThat(reviewed.applicantStatus).isEqualTo(CaseStatus.ACTIVE)
-        assertThat(reviewed.applicantReviewReason).isNull()
-        assertThat(reviewed.reviewReason).isEqualTo(BusinessOnboardingCase.MONITORING_REVIEW)
     }
 
     @Test
@@ -195,7 +232,7 @@ class CaseMonitoringTest {
         val person = requireNotNull(reviewed.screening).subjects[1]
         assertThat(person.sanctionsHit).isTrue()
         assertThat(person.findingOpen).isTrue()
-        assertThat(reviewed.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(reviewed.monitoringReview?.open).isTrue()
     }
 
     @Test
@@ -235,11 +272,12 @@ class CaseMonitoringTest {
     }
 
     @Test
-    fun `the review is resolved only once the finding is decided, and returns the case to where it stood`() {
-        val reviewed = case(CaseStatus.ACTIVE, active = true).monitoringMatched(personRef, match(), t1)
+    fun `the review closes only once the finding is decided, and the case is what it was all along`() {
+        val active = case(CaseStatus.ACTIVE, active = true)
+        val reviewed = active.monitoringMatched(personRef, match(), t1)
 
-        // Must-refuse: the finding is open, whatever the screening switch says.
-        assertThatThrownBy { reviewed.reviewResolved(1, t1, screeningRequired = false) }
+        // Must-refuse: the finding is open.
+        assertThatThrownBy { reviewed.monitoringReviewResolved() }
             .isInstanceOf(ScreeningFindingException::class.java)
             .extracting("code").isEqualTo(ScreeningFindingException.OPEN)
 
@@ -250,16 +288,28 @@ class CaseMonitoringTest {
             "different year of birth",
             t1,
         )
-        val resolved = cleared.reviewResolved(1, t1.plusSeconds(1), screeningRequired = true)
+        assertThat(cleared.updatedAt).describedAs("the operator's decision is not the applicant's to see").isEqualTo(t0)
+        val resolved = cleared.monitoringReviewResolved()
 
         assertThat(resolved.status).isEqualTo(CaseStatus.ACTIVE)
         assertThat(resolved.monitoringReview).isNull()
-        assertThat(resolved.reviewReason).isNull()
+        assertThat(resolved.updatedAt).isEqualTo(t0)
         assertThat(resolved.monitoredSubjects).hasSize(2)
+        // Control: without a review there is nothing to resolve, and a finding cannot be decided on an approved case.
+        assertThatThrownBy { active.monitoringReviewResolved() }.isInstanceOf(CaseTransitionException::class.java)
+        assertThatThrownBy {
+            active.findingDisposed(
+                "k-Quentin Example",
+                FindingDisposition.CONFIRMED,
+                "operator-2",
+                "long enough reason",
+                t1,
+            )
+        }.isInstanceOf(CaseTransitionException::class.java)
     }
 
     @Test
-    fun `a confirmed sanctions finding leaves only rejection, and a rejected case monitors nobody`() {
+    fun `a confirmed sanctions finding leaves only an exit, and the customer stays approved and monitored`() {
         val reviewed = case(CaseStatus.ACTIVE, active = true).monitoringMatched(personRef, match(), t1)
         val confirmed = reviewed.findingDisposed(
             "k-Quentin Example",
@@ -269,39 +319,73 @@ class CaseMonitoringTest {
             t1,
         )
 
-        assertThatThrownBy { confirmed.reviewResolved(1, t1, screeningRequired = true) }
+        assertThatThrownBy { confirmed.monitoringReviewResolved() }
             .isInstanceOf(ScreeningFindingException::class.java)
             .extracting("code").isEqualTo(ScreeningFindingException.CONFIRMED)
+        // An approved customer cannot be "rejected": that transition would end monitoring.
+        assertThatThrownBy { confirmed.rejected("confirmed sanctions match", t1) }
+            .isInstanceOf(CaseTransitionException::class.java)
 
-        val rejected = confirmed.rejected("confirmed sanctions match", t1.plusSeconds(5))
-        assertThat(rejected.status).isEqualTo(CaseStatus.REJECTED)
-        assertThat(rejected.monitoredSubjects).isEmpty()
-        assertThat(rejected.applicantStatus).isEqualTo(CaseStatus.REJECTED)
+        val exiting = confirmed.exitRequired("confirmed sanctions match", t1.plusSeconds(5))
+
+        assertThat(exiting.status).isEqualTo(CaseStatus.ACTIVE)
+        assertThat(exiting.monitored).isTrue()
+        assertThat(exiting.monitoredSubjects).describedAs("nobody is withdrawn by a confirmed finding").hasSize(2)
+        assertThat(exiting.monitoringReview?.exitRequiredAt).isEqualTo(t1.plusSeconds(5))
+        assertThat(exiting.monitoringReview?.exitReason).isEqualTo("confirmed sanctions match")
+        assertThat(exiting.updatedAt).isEqualTo(t0)
+        // The decision is made once: it cannot be resolved away, repeated, or turned into a rejection.
+        assertThatThrownBy { exiting.monitoringReviewResolved() }.isInstanceOf(CaseTransitionException::class.java)
+        assertThatThrownBy { exiting.exitRequired("again", t1) }.isInstanceOf(CaseTransitionException::class.java)
+        assertThatThrownBy { exiting.rejected("again", t1) }.isInstanceOf(CaseTransitionException::class.java)
+        // A later finding is still recorded, and the exit stands.
+        val later = exiting.monitoringMatched(
+            entityParty.toString(),
+            match(id = "0190a000-0000-7000-8000-0000000000f3"),
+            t1.plusSeconds(60),
+        )
+        assertThat(later.monitoringReview).isEqualTo(exiting.monitoringReview)
+        assertThat(requireNotNull(later.screening).subjects[0].monitoringFindings).hasSize(1)
     }
 
     @Test
-    fun `a review opened before activation completes the case when it is resolved after it`() {
-        val reviewed = case(CaseStatus.SIGNED).monitoringMatched(personRef, match(kind = "PEP"), t1)
-        assertThat(reviewed.applicantStatus).isEqualTo(CaseStatus.SIGNED)
-
-        val activated = reviewed.entityPartyActivated(t1.plusSeconds(10))
-        assertThat(activated.status).describedAs("activation does not end a review").isEqualTo(CaseStatus.MANUAL_REVIEW)
-
-        val resolved = activated
-            .findingDisposed("k-Quentin Example", FindingDisposition.CONFIRMED, "operator-2", "a PEP, accepted", t1)
-            .reviewResolved(1, t1.plusSeconds(20), screeningRequired = true)
-        assertThat(resolved.status).isEqualTo(CaseStatus.ACTIVE)
+    fun `an exit needs an open monitoring review and a reason`() {
+        assertThatThrownBy { case(CaseStatus.ACTIVE).exitRequired("no review", t1) }
+            .isInstanceOf(CaseTransitionException::class.java)
+        val reviewed = case(CaseStatus.ACTIVE).monitoringMatched(personRef, match(), t1)
+        assertThatThrownBy { reviewed.exitRequired("  ", t1) }.isInstanceOf(IllegalArgumentException::class.java)
     }
 
     @Test
-    fun `nobody but an operator ends a case that is under a monitoring review`() {
-        val reviewed = case(CaseStatus.SIGNED).monitoringMatched(personRef, match(), t1)
+    fun `an outage of the ownership register never removes a subject, and a leaver keeps its reference`() {
+        val owner = subject(ScreeningSubjectKind.BENEFICIAL_OWNER, "Olga Owner", "ref-owner")
+        val before = screening().copy(subjects = screening().subjects + owner)
+        val withoutOwner = before.subjects.take(2).map { it.copy(ref = null) }
 
-        assertThatThrownBy { reviewed.abandoned(t1) }
-            .isInstanceOf(IllegalArgumentException::class.java)
-            // The applicant is told what they would be told about a case that is simply signed.
-            .hasMessage("case is already SIGNED")
-        // Control: without a monitoring review a signed case can still be abandoned.
-        assertThat(case(CaseStatus.SIGNED).abandoned(t1).status).isEqualTo(CaseStatus.ABANDONED)
+        // The lookup could not be made: the owner's absence from the fresh list proves nothing.
+        val duringOutage = before.rebuilt(withoutOwner, UboSource.UNAVAILABLE)
+        assertThat(duringOutage.subjects.single { it.name == "Olga Owner" }.current).isTrue()
+        assertThat(duringOutage.monitorable.map { it.ref }).contains("ref-owner")
+        assertThat(duringOutage.complete).describedAs("and nothing is approved on such a list").isFalse()
+
+        // The lookup answered without her: she left. She is kept, not current, with her reference.
+        val left = before.rebuilt(withoutOwner, UboSource.REGISTER)
+        val gone = left.subjects.single { it.name == "Olga Owner" }
+        assertThat(gone.current).isFalse()
+        assertThat(gone.ref).isEqualTo("ref-owner")
+        assertThat(left.monitorable.map { it.ref }).doesNotContain("ref-owner")
+        assertThat(left.complete).isTrue()
+
+        // She comes back: the same subject, the same reference, the answer already obtained.
+        val back = left.rebuilt(
+            before.subjects.map {
+                it.copy(ref = null, sanctions = ScreeningVerdict.PENDING)
+            },
+            UboSource.REGISTER,
+        )
+        val again = back.subjects.single { it.name == "Olga Owner" }
+        assertThat(again.current).isTrue()
+        assertThat(again.ref).isEqualTo("ref-owner")
+        assertThat(again.sanctions).isEqualTo(ScreeningVerdict.CLEAR)
     }
 }

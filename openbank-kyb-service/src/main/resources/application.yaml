@@ -363,7 +363,7 @@ authz:
         enabled: true
       # The registration relay does not tick in @QuarkusTest: the ITs call the run themselves, so
       # what a test observes is its own run and not a tick that happened to land in between.
-      # KybMonitoringSchedulerIT re-enables it to prove the real schedule runs.
+      # KybMonitoringWireShapeIT re-enables it to prove the real schedule runs.
       monitoring:
         relay:
           every: "off"

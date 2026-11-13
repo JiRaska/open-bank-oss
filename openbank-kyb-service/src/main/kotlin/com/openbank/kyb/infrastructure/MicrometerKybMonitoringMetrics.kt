@@ -21,12 +21,14 @@ import java.util.concurrent.atomic.AtomicReference
  * establish:
  *
  *  - [ENABLED] — 1 or 0, the switch itself.
- *  - [REGISTRATIONS] — relay attempts by `outcome` (`registered` | `withdrawn` | `failed`) and,
- *    for a failure, `reason`. `registered` means the registry ACCEPTED the subject, not that it
+ *  - [REGISTRATIONS] — relay attempts by `outcome` (`registered` | `withdrawn` | `failed` |
+ *    `unauthorised` | `refused`) and, unless delivered, `reason`. `registered` means the registry ACCEPTED the subject, not that it
  *    has been evaluated: the first evaluation is the registry's sweep.
  *  - [PENDING] / [PENDING_AGE] — rows still owed to the registry and the age of the oldest.
  *  - [REGISTERED] — rows the registry has confirmed.
  *  - [FINDINGS] — records on the findings channel by what became of them.
+ *  - [REFUSED] — subjects the registry refuses as they are: approved and NOT monitored.
+ *  - [EXITS_REQUIRED] — approved cases whose relationship an operator decided has to end.
  *  - [REVIEWS_OPEN] / [REVIEW_AGE] — approved cases under a monitoring review, and the oldest.
  *  - [UNSCREENED] — approved cases with no screening at all, so nobody on them can be registered.
  *
@@ -55,11 +57,17 @@ class MicrometerKybMonitoringMetrics(private val registry: MeterRegistry, privat
         gauge(PENDING_AGE) { observed.get()?.oldestPendingAgeSeconds?.toDouble() ?: Double.NaN }
         gauge(REVIEWS_OPEN) { observed.get()?.openReviews?.toDouble() ?: Double.NaN }
         gauge(REVIEW_AGE) { observed.get()?.oldestOpenReviewAgeSeconds?.toDouble() ?: Double.NaN }
+        gauge(REFUSED) { observed.get()?.refused?.toDouble() ?: Double.NaN }
+        gauge(EXITS_REQUIRED) { observed.get()?.exitsRequired?.toDouble() ?: Double.NaN }
         gauge(UNSCREENED) { observed.get()?.unscreenedApprovedCases?.toDouble() ?: Double.NaN }
         listOf(
             MonitoringRegistrationService.REGISTERED,
             MonitoringRegistrationService.WITHDRAWN,
         ).forEach { registry.counter(REGISTRATIONS, "outcome", it, "reason", NO_REASON) }
+        // The registry's own answers to a wrong caller: the two an alert reads by increase.
+        listOf("http_401", "http_403").forEach {
+            registry.counter(REGISTRATIONS, "outcome", MonitoringRegistrationService.UNAUTHORISED, "reason", it)
+        }
         MonitoringFindingOutcome.entries.forEach { registry.counter(FINDINGS, "outcome", it.tag) }
         listOf(OUTCOME_FOREIGN_OWNER, OUTCOME_IGNORED, OUTCOME_MALFORMED, OUTCOME_UNRECOGNISED)
             .forEach { registry.counter(FINDINGS, "outcome", it) }
@@ -94,6 +102,8 @@ class MicrometerKybMonitoringMetrics(private val registry: MeterRegistry, privat
         const val FINDINGS = "openbank.kyb.monitoring.findings"
         const val REVIEWS_OPEN = "openbank.kyb.monitoring.reviews.open"
         const val REVIEW_AGE = "openbank.kyb.monitoring.reviews.oldest_open_age_seconds"
+        const val REFUSED = "openbank.kyb.monitoring.registrations.refused"
+        const val EXITS_REQUIRED = "openbank.kyb.monitoring.exits.required"
         const val UNSCREENED = "openbank.kyb.monitoring.cases.unscreened"
         const val RUNS = "openbank.kyb.monitoring.runs"
 

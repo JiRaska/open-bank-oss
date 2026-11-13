@@ -9,7 +9,8 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank KYB Service — events
-  version: 1.0.0
+  # 1.0.0 -> 1.1.0: additive — BUSINESS_RELATIONSHIP_EXIT_REQUIRED (ADR-0376, kyb side).
+  version: 1.1.0
   description: |
     Lifecycle events of a business onboarding case (ADR-0284): a sole trader or company being
     verified against its public register and signed for by its listed representatives.
@@ -63,6 +64,8 @@ channels:
         $ref: '#/components/messages/BusinessOnboardingRejected'
       BusinessOnboardingAbandoned:
         $ref: '#/components/messages/BusinessOnboardingAbandoned'
+      BusinessRelationshipExitRequired:
+        $ref: '#/components/messages/BusinessRelationshipExitRequired'
 
 operations:
   publishKybEvents:
@@ -110,6 +113,15 @@ components:
       name: BUSINESS_ONBOARDING_REJECTED
       payload:
         $ref: '#/components/schemas/ReviewEnvelope'
+    BusinessRelationshipExitRequired:
+      name: BUSINESS_RELATIONSHIP_EXIT_REQUIRED
+      summary: >-
+        An operator decided that the relationship with an APPROVED business customer has to end.
+        `status` is the case's unchanged status (SIGNED or ACTIVE): the case stays approved and
+        monitored until the exit happens. No reason and no finding is carried. It must not reach
+        a customer-facing surface before the bank has acted.
+      payload:
+        $ref: '#/components/schemas/CaseEnvelope'
     BusinessOnboardingAbandoned:
       name: BUSINESS_ONBOARDING_ABANDONED
       summary: "By the initiator, or by the Temporal idle/invitation timer (`actorId: temporal-timer`)."

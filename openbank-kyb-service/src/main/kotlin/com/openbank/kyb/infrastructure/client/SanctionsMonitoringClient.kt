@@ -7,6 +7,7 @@ package com.openbank.kyb.infrastructure.client
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.kyb.application.port.out.MonitoredSubjectRegistryException
 import com.openbank.kyb.application.port.out.MonitoredSubjectRegistryPort
+import com.openbank.kyb.application.port.out.RegistryFailure
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import jakarta.enterprise.context.ApplicationScoped
@@ -79,7 +80,9 @@ class SanctionsMonitoredSubjectRegistryAdapter : MonitoredSubjectRegistryPort {
             MonitoredSubjectBody(entityType = if (organisation) "ORGANIZATION" else "INDIVIDUAL", name = name),
         )
         // A 2xx about another subject is not a registration of this one.
-        if (ack.subjectRef != subjectRef) throw MonitoredSubjectRegistryException(REASON_UNEXPECTED, null)
+        if (ack.subjectRef != subjectRef) {
+            throw MonitoredSubjectRegistryException(REASON_UNEXPECTED, RegistryFailure.TRANSIENT, null)
+        }
     }
 
     override suspend fun withdraw(subjectRef: String) = guarded { client.withdraw(subjectRef) }
@@ -92,14 +95,33 @@ class SanctionsMonitoredSubjectRegistryAdapter : MonitoredSubjectRegistryPort {
         try {
             call()
         } catch (e: Exception) {
-            throw e as? MonitoredSubjectRegistryException ?: MonitoredSubjectRegistryException(reasonOf(e), e)
+            throw e as? MonitoredSubjectRegistryException ?: failureOf(e)
         }
     }
 
-    private fun reasonOf(e: Exception): String =
-        if (e is WebApplicationException) "http_${e.response?.status ?: 0}" else REASON_UNAVAILABLE
+    /**
+     * What the relay must do is decided here, by status: 401/403 is this caller not being
+     * accepted, 408/429 and everything that is not an HTTP answer may pass on its own, and any
+     * other 4xx is the registry refusing this subject as it is. 5xx is transient.
+     */
+    private fun failureOf(e: Exception): MonitoredSubjectRegistryException {
+        val status = (e as? WebApplicationException)?.response?.status
+            ?: return MonitoredSubjectRegistryException(REASON_UNAVAILABLE, RegistryFailure.TRANSIENT, e)
+        val kind = when (status) {
+            HTTP_UNAUTHORIZED, HTTP_FORBIDDEN -> RegistryFailure.UNAUTHORISED
+            HTTP_REQUEST_TIMEOUT, HTTP_TOO_MANY_REQUESTS -> RegistryFailure.TRANSIENT
+            in CLIENT_ERRORS -> RegistryFailure.REFUSED
+            else -> RegistryFailure.TRANSIENT
+        }
+        return MonitoredSubjectRegistryException("http_$status", kind, e)
+    }
 
     private companion object {
+        const val HTTP_UNAUTHORIZED = 401
+        const val HTTP_FORBIDDEN = 403
+        const val HTTP_REQUEST_TIMEOUT = 408
+        const val HTTP_TOO_MANY_REQUESTS = 429
+        val CLIENT_ERRORS = 400..499
         const val REASON_UNAVAILABLE = "unavailable"
         const val REASON_UNEXPECTED = "unexpected_response"
     }

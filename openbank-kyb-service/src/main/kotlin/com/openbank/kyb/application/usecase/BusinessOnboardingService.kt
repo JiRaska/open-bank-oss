@@ -34,6 +34,7 @@ import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.InvitationTokens
 import com.openbank.kyb.application.port.out.KybMetricsPort
 import com.openbank.kyb.application.port.out.MandateRequest
+import com.openbank.kyb.application.port.out.MonitoringRegistrationStore
 import com.openbank.kyb.application.port.out.PartyGateway
 import com.openbank.kyb.domain.model.AcceptedDisclosure
 import com.openbank.kyb.domain.model.AgreementConflictException
@@ -92,6 +93,8 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
 
     @Inject lateinit var screening: RelatedPartyScreeningService
 
+    @Inject lateinit var monitoringStore: MonitoringRegistrationStore
+
     private val log = Logger.getLogger(BusinessOnboardingService::class.java)
 
     override suspend fun start(cmd: StartCaseCommand): BusinessOnboardingCase {
@@ -138,6 +141,8 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
 
     override suspend fun get(caseId: UUID): BusinessOnboardingCase =
         cases.findById(caseId) ?: throw CaseNotFoundException(caseId)
+
+    override suspend fun monitoringStates(caseId: UUID): Map<String, String> = monitoringStore.statesOf(caseId)
 
     override suspend fun listForParty(partyId: UUID): List<BusinessOnboardingCase> = cases.findInvolving(partyId)
 
@@ -312,9 +317,26 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     }
 
     override suspend fun resolveReview(cmd: ResolveReviewCommand): BusinessOnboardingCase {
-        val case = screenedBeforeApproval(get(cmd.caseId))
+        val stored = get(cmd.caseId)
+        // A monitoring review is about an APPROVED case: nothing is re-screened, re-approved or published.
+        if (stored.monitoringReview != null) {
+            log.infof("kyb case %s monitoring review resolved by %s", cmd.caseId, cmd.operator)
+            return cases.update(stored.monitoringReviewResolved(), null)
+        }
         val now = Instant.now(clock)
-        if (case.monitoringReview != null) return resolveMonitoringReview(case, cmd, now)
+        // The entity is screened under its party id, so a case that started in review gets its
+        // party BEFORE the screen below, not after it. Creation is idempotent on the case id.
+        val withParty = if (stored.status == CaseStatus.MANUAL_REVIEW && stored.entityPartyId == null) {
+            stored.extract?.let { extract ->
+                cases.update(
+                    stored.entityPartyCreated(parties.createEntityParty(entityPartyRequest(stored.id, extract)), now),
+                    null,
+                )
+            } ?: stored
+        } else {
+            stored
+        }
+        val case = screenedBeforeApproval(withParty)
         var resolved = case.reviewResolved(cmd.requiredSignatures, now, cmd.requiredSignerRoles, screening.required)
         if (resolved.entityPartyId == null && resolved.extract != null) {
             resolved =
@@ -344,27 +366,16 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         return cases.update(resolved, KybEvents.registryVerified(resolved, now)).also(::armTimers)
     }
 
-    /**
-     * The review a monitoring finding opened on an APPROVED case is over. Nothing of the approval
-     * is repeated: the mandates were granted and `AGREEMENT_SIGNED` was published when the case was
-     * approved. The one thing that may still be owed is completion — an entity party that became
-     * active while the review held the case — and that is published here, once.
-     */
-    private suspend fun resolveMonitoringReview(
-        case: BusinessOnboardingCase,
-        cmd: ResolveReviewCommand,
-        now: Instant,
-    ): BusinessOnboardingCase {
-        val heldFrom = requireNotNull(case.monitoringReview).from
-        val resolved = case.reviewResolved(cmd.requiredSignatures, now, cmd.requiredSignerRoles, screening.required)
-        log.infof("kyb case %s monitoring review resolved by %s: back to %s", cmd.caseId, cmd.operator, resolved.status)
-        val completes = heldFrom != CaseStatus.ACTIVE && resolved.status == CaseStatus.ACTIVE
-        return cases.update(resolved, if (completes) KybEvents.completed(resolved, now) else null).also(::armTimers)
-    }
-
     override suspend fun reject(cmd: RejectCaseCommand): BusinessOnboardingCase {
         val case = get(cmd.caseId)
         val now = Instant.now(clock)
+        // The same operator act on an APPROVED case is a different decision with a different
+        // event: the relationship has to end, and until it has, the case stays what it is.
+        if (case.monitoringReview != null) {
+            val exiting = case.exitRequired(cmd.reason, now)
+            log.infof("kyb case %s: exit of the relationship required by %s", cmd.caseId, cmd.operator)
+            return cases.update(exiting, KybEvents.exitRequired(exiting, now, cmd.operator))
+        }
         val rejected = case.rejected(cmd.reason, now)
         return cases.update(rejected, KybEvents.rejected(rejected, now, cmd.operator)).also(::armTimers)
     }
@@ -411,8 +422,6 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     override suspend fun abandonIfInState(caseId: UUID, expectedState: String, actor: String): Boolean {
         val case = cases.findById(caseId) ?: return false
         if (case.status.name != expectedState || case.status.isTerminal) return false
-        // An idle timer never ends an approved relationship that is under a monitoring review.
-        if (case.monitoringReview != null) return false
         val now = Instant.now(clock)
         val abandoned = case.abandoned(now)
         cases.update(abandoned, KybEvents.abandoned(abandoned, now, actor))
@@ -428,8 +437,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     private suspend fun screenedBeforeApproval(case: BusinessOnboardingCase): BusinessOnboardingCase {
         // Whoever is screened carries a reference by now; this covers a screening recorded before
         // references existed, so the approval that follows has someone to register for monitoring.
-        val screened = screening.screened(case)
-            .withMonitoringRefs(MonitoringRegistrationService::newSubjectRef, Instant.now(clock))
+        val screened = screening.screened(case).withMonitoringRefs(MonitoringRegistrationService::newSubjectRef)
         return if (screened === case) case else cases.update(screened, null)
     }
 

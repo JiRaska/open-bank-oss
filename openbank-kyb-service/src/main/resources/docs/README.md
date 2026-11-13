@@ -30,7 +30,7 @@ The switch is off by default. With the switch on, the deployment must supply `SA
 
 ## Ongoing monitoring of approved cases
 
-When `openbank.kyb.monitoring.enabled` is true, the service registers the entity and every screened related party of an approved case with the monitored-subject registry of `openbank-sanctions-service`, withdraws them when the case ends, and moves the case to `MANUAL_REVIEW` when the registry reports a match. Each subject is screened and registered under an opaque reference: the entity's party id, or a random UUID. The switch is off by default. See `08-ongoing-monitoring` in this documentation index for delivery, repair, metrics, alerts and the order to switch it on.
+When `openbank.kyb.monitoring.enabled` is true, the service registers the entity and every screened related party of an approved case with the monitored-subject registry of `openbank-sanctions-service`, withdraws them when the case ends, and opens a monitoring review for an operator when the registry reports a match. The review does not change the status of the case. Each subject is screened and registered under one reference: the entity's party id, or a random UUID for a person. The switch is off by default. See `08-ongoing-monitoring` in this documentation index for delivery, repair, metrics, alerts and the order to switch it on.
 
 ## Concurrent writes to a case
 

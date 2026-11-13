@@ -10,10 +10,13 @@ info:
   # view only), the operator disposition route for a finding, the 503 SCREENING_PENDING refusal on
   # `sign` and `review/resolve`, and the 422 SCREENING_FINDING_* refusal on `review/resolve`.
   # 1.8.0 -> 1.9.0: additive — ongoing monitoring of approved cases (ADR-0376). Two operator-only
-  # response fields: `Case.monitoringReview` (set while a monitoring finding holds an approved case
-  # in MANUAL_REVIEW) and `ScreeningSubject.monitoringFindings` (the list entries that matched).
-  # No route, request or existing field changes; on customer responses `status` keeps reading the
-  # status the case was approved in while such a review is open.
+  # response fields: `Case.monitoringReview` (a monitoring finding on an approved case awaits, or
+  # received, an operator's decision), `ScreeningSubject.monitoringFindings` (the list entries
+  # that matched) and `ScreeningSubject.monitoringState` (where the subject stands with the
+  # registry). No route or request changes. The case's `status` is NOT changed by a monitoring
+  # review. On such a case `review/resolve` closes the review and `reject` records that the
+  # relationship has to end; neither changes `status`. `GET /cases?status=MANUAL_REVIEW` also
+  # returns approved cases with an open monitoring review.
   version: 1.9.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
@@ -1258,9 +1261,9 @@ components:
             - type: 'null'
         monitoringReview:
           description: >-
-            Set while an approved case is back in MANUAL_REVIEW because ongoing monitoring reported
-            a match on the entity or a related party. Operator view only — always null on a response
-            a customer can read, where `status` keeps the value the case was approved in.
+            Set while a monitoring finding on this approved case awaits, or received, an operator's
+            decision. The case's `status` stays SIGNED or ACTIVE throughout. Operator view only —
+            always null on a response a customer can read.
           oneOf:
             - $ref: '#/components/schemas/MonitoringReview'
             - type: 'null'
@@ -1312,7 +1315,9 @@ components:
           description: Identifies the subject on the disposition route.
         current:
           type: boolean
-          description: False for a subject that left the case and is kept because of its finding.
+          description: >-
+            False for a subject that left the case. It is kept so that a finding stays open until
+            decided and so that the same person is the same subject if they return.
         disposition:
           type: [string, 'null']
           enum: [OPEN, CLEARED_FALSE_POSITIVE, CONFIRMED, null]
@@ -1344,6 +1349,12 @@ components:
         screenedAt:
           type: [string, 'null']
           format: date-time
+        monitoringState:
+          type: [string, 'null']
+          description: >-
+            Where the subject stands with the monitored-subject registry: PENDING (owed), SYNCED
+            (accepted) or REFUSED (the registry will not take it as it is — the subject is approved
+            and NOT monitored). Null when the subject is not to be registered, and on list responses.
         monitoringFindings:
           type: array
           description: >-
@@ -1353,17 +1364,21 @@ components:
             $ref: '#/components/schemas/MonitoringFinding'
     MonitoringReview:
       type: object
-      required: [openedAt, from]
+      required: [openedAt]
       properties:
         openedAt:
           type: string
           format: date-time
           description: When the first finding of this review arrived.
-        from:
-          type: string
+        exitRequiredAt:
+          type: [string, 'null']
+          format: date-time
           description: >-
-            The status the case held when the review opened (SIGNED or ACTIVE). Resolving the
-            review returns the case to SIGNED, or to ACTIVE once the entity party is active.
+            Set when an operator decided the relationship has to end (`reject` on a case with a
+            monitoring review). The case keeps its status and stays monitored until the exit is
+            carried out; BUSINESS_RELATIONSHIP_EXIT_REQUIRED is published once.
+        exitReason:
+          type: [string, 'null']
     MonitoringFinding:
       type: object
       description: >-

@@ -298,7 +298,7 @@ class KybRelatedPartyScreeningIT {
         val attempts = screening.requests.filter { it.name == "Hana Čekající" }
         assertThat(attempts.size).isGreaterThanOrEqualTo(3)
         assertThat(attempts.map { it.idempotencyKey }.toSet()).hasSize(1)
-        assertThat(attempts.first().idempotencyKey).startsWith("kyb-screen:$caseId:")
+        assertThat(attempts.first().idempotencyKey).isEqualTo("kyb-screen:${attempts.first().subjectId}")
         assertThat(attempts).allMatch { !it.organisation }
     }
 

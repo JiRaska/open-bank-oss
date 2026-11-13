@@ -8,82 +8,52 @@ import com.openbank.kyb.application.port.out.MonitoringDesired
 import com.openbank.kyb.application.port.out.MonitoringRegistration
 import com.openbank.kyb.application.port.out.MonitoringRegistrationStore
 import com.openbank.kyb.application.port.out.MonitoringStats
-import com.openbank.kyb.infrastructure.persistence.entity.MonitoredSubjectEntity
 import io.quarkus.hibernate.reactive.panache.Panache
-import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.sqlclient.Pool
+import io.vertx.mutiny.sqlclient.Row
 import io.vertx.mutiny.sqlclient.Tuple
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
 
 /**
  * Postgres store of the desired monitoring registrations. See [MonitoringRegistrationStore] for
- * the contract; what is specific here is how each guarantee is held:
+ * the contract. Plain SQL, no entity: every write here is one conditional statement, so there is
+ * no loaded row whose stale copy could be written back.
  *
- *  - [syncInTransaction] uses the caller's session, so its rows commit with the case row;
- *  - [markSynced] and [markFailed] are conditional on `generation`, so the answer to a request
- *    that a later case write superseded changes nothing;
- *  - the read-only aggregates go through the plain reactive pool: they are counts and ages over
- *    two tables and have no business loading entities.
+ *  - [syncInTransaction] runs on the caller's Hibernate session, so it commits with the case row.
+ *    It is one statement whatever the case holds, and its insert is `ON CONFLICT DO NOTHING`:
+ *    two writers of one case never fail on the row, they are told apart by the case's own
+ *    version check.
+ *  - the relay's writes are conditional on `generation`, so the answer to a request that a later
+ *    case write superseded changes nothing.
  */
 @ApplicationScoped
-@Suppress("TooManyFunctions") // one query per thing the relay and the consumer ask, plus the row mappers
-class MonitoringRegistrationStoreImpl(private val pool: Pool) :
-    MonitoringRegistrationStore,
-    PanacheRepository<MonitoredSubjectEntity> {
+@Suppress("TooManyFunctions") // one statement per thing the relay, the consumer and the operator view ask
+class MonitoringRegistrationStoreImpl(private val pool: Pool) : MonitoringRegistrationStore {
 
     override fun syncInTransaction(caseId: UUID, desiredRefs: Set<String>, now: Instant): Uni<Void> =
-        list("caseId", caseId).flatMap { rows ->
-            rows.forEach { row ->
-                val wanted = row.subjectRef in desiredRefs
-                if (wanted != (row.desired == REGISTERED)) row.turn(if (wanted) REGISTERED else WITHDRAWN, now)
-            }
-            val known = rows.map { it.subjectRef }.toSet()
-            val fresh = (desiredRefs - known).map { newRow(caseId, it, now) }
-            if (fresh.isEmpty()) Uni.createFrom().voidItem() else persist(fresh)
-        }
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery<Any>(SYNC_SQL)
+                .setParameter(1, caseId)
+                .setParameter(2, desiredRefs.joinToString(REF_SEPARATOR))
+                .setParameter(TIME_PARAMETER, now.atOffset(ZoneOffset.UTC))
+                .executeUpdate()
+        }.replaceWithVoid()
 
-    private fun MonitoredSubjectEntity.turn(to: String, now: Instant) {
-        desired = to
-        syncState = PENDING
-        generation += 1
-        attemptCount = 0
-        nextAttemptAt = now
-        pendingSince = now
-        lastError = null
-        updatedAt = now
-    }
+    override suspend fun due(now: Instant, limit: Int): List<MonitoringRegistration> = pool.preparedQuery(
+        "SELECT $ROW FROM kyb_monitored_subjects " +
+            "WHERE sync_state = 'PENDING' AND next_attempt_at <= $1 ORDER BY next_attempt_at, id LIMIT $2",
+    ).execute(Tuple.of(now.utc(), limit)).awaitSuspending().map(::registration)
 
-    private fun newRow(case: UUID, ref: String, now: Instant) = MonitoredSubjectEntity().apply {
-        caseId = case
-        subjectRef = ref
-        desired = REGISTERED
-        syncState = PENDING
-        nextAttemptAt = now
-        pendingSince = now
-        createdAt = now
-        updatedAt = now
-    }
-
-    override suspend fun due(now: Instant, limit: Int): List<MonitoringRegistration> = Panache.withSession {
-        find("syncState = ?1 and nextAttemptAt <= ?2 order by nextAttemptAt, id", PENDING, now).page(0, limit).list()
-    }.awaitSuspending().map { it.toDomain() }
-
-    override suspend fun markSynced(registration: MonitoringRegistration, now: Instant): Boolean =
-        Panache.withTransaction {
-            update(
-                "syncState = ?1, syncedAt = ?2, pendingSince = null, lastError = null, updatedAt = ?2 " +
-                    "where id = ?3 and generation = ?4",
-                SYNCED,
-                now,
-                registration.id,
-                registration.generation,
-            )
-        }.awaitSuspending() > 0
+    override suspend fun markSynced(registration: MonitoringRegistration, now: Instant): Boolean = pool.preparedQuery(
+        "UPDATE kyb_monitored_subjects SET sync_state = 'SYNCED', synced_at = $1, pending_since = NULL, " +
+            "last_error = NULL, updated_at = $1 WHERE id = $2 AND generation = $3",
+    ).execute(Tuple.of(now.utc(), registration.id, registration.generation)).awaitSuspending().rowCount() > 0
 
     override suspend fun markFailed(
         registration: MonitoringRegistration,
@@ -91,100 +61,129 @@ class MonitoringRegistrationStoreImpl(private val pool: Pool) :
         nextAttemptAt: Instant,
         reason: String,
     ) {
-        Panache.withTransaction {
-            update(
-                "attemptCount = attemptCount + 1, nextAttemptAt = ?1, lastError = ?2, updatedAt = ?3 " +
-                    "where id = ?4 and generation = ?5 and syncState = ?6",
-                nextAttemptAt,
-                reason.take(MAX_REASON),
-                now,
-                registration.id,
-                registration.generation,
-                PENDING,
-            )
-        }.awaitSuspending()
+        pool.preparedQuery(
+            "UPDATE kyb_monitored_subjects SET attempt_count = attempt_count + 1, next_attempt_at = $1, " +
+                "last_error = $2, updated_at = $3 WHERE id = $4 AND generation = $5 AND sync_state = 'PENDING'",
+        ).execute(
+            Tuple.of(nextAttemptAt.utc(), reason.take(MAX_REASON), now.utc(), registration.id, registration.generation),
+        ).awaitSuspending()
     }
 
-    override suspend fun findBySubjectRef(subjectRef: String): List<MonitoringRegistration> = Panache.withSession {
-        list("subjectRef", subjectRef)
-    }.awaitSuspending().map { it.toDomain() }
+    override suspend fun markRefused(registration: MonitoringRegistration, now: Instant, reason: String) {
+        pool.preparedQuery(
+            "UPDATE kyb_monitored_subjects SET sync_state = 'REFUSED', attempt_count = attempt_count + 1, " +
+                "pending_since = NULL, last_error = $1, updated_at = $2 " +
+                "WHERE id = $3 AND generation = $4 AND sync_state = 'PENDING'",
+        ).execute(Tuple.of(reason.take(MAX_REASON), now.utc(), registration.id, registration.generation))
+            .awaitSuspending()
+    }
 
-    override suspend fun wantedElsewhere(subjectRef: String, exceptCaseId: UUID): Boolean = Panache.withSession {
-        count("subjectRef = ?1 and caseId <> ?2 and desired = ?3", subjectRef, exceptCaseId, REGISTERED)
-    }.awaitSuspending() > 0
+    override suspend fun findBySubjectRef(subjectRef: String): List<MonitoringRegistration> =
+        pool.preparedQuery("SELECT $ROW FROM kyb_monitored_subjects WHERE subject_ref = $1")
+            .execute(Tuple.of(subjectRef)).awaitSuspending().map(::registration)
 
-    override suspend fun requeueConfirmedBefore(confirmedBefore: Instant, now: Instant, limit: Int): Int =
-        Panache.withTransaction {
-            find(
-                "desired = ?1 and syncState = ?2 and syncedAt < ?3 order by syncedAt, id",
-                REGISTERED,
-                SYNCED,
-                confirmedBefore,
-            ).page(0, limit).list().map { rows ->
-                rows.forEach { row ->
-                    row.syncState = PENDING
-                    row.attemptCount = 0
-                    row.nextAttemptAt = now
-                    row.pendingSince = now
-                    row.updatedAt = now
-                }
-                rows.size
-            }
-        }.awaitSuspending()
+    override suspend fun wantedElsewhere(subjectRef: String, exceptCaseId: UUID): Boolean = pool.preparedQuery(
+        "SELECT EXISTS (SELECT 1 FROM kyb_monitored_subjects " +
+            "WHERE subject_ref = $1 AND case_id <> $2 AND desired = 'REGISTERED')",
+    ).execute(Tuple.of(subjectRef, exceptCaseId)).awaitSuspending().iterator().next().getBoolean(0)
+
+    override suspend fun reassertElsewhere(subjectRef: String, exceptCaseId: UUID, now: Instant) {
+        pool.preparedQuery(
+            "UPDATE kyb_monitored_subjects SET $REQUEUE, generation = generation + 1 " +
+                "WHERE subject_ref = $2 AND case_id <> $3 AND desired = 'REGISTERED'",
+        ).execute(Tuple.of(now.utc(), subjectRef, exceptCaseId)).awaitSuspending()
+    }
+
+    override suspend fun requeueSettledBefore(before: Instant, now: Instant, limit: Int): Int = pool.preparedQuery(
+        // The outer condition repeats the inner one: a row that a case write turned to
+        // WITHDRAWN between the two is re-checked by the UPDATE and left alone.
+        "UPDATE kyb_monitored_subjects SET $REQUEUE WHERE $SETTLED AND updated_at < $2 AND id IN " +
+            "(SELECT id FROM kyb_monitored_subjects WHERE $SETTLED AND updated_at < $2 " +
+            "ORDER BY updated_at, id LIMIT $3)",
+    ).execute(Tuple.of(now.utc(), before.utc(), limit)).awaitSuspending().rowCount()
 
     override suspend fun casesToBackfill(limit: Int): List<UUID> =
         pool.preparedQuery(BACKFILL_SQL).execute(Tuple.of(limit)).awaitSuspending().map { it.getUUID(0) }
 
+    override suspend fun statesOf(caseId: UUID): Map<String, String> = pool.preparedQuery(
+        "SELECT subject_ref, sync_state FROM kyb_monitored_subjects WHERE case_id = $1 AND desired = 'REGISTERED'",
+    ).execute(Tuple.of(caseId)).awaitSuspending().associate { it.getString(0) to it.getString(1) }
+
     override suspend fun stats(now: Instant): MonitoringStats {
-        val row = pool.preparedQuery(STATS_SQL).execute(Tuple.of(now.atOffset(ZoneOffset.UTC)))
-            .awaitSuspending().iterator().next()
+        val row = pool.preparedQuery(STATS_SQL).execute(Tuple.of(now.utc())).awaitSuspending().iterator().next()
+        var column = 0
         return MonitoringStats(
-            registered = row.getLong(REGISTERED_COL),
-            pending = row.getLong(PENDING_COL),
-            oldestPendingAgeSeconds = row.getLong(PENDING_AGE_COL),
-            openReviews = row.getLong(REVIEWS_COL),
-            oldestOpenReviewAgeSeconds = row.getLong(REVIEW_AGE_COL),
-            unscreenedApprovedCases = row.getLong(UNSCREENED_COL),
+            registered = row.getLong(column++),
+            pending = row.getLong(column++),
+            oldestPendingAgeSeconds = row.getLong(column++),
+            refused = row.getLong(column++),
+            openReviews = row.getLong(column++),
+            oldestOpenReviewAgeSeconds = row.getLong(column++),
+            exitsRequired = row.getLong(column++),
+            unscreenedApprovedCases = row.getLong(column),
         )
     }
 
-    private fun MonitoredSubjectEntity.toDomain() = MonitoringRegistration(
-        id = requireNotNull(id),
-        caseId = caseId,
-        subjectRef = subjectRef,
-        desired = MonitoringDesired.valueOf(desired),
-        generation = generation,
-        attemptCount = attemptCount,
+    private fun registration(row: Row) = MonitoringRegistration(
+        id = row.getLong("id"),
+        caseId = row.getUUID("case_id"),
+        subjectRef = row.getString("subject_ref"),
+        desired = MonitoringDesired.valueOf(row.getString("desired")),
+        generation = row.getLong("generation"),
+        attemptCount = row.getInteger("attempt_count"),
     )
 
+    private fun Instant.utc(): OffsetDateTime = atOffset(ZoneOffset.UTC)
+
     private companion object {
-        val REGISTERED = MonitoringDesired.REGISTERED.name
-        val WITHDRAWN = MonitoringDesired.WITHDRAWN.name
-        const val PENDING = "PENDING"
-        const val SYNCED = "SYNCED"
         const val MAX_REASON = 64
+        const val TIME_PARAMETER = 3
 
-        const val REGISTERED_COL = 0
-        const val PENDING_COL = 1
-        const val PENDING_AGE_COL = 2
-        const val REVIEWS_COL = 3
-        const val REVIEW_AGE_COL = 4
-        const val UNSCREENED_COL = 5
+        /** A reference is a UUID or `kyb-case:<uuid>:<hex>`; neither can contain this. */
+        const val REF_SEPARATOR = ","
 
-        /** A case counts as approved exactly as `BusinessOnboardingCase.monitored` defines it. */
-        private const val APPROVED =
-            "(c.status IN ('SIGNED', 'ACTIVE') OR " +
-                "(c.status = 'MANUAL_REVIEW' AND c.monitoring_review_opened_at IS NOT NULL))"
+        const val ROW = "id, case_id, subject_ref, desired, generation, attempt_count"
+
+        /** Due now, from attempt zero; `$1` is the time. */
+        const val REQUEUE =
+            "sync_state = 'PENDING', attempt_count = 0, next_attempt_at = $1, pending_since = $1, updated_at = $1"
+
+        const val SETTLED = "desired = 'REGISTERED' AND sync_state IN ('SYNCED', 'REFUSED')"
 
         /**
+         * ?1 case id, ?2 the desired references joined by [REF_SEPARATOR], ?3 the time. The insert
+         * adds what is missing and yields to a row that exists; the update turns every row whose
+         * desired state disagrees with ?2. A row the insert just added is not visible to the
+         * update of the same statement, and needs no turning.
+         */
+        const val SYNC_SQL =
+            "WITH wanted AS (SELECT r AS ref FROM unnest(string_to_array(cast(?2 as text), ',')) AS r " +
+                "WHERE r <> ''), " +
+                "added AS (INSERT INTO kyb_monitored_subjects " +
+                "(id, case_id, subject_ref, desired, sync_state, next_attempt_at, pending_since, " +
+                "created_at, updated_at) " +
+                "SELECT nextval('kyb_monitored_subjects_seq'), ?1, ref, 'REGISTERED', 'PENDING', ?3, ?3, ?3, ?3 " +
+                "FROM wanted ON CONFLICT (case_id, subject_ref) DO NOTHING) " +
+                "UPDATE kyb_monitored_subjects m SET " +
+                "desired = CASE WHEN m.desired = 'REGISTERED' THEN 'WITHDRAWN' ELSE 'REGISTERED' END, " +
+                "sync_state = 'PENDING', generation = m.generation + 1, attempt_count = 0, " +
+                "next_attempt_at = ?3, pending_since = ?3, last_error = NULL, updated_at = ?3 " +
+                "WHERE m.case_id = ?1 " +
+                "AND (m.desired = 'REGISTERED') <> (m.subject_ref IN (SELECT ref FROM wanted))"
+
+        /**
+         * A case counts as approved exactly as `BusinessOnboardingCase.monitored` defines it.
          * `"key":"` is in the stored document of every screened subject, so the LIKE keeps a case
          * whose screening holds nobody out of the list instead of returning it on every run.
          */
         const val BACKFILL_SQL =
-            "SELECT c.case_id FROM kyb_cases c WHERE $APPROVED " +
+            "SELECT c.case_id FROM kyb_cases c WHERE c.status IN ('SIGNED', 'ACTIVE') " +
                 "AND c.screening_json LIKE '%\"key\":\"%' " +
                 "AND NOT EXISTS (SELECT 1 FROM kyb_monitored_subjects m WHERE m.case_id = c.case_id) " +
                 "ORDER BY c.id LIMIT $1"
+
+        private const val OPEN_REVIEW =
+            "c.monitoring_review_opened_at IS NOT NULL AND c.monitoring_exit_required_at IS NULL"
 
         const val STATS_SQL =
             "SELECT " +
@@ -193,11 +192,14 @@ class MonitoringRegistrationStoreImpl(private val pool: Pool) :
                 "(SELECT count(*) FROM kyb_monitored_subjects WHERE sync_state = 'PENDING'), " +
                 "(SELECT COALESCE(EXTRACT(EPOCH FROM ($1::timestamptz - min(pending_since))), 0)::bigint " +
                 "  FROM kyb_monitored_subjects WHERE sync_state = 'PENDING'), " +
-                "(SELECT count(*) FROM kyb_cases c " +
-                "  WHERE c.status = 'MANUAL_REVIEW' AND c.monitoring_review_opened_at IS NOT NULL), " +
+                "(SELECT count(*) FROM kyb_monitored_subjects " +
+                "  WHERE desired = 'REGISTERED' AND sync_state = 'REFUSED'), " +
+                "(SELECT count(*) FROM kyb_cases c WHERE $OPEN_REVIEW), " +
                 "(SELECT COALESCE(EXTRACT(EPOCH FROM " +
                 "  ($1::timestamptz - min(c.monitoring_review_opened_at))), 0)::bigint " +
-                "  FROM kyb_cases c WHERE c.status = 'MANUAL_REVIEW' AND c.monitoring_review_opened_at IS NOT NULL), " +
+                "  FROM kyb_cases c WHERE $OPEN_REVIEW), " +
+                "(SELECT count(*) FROM kyb_cases c WHERE c.monitoring_exit_required_at IS NOT NULL " +
+                "  AND c.status IN ('SIGNED', 'ACTIVE')), " +
                 "(SELECT count(*) FROM kyb_cases c WHERE c.status IN ('SIGNED', 'ACTIVE') AND c.screening_json IS NULL)"
     }
 }

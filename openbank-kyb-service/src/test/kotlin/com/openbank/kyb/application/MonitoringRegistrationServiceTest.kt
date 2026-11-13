@@ -5,12 +5,14 @@
 package com.openbank.kyb.application
 
 import com.openbank.kyb.application.port.out.BusinessOnboardingCaseRepository
+import com.openbank.kyb.application.port.out.ConcurrentCaseUpdateException
 import com.openbank.kyb.application.port.out.KybMonitoringMetricsPort
 import com.openbank.kyb.application.port.out.MonitoredSubjectRegistryException
 import com.openbank.kyb.application.port.out.MonitoredSubjectRegistryPort
 import com.openbank.kyb.application.port.out.MonitoringDesired
 import com.openbank.kyb.application.port.out.MonitoringRegistration
 import com.openbank.kyb.application.port.out.MonitoringRegistrationStore
+import com.openbank.kyb.application.port.out.RegistryFailure
 import com.openbank.kyb.application.usecase.MonitoringRegistrationService
 import com.openbank.kyb.application.usecase.MonitoringRunOutcome
 import com.openbank.kyb.application.usecase.MonitoringSettings
@@ -96,7 +98,7 @@ class MonitoringRegistrationServiceTest {
     @BeforeEach
     fun defaults() {
         coEvery { store.casesToBackfill(any()) } returns emptyList()
-        coEvery { store.requeueConfirmedBefore(any(), any(), any()) } returns 0
+        coEvery { store.requeueSettledBefore(any(), any(), any()) } returns 0
         coEvery { store.due(any(), any()) } returns emptyList()
         coEvery { store.markSynced(any(), any()) } returns true
         coEvery { store.wantedElsewhere(any(), any()) } returns false
@@ -141,7 +143,8 @@ class MonitoringRegistrationServiceTest {
     fun `a refusal is recorded with its reason and retried later, never dropped`(): Unit = runBlocking {
         val due = row(MonitoringDesired.REGISTERED, attempts = 2)
         coEvery { store.due(now, 50) } returns listOf(due)
-        coEvery { registry.register(any(), any(), any()) } throws MonitoredSubjectRegistryException("http_503", null)
+        coEvery { registry.register(any(), any(), any()) } throws
+            MonitoredSubjectRegistryException("http_503", RegistryFailure.TRANSIENT, null)
 
         assertThat(service().run()).isEqualTo(MonitoringRunOutcome.COMPLETED)
 
@@ -166,6 +169,44 @@ class MonitoringRegistrationServiceTest {
         service().run()
         coVerify(exactly = 1) { registry.withdraw(ref) }
         coVerify(exactly = 2) { store.markSynced(due, now) }
+        // Either way every other case holding the reference is sent again: a delete that landed
+        // after its PUT must not leave it recorded as delivered.
+        coVerify(exactly = 2) { store.reassertElsewhere(ref, caseId, now) }
+    }
+
+    @Test
+    fun `a subject the registry refuses leaves the retry loop, a wrong caller does not`(): Unit = runBlocking {
+        val due = row(MonitoringDesired.REGISTERED)
+        coEvery { store.due(now, 50) } returns listOf(due)
+        coEvery { registry.register(any(), any(), any()) } throws
+            MonitoredSubjectRegistryException("http_400", RegistryFailure.REFUSED, null)
+
+        service().run()
+
+        coVerify(exactly = 1) { store.markRefused(due, now, "http_400") }
+        coVerify(exactly = 0) { store.markFailed(any(), any(), any(), any()) }
+        verify(exactly = 1) { metrics.registrationAttempted("refused", "http_400") }
+
+        coEvery { registry.register(any(), any(), any()) } throws
+            MonitoredSubjectRegistryException("http_403", RegistryFailure.UNAUTHORISED, null)
+        service().run()
+        // Still owed and still retried: it heals when the caller is fixed, and it is counted apart.
+        coVerify(exactly = 1) { store.markFailed(due, now, any(), "http_403") }
+        coVerify(exactly = 1) { store.markRefused(any(), any(), any()) }
+        verify(exactly = 1) { metrics.registrationAttempted("unauthorised", "http_403") }
+    }
+
+    @Test
+    fun `one row that fails unexpectedly does not cost the others their turn`(): Unit = runBlocking {
+        val first = row(MonitoringDesired.REGISTERED)
+        val second = first.copy(id = 8)
+        coEvery { store.due(now, 50) } returns listOf(first, second)
+        coEvery { store.markSynced(first, now) } throws IllegalStateException("connection lost")
+
+        assertThat(service().run()).isEqualTo(MonitoringRunOutcome.COMPLETED)
+
+        coVerify(exactly = 1) { store.markSynced(second, now) }
+        verify(exactly = 1) { metrics.registrationAttempted("failed", "internal") }
     }
 
     @Test
@@ -196,9 +237,22 @@ class MonitoringRegistrationServiceTest {
 
         service().run()
 
-        val ref = written.captured.screening!!.subjects.single().ref
-        assertThat(ref).isNotNull()
-        assertThat(UUID.fromString(ref).version()).describedAs("a random id, not a time-ordered one").isEqualTo(4)
+        // Screened before references existed: it keeps the id that screen used.
+        assertThat(written.captured.screening!!.subjects.single().ref).isEqualTo("kyb-case:$caseId:k1")
+    }
+
+    @Test
+    fun `a backfill that loses a race, or fails, does not stop the run`(): Unit = runBlocking {
+        val other = UUID.fromString("0190a000-0000-7000-8000-0000000000c2")
+        coEvery { store.casesToBackfill(50) } returns listOf(other, caseId)
+        coEvery { cases.findById(other) } throws IllegalStateException("connection lost")
+        coEvery { cases.update(any(), null) } throws ConcurrentCaseUpdateException(caseId)
+        val due = row(MonitoringDesired.REGISTERED)
+        coEvery { store.due(now, 50) } returns listOf(due)
+
+        assertThat(service().run()).isEqualTo(MonitoringRunOutcome.COMPLETED)
+
+        coVerify(exactly = 1) { registry.register(ref, false, "Quentin Example") }
     }
 
     @Test

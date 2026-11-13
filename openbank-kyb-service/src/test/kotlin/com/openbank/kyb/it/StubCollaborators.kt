@@ -157,6 +157,15 @@ class StubAresAdapter : RegistryAdapter {
             "71000101" to "Libor Nalezený",
             "71000119" to "Dana Drátová",
             "71000127" to "Emil Plánovaný",
+            "71000135" to "Nora Neviditelná",
+            "71000143" to "Alois Aktivní",
+            "71000151" to "Ctibor Odcházející",
+            "71000160" to "Bohdana Kontrolní",
+            "71000178" to "Hynek Ukončený",
+            "71000186" to "Radka Souběžná",
+            "71000194" to "Jitka Odmítnutá",
+            "71000208" to "Kamil Sdílený",
+            "71000216" to "Lada Druhá",
         )
     }
 
@@ -296,7 +305,7 @@ class StubDocumentGateway : DocumentGateway {
 
 /**
  * Monitored-subject registry double. It accepts everything unless a test sets [failWith], which
- * makes every call fail the way the adapter reports a refusal: by throwing, with a reason.
+ * makes every call fail the way the adapter reports a failure: by throwing, with a reason and a kind.
  * Calls are recorded per reference, so a test asserts on its own subjects only.
  */
 @Alternative
@@ -308,15 +317,15 @@ class StubMonitoredSubjectRegistry : MonitoredSubjectRegistryPort {
     val registered = CopyOnWriteArrayList<Registration>()
     val withdrawn = CopyOnWriteArrayList<String>()
 
-    @Volatile var failWith: String? = null
+    @Volatile var failWith: MonitoredSubjectRegistryException? = null
 
     override suspend fun register(subjectRef: String, organisation: Boolean, name: String) {
-        failWith?.let { throw MonitoredSubjectRegistryException(it, null) }
+        failWith?.let { throw it }
         registered += Registration(subjectRef, organisation, name)
     }
 
     override suspend fun withdraw(subjectRef: String) {
-        failWith?.let { throw MonitoredSubjectRegistryException(it, null) }
+        failWith?.let { throw it }
         withdrawn += subjectRef
     }
 }

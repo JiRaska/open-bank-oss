@@ -4,7 +4,6 @@
 
 package com.openbank.kyb.infrastructure.kafka
 
-import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.kyb.application.port.out.KybMonitoringMetricsPort
 import com.openbank.kyb.application.usecase.MonitoringFindingService
@@ -41,20 +40,25 @@ import java.util.UUID
  *    because a screening event carries the screened name and this consumer has no business with it;
  *  - a missing or unknown type — `unrecognised`, logged at warn. This is what a producer/consumer
  *    disagreement about the wire shape looks like, and nothing else on the channel shows it;
- *  - a finding owned by another service — `foreign_owner`. The owner is compared with the client
- *    this service registers as; a finding addressed to anyone else is not acted on, even if its
- *    reference happens to exist here;
- *  - a finding that cannot be read — `malformed`. Acked: replaying it fails identically forever;
+ *  - a record typed as a finding without a usable owner, finding id or subject reference —
+ *    `malformed`, and NACKED so the channel dead-letters it. Checked before the owner: a body the
+ *    producer changed must not read as somebody else's finding;
+ *  - a well-formed finding owned by another service — `foreign_owner`. The owner is compared with
+ *    the client this service registers as; a finding addressed to anyone else is not acted on,
+ *    even if its reference happens to exist here;
  *  - a kyb-owned finding — whatever [MonitoringFindingService] answered.
  *
  * An infrastructure failure while applying a finding is retried with [EventRetry] and then
- * rethrown; the record is nacked and the channel's configured `failure-strategy` decides what
- * follows.
+ * rethrown; like a malformed finding, the record is nacked and the channel's configured
+ * `failure-strategy` decides what follows.
  *
  * Not gated on `openbank.kyb.monitoring.enabled`. That switch stops this service from REGISTERING;
  * a finding about a subject it registered earlier is still a finding, and dropping it because the
  * switch was later turned off would be a match nobody reviews.
  */
+/** A record typed as a monitoring finding that cannot be one. Carries nothing of the record. */
+class MalformedFindingException : RuntimeException("malformed MONITORED_SUBJECT_MATCHED record")
+
 @ApplicationScoped
 class MonitoredSubjectMatchedConsumer {
 
@@ -74,7 +78,7 @@ class MonitoredSubjectMatchedConsumer {
     suspend fun consume(record: ConsumerRecord<String, String>) {
         // The type comes off the header BEFORE the body is touched.
         when (val type = header(record, OutboxKafkaHeaders.HEADER_EVENT_TYPE)) {
-            EVENT_MATCHED -> decode(record)?.let { handle(it) }
+            EVENT_MATCHED -> handle(record)
             in SIBLING_TYPES -> metrics.findingHandled(MicrometerKybMonitoringMetrics.OUTCOME_IGNORED)
             else -> {
                 // Only the type is logged — never the body, which on this topic can be a screening.
@@ -92,47 +96,61 @@ class MonitoredSubjectMatchedConsumer {
         }
     }
 
-    private suspend fun handle(node: JsonNode) {
-        if (node.path("ownerService").asText("") != settings.ownerClientId) {
+    /**
+     * Shape first, owner second. A record typed as a finding that has no usable owner, finding id
+     * or subject reference is NOT somebody else's finding: it is a producer that changed its body,
+     * and if it were counted as foreign every finding of this service would be acked in silence.
+     */
+    private suspend fun handle(record: ConsumerRecord<String, String>) {
+        val finding = parse(record) ?: run {
+            // Position and type only: never the body.
+            log.errorf(
+                "[%s] a %s record without a usable ownerService, findingId or subjectRef at %s-%d@%d",
+                CHANNEL,
+                EVENT_MATCHED,
+                record.topic(),
+                record.partition(),
+                record.offset(),
+            )
+            metrics.findingHandled(MicrometerKybMonitoringMetrics.OUTCOME_MALFORMED)
+            // Nacked, not acked: the channel dead-letters it, where it can be read and replayed.
+            throw MalformedFindingException()
+        }
+        if (finding.owner != settings.ownerClientId) {
             metrics.findingHandled(MicrometerKybMonitoringMetrics.OUTCOME_FOREIGN_OWNER)
             return
         }
-        val findingId = runCatching { UUID.fromString(node.path("findingId").asText()) }.getOrNull()
-        val subjectRef = node.path("subjectRef").asText("")
-        if (findingId == null || subjectRef.isBlank()) {
-            // The body of a finding names no person, so a prefix of it is safe to log.
-            log.errorf("[%s] finding without a usable findingId or subjectRef, acking: %.200s", CHANNEL, node)
-            metrics.findingHandled(MicrometerKybMonitoringMetrics.OUTCOME_MALFORMED)
-            return
-        }
-        val match = MonitoringMatch(
-            findingId = findingId,
-            matchKind = node.path("matchKind").asText(UNKNOWN),
-            listType = node.path("listType").asText(UNKNOWN),
-            listEntryRef = node.path("listEntryRef").asText(UNKNOWN),
-            listEntryVersion = node.path("listEntryVersion").asText(UNKNOWN),
-            matchScore = node.path("matchScore").asDouble(0.0),
-            matchStatus = node.path("matchStatus").asText(UNKNOWN),
-            detection = node.path("detection").asText(UNKNOWN),
-            receivedAt = Instant.now(clock),
-        )
-        val outcome = EventRetry.withRetry(log, "[$CHANNEL] monitoring finding", findingId) {
-            findings.handle(subjectRef, match)
+        val outcome = EventRetry.withRetry(log, "[$CHANNEL] monitoring finding", finding.match.findingId) {
+            findings.handle(finding.subjectRef, finding.match)
         }
         metrics.findingHandled(outcome.tag)
     }
 
-    @Suppress("TooGenericExceptionCaught")
-    private fun decode(record: ConsumerRecord<String, String>): JsonNode? = try {
-        objectMapper.readTree(record.value()).takeIf { it.isObject } ?: malformed(null)
-    } catch (e: Exception) {
-        malformed(e)
-    }
+    private class Finding(val owner: String, val subjectRef: String, val match: MonitoringMatch)
 
-    private fun malformed(cause: Exception?): JsonNode? {
-        log.errorf(cause, "[%s] undecodable finding body, acking", CHANNEL)
-        metrics.findingHandled(MicrometerKybMonitoringMetrics.OUTCOME_MALFORMED)
-        return null
+    @Suppress("ReturnCount") // one early return per missing required part
+    private fun parse(record: ConsumerRecord<String, String>): Finding? {
+        // Why it could not be read is not interesting, and its text is never logged: null means malformed.
+        val node = runCatching { objectMapper.readTree(record.value()) }.getOrNull()?.takeIf { it.isObject }
+            ?: return null
+        val owner = node.path("ownerService").asText("").takeIf { it.isNotBlank() } ?: return null
+        val subjectRef = node.path("subjectRef").asText("").takeIf { it.isNotBlank() } ?: return null
+        val findingId = runCatching { UUID.fromString(node.path("findingId").asText()) }.getOrNull() ?: return null
+        return Finding(
+            owner,
+            subjectRef,
+            MonitoringMatch(
+                findingId = findingId,
+                matchKind = node.path("matchKind").asText(UNKNOWN),
+                listType = node.path("listType").asText(UNKNOWN),
+                listEntryRef = node.path("listEntryRef").asText(UNKNOWN),
+                listEntryVersion = node.path("listEntryVersion").asText(UNKNOWN),
+                matchScore = node.path("matchScore").asDouble(0.0),
+                matchStatus = node.path("matchStatus").asText(UNKNOWN),
+                detection = node.path("detection").asText(UNKNOWN),
+                receivedAt = Instant.now(clock),
+            ),
+        )
     }
 
     companion object {

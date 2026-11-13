@@ -31,6 +31,8 @@ data class MonitoringRegistration(
  * What the store looks like right now, read from stored timestamps so that a restarted pod reports
  * the same ages as the one it replaced.
  *
+ * @param refused registrations the registry refused for a reason a retry cannot change; each is
+ *   an approved subject that is NOT monitored
  * @param unscreenedApprovedCases approved cases that carry no screening at all: nobody on them
  *   can be registered, because nobody was screened
  */
@@ -38,8 +40,10 @@ data class MonitoringStats(
     val registered: Long,
     val pending: Long,
     val oldestPendingAgeSeconds: Long,
+    val refused: Long,
     val openReviews: Long,
     val oldestOpenReviewAgeSeconds: Long,
+    val exitsRequired: Long,
     val unscreenedApprovedCases: Long,
 )
 
@@ -48,13 +52,17 @@ data class MonitoringStats(
  *
  * [syncInTransaction] is the only writer of the desired state and runs INSIDE the transaction of
  * the case write, so "the case is approved" and "its subjects are to be registered" commit
- * together or not at all. Everything else is the relay's bookkeeping.
+ * together or not at all. Everything else is the relay's bookkeeping, and every one of those
+ * writes is a single conditional statement: none reads a row and writes it back.
  */
+@Suppress("TooManyFunctions") // one conditional statement per thing its three callers ask; none composes another
 interface MonitoringRegistrationStore {
     /**
-     * Brings the rows of [caseId] to [desiredRefs]: a missing reference is added as REGISTERED, a
-     * registered one no longer desired becomes WITHDRAWN, a withdrawn one desired again becomes
-     * REGISTERED. Every row it changes is due immediately. Must be called in an open transaction.
+     * Brings the rows of [caseId] to [desiredRefs] in ONE statement: a missing reference is added
+     * as REGISTERED, a registered one no longer desired becomes WITHDRAWN, a withdrawn one desired
+     * again becomes REGISTERED. Every row it changes is due immediately. Two writers of the same
+     * case cannot collide on a row: the insert yields to an existing one. Must be called in an
+     * open transaction.
      */
     fun syncInTransaction(caseId: UUID, desiredRefs: Set<String>, now: Instant): Uni<Void>
 
@@ -64,8 +72,15 @@ interface MonitoringRegistrationStore {
     /** Records a delivery. False when the row has moved on to a newer generation meanwhile. */
     suspend fun markSynced(registration: MonitoringRegistration, now: Instant): Boolean
 
-    /** Records a failed attempt and when to try again. [reason] is a short machine code. */
+    /** Records a failed attempt that is worth repeating, and when. [reason] is a short machine code. */
     suspend fun markFailed(registration: MonitoringRegistration, now: Instant, nextAttemptAt: Instant, reason: String)
+
+    /**
+     * Records a refusal that repeating cannot change (the registry will not take this subject as
+     * it is). The row leaves the retry loop and the backlog; it is tried again when the case
+     * changes or when it is re-asserted.
+     */
+    suspend fun markRefused(registration: MonitoringRegistration, now: Instant, reason: String)
 
     /** Rows of every case that hold [subjectRef]. */
     suspend fun findBySubjectRef(subjectRef: String): List<MonitoringRegistration>
@@ -74,22 +89,44 @@ interface MonitoringRegistrationStore {
     suspend fun wantedElsewhere(subjectRef: String, exceptCaseId: UUID): Boolean
 
     /**
-     * Makes registered rows whose last confirmation is older than [confirmedBefore] due again, so
-     * the relay re-asserts them. Returns how many.
+     * Makes every row of ANOTHER case that wants [subjectRef] registered due again, at a new
+     * generation. Called after a withdrawal of a shared reference: whatever was in flight for
+     * those rows can no longer be recorded as delivered, so they are sent again.
      */
-    suspend fun requeueConfirmedBefore(confirmedBefore: Instant, now: Instant, limit: Int): Int
+    suspend fun reassertElsewhere(subjectRef: String, exceptCaseId: UUID, now: Instant)
 
     /**
-     * Approved cases with a screening whose current subjects are not all in the store: approved
-     * before registration existed, or written by a path that did not go through it.
+     * Makes registered rows that were last confirmed, or refused, before [before] due again.
+     * Returns how many.
+     */
+    suspend fun requeueSettledBefore(before: Instant, now: Instant, limit: Int): Int
+
+    /**
+     * Approved cases that have a screening and no row at all: approved before registration
+     * existed. A case that already has rows is kept in step by its own writes, not from here.
      */
     suspend fun casesToBackfill(limit: Int): List<UUID>
+
+    /** Delivery state per reference of one case: `PENDING` | `SYNCED` | `REFUSED`, for the operator's view. */
+    suspend fun statesOf(caseId: UUID): Map<String, String>
 
     suspend fun stats(now: Instant): MonitoringStats
 }
 
+/** Why a registry call did not go through, by what the relay must do about it. */
+enum class RegistryFailure {
+    /** Unreachable, timed out, 5xx, throttled: repeating it may work. */
+    TRANSIENT,
+
+    /** The registry does not accept this caller (401/403): nothing is registered until that is fixed. */
+    UNAUTHORISED,
+
+    /** The registry will not take this subject as it is (any other 4xx): repeating it cannot work. */
+    REFUSED,
+}
+
 /** The registry could not be told. [reason] is a short machine code safe to store and to tag a metric with. */
-class MonitoredSubjectRegistryException(val reason: String, cause: Throwable?) :
+class MonitoredSubjectRegistryException(val reason: String, val kind: RegistryFailure, cause: Throwable?) :
     RuntimeException("monitored-subject registry call failed: $reason", cause)
 
 /**
@@ -108,7 +145,7 @@ interface MonitoredSubjectRegistryPort {
 
 /** Counters and gauges of ongoing monitoring; a port so the use cases stay framework-free. */
 interface KybMonitoringMetricsPort {
-    /** One relay attempt: [outcome] is `registered` | `withdrawn` | `failed`; [reason] only for a failure. */
+    /** One relay attempt: [outcome] is `registered` | `withdrawn` | `failed` | `unauthorised` | `refused`; [reason] unless delivered. */
     fun registrationAttempted(outcome: String, reason: String = "none")
 
     /** One record on the findings channel by what became of it; see `MonitoringFindingOutcome`. */

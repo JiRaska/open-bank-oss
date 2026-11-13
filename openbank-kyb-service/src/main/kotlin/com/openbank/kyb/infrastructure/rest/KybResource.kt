@@ -281,7 +281,9 @@ class KybResource {
         } else {
             requireOperator()
         }
-        return Response.ok(CaseResponse.from(case, customerPartyId)).build()
+        // The registry state of each subject is the operator's to see, and only on this one-case read.
+        val monitoring = if (customerPartyId == null) onboarding.monitoringStates(id) else emptyMap()
+        return Response.ok(CaseResponse.from(case, customerPartyId, monitoring)).build()
     }
 
     @POST

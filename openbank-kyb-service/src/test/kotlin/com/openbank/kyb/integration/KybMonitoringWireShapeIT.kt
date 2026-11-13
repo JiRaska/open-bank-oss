@@ -129,10 +129,10 @@ class KybMonitoringWireShapeIT {
             producer.send(record(MonitoredSubjectMatchedWire.EVENT_TYPE, finding)).get(SEND_SECONDS, TimeUnit.SECONDS)
         }
 
-        await("the case to be under a monitoring review") { journey.stored(caseId).status == "MANUAL_REVIEW" }
+        await("the case to be under a monitoring review") { journey.stored(caseId).reviewOpened }
         await("the redelivery to be counted") { counted("duplicate") == 1.0 }
         val reviewed = journey.stored(caseId)
-        assertThat(reviewed.reviewFrom).isEqualTo("SIGNED")
+        assertThat(reviewed.status).describedAs("the review sits beside the status").isEqualTo("SIGNED")
         assertThat(reviewed.screeningJson).contains(findingId.toString())
         // Exactly one finding recorded, although it was delivered twice and a foreign one named the same subject.
         assertThat(Regex("\"findingId\"").findAll(reviewed.screeningJson).count()).isEqualTo(1)
@@ -141,6 +141,19 @@ class KybMonitoringWireShapeIT {
         assertThat(counted("unrecognised")).isEqualTo(1.0)
         assertThat(counted("ignored")).isEqualTo(1.0)
         assertThat(counted("malformed")).isEqualTo(0.0)
+
+        // A record typed as a finding whose body lost its owner is nacked into the dead-letter topic.
+        producer().use {
+            it.send(
+                record(
+                    MonitoredSubjectMatchedWire.EVENT_TYPE,
+                    MonitoredSubjectMatchedWire.json(MonitoredSubjectMatchedWire.body(person) - "ownerService"),
+                ),
+            ).get(SEND_SECONDS, TimeUnit.SECONDS)
+        }
+        await("the malformed finding to reach the dead-letter topic") { deadLettered() == 1L }
+        assertThat(counted("malformed")).isGreaterThanOrEqualTo(1.0)
+        assertThat(counted("foreign_owner")).isEqualTo(1.0)
     }
 
     private fun record(eventType: String, body: String): ProducerRecord<String, String> {
@@ -170,6 +183,12 @@ class KybMonitoringWireShapeIT {
         ),
     )
 
+    private fun deadLettered(): Long = Admin.create(mapOf<String, Any>("bootstrap.servers" to bootstrap)).use { admin ->
+        val partition = org.apache.kafka.common.TopicPartition(DLQ, 0)
+        admin.listOffsets(mapOf(partition to org.apache.kafka.clients.admin.OffsetSpec.latest()))
+            .partitionResult(partition).get(SEND_SECONDS, TimeUnit.SECONDS).offset()
+    }
+
     private fun counted(outcome: String): Double =
         meters.find(MicrometerKybMonitoringMetrics.FINDINGS).tag("outcome", outcome).counter()?.count() ?: -1.0
 
@@ -184,6 +203,7 @@ class KybMonitoringWireShapeIT {
 
     private companion object {
         const val KEY = "kyb-monitoring-wire-it"
+        const val DLQ = "openbank.dlq.kyb.sanctions-monitoring-in"
         const val SEND_SECONDS = 20L
         const val AWAIT_SECONDS = 60L
         const val POLL_MS = 250L
@@ -192,7 +212,7 @@ class KybMonitoringWireShapeIT {
             "openbank.party.events",
             "openbank.kyb.events",
             "openbank.dlq.kyb.party-events-in",
-            "openbank.dlq.kyb.sanctions-monitoring-in",
+            DLQ,
         )
     }
 }

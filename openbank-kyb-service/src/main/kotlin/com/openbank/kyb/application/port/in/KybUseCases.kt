@@ -147,6 +147,12 @@ data class DisposeFindingCommand(
 interface BusinessOnboardingUseCase {
     suspend fun start(cmd: StartCaseCommand): BusinessOnboardingCase
     suspend fun get(caseId: UUID): BusinessOnboardingCase
+
+    /**
+     * Where each monitored subject of the case stands with the registry, by reference: `PENDING`,
+     * `SYNCED` or `REFUSED`. Operators only; a `REFUSED` subject is approved and not monitored.
+     */
+    suspend fun monitoringStates(caseId: UUID): Map<String, String>
     suspend fun listForParty(partyId: UUID): List<BusinessOnboardingCase>
     suspend fun listByStatus(status: CaseStatus, page: Int, size: Int): List<BusinessOnboardingCase>
     suspend fun matchInitiator(cmd: MatchInitiatorCommand): BusinessOnboardingCase

@@ -55,10 +55,14 @@ data class ScreeningSubject(
     val dispositionReason: String? = null,
     val disposedAt: Instant? = null,
     /**
-     * The opaque reference this subject is screened and monitored under: what the screen sends as
-     * `subjectId` and what the monitored-subject registry is keyed by (ADR-0376 D1). A random
-     * UUID, or the entity's party id — never derived from the name, because it travels in a URL
-     * path and comes back on an event. Null on a subject screened before references existed.
+     * The identity this subject is screened and monitored under: what the screen sends as
+     * `subjectId` and what the monitored-subject registry is keyed by, so that an analyst's
+     * clearance of the subject binds in both (ADR-0376 D1). The entity's is its party id, always:
+     * an entity is not screened before it has a party, so a clearance follows the party. Everyone
+     * else first screened from this release on has a random UUID — a reference travels in a URL
+     * path and comes back on an event, so nothing about a person may be derivable from it. A
+     * person screened by an earlier release keeps the id that screen used
+     * ([CaseScreening.withRefs]). Never changed once given; null means "cannot be screened yet".
      */
     val ref: String? = null,
     /** What ongoing monitoring reported about this subject after approval. Operators only. */
@@ -231,35 +235,46 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
 
     /**
      * [fresh] is the case's CURRENT subject list. Answers already obtained for people still on it
-     * are kept. A subject that LEFT is dropped only if it was clear or never answered; one that
-     * carries a finding stays, marked no longer current, and keeps counting until an operator
-     * decides it — otherwise taking a listed person off the declarations would approve the case.
+     * are kept. A subject that LEFT is never forgotten: it stays, marked no longer current. That
+     * keeps a finding counting until an operator decides it, and it keeps the subject's reference,
+     * so a person who comes back is the same subject to sanctions-service and not a new one.
+     *
+     * With [UboSource.UNAVAILABLE] nobody could say who owns the entity, so the absence of a
+     * subject from [fresh] proves nothing and NOBODY is marked as having left: an outage of the
+     * ownership register may add subjects, it never removes one.
      */
     fun rebuilt(fresh: List<ScreeningSubject>, ownerSource: UboSource): CaseScreening {
         val known = subjects.associateBy { it.key }
         val freshKeys = fresh.map { it.key }.toSet()
         val now = fresh.map { known[it.key]?.copy(kind = it.kind, name = it.name, current = true) ?: it }
-        val leftWithFinding = subjects.filter { it.key !in freshKeys && it.finding }.map { it.copy(current = false) }
-        return CaseScreening(now + leftWithFinding, ownerSource)
+        val absent = subjects.filter { it.key !in freshKeys }
+        val kept = if (ownerSource == UboSource.UNAVAILABLE) absent else absent.map { it.copy(current = false) }
+        return CaseScreening(now + kept, ownerSource)
     }
 
     /** The current subjects that carry a reference: the set ongoing monitoring is registered for. */
     val monitorable: List<ScreeningSubject> get() = subjects.filter { it.current && it.ref != null }
 
     /**
-     * Gives every current subject that has none its opaque reference. The entity takes
-     * [entityRef] (its party id, so an analyst's clearance follows the party) when there is one;
-     * everyone else takes a value from [mint], which must be random and must not be derived from
-     * anything about the person. A reference is never changed once given.
+     * Gives every current subject that has none its reference; a reference is never changed.
+     *
+     * The entity takes its party id and nothing else; while it has no party it gets no reference,
+     * is therefore not screened, and the case cannot be approved. A person with NO answer yet
+     * takes a value from [mint], which must be random. A person who already HAS an answer was
+     * screened by a release that had no references, under an id built from the case and the
+     * subject key, and keeps exactly that id: the check, and any clearance an analyst recorded on
+     * it, are keyed by it in sanctions-service, and a new id would orphan both and re-flag a
+     * cleared subject.
      */
-    fun withRefs(entityRef: String?, mint: () -> String): CaseScreening {
+    fun withRefs(caseId: UUID, entityPartyId: UUID?, mint: () -> String): CaseScreening {
         if (subjects.none { it.current && it.ref == null }) return this
         return copy(
             subjects = subjects.map {
                 when {
                     !it.current || it.ref != null -> it
-                    it.kind == ScreeningSubjectKind.ENTITY && entityRef != null -> it.copy(ref = entityRef)
-                    else -> it.copy(ref = mint())
+                    it.kind == ScreeningSubjectKind.ENTITY -> it.copy(ref = entityPartyId?.toString())
+                    it.sanctions == ScreeningVerdict.PENDING -> it.copy(ref = mint())
+                    else -> it.copy(ref = "kyb-case:$caseId:${it.key}")
                 }
             },
         )

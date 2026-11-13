@@ -182,7 +182,7 @@ tests:
             exp_annotations:
               subject_period: continuous
               summary: "kyb-service acked a monitoring finding it could not route to a case (unrecognised)"
-              description: "`openbank_kyb_monitoring_findings_total{outcome=\"unrecognised\"}` moved in kyb within the last hour. `unrecognised`: a record on the sanctions screening topic carried a missing or unknown `ce-type` header — sanctions-service changed how it types its events, or a new type joined the topic; compare with the committed kyb-service/sanctions-service pact. `unknown_subject`: the registry holds a subject under kyb-service's client that kyb-service has no record of, so its finding reaches no case — look for a registration made outside the relay, or a store that was restored from an older backup. `not_monitored`: the finding's case has ended or no longer carries the subject, and its withdrawal had not reached the registry yet. In all three the match itself was NOT reviewed by anyone."
+              description: "`openbank_kyb_monitoring_findings_total{outcome=\"unrecognised\"}` moved in kyb within the last hour. `unrecognised`: a record on the sanctions screening topic carried a missing or unknown `ce-type` header — sanctions-service changed how it types its events, or a new type joined the topic; compare with the committed kyb-service/sanctions-service pact. `malformed`: a record typed as a finding had no usable `ownerService`, `findingId` or `subjectRef` — the producer changed the body; the record is in `openbank.dlq.kyb.sanctions-monitoring-in`. `unknown_subject`: the registry holds a subject under kyb-service's client that kyb-service has no record of, so its finding reaches no case — look for a registration made outside the relay, or a store that was restored from an older backup. `not_monitored`: the finding's case has ended or no longer carries the subject, and its withdrawal had not reached the registry yet. In every one of them the match itself was NOT reviewed by anyone."
       - eval_time: 120m
         alertname: KybMonitoringFindingNotRouted
         exp_alerts: []
@@ -202,4 +202,138 @@ tests:
             exp_annotations:
               subject_period: continuous
               summary: "kyb-service acked a monitoring finding it could not route to a case (unknown_subject)"
-              description: "`openbank_kyb_monitoring_findings_total{outcome=\"unknown_subject\"}` moved in kyb within the last hour. `unrecognised`: a record on the sanctions screening topic carried a missing or unknown `ce-type` header — sanctions-service changed how it types its events, or a new type joined the topic; compare with the committed kyb-service/sanctions-service pact. `unknown_subject`: the registry holds a subject under kyb-service's client that kyb-service has no record of, so its finding reaches no case — look for a registration made outside the relay, or a store that was restored from an older backup. `not_monitored`: the finding's case has ended or no longer carries the subject, and its withdrawal had not reached the registry yet. In all three the match itself was NOT reviewed by anyone."
+              description: "`openbank_kyb_monitoring_findings_total{outcome=\"unknown_subject\"}` moved in kyb within the last hour. `unrecognised`: a record on the sanctions screening topic carried a missing or unknown `ce-type` header — sanctions-service changed how it types its events, or a new type joined the topic; compare with the committed kyb-service/sanctions-service pact. `malformed`: a record typed as a finding had no usable `ownerService`, `findingId` or `subjectRef` — the producer changed the body; the record is in `openbank.dlq.kyb.sanctions-monitoring-in`. `unknown_subject`: the registry holds a subject under kyb-service's client that kyb-service has no record of, so its finding reaches no case — look for a registration made outside the relay, or a store that was restored from an older backup. `not_monitored`: the finding's case has ended or no longer carries the subject, and its withdrawal had not reached the registry yet. In every one of them the match itself was NOT reviewed by anyone."
+  - name: a finding with a body the producer changed is malformed, and that fires too
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyb_monitoring_findings_total{namespace="kyb",pod="kyb-test",outcome="malformed"}'
+        values: 0+0x60 1+1x120
+      - series: 'openbank_kyb_monitoring_findings_total{namespace="kyb",pod="kyb-test",outcome="foreign_owner"}'
+        values: 0+0x180
+    alert_rule_test:
+      - eval_time: 59m
+        alertname: KybMonitoringFindingNotRouted
+        exp_alerts: []
+      - eval_time: 65m
+        alertname: KybMonitoringFindingNotRouted
+        exp_alerts:
+          - exp_labels:
+              namespace: kyb
+              outcome: malformed
+              severity: warning
+            exp_annotations:
+              subject_period: "continuous"
+              summary: "kyb-service acked a monitoring finding it could not route to a case (malformed)"
+              description: "`openbank_kyb_monitoring_findings_total{outcome=\"malformed\"}` moved in kyb within the last hour. `unrecognised`: a record on the sanctions screening topic carried a missing or unknown `ce-type` header — sanctions-service changed how it types its events, or a new type joined the topic; compare with the committed kyb-service/sanctions-service pact. `malformed`: a record typed as a finding had no usable `ownerService`, `findingId` or `subjectRef` — the producer changed the body; the record is in `openbank.dlq.kyb.sanctions-monitoring-in`. `unknown_subject`: the registry holds a subject under kyb-service's client that kyb-service has no record of, so its finding reaches no case — look for a registration made outside the relay, or a store that was restored from an older backup. `not_monitored`: the finding's case has ended or no longer carries the subject, and its withdrawal had not reached the registry yet. In every one of them the match itself was NOT reviewed by anyone."
+  # ---- KybMonitoringRegistryUnauthorised -------------------------------------------------------
+  - name: a wrong caller - quiet at zero and for transient failures, fires on the first 403
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyb_monitoring_registrations_total{namespace="kyb",pod="kyb-test",outcome="unauthorised",reason="http_403"}'
+        values: 0+0x60 1+1x60
+      - series: 'openbank_kyb_monitoring_registrations_total{namespace="kyb",pod="kyb-test",outcome="failed",reason="http_503"}'
+        values: 0+1x120
+    alert_rule_test:
+      - eval_time: 59m
+        alertname: KybMonitoringRegistryUnauthorised
+        exp_alerts: []
+      - eval_time: 62m
+        alertname: KybMonitoringRegistryUnauthorised
+        exp_alerts:
+          - exp_labels:
+              namespace: kyb
+              severity: critical
+            exp_annotations:
+              subject_period: "continuous"
+              summary: "the monitored-subject registry does not accept kyb-service as a caller"
+              description: "`openbank_kyb_monitoring_registrations_total{outcome=\"unauthorised\"}` moved in kyb: sanctions-service answered 401 or 403 to a registration or withdrawal. `http_403` is the registry refusing the client (kyb-service must call as its OWN client, not the fleet's shared one); `http_401` is no valid token at all. No approved business customer is being registered for monitoring while this lasts. The rows stay owed and are sent once the caller is accepted."
+  # ---- KybMonitoringSubjectRefused -------------------------------------------------------------
+  - name: a refused subject is its own alert and never the backlog one
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyb_monitoring_enabled{namespace="kyb",pod="kyb-test"}'
+        values: 1+0x120
+      - series: 'openbank_kyb_monitoring_registrations_refused{namespace="kyb",pod="kyb-test"}'
+        values: NaN 0+0x29 2+0x90
+      # The refused rows are not pending, so the backlog age stays at zero.
+      - series: 'openbank_kyb_monitoring_registrations_oldest_pending_age_seconds{namespace="kyb",pod="kyb-test"}'
+        values: NaN 0+0x119
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: KybMonitoringSubjectRefused
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: KybMonitoringSubjectRefused
+        exp_alerts:
+          - exp_labels:
+              namespace: kyb
+              severity: warning
+            exp_annotations:
+              summary: "sanctions-service refuses to monitor 2 approved business subject(s)"
+              description: "2 subject(s) of approved business cases in kyb were refused by the monitored-subject registry for a reason a retry cannot change (`openbank_kyb_monitoring_registrations_total{outcome=\"refused\"}` carries the HTTP status). They are approved and NOT monitored. The operator view of a case (`GET /api/v1/kyb/cases/{id}`) shows `monitoringState: REFUSED` on the subject: correct what the registry rejects (usually the name as the register spells it), or decide the relationship without monitoring. A refused row is tried again when its case changes and at the next re-assertion."
+      - eval_time: 110m
+        alertname: KybMonitoringRegistrationStuck
+        exp_alerts: []
+  # ---- KybMonitoringApprovedCaseUnscreened -----------------------------------------------------
+  - name: unscreened approved cases - quiet while monitoring is off, fire once it is on
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyb_monitoring_enabled{namespace="kyb",pod="kyb-test"}'
+        values: 0+0x60 1+0x90
+      - series: 'openbank_kyb_monitoring_cases_unscreened{namespace="kyb",pod="kyb-test"}'
+        values: NaN 3+0x150
+    alert_rule_test:
+      - eval_time: 55m
+        alertname: KybMonitoringApprovedCaseUnscreened
+        exp_alerts: []
+      - eval_time: 100m
+        alertname: KybMonitoringApprovedCaseUnscreened
+        exp_alerts:
+          - exp_labels:
+              namespace: kyb
+              severity: warning
+            exp_annotations:
+              summary: "3 approved business case(s) were never screened and are not monitored"
+              description: "3 business case(s) in kyb are SIGNED or ACTIVE with no related-party screening, so ongoing monitoring has no subject to register for them. They were approved while `openbank.kyb.screening.enabled` was off. Nothing screens an approved case after the fact today; until something does, these customers are outside both the onboarding screen and ongoing monitoring."
+  # ---- KybMonitoringExitRequired ---------------------------------------------------------------
+  - name: an exit an operator required pages until it is carried out; none pages nobody
+    interval: 1m
+    input_series:
+      - series: 'openbank_kyb_monitoring_exits_required{namespace="kyb",pod="kyb-test"}'
+        values: NaN 0+0x29 1+0x60
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: KybMonitoringExitRequired
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: KybMonitoringExitRequired
+        exp_alerts:
+          - exp_labels:
+              namespace: kyb
+              severity: critical
+            exp_annotations:
+              summary: "1 approved business relationship(s) must be exited"
+              description: "1 approved business case(s) in kyb carry an operator's decision that the relationship has to end (typically a confirmed sanctions match found by ongoing monitoring). The customer is still active: the party, its mandates and its accounts are untouched, and the case stays monitored. No service acts on `BUSINESS_RELATIONSHIP_EXIT_REQUIRED` yet — restrict and exit the relationship by hand. The review queue's operator view shows `monitoringReview.exitRequiredAt` and the reason."
+  # ---- KybMonitoringFindingDeadLettered --------------------------------------------------------
+  - name: the findings dead-letter topic - quiet while it does not grow, fires when it does
+    interval: 1m
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.kyb.sanctions-monitoring-in",partition="0"}'
+        values: 0+0x60 1+0x60
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.kyb.party-events-in",partition="0"}'
+        values: 0+1x120
+    alert_rule_test:
+      - eval_time: 55m
+        alertname: KybMonitoringFindingDeadLettered
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: KybMonitoringFindingDeadLettered
+        exp_alerts:
+          - exp_labels:
+              topic: openbank.dlq.kyb.sanctions-monitoring-in
+              partition: "0"
+              severity: critical
+            exp_annotations:
+              subject_period: "continuous"
+              summary: "monitoring findings for kyb-service are being dead-lettered"
+              description: "Records are landing in `openbank.dlq.kyb.sanctions-monitoring-in`: kyb-service nacked a MONITORED_SUBJECT_MATCHED record, either because its body could not be read as a finding or because applying it kept failing. Each is a match on an approved business customer that reached no review. Read the topic, fix the cause (kyb-service logs it under `[sanctions-monitoring-in]`), and replay the records onto `openbank.sanctions.screening.event`."
