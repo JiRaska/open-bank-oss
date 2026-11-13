@@ -74,7 +74,7 @@ class DelegatedDomesticPaymentServiceTest {
         // The live grant is the DEFAULT so that every pre-existing test keeps asserting what it
         // was written to assert. A test that wants the authority step to bite overrides it.
         coEvery { authorityPort.factsFor(ACCOUNT_ID, GRANTEE_ID) } returns
-            DelegationFactsLookup.Available(listOf(liveGrant()))
+            DelegationFactsLookup.Available(listOf(liveGrant()), GRANTOR_ID)
     }
 
     private fun liveGrant(capabilities: Set<String> = setOf("ACCOUNT_INITIATE_PAYMENT")) = DelegationFact(
@@ -148,7 +148,11 @@ class DelegatedDomesticPaymentServiceTest {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns binding(
             DelegatedSpendBindingState.PENDING,
         )
-        coEvery { accountLookup.findPartyByAccountId(ACCOUNT_ID) } returns UUID.randomUUID()
+        // Retargeted to the single read: the owner the mismatch check compares is the one that
+        // came with the grants, which is the whole point — it can no longer differ from the owner
+        // the write-time proof compares.
+        coEvery { authorityPort.factsFor(ACCOUNT_ID, GRANTEE_ID) } returns
+            DelegationFactsLookup.Available(listOf(liveGrant()), UUID.randomUUID())
 
         val result = service.createDelegatedPayment(RESERVATION_ID, command())
 
@@ -177,7 +181,11 @@ class DelegatedDomesticPaymentServiceTest {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns binding(
             DelegatedSpendBindingState.PENDING,
         )
-        coEvery { accountLookup.findPartyByAccountId(ACCOUNT_ID) } returns null
+        // Retargeted: the owner now arrives WITH the grants (ADR-0375 D1), so what makes the owner
+        // unresolvable is the authority read failing, not a separate owner lookup. The property is
+        // unchanged — an unresolvable owner is retryable and writes nothing.
+        coEvery { authorityPort.factsFor(ACCOUNT_ID, GRANTEE_ID) } returns
+            DelegationFactsLookup.Unavailable(UnavailableCause.DEPENDENCY_DOWN, "timeout")
 
         val result = service.createDelegatedPayment(RESERVATION_ID, command())
 
@@ -227,7 +235,10 @@ class DelegatedDomesticPaymentServiceTest {
             assertThat(capturedDebitOwner.captured).isEqualTo(GRANTOR_ID)
             assertThat(capturedPayment.captured.transferScope).isEqualTo(DomesticTransferScope.INTERNAL_CLIENT)
             coVerify(exactly = 1) { accountLookup.findAccountIdByIban(DEBTOR_IBAN) }
-            coVerify(exactly = 1) { accountLookup.findPartyByAccountId(ACCOUNT_ID) }
+            // The debit owner is still resolved independently of the command — now from the
+            // authority read, which is the same answer the authority decision used, so the proof
+            // and the decision cannot disagree.
+            coVerify(exactly = 1) { authorityPort.factsFor(ACCOUNT_ID, GRANTEE_ID) }
         }
 
     private fun assertNoCreationSideEffects() {
@@ -315,7 +326,7 @@ class DelegatedDomesticPaymentServiceTest {
     fun `a grant revoked after the reservation no longer buys the payment`(): Unit = runBlocking {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns pendingBinding()
         coEvery { authorityPort.factsFor(ACCOUNT_ID, GRANTEE_ID) } returns
-            DelegationFactsLookup.Available(emptyList())
+            DelegationFactsLookup.Available(emptyList(), GRANTOR_ID)
 
         val result = service.createDelegatedPayment(RESERVATION_ID, command())
 
@@ -327,7 +338,10 @@ class DelegatedDomesticPaymentServiceTest {
     fun `a grant that lost the payment capability no longer buys the payment`(): Unit = runBlocking {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns pendingBinding()
         coEvery { authorityPort.factsFor(ACCOUNT_ID, GRANTEE_ID) } returns
-            DelegationFactsLookup.Available(listOf(liveGrant(capabilities = setOf("ACCOUNT_READ_BALANCES"))))
+            DelegationFactsLookup.Available(
+                listOf(liveGrant(capabilities = setOf("ACCOUNT_READ_BALANCES"))),
+                GRANTOR_ID,
+            )
 
         val result = service.createDelegatedPayment(RESERVATION_ID, command())
 
@@ -359,6 +373,7 @@ class DelegatedDomesticPaymentServiceTest {
             coEvery { authorityPort.factsFor(ACCOUNT_ID, GRANTEE_ID) } returns
                 DelegationFactsLookup.Available(
                     listOf(liveGrant(capabilities = setOf("ACCOUNT_READ_TRANSACTIONS", "ACCOUNT_VIEW_DETAILS"))),
+                    GRANTOR_ID,
                 )
 
             val result = service.createDelegatedPayment(RESERVATION_ID, command())

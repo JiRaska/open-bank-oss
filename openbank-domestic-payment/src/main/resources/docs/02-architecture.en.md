@@ -214,3 +214,13 @@ would be exactly wrong here.
 
 Both arguments to the lookup — the account and the actor — come from the durable reservation
 snapshot, never from the request, so a caller cannot choose whose grants are consulted.
+
+### One read, not two
+
+The owner and the grants come from the same answer. `createDelegatedPayment` used to resolve the
+owner through `AccountLookupPort.findPartyByAccountId` and the grants through the authority
+endpoint, so the owner the authority step compared could differ from the owner the repository's
+binding-row lock later compares — two reads, two answers, and the window between them was invisible
+in both. The authority lookup now carries `ownerPartyId`, and `DelegationAuthorityFacts.outcome`
+takes no owner argument, so the two cannot disagree by construction. It also removes a round trip
+from a path that already calls account-service three times.

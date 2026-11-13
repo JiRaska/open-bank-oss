@@ -31,6 +31,7 @@ import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.fincrime.admission.AdmissionDecision
 import com.openbank.libs.fincrime.admission.DelegationAuthorityFacts
+import com.openbank.libs.fincrime.admission.DelegationFactsLookup
 import com.openbank.libs.fincrime.admission.StepOutcome
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -199,7 +200,13 @@ class DomesticPaymentService(
                 "Debtor account coordinates do not resolve to the reserved account",
             )
         }
-        val resolvedOwnerPartyId = accountLookupPort.findPartyByAccountId(snapshot.resourceId)
+        // ONE read answers all three questions below: who owns the account, whether that owner is
+        // the grantor the reservation names, and whether the actor's authority is still live. They
+        // used to come from two different endpoints, so the owner the authority step compared and
+        // the owner the write-time proof compares could differ — a window nothing observed. It
+        // also removes a round trip from a path that already calls account-service three times.
+        val authority = delegationAuthorityPort.factsFor(snapshot.resourceId, snapshot.granteePartyId)
+        val resolvedOwnerPartyId = (authority as? DelegationFactsLookup.Available)?.ownerPartyId
             ?: return DelegatedDomesticPaymentResult.AccountAuthorityUnavailable
         if (resolvedOwnerPartyId != snapshot.grantorPartyId) {
             return DelegatedDomesticPaymentResult.ReservationMismatch(
@@ -207,7 +214,7 @@ class DomesticPaymentService(
             )
         }
 
-        refuseDelegatedAuthority(snapshot, resolvedOwnerPartyId)?.let { return it }
+        refuseDelegatedAuthority(authority, snapshot)?.let { return it }
 
         val trustedCommand = normalizedCommand.copy(
             debtorAccountId = snapshot.resourceId,
@@ -242,14 +249,15 @@ class DomesticPaymentService(
      * to the existing retryable result, because an outage must not read to the customer like a
      * withdrawn mandate.
      */
-    private suspend fun refuseDelegatedAuthority(
+    private fun refuseDelegatedAuthority(
+        lookup: DelegationFactsLookup,
         snapshot: DelegatedSpendReservationSnapshot,
-        resolvedOwnerPartyId: UUID,
     ): DelegatedDomesticPaymentResult? {
+        // The owner is NOT a parameter: it travels inside the lookup, so this cannot be called
+        // with an owner from a different read than the grants it decides against.
         val outcome = DelegationAuthorityFacts.outcome(
-            lookup = delegationAuthorityPort.factsFor(snapshot.resourceId, snapshot.granteePartyId),
+            lookup = lookup,
             accountId = snapshot.resourceId,
-            ownerPartyId = resolvedOwnerPartyId,
             actorPartyId = snapshot.granteePartyId,
             requiredCapability = CAPABILITY_INITIATE_PAYMENT,
             now = OffsetDateTime.now(clock),

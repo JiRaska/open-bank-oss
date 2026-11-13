@@ -43,7 +43,11 @@ interface DelegationAuthorityRestClient {
  * [DelegationAuthorityGrantPayload], so the "is this grant usable?" judgement — the one with a
  * dangerous mistake available — is made once in `openbank-libs-fincrime` and not per rail.
  */
-data class AuthorityFactsDto(val grants: List<DelegationAuthorityGrantPayload> = emptyList())
+data class AuthorityFactsDto(
+    val grants: List<DelegationAuthorityGrantPayload> = emptyList(),
+    /** The owner, from the same answer as the grants — never resolved by a second lookup. */
+    val ownerPartyId: String? = null,
+)
 
 /**
  * Reads account-service's authority facts for the chain's AUTHORITY step (ADR-0375 D1).
@@ -80,7 +84,7 @@ class DelegationAuthorityClient(
         val dto = httpClient
             .authorityFacts("Bearer $token", accountId.toString(), partyId.toString())
             .awaitSuspending()
-        DelegationAuthorityFacts.lookupOfPayload(dto.grants, accountId, partyId)
+        DelegationAuthorityFacts.lookupOfPayload(dto.grants, accountId, partyId, dto.ownerPartyId)
     } catch (ex: jakarta.ws.rs.WebApplicationException) {
         // Deliberately including 404. account-service answers 200 with an empty list for an
         // unknown account precisely so that this client never has to read a status code as a
