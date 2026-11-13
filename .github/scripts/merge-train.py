@@ -2111,6 +2111,28 @@ class GitHub:
         # no failed-only/full-run fallback is permitted after a refused receiver request either.
         return all(api("POST", path, {})[0] == 201 for path in plans)
 
+    def ctx_jobs(self, sha: str, ctx: str) -> dict[str, str | None] | None:
+        """Latest-attempt jobs of the workflow run whose check run is `ctx` on `sha`: job name ->
+        conclusion (None while running). None when `ctx` is no Actions check run on `sha` (a commit
+        status, another app) or the job list is unreadable: no job evidence, never an empty pass."""
+        latest = None
+        for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
+            if check.get("name") == ctx and (latest is None or check["id"] > latest["id"]):
+                latest = check
+        if latest is None:
+            return None
+        m = re.search(r"/actions/runs/([0-9]+)/job", latest.get("details_url") or latest.get("html_url") or "")
+        if not m:
+            return None
+        out: dict[str, str | None] = {}
+        for j in paginate(f"/repos/{self.repo}/actions/runs/{m.group(1)}/jobs?filter=latest", "jobs"):
+            name = j.get("name") if isinstance(j, dict) else None
+            if not isinstance(name, str):
+                return None
+            v = j.get("conclusion") if j.get("status") == "completed" else None
+            out[name] = v if out.get(name, v) == v else None   # two jobs, one name, disagreeing: not green
+        return out or None
+
     def failures_inconclusive(self, sha: str, failing: list[str]) -> tuple[bool, str]:
         """Whether the carrier's failing contexts failed ONLY for inconclusive gate kinds (budget overrun,
         NOT EVALUATED), from the gate runner's own --json artifacts — never from the log. Any read that
@@ -3924,10 +3946,43 @@ def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict
             summary["refreshed"].append(n)
 
 
+FIX_JOB_OK = frozenset({"success", "skipped", "neutral"})
+
+
+def fix_job_evidence(main_jobs: dict[str, str | None] | None, head_jobs: dict[str, str | None] | None) -> str | None:
+    """Why a PR head does NOT prove it fixes a main-red context, or None when it does. `main_jobs` is
+    main's red run for that context, `head_jobs` the PR head's run for it (GitHub.ctx_jobs). Every job
+    that failed on main must have RUN and succeeded on the head: path-scoped CI skips jobs, and a
+    skipped job leaves an aggregate context (Validate manifests) green without testing the breakage
+    (2026-11-13: #16005 touched only merge-train files, skipped Admin UI, and took the fix slot from
+    the real fix). Fails closed: no job record on either side, or a main run with no failed job, is
+    no evidence. A job red on main for ANOTHER context also has to pass — over-strict, never loose."""
+    if not main_jobs:
+        return "no job record for main's red run"
+    failed = sorted(n for n, c in main_jobs.items() if c is not None and c not in FIX_JOB_OK)
+    if not failed:
+        return "main's red run names no failed job"
+    if not head_jobs:
+        return "no job record on the head"
+    missing = [f"{n} ({head_jobs.get(n) or 'absent'})" for n in failed if head_jobs.get(n) not in OK_STATES]
+    return f"did not run green on the head: {', '.join(missing)}" if missing else None
+
+
+def cached_ctx_jobs(gh, sha: str, ctx: str, cache: dict | None) -> dict[str, str | None] | None:
+    key = ("ctx_jobs", sha, ctx)
+    if cache is not None and key in cache:
+        return cache[key]
+    out = gh.ctx_jobs(sha, ctx)
+    if cache is not None:
+        cache[key] = out
+    return out
+
+
 def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache: dict | None = None) -> list[str]:
     """The main-red contexts this green PR demonstrably fixes: red in main's CI at the PR's own
-    merge-base (or nearest ancestor with a verdict), green on the PR head. A PR that went green over a
-    base that was still green proves nothing about the breakage and is NOT a fix."""
+    merge-base (or nearest ancestor with a verdict), and every job that failed in that red run ran
+    green on the PR head (fix_job_evidence). A PR that went green over a base that was still green
+    proves nothing about the breakage and is NOT a fix; nor is one whose CI skipped the failing job."""
     mb = git("merge-base", view["head_sha"], base, check=False).stdout.strip()
     if not mb:
         return []
@@ -3937,8 +3992,13 @@ def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache
         if ctx in extra and gh.extra_checks(view["head_sha"], {ctx: extra[ctx]}).get(ctx) not in OK_STATES:
             continue   # an extra gate is not required: only its own pinned GREEN on the head proves a fix
         at_base = main_ci_result(gh, git, ctx, mb, cache)
-        if at_base and at_base[1] == "failure":
-            out.append(ctx)
+        if not at_base or at_base[1] != "failure":
+            continue
+        why = fix_job_evidence(cached_ctx_jobs(gh, at_base[0], ctx, cache), cached_ctx_jobs(gh, view["head_sha"], ctx, cache))
+        if why:
+            log(f"#{view.get('number', 0):>6} not a fix for {ctx}: {why}")
+            continue
+        out.append(ctx)
     return out
 
 
@@ -3971,6 +4031,15 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
         return None, [], "claims no main-red context"
     masked = {c: ("success" if c in main_red and c not in claimed and v == "failure" else v) for c, v in checks.items()}
     ok, why = qualifies(view, member, masked, app, untrainable=lambda _f: False, extra=extra)
+    if ok and claim_from != head:
+        # The combined head is what merges: it must have run the failing jobs too, not only the claim.
+        mb = git("merge-base", claim_from, base, check=False).stdout.strip()
+        for c in claimed:
+            at_base = main_ci_result(gh, git, c, mb, cache) if mb else None
+            why = (fix_job_evidence(cached_ctx_jobs(gh, at_base[0], c, cache), cached_ctx_jobs(gh, head, c, cache))
+                   if at_base else "no main verdict at the claim's base")
+            if why:
+                return None, [], f"combined head: {c} {why}"
     if ok:
         return "green", claimed, f"fix for {', '.join(claimed)} red on main {base[:12]}"
     if why.startswith(("required context pending", "required context never reported", "extra gate pending")) and not any(
@@ -4691,6 +4760,8 @@ class FakeGitHub:
         self.foreign_after_merge: str | None = None
         self.refuse_merge: set[int] = set()
         self.head_checks: dict[str, dict] = {}   # PR head sha -> check overrides (red, pending, guard)
+        self.jobs: dict[str, dict] = {}          # sha -> job overrides for ctx_jobs (job name -> conclusion)
+        self.head_jobs: dict = {}                # job overrides on EVERY PR head (claim and combined)
         self.pending_shas: set[str] = set()      # carrier heads whose CI is still running
         self.updates: list[int] = []             # update-branch calls, in order
         self.update_refuse = False               # True: update-branch answers as GitHub does on a refusal
@@ -4765,6 +4836,16 @@ class FakeGitHub:
 
     def ci_activity(self, sha):
         return self.activity.get(sha)
+
+    def ctx_jobs(self, sha, ctx):
+        """The context is its own (only) job unless a fixture names the jobs of its run."""
+        v = self.checks(sha).get(ctx, "absent")
+        if v == "absent":
+            v = self.extra_checks(sha, {ctx: ""}).get(ctx)
+        out = {ctx: v}
+        if any(p["head"]["sha"] == sha for p in self.prs.values()):
+            out.update(self.head_jobs)
+        return {**out, **self.jobs.get(sha, {})}
 
     def extra_checks(self, sha, gates):
         """Pinned runs: `self.pinned[sha]` = {name: [states]} from the declared workflow; with none set, a
@@ -8935,6 +9016,8 @@ def self_test() -> int:
 
             def main_red_done():
                 gh.head_checks.clear()
+                gh.jobs.clear()
+                gh.head_jobs.clear()
                 gh.updates.clear()
                 reset()
 
@@ -8997,6 +9080,29 @@ def self_test() -> int:
             check("main red: a combined fix head green everywhere merges",
                   gh.merged == [36] and s1.get("waiting", []) == [35], f"merged={gh.merged} {s1} {s2}")
             main_red_done()
+
+            # 2026-11-13: main red on MR because a LEAF job (Admin UI) failed. A PR whose path-scoped CI
+            # SKIPPED that job reads MR green but tested nothing: not a fix, so no update and no slot.
+            def leaf_red(head_ui):
+                def tamper(_p):
+                    gh.jobs[base0] = {"Admin UI": "failure"}
+                    gh.head_jobs["Admin UI"] = head_ui
+                return tamper
+            s1, s2 = fix_behind({}, tamper=leaf_red("skipped"))
+            check("main red on a leaf job: a PR that SKIPPED the failing job is not a fix (no update, no merge)",
+                  gh.updates == [] and gh.merged == [] and not s1["in_flight"] and s2 is None,
+                  f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            main_red_done()
+            s1, s2 = fix_behind({}, tamper=leaf_red("success"))
+            check("main red on a leaf job: a PR that RAN the failing job green is the fix (updated, merged)",
+                  gh.updates == [36] and gh.merged == [36], f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            main_red_done()
+            check("fix evidence: a job skipped on the head, or no job record, is never evidence",
+                  fix_job_evidence({"A": "failure", MR: "failure"}, {"A": "skipped", MR: "success"}) is not None
+                  and fix_job_evidence(None, {MR: "success"}) is not None
+                  and fix_job_evidence({MR: "failure"}, None) is not None
+                  and fix_job_evidence({MR: "success"}, {MR: "success"}) is not None
+                  and fix_job_evidence({"A": "failure", MR: "failure"}, {"A": "success", MR: "success"}) is None)
 
             # The fix path takes manual-lane paths exactly as the strict lane does (pW2 touches
             # .github/scripts — the merge above), and refuses everything strict_lane_state refuses.
