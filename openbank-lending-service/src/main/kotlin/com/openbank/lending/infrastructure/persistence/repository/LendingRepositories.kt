@@ -209,6 +209,7 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             s.createMutationQuery(SIGNATURE_HQL)
                 .setParameter("to", application.status)
                 .setParameter("artefactHash", application.signatureArtefactHash)
+                .setParameter("recordedAt", application.signatureRecordedAt)
                 .setParameter("id", application.id.value)
                 .setParameter("from", from)
                 .executeUpdate()
@@ -240,13 +241,12 @@ class LoanApplicationRepositoryImpl @Inject constructor(
 
         /**
          * The sign claim. Same conditional `status = :from` guard as [ADVANCE_HQL]; the extra
-         * column is the ADR-0214 signature artefact hash, written in the SAME statement as the
-         * AWAITING_SIGNATURE → SIGNED transition so the row and its evidentiary anchor can never
-         * disagree about which signature produced the state.
+         * fields anchor the ADR-0214 signature evidence. The caller holds the application transaction
+         * while it appends the matching outbox event.
          */
         const val SIGNATURE_HQL =
             "update LoanApplicationEntity " +
-                "set status = :to, signatureArtefactHash = :artefactHash " +
+                "set status = :to, signatureArtefactHash = :artefactHash, signatureRecordedAt = :recordedAt " +
                 "where id = :id and status = :from"
     }
 }

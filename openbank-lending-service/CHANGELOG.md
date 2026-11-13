@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.48.0...lending-service-v0.49.0) (2026-11-13)
+
+
+### Features
+
+* **lending:** retain the recorded loan signature time ([#15693](https://github.com/JiRaska/open-bank-oss/issues/15693)) ([8aabf3b](https://github.com/JiRaska/open-bank-oss/commit/8aabf3b723ce354d8e3ebeb9d6ac3d17e88babc7))
+
 ## [0.48.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.47.0...lending-service-v0.48.0) (2026-11-13)
 
 

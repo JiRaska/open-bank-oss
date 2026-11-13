@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: AML Service API
-  version: 1.4.0
+  version: 1.5.0
   description: >-
     Anti-Money Laundering screening case lifecycle — submit, review, and decide AML cases.
   license:
@@ -206,6 +206,26 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+
+  /api/v1/aml/monitoring/outcomes:
+    get:
+      tags: [AML Monitoring]
+      summary: The outcome vocabulary a disposition or a report outcome is chosen from
+      description: >-
+        The pinned revision `outcomeCode` is resolved against. A client offers exactly these
+        codes rather than keeping its own copy.
+      operationId: getMonitoringOutcomeVocabulary
+      responses:
+        '200':
+          description: The outcome vocabulary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutcomeCatalogueResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/aml/monitoring/disposition-proposals:
     get:
@@ -599,6 +619,29 @@ components:
           deprecated: true
           description: Ignored. The decider is taken from the authenticated caller.
 
+    OutcomeCatalogueResponse:
+      type: object
+      required: [vocabularyId, vocabularyRevision, vocabularyHash, entries]
+      properties:
+        vocabularyId:
+          type: string
+        vocabularyRevision:
+          type: integer
+        vocabularyHash:
+          type: string
+        entries:
+          type: array
+          items:
+            type: object
+            required: [code, label, meaning]
+            properties:
+              code:
+                type: string
+              label:
+                type: string
+              meaning:
+                type: string
+
     AmlCaseResponse:
       type: object
       required:
@@ -668,6 +711,12 @@ components:
         updatedAt:
           type: string
           format: date-time
+        requiresFourEyesDisposition:
+          type: boolean
+          description: >-
+            True when the case can be closed or escalated only through an approved four-eyes
+            disposition proposal (`/api/v1/aml/monitoring/...`). For such a case `PUT /decision`
+            accepts only UNDER_REVIEW.
 
     ApiError:
       type: object

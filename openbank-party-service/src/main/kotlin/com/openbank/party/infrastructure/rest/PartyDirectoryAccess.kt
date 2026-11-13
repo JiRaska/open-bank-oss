@@ -14,7 +14,7 @@ internal class PartyDirectoryAccess(identity: SecurityIdentity) {
     val canSearchNames = identity.hasRole("ROLE_OPERATOR") ||
         identity.hasRole("ROLE_ADMIN") ||
         identity.hasRole("ROLE_KYC")
-    private val canSeeLegalName = canSearchNames || identity.hasRole("ROLE_RISK")
+    private val canSeeLegalName = canSearchNames || identity.hasRole("ROLE_RISK") || identity.hasRole("ROLE_COMPLIANCE")
 
     val revealActor: String? =
         (identity.principal as? JsonWebToken)?.subject?.takeIf {

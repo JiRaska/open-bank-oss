@@ -102,3 +102,13 @@ Compliance tým je odpovědný za:
 3. Eskalaci záznamů `HIT` na MLRO (Money Laundering Reporting Officer) do 4 hodin.
 4. Podání hlášení o podezřelé transakci (SAR) na český FAÚ do 24 hodin od potvrzeného hitu na domácí transakci.
 5. Spuštění `POST /api/v1/sanctions/lists/refresh-all` po každé větší regulatorní aktualizaci (např. nový sankční balíček EU).
+
+## Průběžný monitoring (ADR-0376)
+
+Průběžný monitoring plní povinnost AMLD sledovat obchodní vztah po celou dobu jeho trvání, nikoli jen prověřit klienta na začátku. Ve výchozím stavu je vypnutý.
+
+- **Účel a minimalizace.** Registr obsahuje atributy, které čte profil `CUSTOMER`, a nic dalšího. Právním základem je právní povinnost (čl. 6 odst. 1 písm. c)); od klienta se nesbírají žádné nové údaje.
+- **Výmaz.** Registr a jeho nálezy nejsou zákonným AML záznamem (ten vede vlastnící služba), takže se uplatní čl. 17. Odregistrace smaže řádek subjektu i jeho nálezy; vlastnící služba ji volá při ukončení vztahu a při výmazu.
+- **Zákaz vyzrazení.** Nález klient nikdy nevidí. Nevrací ho žádná REST operace; publikuje se na interní topic pro vlastnící službu, která otevře případ k posouzení. Žádná služba obsluhující klienta tento topic nekonzumuje.
+- **Žádné automatizované rozhodnutí.** Nález na klientovi nic nemění: nic neblokuje, neomezuje ani neuzavírá. O případu, který vlastnící služba otevře, rozhoduje člověk (ADR-0256 D2).
+- **Datové toky ven.** `MONITORED_SUBJECT_MATCHED` nese referenci subjektu, nikoli jeho jméno; topic archivuje `audit-service`.

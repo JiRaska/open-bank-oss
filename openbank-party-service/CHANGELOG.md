@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.30.0...party-service-v0.31.0) (2026-11-13)
+
+
+### Features
+
+* **party:** let a compliance officer see who an AML case is about ([#15957](https://github.com/JiRaska/open-bank-oss/issues/15957)) ([81190ff](https://github.com/JiRaska/open-bank-oss/commit/81190ff929c640c0fd4816f3ce9786d24882168d)), closes [#15939](https://github.com/JiRaska/open-bank-oss/issues/15939)
+
 ## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.29.2...party-service-v0.30.0) (2026-11-12)
 
 

@@ -1109,6 +1109,13 @@ under the retained deployment hold. Rollback retains receipts, coverage and fina
 
 - **2026-11-09 — Missing-job obligation review correction (#13167).** A missing run cannot be erased by disabling its scheduler after REFUSED: observed `(business_date, job)` obligations are insert-only and retained independently of real run receipts. The observation transaction reads the retained union and all legacy run keys before reporting. It creates no completion, journal, or new authorization. Run completion or an attributable ledger waiver is still required; never infer unobserved historical schedules. Rollback retains both evidence tables. Existing holds and shadow/off defaults remain.
 
+### Recorded signature receipt
+
+The explicit signature command persists the artefact hash, receipt timestamp, `SIGNED` state and
+matching outbox evidence in the application transaction (#9890). A competing sign cannot replace
+the recorded value. Earlier rows have unknown receipt time. Lending retains the existing
+application-based access boundary for the timestamp.
+
 ## 2026-11-11 - Label key domain rename (no reach change)
 
 The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
