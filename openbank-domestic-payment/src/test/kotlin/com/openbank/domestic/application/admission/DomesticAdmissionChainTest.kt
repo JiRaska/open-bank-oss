@@ -209,7 +209,7 @@ class DomesticAdmissionChainTest {
                 .associateWith { (result[it].outcome as StepOutcome.NotApplicable).reason },
         ).isEqualTo(
             mapOf(
-                AdmissionStep.AUTHORITY to DomesticAdmissionChain.AUTHORITY_DECIDED_AT_EDGE,
+                AdmissionStep.AUTHORITY to DomesticAdmissionChain.AUTHORITY_DECIDED_AT_SUBMISSION,
                 AdmissionStep.LIMITS to DomesticAdmissionChain.LIMITS_NOT_DELIVERED,
                 AdmissionStep.AML_DESTINATION_RISK to DomesticAdmissionChain.AML_DESTINATION_RISK_NOT_DELIVERED,
                 AdmissionStep.PAYEE_VERIFICATION to DomesticAdmissionChain.PAYEE_VERIFICATION_NOT_REQUIRED,

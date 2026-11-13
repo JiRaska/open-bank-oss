@@ -45,8 +45,9 @@ import java.time.Duration
  * bound here or declared unbound with the reason it is; the kernel refuses to build a chain that
  * forgets one.
  *
- *  - `AUTHORITY` unbound: the rail holds no grant facts. Delegated authority is decided by the
- *    customer edge until the shared facts source (ADR-0375 D1/D2) is wired into the rail.
+ *  - `AUTHORITY` unbound: whose money this is was decided when the payment was submitted, by the
+ *    customer edge and by the rail's own create path, before this chain ran. The chain holds no
+ *    grant facts to decide it again; that binding is ADR-0375 D1/D2's.
  *  - `STANDING` bound: account-service's answer, read with the account (ADR-0374 D4).
  *  - `LIMITS` unbound: owner limits do not exist yet (ADR-0374 delivery step B).
  *  - `SANCTIONS` bound: the ADR-0032 screen, with the same due-diligence scope rules as before.
@@ -73,7 +74,7 @@ class DomesticAdmissionChain(
 ) {
     private val chain: PaymentAdmissionChain<DomesticPayment> =
         PaymentAdmissionChain.Builder<DomesticPayment>(budget, UnavailablePolicy.HOLD)
-            .unbound(AdmissionStep.AUTHORITY, AUTHORITY_DECIDED_AT_EDGE)
+            .unbound(AdmissionStep.AUTHORITY, AUTHORITY_DECIDED_AT_SUBMISSION)
             .check(AdmissionStep.STANDING) { payment, remaining -> standingWithin(payment, remaining) }
             .unbound(AdmissionStep.LIMITS, LIMITS_NOT_DELIVERED)
             .check(AdmissionStep.SANCTIONS) { payment, remaining -> sanctions(payment, remaining) }
@@ -214,7 +215,7 @@ class DomesticAdmissionChain(
         /** Evidence key under which the standing step records the account's owning party. */
         const val EVIDENCE_DEBTOR_PARTY = "debtor_party_id"
 
-        val AUTHORITY_DECIDED_AT_EDGE = AdmissionReasonCode("AUTHORITY_DECIDED_AT_EDGE")
+        val AUTHORITY_DECIDED_AT_SUBMISSION = AdmissionReasonCode("AUTHORITY_DECIDED_AT_SUBMISSION")
         val LIMITS_NOT_DELIVERED = AdmissionReasonCode("LIMITS_NOT_DELIVERED")
         val AML_DESTINATION_RISK_NOT_DELIVERED = AdmissionReasonCode("AML_DESTINATION_RISK_NOT_DELIVERED")
         val PAYEE_VERIFICATION_NOT_REQUIRED = AdmissionReasonCode("PAYEE_VERIFICATION_NOT_REQUIRED")

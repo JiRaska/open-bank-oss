@@ -153,8 +153,8 @@ same choices, not new ones.
   RECEIVED only while the chain is on for the rail. With the chain off a RECEIVED payment keeps
   that exit: it is the only one a payment left by an exhausted screening re-drive has.
 - *What a rail may leave unbound.* A step whose facts or owner do not exist yet is declared unbound
-  with its reason, which every admission records. On domestic that is authority (the customer edge
-  still decides it, ADR-0375 D1), limits (step B), AML destination risk (step E) and payee
+  with its reason, which every admission records. On domestic that is authority (decided when the
+  payment is submitted, not again by the chain; ADR-0375 D1), limits (step B), AML destination risk (step E) and payee
   verification (not required by the scheme). Fraud is bound, and reports itself not applicable
   while its own per-rail enforcement is off (point 8).
 

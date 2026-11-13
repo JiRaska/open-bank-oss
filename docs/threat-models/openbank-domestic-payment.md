@@ -117,8 +117,8 @@ The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit ma
 - **Admission chain, not delivered with step A (ADR-0374):** (1) the decision on a hold's case is a
   single analyst's in aml-service, where ADR-0374 D3 asks for four eyes; (2) a hold reserves no funds, so
   the release re-runs standing only and balance is checked where it always was, at booking; (3) the
-  chain's `AUTHORITY` step is unbound on this rail and delegated authority is still decided by the
-  customer edge (ADR-0375 D1/D3); (4) between a party's suspension and account-service consuming it the
+  chain's `AUTHORITY` step is unbound on this rail: authority is decided when the payment is submitted
+  (the customer edge, and the rail's create path), not again by the chain (ADR-0375 D1/D3); (4) between a party's suspension and account-service consuming it the
   accounts still report `mayDebit`, because the rail reads account standing and not party standing.
   Each is a precondition of switching the chain on in production, not of merging it off. A hold that
   outlives its expiry (a lost workflow run) is alerted on: `DomesticPaymentHeldPastExpiry`.
