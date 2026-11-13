@@ -4,6 +4,7 @@
 
 package com.openbank.account.application.usecase
 
+import com.openbank.account.application.port.`in`.AccountDelegationFact
 import com.openbank.account.application.port.`in`.AuthorizationUseCase
 import com.openbank.account.application.port.`in`.DelegatedPaymentDecision
 import com.openbank.account.application.port.`in`.DelegatedPaymentOutcome
@@ -215,6 +216,39 @@ class AuthorizationService(
      * The role asked is always PAYMENT_ONLY: this method exists for debits. FULL_ACCESS satisfies
      * it through [DelegatedAccessGrant.satisfies] / the legacy role check, exactly as before.
      */
+    /**
+     * ADR-0375 D1 — hand a rail the grant facts and let the pure kernel decide.
+     *
+     * Three filters, each one a thing the caller cannot do for itself:
+     *  - `issuedBy(account.partyId)` — the grantor must own the account. A row keyed on
+     *    (accountId, granteePartyId) alone is authority in itself; the caller does not know the
+     *    owner, so this cannot be pushed outward.
+     *  - `isActiveOn(now)` — the validity window, evaluated against this service's clock.
+     *  - resource type ACCOUNT — a SAVINGS_GOAL grant is not account authority, and the shared
+     *    projection holds both.
+     *
+     * An unknown account answers empty, not 404: this must not become an existence oracle.
+     */
+    override suspend fun delegationFacts(accountId: UUID, partyId: UUID): List<AccountDelegationFact> {
+        val account = accountRepository.findById(accountId) ?: return emptyList()
+        val now = OffsetDateTime.now(clock)
+        return delegationProjectionRepository
+            .findActiveByAccountPartyAndType(accountId, partyId, DelegatedAccessGrant.RESOURCE_TYPE_ACCOUNT)
+            .filter { it.issuedBy(account.partyId) && it.isActiveOn(now) }
+            .map {
+                AccountDelegationFact(
+                    grantId = it.id,
+                    grantorPartyId = it.grantorPartyId,
+                    accountId = it.accountId,
+                    granteePartyId = it.granteePartyId,
+                    capabilities = it.capabilities,
+                    active = true,
+                    validFrom = it.validFrom,
+                    validTo = it.validTo,
+                )
+            }
+    }
+
     override suspend fun authorizeDelegatedPayment(
         accountId: UUID,
         partyId: UUID,
