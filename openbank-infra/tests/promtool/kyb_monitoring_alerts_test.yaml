@@ -312,7 +312,7 @@ tests:
               namespace: kyb
               severity: critical
             exp_annotations:
-              summary: "1 approved business relationship(s) must be exited"
+              summary: "an approved business relationship must be exited and nothing carries the exit out"
               description: "1 approved business case(s) in kyb carry an operator's decision that the relationship has to end (typically a confirmed sanctions match found by ongoing monitoring). The customer is still active: the party, its mandates and its accounts are untouched, and the case stays monitored. No service acts on `BUSINESS_RELATIONSHIP_EXIT_REQUIRED` yet — restrict and exit the relationship by hand. The review queue's operator view shows `monitoringReview.exitRequiredAt` and the reason."
   # ---- KybMonitoringFindingDeadLettered --------------------------------------------------------
   - name: the findings dead-letter topic - quiet while it does not grow, fires when it does

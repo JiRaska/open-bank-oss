@@ -168,9 +168,15 @@ class KybMonitoringWireShapeIT {
 
     private fun ensureTopics() {
         Admin.create(mapOf<String, Any>("bootstrap.servers" to bootstrap)).use { admin ->
-            val existing = admin.listTopics().names().get(SEND_SECONDS, TimeUnit.SECONDS)
-            val missing = TOPICS.filter { it !in existing }.map { NewTopic(it, 1, 1.toShort()) }
-            if (missing.isNotEmpty()) admin.createTopics(missing).all().get(SEND_SECONDS, TimeUnit.SECONDS)
+            // One at a time, and "already there" is the outcome wanted: the broker creates a topic
+            // on first use, so one can appear between any check and the create.
+            TOPICS.forEach { topic ->
+                try {
+                    admin.createTopics(listOf(NewTopic(topic, 1, 1.toShort()))).all().get(SEND_SECONDS, TimeUnit.SECONDS)
+                } catch (e: java.util.concurrent.ExecutionException) {
+                    if (e.cause !is org.apache.kafka.common.errors.TopicExistsException) throw e
+                }
+            }
         }
     }
 

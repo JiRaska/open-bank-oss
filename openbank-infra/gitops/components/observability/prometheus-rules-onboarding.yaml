@@ -342,7 +342,7 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: "{{ $value }} approved business relationship(s) must be exited"
+            summary: "an approved business relationship must be exited and nothing carries the exit out"
             description: "{{ $value }} approved business case(s) in {{ $labels.namespace }} carry an operator's decision that the relationship has to end (typically a confirmed sanctions match found by ongoing monitoring). The customer is still active: the party, its mandates and its accounts are untouched, and the case stays monitored. No service acts on `BUSINESS_RELATIONSHIP_EXIT_REQUIRED` yet — restrict and exit the relationship by hand. The review queue's operator view shows `monitoringReview.exitRequiredAt` and the reason."
         - alert: KybMonitoringFindingDeadLettered
           # A finding that could not be applied after its retries, or that was malformed, is in the
