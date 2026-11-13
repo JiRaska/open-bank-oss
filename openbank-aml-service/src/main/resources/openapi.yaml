@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: AML Service API
-  version: 1.4.0
+  version: 1.5.0
   description: >-
     Anti-Money Laundering screening case lifecycle — submit, review, and decide AML cases.
   license:
@@ -668,6 +668,12 @@ components:
         updatedAt:
           type: string
           format: date-time
+        requiresFourEyesDisposition:
+          type: boolean
+          description: >-
+            True when the case can be closed or escalated only through an approved four-eyes
+            disposition proposal (`/api/v1/aml/monitoring/...`). For such a case `PUT /decision`
+            accepts only UNDER_REVIEW.
 
     ApiError:
       type: object
