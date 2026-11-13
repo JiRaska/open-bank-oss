@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.16.0...aml-service-v0.17.0) (2026-11-13)
+
+
+### Features
+
+* **aml:** four-eyes monitoring dispositions and the suspicious-transaction report (ADR-0371 slice 3) ([#15742](https://github.com/JiRaska/open-bank-oss/issues/15742)) ([4ab7b54](https://github.com/JiRaska/open-bank-oss/commit/4ab7b54e9ed2a60e23c831cc8151ee72d55d62d0))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.15.0...aml-service-v0.16.0) (2026-11-12)
 
 

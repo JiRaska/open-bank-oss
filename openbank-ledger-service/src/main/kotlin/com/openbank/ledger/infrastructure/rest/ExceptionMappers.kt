@@ -119,7 +119,12 @@ class YearCloseConflictExceptionMapper : ExceptionMapper<YearCloseConflictExcept
 @Provider
 class ClosedFiscalPeriodExceptionMapper : ExceptionMapper<ClosedFiscalPeriodException> {
     override fun toResponse(exception: ClosedFiscalPeriodException): Response = Response.status(CONFLICT)
-        .entity(mapOf("error" to (exception.message ?: "Fiscal period is closed")))
+        .entity(
+            mapOf(
+                "error" to (exception.message ?: "Fiscal period is closed"),
+                "code" to LedgerRefusalCodes.FISCAL_YEAR_CLOSED,
+            ),
+        )
         .type(MediaType.APPLICATION_JSON)
         .build()
 }
@@ -179,7 +184,13 @@ class ClosedPeriodConflictExceptionMapper : ExceptionMapper<ClosedPeriodConflict
 @Provider
 class FrozenPeriodExceptionMapper : ExceptionMapper<FrozenPeriodException> {
     override fun toResponse(exception: FrozenPeriodException): Response = Response.status(CONFLICT)
-        .entity(mapOf("error" to (exception.message ?: "Accounting period is frozen")))
+        .entity(
+            // Same `code` field as the day lock, so a caller can tell this refusal from any other 409.
+            mapOf(
+                "error" to (exception.message ?: "Accounting period is frozen"),
+                "code" to LedgerRefusalCodes.PERIOD_FROZEN,
+            ),
+        )
         .type(MediaType.APPLICATION_JSON)
         .build()
 }
@@ -224,4 +235,13 @@ class CloseParticipantsPendingExceptionMapper : ExceptionMapper<CloseParticipant
         .entity(mapOf("error" to (exception.message ?: "Day-close participants are pending")))
         .type(MediaType.APPLICATION_JSON)
         .build()
+}
+
+/**
+ * Machine codes carried in the `code` field of the period-granular 409 refusals, next to the
+ * day-lock code [AccountingDayClosed.ERROR_CODE]. Additive: the `error` text is unchanged.
+ */
+object LedgerRefusalCodes {
+    const val PERIOD_FROZEN = "ACCOUNTING_PERIOD_FROZEN"
+    const val FISCAL_YEAR_CLOSED = "ACCOUNTING_YEAR_CLOSED"
 }

@@ -53,6 +53,24 @@ class VerificationError(Exception):
     pass
 
 
+class UnresolvedServicesError(VerificationError):
+    """The run listing was read in full and some services have no proven source in it.
+
+    Unlike every other VerificationError this is a fact about SPECIFIC services, not about the
+    evidence pipeline: the API answered, pagination was consistent, the deadline held, and the
+    named services simply have no green build+contract with an exact Pact version at a
+    tree-equivalent ancestor. It carries what WAS proven so the caller can refuse only the
+    missing members. Before this, one unbuilt service refused the whole reconcile batch and
+    stranded every proven peer with it (2026-11-11..13: a sanctions-service fix on main never
+    deployed because anacredit and card-issuance had no source).
+    """
+
+    def __init__(self, message: str, resolved: dict, missing: list[str]):
+        super().__init__(message)
+        self.resolved = resolved
+        self.missing = missing
+
+
 def _read_backoff(attempt: int, deadline: float | None) -> None:
     delay = 2 ** attempt
     if deadline is not None and time.monotonic() + delay >= deadline:
@@ -875,9 +893,11 @@ def resolve_reconcile_service_sources(
             if not pending:
                 return resolved
     missing = ", ".join(sorted(pending))
-    raise VerificationError(
+    raise UnresolvedServicesError(
         f"no successful main Services CI build+contract with exact Pact versions and "
-        f"tree-equivalent inputs found for {missing} at {tip_sha}"
+        f"tree-equivalent inputs found for {missing} at {tip_sha}",
+        resolved,
+        sorted(pending),
     )
 
 
@@ -906,6 +926,12 @@ def main() -> int:
                 os.environ.get("GH_TOKEN", ""),
                 os.environ.get("GITHUB_API_URL", "https://api.github.com"),
             )
+        except UnresolvedServicesError as exc:
+            # Exit 3 = a per-service refusal with the proven remainder on stdout. Exit 1 stays
+            # reserved for "the evidence could not be read", which must refuse everything.
+            print(f"::error::reconcile source refused: {exc}", file=sys.stderr)
+            print(json.dumps({"resolved": exc.resolved, "unresolved": exc.missing}, sort_keys=True))
+            return 3
         except (json.JSONDecodeError, VerificationError) as exc:
             print(f"::error::reconcile source refused: {exc}", file=sys.stderr)
             return 1

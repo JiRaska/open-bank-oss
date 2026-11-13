@@ -91,21 +91,67 @@ class SanctionsService(
         }
 
         val hits = matchMap.values.sortedByDescending { it.score }.map { m ->
-            SanctionsMatch(
-                listType = m.entry.listType,
-                matchType = when {
-                    m.score >= 0.95 -> MatchType.EXACT
-                    m.score >= 0.80 -> MatchType.FUZZY
-                    else -> MatchType.PHONETIC
-                },
-                matchScore = m.score,
-                matchedName = m.entry.primaryName,
-                matchedId = m.entry.externalId,
-                listEntryDate = null,
-                programs = m.entry.programs,
-            )
+            nameMatch(m.entry.listType, m.entry.externalId, m.entry.primaryName, m.entry.programs, m.score)
         }
         return profiles.statusOf(hits) to hits
+    }
+
+    /** The inputs of a screen after parsing: the profile, the country data and the lists it reads. */
+    internal class ScreenedInputs(
+        val profile: ScreeningProfile?,
+        val country: String?,
+        val bankIdentifier: String?,
+        val targetLists: List<SanctionsListType>,
+    )
+
+    /** The result of [evaluate]. */
+    internal class Evaluation(
+        val inputs: ScreenedInputs,
+        val outcome: ScreeningProfileEvaluator.Outcome,
+        val jurisdiction: List<SanctionsMatch>,
+        val clearable: List<SanctionsMatch>,
+        val nameClearance: SanctionsCheck?,
+        val checkedAt: Instant,
+    )
+
+    /**
+     * Everything [screen] decides before it stores a check: the matches, how they split into
+     * jurisdiction and clearable name matches, and the clearance covering the latter, if any.
+     * Ongoing monitoring (ADR-0376) evaluates a subject through this same function, so the two
+     * cannot drift apart on thresholds, lists or what a clearance covers.
+     */
+    internal suspend fun evaluate(cmd: ScreenEntityCommand): Evaluation {
+        val profile = profiles.parseProfile(cmd.profile)
+        val country = profiles.parseCountry(cmd.country)
+        val bankIdentifier = profiles.parseBankIdentifier(cmd.bankIdentifier)
+        val targetLists = resolveTargetLists(cmd, profile)
+        val (nameStatus, nameMatches) = performScreening(cmd, targetLists, profiles.nameSearchFloor(profile))
+        val outcome = profiles.combine(
+            profile,
+            nameStatus,
+            nameMatches,
+            profiles.screenJurisdictions(country, bankIdentifier, targetLists),
+        )
+        val checkedAt = Instant.now(clock)
+        // A clearance dismisses a NAME false positive ("this subject is not the listed person").
+        // A jurisdiction match is a fact about the country, with no identity to be mistaken
+        // about, so no clearance ever covers it: the name matches may be cleared, and the status
+        // is then whatever the jurisdiction matches alone make it — never WHITELISTED.
+        val (jurisdiction, clearable) = outcome.matches.filterNot { it.matchKind == MatchKind.PEP }
+            .partition { it.matchKind == MatchKind.JURISDICTION }
+        val nameClearance = if (outcome.status == SanctionsCheckStatus.CLEAR || clearable.isEmpty()) {
+            null
+        } else {
+            findCoveringClearance(cmd, clearable, checkedAt)
+        }
+        return Evaluation(
+            ScreenedInputs(profile, country, bankIdentifier, targetLists),
+            outcome,
+            jurisdiction,
+            clearable,
+            nameClearance,
+            checkedAt,
+        )
     }
 
     override suspend fun screen(cmd: ScreenEntityCommand): SanctionsCheck {
@@ -121,31 +167,17 @@ class SanctionsService(
             requireNotNull(listType) { "listTypes[$index] must not be null" }
         }
         repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
-        val profile = profiles.parseProfile(cmd.profile)
-        val country = profiles.parseCountry(cmd.country)
-        val bankIdentifier = profiles.parseBankIdentifier(cmd.bankIdentifier)
-        val targetLists = resolveTargetLists(cmd, profile)
-        val (nameStatus, nameMatches) = performScreening(cmd, targetLists, profiles.nameSearchFloor(profile))
-        val outcome = profiles.combine(
-            profile,
-            nameStatus,
-            nameMatches,
-            profiles.screenJurisdictions(country, bankIdentifier, targetLists),
-        )
+        val evaluation = evaluate(cmd)
+        val profile = evaluation.inputs.profile
+        val country = evaluation.inputs.country
+        val bankIdentifier = evaluation.inputs.bankIdentifier
+        val targetLists = evaluation.inputs.targetLists
+        val outcome = evaluation.outcome
         val status = outcome.status
         val matches = outcome.matches
-        val checkedAt = Instant.now(clock)
-        // A clearance dismisses a NAME false positive ("this subject is not the listed person").
-        // A jurisdiction match is a fact about the country, with no identity to be mistaken
-        // about, so no clearance ever covers it: the name matches may be cleared, and the status
-        // is then whatever the jurisdiction matches alone make it — never WHITELISTED.
-        val (jurisdiction, clearable) = matches.filterNot { it.matchKind == MatchKind.PEP }
-            .partition { it.matchKind == MatchKind.JURISDICTION }
-        val nameClearance = if (status == SanctionsCheckStatus.CLEAR || clearable.isEmpty()) {
-            null
-        } else {
-            findCoveringClearance(cmd, clearable, checkedAt)
-        }
+        val checkedAt = evaluation.checkedAt
+        val jurisdiction = evaluation.jurisdiction
+        val nameClearance = evaluation.nameClearance
         val clearance = nameClearance.takeIf { jurisdiction.isEmpty() }
         val namesCleared = nameClearance != null && clearance == null
         val check = SanctionsCheck(
@@ -180,7 +212,7 @@ class SanctionsService(
      * list-entry identities the analyst reviewed; a new entry, changed subject or expired decision
      * therefore keeps the fresh blocking result (#11694).
      */
-    private suspend fun findCoveringClearance(
+    internal suspend fun findCoveringClearance(
         cmd: ScreenEntityCommand,
         currentMatches: List<SanctionsMatch>,
         now: Instant,
@@ -195,17 +227,6 @@ class SanctionsService(
             }
             .maxByOrNull { it.reviewedAt ?: it.checkedAt }
     }
-
-    private fun SanctionsCheck.sameSubject(cmd: ScreenEntityCommand): Boolean = subjectId == cmd.subjectId &&
-        entityType == cmd.entityType &&
-        name == cmd.name &&
-        aliases == cmd.aliases.filterNotNull() &&
-        dateOfBirth == cmd.dateOfBirth &&
-        nationality == cmd.nationality &&
-        identifiers == cmd.identifiers &&
-        profile?.name == cmd.profile?.takeIf { it.isNotBlank() } &&
-        country == cmd.country?.trim()?.uppercase()?.takeIf { it.isNotEmpty() } &&
-        bankIdentifier == cmd.bankIdentifier?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
 
     companion object {
         /**
@@ -274,5 +295,37 @@ class SanctionsService(
     override suspend fun listChecks() = repo.listChecks()
 }
 
-private fun matchIdentity(match: SanctionsMatch): Pair<SanctionsListType, String> =
+internal fun matchIdentity(match: SanctionsMatch): Pair<SanctionsListType, String> =
     match.listType to (match.matchedId?.let { "id:$it" } ?: "name:${match.matchedName}")
+
+/** One list entry as a name match; the legacy path reports it without a kind. */
+internal fun nameMatch(
+    listType: SanctionsListType,
+    externalId: String?,
+    primaryName: String,
+    programs: List<String>,
+    score: Double,
+) = SanctionsMatch(
+    listType = listType,
+    matchType = when {
+        score >= 0.95 -> MatchType.EXACT
+        score >= 0.80 -> MatchType.FUZZY
+        else -> MatchType.PHONETIC
+    },
+    matchScore = score,
+    matchedName = primaryName,
+    matchedId = externalId,
+    listEntryDate = null,
+    programs = programs,
+)
+
+private fun SanctionsCheck.sameSubject(cmd: ScreenEntityCommand): Boolean = subjectId == cmd.subjectId &&
+    entityType == cmd.entityType &&
+    name == cmd.name &&
+    aliases == cmd.aliases.filterNotNull() &&
+    dateOfBirth == cmd.dateOfBirth &&
+    nationality == cmd.nationality &&
+    identifiers == cmd.identifiers &&
+    profile?.name == cmd.profile?.takeIf { it.isNotBlank() } &&
+    country == cmd.country?.trim()?.uppercase()?.takeIf { it.isNotEmpty() } &&
+    bankIdentifier == cmd.bankIdentifier?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
