@@ -531,6 +531,61 @@ class ResolveReconcileSourceTest(unittest.TestCase):
         self.assertEqual(resolved[second_service]["sha"], self.OLDER)
         self.assertEqual(len(requested), 2, "one run-list and one shared jobs request")
 
+    def test_unproven_service_is_reported_by_name_with_its_proven_peers(self):
+        """A complete run listing that proves some services yields a per-service refusal.
+
+        The proven half travels with the error so the gate refuses only the named members;
+        before, one never-built service stranded every proven peer in the reconcile batch.
+        """
+        unbuilt = "openbank-anacredit-service"
+        run = self.run_record(
+            38, self.OLDER, "2026-10-17T12:00:00Z", event="workflow_dispatch"
+        )
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            path = urlsplit(request.full_url).path
+            if path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse({"workflow_runs": [run]})
+            if path.endswith("/runs/38/attempts/1/jobs"):
+                return FixtureResponse({"jobs": job_fixture()["jobs"][:3]})
+            raise AssertionError(f"unexpected API request: {request.full_url}")
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+            patch.object(MODULE, "_is_ancestor", return_value=True),
+            patch.object(MODULE, "_tree_equivalent", return_value=True),
+            patch.object(MODULE, "_exact_pact_exists", return_value=True),
+            self.assertRaises(MODULE.UnresolvedServicesError) as caught,
+        ):
+            MODULE.resolve_reconcile_service_sources(
+                [SERVICE, unbuilt],
+                self.TIP,
+                REPOSITORY,
+                "fixture-token",
+                "https://api.github.test",
+            )
+
+        self.assertEqual(caught.exception.missing, [unbuilt])
+        self.assertEqual(set(caught.exception.resolved), {SERVICE})
+        self.assertEqual(caught.exception.resolved[SERVICE]["sha"], self.OLDER)
+        self.assertIsInstance(caught.exception, MODULE.VerificationError)
+
+    def test_api_failure_is_not_downgraded_to_a_per_service_refusal(self):
+        def fake_urlopen(request, timeout):
+            del request, timeout
+            raise MODULE.HTTPError("u", 502, "bad gateway", {}, None)
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            self.assertRaises(MODULE.VerificationError) as caught,
+        ):
+            MODULE.resolve_reconcile_service_sources(
+                [SERVICE], self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertNotIsInstance(caught.exception, MODULE.UnresolvedServicesError)
+
     def test_failed_verification_metadata_does_not_prove_the_service(self):
         run = self.run_record(36, self.OLDER, "2026-10-17T12:00:00Z")
         jobs = job_fixture()["jobs"] + [

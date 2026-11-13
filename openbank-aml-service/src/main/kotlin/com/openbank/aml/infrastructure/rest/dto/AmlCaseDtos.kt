@@ -78,6 +78,12 @@ data class AmlCaseResponse(
     val decidedAt: Instant?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /**
+     * True when this case can be closed or escalated only through an approved four-eyes disposition
+     * proposal (ADR-0371 §5). A direct `PUT /decision` to anything but UNDER_REVIEW is refused for
+     * it, so a client needs to know which flow to offer before the officer has written a rationale.
+     */
+    val requiresFourEyesDisposition: Boolean = false,
 )
 
 fun AmlCase.toResponse() = AmlCaseResponse(
@@ -100,4 +106,5 @@ fun AmlCase.toResponse() = AmlCaseResponse(
     decidedAt = decidedAt,
     createdAt = createdAt,
     updatedAt = updatedAt,
+    requiresFourEyesDisposition = isPackMonitoringCase,
 )

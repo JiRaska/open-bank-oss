@@ -19,6 +19,20 @@ data class OutcomeResponse(
 
 fun OutcomeLabel.toResponse() = OutcomeResponse(vocabularyId, vocabularyRevision, vocabularyHash, code)
 
+/** One choosable outcome, as the officer is shown it. */
+data class OutcomeEntryResponse(val code: String, val label: String, val meaning: String)
+
+/**
+ * The pinned outcome vocabulary `outcomeCode` is resolved against. Served so a client offers
+ * exactly the codes this service accepts instead of keeping its own copy that can drift.
+ */
+data class OutcomeCatalogueResponse(
+    val vocabularyId: String,
+    val vocabularyRevision: Int,
+    val vocabularyHash: String,
+    val entries: List<OutcomeEntryResponse>,
+)
+
 data class ProposeDispositionRequest(val disposition: String?, val outcomeCode: String?, val note: String?)
 
 data class DecideDispositionRequest(val approve: Boolean?, val reason: String?)
