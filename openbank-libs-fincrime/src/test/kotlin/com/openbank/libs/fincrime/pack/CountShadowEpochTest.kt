@@ -6,6 +6,9 @@ package com.openbank.libs.fincrime.pack
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.openbank.libs.audit.decision.DecisionClass
+import com.openbank.libs.audit.decision.DecisionOutcome
+import com.openbank.libs.audit.decision.DecisionRecord
 import com.openbank.libs.fincrime.vocabulary.FincrimeVocabularyJson
 import com.openbank.libs.governance.MakerCheckerViolation
 import org.assertj.core.api.Assertions.assertThat
@@ -116,6 +119,39 @@ class CountShadowEpochTest {
         }
         val result = candidate.evaluate(candidate.reference, at, oversized.observations)
         assertThat(result).isEqualTo(CountEvaluation.Incomplete(CountEvaluationFailure.INVALID_INPUT))
+    }
+
+    @Test
+    fun `the existing DecisionRecord preserves exact shadow pins for both outcomes and domains`() {
+        for (domain in PackDomain.entries) {
+            val (baseline, candidate) = fixtures(domain)
+            val replay = CountShadowReplay.evidence(baseline, candidate, cases)
+            val pinned = verify(epoch(replay), candidate, replay)
+            val evaluated = DecisionRecord.fromMap(
+                pinned.decisionRecord(UUID.randomUUID(), "synthetic-subject", at, listOf(input), atomic = true),
+            )
+            val incomplete = DecisionRecord.fromMap(
+                pinned.decisionRecord(UUID.randomUUID(), "synthetic-subject", at, emptyList(), atomic = false),
+            )
+            assertThat(evaluated.decisionClass).isEqualTo(DecisionClass.SHADOW)
+            assertThat(evaluated.engine.id).isEqualTo(candidate.reference.id)
+            assertThat(evaluated.engine.version).isEqualTo(candidate.reference.revision.toString())
+            assertThat(evaluated.atomic).isTrue()
+            assertThat(incomplete.atomic).isFalse()
+            val first = evaluated.outcome as DecisionOutcome.Shadow
+            val second = incomplete.outcome as DecisionOutcome.Shadow
+            assertThat(first.result).isEqualTo(DecisionOutcome.Shadow.Result.EVALUATED)
+            assertThat(second.result).isEqualTo(DecisionOutcome.Shadow.Result.INCOMPLETE)
+            assertThat(first.artifactHash.hex).isEqualTo(candidate.reference.contentHash)
+            assertThat(first.approvedEvidenceHash.hex).isEqualTo(replay.digest)
+            assertThat(first.epoch).isEqualTo(1)
+            assertThat(first.outputHash).isNotEqualTo(second.outputHash)
+            assertThat(evaluated.inputDigest).isNotEqualTo(incomplete.inputDigest)
+            val oversized = List(CompiledCountPack.MAX_RULES + 1) { input }
+            assertThatIllegalArgumentException().isThrownBy {
+                pinned.decisionRecord(UUID.randomUUID(), "synthetic-subject", at, oversized, atomic = false)
+            }
+        }
     }
 
     private fun fixtures(domain: PackDomain): Pair<CompiledCountPack, CompiledCountPack> {

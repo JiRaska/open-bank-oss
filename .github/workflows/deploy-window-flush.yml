@@ -119,6 +119,8 @@ jobs:
           # A stale GitOps pin or a supersede refusal (owner hold, rollback) refuses ONLY that
           # kind; the next kind is tried instead of the whole flush stopping on it (2026-10-30:
           # one stale gitops PR held every admin-ui deploy for hours).
+          # Staleness is per pin (#15977): a PR with fresh pins left has only its stale ones
+          # reverted, and is armed on a later tick once its checks re-run on the pruned head.
           python3 .github/scripts/deploy-window.py select --root . --candidates "$CANDIDATES" \
             | tee "$RUNNER_TEMP/deploy-window/select" >> "$GITHUB_OUTPUT"
           arm=$(sed -n 's/^arm=//p' "$RUNNER_TEMP/deploy-window/select")

@@ -124,3 +124,13 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 ## Souhrnný časový limit schránky notifikací
 
 Sjednocená schránka notifikací volá notifikační službu pro každou stranu v rámci jednoho souhrnného časového limitu. Limit se měří monotónními hodinami a každé čekání (získání povolení, čekání na dokončení, časový limit HTTP volání) se zkracuje o zbývající rozpočet. Po vyčerpání rozpočtu endpoint odpoví `NOTIFICATIONS_UNAVAILABLE`, místo aby čekal na sekvenční časové limity. Konfigurace ani kontrakt se nezměnily.
+
+## Testovací převod mezi vlastními účty (#7284)
+
+Vyhrazená zákaznická trasa ověřuje syntetický požadavek a token servisního účtu
+`openbank-synthetic-transfer`. Nastavte `openbank.synthetic-transfer.party-id`,
+`openbank.synthetic-transfer.source-account-id` a `openbank.synthetic-transfer.target-account-id`
+pro izolovanou sandboxovou sadu. Subjekt musí být ve službě Party aktivní s klasifikací SYNTHETIC
+a vlastnit oba účty. `GET /customer/v1/synthetic/transfers` vrací ověřené sadě aktuální datum
+účtování v zóně Europe/Prague. POST na stejné cestě přijímá toto datum a směr převodu. Vyhrazená
+trasa Transaction vyžaduje ověřený Edge a stejný syntetický původ.
