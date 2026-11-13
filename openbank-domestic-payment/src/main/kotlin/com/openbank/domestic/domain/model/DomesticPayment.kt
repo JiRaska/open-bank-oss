@@ -24,6 +24,14 @@ enum class DomesticPaymentStatus {
     REJECTED,
     RETURNED,
     CANCELLED,
+    ;
+
+    /**
+     * The status a customer channel is shown. A held payment reads as RECEIVED, accepted and not yet
+     * processed, which is all the customer may know: that it is held, and by which control, is not
+     * theirs to learn (ADR-0374 D13). Operator reads keep the real status.
+     */
+    val customerFacing: DomesticPaymentStatus get() = if (this == HELD) RECEIVED else this
 }
 
 enum class DomesticPaymentPriority { STANDARD, URGENT, INSTANT }

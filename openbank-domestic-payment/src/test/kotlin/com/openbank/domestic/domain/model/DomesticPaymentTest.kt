@@ -64,6 +64,13 @@ class DomesticPaymentTest {
     }
 
     @Test
+    fun `a customer channel is shown a held payment as received and every other status as it is`() {
+        assertThat(DomesticPaymentStatus.HELD.customerFacing).isEqualTo(DomesticPaymentStatus.RECEIVED)
+        assertThat(DomesticPaymentStatus.entries.filter { it.customerFacing != it })
+            .containsExactly(DomesticPaymentStatus.HELD)
+    }
+
+    @Test
     fun `delegation and reservation form an indivisible pair`() {
         assertThatThrownBy {
             payment().copy(delegationId = UUID.randomUUID())

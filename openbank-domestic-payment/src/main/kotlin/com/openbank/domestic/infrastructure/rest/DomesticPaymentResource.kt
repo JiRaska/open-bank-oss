@@ -135,7 +135,12 @@ class DomesticPaymentResource(
         val result = if (payment == null) {
             mapOf("outcome" to "UNKNOWN")
         } else {
-            mapOf("outcome" to "FOUND", "paymentId" to payment.id.toString(), "status" to payment.status.name)
+            // The one customer-edge read of a status on this rail: a hold is not shown as one.
+            mapOf(
+                "outcome" to "FOUND",
+                "paymentId" to payment.id.toString(),
+                "status" to payment.status.customerFacing.name,
+            )
         }
         return Response.ok(result).header("Cache-Control", "no-store").build()
     }
