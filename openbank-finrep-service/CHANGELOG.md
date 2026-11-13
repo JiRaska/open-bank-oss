@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.19.0...finrep-service-v0.19.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **finrep:** align COREP liquidity previews with EBA 4.2 ([#15671](https://github.com/JiRaska/open-bank-oss/issues/15671)) ([e27b7ab](https://github.com/JiRaska/open-bank-oss/commit/e27b7ab312d784fd1d3f1dc48ac390ff023344c2))
+* **finrep:** verify offline XBRL evidence and reject unsourced facts ([#15657](https://github.com/JiRaska/open-bank-oss/issues/15657)) ([f973fb4](https://github.com/JiRaska/open-bank-oss/commit/f973fb4b91a315158a511104b063139c769a51d5))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.18.0...finrep-service-v0.19.0) (2026-11-12)
+
+
+### Features
+
+* **finrep:** observe staff reporting authorization in OPA ([#15623](https://github.com/JiRaska/open-bank-oss/issues/15623)) ([53786b0](https://github.com/JiRaska/open-bank-oss/commit/53786b0c2c79dd274be7fd2a5b257d29d6891a38)), closes [#15538](https://github.com/JiRaska/open-bank-oss/issues/15538)
+
+
+### Bug Fixes
+
+* **finrep:** correct COREP own-funds and label frozen evidence ([#15666](https://github.com/JiRaska/open-bank-oss/issues/15666)) ([0020a49](https://github.com/JiRaska/open-bank-oss/commit/0020a49ba357567bd827334076d4e6d396975d5b))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.7...finrep-service-v0.18.0) (2026-11-11)
 
 

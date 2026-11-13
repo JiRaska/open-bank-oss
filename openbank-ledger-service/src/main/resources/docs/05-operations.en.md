@@ -18,6 +18,8 @@ openbank-infra/scripts/build-push-service.sh ledger-service
 
 The build uses the `openbank.quarkus-service` convention plugin (ADR-0049 D1). Kover floor is enforced at **40%** lines (`koverVerify` wired into `check`); money-path target is 70%. Provider-side Pact verification runs against the shared `pacts/` dir (ADR-0063).
 
+The standard Gradle `test` task caps its JVM heap at 3 GiB, with a 2 GiB cap for specialized test tasks.
+
 ## Endpoints
 
 | Path | Port | Purpose |
@@ -103,6 +105,10 @@ The daily run is automated by `FxRevaluationScheduler`. To re-run for a business
 
 `JournalPartitionMaintainer` rolls forward automatically. Verify partitions: `\d+ journal_entries`. Lifecycle actions are in `partition_lifecycle_audit`. A non-empty `journal_entries_default` (DEFAULT_NONEMPTY audit row) means roll-forward fell behind — investigate before it blocks new partition ATTACH.
 
+## Observability note: frozen-period refusals
+
+With `openbank.ledger.period-lock.mode=enforce` every refusal increments `openbank_ledger_period_lock_decisions_total{outcome="refused"}` (tags `operation`, `period_type`) and the HTTP response carries `code=ACCOUNTING_PERIOD_FROZEN`. A fiscal-year refusal carries `ACCOUNTING_YEAR_CLOSED` and has no counter of its own; find it by the response code in access logs. This is documentation only: no alert rule is defined for either code, and a non-zero `refused` count is expected whenever a caller back-dates into a closed month.
+
 ## Tech-stack version matrix
 
 | Component | Version |
@@ -123,6 +129,14 @@ Per-service path-scoped CI (only changed services build). Release axis is owned 
 ### FINREP Pact fixture
 
 Broker FINREP verification derives the reporting month from the selected contract requests and uses a dedicated test database. Fixture reset refuses foreign closed-period IDs and retains the immutable evidence trigger. Regression tests cover historical June 2026 and current June 2000 fixtures in both replay orders, including rejection of evidence DELETE. Production frozen-evidence validation is unchanged.
+
+## Required synthetic journal origin
+
+`POST /api/v1/journals/synthetic` applies the journal posting rules and requires a verified
+synthetic origin. A caller without the trusted workload assertion receives HTTP 403 before
+posting. Reusing an idempotency key across origin classifications returns HTTP 409. An older
+ledger image has no synthetic posting route, so the transaction worker's synthetic request fails
+before booking.
 
 ## Shared configuration defaults
 

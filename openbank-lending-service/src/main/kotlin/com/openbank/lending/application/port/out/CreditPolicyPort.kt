@@ -19,7 +19,15 @@ import java.time.LocalDate
 /** The active, versioned credit policy set for the ADR-0213 deterministic evaluation. */
 interface CreditPolicyPort {
     fun activeBundle(asOf: LocalDate): Uni<PolicyBundle>
+
+    fun forApplication(asOf: LocalDate, jurisdiction: String?, productType: String?): Uni<PolicyBundle> =
+        activeBundle(asOf)
+
+    fun isCodeSeeded(bundle: PolicyBundle): Boolean = this is StarterCreditPolicy
 }
+
+internal fun isCzConsumerCredit(jurisdiction: String?, productType: String?): Boolean =
+    jurisdiction == "CZ" && productType == "CONSUMER_CREDIT"
 
 /**
  * Phase-1 deterministic starter bundle (ADR-0213 D3): a conservative, code-seeded

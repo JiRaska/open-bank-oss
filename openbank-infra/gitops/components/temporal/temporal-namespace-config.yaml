@@ -49,7 +49,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: temporal
     app.kubernetes.io/component: namespace-registration
-    openbank.io/derived: gitops-manual
+    open-bank.tech/derived: gitops-manual
 data:
   # Space-separated list of Temporal NAMESPACES (not task queues) — the set of distinct
   # `openbank.temporal.namespace` values across services that run workflows. Today:

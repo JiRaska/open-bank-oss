@@ -56,7 +56,7 @@ class FinrepResourceTest {
         val resp: Response = resource.getTemplate(templateId = "F01.01", asOf = "")
 
         assertThat(resp.status).isEqualTo(200)
-        assertThat(resp.entity).isEqualTo(expected)
+        assertThat(resp.entity).isEqualTo(expected.copy(sourceEvidence = "FROZEN"))
         assertThat(captured.captured.asOf).isEqualTo(LocalDate.now(fixedClock))
         assertThat(captured.captured.templateId).isEqualTo("F01.01")
         assertThat(captured.captured.evidence).isEqualTo(TrialBalanceEvidence.FROZEN)
@@ -75,8 +75,9 @@ class FinrepResourceTest {
         val captured = slot<GetFinrepTemplateQuery>()
         coEvery { finrepUseCase.getTemplate(capture(captured)) } returns expected
 
-        resource.getTemplate("F01.01", "2026-07-31", "LIVE_PREVIEW")
+        val response = resource.getTemplate("F01.01", "2026-07-31", "LIVE_PREVIEW")
 
+        assertThat(response.entity).isEqualTo(expected.copy(sourceEvidence = "LIVE_PREVIEW"))
         assertThat(captured.captured.evidence).isEqualTo(TrialBalanceEvidence.LIVE_PREVIEW)
     }
 
@@ -97,7 +98,7 @@ class FinrepResourceTest {
         val resp: Response = resource.getTemplate(templateId = "F02.00", asOf = "2025-12-31")
 
         assertThat(resp.status).isEqualTo(200)
-        assertThat(resp.entity).isEqualTo(expected)
+        assertThat(resp.entity).isEqualTo(expected.copy(sourceEvidence = "FROZEN"))
         assertThat(captured.captured.asOf).isEqualTo(explicitDate)
         coVerify(exactly = 1) { finrepUseCase.getTemplate(any()) }
     }

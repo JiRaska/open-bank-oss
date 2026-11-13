@@ -13,6 +13,7 @@ import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.CurrencyPocket
+import com.openbank.account.domain.model.FreezeOrigin
 import com.openbank.account.domain.model.ProductRevisionPin
 import com.openbank.account.domain.model.SigningRule
 import com.openbank.account.infrastructure.persistence.entity.AccountEntity
@@ -267,6 +268,8 @@ private fun AccountRepositoryImpl.versionMatchedUpdate(entity: AccountEntity) = 
         // Same round-trip-through-update() story as the goal fields above: only
         // renameAccount in AccountService actually changes this.
         existing.nickname = entity.nickname
+        // Travels with status: set by a freeze, cleared by an unfreeze (chk_accounts_freeze_origin).
+        existing.freezeOrigin = entity.freezeOrigin
         // Audit timestamp comes from the injected Clock, not the entity default (ADR-0100 /
         // #540): the @PreUpdate callback's EPOCH default is never overwritten by the DB
         // DEFAULT since Hibernate writes every insertable/updatable column explicitly.
@@ -300,6 +303,7 @@ private fun AccountEntity.toDomain() = Account(
     termsUrl = termsUrl,
     termsEffectiveFrom = termsEffectiveFrom,
     productRevisionPin = productRevisionPinOrNull(),
+    freezeOrigin = freezeOrigin?.let(FreezeOrigin::valueOf),
 )
 
 // Whole or absent, as chk_accounts_product_revision_pin_whole guarantees for the row.
@@ -336,6 +340,7 @@ private fun Account.toEntity() = AccountEntity().also {
     it.goalTargetMinorUnits = goalTargetMinorUnits
     it.goalTargetDate = goalTargetDate
     it.nickname = nickname
+    it.freezeOrigin = freezeOrigin?.name
     it.termsVersion = termsVersion
     it.termsUrl = termsUrl
     it.termsEffectiveFrom = termsEffectiveFrom

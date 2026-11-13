@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "aml.monitoring-pack.synthetic",
+  "revision": 1,
+  "domain": "AML",
+  "purpose": "synthetic-shadow",
+  "effectiveFrom": "2026-01-01T00:00:00Z",
+  "effectiveUntil": "2100-01-01T00:00:00Z",
+  "reasons": { "id": "aml.monitoring-reasons.synthetic", "revision": 1, "hash": "5e8e7b1977168c357c50548becb6c75133957c898a4ba1d8adc3872c038ddda1" },
+  "severities": { "id": "aml.monitoring-severities.synthetic", "revision": 1, "hash": "b34f81765bfe42850af7b670408d9cf6b81893b8de8ed534554ff9be629ffe84" },
+  "rules": [
+    {
+      "id": "syn-structuring-czk-out",
+      "feature": { "id": "syn_czk_out_below_mark_w24h", "revision": 1, "hash": "727a9f1339a1ddb20d14ae5df5dc2dc3d67d3ef9fe5799318a12e1591d0d54d3" },
+      "operator": "COUNT_AT_LEAST",
+      "maxAgeSeconds": "300",
+      "minimum": "3",
+      "reason": "SYN_REPEATED_BELOW_MARK",
+      "effect": { "type": "AML_TRIAGE", "severity": "MEDIUM" }
+    },
+    {
+      "id": "syn-structuring-czk-in",
+      "feature": { "id": "syn_czk_in_below_mark_w24h", "revision": 1, "hash": "b63dd9569b4a615269461e6bc8c3b68b0a8c4811f74f7a2e21bd1cda2c4b945f" },
+      "operator": "COUNT_AT_LEAST",
+      "maxAgeSeconds": "300",
+      "minimum": "3",
+      "reason": "SYN_REPEATED_BELOW_MARK",
+      "effect": { "type": "AML_TRIAGE", "severity": "MEDIUM" }
+    },
+    {
+      "id": "syn-structuring-eur-out",
+      "feature": { "id": "syn_eur_out_below_mark_w24h", "revision": 1, "hash": "b4ad6780552b68558af94618a888720176d4c1107a3ab7debaf20adbb4e952d3" },
+      "operator": "COUNT_AT_LEAST",
+      "maxAgeSeconds": "300",
+      "minimum": "3",
+      "reason": "SYN_REPEATED_BELOW_MARK",
+      "effect": { "type": "AML_TRIAGE", "severity": "HIGH" }
+    }
+  ]
+}
