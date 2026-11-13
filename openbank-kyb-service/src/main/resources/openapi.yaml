@@ -6,7 +6,10 @@ info:
   # 1.5.0 -> 1.6.0: additive — AML questionnaire, declarations, business agreement + acceptance,
   # prefill; `sign` keeps its schema and gains stricter, documented semantics.
   # 1.6.0 -> 1.7.0: additive — company-scoped PSC record and corporate registration evidence.
-  version: 1.7.0
+  # 1.7.0 -> 1.8.0: additive — related-party sanctions / PEP screening: `Case.screening` (operator
+  # view only), the operator disposition route for a finding, the 503 SCREENING_PENDING refusal on
+  # `sign` and `review/resolve`, and the 422 SCREENING_FINDING_* refusal on `review/resolve`.
+  version: 1.8.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -479,7 +482,15 @@ paths:
         signature any AML risk flag (PEP, FATCA status other than ACTIVE_NFFE, a tax residency
         outside the entity's country, cash-intensive, a high-risk country, a UBO discrepancy, a PEP
         declaration contradicting the customer profile) moves the case to MANUAL_REVIEW with every
-        flag named in `reviewReason`; activation then waits for the reviewer.
+        flag named in `reviewReason`; activation then waits for the reviewer. Where related-party
+        screening is switched on, the LAST required signature is refused with 503 SCREENING_PENDING
+        (and not recorded) until the entity, every listed representative and every reportable
+        beneficial owner and every person named in the declarations has a screening answer and the
+        beneficial-owner lookup is available. The subject list is rebuilt from the case's current
+        parties on every attempt. A sanctions hit, a potential hit or a PEP match moves the case to
+        MANUAL_REVIEW and adds nothing to `reviewReason`; the finding is in the operator-only
+        `Case.screening`. On a customer response an AML review reads "AML risk review before
+        activation" whatever raised it; the flags are in the operator's `reviewReason` only.
       operationId: signCase
       parameters:
         - $ref: '#/components/parameters/caseId'
@@ -503,6 +514,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/AgreementConflict'
+        '503':
+          $ref: '#/components/responses/ScreeningPending'
   /api/v1/kyb/cases/{id}/abandon:
     post:
       tags: [KYB]
@@ -544,6 +557,10 @@ paths:
                 $ref: '#/components/schemas/Case'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ScreeningFinding'
+        '503':
+          $ref: '#/components/responses/ScreeningPending'
   /api/v1/kyb/representation/{scheme}/{identifier}:
     get:
       tags: [KYB]
@@ -600,6 +617,45 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Attestation'
+  /api/v1/kyb/cases/{id}/screening/findings/{subjectKey}/disposition:
+    post:
+      tags: [KYB]
+      summary: Operator decides one screening finding
+      description: >-
+        Sets the disposition of one OPEN finding (a sanctions hit, a potential hit or a PEP match)
+        to CLEARED_FALSE_POSITIVE or CONFIRMED, recording the authenticated operator, the reason
+        and the time. Accepted only while the case is in MANUAL_REVIEW (409 otherwise). It never
+        moves the case: approval stays a separate act, and a case that has ever had a finding is
+        approved only by an operator resolving the review, never by the last signature alone. A CONFIRMED sanctions
+        finding leaves only rejection. A decided finding cannot be decided again (409).
+      operationId: disposeScreeningFinding
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - name: subjectKey
+          in: path
+          required: true
+          description: '`key` of the subject in `Case.screening.subjects`.'
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisposeFindingRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/kyb/cases/{id}/reject:
     post:
       tags: [KYB]
@@ -704,14 +760,37 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Conflict:
-      description: The transition is not valid in the case's current state
+      description: >-
+        The transition is not valid in the case's current state (`error` = INVALID_TRANSITION), or
+        the case was changed concurrently and nothing was written (`error` = CASE_CONCURRENT_UPDATE)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ScreeningFinding:
+      description: >-
+        Operator routes only. The review cannot be resolved while a screening finding has no
+        disposition (`error` = SCREENING_FINDING_OPEN), or after a sanctions finding was confirmed
+        (`error` = SCREENING_FINDING_CONFIRMED; the case can only be rejected). Any finding the
+        call itself discovered is stored and visible in `Case.screening`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ScreeningPending:
+      description: >-
+        Approval was asked for before the related-party screening has a complete answer
+        (`error` = SCREENING_PENDING). Nothing was recorded; the same request succeeds once the
+        screening has finished. The body is identical for every case.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
     AgreementConflict:
       description: >-
-        A state conflict. `error` is INVALID_TRANSITION, or one of the agreement codes
+        A state conflict. `error` is CASE_CONCURRENT_UPDATE when the case was changed by someone
+        else between this caller's read and its write (nothing was written; read it again), or
+        INVALID_TRANSITION, or one of the agreement codes
         (AGREEMENT_PREREQUISITES_MISSING, AGREEMENT_NOT_PREPARED, AGREEMENT_LOCKED, DISCLOSURES_STALE,
         DISCLOSURES_NOT_ACCEPTED, SIGNATURE_REF_MISMATCH, CEREMONY_NOT_FOUND, CEREMONY_CASE_MISMATCH,
         CEREMONY_NOT_SIGNED).
@@ -1150,6 +1229,9 @@ components:
             $ref: '#/components/schemas/Signer'
         reviewReason:
           type: [string, 'null']
+          description: >-
+            Why the case is under review. On a customer response an AML review carries no flags and
+            no cause; an operator response carries the flags the customer's own answers raised.
         questionnaire:
           oneOf:
             - $ref: '#/components/schemas/Questionnaire'
@@ -1162,11 +1244,92 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AgreementSummary'
             - type: 'null'
+        screening:
+          description: >-
+            Related-party sanctions / PEP screening. Operator view only — always null on a response
+            a customer can read.
+          oneOf:
+            - $ref: '#/components/schemas/CaseScreening'
+            - type: 'null'
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
+          format: date-time
+    DisposeFindingRequest:
+      type: object
+      required: [disposition, reason]
+      properties:
+        disposition:
+          type: string
+          enum: [OPEN, CLEARED_FALSE_POSITIVE, CONFIRMED]
+          description: >-
+            CLEARED_FALSE_POSITIVE or CONFIRMED. OPEN is the state a finding starts in and is
+            refused here with 400: a decision cannot be withdrawn through this route.
+        reason:
+          type: string
+          minLength: 10
+    CaseScreening:
+      type: object
+      required: [complete, openFindings, subjects]
+      properties:
+        openFindings:
+          type: integer
+          description: Findings with no disposition. The case cannot be approved while this is above zero.
+        complete:
+          type: boolean
+          description: >-
+            Every subject has an answer and the beneficial owners were established. False while any
+            subject is PENDING, and while `ownerSource` is UNAVAILABLE.
+        ownerSource:
+          type: [string, 'null']
+          enum: [REGISTER, SELF_DECLARATION, UNAVAILABLE, null]
+          description: Where the beneficial owners among the subjects came from when the list was last built.
+        subjects:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScreeningSubject'
+    ScreeningSubject:
+      type: object
+      required: [key, kind, name, organisation, sanctions, pep, current]
+      properties:
+        key:
+          type: string
+          description: Identifies the subject on the disposition route.
+        current:
+          type: boolean
+          description: False for a subject that left the case and is kept because of its finding.
+        disposition:
+          type: [string, 'null']
+          enum: [OPEN, CLEARED_FALSE_POSITIVE, CONFIRMED, null]
+          description: Null when there is nothing to decide.
+        disposedBy:
+          type: [string, 'null']
+        dispositionReason:
+          type: [string, 'null']
+        disposedAt:
+          type: [string, 'null']
+          format: date-time
+        kind:
+          type: string
+          enum: [ENTITY, REPRESENTATIVE, BENEFICIAL_OWNER, DECLARED_PERSON]
+        name:
+          type: string
+        organisation:
+          type: boolean
+          description: True for a legal person, false for a natural person.
+        sanctions:
+          type: string
+          enum: [PENDING, CLEAR, POTENTIAL_HIT, HIT]
+          description: PENDING means no answer was obtained — never "clear".
+        pep:
+          type: boolean
+          description: A politically exposed person match. A customer-risk fact, never a sanctions hit.
+        matchedName:
+          type: [string, 'null']
+        screenedAt:
+          type: [string, 'null']
           format: date-time
     Questionnaire:
       type: object
