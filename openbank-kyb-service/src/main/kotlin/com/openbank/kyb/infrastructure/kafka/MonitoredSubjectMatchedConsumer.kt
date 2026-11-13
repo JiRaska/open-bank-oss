@@ -5,6 +5,7 @@
 package com.openbank.kyb.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.kyb.application.port.out.FindingDecisionConflictException
 import com.openbank.kyb.application.port.out.KybMonitoringMetricsPort
 import com.openbank.kyb.application.usecase.MonitoringFindingService
 import com.openbank.kyb.application.usecase.MonitoringSettings
@@ -118,8 +119,18 @@ class MonitoredSubjectMatchedConsumer {
             metrics.findingHandled(MicrometerKybMonitoringMetrics.OUTCOME_FOREIGN_OWNER)
             return
         }
-        val outcome = EventRetry.withRetry(log, "[$CHANNEL] monitoring finding", finding.match.findingId) {
-            findings.handle(finding.subjectRef, finding.match)
+        val outcome = try {
+            EventRetry.withRetry(
+                log,
+                "[$CHANNEL] monitoring finding",
+                finding.match.findingId,
+                isRetryable = { it !is FindingDecisionConflictException },
+            ) { findings.handle(finding.subjectRef, finding.match) }
+        } catch (e: FindingDecisionConflictException) {
+            // No retry reconciles two decisions: nacked, so the channel dead-letters it.
+            log.errorf("[%s] finding %s: %s", CHANNEL, finding.match.findingId, e.message)
+            metrics.findingHandled(MicrometerKybMonitoringMetrics.OUTCOME_DECISION_CONFLICT)
+            throw e
         }
         metrics.findingHandled(outcome.tag)
     }

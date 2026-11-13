@@ -4,7 +4,7 @@
 
 package com.openbank.kyb.infrastructure.persistence.repository
 
-import com.openbank.kyb.application.port.out.ConcurrentCaseUpdateException
+import com.openbank.kyb.application.port.out.FindingDecisionConflictException
 import com.openbank.kyb.application.port.out.MonitoringDesired
 import com.openbank.kyb.application.port.out.MonitoringRegistration
 import com.openbank.kyb.application.port.out.MonitoringRegistrationStore
@@ -65,7 +65,7 @@ class MonitoringRegistrationStoreImpl(private val pool: Pool) : MonitoringRegist
      * monitoring columns would describe findings that are not there.
      */
     private fun allWritten(caseId: UUID, expected: Int, written: Int) {
-        if (written != expected) throw ConcurrentCaseUpdateException(caseId)
+        if (written != expected) throw FindingDecisionConflictException(caseId)
     }
 
     /** Text only, so the statement casts each value itself and no mapper setting can change the wire form. */
@@ -282,7 +282,8 @@ class MonitoringRegistrationStoreImpl(private val pool: Pool) : MonitoringRegist
         /**
          * ?1 case id, ?2 the findings as a JSON array of text fields. A finding is a row per
          * (case, finding). Each element either inserts its row, or rewrites a stored row that is
-         * still OPEN, or rewrites a stored row that already says exactly the same decision. A
+         * still OPEN, or rewrites a stored row that already says exactly the same decision (disposition, decider,
+         * time and reason). A
          * stored decision that differs is NOT written and so is missing from the row count,
          * which the caller checks. ?2 is cast to text before jsonb: bound as jsonb, the string
          * would arrive as one JSON string and not as the array it spells.
@@ -301,7 +302,8 @@ class MonitoringRegistrationStoreImpl(private val pool: Pool) : MonitoringRegist
                 "decided_at = excluded.decided_at " +
                 "WHERE s.disposition = 'OPEN' OR (s.disposition = excluded.disposition " +
                 "AND s.decided_by IS NOT DISTINCT FROM excluded.decided_by " +
-                "AND s.decided_at IS NOT DISTINCT FROM excluded.decided_at)"
+                "AND s.decided_at IS NOT DISTINCT FROM excluded.decided_at " +
+                "AND s.decision_reason IS NOT DISTINCT FROM excluded.decision_reason)"
 
         const val STATS_SQL =
             "SELECT " +

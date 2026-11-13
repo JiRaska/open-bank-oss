@@ -5,6 +5,7 @@
 package com.openbank.kyb.integration
 
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
+import com.openbank.kyb.application.port.out.FindingDecisionConflictException
 import com.openbank.kyb.application.port.out.MonitoredSubjectRegistryException
 import com.openbank.kyb.application.port.out.MonitoringRegistrationStore
 import com.openbank.kyb.application.port.out.RegistryFailure
@@ -21,11 +22,13 @@ import com.openbank.kyb.it.StubPartyGateway
 import com.openbank.kyb.it.StubRelatedPartyScreening
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
+import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -809,7 +812,8 @@ class KybOngoingMonitoringIT {
         journey.execute(
             "insert into kyb_monitoring_findings (finding_id, case_id, subject_key, match_kind, list_type, " +
                 "list_entry_ref, list_entry_version, match_score, match_status, detection, received_at, disposition, " +
-                "decided_by, decision_reason, decided_at) values (?, ?, ?, 'SANCTIONS', 'EU', 'id:planted', '1', 1.0, " +
+                "decided_by, decision_reason, decided_at) values (?, ?, ?, 'SANCTIONS', 'EU', 'id:planted', '1', " +
+                "1.0, " +
                 "'HIT', 'LIST_DELTA', now(), 'CONFIRMED', 'somebody', 'planted by the test', now())",
             findingId,
             UUID.fromString(caseId),
@@ -818,8 +822,8 @@ class KybOngoingMonitoringIT {
 
         val failure = runCatching { finding(personRef(caseId), findingId) }.exceptionOrNull()
 
-        // Nacked, so the record is retried and dead-lettered; nothing of the write is there.
-        assertThat(failure).isNotNull()
+        // Nacked as its own failure, not retried as a lost race: dead-lettered; nothing of the write is there.
+        assertThat(failure).isInstanceOf(FindingDecisionConflictException::class.java)
         val after = journey.stored(caseId)
         assertThat(after.xmin).describedAs("the case row was not written").isEqualTo(before.xmin)
         assertThat(after.findingCount).isZero()
@@ -830,6 +834,37 @@ class KybOngoingMonitoringIT {
         journey.execute("delete from kyb_monitoring_findings where case_id = ?", UUID.fromString(caseId))
         finding(personRef(caseId), findingId)
         assertThat(journey.stored(caseId).reviewOpen).isTrue()
+    }
+
+    @Test
+    fun `two decisions about one finding that differ only in their reason are a conflict, not a duplicate`() {
+        val caseId = journey.approved("71000305")
+        run()
+        val findingId = UUID.randomUUID()
+        finding(personRef(caseId), findingId)
+        decide(caseId, findingId, "CLEARED_FALSE_POSITIVE").then().statusCode(200)
+        val stored = onEventLoop { store.findingsOf(UUID.fromString(caseId)) }.single()
+
+        // A writer holding the same decision under another reason: the stored one must not count as written.
+        val failure = runCatching {
+            onEventLoop {
+                Panache.withTransaction {
+                    store.saveFindingsInTransaction(
+                        UUID.fromString(caseId),
+                        listOf(stored.copy(decisionReason = "a different reason")),
+                    )
+                }.awaitSuspending()
+            }
+        }.exceptionOrNull()
+        // The identical decision is a duplicate and writes cleanly.
+        onEventLoop {
+            Panache.withTransaction { store.saveFindingsInTransaction(UUID.fromString(caseId), listOf(stored)) }
+                .awaitSuspending()
+        }
+
+        assertThat(failure).isInstanceOf(FindingDecisionConflictException::class.java)
+        assertThat(onEventLoop { store.findingsOf(UUID.fromString(caseId)) }.single().decisionReason)
+            .isEqualTo(stored.decisionReason)
     }
 
     @Test

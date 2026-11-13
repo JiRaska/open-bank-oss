@@ -79,8 +79,8 @@ interface MonitoringRegistrationStore {
 
     /**
      * Stores [findings] with their decisions, in ONE statement, keyed by (case, finding). Fails
-     * with [ConcurrentCaseUpdateException] — and so fails the whole case write — unless every one
-     * of them ends up stored as given: a stored decision is never replaced by a different one.
+     * with [FindingDecisionConflictException] — and so fails the whole case write — unless every
+     * one of them ends up stored as given: a stored decision is never replaced by a different one.
      */
     fun saveFindingsInTransaction(caseId: UUID, findings: List<MonitoringFinding>): Uni<Void>
 
@@ -166,3 +166,12 @@ interface KybMonitoringMetricsPort {
 
     fun observed(stats: MonitoringStats)
 }
+
+/**
+ * A stored decision about a finding differs from the one the case being written carries —
+ * disposition, decider, time or reason. Not a lost race (that is [ConcurrentCaseUpdateException],
+ * which a re-read cures): re-reading cannot reconcile two decisions, so nothing of the case write
+ * commits, a delivery is dead-lettered and an operator request answers 409.
+ */
+class FindingDecisionConflictException(caseId: UUID) :
+    RuntimeException("a stored monitoring decision on kyb case $caseId differs from the one being written")

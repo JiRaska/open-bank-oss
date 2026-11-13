@@ -266,8 +266,9 @@ spec:
           # disagreement of #15900), a record typed as a finding whose body has no usable owner,
           # finding id or subject reference (`malformed` — the same disagreement one level down; it
           # is dead-lettered as well), a finding addressed to kyb-service about a reference it never
-          # registered (`unknown_subject`), or one whose case has ended (`not_monitored`). All but
-          # `malformed` are acked, so there is no lag and no dead-letter; this counter is the only
+          # registered (`unknown_subject`), or one whose case has ended (`not_monitored`), or one
+          # whose stored decision disagrees with the case being written (`decision_conflict`, nothing
+          # of that write commits). All but `malformed` and `decision_conflict` are acked, so there is no lag and no dead-letter; this counter is the only
           # thing that moves.
           #
           # The counters are registered at ZERO when the service boots, so the first occurrence
@@ -279,7 +280,7 @@ spec:
           # cannot fire.
           expr: |
             sum by (namespace, outcome) (
-              increase(openbank_kyb_monitoring_findings_total{outcome=~"unrecognised|malformed|unknown_subject|not_monitored"}[1h])
+              increase(openbank_kyb_monitoring_findings_total{outcome=~"unrecognised|malformed|decision_conflict|unknown_subject|not_monitored"}[1h])
             ) > 0
           labels:
             severity: warning
@@ -288,7 +289,7 @@ spec:
             # window against.
             subject_period: continuous
             summary: "kyb-service acked a monitoring finding it could not route to a case ({{ $labels.outcome }})"
-            description: "`openbank_kyb_monitoring_findings_total{outcome=\"{{ $labels.outcome }}\"}` moved in {{ $labels.namespace }} within the last hour. `unrecognised`: a record on the sanctions screening topic carried a missing or unknown `ce-type` header — sanctions-service changed how it types its events, or a new type joined the topic; compare with the committed kyb-service/sanctions-service pact. `malformed`: a record typed as a finding had no usable `ownerService`, `findingId` or `subjectRef` — the producer changed the body; the record is in `openbank.dlq.kyb.sanctions-monitoring-in`. `unknown_subject`: the registry holds a subject under kyb-service's client that kyb-service has no record of, so its finding reaches no case — look for a registration made outside the relay, or a store that was restored from an older backup. `not_monitored`: the finding's case has ended or no longer carries the subject, and its withdrawal had not reached the registry yet. In every one of them the match itself was NOT reviewed by anyone."
+            description: "`openbank_kyb_monitoring_findings_total{outcome=\"{{ $labels.outcome }}\"}` moved in {{ $labels.namespace }} within the last hour. `unrecognised`: a record on the sanctions screening topic carried a missing or unknown `ce-type` header — sanctions-service changed how it types its events, or a new type joined the topic; compare with the committed kyb-service/sanctions-service pact. `malformed`: a record typed as a finding had no usable `ownerService`, `findingId` or `subjectRef` — the producer changed the body; the record is in `openbank.dlq.kyb.sanctions-monitoring-in`. `decision_conflict`: a finding's stored decision disagrees with the case being written, so nothing of that write committed and the record is dead-lettered in `openbank.dlq.kyb.sanctions-monitoring-in`; compare `kyb_monitoring_findings` for the case with the decision log before replaying. `unknown_subject`: the registry holds a subject under kyb-service's client that kyb-service has no record of, so its finding reaches no case — look for a registration made outside the relay, or a store that was restored from an older backup. `not_monitored`: the finding's case has ended or no longer carries the subject, and its withdrawal had not reached the registry yet. In every one of them the match itself was NOT reviewed by anyone."
         - alert: KybMonitoringRegistryUnauthorised
           # The registry answered 401 or 403: it does not accept kyb-service as a caller. Not one
           # subject can be registered until that is fixed, whatever the backlog age says so far.

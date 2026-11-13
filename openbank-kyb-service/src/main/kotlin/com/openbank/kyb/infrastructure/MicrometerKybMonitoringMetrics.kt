@@ -73,7 +73,13 @@ class MicrometerKybMonitoringMetrics(private val registry: MeterRegistry, privat
             registry.counter(REGISTRATIONS, "outcome", MonitoringRegistrationService.UNAUTHORISED, "reason", it)
         }
         MonitoringFindingOutcome.entries.forEach { registry.counter(FINDINGS, "outcome", it.tag) }
-        listOf(OUTCOME_FOREIGN_OWNER, OUTCOME_IGNORED, OUTCOME_MALFORMED, OUTCOME_UNRECOGNISED)
+        listOf(
+            OUTCOME_FOREIGN_OWNER,
+            OUTCOME_IGNORED,
+            OUTCOME_MALFORMED,
+            OUTCOME_UNRECOGNISED,
+            OUTCOME_DECISION_CONFLICT,
+        )
             .forEach { registry.counter(FINDINGS, "outcome", it) }
     }
 
@@ -122,5 +128,6 @@ class MicrometerKybMonitoringMetrics(private val registry: MeterRegistry, privat
         const val OUTCOME_IGNORED = "ignored"
         const val OUTCOME_MALFORMED = "malformed"
         const val OUTCOME_UNRECOGNISED = "unrecognised"
+        const val OUTCOME_DECISION_CONFLICT = "decision_conflict"
     }
 }
