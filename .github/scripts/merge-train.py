@@ -76,6 +76,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
@@ -2237,21 +2238,17 @@ class GitHub:
         api("PATCH", f"/repos/{self.repo}/pulls/{int(n)}", {"state": "closed"})
 
     def expedite_carriers_today(self, day: str) -> int | None:
-        """Expedite carriers the App opened on UTC `day` (YYYY-MM-DD), open or closed; None when two pages
-        of newest-first PRs do not reach back past that day (the caller then fails closed)."""
-        count = 0
-        for page in (1, 2):
-            rows = get(f"/repos/{self.repo}/pulls?state=all&sort=created&direction=desc&per_page=100&page={page}")
-            for p in rows:
-                if (p.get("created_at") or "")[:10] < day:
-                    return count
-                if ((p.get("user") or {}).get("login") == BOT_LOGIN
-                        and (p.get("title") or "").startswith(EXPEDITE_CARRIER_TITLE)
-                        and (p.get("created_at") or "")[:10] == day):
-                    count += 1
-            if len(rows) < 100:
-                return count
-        return None
+        """Expedite carriers the App opened on UTC `day` (YYYY-MM-DD), open or closed, from ONE search call
+        scoped to the App's own PRs created that day (a repo opens hundreds of PRs a day, so paging the PR
+        list cannot reach back reliably). Every hit is re-checked: author, title prefix, day. None = the
+        search answered incompletely or not at all; the caller then fails closed."""
+        bot = BOT_LOGIN.removesuffix("[bot]")
+        q = urllib.parse.quote(f'repo:{self.repo} is:pr author:app/{bot} created:{day} in:title "{EXPEDITE_CARRIER_TITLE}"')
+        code, data = api("GET", f"/search/issues?q={q}&per_page=100")   # an outage still raises ApiAbort
+        if code != 200:
+            log(f"::warning::expedite daily count unreadable ({code}) — the lane stays closed")
+            return None
+        return count_expedite_hits(data, day)
 
 
 def is_carrier(pr: dict, repo: str) -> bool:
@@ -2269,6 +2266,19 @@ def is_strict_carrier(pr: dict, repo: str) -> bool:
 
 def any_carrier_open(gh, repo: str) -> bool:
     return any(is_carrier(p, repo) or is_strict_carrier(p, repo) for p in gh.open_prs())
+
+
+def count_expedite_hits(data, day: str) -> int | None:
+    """Expedite carriers in one /search/issues answer; None when it is not a complete answer."""
+    if not isinstance(data, dict) or data.get("incomplete_results") or not isinstance(data.get("items"), list):
+        return None
+    items = data["items"]
+    if not isinstance(data.get("total_count"), int) or data["total_count"] > len(items):
+        return None   # more hits than one page holds: far over any cap, and uncounted
+    return sum(1 for p in items
+               if (p.get("user") or {}).get("login") == BOT_LOGIN and "pull_request" in p
+               and (p.get("title") or "").startswith(EXPEDITE_CARRIER_TITLE)
+               and (p.get("created_at") or "")[:10] == day)
 
 
 def is_expedite_carrier(gh, p: dict) -> bool:
@@ -2881,7 +2891,6 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
     if expedite is not None:
         # Marked BEFORE the carrier exists: settle identifies an expedite carrier by this status alone.
         gh.post_status(v.tip, "success", f"expedite lane: #{expedite} alone over {base[:12]}", context=EXPEDITE_CONTEXT)
-    if expedite is not None:
         gh.create_carrier(branch, expedite=True)
     else:
         gh.create_carrier(branch)
@@ -7922,6 +7931,19 @@ def self_test() -> int:
                         delattr(gh, k)
                 reset()
 
+            hit = lambda t, d="2026-11-13", u=BOT_LOGIN: {"title": t, "created_at": f"{d}T10:00:00Z",
+                                                          "user": {"login": u}, "pull_request": {}}
+            good = f"{EXPEDITE_CARRIER_TITLE} train/1-1"
+            counts = [count_expedite_hits({"total_count": 3, "incomplete_results": False,
+                                           "items": [hit(good), hit(good, u="someone"), hit("merge-train carrier train/2-1")]},
+                                          "2026-11-13"),
+                      count_expedite_hits({"total_count": 1, "incomplete_results": False, "items": [hit(good, d="2026-11-12")]},
+                                          "2026-11-13"),
+                      count_expedite_hits({"total_count": 1, "incomplete_results": True, "items": [hit(good)]}, "2026-11-13"),
+                      count_expedite_hits({"total_count": 150, "incomplete_results": False, "items": [hit(good)]}, "2026-11-13"),
+                      count_expedite_hits({"message": "rate limited"}, "2026-11-13")]
+            check("expedite (E0): the daily count counts only the App's expedite carriers of that day, else fails closed",
+                  counts == [1, 0, None, None, None], f"{counts}")
             s0, st0 = exp_setup()
             s, st = exp_tick(on=False)
             check("expedite (E1): lane off -> the label only reorders; nothing is built beside a running carrier",
@@ -7979,9 +8001,12 @@ def self_test() -> int:
             both = [c["number"] for c in exp_open()]
             gh.pending_shas.clear()                                  # both carriers go green in the same tick
             s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False, expedite=True)
+            p1_blamed = (any(n == 1 for n, _ in gh.comments)
+                         or gh.app_statuses(gh.prs[1]["head"]["sha"]).get(STATUS_CONTEXT, ("", ""))[0] == "failure")
             check("expedite (E11): both carriers green in one tick -> the expedite one is judged first and merges",
-                  st == "published" and len(both) == 2 and gh.merged == [2] and 1 not in gh.merged,
-                  f"{s} st={st} carriers={both} merged={gh.merged}")
+                  st == "published" and len(both) == 2 and gh.merged == [2] and 1 not in gh.merged
+                  and not exp_open() and not p1_blamed and not s["culprits"] and not s["bisected"],
+                  f"{s} st={st} carriers={both} merged={gh.merged} open={exp_open()}")
             exp_reset()
 
             exp_setup()
@@ -7993,8 +8018,10 @@ def self_test() -> int:
 
             exp_setup(label="p1")                                   # the expedited PR already rides the carrier
             s, st = exp_tick()
+            why9 = expedite_problem(gh, Git(clone("expchk")), "o/r", 1, 6)
             check("expedite (E9): a PR already on the running carrier gets no second one",
-                  st == "in-flight" and not s.get("expedite_window") and len(exp_open()) == 1, f"{s} {st}")
+                  st == "in-flight" and not s.get("expedite_window") and len(exp_open()) == 1
+                  and why9 is not None and "already rides" in why9, f"{s} {st} why={why9}")
             exp_reset()
 
             exp_setup()
