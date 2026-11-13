@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.17.0...aml-service-v0.18.0) (2026-11-13)
+
+
+### Features
+
+* **aml:** four-eyes flag on cases and the outcome vocabulary endpoint ([#15947](https://github.com/JiRaska/open-bank-oss/issues/15947)) ([d9db9f4](https://github.com/JiRaska/open-bank-oss/commit/d9db9f466ec97ad6094b54327a373c6f44a2a7b0))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.16.0...aml-service-v0.17.0) (2026-11-13)
 
 
