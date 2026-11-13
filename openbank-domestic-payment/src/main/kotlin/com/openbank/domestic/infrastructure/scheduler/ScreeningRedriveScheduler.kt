@@ -92,9 +92,6 @@ class ScreeningRedriveScheduler {
     @ConfigProperty(name = "openbank.domestic.screening-redrive.batch-limit", defaultValue = "20")
     var batchLimit: Int = DEFAULT_BATCH_LIMIT
 
-    @ConfigProperty(name = "openbank.domestic.screening-redrive.held-batch-limit", defaultValue = "200")
-    var heldBatchLimit: Int = DEFAULT_HELD_BATCH_LIMIT
-
     @ConfigProperty(name = "openbank.temporal.task-queue", defaultValue = "openbank-domestic-payments")
     lateinit var temporalTaskQueue: String
 
@@ -127,7 +124,7 @@ class ScreeningRedriveScheduler {
         }
         val minAge = Instant.now(clock).minus(Duration.ofMinutes(minAgeMinutes))
         val stuck = paymentRepository.findRedrivable(maxAttempts, minAge, batchLimit)
-        val held = paymentRepository.findHeldToReconcile(minAge, heldBatchLimit)
+        val held = paymentRepository.findHeldToReconcile(minAge, HELD_BATCH_LIMIT)
         if (stuck.isNotEmpty()) {
             log.infof("[screening-redrive] re-screening %d payment(s) held in RECEIVED", stuck.size)
         }
@@ -206,7 +203,12 @@ class ScreeningRedriveScheduler {
         const val DEFAULT_MAX_ATTEMPTS = 5
         const val DEFAULT_MIN_AGE_MINUTES = 10L
         const val DEFAULT_BATCH_LIMIT = 20
-        const val DEFAULT_HELD_BATCH_LIMIT = 200
+
+        /**
+         * HELD payments offered a run per tick. A constant: each offer is one cheap call that
+         * Temporal refuses while a run is open, and nothing about a deployment changes that.
+         */
+        const val HELD_BATCH_LIMIT = 200
 
         /** A HELD payment was found with no open run and given one. Any increment is a run that died. */
         const val RECOVERED_HOLDS_METRIC = "openbank.payment.admission.hold.runs.recovered"
