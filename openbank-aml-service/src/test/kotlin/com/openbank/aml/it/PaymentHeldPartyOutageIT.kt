@@ -5,7 +5,6 @@
 package com.openbank.aml.it
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.aml.infrastructure.client.AccountServiceClient
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -17,7 +16,6 @@ import io.vertx.mutiny.sqlclient.Tuple
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.clients.producer.KafkaProducer
 import org.apache.kafka.clients.producer.ProducerRecord
@@ -78,9 +76,6 @@ class PaymentHeldPartyOutageIT {
     @Inject
     lateinit var mapper: ObjectMapper
 
-    @Inject
-    lateinit var accounts: AccountServiceClient
-
     private fun <T> onEventLoop(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
 
@@ -97,6 +92,20 @@ class PaymentHeldPartyOutageIT {
         ).execute(Tuple.of("payment-hold:domestic:$payment")).awaitSuspending()
             .map { Case(it.getUUID(0), it.getUUID(1), it.getBoolean(2), it.getLong(3)) }
             .singleOrNull()
+    }
+
+    /** The fake's answer for [account]: the body on 200, the status otherwise, `refused` when it does not listen. */
+    private fun probeFake(account: UUID): String {
+        val base = ConfigProvider.getConfig().getValue("quarkus.rest-client.account-service.url", String::class.java)
+        return try {
+            val response = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder(URI.create("$base/api/v1/accounts/$account")).GET().build(),
+                HttpResponse.BodyHandlers.ofString(),
+            )
+            if (response.statusCode() == 200) response.body() else response.statusCode().toString()
+        } catch (_: java.io.IOException) {
+            "refused"
+        }
     }
 
     private fun accountService(mode: String) {
@@ -149,19 +158,14 @@ class PaymentHeldPartyOutageIT {
 
     @Test
     fun `a hold with no named party gets its case while the account authority is down, and its party later`() {
-        // Known positive for the fake and for the production client in front of it, before anything is
-        // taken down: the lookup works when the authority is up. It also makes the client's first use
-        // happen on this thread, which is a test-classloader artefact only: under @QuarkusTest a first
-        // use from a coroutine worker cannot load the generated client class, while the packaged
-        // application (fast-jar run with `java -jar`, no warm-up) makes its first lookup from
-        // `DefaultDispatcher-worker-1` and resolves the case.
-        assertThat(runBlocking { accounts.findPartyByAccountId(KNOWN_ACCOUNT) }).isEqualTo(OWNING_PARTY)
-        assertThat(runBlocking { accounts.findPartyByAccountId(UNKNOWN_ACCOUNT) }).isNull()
+        // Known positive for the fake, before anything is taken down. Probed over plain HTTP, NOT
+        // through the production client, so the client's first use is the sweep's own, on a coroutine
+        // worker, exactly as in the packaged application (verified by running the fast-jar).
+        assertThat(probeFake(KNOWN_ACCOUNT)).contains(OWNING_PARTY.toString())
+        assertThat(probeFake(UNKNOWN_ACCOUNT)).isEqualTo("404")
 
         accountService(FakeAccountServiceTestResource.REFUSED)
-        assertThat(runBlocking { accounts.findPartyByAccountId(KNOWN_ACCOUNT) })
-            .describedAs("the authority really is unreachable now")
-            .isNull()
+        assertThat(probeFake(KNOWN_ACCOUNT)).describedAs("the authority really is unreachable now").isEqualTo("refused")
         send(REFUSED_HOLD, held(REFUSED_HOLD, KNOWN_ACCOUNT))
         await("a case is opened while the account authority refuses connections") { caseOf(REFUSED_HOLD) != null }
         await("the sweep tried the refused lookup and left the party unresolved") {
@@ -170,9 +174,7 @@ class PaymentHeldPartyOutageIT {
         assertThat(caseOf(REFUSED_HOLD)).isEqualTo(Case(party = null, account = KNOWN_ACCOUNT, true, 1))
 
         accountService(FakeAccountServiceTestResource.UNAVAILABLE)
-        assertThat(runBlocking { accounts.findPartyByAccountId(KNOWN_ACCOUNT) })
-            .describedAs("the authority really answers an error now")
-            .isNull()
+        assertThat(probeFake(KNOWN_ACCOUNT)).describedAs("the authority really answers an error now").isEqualTo("503")
         send(UNAVAILABLE_HOLD, held(UNAVAILABLE_HOLD, KNOWN_ACCOUNT))
         await("a case is opened while the account authority answers 503") { caseOf(UNAVAILABLE_HOLD) != null }
         await("the sweep tried the 503 lookup and left the party unresolved") {

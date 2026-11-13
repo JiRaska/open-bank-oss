@@ -16,8 +16,6 @@ import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Duration
@@ -75,9 +73,10 @@ import java.util.concurrent.atomic.AtomicLong
  * `openbank_aml_cases_party_unresolved` is published so the sweep cannot quietly resolve nothing —
  * the failure this repo keeps meeting is a mechanism that reads as working while doing nothing.
  *
- * `suspend`, never `runBlocking` (#2148); the lookup runs on [Dispatchers.IO] because a blocking
- * HTTP call on the scheduler's Vert.x context stalls the event loop and, under
- * `ConcurrentExecution.SKIP`, one stalled tick wedges every later one.
+ * `suspend`, never `runBlocking` (#2148). The account lookup is a reactive REST client call (a
+ * `Uni`, awaited), so it runs on the scheduler's own Vert.x context and never blocks it; nothing
+ * here may become a blocking call, because under `ConcurrentExecution.SKIP` one stalled tick wedges
+ * every later one.
  */
 @Startup
 @ApplicationScoped
@@ -138,7 +137,7 @@ class PartyResolutionScheduler {
     }
 
     private suspend fun resolveOne(caseId: UUID, accountId: UUID) {
-        val partyId = withContext(Dispatchers.IO) { accounts.findPartyByAccountId(accountId) }
+        val partyId = accounts.findPartyByAccountId(accountId)
         when {
             partyId == null -> {
                 caseRepository.markPartyResolutionAttempted(caseId, Instant.now())
