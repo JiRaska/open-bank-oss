@@ -1118,3 +1118,42 @@ revision by id (`GET /api/v2/revisions/{id}`) to pin a new fund's management fee
   the OPA named-caller check are the effective limits.
 
 - **2026-11-07** — **OpenBao TLS leg and dedicated identity for product-IR signing (ADR-0352, #15113) (product-catalog, accounts namespace — the publish-path signer).** New transport, no new authority: the OpenBao Transit leg moves from `http://…:8200` (never reachable, the client refuses http) to OpenBao's TLS-only listener `https://openbao.vault.svc:8203`, certificate from ClusterIssuer `openbank-ca`; the client trusts ONLY the PEM CA named by `openbank.catalog.ir-signing.openbao.ca-file` (a mounted `ca.crt`), not the JVM's public roots, so a public CA cannot vouch for the OpenBao endpoint (**S/T**, `OpenBaoTransportTrustTest` holds both the accept and the reject case). The workload now runs as a dedicated ServiceAccount `accounts/product-catalog`, and OpenBao's kubernetes-auth role `product-catalog-ir-signing` binds to that SA and namespace only, 10-minute tokens, policy `product-ir-sign` (`update` on `transit/sign/product-ir-publish`, nothing else) — so another pod in the namespace cannot log in as this service (**E**). The Transit key is ed25519, non-exportable, no plaintext backup, deletion disallowed, and no workload policy can create, rotate or read it (**T/R**). The mode stays `disabled`; enabling it is a separate change. **Residual:** the TLS listener terminates in-pod and OpenBao re-reads its certificate only on restart or SIGHUP, which nothing sends today — `renewBefore 720h` renews the Secret, not the running listener, so a pod that outlives the 90-day certificate serves an expired one; a reload (or an expiry alert on the served certificate) is required before any consumer leaves mode `disabled`; OpenBao does not require a client certificate on 8203 — authentication is the kubernetes-auth token. Rollback: revert; the key is left in place (inert without the roles).
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.
+
+## 2026-11-11 - Account standing and party-standing propagation (ADR-0374 D4)
+
+**Change.** `AccountResponse` carries `standing` (`mayDebit`, `mayCredit`, `reason`), and a party
+that becomes `SUSPENDED` or `CLOSED` has every `ACTIVE` account it owns frozen by
+`PartyEventConsumer` through `PartyStandingService`. `accounts.freeze_origin` (V34) records who
+placed a freeze: `OPERATOR` or `PARTY_STANDING`. A party that is `ACTIVE` again lifts only the
+`PARTY_STANDING` freezes.
+
+| Threat | Vector | Mitigation |
+|---|---|---|
+| **E**oP | A suspended or AML-blocked party keeps paying because nothing told its accounts | The party status event freezes the accounts; `standing.mayDebit` is false on the lookup the rails use. Covered by a real-database integration test through the real consumer, added with this change; it is not cited by name here until it has a result on `main` |
+| **E**oP | A party event lifts a freeze an operator or a control placed | Only `freeze_origin = PARTY_STANDING` is lifted. A row frozen before V34 has no origin and is treated as an operator freeze. An operator freezing a party-frozen account takes the freeze over |
+| **T**ampering | A forged or replayed `ACTIVE` party event unfreezes accounts | The topic is written by party-service only (broker ACL). It can lift only party freezes, never an operator freeze. See the residual risk on ordering below |
+| **I**nfo disclosure | The standing reason tells the customer they are under AML review | The reason is `ACCOUNT_FROZEN` for every freeze; the origin is not exposed. No customer notification is sent for a party-standing freeze |
+| **D**oS | A party event that cannot be applied is dropped and the accounts stay usable | The failure propagates to the consumer's bounded retry and then the dead-letter topic; it is never swallowed |
+| **R**epudiation | No record of why an account froze | `AccountStatusChanged` carries `reason = PARTY_<status>` and the row carries the origin |
+
+**Residual risks.**
+- Ordering rests on the party topic's per-key order. A dead-lettered `ACTIVE` event replayed after
+  a later `SUSPENDED` would lift the party freeze until the next status event. The event time is
+  not yet compared with the last applied one.
+- Between the party's suspension and the event being consumed the accounts are still `ACTIVE`.
+  Rails that must not rely on that window need the party's standing as well (ADR-0374 step A on
+  the rails reads account standing only).
+- `MERGED` parties are not frozen here: what happens to a merged party's accounts is decided by
+  the merge flow, not by this consumer.
+- Rolling the binary back after V34: drop `chk_accounts_freeze_origin` first, or an old binary's
+  unfreeze of a party-frozen account is refused by the constraint.

@@ -1010,7 +1010,7 @@ function DocumentsLookup({ t, language }: { t: (cs: string, en: string) => strin
         selectedId={client?.id}
         busy={clientLoading}
         onSelect={p => void pickClient(p)}
-        placeholder={t('Jméno, příjmení, rodné číslo nebo e-mail klienta', 'Client name, surname, birth number or e-mail')}
+        placeholder={t('Jméno nebo obchodní název klienta', 'Client name or trading name')}
       />
       {clientLoading && <div role="status" style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px' }}>{t('Načítám dokumenty klienta…', 'Loading the client’s documents…')}</div>}
       {clientDocs && clientDocs.length === 0 && !doc && (

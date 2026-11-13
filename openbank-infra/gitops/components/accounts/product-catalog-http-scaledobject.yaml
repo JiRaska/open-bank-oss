@@ -49,8 +49,8 @@ metadata:
   labels:
     app.kubernetes.io/name: product-catalog
     app.kubernetes.io/part-of: accounts
-    openbank.io/finops-tier: T0     # held at min:1 — see header; T1 reverted in rules.yaml
-    openbank.io/adr: "0083"
+    open-bank.tech/finops-tier: T0     # held at min:1 — see header; T1 reverted in rules.yaml
+    open-bank.tech/adr: "0083"
 spec:
   hosts:
     - product-catalog.accounts.svc.cluster.local

@@ -11,6 +11,7 @@ import com.openbank.pid.application.port.`in`.OpenCaseCommand
 import com.openbank.pid.application.port.`in`.PriorAdjudication
 import com.openbank.pid.application.port.`in`.ReopenCaseCommand
 import com.openbank.pid.application.port.out.PartyEventPublisher
+import com.openbank.pid.application.port.out.PartyRepository
 import com.openbank.pid.application.port.out.VerificationCaseRepository
 import com.openbank.pid.domain.event.VerificationCaseDecidedEvent
 import com.openbank.pid.domain.event.VerificationCaseOpenedEvent
@@ -34,6 +35,7 @@ import java.util.UUID
 @ApplicationScoped
 class VerificationCaseService(
     private val repository: VerificationCaseRepository,
+    private val partyRepository: PartyRepository,
     private val eventPublisher: PartyEventPublisher,
     private val clock: Clock,
 ) : IdentityAdjudicationUseCase,
@@ -90,6 +92,12 @@ class VerificationCaseService(
     override suspend fun decide(command: DecideCaseCommand): VerificationCase {
         val case = repository.findById(command.caseId)
             ?: throw VerificationCaseNotFoundException("verification case ${command.caseId} not found")
+        // GDPR Art. 17 (#15755): linking a case to an erased party would re-attach applicant data to it.
+        command.linkPartyId?.let { target ->
+            if (partyRepository.findById(target)?.erasedAt != null) {
+                throw PartyErasedException("Link target party $target was erased")
+            }
+        }
         val now = Instant.now(clock)
         val updated = when (case.status) {
             VerificationCaseStatus.OPEN ->

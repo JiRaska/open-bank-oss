@@ -5,7 +5,7 @@
 # over the gold marts (ADR-0022).
 #
 # HAND-MAINTAINED, and in its OWN file on purpose. network-policies.yaml in this directory carries
-# `openbank.io/derived: gen-network-policies` and is rewritten wholesale by
+# `open-bank.tech/derived: gen-network-policies` and is rewritten wholesale by
 # openbank-infra/scripts/gen-network-policies.py — an edit there is erased by the next regeneration,
 # and the house rule is that derived artifacts are never hand-edited.
 #

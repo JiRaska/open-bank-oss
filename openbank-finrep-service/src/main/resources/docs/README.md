@@ -21,7 +21,16 @@ The frozen closing balance sums hash-verified `FROZEN`/`LINES_V1` monthly eviden
 
 F02.00 follows a separate, calendar-year-to-date flow source: `GET /api/v1/ledger/periods/MONTH/{asOf}/frozen-year-to-date-trial-balance` for frozen evidence and `/year-to-date-trial-balance` for live preview. Both cover income and expense movements from January 1 of the reporting year through `asOf`, so a report never inherits a prior year's flows. The frozen route sums hash-verified monthly evidence for every month of the year and is refused when any month's evidence is missing or does not match the journal. A cumulative closing balance must not be substituted for this flow source.
 
-Use `LIVE_PREVIEW` to inspect current books; it does not establish frozen reporting evidence. Follow upstream close and reconciliation failures before retrying a refused frozen report.
+FINREP responses identify the ledger source mode in `sourceEvidence`. Use `LIVE_PREVIEW` to inspect
+current books and `FROZEN` for frozen reporting evidence. Follow upstream close and reconciliation failures before retrying a refused frozen report.
+
+## COREP own-funds preview
+
+In the EBA 4.2 C 01.00 template, row r0200 carries other reserves from GL 6030. The aggregate
+regulatory deductions in GL 6040 affect the CET1 preview subtotal. The r0300 goodwill cell and the
+r0160 profit or loss attributable to owners of the parent cell require separate prudential source
+amounts. Both remain flagged data gaps. Capital amounts require CZK evidence before the preview
+can state a value. [EBA Reporting Framework 4.2](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks/reporting-framework-42)
 
 ## GL classification
 
@@ -57,6 +66,14 @@ The ADR-0344 instrument chart (ledger V35) and the V26/V34 additions are classif
 
 Accrued interest receivable (1520/1521) is one account shared by interbank placements and the ČNB deposit facility, so the facility's accrued interest is reported with loans and advances rather than with cash. Accrued interest payable 2310/2311 is likewise included in aggregate deposits. F01.02 r0130 is debt securities issued and r0150 is hedge-accounting derivatives, not central-bank or credit-institution deposits; both are zero for the current ledger chart. The datapoint ids for these rows and F01.01 r0030 were verified against the pinned Framework 4.2 / DPM 4.2.1 annotated workbook (#13603).
 
+## COREP liquidity coverage previews
+
+`GET /api/v1/corep/templates/{templateId}` serves C_72.00, C_73.00, C_74.00 and C_76.00 as internal previews. They use the total-currency `.a` coordinates in EBA 4.2 and read the combined CZK view from the same `TIED_OUT` risk-engine snapshot for `asOf`. [EBA Reporting Framework 4.2](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks/reporting-framework-42)
+
+C_72.00 reports market and pre-cap Article 9 values, including Level 2 at r0220 and Level 2A at r0230. C_73.00 reports the modelled outflow total and central-bank secured funding at r0930. C_74.00 reports the 75% bucket before the inflow reduction. C_76.00 uses r0300 for total outflows, r0330 for inflows in that bucket and r0360 for their reduction.
+
+Use `isDataGap` and `gapReason` to distinguish unavailable inputs or classifications from a measured zero. The model does not provide regulatory deposit classifications or the borrower sector for its loan factor. It also lacks the 90% and exempt inflow categories. The previews cover a subset of regulatory cells and are for internal analysis.
+
 ## Shared configuration defaults
 
 This service's `application.yaml` does not declare the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
@@ -70,3 +87,60 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 `/api/v1/finrep/submissions` tracks one submission per template, reference period and revision: DRAFT, PACKAGED, SUBMITTING (an exclusive claim held while the transport is called, so concurrent submits transmit once), SUBMITTED, then ACKNOWLEDGED or REJECTED. Opening the same revision twice returns the existing submission. Packaging re-runs the XBRL-CSV preflight and answers 409 while any blocker remains; the stored package is a hashed manifest of identity and framework versions, not an XBRL-CSV archive.
 
 Every submit is recorded as an attempt. No supervisory transmission channel is configured, so the default transport transmits nothing and records `DRY_RUN`, which leaves the submission PACKAGED. Only a `SUBMITTED` transport outcome reaches SUBMITTED, and only a SUBMITTED return can have an acknowledgement recorded. A transport error, a cancelled request or a claim older than `openbank.finrep.submission.claim-lease` (default 15 minutes) leaves the return in OUTCOME_UNKNOWN. It may have been delivered, so it is not resubmitted; an ADMIN resolves it with `POST /api/v1/finrep/submissions/{id}/reconcile` after checking with the supervisor. Submissions and attempts live in the service's own Postgres database (`finrep-db`).
+
+## Offline XBRL-CSV structure check
+
+The local validator checks FINREP9 or COREP OF report-package structure, XBRL-CSV data types and
+taxonomy resolution. It records the package digest, validator version and pinned taxonomy digests.
+The structural check skips the EBA validation-rule linkbases. Reconciliation, filing rules,
+formula assertions and submission acceptance require their own evidence.
+
+From the repository root, use a Python environment containing `arelle-release==2.47.4` and put
+`7z` on PATH. Obtain the **Taxonomy package 4.2** and **Full taxonomy** downloads from the EBA.
+The validator checks their SHA-256 digests and resolves schemas offline from those archives.
+
+```sh
+python openbank-finrep-service/tools/validate_xbrl_csv_structure.py \
+  --module FINREP9 --report report.zip \
+  --taxonomy-package taxo_package_4.2_hotfix.zip \
+  --full-taxonomy Full_taxonomy_and_technical_documentation.zip
+```
+
+A successful run emits `STRUCTURE_VALIDATED`. The existing FINREP preflight still enforces data
+completeness and trial-balance agreement independently. The EBA publishes synthetic sample reports
+for both supported modules. [EBA Reporting Framework 4.2](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks/reporting-framework-42)
+
+The coordinate check reads the official xBRL-CSV table definitions and compares the repository's
+36 ledger-mapper coordinates and monetary datapoint IDs against the same hotfix archive.
+
+```sh
+python openbank-finrep-service/tools/check_finrep_datapoints.py \
+  --taxonomy-package taxo_package_4.2_hotfix.zip
+```
+
+FINREP preflight rejects a frozen trial balance with no reportable rows. It also rejects nonzero
+foreign-currency rows until the ledger supplies a verified CZK reporting-currency conversion.
+The independent per-currency balance verdict and the reporting-currency checks both apply.
+
+For FINREP9, save the four same-date responses from the frozen template reads. Both tools require
+`sourceEvidence: FROZEN` in each response. The draft renderer
+writes the 36 supported facts after reconciling assets with liabilities and equity across F01.
+Supply the reporting entity explicitly. The example uses the EBA's synthetic entity.
+
+```sh
+python openbank-finrep-service/tools/render_finrep_supported_facts.py \
+  --entity-id rs:DUMMYLEI123456789012.CON --output finrep-supported.zip \
+  --template F01.01.json --template F01.02.json --template F01.03.json --template F02.00.json
+```
+
+`SUPPORTED_FACTS_DRAFT_WRITTEN` records the source and package digests. Validate the package with
+Arelle, then use the reconciliation check to compare its exact decimal amounts with the four
+source responses.
+
+```sh
+python openbank-finrep-service/tools/reconcile_finrep_facts.py --report finrep-supported.zip \
+  --template F01.01.json --template F01.02.json --template F01.03.json --template F02.00.json
+```
+
+`SUPPORTED_FACTS_RECONCILED` covers those coordinates. COREP requires an independently reconciled
+prudential capital source. A filing also requires coverage of the other applicable EBA tables.
