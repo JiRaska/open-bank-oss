@@ -1,6 +1,6 @@
 {
   "name": "openbank-admin-ui",
-  "version": "4.10.2",
+  "version": "4.12.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -22,6 +22,7 @@
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "pretest:e2e": "node scripts/generate-gate-catalog.mjs && node scripts/generate-platform-versions.mjs",
+    "test:mutation": "stryker run",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -87,6 +88,8 @@
     "@axe-core/playwright": "4.14.0",
     "@pact-foundation/pact": "17.1.4",
     "@playwright/test": "^1.65.0",
+    "@stryker-mutator/core": "10.1.1",
+    "@stryker-mutator/vitest-runner": "10.1.1",
     "@tailwindcss/postcss": "4.3.4",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
@@ -97,9 +100,11 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^6.2.1",
     "@vitest/coverage-v8": "^5.1.0",
+    "ajv": "8.17.1",
     "autoprefixer": "10.6.2",
     "eslint": "9.39.5",
     "eslint-config-next": "16.4.5",
+    "fast-check": "4.1.1",
     "jsdom": "^31.0.0",
     "postcss": "8.5.32",
     "tailwindcss": "4.3.3",

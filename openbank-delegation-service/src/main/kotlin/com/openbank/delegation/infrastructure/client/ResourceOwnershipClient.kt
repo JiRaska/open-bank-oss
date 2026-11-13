@@ -32,6 +32,9 @@ data class AccountOwnerResponse(val id: UUID, val partyId: UUID)
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class CardOwnerResponse(val id: UUID, val partyId: UUID)
 
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class DocumentOwnerResponse(val id: UUID, val partyId: UUID)
+
 @Path("/api/v1/accounts")
 /**
  * Carries the shared `openbank-services` client-credentials token. Every endpoint this client
@@ -74,6 +77,27 @@ interface CardIssuanceRestClient {
     suspend fun getCard(@PathParam("id") id: UUID): CardOwnerResponse
 }
 
+@Path("/api/v1/documents")
+/**
+ * ADR-0375 D5. Carries the NAMED `m2m` client (`openbank-delegation`, ROLE_API only), never the
+ * shared `openbank-services` subject: document-service pins `document.verifyOwnership` to this
+ * exact service-account and vetoes every other caller, the same shape the disclosure exporter
+ * uses. Measured against the generated bundle with `opa eval` before wiring in — allow fires for
+ * this subject with reason `service-delegation-document-ownership`, and the shared subject, the
+ * customer edge and `document.read` all resolve false.
+ *
+ * Deliberately NOT `document.read`: the authority needed to MINT a delegation must not also be
+ * able to read the document it is over.
+ */
+@OidcClientFilter("m2m")
+@RegisterRestClient(configKey = "document-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
+interface DocumentOwnershipRestClient {
+    @GET
+    @Path("/{id}/owner")
+    suspend fun getOwner(@PathParam("id") id: UUID): DocumentOwnerResponse
+}
+
 /**
  * Answers "does this grantor own that resource?" against the service that owns the resource,
  * because no other party to the grant can. See [ResourceOwnershipClient] for why this gate has
@@ -83,14 +107,19 @@ interface CardIssuanceRestClient {
  * account-service projection already relies on (a savings goal is account metadata, ADR-0153),
  * so both resource types resolve through the same account lookup.
  *
- * Object-level types (PAYMENT, STATEMENT, DOCUMENT — ADR-0232 D7) return [UNVERIFIABLE]: no
- * ownership lookup is wired for them yet, and D7 disclosure is not implemented. UNVERIFIABLE is
- * rejected by the caller, so an unimplemented resource type is refused rather than waved through.
+ * DOCUMENT resolves through document-service's ownership projection (ADR-0375 D5). Before it
+ * existed every object type answered [UNVERIFIABLE], which the caller rejects — so NO object grant
+ * could be minted at all, while customer-edge's reader for a document grant was already built and
+ * its KDoc described the sharing path as fixed. Both halves were green: the unit tests here mock
+ * this client, and the edge's test mocks delegation-service's reply.
+ *
+ * PAYMENT and STATEMENT stay [UNVERIFIABLE] by measurement, not by omission — see the branch.
  */
 @ApplicationScoped
 class RestResourceOwnershipClient @Inject constructor(
     @RestClient private val accountClient: AccountServiceRestClient,
     @RestClient private val cardClient: CardIssuanceRestClient,
+    @RestClient private val documentClient: DocumentOwnershipRestClient,
 ) : ResourceOwnershipClient {
 
     @Timeout(2000)
@@ -107,9 +136,17 @@ class RestResourceOwnershipClient @Inject constructor(
         DelegationResourceType.CARD ->
             verdictFor(grantorPartyId, resourceId) { cardClient.getCard(it).partyId }
 
+        DelegationResourceType.DOCUMENT ->
+            verdictFor(grantorPartyId, resourceId) { documentClient.getOwner(it).partyId }
+
+        // ADR-0375 D5 leaves these two UNVERIFIABLE deliberately, and the reason is not "not built
+        // yet". Measured 2026-11-12: statement-service is addressed by accountId and has no
+        // statement object with an id of its own, and a PAYMENT id resolves in no single service —
+        // six rails own payments and nothing maps an id to its rail. So neither type has an owner
+        // to ask, and the honest fix is to remove them from CAPABILITY_MATRIX (the registry in
+        // rules.yaml records both as unenforced), not to invent an oracle.
         DelegationResourceType.PAYMENT,
         DelegationResourceType.STATEMENT,
-        DelegationResourceType.DOCUMENT,
         -> OwnershipVerdict.UNVERIFIABLE
     }
 

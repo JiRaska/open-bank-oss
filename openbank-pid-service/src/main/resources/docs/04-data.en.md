@@ -47,6 +47,7 @@ Indexes: `family_name`, `birthdate`, `email`, `status`, `kyc_level`, partial `pe
 | V2 | `V2__create_pid_outbox.sql` | `pid_outbox` + two indexes | `DROP TABLE pid_outbox` |
 | V3 | `V3__add_pid_case_lifecycle.sql` | adds `case_*` columns + check constraints + 2 indexes to `parties` | `ALTER TABLE parties DROP COLUMN case_*`; drop the two indexes |
 | V4 | `V4__hibernate_sequences.sql` | `CREATE SEQUENCE pid_outbox_seq INCREMENT BY 50` (Panache id allocation) | `DROP SEQUENCE pid_outbox_seq` |
+| V15 | `V15__party_erasure_erased_at.sql` | nullable `erased_at` on `parties` and `identity_verification_case` + partial index (GDPR Art. 17 marker) | drop the index and both columns; safe at any time |
 
 > **Never rewrite an applied migration** (project rule — checksum mismatch crashes Flyway at start). New changes go in a new `Vn__*.sql`.
 
@@ -70,9 +71,46 @@ Per `governance.yaml`: `dataClassification: restricted`, `retentionPolicy: 10 ye
 | Record state | Retention |
 |---|---|
 | Party with active relationship | ongoing |
-| `status = TERMINATED` / `DECEASED` | retained 10 years (AMLD 6 Art. 40 — overrides GDPR erasure) |
+| `status = TERMINATED` / `DECEASED` | retained 10 years (AMLD 6 Art. 40) |
+| Party erased by `PARTY_ERASED` | personal columns anonymised **immediately**; the anonymised shell row is kept, stamped `erased_at` (see Erasure) |
 | `pid_outbox` row `status = SENT` | prune after dispatch confirmation (operational; not statutory evidence) |
 | Audit evidence (events) | held by `audit-service` for the statutory period |
+
+## Erasure (GDPR Art. 17, ADR-0118)
+
+pid-service consumes `PARTY_ERASED` from party-service's `openbank.party.events` (channel `party-events-in`, consumer `PartyErasureConsumer`, DLQ `openbank.dlq.pid.party-events-in`). It follows the rule kyc-service and party-service apply: **anonymise in place now, keep the shell row stamped `erased_at`** — the identifying data pid holds is a derived index of data whose authoritative AML record is retained elsewhere, so nothing identifying has to stay here.
+
+| Data | Action |
+|---|---|
+| `parties.birth_number_encrypted` | set to NULL |
+| `party_external_ids` (RČ and EUDI blind indices, BankID/Keycloak subs, ROB AIFO, IČO, passport/ID numbers) | **rows deleted** |
+| `party_id_documents` | **rows deleted** |
+| `given_name`, `family_name` | `GDPR_ERASED`; `birthdate` = 1900-01-01 (NOT NULL sentinel) |
+| `gender`, `birthplace`, `nationalities`, `email`, `phone`, `data_box_id`, address columns, `rob_synced_at`, `case_metadata` | NULL / empty |
+| `party_relationships.termination_reason` (free text) | NULL |
+| `parties.status` | `TERMINATED`; `erased_at` stamped |
+| `identity_verification_case` rows the party was linked to (`first_link_party_id` / `final_link_party_id`) | applicant name, birthdate, birthplace, nationalities, `blind_index`, `first_notes` blanked; `dedup_key` replaced by `ERASED:<case id>`; `erased_at` stamped |
+| unlinked `RN:` cases carrying the party's RČ blind index (open, awaiting, DISTINCT_NEW) | `blind_index` NULL, `dedup_key` replaced by `ERASED:<case id>`; the applicant snapshot is **kept**: the attributes diverged, which is why the case exists, so it may be another applicant using the erased person's number (fraud evidence) |
+| unlinked `RN:` cases carrying it decided **REJECT** | `blind_index` NULL; decision and applicant snapshot kept; `dedup_key` replaced by an opaque key (`RNX:` + SHA-256 of the removed index under a fixed prefix, unjoinable with any stored index and not computable from an RČ without the pepper). The resolver checks that key on both tier-1 paths, so the fraud block **still holds** after the erasure: on a miss (nobody holds the number), and on a collision (the number was registered again with divergent attributes), where it blocks exactly like a prior `RN:` REJECT (no new case is opened). It is not consulted when the number is registered again with matching attributes, which a prior `RN:` REJECT does not block either. The key is **still personal data** (a deterministic hash of the erased person's national-id blind index), retained deliberately under the basis, purpose and bound in `06-compliance` (Retained fraud-block key) |
+| unlinked `NK:` / `PK:` (name-keyed) cases | **not touched**: nothing stored ties their applicant to the party, and a namesake shares the key (see Not covered) |
+| no pid row for the erased id | a **tombstone** row is written (sentinel name/birthdate, `status = TERMINATED`, `erased_at`, placeholder `party_type = NATURAL_PERSON`, no personal data), so a later register-identity for the id is refused |
+| `kyc_level`, `pep_flag`, `sanctions_flag`, timestamps, operator names on cases | kept: no longer attributable to a person once the row above is anonymised |
+
+The erase is idempotent: `erased_at` is the marker and is never overwritten, and a re-delivery re-runs the full overwrite and deletes, so anything written to the row after the first erase is cleaned again. The RČ blind index that finds unlinked `RN:` cases is read before the party step deletes it, and removed from those cases before the party step and again after it.
+
+Writes to an erased party are refused with 409 (`PartyErasedException`). Party updates (contact, sync, KYC, status, case transition, external-id link), relationship add/terminate and linking a verification case check `erased_at` under `SELECT ... FOR UPDATE` on the party row inside the writing transaction, the lock the erase takes. register-identity and case-evidence linking check it on a read only (evidence linking stores nothing in pid; it logs and publishes an event). Failures are retried then dead-lettered.
+
+**Not covered** (known gaps, tracked under #15755):
+
+- **No backfill.** The consumer group starts at the latest offset, so a `PARTY_ERASED` published before the consumer first polled is never applied here. Reconciling against party-service's erased parties is a follow-up.
+- **No metric or alert on the erasure outcome**; only the log line (party id, outcome, case count) and the DLQ show it.
+- **The erased person's own UNLINKED cases keep their applicant snapshot.** A case decided DISTINCT_NEW (whose applicant then became the party), and an open, awaiting or rejected name-keyed case, record no party id for the applicant: neither `register-identity` nor party creation carries the case id. pid cannot tell the erased person from a namesake, so these keep name, birthdate, birthplace, nationalities, notes and (for `NK:`/`PK:`) the name-bearing `dedup_key`. Closing this needs a positive tie: an `applicant_party_id` set when the onboarding flow passes the case id at registration (an API change, and a change in the calling services). Follow-up.
+- **A retry after the party step committed** can no longer read the RČ index, so an `RN:` case opened between the two steps of a delivery that then failed keeps the index.
+- An `RN:` case still OPEN or awaiting at erasure that is later decided REJECT gets no surviving block (only cases already REJECT-decided are re-keyed).
+- **No automated purge of the retained fraud-block key.** The `RNX:` key and the REJECT decision it carries must be deleted when the applicable AML record-keeping period ends (`06-compliance`, Retained fraud-block key); nothing deletes them yet. Follow-up.
+- `register-identity` does not resolve, so the erased person's number can be registered again to a new party id; the retained REJECT then applies only when that number is next resolved.
+- The short-TTL EUDI offer/presentation tables are keyed by single-use codes, not by party id, and expire by themselves; `pid_outbox` has no writer in the current code.
+- A scheduled hard-delete of shell rows after the retention period (as kyc-service's retention scheduler does for its cases) is a follow-up; the shell holds no personal data.
 
 ## Lineage (`governance.yaml`)
 

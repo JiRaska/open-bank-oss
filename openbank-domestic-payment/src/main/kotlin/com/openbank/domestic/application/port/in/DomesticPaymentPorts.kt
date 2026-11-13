@@ -47,6 +47,8 @@ data class CreateDomesticPaymentCommand(
     val synthetic: Boolean = false,
     /** Which debtor accounts the caller may pay from (ADR-0335 D5); resolved from the principal at the REST edge. */
     val initiatorScope: InitiatorScope = InitiatorScope.General,
+    /** Opaque customer binding asserted by the verified customer-edge workload. */
+    val customerSubmissionScope: String? = null,
 ) {
     init {
         require((delegationId == null) == (reservationId == null)) {
@@ -75,6 +77,7 @@ data class TransitionDomesticPaymentStatusCommand(
 interface DomesticPaymentUseCase {
     suspend fun createPayment(command: CreateDomesticPaymentCommand): CreateDomesticPaymentResult
     suspend fun getPayment(paymentId: UUID): DomesticPayment
+    suspend fun findCustomerSubmission(idempotencyKey: String, debtorAccountId: UUID, scope: String): DomesticPayment?
     suspend fun listPayments(query: ListDomesticPaymentsQuery): List<DomesticPayment>
     suspend fun transitionStatus(command: TransitionDomesticPaymentStatusCommand): DomesticPayment
 }

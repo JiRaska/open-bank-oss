@@ -71,6 +71,40 @@ is a bug — that is the drift ADR-0212 already paid for once.
   contract. Companies House also publishes only the month and year of a director's birth, so
   `Representative.dateOfBirth` stays null for GB rather than being reconstructed.
 
+- **`reviewReason` is read by the CUSTOMER, and it is on the review event.** `CaseResponse` returns it
+  to the initiator and every signer, and `BUSINESS_ONBOARDING_REVIEW_REQUIRED` publishes it. The
+  flags written there so far all restate what the customer told us, so naming them is harmless. A
+  screening finding is not that: "X matched a sanctions list" in that field is tipping off, and so
+  is a neutral-sounding "screening requires review" — it still names the cause. A finding therefore
+  adds NOTHING to the reason, and the applicant view and the event carry
+  `BusinessOnboardingCase.applicantReviewReason`: an AML review reads the same whatever raised it.
+  Who matched what is in `Case.screening`, which `CaseResponse.from` fills only when
+  `viewerPartyId` is null — the operator routes. Anything else you derive from a list, a score or
+  another customer's data belongs behind the same door.
+- **A finding is settled by a disposition, never by a side effect.** `reviewResolved` used to be able
+  to approve a hit that its own pre-approval rebuild had just discovered, and dropping a listed
+  owner from the declarations made the hit vanish. Every non-clear screen now opens a finding
+  (`FindingDisposition.OPEN`); only `findingDisposed` changes it, with the authenticated operator
+  and a reason; `reviewResolved` refuses while one is open or a sanctions one is confirmed; and
+  `CaseScreening.rebuilt` keeps a leaver that carries a finding. If you add a path to SIGNED or
+  ACTIVE, it goes through the same two checks.
+- **`cases.update` returns the case at its NEW version — write that copy, not the one you passed
+  in.** `kyb_cases.version` is an optimistic lock and the repository compares it explicitly,
+  because the row is loaded fresh inside the write and `@Version` alone would overwrite a
+  committed change. A second `update` of a stale copy answers `ConcurrentCaseUpdateException`
+  (409 `CASE_CONCURRENT_UPDATE`). An event handler has nobody to retry for it: see
+  `entityPartyActivated`.
+- **A screening is complete for the people on the case NOW, or it is not complete.**
+  `RelatedPartyScreeningService.screened` rebuilds the subject list (entity, representatives,
+  register owners, declared persons) before every approval and carries answers over by subject; a
+  stored "complete" from an earlier owner list is never trusted. An ownership lookup that answers
+  `UNAVAILABLE` makes the screening incomplete by itself, because the list may be short.
+- **`openbank.kyb.screening.enabled` ships OFF, and "off" stores nothing.** It needs a route to
+  sanctions-service that the deployment has to supply in the same change; switched on without one,
+  every case stops at its last signature with `503 SCREENING_PENDING`. Off is not "screened clear":
+  `Case.screening` stays null, and `RelatedPartyScreeningService` is `@Startup` so the warning is
+  printed at boot. The module's ITs run with it ON against `StubRelatedPartyScreening`.
+
 ## Authorization
 
 `kyb_rest_ext.rego` is narrow on purpose, for the reason `consent_rest_ext.rego` documents at
