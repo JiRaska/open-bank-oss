@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.48.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.47.0...lending-service-v0.48.0) (2026-11-13)
+
+
+### Features
+
+* **lending:** let staff confirm or overturn a requested decline review ([#15801](https://github.com/JiRaska/open-bank-oss/issues/15801)) ([8f83583](https://github.com/JiRaska/open-bank-oss/commit/8f83583f764fc5e982c23c2f578f2d201a055864))
+
 ## [0.47.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.46.0...lending-service-v0.47.0) (2026-11-12)
 
 
