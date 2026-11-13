@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.19.1...sanctions-service-v0.20.0) (2026-11-13)
+
+
+### Features
+
+* **sanctions:** ongoing monitoring by delta with a monitored-subject registry (off by default) ([#15897](https://github.com/JiRaska/open-bank-oss/issues/15897)) ([c0a0ea5](https://github.com/JiRaska/open-bank-oss/commit/c0a0ea5b80530c84a0fb1e4e7fd60b854a2b3bfd))
+
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.19.0...sanctions-service-v0.19.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **sanctions:** record the authenticated principal as reviewer, not a body field ([#15812](https://github.com/JiRaska/open-bank-oss/issues/15812)) ([416a88c](https://github.com/JiRaska/open-bank-oss/commit/416a88c0721936881d0ffaab274739ff1aac86b0)), closes [#15748](https://github.com/JiRaska/open-bank-oss/issues/15748)
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.6...sanctions-service-v0.19.0) (2026-11-12)
 
 

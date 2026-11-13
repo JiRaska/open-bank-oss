@@ -7,6 +7,7 @@ package com.openbank.transaction.application.port.`in`
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.domain.payment.InstructionType
 import com.openbank.libs.domain.payment.PaymentRail
+import com.openbank.libs.synthetic.SyntheticTransferDirection
 import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionType
 import java.math.BigDecimal
@@ -49,6 +50,8 @@ data class InitiateTransactionCommand(
     val instructionType: InstructionType? = null,
     /** Set by trusted ingress or inherited from the transaction being reversed. */
     val synthetic: Boolean = false,
+    /** Set by the dedicated synthetic transfer route. Its value date is the requested bank date. */
+    val syntheticTransferDirection: SyntheticTransferDirection? = null,
 )
 
 data class GetTransactionQuery(val transactionId: UUID)

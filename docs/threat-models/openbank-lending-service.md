@@ -30,8 +30,9 @@
    path into the lending DB. The versioned `loan.exposure_fact` envelope (#9890) carries
    the loan, application and party identifiers, native amounts, recorded status and effective
    time. The same lending topic ACL controls producer access. Repayment and final-state facts
-   commit with their local source changes. The cash confirmation fact follows both completed
-   disbursement postings and commits with the existing disbursement event.
+   commit with their local source changes. The cash confirmation fact follows the posted loan
+   journal and a Transaction acknowledgement in status `COMPLETED`. Same-key acknowledgements
+   use the same status check. Lending commits the fact with the existing disbursement event.
 4. **Service → credit bureau / risk-parameter / valuation feeds (ports).** `@Default` no-op today; real
    integrations land later as build-time-gated `@Alternative` adapters — each a future trust boundary.
 5. **Service → its own Postgres schema.** Intra-service tables only; no cross-schema reads.
@@ -1108,6 +1109,13 @@ The migration briefly excludes writers/retention while establishing this boundar
 under the retained deployment hold. Rollback retains receipts, coverage and financial history.
 
 - **2026-11-09 — Missing-job obligation review correction (#13167).** A missing run cannot be erased by disabling its scheduler after REFUSED: observed `(business_date, job)` obligations are insert-only and retained independently of real run receipts. The observation transaction reads the retained union and all legacy run keys before reporting. It creates no completion, journal, or new authorization. Run completion or an attributable ledger waiver is still required; never infer unobserved historical schedules. Rollback retains both evidence tables. Existing holds and shadow/off defaults remain.
+
+### Recorded signature receipt
+
+The explicit signature command persists the artefact hash, receipt timestamp, `SIGNED` state and
+matching outbox evidence in the application transaction (#9890). A competing sign cannot replace
+the recorded value. Earlier rows have unknown receipt time. Lending retains the existing
+application-based access boundary for the timestamp.
 
 ## 2026-11-11 - Label key domain rename (no reach change)
 

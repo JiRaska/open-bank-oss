@@ -95,6 +95,15 @@ isolation from transport/persistence.
   read-only re-verify endpoint (`GET /close/{year}/verify`) is the **detective** control that proves a
   sealed period is still hash-identical (or surfaces drift) without flipping state. Corrections to a
   closed year must be booked as an adjustment in the current open period.
+- **Refusal codes (period lock, year lock):** the 409 for a posting into a FROZEN period carries
+  `code=ACCOUNTING_PERIOD_FROZEN` and the ATTESTED-year 409 carries `code=ACCOUNTING_YEAR_CLOSED`, the
+  same body field the day lock already uses. The change is additive and does not alter any decision:
+  the lock still refuses exactly the same postings, the `error` text is unchanged, and the codes
+  disclose nothing beyond the period label the message already contained. The risk it addresses is
+  availability and integrity at the callers: an uncoded 409 is indistinguishable from an idempotency
+  conflict, so a caller may retry a deterministic refusal forever or fail a whole job on it. A code is
+  a classification aid, never an authorization signal; callers must not treat it as permission to
+  re-date into another period.
 - **Four-eyes year-close attestation (#869):** the attestor (checker) MUST differ from the draft
   author (maker, `YearCloseRecord.draftedBy` — recorded as the verified JWT subject on every
   create/refresh of the DRAFT). Enforced **fail-closed** in both `YearCloseService.attest` (409) and
@@ -924,6 +933,13 @@ zero-journal run after close. Frozen reports are never replaced by later success
 receipt sequences cannot prove that sources stayed unchanged. Stable source retries append no new
 receipt and preserve the proof. Producers must refresh the current and immediately prior month,
 including closed days, and explicitly revoke completion while source work is pending.
+
+## Synthetic transfer evidence (#7284)
+
+The dedicated proof identity has a separate read action and is verified again from its OIDC token.
+Evidence requires exactly one posted synthetic journal with two legs matching the configured fixture
+accounts and amount. The response carries the scoped posting evidence. Unknown, ordinary or
+ambiguous journals produce the same absence response.
 
 ### Period freeze lock enforced in sandbox (#15760 item 6)
 - **Threat:** back-dating a journal into an already reported (FROZEN) month changes the live ledger

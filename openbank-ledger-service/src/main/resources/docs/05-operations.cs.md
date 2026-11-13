@@ -160,3 +160,15 @@ nostro se nemění a za jiného účastníka hlásit nemůže.
 ## Offline přehrání historického FINREP
 
 Sestavení definuje explicitní úlohu `historicalFinrepPactTest`, která lokálně přehraje jeden ověřený historický artefakt FINREP Pact proti poskytovateli ledger. Nejde o ověření přes broker: nikdy nemění selektory brokeru, nepublikuje výsledky a odmítne běžet, pokud zadaný commit poskytovatele není 40místné hex SHA, které je předkem `origin/main`. Není součástí výchozího sestavení.
+
+## Důkaz testovacího převodu (#7284)
+
+Vyhrazený klient `openbank-synthetic-transfer-verifier` může načíst důkaz jediného syntetického
+zápisu odpovídajícího oběma nastaveným účtům, částce 0,01 CZK a požadované transakci.
+Identifikátory účtů dodává sandboxová testovací sada. Při nejednoznačných či neúplných
+podkladech trasa důkaz neposkytne.
+
+## Poznámka k pozorovatelnosti: odmítnutí zmrazeného období
+
+Při `openbank.ledger.period-lock.mode=enforce` každé odmítnutí zvýší `openbank_ledger_period_lock_decisions_total{outcome="refused"}` (štítky `operation`, `period_type`) a odpověď HTTP nese `code=ACCOUNTING_PERIOD_FROZEN`. Odmítnutí kvůli fiskálnímu roku nese `ACCOUNTING_YEAR_CLOSED` a nemá vlastní čítač; hledá se podle kódu odpovědi v access logu. Jde jen o dokumentaci: pro žádný z kódů není definováno upozornění a nenulový počet `refused` je očekávaný, kdykoli volající účtuje zpětně do uzavřeného měsíce.
+

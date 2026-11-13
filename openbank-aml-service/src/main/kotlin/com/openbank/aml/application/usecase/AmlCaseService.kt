@@ -105,6 +105,18 @@ class AmlCaseService(
         val amlCase = amlCaseRepository.findById(command.caseId)
             ?: throw AmlCaseNotFoundException(command.caseId)
 
+        // ADR-0371 §5: only an approved four-eyes proposal may close or escalate a pack-monitoring case.
+        // A TRANSACTION_MONITORING case a payment rail opened is not one and keeps its single-analyst flow.
+        // UNDER_REVIEW stays open to one analyst: picking a case up is not deciding it.
+        if (amlCase.isPackMonitoringCase &&
+            command.targetStatus != AmlCaseStatus.UNDER_REVIEW &&
+            command.fourEyesProposalId == null
+        ) {
+            throw InvalidAmlCaseStateTransitionException(
+                "A pack-monitoring case is closed or escalated only through an approved disposition proposal",
+            )
+        }
+
         if (!amlCase.canTransitionTo(command.targetStatus)) {
             throw InvalidAmlCaseStateTransitionException(
                 "Invalid AML case status transition: ${amlCase.status} -> ${command.targetStatus}",
