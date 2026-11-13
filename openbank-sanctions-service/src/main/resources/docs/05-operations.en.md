@@ -204,3 +204,36 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Ongoing monitoring (ADR-0376)
+
+| Property | Default | Purpose |
+|---|---|---|
+| `openbank.sanctions.monitoring.enabled` (`SANCTIONS_MONITORING_ENABLED`) | `false` | Master switch. Off: registration answers 503 and no run matches anything |
+| `openbank.sanctions.monitoring.delta.max-entries-per-run` | `5` | Changed list entries matched per tick |
+| `openbank.sanctions.monitoring.delta.max-pending` | `20000` | Backlog above which the delta is replaced by a full re-sweep |
+| `openbank.sanctions.monitoring.delta.max-candidates-per-entry` | `5000` | Matches per entry above which the sweep takes over |
+| `openbank.sanctions.monitoring.sweep.batch-size` | `25` | Subjects re-evaluated per tick |
+| `openbank.sanctions.monitoring.sweep.interval` | `P30D` | How often every subject is fully re-evaluated |
+| `openbank.sanctions.monitoring.claim-lease` | `PT15M` | How long a claimed subject or queue row stays claimed |
+
+Metrics (Prometheus names):
+
+| Metric | Reading |
+|---|---|
+| `openbank_sanctions_monitoring_enabled` | 1 or 0: the flag |
+| `openbank_sanctions_monitoring_subjects` | Subjects registered. NaN until a run has observed the registry, so NaN while disabled |
+| `openbank_sanctions_monitoring_delta_pending` | Changed entries waiting to be matched |
+| `openbank_sanctions_monitoring_sweep_lag_seconds` | How long the least recently swept subject is overdue; 0 while the sweep keeps up |
+| `openbank_sanctions_monitoring_findings_total{match_kind,detection}` | Findings written. A match already found, or covered by a clearance, is not counted |
+| `openbank_sanctions_monitoring_runs_total{path,outcome}` | Runs by outcome: `completed`, `resweep_requested`, `disabled`, `failed` |
+
+Sizing: the sweep covers `batch-size` subjects per minute, so a full cycle over N subjects takes N / (batch-size × 1440) days; keep that below `sweep.interval` or `sweep_lag_seconds` grows. One delta entry costs a probe of the registry's trigram indexes, not a pass over the registry: measured on one million synthetic subjects, 0.3 s on average (about 0.05 s for an entry with one name, about 0.6 s with five) against 7.3 s for a full scan. The cost grows with the registry and with how common the entry's trigrams are, so 5,000 changed entries a day are about 25 minutes of one database core at that size; the delta is sized for registries up to the low millions and feeds up to the low tens of thousands of changes a day. Above `delta.max-pending` the run requests a re-sweep instead. The figures are from synthetic names on one core; re-measure on real data before raising `delta.max-entries-per-run`.
+
+### Sweep lag growing
+
+`sweep_lag_seconds` above zero means subjects are overdue. Check `runs_total{path="sweep",outcome="failed"}` and the log for `Sanctions monitoring sweep failed for registry row` (a subject that cannot be evaluated is retried after the lease and fails its run each time); otherwise raise `sweep.batch-size`.
+
+### Delta backlog growing
+
+`delta_pending` rising means list changes arrive faster than they are matched. Above `delta.max-pending` the service drops the queue and re-sweeps everyone (`outcome="resweep_requested"`), which is correct and slower. Raising `delta.max-entries-per-run` spends more database time per tick.
