@@ -1122,6 +1122,9 @@ class PaymentAdmissionJourneyIT {
                 "transactionId" to paymentId,
                 "alertCode" to alert,
                 "idempotencyKey" to caseKey,
+            ) + (
+                // aml-service puts provenance on exactly the intake's case (#16041); the rail needs it.
+                if (alert == PaymentHoldPolicy.CASE_ALERT_CODE) mapOf("origin" to "PAYMENT_HOLD_INTAKE") else emptyMap()
             ),
         )
         send(ProducerRecord(AML_TOPIC, 0, caseId.toString(), body)).get(WAIT_SECONDS, TimeUnit.SECONDS)

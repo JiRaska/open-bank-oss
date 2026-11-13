@@ -102,7 +102,7 @@ class DomesticPaymentWorkflowReplayTest {
     @Test
     fun `a pre-chain run recorded by the current workflow is, event for event, the run main records`() {
         val recordedByMain = WorkflowExecutionHistory.fromJson(
-            checkNotNull(javaClass.getResource("/workflow-histories/main/happy-path.json")).readText(),
+            checkNotNull(javaClass.getResource("/temporal/workflow-histories/main/happy-path.json")).readText(),
         )
         recordPreChainRun { history ->
             assertThat(shape(history)).isEqualTo(shape(recordedByMain))

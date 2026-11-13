@@ -21,7 +21,7 @@ import java.io.File
  * a command the new code issues differently fails here with a non-determinism error instead of in a
  * worker.
  *
- * Provenance of `src/test/resources/workflow-histories/main/` (do not hand-edit, re-record instead):
+ * Provenance of `src/test/resources/temporal/workflow-histories/main/` (do not hand-edit, re-record instead):
  * - Source: `main` at commit `4735a65dc2b7319c36d396f23dbdda06f816a869`, recorded 2026-11-13.
  * - SDK: `io.temporal:temporal-sdk` / `temporal-testing` 1.25.1.
  * - How: a throwaway test in a checkout of that commit registered main's real
@@ -141,7 +141,7 @@ class RecordedMainHistoryReplayTest {
     }
 
     companion object {
-        private const val RESOURCE_DIR = "/workflow-histories/main"
+        private const val RESOURCE_DIR = "/temporal/workflow-histories/main"
         private const val PRODUCTION_TASK_QUEUE = "openbank-domestic-payments"
         private const val FRAUD_MARKER = "fraud-enforcement=1"
         private const val SETTLEMENT_MARKER = "settlement-unbounded-retry=1"
