@@ -94,7 +94,7 @@ class PaymentHeldConsumer(
             held.paymentId,
             case.id,
             case.status,
-            if (case.partyResolved) "known" else "unresolved",
+            if (case.partyEstablished) "known" else "unresolved",
         )
     }
 

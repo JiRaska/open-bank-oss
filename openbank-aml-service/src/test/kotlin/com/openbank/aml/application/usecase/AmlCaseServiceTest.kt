@@ -257,7 +257,7 @@ class AmlCaseServiceTest {
         service.createCase(holdCommand(partyId = null))
 
         assertThat(saved.captured.partyId).isNull()
-        assertThat(saved.captured.partyResolved).isFalse()
+        assertThat(saved.captured.partyEstablished).isFalse()
         assertThat(saved.captured.accountId).isNotNull()
         val payload = objectMapper.readTree(event.captured.payload)
         assertThat(payload.has("partyId")).isTrue()

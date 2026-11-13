@@ -116,5 +116,5 @@ fun AmlCase.toResponse() = AmlCaseResponse(
     createdAt = createdAt,
     updatedAt = updatedAt,
     requiresFourEyesDisposition = isPackMonitoringCase,
-    partyResolved = partyResolved,
+    partyResolved = partyEstablished,
 )

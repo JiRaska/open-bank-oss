@@ -84,8 +84,14 @@ data class AmlCase(
      * False while the owning party is not established: no party at all, or (rows from before a
      * missing party could be stored) the account id standing in for it (#3413).
      */
-    val partyResolved: Boolean
+    val partyEstablished: Boolean
         get() = partyId != null && partyId != accountId
+
+    /**
+     * Whether this case may be attached to [candidate]: only while no party is established, and
+     * never to its own account id, which would leave it exactly as unestablished as before.
+     */
+    fun resolvableTo(candidate: UUID): Boolean = !partyEstablished && candidate != accountId
 
     /**
      * A case that sits under a held-payment key without having been opened by the hold intake.

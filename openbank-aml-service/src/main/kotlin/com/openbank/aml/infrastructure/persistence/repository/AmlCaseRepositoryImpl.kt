@@ -110,7 +110,7 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
     override suspend fun resolveParty(caseId: UUID, partyId: UUID, owed: (AmlCase) -> OutboxMessage?): Boolean =
         Panache.withTransaction {
             find("caseId", caseId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().chain { entity ->
-                if (entity == null || (entity.partyId != null && entity.partyId != entity.accountId)) {
+                if (entity == null || !entity.toDomain().resolvableTo(partyId)) {
                     Uni.createFrom().item(false)
                 } else {
                     val event = owed(entity.toDomain())
@@ -174,7 +174,7 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
              WHERE party_id = :partyId
         """
 
-        /** A case whose owning party is not established; mirrors `AmlCase.partyResolved`. */
+        /** A case whose owning party is not established; mirrors `AmlCase.partyEstablished`. */
         const val UNRESOLVED_PARTY = "partyId is null or partyId = accountId"
 
         /** Its exact complement, spelled out: `not (...)` over a null `accountId` is null, not true. */

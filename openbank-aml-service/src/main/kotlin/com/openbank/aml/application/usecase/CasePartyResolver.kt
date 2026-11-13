@@ -18,21 +18,21 @@ import java.util.UUID
 /**
  * Attaches a case to the party that owns its account, and pays the one thing the party can be owed.
  *
- * A held payment's case is opened with NO party when the rail could not name the debtor, and can be
- * decided in that state: the rail must get its release or reject, and it binds the decision by the
- * case key. That decision's event carries no party, so no consumer that acts per party sees one.
- * For a BLOCK that is a debt: the party was blocked by an analyst and nobody was told. It is paid in
- * the transaction that resolves the case, by stating the BLOCK again on the status-changed event,
- * now with the party.
+ * A case can be decided before its party is established ([AmlCase.partyResolved]). A held payment's
+ * case is opened with no party when the rail could not name the debtor; other rails file the debtor
+ * ACCOUNT id where the party belongs. Either way a decision on it is published with nothing a
+ * consumer that acts per party can use: no party, or an account id the party authority cannot find.
+ * For a BLOCK that is a debt: an analyst blocked the party and nobody was told. It is paid in the
+ * transaction that resolves the case, by stating the BLOCK again on the status-changed event, now
+ * with the party.
  *
- * Only that. The consumer that acts on it keeps ONE AML status per party and lets the last event
- * win, so a restated status is not harmless in general: a restated CLEARED could re-activate a
- * party that another case blocked in the meantime. A restated BLOCK can only block. Two rules
- * follow, and both are decided here and nowhere else:
+ * Only a BLOCK, and that is decided here and nowhere else. The consumer that acts on it keeps ONE
+ * AML status per party and lets the last event win, so a restated status is not harmless in
+ * general: a restated CLEARED could re-activate a party that another case blocked in the meantime.
+ * A restated BLOCK can only block. A case that is not BLOCKED when it is resolved owes nothing.
  *
- *  - only a BLOCKED case is restated; a cleared or undecided one has nothing owed to the party;
- *  - only a case that was stored with no party is restated. A case that carried the account id in
- *    the party's place published its events all along and is resolved as it always was, silently.
+ * At most once per case: the repository resolves a case only while its party is not established,
+ * under a lock on the row, and resolving establishes it.
  *
  * The restatement is not a second decision: `previousStatus` equals `newStatus`, and it carries no
  * case key, alert code or payment id, which are what a payment rail matches a decision on.
@@ -47,7 +47,7 @@ class CasePartyResolver(
     suspend fun resolve(caseId: UUID, partyId: UUID): Boolean {
         val now = Instant.now(clock)
         return amlCaseRepository.resolveParty(caseId, partyId) { stored ->
-            val owed = stored.partyId == null && stored.status == AmlCaseStatus.BLOCKED
+            val owed = stored.status == AmlCaseStatus.BLOCKED && !stored.partyEstablished
             if (owed) blockRestated(stored, partyId, now) else null
         }
     }

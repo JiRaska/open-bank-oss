@@ -273,22 +273,75 @@ class PartyResolutionIT {
     }
 
     /**
-     * A case that carries the account id where the party belongs is resolved exactly as it always
-     * was: the party is corrected and NOTHING is published, whatever its status. Those rows exist
-     * with every switch of the hold intake off.
+     * A rail that cannot name the party files the debtor ACCOUNT id in its place. A BLOCK on such a
+     * case has always been published with that account id, which the party authority cannot find, so
+     * it never reached the party. Resolution is the first moment the party is known, and the BLOCK is
+     * owed to it then exactly as for a case stored with no party at all.
      */
     @Test
-    fun `resolving a case whose party was the account id publishes nothing, even when it is BLOCKED`() {
-        for (status in listOf("OPEN", "CLEARED", "BLOCKED")) {
+    fun `a BLOCKED case whose party was the account id states its BLOCK once for the real party`() {
+        val account = UUID.randomUUID()
+        val party = UUID.randomUUID()
+        val caseId = setStatus(case("account-as-party-BLOCKED", partyId = account, accountId = account), "BLOCKED")
+
+        assertThat(onEventLoop { resolver.resolve(caseId, party) }).isTrue()
+
+        val restated = eventsOf(caseId).single()
+        assertThat(restated.path("partyId").asText()).isEqualTo(party.toString())
+        assertThat(restated.path("previousStatus").asText()).isEqualTo("BLOCKED")
+        assertThat(restated.path("newStatus").asText()).isEqualTo("BLOCKED")
+        assertThat(restated.path("idempotencyKey").isNull).isTrue()
+        assertThat(restated.path("alertCode").isNull).isTrue()
+        assertThat(restated.path("transactionId").isNull).isTrue()
+        assertThat(partyOf(caseId)).isEqualTo(party)
+
+        // Once. The sweep no longer selects the case, and a forced second resolution writes nothing.
+        assertThat(onEventLoop { repository.findUnresolvedParty(50) }).isEmpty()
+        assertThat(onEventLoop { resolver.resolve(caseId, party) }).isFalse()
+        assertThat(onEventLoop { resolver.resolve(caseId, UUID.randomUUID()) }).isFalse()
+        assertThat(eventsOf(caseId)).hasSize(1)
+    }
+
+    @Test
+    fun `a case whose party was the account id and that is not BLOCKED at resolution owes nothing`() {
+        // BLOCKED is terminal in the case lifecycle, so "blocked, then cleared before the sweep" can
+        // only be a row whose status is CLEARED when the sweep reads it; it is included as such.
+        for (status in listOf("OPEN", "UNDER_REVIEW", "ESCALATED", "CLEARED")) {
             val account = UUID.randomUUID()
             val party = UUID.randomUUID()
-            val caseId = setStatus(case("account-as-party-$status", partyId = account, accountId = account), status)
+            val caseId = case("account-as-party-$status", partyId = account, accountId = account)
+            if (status == "CLEARED") setStatus(caseId, "BLOCKED")
+            setStatus(caseId, status)
 
             assertThat(onEventLoop { resolver.resolve(caseId, party) }).isTrue()
 
             assertThat(partyOf(caseId)).isEqualTo(party)
             assertThat(eventsOf(caseId)).describedAs("events of a resolved %s account-as-party case", status).isEmpty()
         }
+    }
+
+    /**
+     * "Resolved" to its own account id, a case would still not name a party, and every further call
+     * would find a BLOCK still owed. It is not a resolution, and nothing is written for it.
+     */
+    @Test
+    fun `an account id is not accepted as the party a case is resolved to`() {
+        val account = UUID.randomUUID()
+        val noParty = setStatus(case("blocked-no-party", partyId = null, accountId = account), "BLOCKED")
+        val legacy = UUID.randomUUID().let {
+            setStatus(case("blocked-legacy", partyId = it, accountId = it), "BLOCKED")
+        }
+        val legacyAccount = partyOf(legacy)!!
+
+        repeat(2) {
+            assertThat(onEventLoop { resolver.resolve(noParty, account) }).isFalse()
+            assertThat(onEventLoop { resolver.resolve(legacy, legacyAccount) }).isFalse()
+        }
+
+        assertThat(partyOf(noParty)).isNull()
+        assertThat(eventsOf(noParty)).isEmpty()
+        assertThat(eventsOf(legacy)).isEmpty()
+        assertThat(onEventLoop { repository.countUnresolvedParty() }).isEqualTo(2)
     }
 
     @Test
