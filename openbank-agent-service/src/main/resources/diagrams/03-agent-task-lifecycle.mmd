@@ -11,7 +11,8 @@ stateDiagram-v2
     RUNNING --> TOOL_POLICY_CHECK : model requests tool call\n(AgentPolicyGate.gate())
     TOOL_POLICY_CHECK --> TOOL_ALLOWED : OPA ALLOW\n(GateOutcome.ALLOW)
     TOOL_POLICY_CHECK --> TOOL_DENIED : OPA DENY or absent X-Agent-Id\n(GateOutcome.DENY)
-    TOOL_POLICY_CHECK --> TOOL_ALLOWED : OPA transport error + EnforcementMode=ADVISORY\n(pdpError=true, degrade to advisory)
+    TOOL_POLICY_CHECK --> TOOL_ALLOWED : OPA transport error + EnforcementMode=ADVISORY\n(pdpError=true, audited, call proceeds)
+    TOOL_POLICY_CHECK --> TOOL_DENIED : OPA transport error + EnforcementMode=BLOCK\n(pdpError=true, fail closed, pdp_unavailable_denied)
     TOOL_DENIED --> RUNNING : DENY injected into context\nmodel continues without tool result
     TOOL_ALLOWED --> RUNNING : tool result returned\n(capped to 3 000 chars)
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.15.0...aml-service-v0.16.0) (2026-11-12)
+
+
+### Features
+
+* **aml:** evaluate the monitoring count pack in shadow (ADR-0371 slice 2) ([#15741](https://github.com/JiRaska/open-bank-oss/issues/15741)) ([0ba472d](https://github.com/JiRaska/open-bank-oss/commit/0ba472d8d24a976b2c293339317c253d270248c8))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.14.1...aml-service-v0.15.0) (2026-11-12)
 
 

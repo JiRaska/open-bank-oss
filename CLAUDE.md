@@ -1084,6 +1084,12 @@ repo is the single source of truth.
     a collision-free number. Fill in `tags` and `summary`; the scaffold's placeholders
     are rejected by CI on purpose.
   - Before pushing: `bash docs/adr/gen-index.sh && bash .github/scripts/check-adr-registry.sh`.
+  - **In a PR, prefer NOT committing `README.md`/`DIGEST.md`/`CURRENT.md`/`index.json` at all.**
+    The merge train regenerates them in every carrier, and `check-adr-registry.sh` accepts a PR
+    that leaves them untouched (it reports the drift as a notice). Every ADR PR that commits its
+    own copy conflicts with every other one on the same four files; on 2026-11-12 that alone
+    needed hand-made merges on ten PRs. If you did commit them and they conflict, take main's
+    side and regenerate — never hand-merge them.
     `README.md`, `DIGEST.md`, `CURRENT.md` and `index.json` are DERIVED — never hand-edit them.
 - Shared runtime plumbing (ADR-0122 domain/runtime split): pure domain logic —
   security, audit envelope, outbox ports, idempotency store — lives in

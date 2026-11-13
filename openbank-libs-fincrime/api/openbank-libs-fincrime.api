@@ -148,6 +148,7 @@ public final class com/openbank/libs/fincrime/admission/AdmissionResult {
 
 public final class com/openbank/libs/fincrime/admission/AdmissionStep : java/lang/Enum {
 	public static final field AML_DESTINATION_RISK Lcom/openbank/libs/fincrime/admission/AdmissionStep;
+	public static final field AUTHORITY Lcom/openbank/libs/fincrime/admission/AdmissionStep;
 	public static final field FRAUD Lcom/openbank/libs/fincrime/admission/AdmissionStep;
 	public static final field LIMITS Lcom/openbank/libs/fincrime/admission/AdmissionStep;
 	public static final field PAYEE_VERIFICATION Lcom/openbank/libs/fincrime/admission/AdmissionStep;
@@ -160,6 +161,58 @@ public final class com/openbank/libs/fincrime/admission/AdmissionStep : java/lan
 
 public abstract interface class com/openbank/libs/fincrime/admission/AdmissionTicker {
 	public abstract fun nanos ()J
+}
+
+public final class com/openbank/libs/fincrime/admission/DebitAuthorityFacts {
+	public fun <init> (Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;Ljava/lang/String;Ljava/util/List;Ljava/time/OffsetDateTime;)V
+	public final fun component1 ()Ljava/util/UUID;
+	public final fun component2 ()Ljava/util/UUID;
+	public final fun component3 ()Ljava/util/UUID;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/util/List;
+	public final fun component6 ()Ljava/time/OffsetDateTime;
+	public final fun copy (Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;Ljava/lang/String;Ljava/util/List;Ljava/time/OffsetDateTime;)Lcom/openbank/libs/fincrime/admission/DebitAuthorityFacts;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/admission/DebitAuthorityFacts;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;Ljava/lang/String;Ljava/util/List;Ljava/time/OffsetDateTime;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/admission/DebitAuthorityFacts;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccountId ()Ljava/util/UUID;
+	public final fun getActorPartyId ()Ljava/util/UUID;
+	public final fun getGrants ()Ljava/util/List;
+	public final fun getNow ()Ljava/time/OffsetDateTime;
+	public final fun getOwnerPartyId ()Ljava/util/UUID;
+	public final fun getRequiredCapability ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/admission/DelegatedDebitAuthority {
+	public static final field INSTANCE Lcom/openbank/libs/fincrime/admission/DelegatedDebitAuthority;
+	public final fun check ()Lcom/openbank/libs/fincrime/admission/AdmissionCheck;
+	public final fun evaluate (Lcom/openbank/libs/fincrime/admission/DebitAuthorityFacts;)Lcom/openbank/libs/fincrime/admission/StepOutcome;
+	public final fun getDELEGATED-GAt_hAA ()Ljava/lang/String;
+	public final fun getNO_GRANT-GAt_hAA ()Ljava/lang/String;
+	public final fun getOWNER-GAt_hAA ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/admission/DelegationFact {
+	public fun <init> (Ljava/util/UUID;Ljava/util/UUID;Ljava/util/Set;ZLjava/time/OffsetDateTime;Ljava/time/OffsetDateTime;)V
+	public final fun authorizes (Ljava/util/UUID;Ljava/util/UUID;Ljava/lang/String;Ljava/time/OffsetDateTime;)Z
+	public final fun component1 ()Ljava/util/UUID;
+	public final fun component2 ()Ljava/util/UUID;
+	public final fun component3 ()Ljava/util/Set;
+	public final fun component4 ()Z
+	public final fun component5 ()Ljava/time/OffsetDateTime;
+	public final fun component6 ()Ljava/time/OffsetDateTime;
+	public final fun copy (Ljava/util/UUID;Ljava/util/UUID;Ljava/util/Set;ZLjava/time/OffsetDateTime;Ljava/time/OffsetDateTime;)Lcom/openbank/libs/fincrime/admission/DelegationFact;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/admission/DelegationFact;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/Set;ZLjava/time/OffsetDateTime;Ljava/time/OffsetDateTime;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/admission/DelegationFact;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getActive ()Z
+	public final fun getCapabilities ()Ljava/util/Set;
+	public final fun getGranteePartyId ()Ljava/util/UUID;
+	public final fun getResourceId ()Ljava/util/UUID;
+	public final fun getValidFrom ()Ljava/time/OffsetDateTime;
+	public final fun getValidTo ()Ljava/time/OffsetDateTime;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class com/openbank/libs/fincrime/admission/PaymentAdmissionChain {

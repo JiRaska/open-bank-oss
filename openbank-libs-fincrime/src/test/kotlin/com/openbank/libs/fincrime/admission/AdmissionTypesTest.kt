@@ -11,8 +11,18 @@ import org.junit.jupiter.api.Test
 class AdmissionTypesTest {
 
     @Test
-    fun `the step order is the one ADR-0374 decided`() {
+    fun `the step order is the one ADR-0374 decided, with ADR-0375's authority step first`() {
+        // This list is the control, and it is deliberately spelled out rather than derived: the
+        // chain executes in declaration order, so reordering these constants is a behaviour change
+        // for every rail and must not be possible by accident.
+        //
+        // AUTHORITY is ADR-0375 D1 amending ADR-0374 D1's six. It goes FIRST by ADR-0374's own
+        // ordering rule — cheapest, most local, fully deterministic — and it answers a different
+        // question from STANDING: standing asks whether the ACCOUNT may transact, authority asks
+        // whether this ACTOR may move it. Added while no rail binds the chain yet, so the blast
+        // radius of the order change is zero; after the first rail adopts it, it would not be.
         assertThat(AdmissionStep.entries.map { it.name }).containsExactly(
+            "AUTHORITY",
             "STANDING",
             "LIMITS",
             "SANCTIONS",

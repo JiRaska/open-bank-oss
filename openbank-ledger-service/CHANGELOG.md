@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.45.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.44.1...ledger-service-v1.45.0) (2026-11-12)
+
+
+### Features
+
+* **ledger:** enforce journal balance and append-only in the database (ADR-0372) ([#15733](https://github.com/JiRaska/open-bank-oss/issues/15733)) ([f4e1b6c](https://github.com/JiRaska/open-bank-oss/commit/f4e1b6c39999187b4b64076bab5f3299830de4dd))
+
 ## [1.44.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.44.0...ledger-service-v1.44.1) (2026-11-12)
 
 

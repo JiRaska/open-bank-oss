@@ -123,15 +123,54 @@ rule, and a payment that must be refused costs no remote call. It returns the sa
 verdict from Limits: a delegate inside their ceiling with no grant is REJECT, and a
 delegate with a grant over their ceiling is the Limits step's answer, not this one's.
 
-**D2 — One event-fed projection, in the chain module, not one per rail.** This amends
-ADR-0232 D3. The `delegation.granted|suspended|revoked|expired` projection moves into
-the ADR-0374 chain module, which every rail already runs, so a rail joins with config
-and a migration instead of the ~10 production files
-`openbank-domestic-payment` carries today. The durable spend binding and the
-reservation state consumer are absorbed the same way, under ADR-0374 point 11, and
+**D1 delivery note (2026-11-12).** The ADR-0374 chain kernel landed in #15735 while this ADR
+was in review, so D1 is now buildable and its first half is built: `AdmissionStep` gains
+`AUTHORITY` as its **first** member, and `DelegatedDebitAuthority` in `openbank-libs-fincrime`
+is the pure decision behind it — owner, or an ACTIVE grant over this account carrying the
+capability the action names.
+
+Two things about the sequencing are worth recording. The step was inserted while **no rail binds
+the chain yet**, so the order change has zero blast radius today and would not after the first
+rail adopts it. And the kernel's `Builder.build` refuses a chain with an unbound step, which makes
+this the D4 discipline applied to the chain itself: a rail cannot silently forget authority, it can
+only bind a check or declare the step unbound with a reason. That is the structural answer to the
+defect D1 exists for — ADR-0232 D3 assigned the check to each product service, and one payment
+rail of six performed it.
+
+What is NOT delivered: no rail binds it, because ADR-0374 slice A shipped the kernel only. The
+step is therefore declared and unbound everywhere until the first rail adopts the chain, which is
+visible rather than silent — the opposite of the `403` a delegate gets today.
+
+**D2 — One event-fed projection, shared, not one per rail — and it splits across two
+modules, not one.** This amends ADR-0232 D3. The
+`delegation.granted|suspended|revoked|expired` projection becomes shared code so a rail
+joins with config and a migration instead of the ~10 production files
+`openbank-domestic-payment` carries today. The durable spend binding and the reservation
+state consumer are absorbed the same way, under ADR-0374 point 11, and
 `SpendReservationOperationType` gains one value per rail enabled. No synchronous
-delegation-service call enters the money path, which is what ADR-0232 D3 refused and
-this ADR keeps.
+delegation-service call enters the money path, which is what ADR-0232 D3 refused and this
+ADR keeps.
+
+**Correction (2026-11-12), measured rather than assumed.** This clause first said the
+projection moves "into the ADR-0374 chain module". It cannot:
+`openbank-libs-fincrime`, where the chain kernel landed, declares exactly one dependency
+— `openbank-libs-domain` — so it has no Quarkus, Jakarta, Hibernate or Kafka on its
+classpath, and a consumer, an entity and a migration cannot compile there. Writing the
+clause that way would have sent the next slice into a module that structurally rejects it.
+
+The split follows ADR-0122's domain/runtime boundary, which already decided this shape:
+
+- **Pure, in `openbank-libs-fincrime`** beside the chain: what a grant IS and whether it
+  authorizes an action — `DelegationFact` and `DelegatedDebitAuthority` (delivered with D1).
+  No I/O, no framework, so the decision is testable without a container and a rail cannot
+  reach a different answer than the next rail.
+- **Framework-bearing, in `openbank-libs-runtime`**: the compacted-state consumer, the
+  projection entity, its repository and the Flyway template that produce those facts.
+
+A rail then binds the runtime adapter to the pure check at `AdmissionStep.AUTHORITY`. The
+seam is the fact type, which is also what makes the pure half usable by anything that holds
+grant state by other means — an edge, a test, a simulation — without taking the consumer
+with it.
 
 **D3 — The customer edge stops deciding authority on a debiting route.** The chain is
 authoritative; two enforcement points would drift, and the edge's is the one that

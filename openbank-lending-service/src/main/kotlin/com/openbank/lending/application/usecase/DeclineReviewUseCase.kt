@@ -5,6 +5,7 @@
 package com.openbank.lending.application.usecase
 
 import com.openbank.lending.domain.model.DeclineReview
+import com.openbank.lending.domain.model.DeclineReviewDecisionRequest
 import io.smallrye.mutiny.Uni
 import java.util.UUID
 
@@ -12,10 +13,16 @@ import java.util.UUID
 data class DeclineReviewResult(val review: DeclineReview, val created: Boolean)
 
 /**
- * Human review of a decision-engine decline (GDPR Art. 22(3), EU AI Act Art. 86). The customer asks;
- * the staff decision (confirm, or overturn into a successor application) follows in a separate change.
+ * Human review of a decision-engine decline (GDPR Art. 22(3), EU AI Act Art. 86). The customer asks; a
+ * staff reviewer, never the applicant, confirms the decline or overturns it. Overturning does not
+ * resurrect the declined application: it opens a successor that enters the existing four-eyes decision.
  */
 interface DeclineReviewUseCase {
     /** Customer leg. [partyId] is the applicant, taken from the edge-vouched header, never from a body. */
     fun requestReview(applicationId: UUID, partyId: UUID): Uni<DeclineReviewResult>
+
+    fun listPending(limit: Int): Uni<List<DeclineReview>>
+
+    /** Staff leg. [reviewer] is the authenticated JWT subject, never client-supplied. */
+    fun decide(reviewId: UUID, request: DeclineReviewDecisionRequest, reviewer: String): Uni<DeclineReview>
 }
