@@ -205,16 +205,19 @@ spec:
               The oldest domestic payment in SENT_TO_CLEARING is {{ $value | humanizeDuration }} old —
               at least one clearing cycle has been missed, or settlement is failing silently.
         - alert: DomesticPaymentHeldPastExpiry
-          # ADR-0374: a HELD payment is released, rejected or expired within 48 hours of being held,
-          # and it is held within seconds of being created. One older than that has lost the
-          # workflow run that owns its expiry: nothing will ever move it, and it answers 2xx like
-          # every other payment. The gauge is the age since creation; two hours of margin cover a
-          # release or reject activity that is still retrying. Never fires while the chain is off,
-          # because no payment is HELD then.
+          # ADR-0374: a HELD payment is released, rejected or expired within 48 hours of being
+          # HELD. One held longer has lost the workflow run that owns its expiry and the
+          # reconciliation sweep has not given it a new one: nothing will move it, and it answers
+          # 2xx like every other payment. The gauge is the age of the longest-running hold,
+          # counted from the hold (held_at) and not from the payment's creation, which can be
+          # much earlier. Two hours of margin cover a release or reject activity that is still
+          # retrying. The gauge reads 0 while nothing is held, on a cold pod and while the chain
+          # is off, so none of those can fire it. max by (service): every pod reads the same
+          # table, one alert is enough.
           expr: |
-            openbank_domestic_payments_non_terminal_oldest_age_seconds{
-              service="domestic", status="HELD"
-            } > 180000
+            max by (service) (
+              openbank_domestic_payments_held_oldest_age_seconds{service="domestic"}
+            ) > 180000
           for: 30m
           labels:
             severity: critical
@@ -222,10 +225,30 @@ spec:
           annotations:
             summary: "Domestic payment HELD past the expiry of its hold"
             description: >-
-              The oldest HELD domestic payment is {{ $value | humanizeDuration }} old. A hold ends
-              within 48 hours, so its workflow run is gone or stuck. Find the payment, check its
-              Temporal run `domestic-payment-<paymentId>` and the case with alert_code PAYMENT_HELD;
-              the operator status endpoint cannot move it.
+              The longest-held domestic payment has been HELD for {{ $value | humanizeDuration }}. A
+              hold ends within 48 hours, so its workflow run is gone or stuck and the hold
+              reconciliation has not replaced it. Find the payment, check its Temporal run
+              `domestic-payment-<paymentId>` and the case with alert_code PAYMENT_HELD; the operator
+              status endpoint cannot move it.
+        - alert: DomesticPaymentRedriveExhausted
+          # A RECEIVED payment whose re-drive attempts are spent is picked up by nothing: no run
+          # is started for it again. With the admission chain on, the operator status endpoint is
+          # its only exit and allows REJECTED or CANCELLED once no run is open. The count is 0 on a
+          # cold pod and whenever there is no such payment.
+          expr: |
+            max by (service) (
+              openbank_domestic_payments_redrive_exhausted{service="domestic"}
+            ) > 0
+          for: 30m
+          labels:
+            severity: warning
+            service: domestic-payment
+          annotations:
+            summary: "Domestic payment left RECEIVED with its re-drive attempts spent"
+            description: >-
+              {{ $value }} domestic payment(s) are RECEIVED with no re-drive attempt left. Nothing
+              automatic will move them. Find out why admission or screening never finished for each,
+              then end it through the operator status endpoint (REJECTED or CANCELLED).
         - alert: DomesticPaymentOutboxBacklogStuck
           # The gauge has been published by DomesticPaymentOutboxBacklogGauge all along; nothing
           # read it. That is why 13 events reaching DEAD on a missing Kafka ACL (#3271) went
