@@ -36,6 +36,18 @@ The switch is off by default. With the switch on, the deployment must supply `SA
 
 - **OPA policy decision point.** `openbank.authz.opa-pdp-producer.enabled: true` makes libs-runtime's `OpaPolicyDecisionPointProducer` supply the OPA sidecar client, configured by `opa.url`, `opa.path` and `opa.timeout-ms` (default 500 ms). It is read at build time.
 
+## Private application listener
+
+The KYB image fixes client certificate authentication at build time. The sandbox listener on
+8443 verifies the private CA and still requires an OIDC bearer for API calls. Its ingress admits
+only the Delegation workload. Port 8157 continues serving the existing callers.
+
+The mounted certificate is supplied through KYB-specific environment variables. Earlier images
+ignore these variables and continue serving 8157 during the rollout. After the certificate is ready,
+verify the new image's two-listener posture. Deploy the statutory authority route from #15662 and
+verify its policy admits the named Delegation workload before deploying the collection consumer.
+The sandbox collection flag stays off while those checks run.
+
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
