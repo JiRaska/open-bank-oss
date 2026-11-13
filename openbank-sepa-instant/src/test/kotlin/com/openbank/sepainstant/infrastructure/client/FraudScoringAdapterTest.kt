@@ -4,7 +4,9 @@
 
 package com.openbank.sepainstant.infrastructure.client
 
+import com.openbank.libs.fincrime.CounterpartyRef
 import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.InitiationMode
 import com.openbank.sepainstant.application.port.out.FraudScoreCommand
 import com.openbank.sepainstant.infrastructure.observability.FraudScoringMetrics
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -39,6 +41,8 @@ class FraudScoringAdapterTest {
         rail = "SCT_INST",
         accountId = accountId,
         counterpartyId = null,
+        counterparty = CounterpartyRef.fromIban("DE89370400440532013000"),
+        initiationMode = InitiationMode.CUSTOMER_PRESENT,
     )
 
     private fun response(verdict: String, score: Int = 10) = FraudScoreClientResponse(

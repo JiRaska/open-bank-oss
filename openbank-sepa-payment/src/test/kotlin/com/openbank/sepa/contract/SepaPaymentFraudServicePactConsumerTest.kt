@@ -33,7 +33,9 @@ class SepaPaymentFraudServicePactConsumerTest {
           "currency": "EUR",
           "rail": "SEPA",
           "accountId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-          "counterpartyId": null
+          "counterpartyId": null,
+          "counterparty": { "scheme": "IBAN", "value": "DE89370400440532013000" },
+          "initiationMode": "CUSTOMER_PRESENT"
         }
     """.trimIndent()
 
@@ -65,6 +67,35 @@ class SepaPaymentFraudServicePactConsumerTest {
         )
         .toPact()
 
+    /**
+     * The refusal half (ADR-0279 #3): with no M2M identity the call must answer 401 before the
+     * handler runs. Replayed by fraud-service's `FraudNegativeAuthProviderVerificationTest`, which
+     * filters the pact folder on this provider state and boots without a test identity.
+     */
+    @Pact(consumer = "openbank-sepa-payment", provider = "openbank-fraud-service")
+    fun fraudScoreUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NEGATIVE_AUTH_STATE)
+        .uponReceiving("POST fraud score for SEPA payment with no M2M identity is refused")
+        .path("/api/v1/fraud/score")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(requestBody)
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "fraudScoreUnauthenticatedPact")
+    fun `a score request with no identity is refused with 401, never scored`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .body(requestBody)
+            .post("/api/v1/fraud/score")
+            .then()
+            .statusCode(401)
+    }
+
     @Test
     @PactTestFor(pactMethod = "fraudScorePact")
     fun `score returns the fraud verdict and numeric risk score`(mockServer: MockServer) {
@@ -79,5 +110,10 @@ class SepaPaymentFraudServicePactConsumerTest {
 
         assertThat(body.getString("verdict")).isNotBlank()
         assertThat(body.getInt("score")).isGreaterThanOrEqualTo(0)
+    }
+
+    private companion object {
+        /** The provider's NEGATIVE_AUTH_STATE, served by its NegativeAuth provider class. */
+        const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
     }
 }
