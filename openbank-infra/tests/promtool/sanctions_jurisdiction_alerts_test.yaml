@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: Apache-2.0
+# Jurisdiction reference-data alerts against the SHIPPED rules: a list not re-verified for more
+# than 150 days fires and a recently verified one does not, however old its publication is; an
+# expected list with no rows is reported; a NaN or missing row count is reported as unknown.
+rule_files:
+  - prometheus-rules-sanctions-jurisdictions.yaml
+
+evaluation_interval: 5m
+
+tests:
+  - interval: 5m
+    input_series:
+      # Verified 151 days ago: must fire.
+      - series: 'openbank_sanctions_jurisdiction_verification_age_seconds{source_list="FATF_INCREASED_MONITORING"}'
+        values: '13046400+300x24'
+      # Verified 10 days ago against a publication that is 286 days old: must NOT fire — an old
+      # publication is not stale data when the source has issued nothing newer.
+      - series: 'openbank_sanctions_jurisdiction_verification_age_seconds{source_list="EU_HIGH_RISK_THIRD_COUNTRIES"}'
+        values: '864000+300x24'
+      - series: 'openbank_sanctions_jurisdiction_publication_age_seconds{source_list="EU_HIGH_RISK_THIRD_COUNTRIES"}'
+        values: '24710400+300x24'
+      - series: 'openbank_sanctions_jurisdiction_rows{source_list="EU_HIGH_RISK_THIRD_COUNTRIES"}'
+        values: '26+0x24'
+      - series: 'openbank_sanctions_jurisdiction_rows{source_list="FATF_INCREASED_MONITORING"}'
+        values: '20+0x24'
+      # Expected, never loaded: must be reported.
+      - series: 'openbank_sanctions_jurisdiction_rows{source_list="FATF_CALL_FOR_ACTION"}'
+        values: '0+0x24'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: JurisdictionReferenceDataNotReverified
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: JurisdictionReferenceDataNotReverified
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              source_list: FATF_INCREASED_MONITORING
+            exp_annotations:
+              summary: "Jurisdiction list FATF_INCREASED_MONITORING last compared with its source 151d 1h 30m 0s ago"
+              description: >-
+                sanctions-service screens countries against FATF_INCREASED_MONITORING rows that nobody
+                has compared with the published list for more than 150 days. A country listed since
+                then screens CLEAR, and one delisted is still sent to review. Fetch the current
+                publication and add a migration: new rows with a higher version (retiring the ones
+                it supersedes) if it changed, or an UPDATE of verified_on if it did not — the comment
+                in V22__eu_high_risk_third_countries.sql shows both.
+                openbank_sanctions_jurisdiction_publication_age_seconds gives the age of the
+                publication currently loaded. This alert does not clear on a restart.
+      - eval_time: 90m
+        alertname: JurisdictionReferenceDataNotLoaded
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              team: platform
+              source_list: FATF_CALL_FOR_ACTION
+            exp_annotations:
+              summary: "Jurisdiction list FATF_CALL_FOR_ACTION is not loaded in sanctions-service"
+              description: >-
+                sanctions_jurisdictions holds no active row for FATF_CALL_FOR_ACTION, so a
+                screen's country is never matched against that list. Rows are added only by a
+                reviewed migration written from the published list itself; see the header of
+                V22__eu_high_risk_third_countries.sql for what was loaded and what was not.
+      # Known-negative for rule 3: with a readable row count it stays silent.
+      - eval_time: 150m
+        alertname: JurisdictionReferenceDataUnknown
+        exp_alerts: []
+
+  # The table could not be read at startup: the row gauge is NaN. Neither rule above can see it.
+  - interval: 5m
+    input_series:
+      - series: 'openbank_sanctions_jurisdiction_rows{source_list="EU_HIGH_RISK_THIRD_COUNTRIES"}'
+        values: 'NaN+0x30'
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: JurisdictionReferenceDataNotLoaded
+        exp_alerts: []
+      - eval_time: 150m
+        alertname: JurisdictionReferenceDataUnknown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              source_list: EU_HIGH_RISK_THIRD_COUNTRIES
+            exp_annotations:
+              summary: "sanctions-service reports no usable jurisdiction reference-data row count"
+              description: >-
+                openbank_sanctions_jurisdiction_rows is absent or NaN. Either sanctions-service is
+                not scraped, or it could not read sanctions_jurisdictions when it started (the pod
+                log says "Jurisdiction reference data could not be read"). Until this clears,
+                JurisdictionReferenceDataNotReverified and JurisdictionReferenceDataNotLoaded cannot
+                fire, so their silence means nothing.
+
+  # The series is gone altogether.
+  - interval: 5m
+    input_series:
+      - series: 'up{job="unrelated"}'
+        values: '1+0x30'
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: JurisdictionReferenceDataUnknown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: "sanctions-service reports no usable jurisdiction reference-data row count"
+              description: >-
+                openbank_sanctions_jurisdiction_rows is absent or NaN. Either sanctions-service is
+                not scraped, or it could not read sanctions_jurisdictions when it started (the pod
+                log says "Jurisdiction reference data could not be read"). Until this clears,
+                JurisdictionReferenceDataNotReverified and JurisdictionReferenceDataNotLoaded cannot
+                fire, so their silence means nothing.

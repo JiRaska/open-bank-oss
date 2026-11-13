@@ -9,6 +9,7 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntity
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Table
+import jakarta.persistence.Version
 import java.time.Instant
 import java.util.UUID
 
@@ -70,6 +71,14 @@ class BusinessOnboardingCaseEntity : PanacheEntity() {
 
     @Column(name = "agreement_json", columnDefinition = "TEXT")
     var agreementJson: String? = null
+
+    @Column(name = "screening_json", columnDefinition = "TEXT")
+    var screeningJson: String? = null
+
+    /** Optimistic lock: bumped by Hibernate on every write of the row. */
+    @Version
+    @Column(name = "version", nullable = false)
+    var version: Long = 0
 
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant

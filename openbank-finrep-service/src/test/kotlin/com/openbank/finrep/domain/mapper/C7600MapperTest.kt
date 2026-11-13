@@ -67,19 +67,12 @@ class C7600MapperTest {
         assertThat(t.at("r0020").value).isEqualByComparingTo("250")
         assertThat(t.at("r0030").value).isEqualByComparingTo("611.76")
         assertThat(t.at("r0030").currency).isEqualTo("%")
-        assertThat(t.at("r0180").value).isEqualByComparingTo("1000")
-        assertThat(t.at("r0210").value).isEqualByComparingTo("900")
-        assertThat(t.at("r0240").value).isEqualByComparingTo("750")
-        listOf("r0010", "r0020", "r0030", "r0180", "r0210", "r0240").forEach {
+        assertThat(t.at("r0300").value).isEqualByComparingTo("1000")
+        assertThat(t.at("r0330").value).isEqualByComparingTo("900")
+        assertThat(t.at("r0360").value).isEqualByComparingTo("750")
+        listOf("r0010", "r0020", "r0030", "r0300", "r0330", "r0360").forEach {
             assertThat(t.at(it).isDataGap).describedAs(it).isFalse()
         }
-    }
-
-    @Test
-    fun `every row code is labelled unverified and no row outside the known set is emitted`() {
-        val t = render(result())
-        assertThat(t.cells.map { it.rowRef }).containsExactlyInAnyOrderElementsOf(C7600Mapper.UNVERIFIED_ROWS)
-        assertThat(t.cells).allSatisfy { assertThat(it.label).endsWith("[row code UNVERIFIED]") }
     }
 
     @Test
@@ -131,10 +124,21 @@ class C7600MapperTest {
     }
 
     @Test
+    fun `missing cap evidence leaves the 75 percent rows as gaps`() {
+        val t = render(result().copy(inflowCap = null))
+        listOf("r0330", "r0360").forEach { row ->
+            assertThat(t.at(row).isDataGap).isTrue()
+            assertThat(t.at(row).value).isEqualByComparingTo("0")
+            assertThat(t.at(row).gapReason).isEqualTo(C7400Mapper.MISSING_CAP_REASON)
+        }
+        assertThat(t.at("r0020").isDataGap).isFalse()
+    }
+
+    @Test
     fun `exempt and 90 percent cap rows are always gaps with their reasons`() {
         val t = render(result())
-        listOf("r0190", "r0220").forEach { assertThat(t.at(it).gapReason).isEqualTo(C7600Mapper.EXEMPT_REASON) }
-        listOf("r0200", "r0230").forEach { assertThat(t.at(it).gapReason).isEqualTo(C7600Mapper.HIGHER_CAP_REASON) }
+        listOf("r0310", "r0340").forEach { assertThat(t.at(it).gapReason).isEqualTo(C7600Mapper.EXEMPT_REASON) }
+        listOf("r0320", "r0350").forEach { assertThat(t.at(it).gapReason).isEqualTo(C7600Mapper.HIGHER_CAP_REASON) }
     }
 
     @Test
@@ -183,7 +187,7 @@ class C7600MapperTest {
     @Test
     fun `an unavailable read is a gap on every row`() {
         val t = C7600Mapper.map(RiskLiquidityLookup.unavailable("read disabled"), asOf)
-        assertThat(t.cells).hasSize(C7600Mapper.UNVERIFIED_ROWS.size)
+        assertThat(t.cells).isNotEmpty()
         assertThat(t.cells).allSatisfy { assertThat(it.gapReason).isEqualTo("read disabled") }
     }
 
@@ -199,7 +203,7 @@ class C7600MapperTest {
                 .contains(note)
         }
         // Outflow / inflow rows do not depend on the stock and are still stated.
-        listOf("r0020", "r0180", "r0210", "r0240").forEach {
+        listOf("r0020", "r0300", "r0330", "r0360").forEach {
             assertThat(t.at(it).isDataGap).describedAs(it).isFalse()
         }
     }

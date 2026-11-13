@@ -81,6 +81,13 @@ data class BusinessOnboardingCase(
     val declarations: Declarations? = null,
     /** The rendered framework agreement and its signature ceremony; null until prepared. */
     val agreement: AgreementRecord? = null,
+    /** Sanctions / PEP screening of the entity and its related parties; null until first attempted. */
+    val screening: CaseScreening? = null,
+    /**
+     * The row version this copy was read at. The repository refuses to write a copy whose version
+     * is no longer the stored one, so a decision made in between is never overwritten.
+     */
+    val version: Long = 0,
     val createdAt: Instant,
     val updatedAt: Instant,
     val representationAttestationId: UUID? = null,
@@ -451,6 +458,7 @@ data class BusinessOnboardingCase(
         signatureRef: String,
         at: Instant,
         highRiskCountries: Set<String> = emptySet(),
+        screeningRequired: Boolean = false,
     ): BusinessOnboardingCase {
         val signer = requireSignable(partyId, signatureRef)
         val updated = signers.map {
@@ -464,6 +472,9 @@ data class BusinessOnboardingCase(
         }
         val next = copy(signers = updated, updatedAt = at)
         if (next.signedCount < requireNotNull(requiredSignatures)) return next
+        // The completing signature is the approval. Without a complete screening answer it is
+        // refused — and NOT recorded — so the retry screens again instead of activating unscreened.
+        next.requireScreened(screeningRequired)
         // The offices are re-checked over the people who actually SIGNED. Checking them only when
         // co-signers were invited is not enough: invitations may exceed the count, so a rule of
         // "chair plus one member" could be satisfied on paper by inviting chair, vice and member
@@ -479,10 +490,12 @@ data class BusinessOnboardingCase(
             )
         }
         val flags = next.riskFlags(highRiskCountries)
-        if (flags.isNotEmpty()) {
+        // A screening finding sends the case to the same review and adds NOTHING to the reason:
+        // what a list said about a person never appears where the applicant can read it.
+        if (flags.isNotEmpty() || next.screening?.requiresReview == true) {
             return next.copy(
                 status = CaseStatus.MANUAL_REVIEW,
-                reviewReason = "AML risk review before activation: ${flags.joinToString("; ")}",
+                reviewReason = if (flags.isEmpty()) AML_REVIEW else "$AML_REVIEW: ${flags.joinToString("; ")}",
                 updatedAt = at,
             )
         }
@@ -495,6 +508,61 @@ data class BusinessOnboardingCase(
         identifier.country ?: extract?.registeredAddress?.countryCode,
         highRiskCountries,
     )
+
+    /**
+     * The review reason as the APPLICANT and every event consumer may read it. An AML review reads
+     * the same whatever raised it — the customer's own answers, a list match, or both — so its
+     * wording cannot tell a screened-out applicant from anyone else. Operators read [reviewReason]
+     * and [screening].
+     */
+    val applicantReviewReason: String?
+        get() = reviewReason?.let { if (it.startsWith(AML_REVIEW)) AML_REVIEW else it }
+
+    /** The related-party screening as it stands now — answers obtained, and subjects still pending. */
+    fun screeningRecorded(screening: CaseScreening, at: Instant): BusinessOnboardingCase =
+        copy(screening = screening, updatedAt = at)
+
+    /** An operator decided one screening finding. Never moves the case: approval stays a separate act. */
+    fun findingDisposed(
+        subjectKey: String,
+        disposition: FindingDisposition,
+        operator: String,
+        reason: String,
+        at: Instant,
+    ): BusinessOnboardingCase {
+        // Only under review. Decided anywhere else, the decision would be followed by the last
+        // signature and the case would be approved with no review step between the two.
+        if (status != CaseStatus.MANUAL_REVIEW) {
+            throw CaseTransitionException("a screening finding can be decided only while the case is under review")
+        }
+        val current = screening ?: throw CaseTransitionException("this case has no screening")
+        return copy(screening = current.disposed(subjectKey, disposition, operator, reason, at), updatedAt = at)
+    }
+
+    private fun requireScreened(required: Boolean) {
+        if (required && screening?.complete != true) throw ScreeningPendingException()
+    }
+
+    /**
+     * No operator act approves past a finding. An OPEN one has to be decided first, by its own
+     * action — resolving a review is not a decision about a finding, least of all one the same call
+     * just discovered. A CONFIRMED sanctions match leaves only rejection.
+     */
+    private fun requireFindingsDecided(required: Boolean) {
+        val s = screening?.takeIf { required } ?: return
+        if (s.confirmedSanctions.isNotEmpty()) {
+            throw ScreeningFindingException(
+                ScreeningFindingException.CONFIRMED,
+                "a sanctions finding on this case is confirmed; the case can only be rejected",
+            )
+        }
+        if (s.openFindings.isNotEmpty()) {
+            throw ScreeningFindingException(
+                ScreeningFindingException.OPEN,
+                "${s.openFindings.size} screening finding(s) on this case have no disposition; decide them first",
+            )
+        }
+    }
 
     private fun requireCollecting(what: String) {
         if (status != CaseStatus.INITIATOR_MATCHED &&
@@ -629,9 +697,11 @@ data class BusinessOnboardingCase(
         requiredSignatures: Int,
         at: Instant,
         requiredSignerRoles: List<String> = emptyList(),
+        screeningRequired: Boolean = false,
     ): BusinessOnboardingCase {
         require(status == CaseStatus.MANUAL_REVIEW) { "not under review" }
         require(requiredSignatures >= 1) { "at least one signature is required" }
+        requireFindingsDecided(screeningRequired)
         val next = copy(
             requiredSignatures = requiredSignatures,
             // Normalised on the way IN, not as a safety guard — `holdsOffice` folds and
@@ -652,6 +722,8 @@ data class BusinessOnboardingCase(
         // SIGNED: `signed()` refuses a SIGNED signer, so nothing could ever finish it. Two valid
         // signatures collected, entity never activated, and no timer watches READY_TO_SIGN.
         if (next.signedCount >= requiredSignatures && next.officeShortfall(next.signedSigners).isEmpty()) {
+            // An operator may decide a screening FINDING; nobody may approve past a missing one.
+            next.requireScreened(screeningRequired)
             return if (next.entityPartyActive) {
                 next.copy(status = CaseStatus.ACTIVE)
             } else {
@@ -701,6 +773,8 @@ data class BusinessOnboardingCase(
     }
 
     companion object {
+        const val AML_REVIEW = "AML risk review before activation"
+
         /**
          * The feminine spellings the register uses, mapped to the masculine stem — applied to both
          * the operator's office and the register's role, so `předsedkyně představenstva` satisfies

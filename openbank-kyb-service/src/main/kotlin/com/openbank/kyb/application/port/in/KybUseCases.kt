@@ -9,6 +9,7 @@ import com.openbank.kyb.domain.model.AcceptedDisclosure
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.Declarations
+import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.KnownPerson
 import com.openbank.kyb.domain.model.Questionnaire
@@ -134,6 +135,15 @@ interface RegistryLookupUseCase {
     suspend fun lookup(cmd: LookupCommand): RegistryExtract?
 }
 
+/** [operator] is the AUTHENTICATED principal, never a name from the request body. */
+data class DisposeFindingCommand(
+    val caseId: UUID,
+    val subjectKey: String,
+    val disposition: FindingDisposition,
+    val reason: String,
+    val operator: String,
+)
+
 // One method per state transition: the count belongs to the state machine, not to this interface.
 @Suppress("TooManyFunctions")
 interface BusinessOnboardingUseCase {
@@ -153,6 +163,9 @@ interface BusinessOnboardingUseCase {
     suspend fun abandon(caseId: UUID, callerPartyId: UUID): BusinessOnboardingCase
     suspend fun resolveReview(cmd: ResolveReviewCommand): BusinessOnboardingCase
     suspend fun reject(cmd: RejectCaseCommand): BusinessOnboardingCase
+
+    /** An operator decides one screening finding. Never approves anything by itself. */
+    suspend fun disposeFinding(cmd: DisposeFindingCommand): BusinessOnboardingCase
 
     /** Consumer entry: the entity party for some case reached ACTIVE. Idempotent; no-op when no case owns [entityPartyId]. */
     suspend fun entityPartyActivated(entityPartyId: UUID)

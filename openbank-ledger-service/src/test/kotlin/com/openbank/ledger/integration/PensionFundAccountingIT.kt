@@ -3,6 +3,7 @@
 
 package com.openbank.ledger.integration
 
+import com.openbank.ledger.fixtures.journalTransaction
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -335,11 +336,19 @@ internal object PensionAccountingFixtures {
     }
 
     fun resetChart(prefix: String, debit: String, credit: String, debitType: String, creditType: String) {
-        sql(
-            "TRUNCATE ledger_pension_fee_receipts, ledger_pension_reconciliations, ledger_book_identity, " +
-                "ledger_close_evidence, ledger_close_participation, ledger_accounting_day, ledger_tieout_runs, " +
-                "ledger_outbox, ledger_idempotency, journal_lines, journal_entries CASCADE",
-        )
+        // Emptying the journal tables is a declared repair (ADR-0372); a bare TRUNCATE is refused.
+        connection().use { connection ->
+            connection.journalTransaction("Pension accounting IT chart reset") { c ->
+                c.createStatement().use {
+                    it.execute(
+                        "TRUNCATE ledger_pension_fee_receipts, ledger_pension_reconciliations, " +
+                            "ledger_book_identity, ledger_close_evidence, ledger_close_participation, " +
+                            "ledger_accounting_day, ledger_tieout_runs, ledger_outbox, ledger_idempotency, " +
+                            "journal_lines, journal_entries CASCADE",
+                    )
+                }
+            }
+        }
         sql("UPDATE gl_accounts SET is_enabled = false")
         for ((suffix, type) in listOf(debit to debitType, credit to creditType)) {
             sql(

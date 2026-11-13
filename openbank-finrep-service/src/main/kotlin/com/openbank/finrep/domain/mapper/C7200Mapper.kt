@@ -18,9 +18,9 @@ import java.time.LocalDate
  * and classifies no asset: every figure is the risk engine's, from the same TIED_OUT snapshot at the
  * report date that C 02.00 reads, so the two templates of one date describe one book.
  *
- * Columns: c0010 "Amount / market value" (the engine's unweighted `marketValue`) and c0040 "Value
- * according to Article 9" (the engine's `afterHaircut`, BEFORE the Level 2 caps — the caps belong
- * to C 76.00, not here). The weight columns c0020 / c0030 are not emitted.
+ * EBA 4.2 total-currency table C_72.00.a. Column c0010 is the engine's unweighted `marketValue`.
+ * Column c0040 is its Article 9 value `afterHaircut`, before the Level 2 caps reported by C 76.00.
+ * The applicable-weight column c0030 is outside the preview.
  *
  * Rows:
  *   r0010 TOTAL UNADJUSTED LIQUID ASSETS                                   — Σ L1 + L2A + L2B
@@ -29,16 +29,9 @@ import java.time.LocalDate
  *         no covered bonds: its L1 classes are cash/central-bank reserves and 0%-RW sovereign securities)
  *   r0040 Coins and banknotes                                              — DATA GAP (not split)
  *   r0050 Withdrawable central bank reserves                               — DATA GAP (not split)
- *   r0230 Total unadjusted Level 2 assets            [row code UNVERIFIED]  — Σ L2A + L2B
- *   r0240 Total unadjusted Level 2A assets           [row code UNVERIFIED]  — Σ L2A
- *   r0310 Total unadjusted Level 2B assets           [row code UNVERIFIED]  — Σ L2B
- *
- * UNVERIFIED: the codes of r0230 / r0240 / r0310 are from memory of the Annex XXIV layout and were
- * not checked against the EBA DPM; their labels say so on the wire. The issuer / asset-type
- * breakdown rows below each level (L1 securities by issuer, extremely high quality covered bonds,
- * L2A / L2B sub-types, CIU shares) are NOT emitted at all because their codes are unverified too;
- * they are absent, never zero, and the engine could not populate them anyway (it classifies HQLA by
- * GL account, not by issuer or asset type).
+ *   r0220 Total unadjusted Level 2 assets                                   — Σ L2A + L2B
+ *   r0230 Total unadjusted Level 2A assets                                  — Σ L2A
+ *   r0310 Total unadjusted Level 2B assets                                  — Σ L2B
  *
  * Data gaps (ADR-0097 — never a real-looking zero): r0040 / r0050 because the engine's single L1
  * class `hqla-l1-cash-or-reserves` does not distinguish coins and banknotes from central-bank
@@ -59,7 +52,6 @@ object C7200Mapper {
     const val TEMPLATE_ID = "C_72.00"
     private const val COL_AMOUNT = "c0010"
     private const val COL_VALUE = "c0040"
-    private const val UNVERIFIED = " [row code UNVERIFIED]"
 
     /** Delegated Regulation (EU) 2015/61 standard haircuts for the levels as the engine models them. */
     private val EU_HAIRCUTS: Map<String, Set<BigDecimal>> = mapOf(
@@ -68,12 +60,9 @@ object C7200Mapper {
         L2B to setOf(BigDecimal("0.25"), BigDecimal("0.50")),
     )
 
-    /** Rows this mapper emits whose code has not been checked against the EBA DPM. */
-    val UNVERIFIED_ROWS: Set<String> = setOf("r0230", "r0240", "r0310")
-
     const val NOT_SPLIT_REASON =
         "The risk engine reports coins, banknotes and central-bank reserves as one Level 1 class " +
-            "(hqla-l1-cash-or-reserves), so this split cannot be stated; the total is in r0030."
+            "(hqla-l1-cash-or-reserves), so this split cannot be stated. The combined balance is included in r0030."
 
     fun map(lookup: RiskLiquidityLookup, asOf: LocalDate): CorepTemplate {
         val result = lookup.result
@@ -94,9 +83,9 @@ object C7200Mapper {
                 "Total unadjusted Level 1 assets excluding extremely high quality covered bonds",
                 level(L1),
             ),
-            Triple("r0230", "Total unadjusted Level 2 assets$UNVERIFIED", sum(L2A, L2B)),
-            Triple("r0240", "Total unadjusted Level 2A assets$UNVERIFIED", level(L2A)),
-            Triple("r0310", "Total unadjusted Level 2B assets$UNVERIFIED", level(L2B)),
+            Triple("r0220", "Total unadjusted Level 2 assets", sum(L2A, L2B)),
+            Triple("r0230", "Total unadjusted Level 2A assets", level(L2A)),
+            Triple("r0310", "Total unadjusted Level 2B assets", level(L2B)),
         )
 
         fun cell(row: String, col: String, label: String, value: BigDecimal?, reason: String?) =

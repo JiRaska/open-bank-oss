@@ -105,6 +105,26 @@ mp:
         ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    incoming:
+      # GDPR Art. 17 (#15755, ADR-0118): PARTY_ERASED from party-service's `openbank.party.events`
+      # (NOT the unprefixed `party.events` that party-events-out below publishes to).
+      # #5745: the consumer retries then RETHROWS, and SmallRye's DEFAULT failure-strategy is
+      # `fail`, which STOPS the channel — so the dead-letter strategy is configured here, in the
+      # same change. The DLQ topic is EXPLICIT (the implicit name derives from the channel name
+      # alone, and `party-events-in` exists in eight services) and NESTED: a dotted leaf key
+      # (`dead-letter-queue.topic:`) is quoted by SmallRye's YAML source and never read (#686).
+      # `group.id` / `auto.offset.reset` cannot be YAML keys for the same reason; until the
+      # msg-override ConfigMap lands (a follow-up deploy: a ConfigMap naming a channel the running
+      # image lacks is SRMSG00071) the consumer runs on the fallback group `openbank-pid-service`,
+      # which the KafkaUser is granted Read on alongside `pid-service-party-erasure`.
+      party-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.pid.party-events-in
+        connector: smallrye-kafka
+        topic: openbank.party.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
     outgoing:
       party-events-out:
         connector: smallrye-kafka

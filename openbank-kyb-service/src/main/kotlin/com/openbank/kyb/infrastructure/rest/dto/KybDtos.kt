@@ -6,6 +6,8 @@ package com.openbank.kyb.infrastructure.rest.dto
 
 import com.openbank.kyb.application.port.`in`.DeclaredEntity
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
+import com.openbank.kyb.domain.model.CaseScreening
+import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.Questionnaire
 import com.openbank.kyb.domain.model.RegistryExtract
@@ -326,6 +328,11 @@ data class CaseResponse(
     val questionnaire: Questionnaire?,
     val declarations: DeclarationsResponse?,
     val agreement: AgreementSummary?,
+    /**
+     * The related-party sanctions / PEP screening. OPERATOR view only: it is null on every response
+     * a customer can read, because naming who matched a list to the customer is tipping off.
+     */
+    val screening: ScreeningResponse?,
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
@@ -343,12 +350,73 @@ data class CaseResponse(
             signedCount = c.signedCount,
             extract = c.extract?.let { ExtractResponse.from(it) },
             signers = c.signers.map { SignerResponse.from(it, revealToken = viewerPartyId == c.initiatorPartyId) },
-            reviewReason = c.reviewReason,
+            // The operator reads the flags; the applicant reads wording that cannot tell why.
+            reviewReason = if (viewerPartyId == null) c.reviewReason else c.applicantReviewReason,
             questionnaire = c.questionnaire,
             declarations = c.declarations?.let { DeclarationsResponse.from(it) },
             agreement = c.agreement?.let { AgreementSummary.from(it) },
+            // viewerPartyId is null only on the operator routes (each calls requireOperator first).
+            screening = c.screening?.takeIf { viewerPartyId == null }?.let { ScreeningResponse.from(it) },
             createdAt = c.createdAt,
             updatedAt = c.updatedAt,
+        )
+    }
+}
+
+/** One screened subject of the case, as an operator sees it. */
+data class ScreeningSubjectResponse(
+    /** Identifies the subject on the disposition route. */
+    val key: String,
+    val kind: String,
+    val name: String,
+    val organisation: Boolean,
+    /** PENDING | CLEAR | POTENTIAL_HIT | HIT — PENDING means no answer was obtained, never "clear". */
+    val sanctions: String,
+    val pep: Boolean,
+    val matchedName: String?,
+    val screenedAt: Instant?,
+    /** False for a subject that has left the case and is kept because of its finding. */
+    val current: Boolean,
+    /** OPEN | CLEARED_FALSE_POSITIVE | CONFIRMED, null when there is nothing to decide. */
+    val disposition: String?,
+    val disposedBy: String?,
+    val dispositionReason: String?,
+    val disposedAt: Instant?,
+)
+
+/** An operator's decision about one finding. Who decides is the authenticated principal, not a field here. */
+data class DisposeFindingRequest(val disposition: String?, val reason: String?)
+
+data class ScreeningResponse(
+    val complete: Boolean,
+    /** Findings with no decision yet. Approval is impossible while this is above zero. */
+    val openFindings: Int,
+    /** Where the beneficial owners came from: REGISTER | SELF_DECLARATION | UNAVAILABLE, null if never built. */
+    val ownerSource: String?,
+    val subjects: List<ScreeningSubjectResponse>,
+) {
+    companion object {
+        fun from(s: CaseScreening) = ScreeningResponse(
+            complete = s.complete,
+            openFindings = s.openFindings.size,
+            ownerSource = s.ownerSource?.name,
+            subjects = s.subjects.map {
+                ScreeningSubjectResponse(
+                    key = it.key,
+                    kind = it.kind.name,
+                    name = it.name,
+                    organisation = it.organisation,
+                    sanctions = it.sanctions.name,
+                    pep = it.pep,
+                    matchedName = it.matchedName,
+                    screenedAt = it.screenedAt,
+                    current = it.current,
+                    disposition = (it.disposition ?: FindingDisposition.OPEN.takeIf { _ -> it.finding })?.name,
+                    disposedBy = it.disposedBy,
+                    dispositionReason = it.dispositionReason,
+                    disposedAt = it.disposedAt,
+                )
+            },
         )
     }
 }
