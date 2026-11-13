@@ -16,6 +16,7 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.domestic.domain.model.RecordedFraudScore
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.fincrime.FraudVerdict
 import com.openbank.libs.fincrime.ScreeningMatchStatus
@@ -26,6 +27,7 @@ import com.openbank.libs.fincrime.admission.AdmissionStep
 import com.openbank.libs.fincrime.admission.StepOutcome
 import com.openbank.libs.fincrime.admission.UnavailableCause
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -72,18 +74,21 @@ class DomesticAdmissionChainTest {
         }
     }
 
+    private val fraudMetrics = mockk<FraudEnforcementMetricsPort>(relaxed = true)
+    private val remembered = mutableListOf<RecordedFraudScore>()
+
     private fun chain(fraudEnforced: Boolean = true) = DomesticAdmissionChain(
         standingPort,
         screeningPort,
         fraudPort,
-        mockk<FraudEnforcementMetricsPort>(relaxed = true),
+        fraudMetrics,
         mockk(relaxed = true),
         fraudEnforced,
         Duration.ofSeconds(30),
     )
 
     private fun admit(payment: DomesticPayment = payment(), fraudEnforced: Boolean = true) =
-        runBlocking { chain(fraudEnforced).admit(payment) }
+        runBlocking { chain(fraudEnforced).admit(payment) { remembered += it } }
 
     @Test
     fun `good standing, a clear screen and a real fraud ALLOW admit the payment`() {
@@ -198,6 +203,34 @@ class DomesticAdmissionChainTest {
         assertThat(result[AdmissionStep.FRAUD].outcome)
             .isEqualTo(StepOutcome.NotApplicable(DomesticAdmissionChain.FRAUD_ENFORCEMENT_OFF))
         assertThat(result[AdmissionStep.FRAUD].effective).isNull()
+    }
+
+    @Test
+    fun `a payment is scored for fraud once, and every later evaluation reuses that score`() {
+        fraud = fraud.copy(verdict = FraudVerdict.REVIEW)
+        val first = admit()
+        assertThat(first[AdmissionStep.FRAUD].effective).isEqualTo(AdmissionDecision.HOLD)
+        assertThat(remembered).containsExactly(RecordedFraudScore("REVIEW", fraud.score, fraud.ruleVersion))
+
+        // The payment as the next evaluation reads it: with the score the first one kept. Fraud-
+        // service would by now answer differently; it is not asked.
+        calls.clear()
+        fraud = fraud.copy(verdict = FraudVerdict.ALLOW)
+        val again = admit(payment().copy(admissionFraudScore = remembered.single()))
+
+        assertThat(calls).doesNotContain("fraud")
+        assertThat(again[AdmissionStep.FRAUD].effective).isEqualTo(AdmissionDecision.HOLD)
+        assertThat(remembered).hasSize(1)
+        verify(exactly = 1) { fraudMetrics.recordDecision(any(), any()) }
+    }
+
+    @Test
+    fun `a stand-in for an unreachable fraud service is never kept as the payment's score`() {
+        fraud = fraud.copy(synthetic = true)
+
+        admit()
+
+        assertThat(remembered).isEmpty()
     }
 
     @Test

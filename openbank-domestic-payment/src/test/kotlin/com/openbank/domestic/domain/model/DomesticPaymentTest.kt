@@ -72,6 +72,37 @@ class DomesticPaymentTest {
     }
 
     @Test
+    fun `a customer channel is told a reason only when it is theirs to act on, never one that names a control`() {
+        val shown = DomesticRejectReason.entries.associateWith { it.customerFacing.asRailReason }
+
+        // Named one by one: a reason added later must be placed here on purpose.
+        assertThat(shown.filterValues { it == null }.keys).containsExactlyInAnyOrder(
+            DomesticRejectReason.AML_HOLD,
+            DomesticRejectReason.SANCTIONS_HIT,
+            DomesticRejectReason.FRAUD_SUSPECTED,
+            DomesticRejectReason.DEBTOR_ACCOUNT_BLOCKED,
+        )
+        shown.filterValues { it != null }.forEach { (reason, seen) -> assertThat(seen).isEqualTo(reason) }
+    }
+
+    @Test
+    fun `a hold records when it began and keeps that after it ends, and its case is requested once`() {
+        val clock = Clock.fixed(Instant.parse("2026-11-13T10:00:00Z"), ZoneOffset.UTC)
+        val later = Clock.fixed(Instant.parse("2026-11-13T12:00:00Z"), ZoneOffset.UTC)
+        val held = payment(DomesticPaymentStatus.RECEIVED).transitionTo(DomesticPaymentStatus.HELD, clock = clock)
+        assertThat(held.heldAt).isEqualTo(clock.instant())
+        assertThat(held.holdCaseRequestedAt).isNull()
+
+        val requested = held.withHoldCaseRequested(clock.instant())
+        assertThat(requested.withHoldCaseRequested(later.instant()).holdCaseRequestedAt).isEqualTo(clock.instant())
+
+        val released = requested.transitionTo(DomesticPaymentStatus.VALIDATED, clock = later)
+        assertThat(released.heldAt).isEqualTo(clock.instant())
+        assertThatThrownBy { released.withHoldCaseRequested(later.instant()) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
     fun `delegation and reservation form an indivisible pair`() {
         assertThatThrownBy {
             payment().copy(delegationId = UUID.randomUUID())

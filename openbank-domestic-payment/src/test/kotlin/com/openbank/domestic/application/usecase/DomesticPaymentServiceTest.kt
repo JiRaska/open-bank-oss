@@ -11,21 +11,28 @@ import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepositor
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.workflow.PaymentAdmissionConfig
+import com.openbank.domestic.application.workflow.ScreeningRedriveConfig
 import com.openbank.domestic.domain.error.DomesticSchemeErrorCode
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
+import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.domestic.domain.model.InitiatorScope
 import com.openbank.libs.domain.error.ValidationFailure
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
+import io.grpc.Status
+import io.grpc.StatusRuntimeException
 import io.mockk.Called
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.temporal.api.enums.v1.WorkflowExecutionStatus
+import io.temporal.api.workflow.v1.WorkflowExecutionInfo
+import io.temporal.api.workflowservice.v1.DescribeWorkflowExecutionResponse
 import io.temporal.client.WorkflowClient
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -247,14 +254,85 @@ class DomesticPaymentServiceTest {
             rejectDetail = null,
         )
 
+        coEvery { paymentRepository.redriveAttempts(received.id) } returns 0
         service.admission = PaymentAdmissionConfig(enabled = true)
         assertThatThrownBy { runBlocking { service.transitionStatus(command) } }
             .isInstanceOf(InvalidDomesticPaymentStateTransitionException::class.java)
+            .hasMessageContaining("re-drive has attempts left")
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
 
         service.admission = PaymentAdmissionConfig(enabled = false)
         runBlocking { service.transitionStatus(command) }
         coVerify(exactly = 1) { paymentRepository.update(any(), any()) }
+    }
+
+    private fun exhaustedReceived(openRun: Boolean? = false): DomesticPayment {
+        val received = payment(status = DomesticPaymentStatus.RECEIVED)
+        coEvery { paymentRepository.findById(received.id) } returns received
+        coEvery { paymentRepository.redriveAttempts(received.id) } returns 5
+        service.admission = PaymentAdmissionConfig(enabled = true)
+        service.redrive = ScreeningRedriveConfig(maxAttempts = 5)
+        when (openRun) {
+            // Temporal knows no run for the payment.
+            false -> every {
+                workflowClient.workflowServiceStubs.blockingStub().describeWorkflowExecution(any())
+            } throws StatusRuntimeException(Status.NOT_FOUND)
+            true -> every {
+                workflowClient.workflowServiceStubs.blockingStub().describeWorkflowExecution(any())
+            } returns DescribeWorkflowExecutionResponse.newBuilder()
+                .setWorkflowExecutionInfo(
+                    WorkflowExecutionInfo.newBuilder()
+                        .setStatus(WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_RUNNING),
+                )
+                .build()
+            null -> every {
+                workflowClient.workflowServiceStubs.blockingStub().describeWorkflowExecution(any())
+            } throws StatusRuntimeException(Status.UNAVAILABLE)
+        }
+        return received
+    }
+
+    private fun move(payment: DomesticPayment, target: DomesticPaymentStatus) = runBlocking {
+        service.transitionStatus(
+            TransitionDomesticPaymentStatusCommand(
+                paymentId = payment.id,
+                targetStatus = target,
+                rejectReason = DomesticRejectReason.TECHNICAL_ERROR.takeIf { target == DomesticPaymentStatus.REJECTED },
+                rejectDetail = null,
+            ),
+        )
+    }
+
+    @Test
+    fun `with the chain on a RECEIVED payment nothing acts on any more can be rejected or cancelled by an operator`() {
+        // Its re-drive attempts are spent and no run is open: without this exit it has none.
+        val stranded = exhaustedReceived()
+
+        assertThat(move(stranded, DomesticPaymentStatus.REJECTED).status).isEqualTo(DomesticPaymentStatus.REJECTED)
+        assertThat(move(stranded, DomesticPaymentStatus.CANCELLED).status).isEqualTo(DomesticPaymentStatus.CANCELLED)
+        coVerify(exactly = 2) { paymentRepository.update(any(), any()) }
+    }
+
+    @Test
+    fun `that exit never admits - an operator may refuse such a payment, not wave it through`() {
+        val stranded = exhaustedReceived()
+
+        assertThatThrownBy { move(stranded, DomesticPaymentStatus.VALIDATED) }
+            .isInstanceOf(InvalidDomesticPaymentStateTransitionException::class.java)
+            .hasMessageContaining("may only be REJECTED or CANCELLED")
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+    }
+
+    @Test
+    fun `the exit stays closed while a run is open, or while Temporal cannot say`() {
+        for (openRun in listOf(true, null)) {
+            val busy = exhaustedReceived(openRun)
+
+            assertThatThrownBy { move(busy, DomesticPaymentStatus.REJECTED) }
+                .isInstanceOf(InvalidDomesticPaymentStateTransitionException::class.java)
+                .hasMessageContaining("a workflow run is open")
+        }
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
     }
 
     @Test

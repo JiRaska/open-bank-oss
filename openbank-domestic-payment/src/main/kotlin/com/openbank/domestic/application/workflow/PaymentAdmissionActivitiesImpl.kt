@@ -16,12 +16,14 @@ import com.openbank.domestic.domain.event.PaymentHeldEvent
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
+import com.openbank.domestic.domain.model.RecordedFraudScore
 import com.openbank.libs.fincrime.AmlCaseSeverity
 import com.openbank.libs.fincrime.admission.AdmissionDecision
 import com.openbank.libs.fincrime.admission.AdmissionResult
 import com.openbank.libs.fincrime.admission.AdmissionStep
 import com.openbank.libs.fincrime.admission.StepOutcome
 import com.openbank.libs.fincrime.admission.StepRecord
+import com.openbank.libs.fincrime.admission.UnavailableCause
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -43,8 +45,9 @@ private const val ALERT_SANCTIONS_HIT = "SANCTIONS_HIT"
  *
  * Every write is one transaction through [PaymentAdmissionWrites]: the status, its status event
  * and, for a hold that needs a human, the `PAYMENT_HELD` event. Each method is re-entrant on the
- * payment's status, so a Temporal retry of an attempt that already committed changes nothing and
- * answers what the first attempt would have.
+ * payment's row, so a Temporal retry of an attempt that already committed changes nothing and
+ * answers what that attempt decided: a status that is past admission answers for itself, and a HELD
+ * payment whose case was requested answers "held for review" without asking any control again.
  */
 @Suppress("LongParameterList")
 @ApplicationScoped
@@ -75,7 +78,14 @@ open class PaymentAdmissionActivitiesImpl(
             // must not strand the holds it placed.
             DomesticPaymentStatus.RECEIVED ->
                 if (admissionEnabled) evaluate(payment, lastAttempt) else AdmissionAction.NOT_ENABLED
-            DomesticPaymentStatus.HELD -> evaluate(payment, lastAttempt)
+            DomesticPaymentStatus.HELD ->
+                // Its case was requested: the hold is the case's to decide. Evaluating again could
+                // let a control that answers differently now release a payment a reviewer holds.
+                if (payment.holdCaseRequestedAt != null) {
+                    AdmissionAction.HELD_FOR_REVIEW
+                } else {
+                    evaluate(payment, lastAttempt)
+                }
             DomesticPaymentStatus.VALIDATED,
             DomesticPaymentStatus.SENT_TO_CLEARING,
             DomesticPaymentStatus.SETTLED,
@@ -86,8 +96,16 @@ open class PaymentAdmissionActivitiesImpl(
     }
 
     private suspend fun evaluate(payment: DomesticPayment, lastAttempt: Boolean): AdmissionAction {
-        val result = chain.admit(payment)
-        metrics.recordDecision(result.decision)
+        var freshFraudScore: RecordedFraudScore? = null
+        val result = chain.admit(payment) { freshFraudScore = it }
+        // Kept before anything else is written, so an attempt that fails further down still does
+        // not ask fraud-service about this payment a second time.
+        freshFraudScore?.let { writes.rememberFraudScore(payment.id, it) }
+        // One count per decision that changes the payment. A payment that is HELD and still held
+        // after a re-evaluation was counted when it was first held.
+        val stillHeld = payment.status == DomesticPaymentStatus.HELD &&
+            (result.decision == AdmissionDecision.HOLD || result.decision == AdmissionDecision.CHALLENGE)
+        if (!stillHeld) metrics.recordDecision(result.decision)
         result.steps.forEach { record ->
             val outcome = record.outcome
             if (outcome is StepOutcome.Unavailable) metrics.recordUnavailable(record.step, outcome.cause)
@@ -141,13 +159,16 @@ open class PaymentAdmissionActivitiesImpl(
                     (record.effective ?: AdmissionDecision.ALLOW) > AdmissionDecision.ALLOW
             }
         if (payment.status == DomesticPaymentStatus.RECEIVED) {
-            val updated = payment.transitionTo(DomesticPaymentStatus.HELD, clock = clock)
+            val held = payment.transitionTo(DomesticPaymentStatus.HELD, clock = clock)
+            val updated = if (wantsReview) held.withHoldCaseRequested(Instant.now(clock)) else held
             val events = buildList {
                 add(eventPublisher.statusChanged(payment, updated))
                 if (wantsReview) add(heldEvent(updated, result))
             }
             writes.transition(updated, events)
-        } else if (wantsReview && !writes.appendWhileHeld(payment.id, heldEvent(payment, result))) {
+        } else if (wantsReview &&
+            !writes.requestCaseWhileHeld(payment.id, heldEvent(payment, result), Instant.now(clock))
+        ) {
             // It left HELD between the read and the write; the workflow's next step reads the truth.
             log.warnf("Payment %s left HELD while its review was being requested", payment.id)
         }
@@ -174,17 +195,21 @@ open class PaymentAdmissionActivitiesImpl(
         // Hours may have passed; the account may have been frozen since. Until a hold reserves its
         // amount, this re-run is what stands between a release and a debit of a frozen account.
         val standing = chain.standing(payment)
-        val mayDebit = standing is StepOutcome.Decided && standing.decision == AdmissionDecision.ALLOW
+        // Only an ANSWER decides. A standing read that timed out or failed says nothing about the
+        // account, so it neither releases nor rejects: the attempt fails and Temporal retries it on
+        // the admission policy (unlimited attempts, capped backoff). Rejecting here turned a blip
+        // of account-service into the rejection of a payment a reviewer had just released.
+        if (standing !is StepOutcome.Decided) {
+            metrics.recordUnavailable(AdmissionStep.STANDING, (standing as? StepOutcome.Unavailable)?.cause.orMissing())
+            throw StandingUnavailableAtReleaseException(payment.id, standing)
+        }
+        val mayDebit = standing.decision == AdmissionDecision.ALLOW
         val updated = if (mayDebit) {
             payment.transitionTo(DomesticPaymentStatus.VALIDATED, clock = clock)
         } else {
             payment.transitionTo(
                 targetStatus = DomesticPaymentStatus.REJECTED,
-                reason = if (standing is StepOutcome.Decided) {
-                    DomesticRejectReason.DEBTOR_ACCOUNT_BLOCKED
-                } else {
-                    DomesticRejectReason.TECHNICAL_ERROR
-                },
+                reason = DomesticRejectReason.DEBTOR_ACCOUNT_BLOCKED,
                 clock = clock,
             )
         }
@@ -247,6 +272,15 @@ open class PaymentAdmissionActivitiesImpl(
     }
 }
 
+/**
+ * The standing re-run of a release got no answer. Retryable on purpose: thrown out of the activity
+ * so Temporal tries the release again; the payment stays HELD meanwhile.
+ */
+class StandingUnavailableAtReleaseException(paymentId: UUID, standing: StepOutcome) :
+    RuntimeException("Standing of held payment $paymentId could not be read at release ($standing); retrying")
+
+private fun UnavailableCause?.orMissing(): UnavailableCause = this ?: UnavailableCause.MISSING_DATA
+
 private fun DomesticPaymentEventPublisher.statusChanged(previous: DomesticPayment, current: DomesticPayment) =
     OutboxMessage(
         aggregateId = current.id,
@@ -280,9 +314,9 @@ private fun paymentHeldEvent(held: DomesticPayment, result: AdmissionResult, now
         customerReference = "${held.debtorAccountNumber}/${held.debtorBankCode}",
         reasons = result.reasons.map { it.value },
         steps = result.steps.map(::heldStep),
-        // The move to HELD is the last write to a held payment, so this is when the hold began.
-        heldAt = held.updatedAt,
-        expiresAt = held.updatedAt.plus(PaymentHoldPolicy.EXPIRY),
+        // Rows held by a build from before held_at existed fall back to the last write of the row.
+        heldAt = held.heldAt ?: held.updatedAt,
+        expiresAt = (held.heldAt ?: held.updatedAt).plus(PaymentHoldPolicy.EXPIRY),
         occurredAt = now,
         aggregateRevision = held.aggregateRevision,
     )

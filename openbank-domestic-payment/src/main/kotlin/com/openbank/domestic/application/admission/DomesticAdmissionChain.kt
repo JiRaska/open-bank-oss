@@ -8,6 +8,7 @@ import com.openbank.domestic.application.port.out.AccountStandingLookup
 import com.openbank.domestic.application.port.out.AccountStandingPort
 import com.openbank.domestic.application.port.out.FraudEnforcementMetricsPort
 import com.openbank.domestic.application.port.out.FraudScoreCommand
+import com.openbank.domestic.application.port.out.FraudScoreOutcome
 import com.openbank.domestic.application.port.out.FraudScoringPort
 import com.openbank.domestic.application.port.out.SanctionsScreeningPort
 import com.openbank.domestic.application.port.out.ScreeningUnavailableException
@@ -16,6 +17,7 @@ import com.openbank.domestic.application.workflow.FraudGatePolicy
 import com.openbank.domestic.application.workflow.FraudHoldBasis
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.domestic.domain.model.RecordedFraudScore
 import com.openbank.libs.fincrime.FraudVerdict
 import com.openbank.libs.fincrime.ScreeningDecision
 import com.openbank.libs.fincrime.ScreeningMatchStatus
@@ -72,18 +74,29 @@ class DomesticAdmissionChain(
     @ConfigProperty(name = "openbank.domestic.admission.budget", defaultValue = "PT30S")
     private val budget: Duration,
 ) {
-    private val chain: PaymentAdmissionChain<DomesticPayment> =
-        PaymentAdmissionChain.Builder<DomesticPayment>(budget, UnavailablePolicy.HOLD)
+    /** One evaluation: the payment, and where the fraud step reports a score it obtained afresh. */
+    private class Evaluation(val payment: DomesticPayment, val onFreshFraudScore: (RecordedFraudScore) -> Unit)
+
+    private val chain: PaymentAdmissionChain<Evaluation> =
+        PaymentAdmissionChain.Builder<Evaluation>(budget, UnavailablePolicy.HOLD)
             .unbound(AdmissionStep.AUTHORITY, AUTHORITY_DECIDED_AT_SUBMISSION)
-            .check(AdmissionStep.STANDING) { payment, remaining -> standingWithin(payment, remaining) }
+            .check(AdmissionStep.STANDING) { evaluation, remaining -> standingWithin(evaluation.payment, remaining) }
             .unbound(AdmissionStep.LIMITS, LIMITS_NOT_DELIVERED)
-            .check(AdmissionStep.SANCTIONS) { payment, remaining -> sanctions(payment, remaining) }
+            .check(AdmissionStep.SANCTIONS) { evaluation, remaining -> sanctions(evaluation.payment, remaining) }
             .unbound(AdmissionStep.AML_DESTINATION_RISK, AML_DESTINATION_RISK_NOT_DELIVERED)
-            .check(AdmissionStep.FRAUD) { payment, remaining -> fraud(payment, remaining) }
+            .check(AdmissionStep.FRAUD) { evaluation, remaining -> fraud(evaluation, remaining) }
             .unbound(AdmissionStep.PAYEE_VERIFICATION, PAYEE_VERIFICATION_NOT_REQUIRED)
             .build()
 
-    suspend fun admit(payment: DomesticPayment): AdmissionResult = chain.admit(payment)
+    suspend fun admit(payment: DomesticPayment): AdmissionResult = chain.admit(Evaluation(payment) {})
+
+    /**
+     * As [admit], and [onFreshFraudScore] is told the fraud score when this evaluation obtained one
+     * from fraud-service (not when it reused the payment's own, and never an adapter's stand-in).
+     * The caller keeps it on the payment; the chain itself writes nothing.
+     */
+    suspend fun admit(payment: DomesticPayment, onFreshFraudScore: (RecordedFraudScore) -> Unit): AdmissionResult =
+        chain.admit(Evaluation(payment, onFreshFraudScore))
 
     /**
      * The standing step alone, for the re-run a release makes before it lets a payment go.
@@ -166,7 +179,26 @@ class DomesticAdmissionChain(
         },
     )
 
-    private suspend fun fraud(payment: DomesticPayment, remaining: Duration): StepOutcome {
+    /**
+     * The fraud score of [payment]: the one this chain already obtained for it, or a fresh one.
+     *
+     * A payment is evaluated more than once (a control that could not answer is asked again, an
+     * activity attempt is retried), and fraud-service has no way to recognise a repeat: the score
+     * request carries no payment id, every call stores a score, and its hold rule counts stored
+     * REVIEW scores per account. So the first real score is kept on the payment (by the caller,
+     * told through the evaluation) and every later evaluation reuses it. A stand-in for an
+     * unreachable fraud-service is never kept.
+     */
+    private suspend fun fraudScore(evaluation: Evaluation, remaining: Duration): FraudScoreOutcome? {
+        val payment = evaluation.payment
+        payment.admissionFraudScore?.let { kept ->
+            return FraudScoreOutcome(
+                verdict = runCatching { FraudVerdict.valueOf(kept.verdict) }.getOrDefault(FraudVerdict.UNKNOWN),
+                score = kept.score,
+                ruleVersion = kept.ruleVersion,
+                reasons = emptyList(),
+            )
+        }
         val outcome = withTimeoutOrNull(remaining.toMillis()) {
             fraudScoringPort.score(
                 FraudScoreCommand(
@@ -177,9 +209,22 @@ class DomesticAdmissionChain(
                     counterpartyId = null,
                 ),
             )
-        } ?: return StepOutcome.Unavailable(UnavailableCause.BUDGET_EXCEEDED)
+        } ?: return null
+        // Counted where the score is obtained, so one payment is one decision in this metric
+        // however many times it is evaluated.
+        fraudMetrics.recordDecision(FraudGatePolicy.wouldDo(outcome), enforced = fraudEnforcementEnabled)
+        if (!outcome.synthetic) {
+            evaluation.onFreshFraudScore(
+                RecordedFraudScore(outcome.verdict.name, outcome.score, outcome.ruleVersion.take(RULE_VERSION_MAX)),
+            )
+        }
+        return outcome
+    }
+
+    private suspend fun fraud(evaluation: Evaluation, remaining: Duration): StepOutcome {
+        val outcome = fraudScore(evaluation, remaining)
+            ?: return StepOutcome.Unavailable(UnavailableCause.BUDGET_EXCEEDED)
         val wouldDo = FraudGatePolicy.wouldDo(outcome)
-        fraudMetrics.recordDecision(wouldDo, enforced = fraudEnforcementEnabled)
         if (!fraudEnforcementEnabled) return StepOutcome.NotApplicable(FRAUD_ENFORCEMENT_OFF)
         if (outcome.synthetic) {
             // The adapter's stand-in for an unreachable fraud-service: no verdict at all.
@@ -212,6 +257,8 @@ class DomesticAdmissionChain(
     }
 
     companion object {
+        private const val RULE_VERSION_MAX = 128
+
         /** Evidence key under which the standing step records the account's owning party. */
         const val EVIDENCE_DEBTOR_PARTY = "debtor_party_id"
 

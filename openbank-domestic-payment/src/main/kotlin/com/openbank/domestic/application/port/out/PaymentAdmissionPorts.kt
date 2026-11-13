@@ -5,10 +5,12 @@
 package com.openbank.domestic.application.port.out
 
 import com.openbank.domestic.domain.model.DomesticPayment
+import com.openbank.domestic.domain.model.RecordedFraudScore
 import com.openbank.libs.fincrime.admission.AdmissionDecision
 import com.openbank.libs.fincrime.admission.AdmissionStep
 import com.openbank.libs.fincrime.admission.UnavailableCause
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import java.time.Instant
 import java.util.UUID
 
 /** What account-service says about the debtor account, or that it could not be asked (ADR-0374 D4). */
@@ -38,10 +40,18 @@ interface PaymentAdmissionWrites {
     suspend fun transition(payment: DomesticPayment, events: List<OutboxMessage>): DomesticPayment
 
     /**
-     * Add [event] for a payment that is still HELD, without changing it. Returns false, and writes
-     * nothing, when the payment has left HELD in the meantime.
+     * Request the case of a payment that is still HELD: write [event] and mark the case as
+     * requested at [requestedAt], in one transaction. A payment whose case was already requested
+     * is left as it is, so a repeat writes no second event. Returns false, and writes nothing,
+     * when the payment has left HELD in the meantime.
      */
-    suspend fun appendWhileHeld(paymentId: UUID, event: OutboxMessage): Boolean
+    suspend fun requestCaseWhileHeld(paymentId: UUID, event: OutboxMessage, requestedAt: Instant): Boolean
+
+    /**
+     * Keep the first fraud score obtained for the payment. A payment that already has one keeps
+     * it; the score does not change the payment's revision or its status.
+     */
+    suspend fun rememberFraudScore(paymentId: UUID, score: RecordedFraudScore)
 }
 
 /** Admission outcomes as enums, one series per value, never a pass/fail boolean. */

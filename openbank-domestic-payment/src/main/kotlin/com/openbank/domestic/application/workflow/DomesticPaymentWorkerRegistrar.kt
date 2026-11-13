@@ -38,8 +38,6 @@ class DomesticPaymentWorkerRegistrar(
             log.info("Temporal domestic worker registration disabled (openbank.domestic.worker.enabled=false)")
             return
         }
-        // Before the worker exists, so no run can read the switch ahead of its configured value.
-        PaymentAdmissionSwitch.enabled = admissionEnabled
         log.infof("Registering Temporal worker on task queue '%s' (admission chain %s)", taskQueue, admissionEnabled)
         val factory = WorkerFactory.newInstance(workflowClient)
         val worker = factory.newWorker(taskQueue)

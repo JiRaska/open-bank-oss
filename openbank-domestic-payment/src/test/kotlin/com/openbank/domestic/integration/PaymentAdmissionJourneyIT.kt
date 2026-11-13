@@ -22,9 +22,10 @@ import com.openbank.domestic.application.port.out.SettlementPort
 import com.openbank.domestic.application.workflow.DomesticPaymentActivitiesImpl
 import com.openbank.domestic.application.workflow.DomesticPaymentWorkflowImpl
 import com.openbank.domestic.application.workflow.PaymentAdmissionActivitiesImpl
-import com.openbank.domestic.application.workflow.PaymentAdmissionSwitch
 import com.openbank.domestic.application.workflow.PaymentHoldPolicy
+import com.openbank.domestic.application.workflow.domesticPaymentWorkflowId
 import com.openbank.domestic.domain.model.DomesticPayment
+import com.openbank.domestic.infrastructure.scheduler.ScreeningRedriveScheduler
 import com.openbank.libs.fincrime.FraudVerdict
 import com.openbank.libs.fincrime.ScreeningMatchStatus
 import com.openbank.libs.fincrime.ScreeningResult
@@ -37,9 +38,15 @@ import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
+import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured
+import io.smallrye.mutiny.coroutines.asUni
+import io.temporal.api.common.v1.WorkflowExecution
+import io.temporal.api.enums.v1.WorkflowExecutionStatus
+import io.temporal.api.workflowservice.v1.DescribeWorkflowExecutionRequest
 import io.temporal.client.WorkflowClient
 import io.temporal.testing.TestWorkflowEnvironment
+import io.vertx.core.Vertx
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
 import jakarta.enterprise.context.ApplicationScoped
@@ -47,6 +54,9 @@ import jakarta.enterprise.inject.Alternative
 import jakarta.enterprise.inject.Produces
 import jakarta.inject.Inject
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.async
 import org.apache.kafka.clients.producer.KafkaProducer
 import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.clients.producer.ProducerRecord
@@ -54,6 +64,7 @@ import org.apache.kafka.common.serialization.StringSerializer
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -61,6 +72,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -130,6 +142,9 @@ class PaymentAdmissionJourneyIT {
 
     @Inject
     lateinit var mapper: ObjectMapper
+
+    @Inject
+    lateinit var redrive: ScreeningRedriveScheduler
 
     @Inject
     @ConfigProperty(name = "kafka.bootstrap.servers")
@@ -344,6 +359,201 @@ class PaymentAdmissionJourneyIT {
     }
 
     @Test
+    fun `a release whose standing re-run gets no answer is retried, and goes through when standing answers`() {
+        val payment = create(creditorName = "REVIEW Shipping")
+        awaitStatus(payment, "HELD")
+
+        world.standingDown.set(true)
+        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment)) }
+        await("the release to have asked for standing and got no answer") { world.standingUnanswered.get() >= 1 }
+        runtime.advance(Duration.ofMinutes(20))
+
+        // An outage is not a refusal: the payment is neither sent nor rejected, it is still held,
+        // and the release has been tried again.
+        assertThat(world.standingUnanswered.get()).isGreaterThanOrEqualTo(2)
+        assertThat(status(payment)).isEqualTo("HELD")
+        assertThat(
+            query("SELECT coalesce(reject_reason, 'none') FROM domestic_payments WHERE payment_id = ?", payment) {
+                it.getString(1)
+            },
+        ).containsExactly("none")
+        assertThat(world.submissions(payment)).isZero()
+
+        world.standingDown.set(false)
+        runtime.advance(Duration.ofMinutes(6))
+        awaitStatus(payment, "SETTLED")
+        assertThat(world.submissions(payment)).isEqualTo(1)
+    }
+
+    @Test
+    fun `a held payment whose run died gets a new run, keeps its one case request and is still released by its case`() {
+        val payment = create(creditorName = "REVIEW Freight")
+        awaitStatus(payment, "HELD")
+        assertThat(heldEvents(payment)).hasSize(1)
+        val asked = world.screenings.get()
+
+        // The run is gone: nothing waits for the case, nothing would expire the hold.
+        runtime.terminate(payment)
+        kafkaProducer().use { it.decide(payment, "BLOCKED", "attacker-chosen-key") }
+
+        sweep()
+        // A second tick finds the run it started and starts no other.
+        sweep()
+
+        assertThat(runtime.isRunning(payment)).describedAs("the reconciliation started a run").isTrue()
+        assertThat(status(payment)).isEqualTo("HELD")
+        // The new run did not evaluate the payment again: its case was requested, the hold is the
+        // case's to decide. No control was asked, and no second case request was written.
+        runtime.advance(Duration.ofMinutes(2))
+        assertThat(world.screenings.get()).isEqualTo(asked)
+        assertThat(heldEvents(payment)).hasSize(1)
+
+        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment)) }
+        awaitStatus(payment, "SETTLED")
+        assertThat(world.submissions(payment)).isEqualTo(1)
+    }
+
+    @Test
+    fun `a decision that arrives after the hold's run died is not lost - it starts a run and releases the payment`() {
+        val payment = create(creditorName = "REVIEW Haulage")
+        awaitStatus(payment, "HELD")
+        runtime.terminate(payment)
+
+        // No sweep has run: the decision itself finds the payment HELD with no run.
+        kafkaProducer().use { it.decide(payment, "CLEARED", PaymentHoldPolicy.caseKey(payment)) }
+
+        awaitStatus(payment, "SETTLED")
+        assertThat(world.submissions(payment)).isEqualTo(1)
+        assertThat(heldEvents(payment)).hasSize(1)
+    }
+
+    @Test
+    fun `a recovered hold expires 48 hours after the payment was first held, not after its recovery`() {
+        val payment = create(creditorName = "REVIEW Cargo")
+        awaitStatus(payment, "HELD")
+        runtime.terminate(payment)
+        // Held 47 hours ago, as the row says.
+        update("UPDATE domestic_payments SET held_at = held_at - interval '47 hours' WHERE payment_id = ?", payment)
+
+        sweep()
+        runtime.advance(Duration.ofMinutes(30))
+        assertThat(status(payment)).isEqualTo("HELD")
+        runtime.advance(Duration.ofMinutes(45))
+
+        awaitStatus(payment, "REJECTED")
+        assertThat(rejectReason(payment)).isEqualTo("AML_HOLD")
+        assertThat(world.submissions(payment)).isZero()
+    }
+
+    @Test
+    fun `with the chain on a RECEIVED payment nothing acts on can be rejected by an operator, never validated`() {
+        // A RECEIVED payment whose run has closed: the state a run that failed or gave up leaves
+        // behind. Reached by letting a payment run to its end and putting the row back, so that no
+        // run is ended by force with an activity in flight (that locks the test server's clock).
+        val payment = create()
+        awaitStatus(payment, "SETTLED")
+        update("UPDATE domestic_payments SET status = 'RECEIVED' WHERE payment_id = ?", payment)
+        val reject = """{"targetStatus":"REJECTED","rejectReason":"TECHNICAL_ERROR"}"""
+        fun patch(body: String) = RestAssured.given().contentType("application/json").body(body)
+            .patch("/api/v1/domestic-payments/$payment/status").then()
+
+        // No run, but the re-drive has attempts left and will start one: admission still owns it.
+        patch(reject).statusCode(409)
+        update("UPDATE domestic_payments SET redrive_attempts = 5 WHERE payment_id = ?", payment)
+        // Now nothing will ever pick it up. It may be refused, and only refused.
+        patch("""{"targetStatus":"VALIDATED"}""").statusCode(409)
+        assertThat(status(payment)).isEqualTo("RECEIVED")
+        patch(reject).statusCode(200)
+
+        assertThat(status(payment)).isEqualTo("REJECTED")
+    }
+
+    @Test
+    fun `a payment is scored for fraud once however many times it is evaluated`() {
+        val account = UUID.randomUUID()
+        world.screeningDown.set(true)
+        val payment = create(debtorAccountId = account)
+        awaitStatus(payment, "HELD")
+        repeat(2) { runtime.advance(PaymentHoldPolicy.REEVALUATION_INTERVAL.plusMinutes(1)) }
+        world.screeningDown.set(false)
+        runtime.advance(PaymentHoldPolicy.REEVALUATION_INTERVAL.plusMinutes(1))
+        awaitStatus(payment, "SETTLED")
+
+        // Evaluated at least four times; fraud-service heard of it once and the row kept the answer.
+        assertThat(world.scoreCalls[account]?.get()).isEqualTo(1)
+        assertThat(
+            query("SELECT admission_fraud_verdict FROM domestic_payments WHERE payment_id = ?", payment) {
+                it.getString(1)
+            },
+        ).containsExactly("ALLOW")
+    }
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR", "ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "sub", value = OPERATOR),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `the customer edge is not told which control rejected a payment, on the payment or in the list`() {
+        val account = UUID.randomUUID()
+        world.frozen += account
+        val payment = create(account, idempotencyKey = "admission-edge-${UUID.randomUUID()}", customerScope = SCOPE)
+        awaitStatus(payment, "REJECTED")
+        assertThat(
+            rejectReason(payment),
+        ).describedAs("the row keeps the real reason").isEqualTo("DEBTOR_ACCOUNT_BLOCKED")
+
+        val one = RestAssured.given().get("/api/v1/domestic-payments/$payment").then().statusCode(200)
+            .body("status", equalTo("REJECTED"))
+            .body("rejectReason", nullValue())
+            .body("rejectDetail", nullValue())
+            .extract().asString()
+        val listed = RestAssured.given().queryParam("debtorAccountId", account).get("/api/v1/domestic-payments")
+            .then().statusCode(200).extract().asString()
+
+        assertThat(one).doesNotContain("BLOCKED", "AML", "SANCTIONS", "FRAUD")
+        assertThat(listed).contains(payment.toString()).doesNotContain("BLOCKED", "AML", "SANCTIONS", "FRAUD")
+    }
+
+    @Test
+    fun `an operator reads the real reason a payment was rejected for`() {
+        val account = UUID.randomUUID()
+        world.frozen += account
+        val payment = create(account)
+        awaitStatus(payment, "REJECTED")
+
+        RestAssured.given().get("/api/v1/domestic-payments/$payment")
+            .then().statusCode(200).body("rejectReason", equalTo("DEBTOR_ACCOUNT_BLOCKED"))
+    }
+
+    /** One tick of the re-drive and hold-reconciliation sweep, with no minimum age. */
+    private fun sweep() {
+        val minAge = redrive.minAgeMinutes
+        redrive.minAgeMinutes = -1
+        try {
+            VertxContextSupport.subscribeAndAwait {
+                // As the scheduler runs it: every resumption returns to the Vert.x context, also the
+                // one after the blocking Temporal start, or the next repository call has no session.
+                val context = Vertx.currentContext()
+                val onContext = Executor { task -> context.runOnContext { task.run() } }.asCoroutineDispatcher()
+                CoroutineScope(onContext).async { redrive.sweep() }.asUni()
+            }
+        } finally {
+            redrive.minAgeMinutes = minAge
+        }
+    }
+
+    private fun update(sql: String, id: UUID) = dataSource.connection.use { connection ->
+        connection.prepareStatement(sql).use { statement ->
+            statement.setObject(1, id)
+            assertThat(statement.executeUpdate()).isEqualTo(1)
+        }
+    }
+
+    @Test
     fun `an operator reads a held payment as held`() {
         val payment = create(creditorName = "REVIEW Logistics")
         awaitStatus(payment, "HELD")
@@ -447,13 +657,18 @@ class PaymentAdmissionJourneyIT {
         paymentId,
     ) { Writer(it.getString(1), it.getString(2), it.getString(3)) }
 
-    private fun awaitStatus(paymentId: UUID, expected: String) =
-        await("payment $paymentId to be $expected (is ${status(paymentId)})") { status(paymentId) == expected }
+    // On a timeout the message carries what the run last did, which is what tells a decision that
+    // never arrived from an activity that never completed.
+    private fun awaitStatus(paymentId: UUID, expected: String) = await(
+        { "payment $paymentId to be $expected (is ${status(paymentId)}; run: ${runtime.lastEvents(paymentId)})" },
+    ) { status(paymentId) == expected }
 
-    private fun await(description: String, ready: () -> Boolean) {
+    private fun await(description: String, ready: () -> Boolean) = await({ description }, ready)
+
+    private fun await(description: () -> String, ready: () -> Boolean) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS)
         while (!ready()) {
-            check(System.nanoTime() < deadline) { "Timed out waiting for $description" }
+            check(System.nanoTime() < deadline) { "Timed out waiting for ${description()}" }
             Thread.sleep(50)
         }
     }
@@ -506,6 +721,9 @@ class AdmissionWorld {
     val standingWaiters = AtomicInteger()
     val screened: MutableSet<String> = ConcurrentHashMap.newKeySet()
     val scored: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
+    val scoreCalls = ConcurrentHashMap<UUID, AtomicInteger>()
+    val screenings = AtomicInteger()
+    val standingUnanswered = AtomicInteger()
     private val submitted = ConcurrentHashMap<UUID, AtomicInteger>()
 
     fun submitted(paymentId: UUID) {
@@ -520,6 +738,7 @@ class AdmissionWorld {
         screeningDown.set(false)
         standingGate.getAndSet(null)?.complete(Unit)
         standingWaiters.set(0)
+        standingUnanswered.set(0)
     }
 }
 
@@ -535,7 +754,10 @@ class FakeStanding(private val world: AdmissionWorld) : AccountStandingPort {
     }
 
     private fun answer(accountId: UUID): AccountStandingLookup = when {
-        world.standingDown.get() -> AccountStandingLookup.Unavailable(UnavailableCause.DEPENDENCY_DOWN)
+        world.standingDown.get() -> {
+            world.standingUnanswered.incrementAndGet()
+            AccountStandingLookup.Unavailable(UnavailableCause.DEPENDENCY_DOWN)
+        }
         accountId in world.frozen -> AccountStandingLookup.Known(
             world.owner,
             mayDebit = false,
@@ -551,6 +773,7 @@ class FakeScreening(private val world: AdmissionWorld) : SanctionsScreeningPort 
     override suspend fun screen(name: String, role: ScreeningRole, idempotencyKey: String): ScreeningResult {
         if (world.screeningDown.get()) throw ScreeningUnavailableException(IllegalStateException("sanctions is down"))
         world.screened += idempotencyKey
+        world.screenings.incrementAndGet()
         val status = if (name.startsWith("REVIEW")) ScreeningMatchStatus.POTENTIAL_HIT else ScreeningMatchStatus.CLEAR
         return ScreeningResult(name, role, status, if (status == ScreeningMatchStatus.CLEAR) 0.0 else 0.8, null)
     }
@@ -560,7 +783,10 @@ class FakeScreening(private val world: AdmissionWorld) : SanctionsScreeningPort 
 @ApplicationScoped
 class FakeFraud(private val world: AdmissionWorld) : FraudScoringPort {
     override suspend fun score(command: FraudScoreCommand): FraudScoreOutcome {
-        command.accountId?.let { world.scored += it }
+        command.accountId?.let {
+            world.scored += it
+            world.scoreCalls.computeIfAbsent(it) { AtomicInteger() }.incrementAndGet()
+        }
         val verdict = if (command.amount.compareTo(REVIEW_AMOUNT) == 0) FraudVerdict.REVIEW else FraudVerdict.ALLOW
         return FraudScoreOutcome(verdict, 10, "rules-it", emptyList())
     }
@@ -603,7 +829,6 @@ class AdmissionJourneyRuntime(
 
     @PostConstruct
     fun start() {
-        PaymentAdmissionSwitch.enabled = true
         environment = TestWorkflowEnvironment.newInstance()
         val worker = environment.newWorker("openbank-domestic-payments")
         worker.registerWorkflowImplementationTypes(DomesticPaymentWorkflowImpl::class.java)
@@ -617,9 +842,40 @@ class AdmissionJourneyRuntime(
 
     fun advance(duration: Duration) = environment.sleep(duration)
 
+    /**
+     * Ends the payment's run the way a failed or terminated run ends: nothing left to signal.
+     *
+     * Only once the run is parked on its timer. The row turns HELD when the admission activity
+     * commits, which is before that activity completes; ending the run with the attempt still in
+     * flight leaves the test server's clock locked, and every later `advance` then waits for ever.
+     */
+    fun terminate(paymentId: UUID) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+        while (!lastEvents(paymentId).endsWith("TIMER_STARTED")) {
+            check(System.nanoTime() < deadline) { "Run of $paymentId never parked: ${lastEvents(paymentId)}" }
+            Thread.sleep(20)
+        }
+        environment.workflowClient.newUntypedWorkflowStub(domesticPaymentWorkflowId(paymentId)).terminate("test")
+    }
+
+    /** The last history events of the payment's current run, for a failure message. */
+    fun lastEvents(paymentId: UUID): String = runCatching {
+        environment.workflowClient.fetchHistory(domesticPaymentWorkflowId(paymentId)).events
+            .takeLast(8).joinToString(" > ") { it.eventType.name.removePrefix("EVENT_TYPE_") }
+    }.getOrElse { "unreadable (${it.message})" }
+
+    fun isRunning(paymentId: UUID): Boolean = environment.workflowClient.workflowServiceStubs.blockingStub()
+        .describeWorkflowExecution(
+            DescribeWorkflowExecutionRequest.newBuilder()
+                .setNamespace(environment.namespace)
+                .setExecution(
+                    WorkflowExecution.newBuilder().setWorkflowId(domesticPaymentWorkflowId(paymentId)).build(),
+                )
+                .build(),
+        ).workflowExecutionInfo.status == WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_RUNNING
+
     @PreDestroy
     fun stop() {
-        PaymentAdmissionSwitch.enabled = false
         if (::environment.isInitialized) environment.close()
     }
 }

@@ -101,6 +101,23 @@ interface DomesticPaymentRepository {
     /** Count one re-drive against [paymentId], before it is attempted. */
     suspend fun recordRedriveAttempt(paymentId: UUID)
 
+    /**
+     * HELD payments to check for a live workflow run (ADR-0374): held before [heldBefore], the
+     * least recently checked first. The check is counted on the same per-row counter as a re-drive,
+     * which a HELD payment no longer needs for anything else, so every held payment gets its turn
+     * however many are held.
+     */
+    suspend fun findHeldToReconcile(heldBefore: Instant, limit: Int): List<HeldPaymentRef> = emptyList()
+
+    /** How many re-drives of [paymentId] were attempted; 0 for an unknown payment. */
+    suspend fun redriveAttempts(paymentId: UUID): Int = 0
+
+    /** RECEIVED payments whose re-drive budget of [maxAttempts] is spent: nothing automatic moves them. */
+    suspend fun countRedriveExhausted(maxAttempts: Int): Long = 0
+
+    /** When the longest-held payment still HELD was held, or null when none is. */
+    suspend fun oldestHeldAt(): Instant? = null
+
     /** How many payments currently sit in [status]. */
     suspend fun countByStatus(status: DomesticPaymentStatus): Long
 
@@ -116,6 +133,9 @@ interface DomesticPaymentRepository {
 
 /** Outbound port for draining the transactional outbox (read pending, mark sent/failed). */
 interface DomesticPaymentOutboxRepository : OutboxRepository
+
+/** A HELD payment and the moment its hold began. */
+data class HeldPaymentRef(val paymentId: UUID, val heldAt: Instant)
 
 /**
  * Outbound port for domestic-payment domain events. The `*Payload` methods serialize the event body

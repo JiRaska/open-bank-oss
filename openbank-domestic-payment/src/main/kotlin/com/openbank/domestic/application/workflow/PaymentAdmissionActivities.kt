@@ -5,9 +5,12 @@
 package com.openbank.domestic.application.workflow
 
 import io.temporal.activity.ActivityInterface
+import io.temporal.client.WorkflowOptions
+import io.temporal.workflow.Workflow
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 
 /** What the workflow does after one admission (ADR-0374). */
@@ -27,16 +30,59 @@ enum class AdmissionAction {
 }
 
 /**
- * Whether the chain is switched on for this rail, as the WORKFLOW reads it.
+ * How a run is told, at its START, whether it goes through admission (ADR-0374).
  *
- * Workflow code has no injection, so the worker registrar copies
- * `openbank.domestic.admission.enabled` here before it registers the worker, and the workflow
- * records the value it saw as a side effect. Off unless something set it, which is the safe side:
- * a run then follows the path it had before the chain existed.
+ * The decision belongs to whoever starts the run and travels in the run's memo. It is not read from
+ * configuration by workflow code and not recorded as a side effect, for two reasons. The memo is
+ * part of the start event, so every replay of the run sees the same value. And a run started with
+ * the chain off carries NO memo and writes nothing extra to its history, so its history is exactly
+ * what the implementation from before the chain produces and such a worker can serve it.
+ *
+ * What the memo does not do: a worker from before this change does not read it. If one takes a task
+ * of a run started with the chain ON it follows the path it knows (screening and the fraud gate,
+ * no standing check, no hold) or, for a run already past its first admission, fails the task as
+ * non-deterministic until a current worker takes it. So the chain is switched on only once every
+ * worker runs this code, and switched off, and its runs drained, before an image from before it is
+ * rolled back to.
  */
-object PaymentAdmissionSwitch {
-    @Volatile
-    var enabled: Boolean = false
+object AdmissionRun {
+    /** Memo key: present and true on a run that goes through admission, absent otherwise. */
+    const val CHAIN_MEMO = "admissionChain"
+
+    /** Memo key: epoch millis of the first hold, on a run started to recover a HELD payment. */
+    const val HELD_AT_MEMO = "admissionHeldAtEpochMillis"
+
+    /**
+     * Start options of a run for [paymentId]. [chainOn] is the rail's switch as the starter read it;
+     * a payment that is already HELD ([heldAt] set) goes through admission whatever the switch says,
+     * because turning the chain off must not strand the holds it placed.
+     */
+    fun options(
+        taskQueue: String,
+        paymentId: UUID,
+        chainOn: Boolean,
+        heldAt: Instant? = null,
+    ): WorkflowOptions.Builder {
+        val builder = WorkflowOptions.newBuilder()
+            .setTaskQueue(taskQueue)
+            .setWorkflowId(domesticPaymentWorkflowId(paymentId))
+        // No memo at all for a chain-off run: its start event stays what it was before the chain.
+        if (chainOn || heldAt != null) {
+            builder.setMemo(
+                buildMap<String, Any> {
+                    put(CHAIN_MEMO, true)
+                    if (heldAt != null) put(HELD_AT_MEMO, heldAt.toEpochMilli())
+                },
+            )
+        }
+        return builder
+    }
+
+    /** For workflow code only. */
+    fun chainOn(): Boolean = Workflow.getMemo(CHAIN_MEMO, Boolean::class.javaObjectType) == true
+
+    /** For workflow code only. */
+    fun heldAtMillis(): Long? = (Workflow.getMemo(HELD_AT_MEMO, Number::class.java) as? Number)?.toLong()
 }
 
 /**
@@ -48,6 +94,17 @@ object PaymentAdmissionSwitch {
 class PaymentAdmissionConfig(
     @ConfigProperty(name = "openbank.domestic.admission.enabled", defaultValue = "false")
     val enabled: Boolean,
+)
+
+/**
+ * The re-drive budget as injected configuration, for readers other than the sweep itself (the
+ * status endpoint, the gauge of payments whose budget is spent). A bean of its own for the same
+ * reason as [PaymentAdmissionConfig].
+ */
+@ApplicationScoped
+class ScreeningRedriveConfig(
+    @ConfigProperty(name = "openbank.domestic.screening-redrive.max-attempts", defaultValue = "5")
+    val maxAttempts: Int,
 )
 
 /** Why a held payment is being rejected without a release. */

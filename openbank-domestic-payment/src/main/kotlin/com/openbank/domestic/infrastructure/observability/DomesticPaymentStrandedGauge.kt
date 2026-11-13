@@ -4,6 +4,7 @@
 package com.openbank.domestic.infrastructure.observability
 
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
+import com.openbank.domestic.application.workflow.ScreeningRedriveConfig
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
@@ -86,10 +87,28 @@ class DomesticPaymentStrandedGauge(
     private val oldestAgeSeconds: Map<DomesticPaymentStatus, AtomicLong> =
         NON_TERMINAL.associateWith { AtomicLong(0) }
     private var liveness: WorkflowLivenessRecorder? = null
+    private val heldOldestAgeSeconds = AtomicLong(0)
+    private val redriveExhausted = AtomicLong(0)
+
+    /** Field-injected so no constructor, and no test that calls one, changes shape. */
+    @Inject
+    var redrive: ScreeningRedriveConfig = ScreeningRedriveConfig(maxAttempts = DEFAULT_REDRIVE_MAX_ATTEMPTS)
 
     @PostConstruct
     fun register() {
         val r = registry ?: return
+        // ADR-0374. Age of the longest-running HOLD, counted from the moment the payment was held,
+        // not from its creation: the hold's expiry runs from there, and a payment may be held some
+        // time after it was created (a run started later, a re-drive). 0 when nothing is held.
+        Gauge.builder(HELD_OLDEST_AGE_METRIC, heldOldestAgeSeconds) { it.get().toDouble() }
+            .tag("service", SERVICE)
+            .strongReference(true)
+            .register(r)
+        // RECEIVED payments whose re-drive budget is spent: nothing automatic moves them any more.
+        Gauge.builder(REDRIVE_EXHAUSTED_METRIC, redriveExhausted) { it.get().toDouble() }
+            .tag("service", SERVICE)
+            .strongReference(true)
+            .register(r)
         NON_TERMINAL.forEach { status ->
             gauge(r, "openbank.domestic.payments.non_terminal", status, counts.getValue(status))
             gauge(
@@ -128,10 +147,17 @@ class DomesticPaymentStrandedGauge(
                 oldest?.let { maxOf(0L, Duration.between(it, now).seconds) } ?: 0L,
             )
         }
+        heldOldestAgeSeconds.set(
+            paymentRepository.oldestHeldAt()?.let { maxOf(0L, Duration.between(it, now).seconds) } ?: 0L,
+        )
+        redriveExhausted.set(paymentRepository.countRedriveExhausted(redrive.maxAttempts))
         liveness?.recordSuccess()
     }
 
     companion object {
+        const val HELD_OLDEST_AGE_METRIC = "openbank.domestic.payments.held.oldest.age.seconds"
+        const val REDRIVE_EXHAUSTED_METRIC = "openbank.domestic.payments.redrive.exhausted"
+        private const val DEFAULT_REDRIVE_MAX_ATTEMPTS = 5
         private const val SERVICE = "domestic"
         private const val WORKFLOW_NAME = "domestic-payment-stranded-gauge"
         private const val REFRESH_INTERVAL_SECONDS = 30L

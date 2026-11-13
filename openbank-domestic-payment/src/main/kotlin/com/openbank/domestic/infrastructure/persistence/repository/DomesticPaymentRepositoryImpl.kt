@@ -7,12 +7,14 @@ package com.openbank.domestic.infrastructure.persistence.repository
 import com.openbank.domestic.application.port.out.DelegatedPaymentSaveOutcome
 import com.openbank.domestic.application.port.out.DomesticBookingWrites
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
+import com.openbank.domestic.application.port.out.HeldPaymentRef
 import com.openbank.domestic.application.port.out.PaymentAdmissionWrites
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DelegatedSpendReservationSnapshot
 import com.openbank.domestic.domain.model.DelegatedSpendReservationState
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
+import com.openbank.domestic.domain.model.RecordedFraudScore
 import com.openbank.domestic.infrastructure.persistence.entity.DelegatedSpendBindingEntity
 import com.openbank.domestic.infrastructure.persistence.entity.DomesticPaymentEntity
 import com.openbank.domestic.infrastructure.persistence.mapper.toDomain
@@ -184,6 +186,27 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
         }.awaitSuspending()
     }
 
+    override suspend fun findHeldToReconcile(heldBefore: Instant, limit: Int): List<HeldPaymentRef> =
+        Panache.withSession {
+            find(
+                "status = ?1 and updatedAt < ?2 order by redriveAttempts asc, updatedAt asc",
+                DomesticPaymentStatus.HELD.name,
+                heldBefore,
+            ).range(0, limit - 1).list()
+        }.awaitSuspending().map { HeldPaymentRef(it.paymentId, it.heldAt ?: it.updatedAt) }
+
+    override suspend fun redriveAttempts(paymentId: UUID): Int = Panache.withSession {
+        find("paymentId", paymentId).firstResult()
+    }.awaitSuspending()?.redriveAttempts ?: 0
+
+    override suspend fun countRedriveExhausted(maxAttempts: Int): Long = Panache.withSession {
+        count("status = ?1 and redriveAttempts >= ?2", DomesticPaymentStatus.RECEIVED.name, maxAttempts)
+    }.awaitSuspending()
+
+    override suspend fun oldestHeldAt(): Instant? = Panache.withSession {
+        find("status = ?1 order by heldAt asc nulls last, updatedAt asc", DomesticPaymentStatus.HELD.name).firstResult()
+    }.awaitSuspending()?.let { it.heldAt ?: it.updatedAt }
+
     override suspend fun update(payment: DomesticPayment, outboxMessage: OutboxMessage): DomesticPayment =
         writeLifecycle(payment, listOf(outboxMessage))
 
@@ -192,23 +215,43 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
 
     // Locks the row so the check and the insert are one decision: a concurrent release or reject
     // either commits first (and this writes nothing) or waits for this event to be written.
-    override suspend fun appendWhileHeld(paymentId: UUID, event: OutboxMessage): Boolean = Panache.withTransaction {
-        Panache.getSession().flatMap { session ->
-            session.createQuery(
-                "FROM DomesticPaymentEntity WHERE paymentId = :paymentId",
-                DomesticPaymentEntity::class.java,
-            ).setParameter("paymentId", paymentId)
-                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
-                .singleResultOrNull
-                .flatMap { entity ->
-                    if (entity?.status == DomesticPaymentStatus.HELD.name) {
-                        outboxRepository.persistWithinCurrentTransaction(event).replaceWith(true)
-                    } else {
-                        Uni.createFrom().item(false)
+    override suspend fun requestCaseWhileHeld(paymentId: UUID, event: OutboxMessage, requestedAt: Instant): Boolean =
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.createQuery(
+                    "FROM DomesticPaymentEntity WHERE paymentId = :paymentId",
+                    DomesticPaymentEntity::class.java,
+                ).setParameter("paymentId", paymentId)
+                    .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                    .singleResultOrNull
+                    .flatMap { entity ->
+                        when {
+                            entity?.status != DomesticPaymentStatus.HELD.name -> Uni.createFrom().item(false)
+                            // Already requested: the hold has its case, a second event would say nothing new.
+                            entity.holdCaseRequestedAt != null -> Uni.createFrom().item(true)
+                            else -> {
+                                entity.holdCaseRequestedAt = requestedAt
+                                outboxRepository.persistWithinCurrentTransaction(event).replaceWith(true)
+                            }
+                        }
                     }
-                }
-        }
-    }.awaitSuspending()
+            }
+        }.awaitSuspending()
+
+    // A bulk update guarded by "is null": the first score wins, and neither the revision nor any
+    // other column of the aggregate is touched, so it cannot race a lifecycle write.
+    override suspend fun rememberFraudScore(paymentId: UUID, score: RecordedFraudScore) {
+        Panache.withTransaction {
+            update(
+                "admissionFraudVerdict = ?1, admissionFraudScore = ?2, admissionFraudRuleVersion = ?3 " +
+                    "where paymentId = ?4 and admissionFraudVerdict is null",
+                score.verdict,
+                score.score,
+                score.ruleVersion,
+                paymentId,
+            )
+        }.awaitSuspending()
+    }
 
     override suspend fun acceptForBooking(payment: DomesticPayment, outbox: OutboxMessage): DomesticPayment =
         writeLifecycle(payment, listOf(outbox), acceptedBooking = true)
@@ -246,6 +289,10 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
                     entity.settledAt = payment.settledAt
                     entity.updatedAt = payment.updatedAt
                     entity.aggregateRevision = payment.aggregateRevision
+                    // Hold facts only ever go from unset to set; a writer holding an older read of
+                    // the payment must not clear what another transaction recorded meanwhile.
+                    entity.heldAt = entity.heldAt ?: payment.heldAt
+                    entity.holdCaseRequestedAt = entity.holdCaseRequestedAt ?: payment.holdCaseRequestedAt
                 }
                 // One after another on the one session; every row is part of this transaction.
                 .flatMap {

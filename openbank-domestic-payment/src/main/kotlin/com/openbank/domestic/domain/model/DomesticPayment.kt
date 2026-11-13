@@ -62,6 +62,32 @@ enum class CustomerFacingPaymentStatus {
     val asRailStatus: DomesticPaymentStatus get() = DomesticPaymentStatus.valueOf(name)
 }
 
+/**
+ * What a customer channel is told about why a payment was rejected.
+ *
+ * A reason is shown only when it is the customer's to act on. A reason that names a control (a
+ * sanctions hit, a fraud decline, an AML hold, a blocked account, which may itself be an AML
+ * block) is not the customer's to learn (ADR-0374 D13), and reads as [NOT_STATED]. Its own type,
+ * with an exhaustive mapping from [DomesticRejectReason], so a reason added there cannot reach a
+ * customer until someone decides here what the customer sees for it.
+ */
+enum class CustomerFacingRejectReason {
+    INVALID_ACCOUNT_NUMBER,
+    INVALID_BANK_CODE,
+    BENEFICIARY_ACCOUNT_CLOSED,
+    INSUFFICIENT_FUNDS,
+    AMOUNT_LIMIT_EXCEEDED,
+    TECHNICAL_ERROR,
+
+    /** Rejected, and the reason is not given. On the wire: no reason and no detail. */
+    NOT_STATED,
+    ;
+
+    /** The same-named rail reason for a response typed as the rail's; null for [NOT_STATED]. */
+    val asRailReason: DomesticRejectReason?
+        get() = if (this == NOT_STATED) null else DomesticRejectReason.valueOf(name)
+}
+
 enum class DomesticPaymentPriority { STANDARD, URGENT, INSTANT }
 
 enum class DomesticTransferScope { OWN_ACCOUNTS, INTERNAL_CLIENT, TECHNICAL_ACCOUNT, EXTERNAL }
@@ -79,7 +105,26 @@ enum class DomesticRejectReason {
     /** The debtor account may not be debited: frozen, closed, dormant or not yet active (ADR-0374 D4). */
     DEBTOR_ACCOUNT_BLOCKED,
     TECHNICAL_ERROR,
+    ;
+
+    /** What a customer channel is shown for this reason; see [CustomerFacingRejectReason]. */
+    val customerFacing: CustomerFacingRejectReason
+        get() = when (this) {
+            INVALID_ACCOUNT_NUMBER -> CustomerFacingRejectReason.INVALID_ACCOUNT_NUMBER
+            INVALID_BANK_CODE -> CustomerFacingRejectReason.INVALID_BANK_CODE
+            BENEFICIARY_ACCOUNT_CLOSED -> CustomerFacingRejectReason.BENEFICIARY_ACCOUNT_CLOSED
+            INSUFFICIENT_FUNDS -> CustomerFacingRejectReason.INSUFFICIENT_FUNDS
+            AMOUNT_LIMIT_EXCEEDED -> CustomerFacingRejectReason.AMOUNT_LIMIT_EXCEEDED
+            TECHNICAL_ERROR -> CustomerFacingRejectReason.TECHNICAL_ERROR
+            AML_HOLD, SANCTIONS_HIT, FRAUD_SUSPECTED, DEBTOR_ACCOUNT_BLOCKED -> CustomerFacingRejectReason.NOT_STATED
+        }
 }
+
+/**
+ * A fraud score as the rail remembers it for one payment: what fraud-service answered, never an
+ * adapter's stand-in for an unreachable one. [verdict] is the verdict's name as it was received.
+ */
+data class RecordedFraudScore(val verdict: String, val score: Int, val ruleVersion: String)
 
 data class DomesticPayment(
     val id: UUID,
@@ -141,6 +186,24 @@ data class DomesticPayment(
     val aggregateRevision: Long = 1,
     /** Absent when no authenticated customer scope was captured at submission. */
     val customerSubmissionScope: String? = null,
+    /**
+     * When the admission chain first HELD this payment (ADR-0374 D3), kept after the hold ends. The
+     * hold's expiry and its age are measured from here. Null for a payment that was never held.
+     */
+    val heldAt: Instant? = null,
+    /**
+     * When the case of the hold was requested, in the transaction that wrote the `PAYMENT_HELD`
+     * event. Null while a hold is only being re-evaluated. Once set the hold is its case's to
+     * decide: no automatic re-evaluation releases it, and a repeated admission answers "held for
+     * review" without asking any control again.
+     */
+    val holdCaseRequestedAt: Instant? = null,
+    /**
+     * The fraud score the admission chain first obtained for this payment, reused by every later
+     * evaluation of it. Fraud-service keeps every score it gives and counts them, so asking again
+     * for the same payment would add to what it holds against the account.
+     */
+    val admissionFraudScore: RecordedFraudScore? = null,
 ) {
     /** ISO 4217 code of [amount], the spelling every outbound contract and the column carry. */
     val currency: String get() = amount.currency.code
@@ -189,7 +252,14 @@ data class DomesticPayment(
             },
             updatedAt = now,
             aggregateRevision = aggregateRevision + 1,
+            heldAt = if (targetStatus == DomesticPaymentStatus.HELD) now else heldAt,
         )
+    }
+
+    /** The same held payment with its case marked as requested at [at]. */
+    fun withHoldCaseRequested(at: Instant): DomesticPayment {
+        require(status == DomesticPaymentStatus.HELD) { "Only a HELD payment has a case to request, not $status" }
+        return copy(holdCaseRequestedAt = holdCaseRequestedAt ?: at)
     }
 
     fun canTransitionTo(targetStatus: DomesticPaymentStatus): Boolean = when (status) {

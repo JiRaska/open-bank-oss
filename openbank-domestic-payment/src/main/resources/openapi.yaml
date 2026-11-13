@@ -242,9 +242,10 @@ paths:
         '409':
           description: >-
             The transition is not allowed from the payment's current status. Always the answer for
-            a HELD payment, and for a RECEIVED payment while the admission chain is switched on:
-            those statuses are left only through payment admission (ADR-0374), never through this
-            endpoint, which starts no workflow.
+            a HELD payment. While the admission chain is switched on it is also the answer for a
+            RECEIVED payment that a re-drive attempt or an open workflow run can still act on, and
+            for any target other than REJECTED or CANCELLED once neither can: those statuses are
+            left through payment admission (ADR-0374), and this endpoint starts no workflow.
           content:
             application/json:
               schema:

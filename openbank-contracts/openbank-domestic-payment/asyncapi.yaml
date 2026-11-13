@@ -169,7 +169,9 @@ components:
           debtorPartyId:
             type: [string, 'null']
             format: uuid
-            description: Absent when account standing could not be read; the case intake resolves it.
+            description: >-
+              Absent when account standing could not be read. The case is opened without a party
+              and the case service establishes it afterwards.
           customerReference: {type: string, maxLength: 128}
           reasons:
             type: array

@@ -150,12 +150,21 @@ class DomesticPaymentResource(
     /**
      * The payment as this caller may see it. The customer edge serves the customer, who is not
      * shown that a payment is held (ADR-0374 D13): it reads a hold as RECEIVED on every read of this
-     * resource, as on the submission lookup. Every other caller reads the real status.
+     * resource, as on the submission lookup. Nor is the customer told which control rejected a
+     * payment: a reason that names one reads as no reason, and its detail is withheld with it
+     * ([com.openbank.domestic.domain.model.CustomerFacingRejectReason]). Every other caller reads
+     * the real status, reason and detail.
      */
     private fun DomesticPayment.forCaller(): DomesticPaymentResponse {
         val response = toResponse()
         return if (ServiceAccountIdentity.isPrincipal(identity, CUSTOMER_EDGE)) {
-            response.copy(status = status.customerFacing.asRailStatus)
+            val shownReason = rejectReason?.customerFacing?.asRailReason
+            response.copy(
+                status = status.customerFacing.asRailStatus,
+                rejectReason = shownReason,
+                // The detail explains the reason; without the reason it would give it away.
+                rejectDetail = rejectDetail.takeIf { shownReason != null },
+            )
         } else {
             response
         }
