@@ -293,7 +293,7 @@ on an invariant nothing distinguishes" pattern, just one layer up from where it 
 ### Elevation of privilege
 
 - **T-E1 — NetworkPolicy present, but the same-namespace rule is the whole fence. [LIVE, partial]**
-  `mcp-service-ingress-allow-list` (`openbank.io/derived: gen-network-policies`) has been live since
+  `mcp-service-ingress-allow-list` (`open-bank.tech/derived: gen-network-policies`) has been live since
   the phase-1 deploy (#2134); it was authored into `components/agent/network-policies.yaml` because
   `gen-network-policies.py` keyed its output by *namespace* and `platform` is shared by agent, ap2,
   copilot and mcp — which is why the first draft of this model recorded it as absent (issue #2207).

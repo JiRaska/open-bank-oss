@@ -103,3 +103,33 @@ The case record is **restricted** (`dataClassification: restricted`). GDPR **rig
 - **Upstream (topic):** kyc-service (triggers), sanctions-service (updates).
 - **Owned schema:** `aml_schema`. **Dependent schemas:** sepa_schema, domestic_schema, swift_schema, sepa_instant_schema.
 - `dataLineageRole: both` — the service is both a consumer and a producer of compliance data.
+
+## Transaction-monitoring intake (ADR-0371, migration V11)
+
+Post-booking monitoring records booked money movement and counts it per party. None of it is on a payment path.
+
+| Table | Key | Purpose |
+|---|---|---|
+| `aml_booked_movement` | `(journal_entry_id, account_id, currency)` | one booked change of one customer account in one currency, from the ledger's `AccountBookedChanged`; the key is the booking's business key, so a redelivered or re-emitted event is a no-op |
+| `aml_movement_origin` | `transaction_id` | rail of the originating transaction, from `TransactionInitiated`; first write wins |
+| `aml_account_party` | `account_id` | account → owning party, remembered after the account authority answered |
+| `aml_movement_counter` | `(party_id, currency, direction, rail, scheme_revision, bucket_start, band_code)` | rolling counts |
+
+- Counters never sum or convert amounts and never span currencies; `currency` is part of the key and an amount band belongs to one currency.
+- Bucket width and amount bands are **data** (`openbank.aml.monitoring.counter-scheme.resource`). The file in this repository is synthetic; its bands mean nothing. `scheme_revision` is part of the counter key, so a changed band starts new counters.
+- Every movement counts under band `ALL` plus each band that contains its amount.
+- A movement is attributed (party, rail) and counted in one transaction by the `aml-movement-attribution` sweep. A booking with no originating transaction event is counted under rail `NONE` after `origin-grace`. A movement whose account has no known party stays uncounted and is retried.
+- Known limits: a reversal is booked by the ledger as an opposite movement and counts as one; counterparty attributes are on no event today.
+- These tables hold party and account identifiers and amounts. They are monitoring records under the same retention duty as cases; the period is not asserted here (ADR-0371).
+
+## Transaction-monitoring evaluation (ADR-0371, migration V12)
+
+| Table | Key | Purpose |
+|---|---|---|
+| `aml_monitoring_evaluation` | `(party_id, pack_hash)` | latest evaluation of a party under one pack content: `NO_FINDING`, `FINDING` or `INCOMPLETE` with the reason |
+| `aml_monitoring_hit` | `hit_id`; unique `(party_id, scenario_code, window_start)` | one row per party, scenario and window with the pack hash and the counter snapshot; a repeat detection refreshes it |
+
+- There is no "clear" outcome. `NO_FINDING` means the pack's rules did not match the counts; `INCOMPLETE` means the pack could not be evaluated. Neither is a statement about the party.
+- The pack, its two vocabularies and its count features are **data** (`openbank.aml.monitoring.pack.*`). The shipped files are synthetic. A feature is pinned by a hash over its currency, band, direction, rail and window, so editing a window invalidates the pack's pin and the service does not start.
+- SHADOW is the default: a hit is recorded and nothing else happens. With `openbank.aml.monitoring.evaluation.open-cases=true` a hit opens an `AmlCase` of type `TRANSACTION_MONITORING` keyed by party, scenario and window.
+- Shipped scenarios: repeated movements in a below-mark band (three currency/direction variants). Rapid pass-through and activity after long inactivity are **not** shipped: a pack rule compares one count with a minimum, and those two need a conjunction of counts and an absence respectively.

@@ -31,7 +31,7 @@ metadata:
   namespace: aml
   labels:
     app.kubernetes.io/part-of: aml
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -92,7 +92,7 @@ metadata:
   namespace: aml
   labels:
     app.kubernetes.io/part-of: aml
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

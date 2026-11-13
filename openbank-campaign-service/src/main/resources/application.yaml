@@ -15,7 +15,7 @@ quarkus:
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_campaigns
     username: ${DB_USER:campaign}
-    password: ${DB_PASSWORD:campaign}
+    password: ${DB_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
   flyway:
     migrate-at-start: true
   hibernate-orm:
@@ -396,3 +396,11 @@ mp:
         auto:
           offset:
             reset: earliest
+
+# ADR-0007/0017: the deployed default above is the sentinel, so a pod whose Secret failed to
+# mount fails auth instead of booting on a credential baked into the image. The local-only
+# password the dev compose / test containers use lives here (gate appyaml-secret-literals).
+"%dev,test":
+  quarkus:
+    datasource:
+      password: ${DB_PASSWORD:campaign}

@@ -6,6 +6,7 @@ package com.openbank.libs.persistence.outbox
 
 import com.openbank.libs.observability.DomainMetrics
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -243,6 +244,33 @@ class AbstractOutboxDispatcherTest {
         // OutboxFailurePolicy's own threshold.
         verify(exactly = 1) { metrics.outboxDead("widget") }
         verify(exactly = 0) { metrics.outboxDispatched(any(), any()) }
+    }
+
+    @Test
+    fun `fenced acknowledgements count only committed dispatches and terminal failures`() {
+        val accepted = OutboxClaim(entry("accepted"), UUID.randomUUID())
+        val staleSuccess = OutboxClaim(entry("stale-success"), UUID.randomUUID())
+        val terminal = OutboxClaim(entry("terminal"), UUID.randomUUID())
+        val staleFailure = OutboxClaim(entry("stale-failure"), UUID.randomUUID())
+        val repo = mockk<ClaimFencedOutboxRepositoryV2>()
+        coEvery { repo.claimWithTokens(any(), any()) } returnsMany listOf(
+            listOf(accepted, staleSuccess, terminal, staleFailure),
+            emptyList(),
+        )
+        coEvery { repo.markClaimsSent(listOf(accepted, staleSuccess), any()) } returns setOf(accepted.entry.eventId)
+        coEvery { repo.markClaimFailed(terminal, any(), any()) } returns OutboxStatus.DEAD
+        coEvery { repo.markClaimFailed(staleFailure, any(), any()) } returns null
+        val publisher = FakePublisher()
+        publisher.publishErrors[terminal.entry.eventId] = IllegalStateException("publish failed")
+        publisher.publishErrors[staleFailure.entry.eventId] = IllegalStateException("publish failed")
+        val metrics = mockk<DomainMetrics>(relaxed = true)
+        val dispatcher = TestOutboxDispatcher(repo, publisher, service = "widget", metrics = metrics)
+
+        runBlocking { dispatcher.runBatch() }
+
+        verify(exactly = 1) { metrics.outboxDispatched("widget", "accepted") }
+        verify(exactly = 0) { metrics.outboxDispatched("widget", "stale-success") }
+        verify(exactly = 1) { metrics.outboxDead("widget") }
     }
 
     @Test

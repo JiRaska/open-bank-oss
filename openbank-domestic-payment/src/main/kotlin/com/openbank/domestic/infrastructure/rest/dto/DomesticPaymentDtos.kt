@@ -39,6 +39,7 @@ data class CreateDomesticPaymentRequest(
     val technicalAccountCode: String? = null,
     val statementLabel: String?,
     val endToEndId: String?,
+    val customerSubmissionScope: String? = null,
 ) {
     fun toCommand(
         idempotencyKey: String,
@@ -79,6 +80,8 @@ internal fun inboundAmount(amount: BigDecimal?, currency: String?): Money {
     requireValid(parsed.isPositive(), "amount") { "amount must be greater than zero" }
     return DomesticSchemeRules.requireSchemeCurrency(parsed)
 }
+
+data class DomesticPaymentSubmissionLookup(val debtorAccountId: UUID?, val customerSubmissionScope: String?)
 
 data class TransitionDomesticPaymentStatusRequest(
     val targetStatus: String,

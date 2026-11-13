@@ -140,3 +140,24 @@ Některé upstreamy omezují jen podle `accountId` (party hlavička je tam jen p
 3. **Edge je hranicí IDOR** — vlastnictví se vynucuje zde vždy, když upstream omezuje jen podle id.
 4. **Bezstavová** — bez DB, bez outboxu, bez doménového stavu; horizontálně škálovatelná, levně škáluje na nulu.
 5. **Obohacuj na edge** — drž bankovní detail (rozdělení IBAN/BBAN, právní jméno, defaulty plateb) mimo mobilního klienta.
+
+## Delegované akce nad kartou se ptají na capability té akce (ADR-0375 D7)
+
+Ke sdílené kartě se chodí přes `mayControlCard(id, party, capability)`: držitel a majitel účtu
+projdou rovnou, kdokoli jiný potřebuje ACTIVE delegaci nesoucí capability **té konkrétní akce**.
+Na kterou capability se která akce ptá, je celá ta kontrola — a dřív to byla pro všechno stejná:
+
+| akce | capability, na kterou se ptá |
+|---|---|
+| výpis sdílené karty, čtení detailu | `CARD_VIEW` |
+| `PUT /cards/{id}/limits` | `CARD_MANAGE_LIMITS` |
+| `POST /cards/{id}/freeze`, `/unfreeze`, `/block` | `CARD_MANAGE_STATUS` |
+| `PUT /cards/{id}/controls` (contactless, online, ATM, zahraničí) | `CARD_MANAGE_CHANNELS` |
+
+Před ADR-0375 D7 se poslední dva řádky ptaly taky na `CARD_MANAGE_LIMITS`, takže dvě capabilities,
+které slovník grantů nabízí, byly grantovatelné a nikým nečtené — a delegát s pouhými limity mohl
+kartu zmrazit a vypnout jí kanály. Obě karetní presety udělují všech pět karetních capabilities,
+takže delegáta z presetu se to nedotkne; mění se případ ručně složeného grantu jen s limity.
+
+Routa s transakcemi karty tu neexistuje, a proto `CARD_VIEW_TRANSACTIONS` pořád nemá enforcera —
+nemá co hlídat, spíš než že by hlídalo špatně.
