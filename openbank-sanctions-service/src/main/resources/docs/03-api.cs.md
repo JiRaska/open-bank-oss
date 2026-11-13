@@ -137,13 +137,14 @@ Authorization: Bearer <token>
 
 {
   "checkId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "reviewedBy": "compliance@openbank.example",
   "note": "Jiná osoba potvrzena kontrolou pasu — čisto.",
   "newStatus": "CLEAR"
 }
 ```
 
 `newStatus` ∈ `CLEAR | HIT | POTENTIAL_HIT | WHITELISTED | ESCALATED`
+
+Přezkoumávající zaznamenaný u rozhodnutí je přihlášený principal (`preferred_username` z tokenu). Přezkoumávajícího v těle neposílejte: pole `reviewedBy` se z důvodu kompatibility přijme, ale ignoruje se.
 
 ### Získat konkrétní prověření
 
