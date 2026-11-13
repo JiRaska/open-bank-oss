@@ -171,13 +171,14 @@ Authorization: Bearer <token>
 
 {
   "checkId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "reviewedBy": "compliance@openbank.example",
   "note": "Different person confirmed by passport check — cleared.",
   "newStatus": "CLEAR"
 }
 ```
 
 `newStatus` ∈ `CLEAR | HIT | POTENTIAL_HIT | WHITELISTED | ESCALATED`
+
+The reviewer recorded on the decision is the authenticated principal (the token's `preferred_username`). Do not send a reviewer in the body: a `reviewedBy` field is accepted for compatibility but ignored.
 
 ### Get a specific check
 
