@@ -10,6 +10,7 @@ import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepository
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
+import com.openbank.domestic.application.workflow.PaymentAdmissionConfig
 import com.openbank.domestic.domain.error.DomesticSchemeErrorCode
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
@@ -246,12 +247,12 @@ class DomesticPaymentServiceTest {
             rejectDetail = null,
         )
 
-        service.admissionEnabled = true
+        service.admission = PaymentAdmissionConfig(enabled = true)
         assertThatThrownBy { runBlocking { service.transitionStatus(command) } }
             .isInstanceOf(InvalidDomesticPaymentStateTransitionException::class.java)
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
 
-        service.admissionEnabled = false
+        service.admission = PaymentAdmissionConfig(enabled = false)
         runBlocking { service.transitionStatus(command) }
         coVerify(exactly = 1) { paymentRepository.update(any(), any()) }
     }

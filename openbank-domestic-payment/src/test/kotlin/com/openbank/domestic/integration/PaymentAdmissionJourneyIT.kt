@@ -46,6 +46,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
 import jakarta.enterprise.inject.Produces
 import jakarta.inject.Inject
+import kotlinx.coroutines.CompletableDeferred
 import org.apache.kafka.clients.producer.KafkaProducer
 import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.clients.producer.ProducerRecord
@@ -63,6 +64,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import javax.sql.DataSource
 
 private const val AML_TOPIC = "openbank.aml.events"
@@ -325,6 +327,23 @@ class PaymentAdmissionJourneyIT {
     }
 
     @Test
+    fun `with the chain on the status endpoint cannot move a payment that is still RECEIVED`() {
+        val gate = CompletableDeferred<Unit>()
+        world.standingGate.set(gate)
+        val payment = create()
+        await("the admission to be waiting on standing") { world.standingWaiters.get() > 0 }
+        assertThat(status(payment)).isEqualTo("RECEIVED")
+
+        RestAssured.given().contentType("application/json").body("""{"targetStatus":"VALIDATED"}""")
+            .patch("/api/v1/domestic-payments/$payment/status").then().statusCode(409)
+        assertThat(status(payment)).isEqualTo("RECEIVED")
+
+        gate.complete(Unit)
+        awaitStatus(payment, "SETTLED")
+        assertThat(world.submissions(payment)).isEqualTo(1)
+    }
+
+    @Test
     fun `an operator reads a held payment as held`() {
         val payment = create(creditorName = "REVIEW Logistics")
         awaitStatus(payment, "HELD")
@@ -481,6 +500,10 @@ class AdmissionWorld {
     val frozen: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
     val standingDown = AtomicBoolean(false)
     val screeningDown = AtomicBoolean(false)
+
+    /** When set, the standing answer waits on it: a payment that stays RECEIVED for as long as a test needs. */
+    val standingGate = AtomicReference<CompletableDeferred<Unit>?>(null)
+    val standingWaiters = AtomicInteger()
     val screened: MutableSet<String> = ConcurrentHashMap.newKeySet()
     val scored: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
     private val submitted = ConcurrentHashMap<UUID, AtomicInteger>()
@@ -495,13 +518,23 @@ class AdmissionWorld {
         frozen.clear()
         standingDown.set(false)
         screeningDown.set(false)
+        standingGate.getAndSet(null)?.complete(Unit)
+        standingWaiters.set(0)
     }
 }
 
 @Alternative
 @ApplicationScoped
 class FakeStanding(private val world: AdmissionWorld) : AccountStandingPort {
-    override suspend fun debtorStanding(accountId: UUID): AccountStandingLookup = when {
+    override suspend fun debtorStanding(accountId: UUID): AccountStandingLookup {
+        world.standingGate.get()?.let { gate ->
+            world.standingWaiters.incrementAndGet()
+            gate.await()
+        }
+        return answer(accountId)
+    }
+
+    private fun answer(accountId: UUID): AccountStandingLookup = when {
         world.standingDown.get() -> AccountStandingLookup.Unavailable(UnavailableCause.DEPENDENCY_DOWN)
         accountId in world.frozen -> AccountStandingLookup.Known(
             world.owner,

@@ -5,6 +5,8 @@
 package com.openbank.domestic.application.workflow
 
 import io.temporal.activity.ActivityInterface
+import jakarta.enterprise.context.ApplicationScoped
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Duration
 import java.util.UUID
 
@@ -36,6 +38,17 @@ object PaymentAdmissionSwitch {
     @Volatile
     var enabled: Boolean = false
 }
+
+/**
+ * The rail's admission switch as injected configuration. A bean of its own, because a constructor
+ * parameter is the one place a `@ConfigProperty` Boolean can be injected without a Kotlin default
+ * standing in for it.
+ */
+@ApplicationScoped
+class PaymentAdmissionConfig(
+    @ConfigProperty(name = "openbank.domestic.admission.enabled", defaultValue = "false")
+    val enabled: Boolean,
+)
 
 /** Why a held payment is being rejected without a release. */
 enum class HoldRejectCause { REVIEW_REJECTED, EXPIRED }

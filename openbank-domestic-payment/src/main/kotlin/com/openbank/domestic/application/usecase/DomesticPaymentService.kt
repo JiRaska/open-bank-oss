@@ -17,6 +17,7 @@ import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepositor
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
+import com.openbank.domestic.application.workflow.PaymentAdmissionConfig
 import com.openbank.domestic.application.workflow.domesticPaymentWorkflowId
 import com.openbank.domestic.domain.error.DomesticSchemeRules
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
@@ -90,9 +91,13 @@ class DomesticPaymentService(
         Clock.systemUTC(),
     )
 
-    /** Field-injected so neither constructor, nor any test that calls one, changes shape. */
-    @ConfigProperty(name = "openbank.domestic.admission.enabled", defaultValue = "false")
-    var admissionEnabled: Boolean = false
+    /**
+     * Whether payment admission owns RECEIVED on this rail. Field-injected so neither constructor,
+     * nor any test that calls one, changes shape; the initial value is what a hand-built service
+     * gets, and the container replaces it.
+     */
+    @Inject
+    var admission: PaymentAdmissionConfig = PaymentAdmissionConfig(enabled = false)
 
     companion object {
         private const val PAYMENT_CREATED_EVENT = "domestic.payment.created"
@@ -377,7 +382,7 @@ class DomesticPaymentService(
         // While the chain is off a RECEIVED payment keeps this exit: it is the only one a payment
         // left by an exhausted screening re-drive has.
         val ownedByAdmission = payment.status == DomesticPaymentStatus.HELD ||
-            (admissionEnabled && payment.status == DomesticPaymentStatus.RECEIVED)
+            (admission.enabled && payment.status == DomesticPaymentStatus.RECEIVED)
         if (ownedByAdmission) {
             throw InvalidDomesticPaymentStateTransitionException(
                 "A ${payment.status} domestic payment leaves that status only through payment admission",
