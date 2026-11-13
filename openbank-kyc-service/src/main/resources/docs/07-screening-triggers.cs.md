@@ -4,11 +4,11 @@ Perpetual-KYC slice 1 podle [ADR 0256](../../../../docs/adr/0256-perpetual-kyc-e
 
 ## Průběh
 
-1. **Konzumace** — `SanctionsListChangedConsumer` čte kanál `sanctions-list-changes-in` (explicitní DLQ topic `openbank.dlq.kyc.sanctions-list-changes`; group id a `auto.offset.reset` přicházejí z ConfigMap `kyc-service-msg-override`, aparát #686). Události `SANCTIONS_LIST_CHANGE_STORM` se ignorují. Typ události se čte z Kafka **hlavičky** `ce-type`: topic je plněn z outboxu a těla zpráv žádné pole `eventType` nenesou (`openbank-contracts/openbank-sanctions-service/asyncapi.yaml`). Každý záznam se počítá v `openbank.kyc.sanctions_list_change_events{outcome}` — `handled`, `storm`, `disabled`, `ignored` (screeningové události sdílející topic), `malformed`, `unrecognised`.
+1. **Konzumace** — `SanctionsListChangedConsumer` čte kanál `sanctions-list-changes-in` (explicitní DLQ topic `openbank.dlq.kyc.sanctions-list-changes`; group id a `auto.offset.reset` přicházejí z ConfigMap `kyc-service-msg-override`, aparát #686). Události `SANCTIONS_LIST_CHANGE_STORM` se ignorují. Typ události se čte z Kafka **hlavičky** `ce-type`: topic je plněn z outboxu a těla zpráv žádné pole `eventType` nenesou (`openbank-contracts/openbank-sanctions-service/asyncapi.yaml`). Každý záznam se počítá v `openbank.kyc.sanctions_list_change_events{outcome}` — `handled`, `storm`, `recorded_while_disabled`, `ignored` (screeningové události sdílející topic), `malformed`, `unrecognised`.
 2. **Záznam** — `ScreeningTriggerService` vloží jeden trvalý řádek `kyc_screening_triggers` na (publication, party) — `insertIfAbsent`, takže redelivery Kafka zprávy naváže místo duplikování. Celý diff zůstává na řádku, aby „proč je tento klient v re-screeningu" mělo odpověď v jednom řádku.
 3. **Otevření** — jeden případ `AML_ALERT` na stranu přes `POST /api/v1/case-coordinator/cases` (`case-coordinator-agent` v namespace `platform`, port 8146, dodáno jako `CASE_COORDINATOR_URL`).
 4. **Trvalé selhání** — 429/503/timeout z coordinatoru zaznamená trigger `OPEN_FAILED` a po vyčerpání pokusů outbox řádek `KYC_COORDINATOR_OPEN_FAILED` ve STEJNÉ transakci jako změnu stavu. Chybějící `CASE_COORDINATOR_URL` namapuje každý trigger na trvalou cestu `NOT_CONFIGURED` — nikdy na tiché přeskočení.
-5. **Retry** — `ScreeningTriggerRetryJob` opakuje řádky `OPEN_FAILED` po backoffu, takže se smyčka uzavře, když se coordinator zotaví.
+5. **Retry** — `ScreeningTriggerRetryJob` opakuje řádky `OPEN_FAILED` po backoffu, takže se smyčka uzavře, když se coordinator zotaví. Převezme také PENDING řádky s prošlým leasem a odložené řádky zapsané při vypnutém vypínači.
 
 ## HTTP výsledky koordinátoru
 
@@ -29,9 +29,8 @@ Kandidátní množina **není** rozsahovaná per položka diffu: kyc-service neu
 
 | Env proměnná | Výchozí | Účel |
 |---|---|---|
-| `KYC_SCREENING_TRIGGERS_ENABLED` | `false` | Hlavní vypínač. Lodi se **vypnuté** podle rollout sekvence kontraktu (Pact verifikace, sandbox exercise, metriky operátorských úkolů před enablementem). |
+| `KYC_SCREENING_TRIGGERS_ENABLED` | `false` | Hlavní a jediný vypínač: řídí každou cestu, která otevírá případ (první pokus consumeru i `ScreeningTriggerRetryJob`). Lodi se **vypnuté** podle rollout sekvence kontraktu (Pact verifikace, sandbox exercise, metriky operátorských úkolů před enablementem). Vypnuto stále zapisuje: viz „Hlavní vypínač“ níže. |
 | `KYC_SCREENING_TRIGGERS_CANDIDATE_LIMIT` | `500` | Strop kandidátních stran na chunk publikace. |
-| `KYC_SCREENING_TRIGGERS_RETRY_ENABLED` | `true` | Plánovaný retry řádků `OPEN_FAILED`. |
 | `KYC_SCREENING_TRIGGERS_RETRY_INTERVAL` | `1m` | Backoff retry. |
 | `KYC_SCREENING_TRIGGERS_RETRY_BATCH_SIZE` | `100` | Řádky zpracované v jednom retry průchodu. |
 | `CASE_COORDINATOR_URL` | (prázdné → `NOT_CONFIGURED`) | Base URL case coordinatoru; v gitops nastaveno na `http://case-coordinator-agent.platform.svc:8146`. |
@@ -51,7 +50,7 @@ Issue #15961. Backlog tvoří řádky `kyc_screening_triggers` ve stavu PENDING 
 |---|---|---|
 | `openbank_kyc_rescreen_backlog_pending{service="kyc"}` | Řádky PENDING nebo OPEN_FAILED (rozpracované, opakované nebo odstavené). | NaN do prvního vzorku |
 | `openbank_kyc_rescreen_backlog_oldest_age_seconds{service="kyc"}` | `now() - created_at` nejstaršího takového řádku podle hodin databáze, od zařazení do fronty. `0` jen při prázdném backlogu. Nikdy z `next_attempt_at`, který každý pokus posouvá dopředu. | NaN do prvního vzorku |
-| `openbank_kyc_rescreen_loop_disabled_with_pending{service="kyc"}` | `1`, když je `enabled` nebo `retry-enabled` false a backlog není prázdný, jinak `0`. Samostatná řada, aby „vypnuto a prázdno“ a „vypnuto se zbylou prací“ nikdy nesdílely hodnotu. | NaN do prvního vzorku |
+| `openbank_kyc_rescreen_loop_disabled_with_pending{service="kyc"}` | `1`, když je `enabled` false a backlog není prázdný, jinak `0`. Samostatná řada, aby „vypnuto a prázdno“ a „vypnuto se zbylou prací“ nikdy nesdílely hodnotu. | NaN do prvního vzorku |
 
 NaN, ne 0 a ne stáří odvozené od epochy: studený pod netvrdí prázdnou zdravou frontu, kterou nikdo neměřil, ani nehlásí desetiletí. Neúspěšný vzorek ponechá předchozí hodnoty, takže výpadek databáze nemůže zrušit spuštěný alert; místo toho zestárne heartbeat `kyc-rescreen-backlog-sample`.
 
@@ -60,9 +59,15 @@ NaN, ne 0 a ne stáří odvozené od epochy: studený pod netvrdí prázdnou zdr
 - `KycRescreenBacklogOverdue` (critical): nejstarší stáří nad 86400 s po dobu 15 minut, pokud smyčka není vypnutá se zbylou prací.
 - `KycRescreenLoopDisabledWithPending` (warning): řada vypnuto-se-zbylou-prací je 1 po dobu 30 minut.
 
-- `KycSanctionsListChangeDroppedWhileDisabled` (warning): výsledek `disabled` consumeru se za poslední hodinu pohnul, takže změna seznamu byla při vypnutém vypínači zahozena bez prověření.
 
-**Proč se změna při vypnutém vypínači zahazuje, a nezařazuje.** Zařadit řádek triggeru i tak by vypadalo jako čistší oprava, protože zapnutí smyčky by pak zmeškané znovu prověřilo. Se současným kódem to bezpečné není: `ScreeningTriggerRetryJob` hlídá jen `retry-enabled` (výchozí true) a převezme každý PENDING řádek s prošlým leasem, takže řádek zařazený při vypnutí by se asi po deseti minutách dostal ke case coordinatoru. Tím by se smyčka zapnula mimo rollout gate. Místo toho se na zahození alertuje. Zařazování při vypnutí vyžaduje, aby retry job nejprve respektoval hlavní vypínač, což je změna chování pro samostatné PR.
+**Hlavní vypínač (issue #15961).** `KYC_SCREENING_TRIGGERS_ENABLED` rozhoduje, zda smyčka *jedná*; fronta zapisuje vždy.
+
+| Vypínač | Přijde `SANCTIONS_LIST_CHANGED` | Tick retry jobu |
+|---|---|---|
+| vypnuto | Jeden **odložený** řádek na kandidátní stranu (PENDING, `attempts` 0, splatný hned), žádné volání coordinatoru; počítá se `recorded_while_disabled`. Slučuje se: strana, která už čeká, druhý řádek nedostane (částečný unikátní index z V14). | Nepřevezme nic. Čekají i řádky z dřívějšího zapnutí (leasy, retry `OPEN_FAILED`). |
+| zapnuto | Beze změny: řádek s leasem, případ se otevře hned; počítá se `handled`. | Převezme až `KYC_SCREENING_TRIGGERS_RETRY_BATCH_SIZE` splatných řádků (odložené, prošlé leasy, `OPEN_FAILED` po backoffu) a každý otevře jednou. |
+
+Růst při vypnutí je omezen počtem aktivních KYC stran, ne časem: jeden odložený řádek na stranu bez ohledu na počet publikací (seznamy se obnovují zhruba denně). Měsíc vypnutí přidá nejvýš jeden řádek na aktivní stranu a nic za strany, které už čekají. Řádek nese diff první publikace; případ, který otevře, prověřuje proti aktuálním seznamům. Vyprázdnění po zapnutí: nejvýš batch size za interval a pod, výchozí 100 za minutu (6 000 za hodinu) při jedné replice; `429`/`503` coordinatoru posune řádek na backoff 5 minut krát pokus místo horkého opakování. Po dlouhém vypnutí `KycRescreenBacklogOverdue` vystřelí, dokud se neotevře nejstarší odložený řádek, protože tyto změny 24hodinový slib opravdu nesplnily.
 
 První dva alerty nemohou vystřelit ve výchozím nasazení (smyčka vypnutá, tabulka prázdná: stáří 0, vypnuto-se-zbylou-prací 0). Testy: `openbank-infra/tests/promtool/kyc_rescreen_backlog_alerts_test.yaml`. Runbook: [05-operations](05-operations.cs.md#backlog-opětovného-prověření).
 

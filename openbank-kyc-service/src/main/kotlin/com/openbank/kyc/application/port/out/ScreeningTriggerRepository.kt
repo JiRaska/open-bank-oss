@@ -28,6 +28,14 @@ interface ScreeningTriggerRepository {
      */
     suspend fun insertIfAbsent(trigger: ScreeningTrigger): Boolean
 
+    /**
+     * Records a DEFERRED trigger — the master switch is off, so no open is attempted: state
+     * PENDING, attempts 0, due at once. Coalesced to one per party (V14 partial unique index) and
+     * still deduplicated on (publication, party); returns true when the row was inserted. The
+     * retry job claims it once the switch is on.
+     */
+    suspend fun recordDeferred(trigger: ScreeningTrigger): Boolean
+
     /** Marks [trigger] OPENED with the coordinator's case id (201, or 409 already-exists). */
     suspend fun recordOpened(trigger: ScreeningTrigger, coordinatorCaseId: String?, at: Instant)
 

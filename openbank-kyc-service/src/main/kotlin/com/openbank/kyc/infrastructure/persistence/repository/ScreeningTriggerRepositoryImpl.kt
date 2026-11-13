@@ -62,6 +62,27 @@ class ScreeningTriggerRepositoryImpl(private val outboxRepository: KycOutboxRepo
         }.awaitSuspending() == 1
     }
 
+    override suspend fun recordDeferred(trigger: ScreeningTrigger): Boolean {
+        require(trigger.state == ScreeningTriggerState.PENDING && trigger.attempts == 0) {
+            "A deferred screening trigger is PENDING with no attempt made"
+        }
+        return Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery<Any>(INSERT_DEFERRED)
+                    .setParameter("triggerId", trigger.triggerId)
+                    .setParameter("partyId", trigger.partyId)
+                    .setParameter("triggerType", ScreeningTrigger.TRIGGER_TYPE_SANCTIONS_LIST_CHANGED)
+                    .setParameter("publicationId", trigger.publicationId)
+                    .setParameter("chunkIndex", trigger.chunkIndex)
+                    .setParameter("listType", trigger.listType)
+                    .setParameter("diff", objectMapper.writeValueAsString(trigger.diff))
+                    .setParameter("state", ScreeningTriggerState.PENDING.name)
+                    .setParameter("dueAt", trigger.nextAttemptAt ?: trigger.createdAt)
+                    .executeUpdate()
+            }
+        }.awaitSuspending() == 1
+    }
+
     override suspend fun recordOpened(trigger: ScreeningTrigger, coordinatorCaseId: String?, at: Instant) {
         Panache.withTransaction {
             Panache.getSession().flatMap { session ->
@@ -181,6 +202,16 @@ class ScreeningTriggerRepositoryImpl(private val outboxRepository: KycOutboxRepo
             VALUES
                 (:triggerId, :partyId, :triggerType, :publicationId, :chunkIndex, :listType, :diff, :state, :attempts, :leaseUntil)
             ON CONFLICT (publication_id, party_id) DO NOTHING
+        """
+
+        // No conflict target: either unique index may reject it — (publication, party) for a
+        // redelivery, or the V14 deferred-per-party index when the party already waits.
+        const val INSERT_DEFERRED = """
+            INSERT INTO kyc_screening_triggers
+                (trigger_id, party_id, trigger_type, publication_id, chunk_index, list_type, diff, state, attempts, next_attempt_at)
+            VALUES
+                (:triggerId, :partyId, :triggerType, :publicationId, :chunkIndex, :listType, :diff, :state, 0, :dueAt)
+            ON CONFLICT DO NOTHING
         """
 
         const val CLAIM = """
