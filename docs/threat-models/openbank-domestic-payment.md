@@ -119,10 +119,9 @@ The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit ma
   the release re-runs standing only and balance is checked where it always was, at booking; (3) the
   chain's `AUTHORITY` step is unbound on this rail and delegated authority is still decided by the
   customer edge (ADR-0375 D1/D3); (4) between a party's suspension and account-service consuming it the
-  accounts still report `mayDebit`, because the rail reads account standing and not party standing;
-  (5) no alert watches the age of the oldest HELD payment yet, only the gauge
-  `openbank_domestic_payments_non_terminal_oldest_age_seconds{status="HELD"}` exists. Each is a
-  precondition of switching the chain on in production, not of merging it off.
+  accounts still report `mayDebit`, because the rail reads account standing and not party standing.
+  Each is a precondition of switching the chain on in production, not of merging it off. A hold that
+  outlives its expiry (a lost workflow run) is alerted on: `DomesticPaymentHeldPastExpiry`.
 - SCA (sca-service) must gate customer-initiated transfers.
 - **Four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent audit
   trail** (ADR-0155) — a durable-audit requirement for "who approved what, forever" would
@@ -159,8 +158,10 @@ The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit ma
     audit, context and pension also read. It carries the debtor's party id and account reference (both
     already on that topic) and, as evidence, statuses, scores and the matched list entry; never the
     debtor or creditor name. The customer is told nothing: no rejection this chain makes sends a
-    notification, and `customerSafeReason` renders `DEBTOR_ACCOUNT_BLOCKED` without naming a control,
-    because a freeze can be an AML block on the party.
+    notification, `customerSafeReason` renders `DEBTOR_ACCOUNT_BLOCKED` without naming a control
+    (a freeze can be an AML block on the party), and the customer edge reads a HELD payment as
+    RECEIVED on every read of the payment resource and on the submission lookup
+    (`DomesticPaymentStatus.customerFacing`); operators read the real status.
   - **Denial of service:** an outage of account-service, sanctions-service or (with fraud enforcement on)
     fraud-service now HOLDS every payment instead of leaving it RECEIVED. Each is re-evaluated every
     15 minutes, five times, and only then becomes a case, so a short outage heals with no human and a

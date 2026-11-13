@@ -31,7 +31,35 @@ enum class DomesticPaymentStatus {
      * processed, which is all the customer may know: that it is held, and by which control, is not
      * theirs to learn (ADR-0374 D13). Operator reads keep the real status.
      */
-    val customerFacing: DomesticPaymentStatus get() = if (this == HELD) RECEIVED else this
+    val customerFacing: CustomerFacingPaymentStatus
+        get() = when (this) {
+            RECEIVED, HELD -> CustomerFacingPaymentStatus.RECEIVED
+            VALIDATED -> CustomerFacingPaymentStatus.VALIDATED
+            SENT_TO_CLEARING -> CustomerFacingPaymentStatus.SENT_TO_CLEARING
+            SETTLED -> CustomerFacingPaymentStatus.SETTLED
+            REJECTED -> CustomerFacingPaymentStatus.REJECTED
+            RETURNED -> CustomerFacingPaymentStatus.RETURNED
+            CANCELLED -> CustomerFacingPaymentStatus.CANCELLED
+        }
+}
+
+/**
+ * The payment statuses a customer channel can be shown: the vocabulary the customer submission
+ * lookup publishes. Its own type, so a status added to [DomesticPaymentStatus] cannot reach a
+ * customer until someone decides here what the customer sees for it.
+ */
+enum class CustomerFacingPaymentStatus {
+    RECEIVED,
+    VALIDATED,
+    SENT_TO_CLEARING,
+    SETTLED,
+    REJECTED,
+    RETURNED,
+    CANCELLED,
+    ;
+
+    /** The same-named rail status, for a response whose field is typed as the rail's. */
+    val asRailStatus: DomesticPaymentStatus get() = DomesticPaymentStatus.valueOf(name)
 }
 
 enum class DomesticPaymentPriority { STANDARD, URGENT, INSTANT }

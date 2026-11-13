@@ -7,8 +7,10 @@ package com.openbank.domestic.infrastructure.rest
 import com.openbank.domestic.application.port.`in`.DomesticPaymentUseCase
 import com.openbank.domestic.application.port.`in`.ListDomesticPaymentsQuery
 import com.openbank.domestic.application.port.`in`.PaymentConfirmationUseCase
+import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.infrastructure.rest.dto.CreateDomesticPaymentRequest
+import com.openbank.domestic.infrastructure.rest.dto.DomesticPaymentResponse
 import com.openbank.domestic.infrastructure.rest.dto.DomesticPaymentSubmissionLookup
 import com.openbank.domestic.infrastructure.rest.dto.TransitionDomesticPaymentStatusRequest
 import com.openbank.domestic.infrastructure.rest.dto.toResponse
@@ -107,7 +109,7 @@ class DomesticPaymentResource(
                 customerSubmissionScope = customerScope,
             ),
         )
-        val responseBody = result.payment.toResponse()
+        val responseBody = result.payment.forCaller()
 
         val response = Response.created(URI.create("/api/v1/domestic-payments/${result.payment.id}"))
             .entity(responseBody)
@@ -145,6 +147,20 @@ class DomesticPaymentResource(
         return Response.ok(result).header("Cache-Control", "no-store").build()
     }
 
+    /**
+     * The payment as this caller may see it. The customer edge serves the customer, who is not
+     * shown that a payment is held (ADR-0374 D13): it reads a hold as RECEIVED on every read of this
+     * resource, as on the submission lookup. Every other caller reads the real status.
+     */
+    private fun DomesticPayment.forCaller(): DomesticPaymentResponse {
+        val response = toResponse()
+        return if (ServiceAccountIdentity.isPrincipal(identity, CUSTOMER_EDGE)) {
+            response.copy(status = status.customerFacing.asRailStatus)
+        } else {
+            response
+        }
+    }
+
     private fun requireCustomerEdge() {
         if (!ServiceAccountIdentity.isPrincipal(identity, CUSTOMER_EDGE)) {
             throw ForbiddenException("Customer submission scope is restricted to customer-edge")
@@ -162,7 +178,7 @@ class DomesticPaymentResource(
     @Authorize(action = "domestic-payment.read", resource = "#paymentId")
     @Operation(summary = "Get a domestic payment by ID")
     suspend fun getPayment(@PathParam("paymentId") paymentId: UUID): Response =
-        Response.ok(paymentUseCase.getPayment(paymentId).toResponse()).build()
+        Response.ok(paymentUseCase.getPayment(paymentId).forCaller()).build()
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
@@ -182,7 +198,7 @@ class DomesticPaymentResource(
                 offset = offset,
             ),
         )
-        return Response.ok(payments.map { it.toResponse() }).build()
+        return Response.ok(payments.map { it.forCaller() }).build()
     }
 
     /**

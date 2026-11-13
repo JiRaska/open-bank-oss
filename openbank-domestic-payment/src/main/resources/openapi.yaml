@@ -11,10 +11,11 @@ info:
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
   # 1.12.0 -> 1.13.0: additive durable company-scoped business payment batch drafts.
-  # 1.14.0 -> 1.15.0 (ADR-0374): additive. The payment resource may report status HELD while the
-  # admission chain is switched on for this rail (the customer submission lookup reports it as
-  # RECEIVED, so its published enum is unchanged); the status transition documents its 409, now
-  # also the answer for a payment that payment admission owns. No request shape changes.
+  # 1.14.0 -> 1.15.0 (ADR-0374): additive. The payment resource may report status HELD to
+  # operators while the admission chain is switched on for this rail (the customer edge reads a
+  # hold as RECEIVED, here and on the submission lookup, whose published enum is unchanged); the
+  # status transition documents its 409, now also the answer for a payment that payment admission
+  # owns. No request shape changes.
   version: 1.15.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names

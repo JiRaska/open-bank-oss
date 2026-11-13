@@ -204,6 +204,28 @@ spec:
             description: >-
               The oldest domestic payment in SENT_TO_CLEARING is {{ $value | humanizeDuration }} old —
               at least one clearing cycle has been missed, or settlement is failing silently.
+        - alert: DomesticPaymentHeldPastExpiry
+          # ADR-0374: a HELD payment is released, rejected or expired within 48 hours of being held,
+          # and it is held within seconds of being created. One older than that has lost the
+          # workflow run that owns its expiry: nothing will ever move it, and it answers 2xx like
+          # every other payment. The gauge is the age since creation; two hours of margin cover a
+          # release or reject activity that is still retrying. Never fires while the chain is off,
+          # because no payment is HELD then.
+          expr: |
+            openbank_domestic_payments_non_terminal_oldest_age_seconds{
+              service="domestic", status="HELD"
+            } > 180000
+          for: 30m
+          labels:
+            severity: critical
+            service: domestic-payment
+          annotations:
+            summary: "Domestic payment HELD past the expiry of its hold"
+            description: >-
+              The oldest HELD domestic payment is {{ $value | humanizeDuration }} old. A hold ends
+              within 48 hours, so its workflow run is gone or stuck. Find the payment, check its
+              Temporal run `domestic-payment-<paymentId>` and the case with alert_code PAYMENT_HELD;
+              the operator status endpoint cannot move it.
         - alert: DomesticPaymentOutboxBacklogStuck
           # The gauge has been published by DomesticPaymentOutboxBacklogGauge all along; nothing
           # read it. That is why 13 events reaching DEAD on a missing Kafka ACL (#3271) went

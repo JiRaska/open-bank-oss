@@ -52,6 +52,7 @@ import org.apache.kafka.clients.producer.ProducerRecord
 import org.apache.kafka.common.serialization.StringSerializer
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -67,6 +68,8 @@ import javax.sql.DataSource
 private const val AML_TOPIC = "openbank.aml.events"
 private const val WAIT_SECONDS = 60L
 private const val OPERATOR = "00000000-0000-0000-0000-000000000099"
+private const val EDGE = "service-account-openbank-edge"
+private const val SCOPE = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 /**
  * ADR-0374 on the domestic rail, proven by effect: a real HTTP request creates the payment, the
@@ -298,6 +301,39 @@ class PaymentAdmissionJourneyIT {
     }
 
     @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "sub", value = OPERATOR),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `the customer edge reads a held payment as received, on the payment and on the submission lookup`() {
+        val account = UUID.randomUUID()
+        val key = "admission-edge-${UUID.randomUUID()}"
+        val payment = create(account, creditorName = "REVIEW Partners", idempotencyKey = key, customerScope = SCOPE)
+        awaitStatus(payment, "HELD")
+
+        RestAssured.given().get("/api/v1/domestic-payments/$payment")
+            .then().statusCode(200).body("status", equalTo("RECEIVED"))
+        RestAssured.given().contentType("application/json").header("Idempotency-Key", key)
+            .body("""{"debtorAccountId":"$account","customerSubmissionScope":"$SCOPE"}""")
+            .post("/api/v1/domestic-payments/submissions/lookup")
+            .then().statusCode(200).body("outcome", equalTo("FOUND")).body("status", equalTo("RECEIVED"))
+        assertThat(status(payment)).describedAs("the row itself is HELD").isEqualTo("HELD")
+    }
+
+    @Test
+    fun `an operator reads a held payment as held`() {
+        val payment = create(creditorName = "REVIEW Logistics")
+        awaitStatus(payment, "HELD")
+
+        RestAssured.given().get("/api/v1/domestic-payments/$payment")
+            .then().statusCode(200).body("status", equalTo("HELD"))
+    }
+
+    @Test
     fun `the read helpers return nothing for a payment that was never written`() {
         val unknown = UUID.randomUUID()
         assertThat(status(unknown)).isNull()
@@ -309,13 +345,17 @@ class PaymentAdmissionJourneyIT {
         debtorAccountId: UUID = UUID.randomUUID(),
         creditorName: String = "Brno Utility",
         amount: BigDecimal = BigDecimal("1234.56"),
+        idempotencyKey: String = "admission-it-${UUID.randomUUID()}",
+        customerScope: String? = null,
     ): UUID {
+        val scope = customerScope?.let { """"customerSubmissionScope": "$it",""" }.orEmpty()
         val response = RestAssured.given()
             .contentType("application/json")
-            .header("Idempotency-Key", "admission-it-${UUID.randomUUID()}")
+            .header("Idempotency-Key", idempotencyKey)
             .body(
                 """
                 {
+                  $scope
                   "debtorAccountId": "$debtorAccountId",
                   "debtorAccountNumber": "1234567890",
                   "debtorBankCode": "0800",
