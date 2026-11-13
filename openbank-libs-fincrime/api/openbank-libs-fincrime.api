@@ -13,6 +13,104 @@ public final class com/openbank/libs/fincrime/AmlCaseSeverity$Companion {
 	public final fun fromWire (Ljava/lang/String;)Lcom/openbank/libs/fincrime/AmlCaseSeverity;
 }
 
+public final class com/openbank/libs/fincrime/CounterpartyAccount {
+	public static final field Companion Lcom/openbank/libs/fincrime/CounterpartyAccount$Companion;
+	public static final field MAX_LENGTH I
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getScheme ()Lcom/openbank/libs/fincrime/CounterpartyScheme;
+	public final fun getValue ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/CounterpartyAccount$Companion {
+	public final fun of (Lcom/openbank/libs/fincrime/CounterpartyScheme;Ljava/lang/String;)Lcom/openbank/libs/fincrime/CounterpartyAccount;
+}
+
+public abstract interface class com/openbank/libs/fincrime/CounterpartyRef {
+	public static final field Companion Lcom/openbank/libs/fincrime/CounterpartyRef$Companion;
+}
+
+public final class com/openbank/libs/fincrime/CounterpartyRef$Companion {
+	public final fun fromAccountNumber (Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/fincrime/CounterpartyRef$Known;
+	public final fun fromIban (Ljava/lang/String;)Lcom/openbank/libs/fincrime/CounterpartyRef$Known;
+}
+
+public final class com/openbank/libs/fincrime/CounterpartyRef$Known : com/openbank/libs/fincrime/CounterpartyRef {
+	public fun <init> (Lcom/openbank/libs/fincrime/CounterpartyAccount;)V
+	public final fun component1 ()Lcom/openbank/libs/fincrime/CounterpartyAccount;
+	public final fun copy (Lcom/openbank/libs/fincrime/CounterpartyAccount;)Lcom/openbank/libs/fincrime/CounterpartyRef$Known;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/CounterpartyRef$Known;Lcom/openbank/libs/fincrime/CounterpartyAccount;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/CounterpartyRef$Known;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccount ()Lcom/openbank/libs/fincrime/CounterpartyAccount;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/CounterpartyRef$Unknown : com/openbank/libs/fincrime/CounterpartyRef {
+	public fun <init> (Lcom/openbank/libs/fincrime/UnknownCounterpartyReason;)V
+	public final fun component1 ()Lcom/openbank/libs/fincrime/UnknownCounterpartyReason;
+	public final fun copy (Lcom/openbank/libs/fincrime/UnknownCounterpartyReason;)Lcom/openbank/libs/fincrime/CounterpartyRef$Unknown;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/CounterpartyRef$Unknown;Lcom/openbank/libs/fincrime/UnknownCounterpartyReason;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/CounterpartyRef$Unknown;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReason ()Lcom/openbank/libs/fincrime/UnknownCounterpartyReason;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/CounterpartyScheme : java/lang/Enum {
+	public static final field DOMESTIC_ACCOUNT Lcom/openbank/libs/fincrime/CounterpartyScheme;
+	public static final field IBAN Lcom/openbank/libs/fincrime/CounterpartyScheme;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/fincrime/CounterpartyScheme;
+	public static fun values ()[Lcom/openbank/libs/fincrime/CounterpartyScheme;
+}
+
+public final class com/openbank/libs/fincrime/FraudRiskContext {
+	public fun <init> (Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/util/UUID;Lcom/openbank/libs/fincrime/InitiationMode;Lcom/openbank/libs/fincrime/CounterpartyRef;Lcom/openbank/libs/fincrime/FraudRiskEvidence;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/util/UUID;Lcom/openbank/libs/fincrime/InitiationMode;Lcom/openbank/libs/fincrime/CounterpartyRef;Lcom/openbank/libs/fincrime/FraudRiskEvidence;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/math/BigDecimal;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/util/UUID;
+	public final fun component5 ()Lcom/openbank/libs/fincrime/InitiationMode;
+	public final fun component6 ()Lcom/openbank/libs/fincrime/CounterpartyRef;
+	public final fun component7 ()Lcom/openbank/libs/fincrime/FraudRiskEvidence;
+	public final fun copy (Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/util/UUID;Lcom/openbank/libs/fincrime/InitiationMode;Lcom/openbank/libs/fincrime/CounterpartyRef;Lcom/openbank/libs/fincrime/FraudRiskEvidence;)Lcom/openbank/libs/fincrime/FraudRiskContext;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/FraudRiskContext;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/util/UUID;Lcom/openbank/libs/fincrime/InitiationMode;Lcom/openbank/libs/fincrime/CounterpartyRef;Lcom/openbank/libs/fincrime/FraudRiskEvidence;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/FraudRiskContext;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAmount ()Ljava/math/BigDecimal;
+	public final fun getCounterparty ()Lcom/openbank/libs/fincrime/CounterpartyRef;
+	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getDebtorAccountId ()Ljava/util/UUID;
+	public final fun getEvidence ()Lcom/openbank/libs/fincrime/FraudRiskEvidence;
+	public final fun getInitiationMode ()Lcom/openbank/libs/fincrime/InitiationMode;
+	public final fun getRail ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/FraudRiskEvidence {
+	public fun <init> ()V
+	public fun <init> (Lcom/openbank/libs/fincrime/InitiationChannel;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/fincrime/VopResult;)V
+	public synthetic fun <init> (Lcom/openbank/libs/fincrime/InitiationChannel;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/fincrime/VopResult;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lcom/openbank/libs/fincrime/InitiationChannel;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Lcom/openbank/libs/fincrime/VopResult;
+	public final fun copy (Lcom/openbank/libs/fincrime/InitiationChannel;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/fincrime/VopResult;)Lcom/openbank/libs/fincrime/FraudRiskEvidence;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/FraudRiskEvidence;Lcom/openbank/libs/fincrime/InitiationChannel;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/fincrime/VopResult;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/FraudRiskEvidence;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getChannel ()Lcom/openbank/libs/fincrime/InitiationChannel;
+	public final fun getDeviceSessionRef ()Ljava/lang/String;
+	public final fun getMerchantCategoryCode ()Ljava/lang/String;
+	public final fun getMerchantCountry ()Ljava/lang/String;
+	public final fun getVopResult ()Lcom/openbank/libs/fincrime/VopResult;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class com/openbank/libs/fincrime/FraudVerdict : java/lang/Enum {
 	public static final field ALLOW Lcom/openbank/libs/fincrime/FraudVerdict;
 	public static final field CHALLENGE Lcom/openbank/libs/fincrime/FraudVerdict;
@@ -27,6 +125,30 @@ public final class com/openbank/libs/fincrime/FraudVerdict : java/lang/Enum {
 
 public final class com/openbank/libs/fincrime/FraudVerdict$Companion {
 	public final fun fromWire (Ljava/lang/String;)Lcom/openbank/libs/fincrime/FraudVerdict;
+}
+
+public final class com/openbank/libs/fincrime/InitiationChannel : java/lang/Enum {
+	public static final field API Lcom/openbank/libs/fincrime/InitiationChannel;
+	public static final field BACK_OFFICE Lcom/openbank/libs/fincrime/InitiationChannel;
+	public static final field BRANCH Lcom/openbank/libs/fincrime/InitiationChannel;
+	public static final field MOBILE_APP Lcom/openbank/libs/fincrime/InitiationChannel;
+	public static final field SCHEDULER Lcom/openbank/libs/fincrime/InitiationChannel;
+	public static final field WEB Lcom/openbank/libs/fincrime/InitiationChannel;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/fincrime/InitiationChannel;
+	public static fun values ()[Lcom/openbank/libs/fincrime/InitiationChannel;
+}
+
+public final class com/openbank/libs/fincrime/InitiationMode : java/lang/Enum {
+	public static final field CUSTOMER_PRESENT Lcom/openbank/libs/fincrime/InitiationMode;
+	public static final field DELEGATE Lcom/openbank/libs/fincrime/InitiationMode;
+	public static final field MANDATE Lcom/openbank/libs/fincrime/InitiationMode;
+	public static final field STANDING_INSTRUCTION Lcom/openbank/libs/fincrime/InitiationMode;
+	public static final field SYSTEM_RETRY Lcom/openbank/libs/fincrime/InitiationMode;
+	public static final field THIRD_PARTY_PROVIDER Lcom/openbank/libs/fincrime/InitiationMode;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/fincrime/InitiationMode;
+	public static fun values ()[Lcom/openbank/libs/fincrime/InitiationMode;
 }
 
 public final class com/openbank/libs/fincrime/ScreeningDecision : java/lang/Enum {
@@ -85,6 +207,25 @@ public final class com/openbank/libs/fincrime/ScreeningRole : java/lang/Enum {
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/fincrime/ScreeningRole;
 	public static fun values ()[Lcom/openbank/libs/fincrime/ScreeningRole;
+}
+
+public final class com/openbank/libs/fincrime/UnknownCounterpartyReason : java/lang/Enum {
+	public static final field CARD_MERCHANT Lcom/openbank/libs/fincrime/UnknownCounterpartyReason;
+	public static final field NOT_APPLICABLE_OWN_ACCOUNT Lcom/openbank/libs/fincrime/UnknownCounterpartyReason;
+	public static final field NOT_PROVIDED_BY_SCHEME Lcom/openbank/libs/fincrime/UnknownCounterpartyReason;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/fincrime/UnknownCounterpartyReason;
+	public static fun values ()[Lcom/openbank/libs/fincrime/UnknownCounterpartyReason;
+}
+
+public final class com/openbank/libs/fincrime/VopResult : java/lang/Enum {
+	public static final field CLOSE_MATCH Lcom/openbank/libs/fincrime/VopResult;
+	public static final field MATCH Lcom/openbank/libs/fincrime/VopResult;
+	public static final field NOT_POSSIBLE Lcom/openbank/libs/fincrime/VopResult;
+	public static final field NO_MATCH Lcom/openbank/libs/fincrime/VopResult;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/fincrime/VopResult;
+	public static fun values ()[Lcom/openbank/libs/fincrime/VopResult;
 }
 
 public abstract interface class com/openbank/libs/fincrime/admission/AdmissionCheck {
