@@ -683,6 +683,21 @@ Decision (proposed):
 
 What it does not fix: throughput. One carrier at a time remains the ceiling of the ordinary lane, and the stacked-carrier switch stays off until its carrier resolver knows the holder base (#15772). Expected effect, to measure after enabling: expedite label-to-merge p50 under 30 min with the same query.
 
+### Amendment (2026-11-14) — a pure gates.yaml append rides a train
+
+#13837 put every `gates.yaml` change in the strict lane. Its reason was that one edit can retire or weaken a privileged gate without touching that gate's script, and settle cannot tell such an edit apart because it has no YAML parser. That reason does not apply to an append. Measured on 40 merged non-bot PRs from 2026-11-10..13: 15 took the strict lane, where the wait from arm to merge was p50 5.3 h against 1.4 h on the train. 8 of those 15 changed `gates.yaml`, nearly all to add a gate next to its new `check-*.py`, which is gate code that already rides.
+
+A member qualifies when its `gates.yaml` (merge-base against verified head) is the old file plus whole new entries only. This is decided by text, with `gates_append_problem`:
+- every existing `  - id:` block is byte-identical and in the same order;
+- the text before the first entry is unchanged;
+- every new id is unused, both on main and in the file;
+- every line of a new entry is indented under it, so no top-level key can be added;
+- no new line defines a YAML anchor, which could redefine an alias that a later entry already reads.
+
+Anything else returns a reason, and the member stays in the strict lane as before.
+
+The rule is checked three times: in settle on the member's own diff, at build over the train built so far (so two appends in one train stack), and again at publish, where anything beyond a pure append is a member fault. An appended member counts as gate code, so it never shares a train with a regeneration commit. `.github/` stays protected from the fast lane.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
