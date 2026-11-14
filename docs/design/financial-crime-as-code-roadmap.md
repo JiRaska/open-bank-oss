@@ -178,14 +178,23 @@ contract, including AML/fraud effect separation. Executed schema-agreement fixtu
 both domains and structural negatives. Compilation remains authoritative for semantic
 checks (exact vocabulary pins/codes, validity, Long range, rule identity and feature
 consistency), source size and duplicate-key rejection. JSON Schema alone is not a trust
-check. At that stage vocabulary authoring remained typed; the next section records its
-JSON boundary. No registry was introduced.
+check. At that stage vocabulary authoring remained typed. The vocabulary source section
+records its JSON boundary. No registry was introduced.
 
-Still required under #13775: authentic source/snapshot adapters, CLI/HTTP/MCP integration,
+At this source-boundary milestone, #13775 still required authentic source/snapshot adapters, CLI/HTTP/MCP integration,
 DecisionRecord integration, evidence-bound independent approval/signature, SHADOW epochs,
 replica consistency, real HTTP/DB/outbox/concurrency tests and the full enforced
 fincrime-pack-conformance gate. No approval, signature, activation, production caller,
 threshold writer or payment enforcement is enabled by decoding a source.
+
+## K0 offline CLI proof
+
+`obp fincrime proof` replays the checked-in synthetic AML and fraud vectors through
+`FincrimeVocabularyJson`, `CountPackJson` and `CountPackReplay`. It checks the change at a
+fixed count boundary, preserves the incomplete result for a missing input, and emits the
+pack and input hashes plus actual evaluated rule counts in canonical JSON. The command
+accepts no input files. The runtime and activation conformance requirements remain tracked
+in #13775.
 
 ## K0 vocabulary source boundary
 
@@ -210,7 +219,7 @@ compilation additionally enforces text/Unicode, exact numeric, validity and uniq
 invariants. Schema lengths count code points, while typed text bounds count UTF-16 units.
 Authored provenance is not authenticated evidence, and a digest does not confer authority.
 
-This closes only vocabulary JSON authoring in #13775. Authentic source/snapshot adapters,
+This milestone covers vocabulary JSON authoring in #13775. Authentic source/snapshot adapters,
 CLI/HTTP/MCP parity, generated catalogues, independent evidence-bound approvals/signatures,
 DecisionRecord integration, SHADOW epochs/rollback/replica consistency, real HTTP/DB/outbox
 and concurrency proof, and the full fincrime-pack-conformance gate remain open. No production

@@ -35,3 +35,38 @@ statement-service je adresovaná `accountId` a nemá objekt výpisu s vlastním 
 `STATEMENT` neodkazuje na nic, co by vlastnící služba uměla dohledat. Id platby se neresolvuje v
 žádné jedné službě: platby vlastní šest railů a nic nemapuje id na rail. Ani jeden typ nemá koho se
 zeptat, takže oba zůstávají odmítané, dokud ty páry neodejdou z matice capabilities.
+
+### Opravy katalogu presetů jsou dopředné migrace (ADR-0375 D7)
+
+Katalog rolí se seeduje migrací a preset může být špatně způsobem, kterého si nikdo nevšimne,
+dokud je špatně i vynucování kolem něj. „Účetní" a „Pokladník" udělují `ACCOUNT_READ_BALANCES` bez
+`ACCOUNT_VIEW_DETAILS`; to bylo neviditelné tak dlouho, dokud se čtení detailu účtu na edge ptalo
+na capability pro zůstatky. V33 oběma presetům chybějící capability doplňuje.
+
+Sahá to jen na KATALOG. Už vystavené granty jsou neměnné snímky — grant nese to, s čím poskytovatel
+v té chvíli souhlasil, a jeho dodatečné rozšíření by znamenalo, že tahle služba edituje někomu
+mandát. Stávající držitel těch dvou rolí si nechává zůstatky i transakce a o detail účtu přijde,
+dokud mu poskytovatel nesdílí znovu z opraveného presetu.
+
+## Rezervace limitu vypořádané výsledkem platby (dodatek ADR-0249 D3, #16000)
+
+Rezervace limitu tuzemské platby se vypořádá podle toho, jak platba skutečně skončila, ne podle
+toho, že ji platební kanál přijal. `DomesticPaymentOutcomeConsumer` čte
+`openbank.domestic.payment.events` (skupina `delegation-service-domestic-payment-outcomes`) a
+rozhoduje podle hlavičky `ce-type`:
+
+| Událost | Rezervace |
+|---|---|
+| `domestic.payment.status-changed`, `newStatus` SETTLED | RESERVED → CONFIRMED |
+| … REJECTED, CANCELLED; `domestic.delegated-spend.finalized-absent` | RESERVED → RELEASED |
+| … RETURNED | RESERVED nebo CONFIRMED → RELEASED (jediná cesta ze stavu CONFIRMED) |
+| bez `reservationId`, nekoncový stav, `created`, `held` | beze změny (`ignored`) |
+| jiný nebo chybějící `ce-type`, nečitelné tělo | beze změny (`unrecognised`, s alertem) |
+
+Opakovaně doručený výsledek nic nezmění; protichůdný se potvrdí a započítá jako `conflict`. Každý
+záznam se počítá v `openbank_delegation_payment_outcome_events_total{outcome}`. Do
+`openbank.dlq.delegation.domestic-payment-events-in` jde jen záznam, jehož zápis selhal.
+
+Konzument je vypnutý, dokud není `OPENBANK_DELEGATION_PAYMENT_OUTCOME_CONSUMER_ENABLED=true`;
+vypnutý kanál vůbec neexistuje. Pořadí zapnutí: tento konzument, potom vazba rezervace v platebním
+kanálu, potom edge přestane potvrzovat na odpověď 2xx.

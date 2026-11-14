@@ -72,7 +72,7 @@ Flyway, neměnné historické skripty, pouze dopředu:
 ## Referenční data jurisdikcí
 
 `sanctions_jurisdictions` (V21) obsahuje země pod embargem a vysoce rizikové země: `list_type`,
-`source_list`, `country_code`, `measure` (`EMBARGO` | `HIGH_RISK`), `version`, `source_ref`,
+`source_list`, `country_code`, `measure` (`EMBARGO` | `HIGH_RISK` | `RISK_FACTOR`), `version`, `source_ref`,
 `published_on`, `verified_on`, `active`. `list_type` je listina, pod kterou se řádek při prověření
 použije; `source_list` je vydání, ze kterého byl převzat.
 
@@ -86,11 +86,13 @@ uvedeny, je rozhodnutí compliance zaznamenané v migraci, která je přidá.
 | `source_list` | Naplněno | Zdroj |
 |---|---|---|
 | `EU_HIGH_RISK_THIRD_COUNTRIES` | V22 — 26 zemí, všechny `HIGH_RISK` | Nařízení Komise v přenesené pravomoci (EU) 2016/1675, příloha, konsolidované znění z 29. 1. 2026; porovnáno s EUR-Lex 11. 11. 2026 |
-| `FATF_CALL_FOR_ACTION` | nenaplněno | web vydavatele se nepodařilo načíst; žádný řádek se nezapisuje zpaměti |
-| `FATF_INCREASED_MONITORING` | nenaplněno | totéž |
+| `FATF_CALL_FOR_ACTION` | V24 — KP, IR (protiopatření), MM (posílená due diligence), všechny `HIGH_RISK` | prohlášení FATF z 30. 10. 2026, převzato z oficiálního překladu japonského ministerstva financí (SHA-256 ve V24), ověřeno proti FinCEN; porovnáno 14. 11. 2026 |
+| `FATF_INCREASED_MONITORING` | V24 — 18 zemí, všechny `RISK_FACTOR` | prohlášení FATF z 30. 10. 2026, stejný zdroj a kontrola |
 
-Žádný řádek nemá `EMBARGO`: nařízení EU ukládá posílenou due diligence, nikoli zákaz, a žádný
-dosud načtený zdroj embargo země neuvádí.
+Žádný řádek nemá `EMBARGO`: nařízení EU ukládá posílenou due diligence, nikoli zákaz, a ani ono,
+ani prohlášení FATF embargo země nevyhlašuje. Řádky `RISK_FACTOR` nikdy nejsou nálezem prověření
+(ADR-0032, dodatek z 14. 11. 2026): šedý seznam FATF je rizikový faktor pro hodnocení rizika
+klienta, ne důvod k přezkumu. Tyto řádky mají `list_type = COUNTRY_RISK_FACTOR`, což není žádná prověřovací listina, takže je žádné prověření — této ani předchozí verze — nevybere; proto je návrat k předchozí verzi bezpečný bez ručního kroku.
 
 **Stárnutí.** Tyto listiny se mění několikrát ročně a nic je neimportuje, proto každý řádek nese
 datum svého vydání (`published_on`) a datum posledního porovnání se zdrojem (`verified_on`).

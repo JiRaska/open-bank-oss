@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: wealth-service
     app.kubernetes.io/part-of: wealth
   annotations:
-    openbank.tech/policy-checksum: "f3e51204430f045b"
+    openbank.tech/policy-checksum: "29b1d7ad7e625a3b"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2164,6 +2164,10 @@ data:
             - kyb.case.reject
             - kyb.case.review.resolve
             - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
+            - kyb.monitoring.finding.decide    # #16028: decide an ongoing-monitoring finding (human reviewer only)
+            - kyb.monitoring.queue.list        # #16028: ongoing-monitoring holds queue
+            - kyb.monitoring.exit.propose      # #16028: four-eyes exit, maker
+            - kyb.monitoring.exit.confirm      # #16028: four-eyes exit, checker (code refuses checker == maker)
         ROLE_AUDITOR:
           grant:
             - audit.trail.inspect

@@ -1,6 +1,6 @@
 {
   "name": "openbank-admin-ui",
-  "version": "4.13.0",
+  "version": "4.14.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -82,6 +82,12 @@
     },
     "@typescript-eslint/typescript-estree": {
       "minimatch": "11.0.1"
+    },
+    "@stryker-mutator/core": {
+      "minimatch": "11.0.1"
+    },
+    "typed-rest-client": {
+      "qs": "6.16.1"
     }
   },
   "devDependencies": {
