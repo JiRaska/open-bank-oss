@@ -16,6 +16,7 @@ import com.openbank.aml.domain.event.toCreatedEvent
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.CaseOrigin
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
@@ -221,7 +222,7 @@ internal fun ObjectMapper.statusChangedPayload(event: AmlCaseStatusChangedEvent)
 
 /** The status-changed event of a transition from [previous] to [current]; `origin` only for the hold intake's case. */
 internal fun ObjectMapper.statusChangedEvent(previous: AmlCase, current: AmlCase): OutboxMessage = OutboxMessage(
-    eventId = UUID.randomUUID(),
+    eventId = Ids.newId(),
     aggregateId = current.id,
     eventType = AmlCaseService.EVENT_STATUS_CHANGED,
     payload = statusChangedPayload(
