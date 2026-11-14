@@ -308,7 +308,7 @@ spec:
                 fieldPath: metadata.namespace
           - name: canary-hash
             valueFrom:
-              podTemplateHashValue: Canary
+              podTemplateHashValue: Latest
       # One replica cannot express a 10%/30% weight (canary-rollout-realisable), so the new pod
       # takes all traffic at once and the money-path analysis runs against it for a 10 min hold
       # before the old ReplicaSet is scaled down.
