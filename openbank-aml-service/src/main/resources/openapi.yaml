@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: AML Service API
-  version: 1.5.0
+  version: 1.6.0
   description: >-
     Anti-Money Laundering screening case lifecycle — submit, review, and decide AML cases.
   license:
@@ -31,6 +31,9 @@ paths:
         the stored 201, reusing the key with a different body is refused with 409
         IDEMPOTENCY_KEY_REUSED, and a duplicate arriving while the first is still processing is
         refused with 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
+        A key in a namespace the service writes itself (`tm:`, `payment-hold:`) is
+        refused with 400: those cases are opened by the service's own jobs and consumers only.
+        The all-zero UUID is refused as `partyId`.
       operationId: createAmlCase
       parameters:
         - $ref: '#/components/parameters/idempotencyKey'
@@ -88,6 +91,13 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: partyResolved
+          in: query
+          description: >-
+            `false` narrows to cases whose owning party is not established, `true` to cases whose
+            party is; omit it for both.
+          schema:
+            type: boolean
         - name: screeningType
           in: query
           schema:
@@ -665,6 +675,10 @@ components:
         partyId:
           type: string
           format: uuid
+          description: >-
+            The party the case is about. Meaningful only when `partyResolved` is true: while the
+            party is not established this is the all-zero UUID (or, on older cases, a copy of
+            `accountId`), which identifies nobody.
         accountId:
           type: string
           format: uuid
@@ -717,6 +731,12 @@ components:
             True when the case can be closed or escalated only through an approved four-eyes
             disposition proposal (`/api/v1/aml/monitoring/...`). For such a case `PUT /decision`
             accepts only UNDER_REVIEW.
+        partyResolved:
+          type: boolean
+          description: >-
+            False while the owning party of the case is not established, for example a held payment
+            whose rail could not name the debtor's party. The service resolves it from `accountId`
+            afterwards; until then `partyId` does not identify a party.
 
     ApiError:
       type: object

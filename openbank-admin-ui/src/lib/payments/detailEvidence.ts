@@ -39,7 +39,17 @@ export interface PaymentDetailEvidence {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const CURRENCY = /^[A-Z]{3}$/
 const SEPA_STATUSES = new Set(['RECEIVED', 'VALIDATED', 'PROCESSING', 'COMPLETED', 'REJECTED', 'RETURNED', 'CANCELLED'])
-const DOMESTIC_STATUSES = new Set(['RECEIVED', 'VALIDATED', 'SENT_TO_CLEARING', 'SETTLED', 'REJECTED', 'RETURNED', 'CANCELLED'])
+
+/**
+ * Every status the domestic rail declares, in its own order. HELD follows RECEIVED: the payment is
+ * parked before execution and waits for a control to answer or for a case decision, and leaves the
+ * hold only to VALIDATED or REJECTED. A status missing here makes the parser below answer null, so
+ * `domestic-payment-vocabulary.test.ts` holds this list to the rail's enum.
+ */
+export const DOMESTIC_PAYMENT_STATUSES = [
+  'RECEIVED', 'HELD', 'VALIDATED', 'SENT_TO_CLEARING', 'SETTLED', 'REJECTED', 'RETURNED', 'CANCELLED',
+] as const
+const DOMESTIC_STATUSES = new Set<string>(DOMESTIC_PAYMENT_STATUSES)
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)

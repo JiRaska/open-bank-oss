@@ -17,7 +17,9 @@ import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepositor
 import com.openbank.domestic.application.port.out.DelegationAuthorityPort
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
-import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
+import com.openbank.domestic.application.workflow.DomesticPaymentRuns
+import com.openbank.domestic.application.workflow.PaymentAdmissionConfig
+import com.openbank.domestic.application.workflow.ScreeningRedriveConfig
 import com.openbank.domestic.application.workflow.domesticPaymentWorkflowId
 import com.openbank.domestic.domain.error.DomesticSchemeRules
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
@@ -35,11 +37,18 @@ import com.openbank.libs.fincrime.admission.DelegationFactsLookup
 import com.openbank.libs.fincrime.admission.StepOutcome
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import io.grpc.Status
+import io.grpc.StatusRuntimeException
+import io.temporal.api.common.v1.WorkflowExecution
+import io.temporal.api.enums.v1.WorkflowExecutionStatus
+import io.temporal.api.workflowservice.v1.DescribeWorkflowExecutionRequest
 import io.temporal.client.WorkflowClient
-import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -109,7 +118,22 @@ class DomesticPaymentService(
     @Inject
     lateinit var delegationAuthorityPort: DelegationAuthorityPort
 
+    /**
+     * Whether payment admission owns RECEIVED on this rail. Field-injected so neither constructor,
+     * nor any test that calls one, changes shape; the initial value is what a hand-built service
+     * gets, and the container replaces it.
+     */
+    @Inject
+    var admission: PaymentAdmissionConfig = PaymentAdmissionConfig(enabled = false)
+
+    /** The re-drive budget, to tell a payment the re-drive will still pick up from one it will not. */
+    @Inject
+    var redrive: ScreeningRedriveConfig = ScreeningRedriveConfig(maxAttempts = DEFAULT_REDRIVE_MAX_ATTEMPTS)
+
+    private val log = Logger.getLogger(DomesticPaymentService::class.java)
+
     companion object {
+        private const val DEFAULT_REDRIVE_MAX_ATTEMPTS = 5
         private const val PAYMENT_CREATED_EVENT = "domestic.payment.created"
         private const val PAYMENT_STATUS_CHANGED_EVENT = "domestic.payment.status-changed"
 
@@ -359,14 +383,7 @@ class DomesticPaymentService(
     )
 
     private fun startWorkflow(paymentId: UUID) {
-        val stub = workflowClient.newWorkflowStub(
-            DomesticPaymentWorkflow::class.java,
-            WorkflowOptions.newBuilder()
-                .setTaskQueue(temporalTaskQueue)
-                .setWorkflowId(domesticPaymentWorkflowId(paymentId))
-                .build(),
-        )
-        WorkflowClient.start(stub::process, paymentId)
+        DomesticPaymentRuns(workflowClient, temporalTaskQueue).start(paymentId, chainOn = admission.enabled)
     }
 
     private fun DelegatedDomesticPaymentResult.acceptedOrNull(): CreateDomesticPaymentResult? =
@@ -455,6 +472,10 @@ class DomesticPaymentService(
         val payment = paymentRepository.findById(command.paymentId)
             ?: throw DomesticPaymentNotFoundException(command.paymentId)
 
+        admissionRefusal(payment, command.targetStatus)?.let {
+            throw InvalidDomesticPaymentStateTransitionException(it)
+        }
+
         if (!payment.canTransitionTo(command.targetStatus)) {
             throw InvalidDomesticPaymentStateTransitionException(
                 "Invalid domestic payment status transition: ${payment.status} -> ${command.targetStatus}",
@@ -498,6 +519,65 @@ class DomesticPaymentService(
                 payload = eventPublisher.statusChangedPayload(payment, updated),
             ),
         )
+    }
+
+    /**
+     * ADR-0374 D13: why the status endpoint may not make this move, or null when it may.
+     *
+     * Leaving HELD is the admission chain's and the case decision's alone. With the chain on so is
+     * leaving RECEIVED, for as long as something can still act on the payment: a status written
+     * here restarts no workflow, so it would move a payment past controls that never ran, or orphan
+     * the run working on it.
+     *
+     * "As long as something can still act" is the part that has an end. A RECEIVED payment whose
+     * re-drive budget is spent and which has no open run is picked up by nothing, ever, so refusing
+     * it here too would leave it with no exit at all. That payment may be ended by an operator,
+     * REJECTED or CANCELLED and nothing else: an operator may refuse a payment admission never
+     * finished with, and may not wave it through.
+     *
+     * While the chain is off a RECEIVED payment keeps the exit it always had.
+     */
+    private suspend fun admissionRefusal(payment: DomesticPayment, target: DomesticPaymentStatus): String? {
+        val owned = "A ${payment.status} domestic payment leaves that status only through payment admission"
+        return when {
+            payment.status == DomesticPaymentStatus.HELD -> owned
+            payment.status != DomesticPaymentStatus.RECEIVED || !admission.enabled -> null
+            paymentRepository.redriveAttempts(payment.id) < redrive.maxAttempts ->
+                "$owned; its re-drive has attempts left"
+            hasOpenRun(payment.id) -> "$owned; a workflow run is open for it"
+            target != DomesticPaymentStatus.REJECTED && target != DomesticPaymentStatus.CANCELLED ->
+                "A RECEIVED domestic payment that admission no longer acts on may only be REJECTED or CANCELLED"
+            else -> null
+        }
+    }
+
+    /**
+     * Whether Temporal has an open run for the payment. Anything short of a clear "no" counts as
+     * open: when Temporal cannot be asked, the endpoint refuses rather than risk orphaning a run.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun hasOpenRun(paymentId: UUID): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val described = workflowClient.workflowServiceStubs.blockingStub().describeWorkflowExecution(
+                DescribeWorkflowExecutionRequest.newBuilder()
+                    .setNamespace(workflowClient.options.namespace)
+                    .setExecution(
+                        WorkflowExecution.newBuilder().setWorkflowId(domesticPaymentWorkflowId(paymentId)).build(),
+                    )
+                    .build(),
+            )
+            described.workflowExecutionInfo.status == WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_RUNNING
+        } catch (ex: StatusRuntimeException) {
+            if (ex.status.code == Status.Code.NOT_FOUND) {
+                false
+            } else {
+                log.warnf(ex, "Could not establish whether payment %s has an open run; treating it as open", paymentId)
+                true
+            }
+        } catch (ex: Exception) {
+            log.warnf(ex, "Could not establish whether payment %s has an open run; treating it as open", paymentId)
+            true
+        }
     }
 
     private fun generateEndToEndId(priority: DomesticPaymentPriority): String =

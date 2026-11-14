@@ -4,6 +4,7 @@
 
 package com.openbank.domestic.application.workflow
 
+import com.openbank.domestic.application.admission.DomesticScreeningScope
 import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.AmlCasePort
 import com.openbank.domestic.application.port.out.CustomerNotificationPort
@@ -24,7 +25,6 @@ import com.openbank.domestic.application.port.out.customerSafeReason
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
-import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.libs.fincrime.AmlCaseSeverity
 import com.openbank.libs.fincrime.FraudVerdict
 import com.openbank.libs.fincrime.ScreeningDecision
@@ -87,12 +87,9 @@ open class DomesticPaymentActivitiesImpl(
         val payment = paymentRepository.findById(paymentId)
             ?: error("Payment $paymentId not found during screening activity")
 
-        when (payment.transferScope) {
-            DomesticTransferScope.OWN_ACCOUNTS, DomesticTransferScope.TECHNICAL_ACCOUNT -> {
-                log.infof("%s transfer %s — sanctions screening skipped (SDD)", payment.transferScope, paymentId)
-                return@vtx ScreeningDecision.CLEAR
-            }
-            else -> Unit
+        if (!DomesticScreeningScope.isScreened(payment.transferScope)) {
+            log.infof("%s transfer %s — sanctions screening skipped (SDD)", payment.transferScope, paymentId)
+            return@vtx ScreeningDecision.CLEAR
         }
 
         val results = try {
@@ -129,11 +126,8 @@ open class DomesticPaymentActivitiesImpl(
     /** SDD for INTERNAL_CLIENT: bank holds full KYC on both parties — POTENTIAL_HIT is not
      *  actionable and must not escalate to REVIEW hold (AMLD4 Art. 15–17). */
     private fun applySddPolicy(payment: DomesticPayment, raw: ScreeningDecision, paymentId: UUID): ScreeningDecision =
-        if (payment.transferScope == DomesticTransferScope.INTERNAL_CLIENT && raw == ScreeningDecision.REVIEW) {
-            log.infof("INTERNAL_CLIENT payment %s: downgrading REVIEW → CLEAR under SDD", paymentId)
-            ScreeningDecision.CLEAR
-        } else {
-            raw
+        DomesticScreeningScope.apply(payment.transferScope, raw).also {
+            if (it != raw) log.infof("INTERNAL_CLIENT payment %s: downgrading REVIEW → CLEAR under SDD", paymentId)
         }
 
     private suspend fun openSanctionsCase(

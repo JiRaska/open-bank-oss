@@ -4,19 +4,18 @@
 package com.openbank.domestic.infrastructure.scheduler
 
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
-import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
-import com.openbank.domestic.application.workflow.domesticPaymentWorkflowId
+import com.openbank.domestic.application.workflow.DomesticPaymentRuns
+import com.openbank.domestic.application.workflow.PaymentAdmissionConfig
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
+import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
-import io.temporal.api.enums.v1.WorkflowIdConflictPolicy
-import io.temporal.api.enums.v1.WorkflowIdReusePolicy
 import io.temporal.client.WorkflowClient
-import io.temporal.client.WorkflowExecutionAlreadyStarted
-import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
+import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -25,6 +24,7 @@ import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 
 /**
  * Re-screens payments left holding on an unavailable sanctions check (#3266).
@@ -91,6 +91,16 @@ class ScreeningRedriveScheduler {
     @ConfigProperty(name = "openbank.temporal.task-queue", defaultValue = "openbank-domestic-payments")
     lateinit var temporalTaskQueue: String
 
+    /** The rail's admission switch, as the starter of a run reads it (see AdmissionRun). */
+    @Inject
+    var admission: PaymentAdmissionConfig = PaymentAdmissionConfig(enabled = false)
+
+    @Inject
+    var registry: Instance<MeterRegistry>? = null
+    private val recoveredHolds: Counter? by lazy {
+        registry?.takeIf { it.isResolvable }?.get()?.counter(RECOVERED_HOLDS_METRIC)
+    }
+
     private val log = Logger.getLogger(ScreeningRedriveScheduler::class.java)
     private var liveness: WorkflowLivenessRecorder? = null
 
@@ -109,53 +119,26 @@ class ScreeningRedriveScheduler {
             return
         }
         val minAge = Instant.now(clock).minus(Duration.ofMinutes(minAgeMinutes))
-        val stuck = paymentRepository.findRedrivable(maxAttempts, minAge, batchLimit)
-        if (stuck.isEmpty()) {
-            liveness?.recordSuccess()
-            return
-        }
-
-        log.infof("[screening-redrive] re-screening %d payment(s) held in RECEIVED", stuck.size)
-        var hadFailure = false
-        for (paymentId in stuck) {
-            // Counted BEFORE the attempt: a re-drive that dies mid-flight must still consume its
-            // budget, or a payment that reliably kills the sweep is retried forever.
-            paymentRepository.recordRedriveAttempt(paymentId)
-            try {
-                // Temporal's start is a BLOCKING gRPC call. This method is `suspend`, so Quarkus
-                // dispatches it on a duplicated Vert.x context — blocking there stalls the event
-                // loop, and with ConcurrentExecution.SKIP one stalled tick wedges every later one.
-                // Measured: the sweep re-drove exactly one payment and then never ran again.
-                withContext(Dispatchers.IO) {
-                    val stub = workflowClient.newWorkflowStub(
-                        DomesticPaymentWorkflow::class.java,
-                        WorkflowOptions.newBuilder()
-                            .setTaskQueue(temporalTaskQueue)
-                            // The SAME id as the first run, with the reuse policy stated rather than
-                            // inherited: a new run may start only once the previous one has closed.
-                            // A fraud-hold decision is signalled to this id and so always reaches the
-                            // current run; a per-attempt id stranded it on the closed one and let the
-                            // re-driven hold time out into REJECTED.
-                            .setWorkflowId(domesticPaymentWorkflowId(paymentId))
-                            .setWorkflowIdReusePolicy(WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE)
-                            .setWorkflowIdConflictPolicy(WorkflowIdConflictPolicy.WORKFLOW_ID_CONFLICT_POLICY_FAIL)
-                            .build(),
-                    )
-                    WorkflowClient.start(stub::process, paymentId)
+        val runs = DomesticPaymentRuns(workflowClient, temporalTaskQueue)
+        // Read here, on the scheduler's own thread, and not inside the blocking call below.
+        // The one boundary: with the chain off, re-driving RECEIVED payments reads, writes and counts
+        // exactly as main does. Only the chain-on path and HELD payments use `run_checked_at`.
+        val chainOn = admission.enabled
+        var hadFailure = if (chainOn) redriveChainOn(runs, minAge) else redriveAsMain(runs, minAge)
+        val held = paymentRepository.findHeldToReconcile(minAge, HELD_BATCH_LIMIT)
+        // ADR-0374: a HELD payment lives only as long as its workflow run does. The run is what
+        // re-evaluates it, applies its case's decision and expires it, so a HELD payment whose run
+        // is gone (failed, terminated, timed out) would stay HELD for good. Every tick offers a run
+        // to the least recently checked holds; Temporal refuses the offer while a run is open, which
+        // is the normal case, costs one call and is not logged.
+        for (ref in held) {
+            when (offerRun(ref.paymentId) { runs.recoverHeld(ref.paymentId) }) {
+                true -> {
+                    recoveredHolds?.increment()
+                    log.warnf("[screening-redrive] HELD payment %s had no open run; started one", ref.paymentId)
                 }
-                log.infof("[screening-redrive] re-drove payment %s", paymentId)
-            } catch (_: WorkflowExecutionAlreadyStarted) {
-                // A run for this payment is still open — typically a fraud hold awaiting an analyst,
-                // during which the payment stays RECEIVED. Starting a second run would re-screen,
-                // re-score and hold the payment twice in parallel; leaving it alone is correct.
-                // The attempt counted above is spent without a re-drive, and that is harmless: a run
-                // that reached the fraud hold has already cleared screening, so it ends VALIDATED or
-                // REJECTED and never returns the payment to RECEIVED for this sweep to need.
-                log.infof("[screening-redrive] payment %s still has an open run; not re-driven", paymentId)
-            } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
-                // One payment must not abort the sweep for the rest — the #846 shape.
-                hadFailure = true
-                log.warnf(ex, "[screening-redrive] could not re-drive payment %s", paymentId)
+                false -> Unit
+                null -> hadFailure = true
             }
         }
         if (!hadFailure) {
@@ -163,10 +146,89 @@ class ScreeningRedriveScheduler {
         }
     }
 
+    /**
+     * Main's re-drive, unchanged: the attempt is counted BEFORE it is made, so a payment whose
+     * re-drive keeps failing (Temporal unreachable, a run stuck open) spends its budget and becomes
+     * visible as exhausted (`countRedriveExhausted`) instead of being retried forever.
+     */
+    private suspend fun redriveAsMain(runs: DomesticPaymentRuns, minAge: Instant): Boolean {
+        val stuck = paymentRepository.findRedrivable(maxAttempts, minAge, batchLimit)
+        if (stuck.isNotEmpty()) {
+            log.infof("[screening-redrive] re-screening %d payment(s) held in RECEIVED", stuck.size)
+        }
+        var hadFailure = false
+        for (paymentId in stuck) {
+            paymentRepository.recordRedriveAttempt(paymentId)
+            try {
+                val started = withContext(Dispatchers.IO) { runs.redrive(paymentId, chainOn = false) }
+                if (started) {
+                    log.infof("[screening-redrive] re-drove payment %s", paymentId)
+                } else {
+                    log.infof("[screening-redrive] payment %s still has an open run; not re-driven", paymentId)
+                }
+            } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
+                hadFailure = true
+                log.warnf(ex, "[screening-redrive] could not re-drive payment %s", paymentId)
+            }
+        }
+        return hadFailure
+    }
+
+    /** The chain-on re-drive: payments least recently offered a run first; only a started run counts. */
+    private suspend fun redriveChainOn(runs: DomesticPaymentRuns, minAge: Instant): Boolean {
+        val stuck = paymentRepository.findRedrivableLeastRecentlyChecked(maxAttempts, minAge, batchLimit)
+        if (stuck.isNotEmpty()) {
+            log.infof("[screening-redrive] re-screening %d payment(s) held in RECEIVED", stuck.size)
+        }
+        var hadFailure = false
+        for (paymentId in stuck) {
+            when (offerRun(paymentId) { runs.redrive(paymentId, chainOn = true) }) {
+                // The budget counts re-drives, and a re-drive is a run that was started. An offer
+                // Temporal refused because a run is still open spends nothing.
+                true -> {
+                    paymentRepository.recordRedriveAttempt(paymentId)
+                    log.infof("[screening-redrive] re-drove payment %s", paymentId)
+                }
+                false -> log.infof("[screening-redrive] payment %s still has an open run; not re-driven", paymentId)
+                null -> hadFailure = true
+            }
+        }
+        return hadFailure
+    }
+
+    /**
+     * Offer the payment a run. True when one was started, false when one was already open, null
+     * when the offer itself failed. The check is noted BEFORE the offer, so a payment whose offer
+     * kills the sweep goes to the back of the queue instead of heading every tick.
+     */
+    private suspend fun offerRun(paymentId: UUID, start: () -> Boolean): Boolean? {
+        paymentRepository.markRunChecked(paymentId, Instant.now(clock))
+        return try {
+            // Temporal's start is a BLOCKING gRPC call. This method is `suspend`, so Quarkus
+            // dispatches it on a duplicated Vert.x context — blocking there stalls the event
+            // loop, and with ConcurrentExecution.SKIP one stalled tick wedges every later one.
+            // Measured: the sweep re-drove exactly one payment and then never ran again.
+            withContext(Dispatchers.IO) { start() }
+        } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
+            // One payment must not abort the sweep for the rest — the #846 shape.
+            log.warnf(ex, "[screening-redrive] could not offer payment %s a run", paymentId)
+            null
+        }
+    }
+
     private companion object {
         const val DEFAULT_MAX_ATTEMPTS = 5
         const val DEFAULT_MIN_AGE_MINUTES = 10L
         const val DEFAULT_BATCH_LIMIT = 20
+
+        /**
+         * HELD payments offered a run per tick. A constant: each offer is one cheap call that
+         * Temporal refuses while a run is open, and nothing about a deployment changes that.
+         */
+        const val HELD_BATCH_LIMIT = 200
+
+        /** A HELD payment was found with no open run and given one. Any increment is a run that died. */
+        const val RECOVERED_HOLDS_METRIC = "openbank.payment.admission.hold.runs.recovered"
         const val SWEEP_INTERVAL_MINUTES = 15L
         const val WORKFLOW_NAME = "domestic-payment-screening-redrive"
     }

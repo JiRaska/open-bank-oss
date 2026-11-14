@@ -163,6 +163,21 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
+# openbank-aml-service :: channel `payment-held-in` (ADR-0374 D13)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.aml.payment-held-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-anacredit-service :: channel `lending-events-in`
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic

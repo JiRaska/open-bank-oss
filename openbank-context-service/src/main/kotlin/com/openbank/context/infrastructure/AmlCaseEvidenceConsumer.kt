@@ -33,6 +33,12 @@ class AmlCaseEvidenceConsumer(
             val type = record.headers?.lastHeader(OutboxKafkaHeaders.HEADER_EVENT_TYPE)
                 ?.value()?.toString(Charsets.UTF_8)
             require(record.topic == "openbank.aml.events") { "unexpected AML evidence topic" }
+            if (decoder.namesNoParty(message.payload)) {
+                // No party to record it under yet; aml-service restates the case once it has one.
+                Uni.createFrom().completionStage(message.ack()).awaitSuspending()
+                meters.counter("openbank_context_aml_case_events", "outcome", "party_unresolved").increment()
+                return
+            }
             val evidence = decoder.decode(message.payload, id, type)
             require(record.key == evidence.caseId.toString()) { "AML event case and broker key disagree" }
             history.append(evidence)
