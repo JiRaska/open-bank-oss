@@ -4,7 +4,7 @@
 
 package com.openbank.delegation.application.port.`in`
 
-import com.openbank.delegation.domain.model.DomesticPaymentOutcome
+import com.openbank.delegation.domain.model.PaymentMoneyEffect
 import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.delegation.domain.model.SpendReservationOperationType
 import com.openbank.libs.domain.money.Money
@@ -69,6 +69,6 @@ interface SettleSpendOnPaymentOutcomeUseCase {
     suspend fun applyPaymentOutcome(
         delegationId: UUID,
         reservationId: UUID,
-        outcome: DomesticPaymentOutcome,
+        effect: PaymentMoneyEffect,
     ): PaymentOutcomeResult
 }

@@ -21,7 +21,7 @@ import com.openbank.delegation.domain.model.CountedSpend
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
-import com.openbank.delegation.domain.model.DomesticPaymentOutcome
+import com.openbank.delegation.domain.model.PaymentMoneyEffect
 import com.openbank.delegation.domain.model.PaymentOutcomeSettlement
 import com.openbank.delegation.domain.model.SettlementDecision
 import com.openbank.delegation.domain.model.SpendCeilings
@@ -189,7 +189,7 @@ class SpendReservationService(
     override suspend fun applyPaymentOutcome(
         delegationId: UUID,
         reservationId: UUID,
-        outcome: DomesticPaymentOutcome,
+        effect: PaymentMoneyEffect,
     ): PaymentOutcomeResult {
         val grant = delegationRepository.findById(delegationId) ?: return PaymentOutcomeResult.UNKNOWN_RESERVATION
         repeat(MAX_OUTCOME_ATTEMPTS) {
@@ -198,7 +198,7 @@ class SpendReservationService(
             if (current.operationType != SpendReservationOperationType.DOMESTIC_PAYMENT) {
                 return PaymentOutcomeResult.CONFLICT
             }
-            when (val decision = PaymentOutcomeSettlement.decide(outcome, current.state)) {
+            when (val decision = PaymentOutcomeSettlement.decide(effect, current.state)) {
                 SettlementDecision.AlreadySettled -> return PaymentOutcomeResult.ALREADY_SETTLED
                 SettlementDecision.Conflict -> return PaymentOutcomeResult.CONFLICT
                 is SettlementDecision.Apply -> {

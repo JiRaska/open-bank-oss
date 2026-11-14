@@ -9,7 +9,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.port.`in`.PaymentOutcomeResult
 import com.openbank.delegation.application.port.`in`.SettleSpendOnPaymentOutcomeUseCase
-import com.openbank.delegation.domain.model.DomesticPaymentOutcome
+import com.openbank.delegation.domain.model.PaymentMoneyEffect
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.micrometer.core.instrument.MeterRegistry
@@ -79,22 +79,23 @@ class DomesticPaymentOutcomeConsumer(
 
     private suspend fun handleStatusChanged(body: String?): Outcome {
         val node = read(body) ?: return Outcome.UNRECOGNISED
-        val outcome = when (node.path("newStatus").asText()) {
-            "SETTLED" -> DomesticPaymentOutcome.SETTLED
-            "REJECTED" -> DomesticPaymentOutcome.REJECTED
-            "CANCELLED" -> DomesticPaymentOutcome.CANCELLED
-            "RETURNED" -> DomesticPaymentOutcome.RETURNED
+        // The rail's status vocabulary stays the rail's: read here as strings and translated into the
+        // only thing a reservation cares about, whether the money moved.
+        val effect = when (node.path("newStatus").asText()) {
+            "SETTLED" -> PaymentMoneyEffect.MOVED
+            "REJECTED", "CANCELLED" -> PaymentMoneyEffect.NEVER_MOVED
+            "RETURNED" -> PaymentMoneyEffect.RETURNED
             else -> return Outcome.IGNORED
         }
-        return settle(node, outcome)
+        return settle(node, effect)
     }
 
     private suspend fun handleFinalizedAbsent(body: String?): Outcome {
         val node = read(body) ?: return Outcome.UNRECOGNISED
-        return settle(node, DomesticPaymentOutcome.FINALIZED_ABSENT)
+        return settle(node, PaymentMoneyEffect.NEVER_MOVED)
     }
 
-    private suspend fun settle(node: JsonNode, outcome: DomesticPaymentOutcome): Outcome {
+    private suspend fun settle(node: JsonNode, effect: PaymentMoneyEffect): Outcome {
         val reservationId = uuid(node, "reservationId")
         val delegationId = uuid(node, "delegationId")
         if (reservationId == null || delegationId == null) {
@@ -107,12 +108,12 @@ class DomesticPaymentOutcomeConsumer(
             reservationId,
             isRetryable = EventRetry.RETRY_UNLESS_DETERMINISTIC,
         ) {
-            settlements.applyPaymentOutcome(delegationId, reservationId, outcome)
+            settlements.applyPaymentOutcome(delegationId, reservationId, effect)
         }
         if (result == PaymentOutcomeResult.CONFLICT || result == PaymentOutcomeResult.UNKNOWN_RESERVATION) {
             log.warnf(
                 "[delegation-payment-outcome] %s for reservation %s under delegation %s: %s, acking",
-                outcome,
+                effect,
                 reservationId,
                 delegationId,
                 result,
