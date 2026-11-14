@@ -153,11 +153,13 @@ spec:
               value: https://pension-service.pension.svc:8443
             - name: PENSION_FUND_SERVICE_URL
               value: https://pension-fund-service.pension-fund.svc:8443
-            # ADR-0340 B: the CRS/FATCA read models, fleet-convention plaintext ports.
+            # ADR-0340 B: the CRS/FATCA read models. party and account on their 8443 mTLS
+            # listeners (same internal-authority bucket). balance-service has no 8443 listener yet,
+            # so it stays on plaintext 8103 until one exists (tracked as a follow-up issue).
             - name: PARTY_SERVICE_URL
-              value: http://party-service.party.svc:8111
+              value: https://party-service.party.svc:8443
             - name: ACCOUNT_SERVICE_URL
-              value: http://account-service.accounts.svc:8100
+              value: https://account-service.accounts.svc:8443
             - name: BALANCE_SERVICE_URL
               value: http://balance-service.balances.svc:8103
             # openbank.statutory-returns.company-books.opened (CompanyBooks, #12496): the first day

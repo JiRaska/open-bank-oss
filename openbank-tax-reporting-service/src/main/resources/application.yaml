@@ -286,6 +286,11 @@ openbank:
         tls-configuration-name: internal-authority
       pension-fund-service:
         tls-configuration-name: internal-authority
+      # CRS/FATCA reads: party-service and account-service 8443 listeners (client auth REQUIRED).
+      party-service:
+        tls-configuration-name: internal-authority
+      account-service:
+        tls-configuration-name: internal-authority
   openbank:
     statutory-returns:
       # ADR-0336: the first period the pension company reports for, declared by the owner. Deadline
