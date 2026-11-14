@@ -58,9 +58,9 @@ spec:
               value: "0.1"
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
-            # Collect OPA decisions in advisory mode before a separate enforcement rollout.
+            # Enforced after an advisory window with no would-DENY decision logged.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
             - name: LEDGER_SERVICE_URL
               value: http://ledger-service.ledger.svc:8101
             # Supervisory submission store (finrep/postgres.yaml): reactive + JDBC (Flyway) legs onto

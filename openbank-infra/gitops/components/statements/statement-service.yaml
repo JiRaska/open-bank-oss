@@ -143,14 +143,10 @@ spec:
             # ADR-0034 Phase 5 / issue #1797: the OPA sidecar (below) is now wired, so @Authorize
             # actually reaches a PDP. Before this, statement-service ran with the app default
             # AUTHZ_ENFORCE=true and NO sidecar — so every @Authorize endpoint's PDP call failed
-            # and the interceptor failed closed (HTTP 422). Kept ADVISORY (false) for this rollout:
-            # the interceptor evaluates + records every decision but does NOT block while false, so
-            # the "would DENY" population can be confirmed empty in the live decision log before the
-            # enforce flip (a separate, deliberate follow-up per the rules.yaml four_eyes /
-            # AUTHZ_ENFORCE guardrail). The app default is `true`, so this explicit `false` is
-            # load-bearing.
+            # and the interceptor failed closed (HTTP 422). ENFORCED after an advisory window
+            # in which the live decision log recorded no would-DENY.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
             # #686 / #2945: load the account-events-in group.id override
             # (statement-service-msg-override ConfigMap, mounted below) as an external Quarkus
             # config source, so the dotted YAML key's declared value actually reaches the Kafka
