@@ -7,7 +7,7 @@ The gh shim only sees `gh` invocations. Scripts that talk to the API with urllib
 into the counter directory and puts that directory on PYTHONPATH; Python then imports it at start-up
 (site.py's `sitecustomize` hook) in every interpreter the job launches, without any script change.
 
-Hooked at http.client, which both urllib and requests sit on, so one patch covers both. Only
+Hooked at http.client's putrequest, which both urllib and requests (urllib3) go through, so one patch covers both. Only
 requests whose host is the API host are logged, as `<caller>\\tpy <METHOD> <path-without-query>\\t-`:
 no headers, no body, no query string. Like the shim it fails open: an error here never stops the
 request, and an unwritable log only loses the line.
@@ -30,11 +30,15 @@ def _install() -> None:
     api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
     hosts = {"api.github.com", (urlsplit(api_url).hostname or "").lower()} - {""}
     caller = os.path.basename(sys.argv[0]) if sys.argv and sys.argv[0] else "python"
-    original = http.client.HTTPConnection.request
+    # putrequest, not request: urllib3 2.x (under `requests`) overrides HTTPConnection.request and
+    # never calls it, but both it and http.client's own request() go through putrequest.
+    original = http.client.HTTPConnection.putrequest
 
-    def request(self, method, url, *args, **kwargs):
+    def putrequest(self, method, url, *args, **kwargs):
         try:
-            if (getattr(self, "host", "") or "").lower() in hosts:
+            # Through an HTTPS proxy `host` is the proxy; the API host is the CONNECT tunnel target.
+            host = (getattr(self, "_tunnel_host", None) or getattr(self, "host", "") or "").lower()
+            if host in hosts:
                 path = urlsplit(url).path if "://" in url else url.split("?", 1)[0]
                 what = re.sub(r"[^a-zA-Z0-9/._ -]", "_", f"py {method} {path}")[:120]
                 with open(log, "a", encoding="utf-8") as f:
@@ -43,7 +47,7 @@ def _install() -> None:
             pass
         return original(self, method, url, *args, **kwargs)
 
-    http.client.HTTPConnection.request = request
+    http.client.HTTPConnection.putrequest = putrequest
 
 
 def _chain() -> None:

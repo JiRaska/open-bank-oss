@@ -23,16 +23,41 @@ INSTALL = re.compile(r"gh-call-counter\.sh\s+install\b")
 BUDGET_LINE = re.compile(r'^"([^"]+)":\s*(\d+)\s*(#.*)?$')
 
 
-def instrumented(root: pathlib.Path) -> set[str]:
-    out = set()
+# A sparse checkout must carry these, or install fails behind continue-on-error and the job's budget
+# line describes counting that never happens (auto-retry-cancelled, caught in review of #16137).
+COUNTER_FILES = (".github/scripts/gh-call-counter.sh", ".github/scripts/gh_call_counter_site/sitecustomize.py",
+                 ".github/api-call-budgets.yaml")
+
+
+def _jobs(root: pathlib.Path):
     for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
         doc = gatelib.load_yaml(wf) or {}
         name = str(doc.get("name") or wf.stem)
         for job_id, job in (doc.get("jobs") or {}).items():
-            for step in (job or {}).get("steps") or []:
-                if INSTALL.search(str((step or {}).get("run") or "")):
-                    out.add(f"{name}/{job_id}")
-    return out
+            steps = (job or {}).get("steps") or []
+            if any(INSTALL.search(str((st or {}).get("run") or "")) for st in steps):
+                yield wf.name, f"{name}/{job_id}", steps
+
+
+def instrumented(root: pathlib.Path) -> set[str]:
+    return {label for _, label, _ in _jobs(root)}
+
+
+def sparse_errors(root: pathlib.Path) -> list[str]:
+    errors = []
+    for fname, label, steps in _jobs(root):
+        for st in steps:
+            if "actions/checkout@" not in str((st or {}).get("uses") or ""):
+                continue
+            sparse = str(((st or {}).get("with") or {}).get("sparse-checkout") or "")
+            if not sparse.strip():
+                continue
+            listed = {line.strip() for line in sparse.splitlines()}
+            missing = [f for f in COUNTER_FILES if f not in listed]
+            if missing:
+                errors.append(f"{label} ({fname}): sparse checkout omits {', '.join(missing)} - the counter "
+                              "cannot install and its budget would check nothing")
+    return errors
 
 
 def budgets(root: pathlib.Path) -> tuple[set[str], list[str]]:
@@ -60,6 +85,7 @@ def check(root: pathlib.Path) -> list[str]:
                for j in sorted(jobs - keys)]
     errors += [f"{k}: budget declared for a job that does not install gh-call-counter (renamed or removed?)"
                for k in sorted(keys - jobs)]
+    errors += sparse_errors(root)
     if not jobs:
         errors.append("no job installs gh-call-counter - the workflow parse found nothing, refusing to pass")
     return errors
@@ -75,13 +101,17 @@ def self_test() -> int:
         ("stale-entry", '"Demo/counted": 5\n"Demo/gone": 1\n', 1),
         ("malformed", '"Demo/counted": lots\n', 2),
         ("duplicate", '"Demo/counted": 5\n"Demo/counted": 6\n', 1),
+        ("sparse-without-counter", '"Demo/counted": 5\n', 1),
     ]
     bad = 0
     for name, text, want in cases:
         with tempfile.TemporaryDirectory() as d:
             root = pathlib.Path(d)
             (root / ".github/workflows").mkdir(parents=True)
-            (root / ".github/workflows/demo.yml").write_text(wf)
+            (root / ".github/workflows/demo.yml").write_text(
+                wf.replace("    steps:\n      - run: bash", "    steps:\n      - uses: actions/checkout@x\n"
+                           "        with:\n          sparse-checkout: |\n            other.py\n      - run: bash", 1)
+                if name == "sparse-without-counter" else wf)
             (root / ".github/api-call-budgets.yaml").write_text(text)
             got = check(root)
             ok = len(got) == want

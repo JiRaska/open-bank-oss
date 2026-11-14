@@ -170,6 +170,9 @@ jobs:
             .github/scripts/select-ci-reconcile-candidates.py
             .github/scripts/gh-retry.sh
             .github/scripts/gh-transient-patterns.txt
+            .github/scripts/gh-call-counter.sh
+            .github/scripts/gh_call_counter_site/sitecustomize.py
+            .github/api-call-budgets.yaml
           sparse-checkout-cone-mode: false
           persist-credentials: false
       # Through gh_retry, like every other API call in this workflow. Bare, this call was the one
@@ -318,6 +321,9 @@ jobs:
             .github/scripts/spot-kill-retry.sh
             .github/scripts/gh-retry.sh
             .github/scripts/gh-transient-patterns.txt
+            .github/scripts/gh-call-counter.sh
+            .github/scripts/gh_call_counter_site/sitecustomize.py
+            .github/api-call-budgets.yaml
           sparse-checkout-cone-mode: false
           # Under `with:`, not in the step below. #9730 inserted the assert step directly above
           # this key, which moved it into that step's `run:` script: every candidate then died on
