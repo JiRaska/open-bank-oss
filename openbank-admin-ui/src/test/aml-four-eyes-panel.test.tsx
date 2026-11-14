@@ -8,6 +8,11 @@ import { AmlFourEyesPanel } from '@/components/aml/AmlFourEyesPanel'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import type { AmlCase } from '@/lib/aml/amlCaseContract'
 
+const session = vi.hoisted(() => ({ roles: ['ROLE_COMPLIANCE'] as string[] }))
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({ data: { user: { roles: session.roles } }, status: 'authenticated' }),
+}))
+
 const amlCase: AmlCase = {
   id: '11111111-1111-4111-8111-111111111111', partyId: '22222222-2222-4222-8222-222222222222',
   accountId: null, transactionId: null, customerReference: 'tm:1', screeningType: 'TRANSACTION_MONITORING',
@@ -25,7 +30,7 @@ const vocabulary = { vocabularyId: 'v', vocabularyRevision: 1, vocabularyHash: '
   { code: 'CONFIRMED_SUSPICION', label: 'Suspicion confirmed', meaning: 'm' },
 ] }
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); session.roles = ['ROLE_COMPLIANCE'] })
 
 describe('AML four-eyes panel', () => {
   it('renders nothing for a case outside transaction monitoring', () => {
@@ -77,5 +82,17 @@ describe('AML four-eyes panel', () => {
     expect(send).toBeDisabled()
     expect(screen.getByLabelText('Assessment outcome *').querySelectorAll('option')).toHaveLength(1)
     expect(await screen.findByRole('alert')).toBeInTheDocument()
+  })
+
+  it('explains the compliance role to an officer without it, and asks the service nothing', async () => {
+    session.roles = ['ROLE_ADMIN', 'ROLE_OPERATOR']
+    const fetcher = vi.fn()
+    vi.stubGlobal('fetch', fetcher)
+    render(<LanguageProvider initialLanguage="en"><AmlFourEyesPanel amlCase={amlCase} onCaseChanged={() => {}} /></LanguageProvider>)
+    expect(screen.getByText(/reserved to the compliance role \(ROLE_COMPLIANCE\)/)).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button')).toBeNull()
+    await new Promise(r => setTimeout(r, 10))
+    expect(fetcher).not.toHaveBeenCalled()
   })
 })

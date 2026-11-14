@@ -9,6 +9,8 @@ import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.MandateRequest
 import com.openbank.kyb.application.port.out.PartyGateway
 import com.openbank.kyb.application.port.out.PepProfile
+import com.openbank.kyb.application.port.out.StatutoryRepresentationEvidence
+import com.openbank.kyb.application.port.out.StatutoryRepresentationPublisher
 import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.RegisteredAddress
 import com.openbank.libs.web.SyntheticTaintClientFilter
@@ -19,6 +21,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -108,13 +111,22 @@ interface PartyServiceRestClient {
     @Path("/{id}/mandates")
     suspend fun grantMandate(@PathParam("id") principalPartyId: UUID, body: MandateBody): Any?
 
+    @PUT
+    @Path("/{id}/statutory-representation")
+    suspend fun publishStatutoryRule(
+        @PathParam("id") principalPartyId: UUID,
+        evidence: StatutoryRepresentationEvidence,
+    )
+
     @GET
     @Path("/{id}")
     suspend fun getParty(@PathParam("id") id: UUID): PartyRecord
 }
 
 @ApplicationScoped
-class PartyServiceGateway : PartyGateway {
+class PartyServiceGateway :
+    PartyGateway,
+    StatutoryRepresentationPublisher {
 
     @Inject @RestClient
     lateinit var client: PartyServiceRestClient
@@ -174,6 +186,11 @@ class PartyServiceGateway : PartyGateway {
                 request.evidenceRef,
             ),
         )
+    }
+
+    @Timeout(PARTY_TIMEOUT_MS)
+    override suspend fun publishStatutoryRule(principalPartyId: UUID, evidence: StatutoryRepresentationEvidence) {
+        client.publishStatutoryRule(principalPartyId, evidence)
     }
 
     /**
