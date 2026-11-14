@@ -33,6 +33,9 @@
 #                      `applicability` names the trigger
 #   - `reports` lists ids from the admin-ui regulatory catalogue; the checker fails on an unknown id
 #     and on any catalogue entry that no obligation claims.
+#   - `controls` (optional) lists ids from compliance-controls.yaml that operate the duty (ADR-0379).
+#     It is the edge the admin-ui compliance hub joins on; gate `compliance-trace` fails on an
+#     unknown id. An obligation with no control is shown as a gap, not rejected.
 #
 # A watcher charter (`regulatory-obligations-watcher`) is PROPOSED separately and lands disabled
 # until a source fetcher is wired; nothing watches the cited sources today. Changes to this file
@@ -570,6 +573,7 @@ obligations:
     personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
+    controls: [fraud-monitoring]
   - id: psd2-tra-fraud-monitoring
     area: payments
     name: { cs: Monitoring míry podvodů pro výjimku TRA, en: TRA exemption fraud-rate monitoring }
@@ -585,6 +589,7 @@ obligations:
     personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
+    controls: [fraud-monitoring]
   - id: psd2-api-statistics
     area: payments
     name: { cs: Statistiky dostupnosti rozhraní PSD2, en: PSD2 dedicated-interface statistics }
@@ -647,6 +652,7 @@ obligations:
     personal_data: "no"
     applicability: always
     coverage: { status: bff-only, reports: [dora-ict], services: [], tracking: ADR-0367 }
+    controls: [observability, business-continuity]
     note: Pro úvěrové instituce nahrazuje hlášení incidentů podle PSD2 čl. 96.
   - id: dora-register-of-information
     area: ict
@@ -693,6 +699,7 @@ obligations:
     personal_data: "no"
     applicability: "conditional: instituce určená ČNB k TLPT"
     coverage: { status: conditional, reports: [], services: [], tracking: null }
+    controls: [dast-fuzzing, threat-modelling]
   - id: nis2-cyber-incident
     area: ict
     name: { cs: Hlášení kybernetického incidentu NÚKIB, en: Cyber incident report to NÚKIB }
@@ -708,6 +715,7 @@ obligations:
     personal_data: "no"
     applicability: "conditional: použitelnost vedle DORA neověřena"
     coverage: { status: conditional, reports: [], services: [], tracking: null }
+    controls: [observability, runtime-detection]
   - id: uoou-personal-data-breach
     area: ict
     name: { cs: Ohlášení porušení zabezpečení osobních údajů, en: Personal data breach notification }
@@ -723,6 +731,7 @@ obligations:
     personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: "#15756" }
+    controls: [data-classification, audit-trail]
     note: Interim runbook docs/runbooks/0035-personal-data-breach-notification.md; skutečný rejstřík se vede mimo veřejné repo, v repu je jen šablona docs/compliance/personal-data-breach-register.md; workflow v kódu zatím neexistuje.
 
   # ── AML and sanctions ─────────────────────────────────────────────────────────────────────
@@ -772,6 +781,7 @@ obligations:
     personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [openbank-sanctions-service], tracking: null }
+    controls: [sanctions-screening]
   - id: eu-russia-belarus-deposits
     area: aml
     name: { cs: Vklady ruských a běloruských osob nad 100 000 EUR, en: Russia/Belarus deposits above EUR 100k }
@@ -989,6 +999,7 @@ obligations:
     personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
+    controls: [complaints-handling]
 
   # ── Disclosure and client information ─────────────────────────────────────────────────────
   - id: pillar3-disclosure

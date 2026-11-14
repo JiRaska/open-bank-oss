@@ -3124,18 +3124,6 @@ gates:
     run: |
       python3 .github/scripts/check-ai-act-high-risk-inventory.py
 
-  # The admin-ui compliance page renders 47 regulatory-conformance claims from a hardcoded
-  # literal. #2370 found it wrong in BOTH directions — GDPR rows marked `ok` citing columns
-  # that exist only in a Flyway migration, with nothing reading them — and #2667 corrected
-  # those rows BY HAND. The checker that stops them rotting again was written at the same
-  # time and then referenced from nowhere: no workflow, no manifest entry, and nothing in
-  # this repo iterates `.github/scripts/check-*` (this runner reads the manifest, not the
-  # directory). So it had never run once (#3240).
-  #
-  # ENFORCED, same reasoning as the two gates above: the claim is published to users, the
-  # evidence citation is mechanical, and advisory over a published claim means "the page
-  # says something the code does not support" is mergeable. Green on the current tree, and
-  # `--self-test` (added with this registration) proves the red is reachable.
   # ensure-ecr-repository.sh runs on the deploy path, which CI cannot exercise: it needs AWS
   # credentials and a real registry. What CAN regress silently is its CLASSIFICATION of the
   # registry's answer, and that is exactly what broke the first attempt — #3444 read AccessDenied
@@ -3822,16 +3810,6 @@ gates:
     run: |
       python3 .github/scripts/check-route-exports.py --enforce
 
-  - id: compliance-matrix
-    name: "compliance-page evidence citations (#2370, enforced)"
-    group: registry
-    min_subjects: 1000   # 2177 Kotlin sources observed
-    mode: enforced
-    selftest_inputs: [".github/scripts/check-compliance-matrix.py"]
-    selftest: |
-      python3 .github/scripts/check-compliance-matrix.py --self-test
-    run: |
-      python3 .github/scripts/check-compliance-matrix.py --enforce
 
   # docs/compliance/openssf-gold-gap.md feeds the OpenSSF BadgeApp form -- a public
   # attestation to a third party. It shipped scoring crypto_used_network/crypto_tls12 as
@@ -3988,6 +3966,27 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-regulatory-obligations.py"]
     run: python3 .github/scripts/check-regulatory-obligations.py
+
+  # GATE-REMOVED: compliance-matrix — guarded the hand-written COMPLIANCE_AREAS literal on /docs/compliance; ADR-0379 deletes the literal and `compliance-trace` replaces the guard.
+  # GATE-REMOVED: compliance-page-evidence — same literal, same reason (ADR-0379); `compliance-trace` keeps the literal from returning.
+  # The admin-ui compliance hub (ADR-0379) joins obligation -> control -> evidence at request time
+  # from three hand-authored YAML ids. A misspelt id fails nothing at runtime; the hub would quietly
+  # show an honest-looking gap. This gate resolves every edge (gate id, workflow file, ADR, path,
+  # control id) and keeps the deleted requirement literal from returning.
+  - id: compliance-trace
+    name: "compliance trace resolves: obligation -> control -> evidence (ADR-0379, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 20   # ~0.3s locally
+    # 63 edges measured 2026-11-14 (55 evidence refs + 8 obligation links); half, so a renamed key
+    # turning the check into a green no-op over an empty catalogue goes red.
+    min_subjects: 30
+    review_after: "2027-11-14"
+    rationale: "The compliance hub is what compliance, other departments and auditors read as the platform's control posture. An edge that silently fails to resolve turns a real control into an apparent gap, or hides a gap behind evidence that does not exist."
+    selftest: python3 .github/scripts/check-compliance-trace.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-compliance-trace.py"]
+    run: python3 .github/scripts/check-compliance-trace.py --enforce
 
   - id: ai-governance-snapshot-drift
     name: "AI governance snapshot drift (ADR-0029 D3 / ADR-0031, enforced)"
@@ -6326,15 +6325,6 @@ gates:
     run: |
       python3 .github/scripts/check-threat-model-test-evidence.py --fetch-evidence --pr-base "${PR_DIFF_BASE:-}" --ratchet .github/gates/baselines/threat-model-test-evidence.txt
 
-  - id: compliance-page-evidence
-    name: "Compliance-page evidence (issue #2370, enforced)"
-    group: security
-    mode: enforced
-    selftest_inputs: [".github/scripts/check-compliance-evidence.py"]
-    selftest: |
-      python3 .github/scripts/check-compliance-evidence.py --selftest
-    run: |
-      python3 .github/scripts/check-compliance-evidence.py --enforce
 
   - id: scheduler-exercised-in-tests
     name: "Scheduler exercised in tests (issue #2204, enforced)"
