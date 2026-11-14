@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.customeredge.infrastructure.audit.EdgeAuditPublisher
 import com.openbank.customeredge.infrastructure.rest.CustomerEdgeResource
 import com.openbank.customeredge.infrastructure.rest.DelegatedBoundCreate
+import com.openbank.customeredge.infrastructure.rest.ReservationDisposition
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
 import com.openbank.customeredge.infrastructure.rest.inMemoryPaymentSessionStore
 import io.mockk.every
@@ -70,7 +71,7 @@ class DelegatedBoundCreateSwitchTest {
 
     private fun upstream(): UpstreamClient = mockk<UpstreamClient>().also { upstream ->
         every { upstream.post(match { it.endsWith("/reservations") }, any(), any()) } returns
-            Response.status(201).entity("""{"reservationId":"$RESERVATION_ID"}""").build()
+            reserved(replayed = "false")
         every { upstream.post(match { it.contains("/reservations/") }, any(), any()) } returns
             Response.ok("{}").build()
         every {
@@ -93,6 +94,11 @@ class DelegatedBoundCreateSwitchTest {
         every { upstream.post(eq(LEGACY_URL), any(), any(), any()) } returns
             Response.status(201).entity("""{"id":"$PAYMENT_ID","status":"RECEIVED"}""").build()
     }
+
+    private fun reserved(replayed: String?): Response = Response.status(201)
+        .entity("""{"reservationId":"$RESERVATION_ID"}""")
+        .apply { replayed?.let { header("X-Idempotency-Replayed", it) } }
+        .build()
 
     private fun railAnswers(upstream: UpstreamClient, vararg answers: Response) {
         every { upstream.postKeepingRetryAfter(eq(BOUND_URL), any(), any(), any()) } returnsMany answers.toList()
@@ -190,7 +196,7 @@ class DelegatedBoundCreateSwitchTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["RESERVATION_MISMATCH", "RESERVATION_NOT_RESERVED", "IDEMPOTENCY_KEY_REUSED"])
-    fun `switch on - a terminal refusal releases the reservation and answers neutrally`(code: String) {
+    fun `switch on - a terminal refusal answers neutrally and releases only on proof nothing was bound`(code: String) {
         val upstream = upstream()
         railAnswers(upstream, refusal(409, code))
 
@@ -202,7 +208,7 @@ class DelegatedBoundCreateSwitchTest {
         assertThat(answer).doesNotContain("RESERVATION", "IDEMPOTENCY", "rail detail")
         verify(exactly = 1) { upstream.postKeepingRetryAfter(any(), any(), any(), any()) }
         assertThat(sleeps).isEmpty()
-        settled(upstream, "release", 1)
+        settled(upstream, "release", if (code == "RESERVATION_MISMATCH") 1 else 0)
         settled(upstream, "confirm", 0)
         verify {
             audit.emit(
@@ -282,7 +288,7 @@ class DelegatedBoundCreateSwitchTest {
     }
 
     @Test
-    fun `switch on - a 400 about the instruction is passed through and releases`() {
+    fun `switch on - an uncoded 400 is passed through and the reservation is left to the outcome`() {
         val upstream = upstream()
         val invalid = Response.status(400).entity("""{"error":"creditorBankCode is invalid"}""").build()
         railAnswers(upstream, invalid)
@@ -291,7 +297,7 @@ class DelegatedBoundCreateSwitchTest {
 
         assertThat(resp.status).isEqualTo(400)
         assertThat(resp.entity.toString()).contains("creditorBankCode")
-        settled(upstream, "release", 1)
+        settled(upstream, "release", 0)
     }
 
     @Test
@@ -304,6 +310,42 @@ class DelegatedBoundCreateSwitchTest {
 
         verify(exactly = 0) { upstream.postKeepingRetryAfter(any(), any(), any(), any()) }
         settled(upstream, "release", 1)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["true", "absent"])
+    fun `switch on - a replayed reservation is never released, even on a pre-binding refusal`(replayed: String) {
+        val upstream = upstream()
+        every { upstream.post(match { it.endsWith("/reservations") }, any(), any()) } returns
+            reserved(replayed.takeIf { it != "absent" })
+        railAnswers(upstream, refusal(409, "RESERVATION_MISMATCH"))
+
+        val resp = resource(upstream, boundCreate = true).createDomesticPayment(body(), "idem-replay", SCA_ID)
+
+        assertThat(resp.status).isEqualTo(409)
+        settled(upstream, "release", 0)
+        settled(upstream, "confirm", 0)
+    }
+
+    @Test
+    fun `the release decision - every rail code, fresh and replayed`() {
+        val release = ReservationDisposition.RELEASE
+        val leave = ReservationDisposition.LEAVE_TO_OUTCOME
+        val fresh = mapOf(
+            "RESERVATION_PROJECTION_PENDING" to release,
+            "RESERVATION_MISMATCH" to release,
+            "ACCOUNT_AUTHORITY_UNAVAILABLE" to release,
+            "RESERVATION_NOT_RESERVED" to leave,
+            "IDEMPOTENCY_KEY_REUSED" to leave,
+            "SOMETHING_NEW" to leave,
+            null to leave,
+        )
+        fresh.forEach { (code, expected) ->
+            assertThat(DelegatedBoundCreate.dispositionForRefusal(code, reservationReplayed = false))
+                .describedAs("fresh $code").isEqualTo(expected)
+            assertThat(DelegatedBoundCreate.dispositionForRefusal(code, reservationReplayed = true))
+                .describedAs("replayed $code").isEqualTo(leave)
+        }
     }
 
     @Test

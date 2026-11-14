@@ -3751,8 +3751,9 @@ paths:
           description: >-
             Delegated payment only, with the reservation-bound create switched on (#16000):
             `code: PAYMENT_NOT_ACCEPTED`. The payment rail refused to bind the payment to its spend
-            reservation; nothing was created and the reserved headroom has been released. The
-            reason is deliberately neutral and is kept in the audit trail.
+            reservation; the edge gives the headroom back only when the rail proves nothing was
+            bound, otherwise delegation-service settles it from the payment's outcome. The reason is
+            deliberately neutral and is kept in the audit trail.
         '503':
           description: >-
             Under X-Acting-For: the company's signing policy could not be evaluated, so the

@@ -119,6 +119,11 @@ class DelegatedHeadroomOverHttpTest {
         }
         val bytes = answer.toByteArray()
         ex.responseHeaders.add("Content-Type", "application/json")
+        if (path ==
+            "/api/v1/delegations/$grantId/reservations"
+        ) {
+            ex.responseHeaders.add("X-Idempotency-Replayed", "false")
+        }
         ex.sendResponseHeaders(status, bytes.size.toLong())
         ex.responseBody.use { it.write(bytes) }
     }
@@ -207,7 +212,7 @@ class DelegatedHeadroomOverHttpTest {
     @Test
     fun `switch on - a refused bound create frees the headroom before the customer sees the answer`() {
         boundAnswer =
-            { _ -> 409 to """{"code":"RESERVATION_NOT_RESERVED","status":409,"detail":"x","retryable":false}""" }
+            { _ -> 409 to """{"code":"RESERVATION_MISMATCH","status":409,"detail":"x","retryable":false}""" }
 
         val resp = pay(edge(boundCreate = true), "idem-e2e-3")
 

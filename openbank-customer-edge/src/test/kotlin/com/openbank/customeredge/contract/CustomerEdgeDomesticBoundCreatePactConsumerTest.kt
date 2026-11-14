@@ -75,7 +75,7 @@ class CustomerEdgeDomesticBoundCreatePactConsumerTest {
          "amount":1500.00,"currency":"CZK","priority":"STANDARD"}
     """.trimIndent()
 
-    private val reservation = SpendReservation(DELEGATION_ID, RESERVATION_ID, IDEMPOTENCY_KEY)
+    private val reservation = SpendReservation(DELEGATION_ID, RESERVATION_ID, IDEMPOTENCY_KEY, replayed = false)
 
     private fun call(mockServer: MockServer) = DelegatedBoundCreate.create(
         upstream(),
@@ -150,10 +150,10 @@ class CustomerEdgeDomesticBoundCreatePactConsumerTest {
 
     @Test
     @PactTestFor(pactMethod = "boundCreateUnauthenticatedPact")
-    fun `an unauthenticated refusal is 401, released, and neutral to the customer`(mockServer: MockServer) {
+    fun `an unauthenticated refusal is 401, neutral, and left to the outcome`(mockServer: MockServer) {
         val created = call(mockServer)
 
-        assertThat(created.disposition).isEqualTo(ReservationDisposition.RELEASE)
+        assertThat(created.disposition).isEqualTo(ReservationDisposition.LEAVE_TO_OUTCOME)
         assertThat(created.railRefusalCode).isEqualTo("HTTP_401")
         assertThat(created.response.status).isEqualTo(409)
     }

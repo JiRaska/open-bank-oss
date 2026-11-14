@@ -2869,7 +2869,10 @@ class CustomerEdgeResource(
                     .build(),
             )
         }
-        return SpendReservationOutcome.Held(SpendReservation(grantId, reservationId, reservationKey))
+        // delegation-service answers 201 for a replay too and says so in this header. Absent means
+        // "cannot tell", which must be read as a replay: the bound path never releases one.
+        val replayed = resp?.getHeaderString("X-Idempotency-Replayed")?.trim()?.lowercase() != "false"
+        return SpendReservationOutcome.Held(SpendReservation(grantId, reservationId, reservationKey, replayed))
     }
 
     /**
@@ -6922,6 +6925,8 @@ internal data class SpendReservation(
     val reservationId: String,
     /** The key the reservation was taken under; the bound create must present it (#16000). */
     val idempotencyKey: String,
+    /** True unless delegation-service said this reserve CREATED it; the bound path never releases a replay. */
+    val replayed: Boolean = true,
 )
 
 /**

@@ -89,8 +89,12 @@ internal object DelegatedBoundCreate {
         actingPartyId: String,
         sleeper: (Long) -> Unit,
     ): DelegatedCreate {
+        // Nothing was sent, so nothing can be bound — but a replayed reservation may already be.
         val body = boundBody(mapper, enriched, reservation, actingPartyId)
-            ?: return DelegatedCreate(temporarilyUnavailable(HTTP_BAD_GATEWAY), ReservationDisposition.RELEASE)
+            ?: return DelegatedCreate(
+                temporarilyUnavailable(HTTP_BAD_GATEWAY),
+                if (reservation.replayed) ReservationDisposition.LEAVE_TO_OUTCOME else ReservationDisposition.RELEASE,
+            )
         var attempt = 1
         while (true) {
             val resp = upstream.postKeepingRetryAfter(
@@ -99,39 +103,64 @@ internal object DelegatedBoundCreate {
                 body,
                 reservation.idempotencyKey,
             )
-            val status = resp.status
             if (resp.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
                 return DelegatedCreate(resp, ReservationDisposition.LEAVE_TO_OUTCOME)
             }
             val code = refusalCode(mapper, resp)
-            val retryable = code in RETRYABLE && (status == HTTP_CONFLICT || status == HTTP_UNAVAILABLE)
-            when {
-                retryable && attempt < MAX_ATTEMPTS -> {
-                    sleeper(waitMillis(resp.getHeaderString("Retry-After")))
-                    attempt++
-                }
-                // Definitively nothing was created: the rail said "not yet" every time we asked.
-                retryable -> return DelegatedCreate(
-                    temporarilyUnavailable(HTTP_UNAVAILABLE),
-                    ReservationDisposition.RELEASE,
-                    code,
-                )
-                // A 4xx refusal (coded or not): the rail created nothing. A 400 is about the caller's
-                // own instruction and is passed through as the legacy route does; anything else
-                // is neutral so a mismatch cannot be used to probe the reservation.
-                status in HTTP_BAD_REQUEST until HTTP_SERVER_ERROR -> return DelegatedCreate(
-                    if (status == HTTP_BAD_REQUEST) resp else notAccepted(),
-                    ReservationDisposition.RELEASE,
-                    code ?: "HTTP_$status",
-                )
-                // Any other 5xx / transport failure: the payment MAY exist. Leave the reservation to
-                // the payment's outcome (or the rail's finalized-absent) rather than free headroom
-                // for money that may still move. A retry with the same key replays on the rail.
-                else -> return DelegatedCreate(
-                    statusUnknown(),
-                    ReservationDisposition.LEAVE_TO_OUTCOME,
-                )
+            val retryable = code in RETRYABLE && (resp.status == HTTP_CONFLICT || resp.status == HTTP_UNAVAILABLE)
+            if (retryable && attempt < MAX_ATTEMPTS) {
+                sleeper(waitMillis(resp.getHeaderString("Retry-After")))
+                attempt++
+                continue
             }
+            return DelegatedCreate(
+                customerAnswer(resp, code, retryable),
+                dispositionForRefusal(code, reservation.replayed),
+                code ?: "HTTP_${resp.status}",
+            )
+        }
+    }
+
+    /** The neutral answer the customer sees for a refusal; never names the rail's reason. */
+    private fun customerAnswer(resp: Response, code: String?, retryable: Boolean): Response = when {
+        retryable -> temporarilyUnavailable(HTTP_UNAVAILABLE)
+        // A 400 is about the caller's own instruction; passed through as the legacy route does.
+        resp.status == HTTP_BAD_REQUEST && code == null -> resp
+        resp.status in HTTP_BAD_REQUEST until HTTP_SERVER_ERROR -> notAccepted()
+        // Any other 5xx / transport failure: the payment MAY exist; the same key replays it.
+        else -> statusUnknown()
+    }
+
+    /**
+     * The ONE decision on whether the edge may give a reservation back after the rail refused
+     * (#16000). Releasing is safe only when the rail PROVES nothing was bound, and only for a
+     * reservation this request created itself: a replayed reservation may already be bound to a
+     * payment by an earlier attempt, and releasing it would free headroom for money that can still
+     * move. Everything else is left to delegation-service, which settles from the payment's
+     * terminal event or the rail's finalized-absent event. Unknown code -> never release.
+     *
+     * Which codes are pre-binding, read from domestic-payment's `createDelegatedPayment`:
+     * - RESERVATION_PROJECTION_PENDING — no binding row exists at all (lookup miss, or the
+     *   repository's ProjectionMissing).
+     * - RESERVATION_MISMATCH — returned by the pre-checks, or by the repository only when the
+     *   binding is NOT already BOUND (a BOUND one answers a replay instead).
+     * - ACCOUNT_AUTHORITY_UNAVAILABLE — returned before the repository is reached.
+     * NOT pre-binding proof: RESERVATION_NOT_RESERVED (already finalized; delegation settles it),
+     * IDEMPOTENCY_KEY_REUSED (a payment exists under this key), and every uncoded status.
+     */
+    internal fun dispositionForRefusal(code: String?, reservationReplayed: Boolean): ReservationDisposition {
+        val provesNothingBound = when (code) {
+            "RESERVATION_PROJECTION_PENDING" -> true
+            "RESERVATION_MISMATCH" -> true
+            "ACCOUNT_AUTHORITY_UNAVAILABLE" -> true
+            "RESERVATION_NOT_RESERVED" -> false
+            "IDEMPOTENCY_KEY_REUSED" -> false
+            else -> false
+        }
+        return if (provesNothingBound && !reservationReplayed) {
+            ReservationDisposition.RELEASE
+        } else {
+            ReservationDisposition.LEAVE_TO_OUTCOME
         }
     }
 
