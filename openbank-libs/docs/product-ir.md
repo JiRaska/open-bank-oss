@@ -199,10 +199,11 @@ The first replay of the reference products found four behaviours. Each was decid
 
 ## Testing
 
-openbank-libs-testing holds the golden-scenario runner, `ProductArb` property
-generators and `assertMoneyConserved`. Golden scenarios live under
-`product-golden/` in that module's resources and must be listed in its
-`index.txt`.
+The pure golden-scenario parser and runner live with the production arithmetic
+in `openbank-libs-finance`, keeping their existing JVM names. Both `obp test`
+and the conformance tests use that runner and its money-conservation check.
+`openbank-libs-testing` provides `ProductArb` and the fixture loader to tests.
+Its golden fixtures are indexed by `product-golden/index.txt`.
 
 ## Gates
 
