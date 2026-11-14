@@ -67,6 +67,14 @@ The audit trail stores the **verbatim payload** of every upstream event, so it t
 
 See [06 — Compliance](./06-compliance.md) for the lawful-basis and erasure analysis (erasure is overridden by the AML/EBA retention obligation).
 
+## Staff access to party personal data
+
+Audit-service consumes `PARTY_PII_REVEALED` from `openbank.party.audit`. Party-service
+waits for Kafka to acknowledge the record before returning unmasked fields to an authorized
+staff member. The payload has the event ID, party ID, staff subject identifier, purpose and
+event time. It carries no revealed values. The party-service KafkaUser can publish and the
+audit-service KafkaUser can read. The consumer deduplicates delivery by event ID.
+
 ## Retention
 
 - **10 years**, enforced two ways: a per-row `retention_until = occurred_at + INTERVAL '10 years'` set by the `trg_audit_retention` trigger, and the service property `openbank.gdpr.audit-retention-days: 3650`.

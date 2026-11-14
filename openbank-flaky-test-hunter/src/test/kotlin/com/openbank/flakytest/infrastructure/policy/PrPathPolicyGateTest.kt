@@ -9,6 +9,7 @@ import com.openbank.flakytest.domain.model.FindingSeverity
 import com.openbank.flakytest.domain.model.FlakyTestCheckType
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.infrastructure.config.FlakyTestHunterConfig
+import com.openbank.flakytest.infrastructure.config.WriterBaseRef
 import io.mockk.Called
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -49,6 +50,7 @@ class PrPathPolicyGateTest {
 
     private fun gateEnabled(enabled: Boolean = true) {
         every { config.policyGate() } returns gateConfig
+        every { config.writerBaseRef() } returns WriterBaseRef.MAIN
         every { gateConfig.enabled() } returns enabled
     }
 
@@ -66,8 +68,8 @@ class PrPathPolicyGateTest {
     @Test
     fun `an enabled gate with a chartered grant and an allowing OPA decision allows`() {
         gateEnabled()
-        every { charterVerifier.checkPrOpenGrant() } returns CharterGrant.Granted
-        coEvery { opa.queryPrOpenDecision() } returns OpaAgentDecision.Allowed
+        every { charterVerifier.checkPrOpenGrant("main") } returns CharterGrant.Granted
+        coEvery { opa.queryPrOpenDecision("main") } returns OpaAgentDecision.Allowed
 
         val decision = runBlocking { gate.decide(finding) }
 
@@ -77,7 +79,7 @@ class PrPathPolicyGateTest {
     @Test
     fun `a charter denial short-circuits and never queries the sidecar`() {
         gateEnabled()
-        every { charterVerifier.checkPrOpenGrant() } returns
+        every { charterVerifier.checkPrOpenGrant("main") } returns
             CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_DENIED)
 
         val decision = runBlocking { gate.decide(finding) }
@@ -89,8 +91,8 @@ class PrPathPolicyGateTest {
     @Test
     fun `an OPA policy deny carries the OPA reason`() {
         gateEnabled()
-        every { charterVerifier.checkPrOpenGrant() } returns CharterGrant.Granted
-        coEvery { opa.queryPrOpenDecision() } returns OpaAgentDecision.Denied("no matching allow rule")
+        every { charterVerifier.checkPrOpenGrant("main") } returns CharterGrant.Granted
+        coEvery { opa.queryPrOpenDecision("main") } returns OpaAgentDecision.Denied("no matching allow rule")
 
         val decision = runBlocking { gate.decide(finding) }
 
@@ -102,8 +104,8 @@ class PrPathPolicyGateTest {
     @Test
     fun `an unreachable sidecar fails closed with pdp_unreachable`() {
         gateEnabled()
-        every { charterVerifier.checkPrOpenGrant() } returns CharterGrant.Granted
-        coEvery { opa.queryPrOpenDecision() } throws OpaGateException("connection refused")
+        every { charterVerifier.checkPrOpenGrant("main") } returns CharterGrant.Granted
+        coEvery { opa.queryPrOpenDecision("main") } throws OpaGateException("connection refused")
 
         val decision = runBlocking { gate.decide(finding) }
 

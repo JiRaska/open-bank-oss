@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:catalog-schema:org.openbank.fincrime.aml-count-shadow:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "mode",
+    "evidenceClass",
+    "packId",
+    "baseline",
+    "candidate",
+    "replayDigest",
+    "evaluatedCases",
+    "changedCases"
+  ],
+  "properties": {
+    "mode": {
+      "const": "SHADOW"
+    },
+    "evidenceClass": {
+      "const": "SYNTHETIC"
+    },
+    "packId": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+    },
+    "baseline": {
+      "$ref": "#/$defs/packRevision"
+    },
+    "candidate": {
+      "$ref": "#/$defs/packRevision"
+    },
+    "replayDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "evaluatedCases": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 256
+    },
+    "changedCases": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 256
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "packRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "hash"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

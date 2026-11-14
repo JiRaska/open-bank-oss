@@ -31,7 +31,7 @@ metadata:
   namespace: ai-platform
   labels:
     app.kubernetes.io/part-of: ai-platform
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -63,7 +63,7 @@ metadata:
   namespace: ai-platform
   labels:
     app.kubernetes.io/part-of: ai-platform
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -95,7 +95,7 @@ metadata:
   namespace: ai-platform
   labels:
     app.kubernetes.io/part-of: ai-platform
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -127,7 +127,7 @@ metadata:
   namespace: ai-platform
   labels:
     app.kubernetes.io/part-of: ai-platform
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -166,7 +166,7 @@ metadata:
   namespace: ai-platform
   labels:
     app.kubernetes.io/part-of: ai-platform
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -191,7 +191,7 @@ metadata:
   namespace: ai-platform
   labels:
     app.kubernetes.io/part-of: ai-platform
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -243,7 +243,7 @@ metadata:
   namespace: ai-platform
   labels:
     app.kubernetes.io/part-of: ai-platform
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -268,7 +268,7 @@ metadata:
   namespace: ai-platform
   labels:
     app.kubernetes.io/part-of: ai-platform
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

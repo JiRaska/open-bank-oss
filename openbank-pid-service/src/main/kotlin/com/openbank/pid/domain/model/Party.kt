@@ -26,6 +26,8 @@ data class Party(
     val createdAt: OffsetDateTime,
     val updatedAt: OffsetDateTime,
     val version: Long,
+    /** GDPR Art. 17 (#15755): non-null once the party's personal data was anonymised; the row is then read-only. */
+    val erasedAt: OffsetDateTime? = null,
 ) {
     fun hasRole(role: PartyRole): Boolean =
         relationships.any { it.role == role && it.status == RelationshipStatus.ACTIVE }

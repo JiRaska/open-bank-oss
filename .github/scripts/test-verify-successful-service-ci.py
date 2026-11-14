@@ -531,6 +531,168 @@ class ResolveReconcileSourceTest(unittest.TestCase):
         self.assertEqual(resolved[second_service]["sha"], self.OLDER)
         self.assertEqual(len(requested), 2, "one run-list and one shared jobs request")
 
+    def test_unproven_service_is_reported_by_name_with_its_proven_peers(self):
+        """A complete run listing that proves some services yields a per-service refusal.
+
+        The proven half travels with the error so the gate refuses only the named members;
+        before, one never-built service stranded every proven peer in the reconcile batch.
+        """
+        unbuilt = "openbank-anacredit-service"
+        run = self.run_record(
+            38, self.OLDER, "2026-10-17T12:00:00Z", event="workflow_dispatch"
+        )
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            path = urlsplit(request.full_url).path
+            if path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse({"workflow_runs": [run]})
+            if path.endswith("/runs/38/attempts/1/jobs"):
+                return FixtureResponse({"jobs": job_fixture()["jobs"][:3]})
+            raise AssertionError(f"unexpected API request: {request.full_url}")
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+            patch.object(MODULE, "_is_ancestor", return_value=True),
+            patch.object(MODULE, "_tree_equivalent", return_value=True),
+            patch.object(MODULE, "_exact_pact_exists", return_value=True),
+            self.assertRaises(MODULE.UnresolvedServicesError) as caught,
+        ):
+            MODULE.resolve_reconcile_service_sources(
+                [SERVICE, unbuilt],
+                self.TIP,
+                REPOSITORY,
+                "fixture-token",
+                "https://api.github.test",
+            )
+
+        self.assertEqual(caught.exception.missing, [unbuilt])
+        self.assertEqual(set(caught.exception.resolved), {SERVICE})
+        self.assertEqual(caught.exception.resolved[SERVICE]["sha"], self.OLDER)
+        self.assertIsInstance(caught.exception, MODULE.VerificationError)
+
+    def test_budget_exhaustion_keeps_the_proven_half_and_names_the_rest(self):
+        """An exhausted time budget is a per-service refusal, never a whole-batch one.
+
+        2026-11-14: a 12-service scheduled reconcile ran out of RECONCILE_RESOLUTION_SECONDS
+        while still searching older runs for some services, and the plain VerificationError
+        refused the whole batch, including a service whose source was already proven.
+        """
+        slow = ["openbank-anacredit-service", "openbank-card-issuance-service"]
+        newer = self.run_record(40, self.OLDER, "2026-10-17T12:00:00Z")
+        older = self.run_record(39, self.OLDEST, "2026-10-16T12:00:00Z")
+        clock = [0.0]
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            path = urlsplit(request.full_url).path
+            if path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse({"workflow_runs": [newer, older]})
+            if path.endswith("/runs/40/attempts/1/jobs"):
+                return FixtureResponse({"jobs": job_fixture()["jobs"][:3]})
+            raise AssertionError(f"unexpected API request: {request.full_url}")
+
+        def ancestor_then_expire(sha, _tip, *, deadline=None):
+            del deadline
+            if sha == self.OLDEST:
+                clock[0] = 10.0**9  # the budget runs out while searching an older run
+            return True
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE.time, "monotonic", lambda: clock[0]),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+            patch.object(MODULE, "_is_ancestor", ancestor_then_expire),
+            patch.object(MODULE, "_tree_equivalent", return_value=True),
+            patch.object(MODULE, "_exact_pact_exists", return_value=True),
+            self.assertRaises(MODULE.UnresolvedServicesError) as caught,
+        ):
+            MODULE.resolve_reconcile_service_sources(
+                [SERVICE, *slow], self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertEqual(set(caught.exception.resolved), {SERVICE})
+        self.assertEqual(caught.exception.missing, sorted(slow))
+        self.assertIn("time budget", str(caught.exception))
+        self.assertTrue(caught.exception.budget_exhausted)
+
+    def test_budget_exhaustion_cli_reports_it_as_the_reason(self):
+        """The CLI tells the gate WHY the remainder is unresolved, so it can say so per service."""
+        err = MODULE.UnresolvedServicesError(
+            "time budget",
+            {SERVICE: {"sha": "a" * 40, "run_id": "1", "attempt": 1}},
+            ["openbank-x-service"],
+            budget_exhausted=True,
+        )
+        argv = ["v", "--resolve-reconcile-sources", json.dumps([SERVICE, "openbank-x-service"]), self.TIP]
+        out = io.StringIO()
+        with (
+            patch.object(MODULE.sys, "argv", argv),
+            patch.object(MODULE, "resolve_reconcile_service_sources", side_effect=err),
+            patch.object(MODULE.sys, "stdout", out),
+            patch.object(MODULE.sys, "stderr", io.StringIO()),
+        ):
+            self.assertEqual(MODULE.main(), 3)
+        answer = json.loads(out.getvalue())
+        self.assertEqual(answer["unresolved"], ["openbank-x-service"])
+        self.assertIs(answer["budget_exhausted"], True)
+
+    def test_read_failure_after_partial_progress_still_refuses_all(self):
+        """Only the budget converts to a per-service refusal; a read failure does not.
+
+        One service is fully proven from the newest run before the next run's jobs read
+        answers 403. If the budget handler were widened to every VerificationError, this
+        would come back as a partial answer and deploy the proven half on unread evidence.
+        """
+        newer = self.run_record(40, self.OLDER, "2026-10-17T12:00:00Z")
+        older = self.run_record(39, self.OLDEST, "2026-10-16T12:00:00Z")
+        other = "openbank-anacredit-service"
+        proven = []
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            path = urlsplit(request.full_url).path
+            if path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse({"workflow_runs": [newer, older]})
+            if path.endswith("/runs/40/attempts/1/jobs"):
+                return FixtureResponse({"jobs": job_fixture()["jobs"][:3]})
+            raise MODULE.HTTPError(
+                request.full_url, 403, "Resource not accessible by integration", {}, None
+            )
+
+        def pact(service, sha, *, deadline=None):
+            del deadline
+            proven.append((service, sha))
+            return True
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+            patch.object(MODULE, "_is_ancestor", return_value=True),
+            patch.object(MODULE, "_tree_equivalent", return_value=True),
+            patch.object(MODULE, "_exact_pact_exists", pact),
+            self.assertRaises(MODULE.VerificationError) as caught,
+        ):
+            MODULE.resolve_reconcile_service_sources(
+                [SERVICE, other], self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertEqual(proven, [(SERVICE, self.OLDER)])  # partial progress really happened
+        self.assertNotIsInstance(caught.exception, MODULE.UnresolvedServicesError)
+
+    def test_api_failure_is_not_downgraded_to_a_per_service_refusal(self):
+        def fake_urlopen(request, timeout):
+            del request, timeout
+            raise MODULE.HTTPError("u", 502, "bad gateway", {}, None)
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            self.assertRaises(MODULE.VerificationError) as caught,
+        ):
+            MODULE.resolve_reconcile_service_sources(
+                [SERVICE], self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertNotIsInstance(caught.exception, MODULE.UnresolvedServicesError)
+
     def test_failed_verification_metadata_does_not_prove_the_service(self):
         run = self.run_record(36, self.OLDER, "2026-10-17T12:00:00Z")
         jobs = job_fixture()["jobs"] + [
@@ -544,6 +706,72 @@ class ResolveReconcileSourceTest(unittest.TestCase):
                 run, {SERVICE}, REPOSITORY, "fixture-token", "https://api.github.test"
             )
         self.assertEqual(proven, set())
+
+    def test_unexpanded_skipped_metadata_matrix_is_no_metadata_job(self):
+        """The API shape of a main push that changed no build file (runs 43210743668,
+        43331225900): one SKIPPED job named with the literal matrix template. Before
+        this case existed every fixture omitted that job, so the resolver refused the
+        commonest run shape while its tests stayed green."""
+        run = self.run_record(38, self.OLDER, "2026-10-17T12:00:00Z")
+        shard = "verification-metadata (${{ matrix.shard.label }})"
+        module = "verification-metadata (${{ matrix.module }})"
+        cases = (
+            # (label, metadata jobs, expected metadata, service proven?)
+            ("skipped shard template", [(shard, "skipped")], set(), True),
+            ("skipped module template", [(module, "skipped")], set(), True),
+            ("template but a shard was expected", [(shard, "skipped")],
+             {"verification-metadata (shard 1/1)"}, False),
+            ("template not skipped", [(shard, "failure")], set(), False),
+            ("template cancelled", [(shard, "cancelled")], set(), False),
+            ("template reported green", [(shard, "success")], set(), False),
+            ("template beside a real shard",
+             [(shard, "skipped"), ("verification-metadata (shard 1/1)", "success")],
+             set(), False),
+            ("two templates", [(shard, "skipped"), (module, "skipped")], set(), False),
+            ("lookalike name", [("verification-metadata (${{ matrix.other }})", "skipped")],
+             set(), False),
+            ("unrecognized source contract", [(shard, "skipped")], None, False),
+        )
+        for label, metadata, expected, proves in cases:
+            jobs = job_fixture()["jobs"] + [
+                {"name": name, "conclusion": conclusion} for name, conclusion in metadata
+            ]
+            with (
+                self.subTest(case=label),
+                patch.object(MODULE, "_json_pages", return_value=jobs),
+                patch.object(
+                    MODULE, "_expected_verification_jobs", return_value=expected
+                ),
+            ):
+                proven = MODULE._jobs_prove_services(
+                    run, {SERVICE}, REPOSITORY, "fixture-token", "https://api.github.test"
+                )
+            self.assertEqual(proven, {SERVICE} if proves else set(), label)
+
+    def test_unrelated_red_job_does_not_erase_a_green_service_with_skipped_matrix(self):
+        """Two unrelated contract jobs killed by a runner shutdown reddened all-green;
+        this service's own build and contract stayed green and remain valid evidence."""
+        run = self.run_record(39, self.OLDER, "2026-10-17T12:00:00Z")
+        other = "openbank-other-service"
+        jobs = [
+            job if job["name"] != "all-green" else job | {"conclusion": "failure"}
+            for job in job_fixture()["jobs"]
+        ] + [
+            {"name": f"build ({other}) / {other} (build)", "conclusion": "success"},
+            {"name": f"build ({other}) / {other} (contract)", "conclusion": "failure"},
+            {
+                "name": "verification-metadata (${{ matrix.shard.label }})",
+                "conclusion": "skipped",
+            },
+        ]
+        with (
+            patch.object(MODULE, "_json_pages", return_value=jobs),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+        ):
+            proven = MODULE._jobs_prove_services(
+                run, {SERVICE, other}, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertEqual(proven, {SERVICE})
 
     def test_missing_required_verification_metadata_job_is_not_vacuously_green(self):
         run = self.run_record(35, self.OLDER, "2026-10-17T12:00:00Z")

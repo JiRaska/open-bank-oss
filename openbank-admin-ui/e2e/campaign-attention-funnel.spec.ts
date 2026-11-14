@@ -4,7 +4,7 @@
 // The attention funnel is a decision surface. This browser contract prevents a CSS-only regression
 // from collapsing its three observed facts back into an opaque total card.
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 const CAMPAIGN_ID = '019fb944-6c3a-7bd2-814d-7c946371f1ae'

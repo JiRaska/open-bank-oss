@@ -85,6 +85,8 @@ class SyntheticLedgerDimensionIT {
     class TrustedCanaryProfile : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "openbank.synthetic.trusted-principals" to CANARY_PRINCIPAL,
+            "quarkus.otel.sdk.disabled" to "true",
+            "quarkus.scheduler.enabled" to "false",
             // Force the missing-property condition only in this HTTP test profile. The real
             // authentication/filter decision remains the sole writer of the CDI holder.
             "openbank.test.synthetic-taint.drop-request-property" to "true",
@@ -191,6 +193,8 @@ class SyntheticLedgerDimensionIT {
         ],
     )
     fun `concurrent trusted and ordinary postings keep separate CDI decisions after property loss`() {
+        // Initialize the HTTP request reader before starting the timed two-request barrier.
+        postJournal(TODAY, REAL_AMOUNT, tainted = false)
         val held = propertyLoss.beginPair()
         val clients = Executors.newFixedThreadPool(2)
         val posts = mutableListOf<Future<UUID>>()
@@ -220,11 +224,74 @@ class SyntheticLedgerDimensionIT {
         assertThat(syntheticColumnOf(followUp)).`as`("fresh ordinary request remains REAL").isFalse()
     }
 
+    @Test
+    @TestSecurity(user = "untrusted-operator", roles = ["ROLE_OPERATOR"])
+    fun `synthetic journal route refuses an untrusted origin before posting`() {
+        val transactionId = UUID.randomUUID()
+        val response = postJournalRequest(
+            date = TODAY,
+            amount = SYNTHETIC_AMOUNT,
+            tainted = true,
+            path = SYNTHETIC_JOURNALS_PATH,
+            transactionId = transactionId,
+        )
+        assertThat(response.statusCode).isEqualTo(403)
+        val journals = Given { accept("application/json") } When { get("/api/v1/journals/transaction/$transactionId") }
+        assertThat(journals.statusCode).isEqualTo(200)
+        assertThat(journals.jsonPath().getList<Any>("$")).isEmpty()
+    }
+
+    @Test
+    @TestSecurity(user = CANARY_PRINCIPAL, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-synthetic-canary"),
+            Claim(key = "preferred_username", value = CANARY_PRINCIPAL),
+            Claim(key = "sub", value = "synthetic-canary-subject"),
+        ],
+    )
+    fun `journal idempotency preserves synthetic origin in both directions`() {
+        val key = UUID.randomUUID()
+        val transactionId = UUID.randomUUID()
+        val first = postJournalRequest(TODAY, SYNTHETIC_AMOUNT, true, SYNTHETIC_JOURNALS_PATH, key, transactionId)
+        assertThat(first.statusCode).isEqualTo(201)
+        assertThat(first.jsonPath().getBoolean("synthetic")).isTrue()
+        val id = first.jsonPath().getUUID("id")
+        assertThat(syntheticColumnOf(id)).isTrue()
+
+        val replay = postJournalRequest(TODAY, SYNTHETIC_AMOUNT, true, SYNTHETIC_JOURNALS_PATH, key, transactionId)
+        assertThat(replay.statusCode).isEqualTo(201)
+        assertThat(replay.getHeader("Idempotent-Replayed")).isEqualTo("true")
+        assertThat(replay.jsonPath().getUUID("id")).isEqualTo(id)
+        assertThat(postJournalRequest(TODAY, SYNTHETIC_AMOUNT, false, key = key).statusCode).isEqualTo(409)
+
+        val realKey = UUID.randomUUID()
+        assertThat(postJournalRequest(TODAY, REAL_AMOUNT, false, key = realKey).statusCode).isEqualTo(201)
+        val conflicting = postJournalRequest(TODAY, SYNTHETIC_AMOUNT, true, SYNTHETIC_JOURNALS_PATH, realKey)
+        assertThat(conflicting.statusCode).isEqualTo(409)
+        val journals = Given { accept("application/json") } When { get("/api/v1/journals/transaction/$transactionId") }
+        assertThat(journals.statusCode).isEqualTo(200)
+        assertThat(journals.jsonPath().getList<Any>("$")).hasSize(1)
+    }
+
     private fun postJournal(date: String, amount: Double, tainted: Boolean): UUID {
+        val response = postJournalRequest(date, amount, tainted)
+        response.then().statusCode(201)
+        return response.jsonPath().getUUID("id")
+    }
+
+    private fun postJournalRequest(
+        date: String,
+        amount: Double,
+        tainted: Boolean,
+        path: String = "/api/v1/journals",
+        key: UUID = UUID.randomUUID(),
+        transactionId: UUID = UUID.randomUUID(),
+    ): io.restassured.response.Response {
         val payload = """
             {
-              "idempotencyKey": "${UUID.randomUUID()}",
-              "transactionId": "${UUID.randomUUID()}",
+              "idempotencyKey": "$key",
+              "transactionId": "$transactionId",
               "entryDate": "$date",
               "valueDate": "$date",
               "description": "ADR-0252 dimension IT (tainted=$tainted)",
@@ -250,19 +317,13 @@ class SyntheticLedgerDimensionIT {
             }
         """.trimIndent()
 
-        val response = (
-            Given {
-                contentType("application/json")
-                body(payload)
-                if (tainted) header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE) else this
-            } When {
-                post("/api/v1/journals")
-            } Then {
-                statusCode(201)
-            }
-            ).extract().jsonPath()
-
-        return UUID.fromString(response.getString("id"))
+        return Given {
+            contentType("application/json")
+            body(payload)
+            if (tainted) header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE) else this
+        } When {
+            post(path)
+        }
     }
 
     private fun trialBalance(scope: String?): JsonPath = (
@@ -304,6 +365,7 @@ class SyntheticLedgerDimensionIT {
     companion object {
         /** The canary service account. Trusted only because [TrustedCanaryProfile] names it. */
         const val CANARY_PRINCIPAL = "service-account-openbank-synthetic-canary"
+        const val SYNTHETIC_JOURNALS_PATH = "/api/v1/journals/synthetic"
 
         // The journal author is a UUID; the authenticated service-account name is not.
         const val CANARY_ACTOR_ID = "00000000-0000-0000-0000-000000000252"

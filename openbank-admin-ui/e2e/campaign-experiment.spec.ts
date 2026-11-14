@@ -6,7 +6,7 @@
 // important state is the honest "collecting data" state. Exercise the browser route so the
 // authenticated app shell, page fetch and rendered decision gate agree on that fact.
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 const CAMPAIGN_ID = '019fb939-3e0a-7716-a1ed-7854754c8786'

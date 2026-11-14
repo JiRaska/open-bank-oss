@@ -74,7 +74,7 @@ Gateway degradovala s grácií při chybě modelu. Zkontrolujte: `AGENT_DEFAULT_
 Celé kolo nástrojů chybovalo (auth/konektivita). Ověřte: secret klienta OIDC `openbank-services`, URL downstream služeb (`quarkus.rest-client.*.url`) a že downstream služby běží. Smyčka po neúspěšném kole přestane nabízet nástroje a odpoví textem — to je záměr, ne pád.
 
 ### Každé volání nástroje je DENIED
-Očekávané pod `advisory` jen pokud je nástroj nenamapovaný (deny-by-default) nebo na `/mcp` nebyl deklarován `X-Agent-Id`. Pod `block`: zkontrolujte, že OPA sidecar (8181) je dosažitelný a charter bundle z `agents.yaml` je načten. Pokud je **nedosažitelný sám PDP**, brána degraduje na advisory + WARN (asistenta **nezamkne**) — opravte OPA sidecar, abyste obnovili vynucení.
+Očekávané pod `advisory` jen pokud je nástroj nenamapovaný (deny-by-default) nebo na `/mcp` nebyl deklarován `X-Agent-Id`. Pod `block`: zkontrolujte, že OPA sidecar (8181) je dosažitelný a charter bundle z `agents.yaml` je načten. Pokud je **nedosažitelný sám PDP**, režim `block` nyní selže uzavřeně: každé volání nástroje je zamítnuto s výsledkem `pdp_unavailable_denied` (čítač `openbank.agent.policy.gate.decisions{outcome}`, ERROR log), včetně plánovaného oversight sweepu. Pod `advisory` volání nadále projde. Nastavte alert na tento výsledek a opravte OPA sidecar, aby se obnovila volání nástrojů.
 
 ### Zapnutí vynucení
 Nastavte `AGENT_POLICY_ENFORCEMENT=block` v env deploye, jakmile je v cíli přítomen OPA sidecar. Není třeba redeploy kódu; kill-switch / charter změny žijí v `agents.yaml` + OPA bundle.

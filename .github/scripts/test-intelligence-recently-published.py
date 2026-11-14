@@ -7,9 +7,8 @@ main CI / Services CI completion, ~4-5 times an hour, i.e. ~1,000-1,300 of the r
 shared 5000/h REST core quota — the largest attributed consumer when that quota ran out three
 times in nine hours on 2026-11-09/10 and failed required admission checks on unrelated PRs (#15483).
 
-A dashboard dataset an hour old loses nothing; required checks failing loses a lot. So a
-workflow_run trigger skips test-intelligence while a successful publish is younger than WINDOW
-minutes. Scheduled runs and dispatches are not throttled (they are the freshness backstop).
+Scheduled and workflow_run triggers skip test-intelligence when an automated publish succeeded
+within WINDOW minutes. Manual dispatches can force a refresh or roll back a snapshot.
 
 Fail OPEN toward collecting: any error answering the question (API failure, unexpected shape)
 exits 1 = "not recently published", so a broken probe can only restore today's behaviour, never
@@ -29,6 +28,7 @@ import tempfile
 GH = os.environ.get("TI_RECENT_GH", "gh")
 WORKFLOW = "admin-ui-evidence.yml"
 JOB = "publish (test-intelligence)"
+PUBLISH_STEP = "Publish selected validated snapshot and atomic selector"
 MAX_RUNS = 6
 
 
@@ -45,27 +45,43 @@ def recently_published(repo, current_run, window_min, now=None):
     runs = gh_json(f"repos/{repo}/actions/workflows/{WORKFLOW}/runs?per_page=20&created=%3E{since}")["workflow_runs"]
     checked = 0
     for run in runs:
-        if str(run["id"]) == str(current_run) or run.get("status") != "completed":
+        if (str(run["id"]) == str(current_run) or run.get("status") not in {"completed", "in_progress"}
+                or run.get("event") not in {"schedule", "workflow_run"}):
             continue
         if checked >= MAX_RUNS:
             break
         checked += 1
         for job in gh_json(f"repos/{repo}/actions/runs/{run['id']}/jobs?per_page=50")["jobs"]:
-            if job["name"] == JOB and job.get("conclusion") == "success":
+            if job["name"] != JOB or job.get("conclusion") != "success":
+                continue
+            if any(step["name"] == PUBLISH_STEP and step.get("conclusion") == "success"
+                   for step in job["steps"]):
                 return run["id"]
     return None
 
 
 def self_test():
     fails = 0
-    runs = {"workflow_runs": [{"id": 1, "status": "completed"}, {"id": 2, "status": "in_progress"},
-                              {"id": 3, "status": "completed"}]}
-    jobs_hit = {"jobs": [{"name": "authorize-source", "conclusion": "success"},
-                         {"name": JOB, "conclusion": "success"}]}
+    runs = {"workflow_runs": [
+        {"id": 1, "status": "completed", "event": "workflow_run"},
+        {"id": 2, "status": "in_progress", "event": "schedule"},
+        {"id": 3, "status": "completed", "event": "schedule"},
+    ]}
+    jobs_hit = {"jobs": [
+        {"name": "authorize-source", "conclusion": "success"},
+        {"name": JOB, "conclusion": "success", "steps": [{"name": PUBLISH_STEP, "conclusion": "success"}]},
+    ]}
     jobs_skip = {"jobs": [{"name": JOB, "conclusion": "skipped"}]}
+    superseded = {"jobs": [
+        {"name": JOB, "conclusion": "success", "steps": [{"name": PUBLISH_STEP, "conclusion": "skipped"}]},
+    ]}
+    manual = {"workflow_runs": [{"id": 3, "status": "completed", "event": "workflow_dispatch"}]}
     cases = [  # name, runs payload, jobs payload, runs-exit, expected
-        ("published-recently", runs, jobs_hit, 0, 3),
+        ("published-recently", runs, jobs_hit, 0, 2),
+        ("whole-run-completed", {"workflow_runs": [runs["workflow_runs"][2]]}, jobs_hit, 0, 3),
         ("only-skipped", runs, jobs_skip, 0, None),
+        ("successful-job-without-publication", runs, superseded, 0, None),
+        ("manual-rollback-cannot-count-as-fresh", manual, jobs_hit, 0, None),
         ("no-runs", {"workflow_runs": []}, jobs_hit, 0, None),
     ]
     global GH

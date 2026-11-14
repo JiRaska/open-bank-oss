@@ -60,8 +60,26 @@ interface RegistryExtractCache {
     suspend fun put(extract: RegistryExtract)
 }
 
+/**
+ * The case was changed by someone else between this caller's read and its write. Nothing was
+ * written; the caller reads the case again and decides again.
+ */
+class ConcurrentCaseUpdateException(caseId: UUID) :
+    RuntimeException("business onboarding case $caseId was changed concurrently; read it again and retry")
+
 interface BusinessOnboardingCaseRepository {
     suspend fun save(case: BusinessOnboardingCase, event: KybEvent?): BusinessOnboardingCase
+
+    /**
+     * Writes [case] only if the stored row is still at [BusinessOnboardingCase.version], and
+     * returns the case at its NEW version — a caller that writes twice must write the returned copy.
+     *
+     * The same transaction brings the ongoing-monitoring registration store to
+     * [BusinessOnboardingCase.monitoredSubjects] and stores the case's monitoring findings, so no
+     * path that approves, ends or changes a case can do so without them following.
+     *
+     * @throws ConcurrentCaseUpdateException when the row has moved on
+     */
     suspend fun update(case: BusinessOnboardingCase, event: KybEvent?): BusinessOnboardingCase
     suspend fun findById(id: UUID): BusinessOnboardingCase?
     suspend fun findOpenByIdentifier(identifier: LegalEntityIdentifier): BusinessOnboardingCase?
@@ -71,6 +89,9 @@ interface BusinessOnboardingCaseRepository {
     /** Cases the party initiated OR is a signer on. */
     suspend fun findInvolving(partyId: UUID): List<BusinessOnboardingCase>
     suspend fun listByStatus(status: CaseStatus, page: Int, size: Int): List<BusinessOnboardingCase>
+
+    /** Cases with an undecided monitoring finding or an exit owed, longest-waiting first. */
+    suspend fun listMonitoringHolds(page: Int, size: Int): List<BusinessOnboardingCase>
 }
 
 /**
@@ -155,6 +176,12 @@ interface KybMetricsPort {
 
     /** Temporal could not be told about a state change; the case is correct, its timers are not armed. */
     fun timerArmingFailed(state: String)
+
+    /**
+     * One related-party screen: [outcome] is `clear` | `pep` | `potential_hit` | `hit` | `unavailable`.
+     * `unavailable` is the one to alert on — while it is the only value moving, no case can be approved.
+     */
+    fun relatedPartyScreened(outcome: String)
 }
 
 /**

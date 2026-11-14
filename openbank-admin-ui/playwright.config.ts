@@ -7,6 +7,19 @@
 
 import { defineConfig, devices } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+
+// ADR-0370 U2: a quarantined test is excluded from the gating run and runs alone, non-gating,
+// when OPENBANK_E2E_QUARANTINE=only. The list is held honest by the admin-ui-flake-quarantine
+// gate (owner, issue, expiry of at most 30 days).
+const quarantineOnly = process.env.OPENBANK_E2E_QUARANTINE === 'only'
+const perfOnly = process.env.OPENBANK_E2E_PERF === 'only'
+const quarantined: RegExp[] = (
+  JSON.parse(readFileSync('e2e/flaky-quarantine.json', 'utf8')).quarantine as { test: string }[]
+).map(({ test }) => {
+  const title = test.split(' › ').slice(1).join(' › ')
+  return new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+})
 
 const e2ePort = process.env.OPENBANK_E2E_PORT ?? '3001'
 const e2eBaseUrl = `http://localhost:${e2ePort}`
@@ -19,7 +32,11 @@ export default defineConfig({
   testDir: './e2e',
   // @deployed specs target the live sandbox via playwright.deployed.config.ts, not this stubbed server.
   // deployed-session.* sign in to the sandbox through Keycloak (playwright.deployed-session.config.ts).
-  grepInvert: /@deployed|@sandbox-session/,
+  // ADR-0370 U6: @perf budgets run on their own (OPENBANK_E2E_PERF=only), never in the gating run.
+  grepInvert: perfOnly ? [/@deployed|@sandbox-session/]
+    : quarantineOnly ? [/@deployed|@sandbox-session|@perf/] : [/@deployed|@sandbox-session|@perf/, ...quarantined],
+  // An empty quarantine selects nothing; `--pass-with-no-tests` in CI keeps that step green.
+  ...(perfOnly ? { grep: [/@perf/] } : quarantineOnly ? { grep: quarantined.length ? quarantined : [/$^/] } : {}),
   testIgnore: ['image-delivery.spec.ts', 'deployed-session.*'],
   timeout: 30_000,
   expect: { timeout: 5_000 },

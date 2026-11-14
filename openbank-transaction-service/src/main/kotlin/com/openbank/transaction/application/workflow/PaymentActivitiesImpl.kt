@@ -80,7 +80,8 @@ open class PaymentActivitiesImpl(
 
     override fun postJournal(transactionId: UUID): UUID = runOnVertxContext {
         val transaction = loadTransaction(transactionId)
-        ledgerCallGuard.postJournal(buildJournalRequest(transaction)).awaitSuspending().id
+        ledgerCallGuard.postJournal(buildJournalRequest(transaction), synthetic = transaction.synthetic)
+            .awaitSuspending().id
     }
 
     // Best-effort compensation: balance-service TTL-expires the hold and the ledger reversal is
@@ -125,6 +126,7 @@ open class PaymentActivitiesImpl(
                 aggregateId = completed.id,
                 eventType = TRANSACTION_COMPLETED_EVENT,
                 payload = eventPublisher.completedPayload(completed),
+                synthetic = completed.synthetic,
             ),
         )
     }
@@ -149,6 +151,7 @@ open class PaymentActivitiesImpl(
                 aggregateId = failed.id,
                 eventType = TRANSACTION_FAILED_EVENT,
                 payload = eventPublisher.failedPayload(failed, reason),
+                synthetic = failed.synthetic,
             ),
         )
     }

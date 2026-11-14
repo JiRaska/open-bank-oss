@@ -20,7 +20,9 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.util.Comparator
+import java.util.UUID
 
 /**
  * Repository round-trip against a real Testcontainers PostgreSQL (ADR-0037 v2) — the one thing pure
@@ -41,8 +43,36 @@ class PostgresCreditExposureRepositoryIT {
     @Inject
     lateinit var repository: PostgresCreditExposureRepository
 
+    @Inject
+    lateinit var facts: LoanExposureFactStore
+
     private fun <T> onVertxContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
         CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
+    }
+
+    @Test
+    fun `a duplicate lending fact cannot replace committed source values`(): Unit = onVertxContext {
+        val loanId = UUID.randomUUID()
+        val fact = LoanExposureFact(
+            eventId = UUID.randomUUID(),
+            sourceReference = "loan:$loanId:disbursement",
+            loanId = loanId,
+            effectiveAt = OffsetDateTime.parse("2026-01-01T12:00:00Z"),
+            payload = """{"originalPrincipal":100.05,"loanStatus":"ACTIVE"}""",
+        )
+        facts.append(fact)
+        facts.append(fact.copy(payload = """{"loanStatus":"ACTIVE","originalPrincipal":100.05}"""))
+
+        val conflicts = listOf(
+            fact.copy(payload = """{"originalPrincipal":200.05}"""),
+            fact.copy(eventId = UUID.randomUUID()),
+            fact.copy(effectiveAt = fact.effectiveAt.plusDays(1)),
+        )
+        for (conflict in conflicts) {
+            val failure = runCatching { facts.append(conflict) }.exceptionOrNull()
+            assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
+        }
+        facts.append(fact)
     }
 
     private fun exposure(instrumentId: String, drawnAmount: BigDecimal = BigDecimal("12000.00")) = CreditExposure(

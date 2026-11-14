@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ADR-0315 / #10618 smoke: the treasury desk reaches the Treasury section. Backends are mocked (as
 // in every spec here); the hide-approve-from-the-creator rule is covered by treasury-pages.test.tsx.
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInWithRoles } from './helpers/auth'
 
 const deal = (dealId: string, state: string, createdBy: string) => ({

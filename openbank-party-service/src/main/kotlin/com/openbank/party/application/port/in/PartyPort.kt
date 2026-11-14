@@ -123,7 +123,12 @@ class PayeeLimitExceededException(partyId: UUID) :
     RuntimeException("Party $partyId already has the maximum of 30 saved payees")
 
 /** ADR-0055 bounded name search. `q` is normalised via SearchRequest; a blank/`*`/sub-2-char term returns an empty page. */
-data class SearchPartiesQuery(val q: String?, val limit: Int = 20, val cursor: String? = null)
+data class SearchPartiesQuery(
+    val q: String?,
+    val limit: Int = 20,
+    val cursor: String? = null,
+    val namesOnly: Boolean = false,
+)
 
 /** ADR-0284 D3: bind a human [agentPartyId] to the legal entity [principalPartyId] they may act for. */
 data class GrantMandateCommand(

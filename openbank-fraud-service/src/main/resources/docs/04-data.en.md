@@ -4,7 +4,11 @@ This page currently documents only the outbox lifecycle; the rest of the data mo
 
 ## Outbox retention (SENT rows)
 
-`fraud_outbox` is a delivery buffer, not a record. Rows that reached the broker (`status = 'SENT'`) are deleted once their `sent_at` is older than `openbank.outbox.retention.sent-days` (default **7**), by libs-runtime's shared `OutboxSentRetentionJob` (ADR-0329, ADR-0327 D8). The repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`.
+`fraud_outbox` is a delivery buffer, not a record. Rows that reached the broker (`status = 'SENT'`) are deleted once their `sent_at` is older than `openbank.outbox.retention.sent-days` (default **7**), by libs-runtime's shared `OutboxSentRetentionJob` (ADR-0329, ADR-0327 D8). The repository is the kernel `AbstractPanacheOutboxRepository` (ADR-0327 phase 2), whose `purgeSent` the job calls.
+
+## Outbox dispatch (kernel repository)
+
+`FraudOutboxRepositoryImpl` extends libs-runtime's `AbstractPanacheOutboxRepository`. The claim takes only the oldest in-flight row of each party (`aggregate_id`), so `fraud.hold_changed` events of one party stay in order across replicas. A failed row parks that party until its retry. Retries back off exponentially via `next_attempt_at` and go DEAD after the shared attempt limit. `V11__outbox_v2.sql` adds the column and two partial indexes, `ix_fraud_outbox_claim` and `ix_fraud_outbox_inflight_aggregate`.
 
 - Runs nightly (`openbank.outbox.retention.cron`, default `0 17 3 * * ?`) on every replica; each delete is bounded (`batch-size` 5 000, at most `max-batches` 200 per run), so a long-unpurged table drains over several nights.
 - PENDING, FAILED, DISPATCHING and DEAD rows are never touched — DEAD rows are the producer-side DLQ.
@@ -23,3 +27,25 @@ The consumer group id, offset reset and dead-letter topic for fraud-service chan
 ## Test profile: outbox channel disabled
 
 Under the `%test` profile the `fraud-outbox-out` outgoing channel is disabled next to the already-disabled `transaction-signal` consumer and `dispatch-enabled=false`, so integration tests boot without a broker. Production and dev configuration are unchanged: the dispatcher and channel stay enabled there.
+
+### Count-pack SHADOW epoch evidence
+
+The SHADOW ledger stores the signed envelope, proposal ID, artifact lineage and effective
+time in immutable rows. The epoch primary key admits one writer per epoch and the
+predecessor key forbids a gap, so competing proposals cannot both land, and repeating the
+exact signed envelope replays its original record.
+A rollback appends a new independently signed epoch referencing the earlier artifact.
+
+Readers choose the epoch effective at the evaluation time and reverify its signed envelope
+before obtaining a request pin. The ledger is separate from the live threshold-set table.
+The V12 rollback leaves evidence rows in place and stops the shadow reader.
+
+## Payee history: keyed counterparty pseudonym (ADR-0377 D3)
+
+`POST /api/v1/fraud/score` accepts an optional `counterparty` object (`scheme` is `IBAN` or `DOMESTIC_ACCOUNT`, plus `value`; API contract 1.4.0). The service never stores the raw value: it keys it with HMAC-SHA-256 under `openbank.fraud.counterparty-hmac.key` and writes `cp2:<keyId>:<hex>` (key id from `openbank.fraud.counterparty-hmac.key-id`) into `payee_history.payee_identifier`, then drops the raw identifier.
+
+- **Classification.** A `cp2:` value is a keyed pseudonym. Whoever holds the key can re-identify it, so it is still personal data under GDPR and is handled as such.
+- **Schema.** `V13__payee_history_counterparty_ref_width.sql` widens `payee_identifier` from `VARCHAR(64)` to `VARCHAR(128)` so the pseudonym fits. The change is metadata-only; the existing primary key `(account_id, payee_identifier)` still serves the lookup. Older UUID-keyed rows are untouched.
+- **When a payee becomes established.** A payee is recorded only when the verdict is `ALLOW`; a challenged, reviewed or declined payment does not make the payee count as known.
+- **Missing key.** Without a key the payee signal is unavailable: there is no unkeyed fallback, the service logs one warning at startup and counts each affected request in `openbank.fraud.counterparty.key.missing`.
+- **Retention.** Unchanged by this feature: pseudonym rows follow the same retention as the rest of `payee_history`.

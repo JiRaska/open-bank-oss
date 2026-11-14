@@ -145,7 +145,9 @@ class TerminationService(
             }.flatMap { settled ->
                 transitionLoan(settled, LoanStatus.CLOSED, actor, "loan closed by early settlement")
             }.flatMap { closed ->
-                releaseCollateral(closed).map { closed }
+                releaseCollateral(closed)
+                    .call { _ -> events.emitExposureFact(closed, LoanExposureChange.Ended, clock.instant()) }
+                    .map { closed }
             }
         }
     }
@@ -189,6 +191,7 @@ class TerminationService(
                     }.flatMap { unwound ->
                         emitDomainEvent(unwound, "loan.withdrawn")
                             .flatMap { releaseCollateral(unwound) }
+                            .call { _ -> events.emitExposureFact(unwound, LoanExposureChange.Ended, clock.instant()) }
                             .map { unwound }
                     }
             }

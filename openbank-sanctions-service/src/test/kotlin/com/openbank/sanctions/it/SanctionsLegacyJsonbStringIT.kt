@@ -53,6 +53,7 @@ class SanctionsLegacyJsonbStringIT {
 
     @Test
     fun `V20 unwraps legacy jsonb string payloads so the check list reads again`() {
+        addColumnsAddedAfterLegacyPin(dataSource)
         dataSource.connection.use { c ->
             c.createStatement().use { it.executeUpdate("DELETE FROM sanctions_checks") }
             // to_jsonb(text) produces exactly the legacy shape: a jsonb string holding JSON text.

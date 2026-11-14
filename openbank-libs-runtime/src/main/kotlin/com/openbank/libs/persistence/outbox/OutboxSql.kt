@@ -25,7 +25,7 @@ data class OutboxTableShape(
     /**
      * Extra `SET` assignments appended to the claim, e.g. `claim_token = gen_random_uuid()`.
      * Rendered verbatim after a comma; empty for the canonical shape. Must not reference
-     * parameters other than the claim's own (`:now`, `:stale`, `:limit`, status names).
+     * parameters other than those bound by the caller of the rendered claim.
      */
     val extraClaimAssignments: String = "",
     /** Column recording when the row reached the broker; `sent_at` everywhere but incentive (`published_at`). */
@@ -143,4 +143,30 @@ object OutboxSql {
 
     fun purgeDead(shape: OutboxTableShape): String =
         "DELETE FROM ${shape.table} WHERE id IN (SELECT id FROM ${shape.table} WHERE status = :dead AND updated_at < :cut LIMIT :limit)"
+}
+
+/** Ownership-aware statements for the optional fenced V2 repository. */
+internal object OutboxClaimFenceSql {
+    fun claim(shape: OutboxTableShape): String {
+        require(shape.extraClaimAssignments.isBlank()) { "Fenced outbox claims own claim_token assignment" }
+        return OutboxSql.claim(shape.copy(extraClaimAssignments = "claim_token = :claimToken"))
+    }
+
+    /** Pair each event with its exact claim token. Return only rows this acknowledgement owns. */
+    fun markSent(shape: OutboxTableShape, claimCount: Int): String {
+        require(claimCount > 0) { "At least one claim is required" }
+        val claims = (0 until claimCount).joinToString { "(:eventId$it, :claimToken$it)" }
+        return "UPDATE ${shape.table} SET status = :sent, ${shape.sentAtColumn} = :now, updated_at = :now, " +
+            "attempt_count = attempt_count + 1, last_error = NULL, claim_token = NULL " +
+            "WHERE status = :dispatching AND (event_id, claim_token) IN ($claims) RETURNING event_id"
+    }
+
+    fun lockForFailure(shape: OutboxTableShape): String =
+        "SELECT attempt_count FROM ${shape.table} WHERE $CLAIM_OWNER FOR UPDATE"
+
+    fun markFailed(shape: OutboxTableShape): String =
+        "UPDATE ${shape.table} SET status = :status, attempt_count = :attempts, last_error = :error, " +
+            "updated_at = :now, next_attempt_at = :nextAttemptAt, claim_token = NULL WHERE $CLAIM_OWNER"
+
+    private const val CLAIM_OWNER = "event_id = :eventId AND status = :dispatching AND claim_token = :claimToken"
 }

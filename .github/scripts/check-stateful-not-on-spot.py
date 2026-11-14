@@ -35,7 +35,7 @@ exceed `stateful_load_by_zone`, the measurement the derived NodePool limit is co
 WHAT IT DOES NOT PROVE, AND WHAT DOES
 The CEL is checked here as TEXT. `--kyverno` runs the pinned Kyverno CLI (docker) over
 openbank-infra/tests/kyverno-cel/stateful-resources.yaml and compares every fixture with its
-`openbank.io/expect` annotation. The gates shard has no docker, so that half runs locally.
+`open-bank.tech/expect` annotation. The gates shard has no docker, so that half runs locally.
 
 Usage:
     check-stateful-not-on-spot.py                # gate (exit 1 on any finding)
@@ -168,6 +168,8 @@ def derive() -> tuple[dict[str, str], dict[str, dict], list[str]]:
 # are not configured in this tree at all and tolerate every NoSchedule taint (`operator: Exists`,
 # no key); `--live` checks them, and everything else, against a `kubectl get ds -A -o json`.
 STATEFUL_TAINT = ("openbank.io/stateful", "true")
+# Taint keys the stateful Kyverno policy must add while the node keys move to open-bank.tech.
+MIGRATION_STATEFUL_TAINT_KEYS = ("openbank.io/stateful", "open-bank.tech/stateful")
 OBS_TAINT = ("workload", "observability")
 # Unpinned observability tolerations that are NOT node agents. Reason required; an entry that no
 # longer matches an unpinned list is itself a finding, so the exemption cannot outlive its cause.
@@ -397,7 +399,7 @@ def kyverno() -> int:
     expect = {}
     for d in gatelib.load_yaml_all(REPO / FIXTURES):
         md = d["metadata"]
-        expect[f"{md['namespace']}/Pod/{md['name']}"] = md["annotations"]["openbank.io/expect"]
+        expect[f"{md['namespace']}/Pod/{md['name']}"] = md["annotations"]["open-bank.tech/expect"]
     got: dict[str, str] = {}
     for block in re.split(r"^policy \S+ applied to ", out, flags=re.M)[1:]:
         res, _, body = block.partition(":\n")
@@ -405,8 +407,10 @@ def kyverno() -> int:
         sp = (doc or {}).get("spec") or {}
         req = json.dumps(((sp.get("affinity") or {}).get("nodeAffinity") or {}).get(
             "requiredDuringSchedulingIgnoredDuringExecution") or {})
-        routed = '"on-demand"' in req and "karpenter.sh/capacity-type" in req and any(
-            t.get("key") == "openbank.io/stateful" for t in sp.get("tolerations") or [])
+        tol_keys = {t.get("key") for t in sp.get("tolerations") or []}
+        # Node-key migration to open-bank.tech, stage 1: the policy must add BOTH taint keys.
+        routed = ('"on-demand"' in req and "karpenter.sh/capacity-type" in req
+                  and all(k in tol_keys for k in MIGRATION_STATEFUL_TAINT_KEYS))
         got[res.strip()] = "on-demand" if routed else "untouched"
     bad = [f"{r}: expected {e}, got {got.get(r, 'NOT EVALUATED')}" for r, e in expect.items() if got.get(r) != e]
     for b in bad:
@@ -528,7 +532,7 @@ def self_test() -> int:
             tf0, pol0.replace("in variables.targets", "in ['x/y']"), fleet(), "no longer keys on variables.targets"),
         "on-demand retyped to spot in the affinity": (tf0, pol0.replace('values: ["on-demand"]', 'values: ["spot"]'), fleet(), "no required affinity"),
         "taint renamed without the toleration": (
-            tf0.replace('key = "openbank.io/stateful", value = "true"', 'key = "openbank.io/db", value = "true"'),
+            tf0.replace('key = "openbank.io/stateful", value = "true"', 'key = "open-bank.tech/db", value = "true"'),
             pol0, fleet(), "routed pods could never schedule"),
         "money-path Cluster with its own required nodeAffinity": (
             tf0, pol0, fleet(pay_extra="  affinity:\n    nodeAffinity:\n      requiredDuringSchedulingIgnoredDuringExecution:\n"

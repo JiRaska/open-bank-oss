@@ -93,7 +93,7 @@ function ContractSearch() {
 
       <PartySearch
         selectedId={partyId ?? undefined}
-        placeholder={t('Jméno, rodné číslo nebo datum narození klienta', 'Client name, national id or date of birth')}
+        placeholder={t('Jméno nebo obchodní název klienta', 'Client name or trading name')}
         onSelect={hit => { setPartyId(hit.id); setQuery('') }}
       />
       {partyId && (

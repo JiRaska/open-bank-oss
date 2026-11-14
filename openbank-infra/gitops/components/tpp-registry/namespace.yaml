@@ -5,8 +5,8 @@ metadata:
   name: tpp-registry
   labels:
     app.kubernetes.io/part-of: openbank
-    openbank.io/component: tpp-registry
-    openbank.io/plane: app
+    open-bank.tech/component: tpp-registry
+    open-bank.tech/plane: app
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

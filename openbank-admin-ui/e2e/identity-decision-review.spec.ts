@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 const caseId = '019fbe12-1111-7222-8333-444444444444'

@@ -10,6 +10,7 @@ import com.openbank.lending.domain.model.CreditPolicyView
 import com.openbank.lending.domain.model.DecisionOutcomeSummary
 import com.openbank.lending.domain.model.LoanRiskView
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.calendar.AccountingClock
 import io.smallrye.mutiny.Uni
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.DefaultValue
@@ -80,15 +81,15 @@ class CreditRiskResource(private val insight: CreditRiskInsightUseCase, private 
     @Operation(
         summary = "The credit policy bundle the engine evaluates as of a date",
         description = "Every decision table (exclusion, eligibility, affordability, pricing band) with " +
-            "its rules, version and effective window. codeSeeded=true while the ADR-0213 D3 starter " +
-            "policy is the binding, i.e. before the four-eyes table store (D4) exists.",
+            "its rules, version and effective window for Czech consumer credit. codeSeeded is true " +
+            "when no approved Czech revision was effective on that day.",
     )
     @Authorize(action = "lending.read", resource = "")
     fun policy(@QueryParam("asOf") asOf: String?): Uni<CreditPolicyView> = insight.activePolicy(parseAsOf(asOf))
 
     /** ISO date or today; a malformed value is the caller's error (400 via libs-runtime), not a 500. */
     private fun parseAsOf(raw: String?): LocalDate {
-        if (raw.isNullOrBlank()) return LocalDate.now(clock)
+        if (raw.isNullOrBlank()) return AccountingClock.bank(clock).today()
         return try {
             LocalDate.parse(raw)
         } catch (e: DateTimeParseException) {

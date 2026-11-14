@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { test, expect } from '@playwright/test'
+import { test, expect } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 test('the deployable image enforces auth and serves its stamped source and UI', async ({ page, context, baseURL }) => {

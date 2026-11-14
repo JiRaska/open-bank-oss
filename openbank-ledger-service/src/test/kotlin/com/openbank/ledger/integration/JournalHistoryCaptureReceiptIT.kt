@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.ledger.integration
 
+import com.openbank.ledger.fixtures.journalTransaction
 import com.openbank.ledger.infrastructure.persistence.repository.JournalHistoryManifest
 import io.agroal.api.AgroalDataSource
 import io.quarkus.test.common.QuarkusTestResource
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
+import java.sql.Connection
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -40,18 +42,7 @@ class JournalHistoryCaptureReceiptIT {
 
     @AfterEach
     fun cleanup() {
-        dataSource.connection.use { c ->
-            journals.forEach { id ->
-                c.prepareStatement("DELETE FROM journal_lines WHERE journal_id = ?").use {
-                    it.setObject(1, id)
-                    it.executeUpdate()
-                }
-                c.prepareStatement("DELETE FROM journal_entries WHERE id = ?").use {
-                    it.setObject(1, id)
-                    it.executeUpdate()
-                }
-            }
-        }
+        journals.forEach { deleteSource(it) }
     }
 
     @Test
@@ -257,7 +248,12 @@ class JournalHistoryCaptureReceiptIT {
         }
     }
 
-    private fun seed(): UUID = dataSource.connection.use { c ->
+    // One transaction for the journal and both legs: ADR-0372 checks the balance at commit.
+    private fun seed(): UUID = dataSource.connection.use { connection ->
+        connection.journalTransaction { c -> insertBalancedJournal(c) }
+    }
+
+    private fun insertBalancedJournal(c: Connection): UUID {
         val id = UUID.randomUUID()
         journals += id
         c.prepareStatement(
@@ -283,17 +279,20 @@ class JournalHistoryCaptureReceiptIT {
                 it.executeUpdate()
             }
         }
-        id
+        return id
     }
 
-    private fun deleteSource(id: UUID) = dataSource.connection.use { c ->
-        c.prepareStatement("DELETE FROM journal_lines WHERE journal_id = ?").use {
-            it.setObject(1, id)
-            it.executeUpdate()
-        }
-        c.prepareStatement("DELETE FROM journal_entries WHERE id = ?").use {
-            it.setObject(1, id)
-            it.executeUpdate()
+    // Erasing a posted source is a declared repair (ADR-0372); without it the database refuses.
+    private fun deleteSource(id: UUID) = dataSource.connection.use { connection ->
+        connection.journalTransaction("JournalHistoryCaptureReceiptIT source erasure fixture") { c ->
+            c.prepareStatement("DELETE FROM journal_lines WHERE journal_id = ?").use {
+                it.setObject(1, id)
+                it.executeUpdate()
+            }
+            c.prepareStatement("DELETE FROM journal_entries WHERE id = ?").use {
+                it.setObject(1, id)
+                it.executeUpdate()
+            }
         }
     }
 

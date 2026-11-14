@@ -31,7 +31,7 @@ metadata:
   namespace: flaky-test-hunter
   labels:
     app.kubernetes.io/part-of: flaky-test-hunter
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

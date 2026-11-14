@@ -45,7 +45,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-onboarding-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "4162feba0a965815"
+        openbank.tech/policy-checksum: "97c20d0a559b975b"
       labels:
         app.kubernetes.io/name: onboarding-service
         app.kubernetes.io/part-of: onboarding
@@ -59,7 +59,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: onboarding-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-onboarding-service:sandbox-34e2450c@sha256:56ff9470cdee6509fe2cc347e6db07216036f696ac0321448c3145ff67c10fbc
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-onboarding-service:sandbox-548fa683@sha256:d2c30a4edc1d900b3389986429b1119cd4aad10d1005b3b40af0323230a20c75
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -67,13 +67,11 @@ spec:
             - name: management
               containerPort: 8085
           env:
-            # ADVISORY on purpose (ADR-0034 Phase 5). Every endpoint now carries @Authorize and
-            # the `opa` sidecar below serves onboarding_rest_ext.rego, so each request is decided
-            # and logged while @RolesAllowed (JWT roles) still does the enforcing. Flip to "true"
-            # only after the decision log shows no would-DENY for the cockpit's real callers —
-            # an owner decision, not part of the change that wired the PDP.
+            # ENFORCED (ADR-0034 Phase 5). Every endpoint carries @Authorize and the `opa` sidecar
+            # below serves onboarding_rest_ext.rego; the advisory window logged no would-DENY for
+            # the cockpit's real callers before this flip.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://onboarding-db-rw.onboarding.svc:5432/openbank_onboarding
             - name: QUARKUS_DATASOURCE_REACTIVE_URL

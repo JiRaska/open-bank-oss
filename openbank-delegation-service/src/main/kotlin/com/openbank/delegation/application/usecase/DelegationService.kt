@@ -258,8 +258,10 @@ class DelegationService(
         val authority = grantorAuthorityClient.authorityFor(command.grantorPartyId, actor)
         return when (authority.verdict) {
             GrantorAuthorityVerdict.AUTHORIZED -> authority
-            GrantorAuthorityVerdict.DENIED -> throw DelegationGrantorAuthorityException(
-                "actor $actor has no active authority for grantor ${command.grantorPartyId}",
+            GrantorAuthorityVerdict.DENIED,
+            GrantorAuthorityVerdict.MANDATE_ONLY,
+            -> throw DelegationGrantorAuthorityException(
+                "actor $actor has no verified sole authority for grantor ${command.grantorPartyId}",
             )
             GrantorAuthorityVerdict.UNVERIFIABLE -> throw DelegationGrantorAuthorityUnavailableException(
                 "authority for grantor ${command.grantorPartyId} could not be established",

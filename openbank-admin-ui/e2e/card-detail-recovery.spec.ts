@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 // RFC-4122 shape is load-bearing: parseCard (clientContract.ts) validates the version and

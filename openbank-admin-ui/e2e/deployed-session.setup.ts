@@ -8,7 +8,7 @@
 // in an artifact.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { expect, test as setup, type Page } from '@playwright/test'
+import { expect, test as setup, type Page } from './helpers/test'
 import { OPERATOR_STATE, SESSION_STATE } from '../playwright.deployed-session.config'
 import { watchTraffic } from './deployed-session-guard'
 

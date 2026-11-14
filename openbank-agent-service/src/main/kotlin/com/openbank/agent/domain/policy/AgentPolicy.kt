@@ -47,8 +47,9 @@ data class PolicyDecision(
      * True when this DENY was caused by the PDP engine itself being unreachable or erroring,
      * NOT by an explicit policy decision. Set by the PDP adapter ([PolicyDecisionPoint]) on a
      * connectivity/timeout failure. AgentPolicyGate uses this flag (not the `reason` string) to
-     * decide whether to fall back from BLOCK to ADVISORY — avoids free-form string matching that
-     * could be exploited by OPA rules that happen to embed "unavailable" in their reason text.
+     * tell an outage from a policy DENY (distinct [GateResult], metric and log line) — avoids
+     * free-form string matching on the reason text. It never lets a call through: in BLOCK mode a
+     * PDP error is denied fail-closed (#15758).
      */
     val pdpError: Boolean = false,
 )
@@ -65,4 +66,38 @@ enum class EnforcementMode { ADVISORY, BLOCK }
  * given the active [EnforcementMode]. In ADVISORY mode `proceed` is always true; in BLOCK mode
  * it equals `decision.allow`.
  */
-data class GateOutcome(val decision: PolicyDecision, val mode: EnforcementMode, val proceed: Boolean)
+data class GateOutcome(
+    val decision: PolicyDecision,
+    val mode: EnforcementMode,
+    val proceed: Boolean,
+    val result: GateResult = GateResult.of(decision, proceed),
+)
+
+/**
+ * What the gate actually did with a call — a distinct value per case so a policy DENY, a DENY
+ * caused by the policy engine being unreachable, and an advisory pass-through never share a flag
+ * (and never share a metric label).
+ */
+enum class GateResult(val label: String) {
+    /** The decision was ALLOW. */
+    ALLOWED("allowed"),
+
+    /** An explicit policy / allow-list / identity DENY stopped the call (BLOCK mode). */
+    POLICY_DENIED("policy_denied"),
+
+    /** BLOCK mode and the PDP errored or was unreachable: the call was stopped fail-closed. */
+    PDP_UNAVAILABLE_DENIED("pdp_unavailable_denied"),
+
+    /** The decision was DENY (policy or PDP error) but ADVISORY mode let the call proceed. */
+    ADVISORY_PROCEEDED("advisory_proceeded"),
+    ;
+
+    companion object {
+        fun of(decision: PolicyDecision, proceed: Boolean): GateResult = when {
+            decision.allow -> ALLOWED
+            proceed -> ADVISORY_PROCEEDED
+            decision.pdpError -> PDP_UNAVAILABLE_DENIED
+            else -> POLICY_DENIED
+        }
+    }
+}

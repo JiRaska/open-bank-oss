@@ -275,7 +275,7 @@ export default function TransactionsPage() {
             selectedId={client?.id}
             busy={accountsLoading}
             onSelect={p => void pickClient(p)}
-            placeholder={t('Jméno, příjmení, rodné číslo nebo e-mail klienta', 'Client name, surname, birth number or e-mail')}
+            placeholder={t('Jméno nebo obchodní název klienta', 'Client name or trading name')}
           />
           {accountsLoading && <div role="status" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('Načítám účty klienta…', 'Loading the client’s accounts…')}</div>}
           {accountsFailed && <DataUnavailable kind="unreachable" service="account-service" feature={t('Účty klienta', 'Client accounts')} lang={language} dense />}

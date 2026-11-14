@@ -69,3 +69,7 @@ This does not establish official regulator taxonomy or deployment of the company
 Pension fund period figures are read from `GET /api/v2/reporting/funds/{fundId}/period-figures`. Query periods, machine identity, authentication configuration and returned figures are unchanged. The separate pension participant-aggregate client remains on `/api/v2/pension/reporting`; other tax providers and this service's own public API do not change versions. Consumer Pact and real reporting fixtures explicitly use the v2 fund path.
 
 A separately approved client rollout requires v2 capability across every active fund backend. The provider's deprecated v1 alias permits existing callers during transition, but source fixtures do not prove live capability or regulator delivery. Roll back clients before a v1-only provider, and preserve the provider's revision pins and widened fee precision. No provisioning, submission or deployment is authorized by this change.
+
+## Outbound client configuration
+
+The machine-identity OIDC client (`quarkus.oidc-client`) and the outbound REST clients (`quarkus.rest-client`) are configured under `quarkus:` in `application.yaml`. They used to sit under the top-level `kafka:` key, where Quarkus never read them. Once the treasury portfolio client required the OIDC client at startup, the service could not boot. The base URLs of the five read-model upstreams (pension, pension fund, party, account, balance) must be supplied by the deployment environment. Their local defaults point at localhost.

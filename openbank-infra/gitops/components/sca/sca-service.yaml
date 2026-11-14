@@ -28,7 +28,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sca-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "4a32873f15d48ee8"
+        openbank.tech/policy-checksum: "d0b4905ff0f44efb"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -39,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sca-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sca-service:sandbox-27e19a17@sha256:a805bdc64874aecfc88a71e6c8f97bc539e401d89c8e5bcbfe5f172f5ee0741b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sca-service:sandbox-548fa683@sha256:4f1f9e956e1075f3f42410a8a732c4f4a1855e1f3f42488f90f44d75a9159724
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

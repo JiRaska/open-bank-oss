@@ -149,7 +149,7 @@ export default function AuditPage() {
             selectedId={aggregateId || undefined}
             busy={loading}
             onSelect={p => { setAggregateId(p.id); setEntries([]); setLoadedAggregateId(null); setExpanded(null); setUnavailable(null); void search(p.id) }}
-            placeholder={t('Jméno, příjmení, rodné číslo nebo e-mail klienta', 'Client name, surname, birth number or e-mail')}
+            placeholder={t('Jméno nebo obchodní název klienta', 'Client name or trading name')}
           />
         )}
         {mode === 'iban' && (

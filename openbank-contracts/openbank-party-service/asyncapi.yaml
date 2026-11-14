@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+asyncapi: 3.0.0
+info:
+  title: OpenBank Party Service — events
+  version: 1.0.0
+defaultContentType: application/json
+channels:
+  partyLifecycle:
+    address: openbank.party.events
+    description: |
+      Producer: party-service, through its durable outbox. The platform lifecycle consumers
+      include account-service, kyc-service, aml-service, onboarding-service and audit-service.
+      Retention: 7 days, delete policy. Partition key: party ID.
+      The linked fleet contract describes the existing lifecycle payloads.
+    messages:
+      PartyEvent:
+        $ref: '../../docs/asyncapi/openbank-events.yaml#/components/messages/PartyEvent'
+      PARTY_ERASED:
+        $ref: '#/components/messages/PARTY_ERASED'
+      PARTY_MERGED:
+        $ref: '#/components/messages/PARTY_MERGED'
+  partyPiiAudit:
+    address: openbank.party.audit
+    description: |
+      Producer: party-service. Consumer: audit-service.
+      Only these services have write and read access, respectively.
+      Retention: 7 days, delete policy. Partition key: party ID.
+      The producer waits for broker acknowledgement. Audit-service deduplicates using eventId or ce-id.
+      The ce-type header and the eventType field both identify the record type.
+    messages:
+      PARTY_PII_REVEALED:
+        $ref: '#/components/messages/PARTY_PII_REVEALED'
+operations:
+  publishPartyLifecycle:
+    action: send
+    channel:
+      $ref: '#/channels/partyLifecycle'
+  publishPartyPiiAudit:
+    action: send
+    channel:
+      $ref: '#/channels/partyPiiAudit'
+components:
+  messages:
+    PARTY_ERASED:
+      name: PARTY_ERASED
+      payload:
+        $ref: '../../docs/asyncapi/openbank-events.yaml#/components/schemas/PartyErasedPayload'
+    PARTY_MERGED:
+      name: PARTY_MERGED
+      payload:
+        $ref: '../../docs/asyncapi/openbank-events.yaml#/components/schemas/PartyMergedPayload'
+    PARTY_PII_REVEALED:
+      name: PARTY_PII_REVEALED
+      description: An authorized interactive staff request disclosed an unmasked party record.
+      payload:
+        $ref: '#/components/schemas/PartyPiiRevealedPayload'
+  schemas:
+    PartyPiiRevealedPayload:
+      type: object
+      additionalProperties: false
+      required: [eventId, eventType, partyId, sourceService, actorId, actorType, reason, occurredAt]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          const: PARTY_PII_REVEALED
+        partyId:
+          type: string
+          format: uuid
+        sourceService:
+          type: string
+          const: party-service
+        actorId:
+          type: string
+          description: Verified interactive staff subject identifier.
+        actorType:
+          type: string
+          const: HUMAN
+        reason:
+          type: string
+          enum: [KYC_REVIEW, CUSTOMER_SUPPORT, DATA_CORRECTION]
+        occurredAt:
+          type: string
+          format: date-time

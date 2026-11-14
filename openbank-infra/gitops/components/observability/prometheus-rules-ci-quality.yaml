@@ -1,0 +1,171 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# CI quality alerts for openbank-app, over the series pushed by the CI metrics gateway
+# (apps/ci-metrics-gateway.yaml; OTLP name `ci.x.y` -> Prometheus `ci_x_y[_unit]`).
+# The nightly alerts evaluate only the NEWEST series per group (each run is a new series because of
+# the `sha` label), so a green re-run clears a red one. timestamp(last_over_time()) returns the
+# evaluation time, so the sample time is taken with max_over_time(timestamp(m)[3h:1m]).
+# Routing (kube-prometheus-stack.yaml Alertmanager): severity=warning -> Slack (non-paging),
+# severity=info -> default `null` receiver (visible in Alertmanager/Grafana only). Nothing here is
+# critical: CI telemetry never pages on-call (GoAlert/ntfy stay reserved for production impact).
+#
+# Prometheus keeps 30d here, but CI samples are pushed once per run (not scraped), so a series is
+# only visible at an instant for 5 minutes (staleness lookback). Rules therefore use
+# last_over_time([<=3h]) / absent_over_time([26h]) windows rather than instant selectors.
+# The nightly alerts evaluate only the NEWEST series per group (each run is a new series because of
+# the `sha` label), so a green re-run clears a red one. timestamp(last_over_time()) returns the
+# evaluation time, so the sample time is taken with max_over_time(timestamp(m)[3h:1m]).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-ci-quality-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.ci-quality.heartbeat
+      rules:
+        # No main-branch ci_* sample from openbank-app for 26h (nightly + merges push daily):
+        # exporter broken, token rotated on one side only, or the exporter disarmed (it exits 0
+        # with a warning when CI_METRICS_OTLP_ENDPOINT / CI_METRICS_TOKEN are unset). Weakness: any
+        # token holder can keep this quiet by pushing ci_run_wallclock_seconds with
+        # branch_class=main (threat model T1). Fires until the first push after arming.
+        - alert: CiMetricsAbsent
+          expr: |
+            absent_over_time({__name__=~"ci_(tests_executed|gate_outcome|run_wallclock_seconds)", repo="JiRaska/openbank-app", branch_class="main"}[26h])
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+            service: openbank-app-ci
+          annotations:
+            summary: "No CI quality metrics from openbank-app main for >26h"
+            description: "The nightly/main exporter (scripts/ci-quality-metrics.py) has not pushed for over 26h, or never has. Check the CI_METRICS_OTLP_ENDPOINT / CI_METRICS_TOKEN secrets (not armed = silent), the token in Vault key ci-metrics-ingest, and the ci-metrics-gateway pod/route."
+    - name: openbank.ci-quality.tests
+      rules:
+        # Silent skip: a main-branch suite executed fewer tests than it discovered, for the same run.
+        # (PR runs are excluded: path-scoped PRs legitimately skip suites.)
+        - alert: CiTestsSilentlySkipped
+          expr: |
+            (
+              max by (repo, suite, sha, event) (last_over_time(ci_tests_discovered{branch_class="main"}[1h]))
+                >
+              on (repo, suite, sha, event)
+              max by (repo, suite, sha, event) (last_over_time(ci_tests_executed{branch_class="main"}[1h]))
+            )
+            or
+            (
+              # discovered pushed but executed missing entirely (suite never ran)
+              max by (repo, suite, sha, event) (last_over_time(ci_tests_discovered{branch_class="main"}[1h]) > 0)
+                unless on (repo, suite, sha, event)
+              max by (repo, suite, sha, event) (last_over_time(ci_tests_executed{branch_class="main"}[1h]))
+            )
+          labels:
+            severity: warning
+            team: platform
+            service: openbank-app-ci
+          annotations:
+            summary: "Suite {{ $labels.suite }} executed fewer tests than discovered ({{ $labels.sha }})"
+            description: "Suite {{ $labels.suite }} on {{ $labels.repo }}@{{ $labels.sha }} ({{ $labels.event }}) discovered more tests than it executed, or reported none executed: tests were skipped or never ran."
+        # Flaky-test count above zero and higher than the previous window.
+        - alert: CiFlakyTestsRising
+          expr: |
+            max(last_over_time(ci_flaky_tests{branch_class="main"}[1h])) > 0
+              and
+            max(last_over_time(ci_flaky_tests{branch_class="main"}[1h]))
+              >
+            (max(last_over_time(ci_flaky_tests{branch_class="main"}[11h] offset 1h)) or vector(0))
+          labels:
+            severity: info
+            team: platform
+            service: openbank-app-ci
+          annotations:
+            summary: "Flaky test count is rising ({{ $value }})"
+            description: "ci_flaky_tests is above 0 and higher than 1h ago. See the OpenBank - CI quality dashboard (Flaky tests)."
+    - name: openbank.ci-quality.nightly
+      rules:
+        - alert: CiNightlyGateFailed
+          expr: |
+            (last_over_time(ci_gate_outcome{event="schedule", ci_job=~"(?i).*(fuzz|bench|journey).*"}[3h]) == 0)
+              and on (repo, workflow, ci_job, sha)
+            (
+              max_over_time(timestamp(ci_gate_outcome{event="schedule", ci_job=~"(?i).*(fuzz|bench|journey).*"})[3h:1m])
+                == on (repo, workflow, ci_job) group_left
+              max by (repo, workflow, ci_job) (max_over_time(timestamp(ci_gate_outcome{event="schedule", ci_job=~"(?i).*(fuzz|bench|journey).*"})[3h:1m]))
+            )
+          labels:
+            severity: warning
+            team: platform
+            service: openbank-app-ci
+          annotations:
+            # Nightly app workflows (schedule, once per day); no `for:`, so one true evaluation fires.
+            subject_period: 24h
+            summary: "Nightly gate failed: {{ $labels.ci_job }}"
+            description: "Nightly job {{ $labels.ci_job }} ({{ $labels.workflow }}) on {{ $labels.repo }} concluded with failure."
+        - alert: CiFuzzCrashFound
+          expr: |
+            (last_over_time(ci_fuzz_crashes{event="schedule"}[3h]) > 0)
+              and on (repo, target, sha)
+            (
+              max_over_time(timestamp(ci_fuzz_crashes{event="schedule"})[3h:1m])
+                == on (repo, target) group_left
+              max by (repo, target) (max_over_time(timestamp(ci_fuzz_crashes{event="schedule"})[3h:1m]))
+            )
+          labels:
+            severity: warning
+            team: platform
+            service: openbank-app-ci
+          annotations:
+            # Nightly app workflows (schedule, once per day); no `for:`, so one true evaluation fires.
+            subject_period: 24h
+            summary: "Nightly fuzz found {{ $value }} crash(es) in {{ $labels.target }}"
+            description: "ci_fuzz_crashes > 0 for target {{ $labels.target }} on {{ $labels.repo }}."
+        - alert: CiJourneyFailed
+          expr: |
+            (last_over_time(ci_journey_outcome{event="schedule"}[3h]) == 0)
+              and on (repo, flow, platform, sha)
+            (
+              max_over_time(timestamp(ci_journey_outcome{event="schedule"})[3h:1m])
+                == on (repo, flow, platform) group_left
+              max by (repo, flow, platform) (max_over_time(timestamp(ci_journey_outcome{event="schedule"})[3h:1m]))
+            )
+          labels:
+            severity: warning
+            team: platform
+            service: openbank-app-ci
+          annotations:
+            # Nightly app workflows (schedule, once per day); no `for:`, so one true evaluation fires.
+            subject_period: 24h
+            summary: "Nightly journey failed: {{ $labels.flow }} ({{ $labels.platform }})"
+            description: "Journey {{ $labels.flow }} on {{ $labels.platform }} failed in the nightly run for {{ $labels.repo }}."
+    - name: openbank.ci-quality.cardinality
+      rules:
+        # Ceiling alerts on ci_* series over a 12h window.
+        # Expected volume: ~17 metric names; each run adds ~90 series (5 test fields x ~6 suites,
+        # ~25 jobs x 2 gate/duration, +3) and nightly runs ~60 (benchmark/fuzz/journeys).
+        # ~60 runs per 12h => ~5.5k series in the window. Total ceiling 20000 (~3.5x headroom);
+        # largest single metric (ci_gate_outcome / ci_job_duration_seconds, ~25 per run x 60 runs
+        # = ~1.5k) ceiling 5000. last_over_time is used because a pushed series is only "present"
+        # for 5 minutes at an instant.
+        - alert: CiMetricsCardinalityHigh
+          expr: count(last_over_time({__name__=~"ci_.+"}[12h])) > 20000
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+            service: openbank-app-ci
+          annotations:
+            summary: "ci_* series count {{ $value }} exceeds 20000"
+            description: "More than 20000 ci_* series in 12h (expected ~5.5k). A leaked token or exporter bug may be minting label values (threat model D2/O1). Rotate the Vault token ci-metrics-ingest."
+        - alert: CiMetricCardinalityHigh
+          expr: count by (__name__) (last_over_time({__name__=~"ci_.+"}[12h])) > 5000
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+            service: openbank-app-ci
+          annotations:
+            summary: "{{ $labels.__name__ }} has {{ $value }} series (ceiling 5000)"
+            description: "Metric {{ $labels.__name__ }} exceeds 5000 series in 12h (expected <=~1.5k). See threat model D2/O1."
