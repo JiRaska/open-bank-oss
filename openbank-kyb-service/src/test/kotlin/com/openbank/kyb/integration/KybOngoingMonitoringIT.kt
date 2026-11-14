@@ -725,7 +725,11 @@ class KybOngoingMonitoringIT {
     }
 
     /** Headers that belong to one request, not to the case. */
-    private val perRequestHeaders = setOf("date", "traceparent", "tracestate", "x-correlation-id", "x-request-id")
+    // content-length too: it measures the UNblanked body, and a blanked `timestamp` or `updatedAt`
+    // is an Instant whose rendering drops trailing zero digits, so its length varies per request
+    // (seen as 2785 vs 2788 for equal bodies). The blanked body itself is still compared whole.
+    private val perRequestHeaders =
+        setOf("date", "traceparent", "tracestate", "x-correlation-id", "x-request-id", "content-length")
 
     /** Status code, headers and body, with only the per-request parts of the fleet's error body blanked. */
     private fun whole(response: io.restassured.response.Response, blank: Regex? = null): String {
