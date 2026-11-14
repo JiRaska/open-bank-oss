@@ -74,6 +74,15 @@ class FraudMetricsAdapter(private val registry: MeterRegistry?) : FraudMetricsPo
         }
     }
 
+    override fun recordCounterpartyKeyMissing() {
+        registry?.let { r ->
+            Counter.builder("openbank.fraud.counterparty.key.missing")
+                .tag("service", SERVICE)
+                .register(r)
+                .increment()
+        }
+    }
+
     companion object {
         private const val SERVICE = "fraud"
         private const val UNKNOWN_RAIL = "unknown"
