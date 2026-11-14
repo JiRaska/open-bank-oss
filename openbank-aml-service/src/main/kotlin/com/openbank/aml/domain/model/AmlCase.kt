@@ -4,6 +4,8 @@
 
 package com.openbank.aml.domain.model
 
+import com.openbank.libs.governance.MakerCheckerViolation
+import com.openbank.libs.governance.Proposal
 import java.time.Instant
 import java.util.UUID
 
@@ -50,6 +52,30 @@ enum class CaseOrigin {
     ONBOARDING_SCREENING,
 }
 
+/**
+ * The two outcomes of a held payment's case (ADR-0374 point 3): the rail releases the payment on
+ * [CLEAR] and rejects it on [BLOCK]. Deliberately not the monitoring disposition's CLEAR/REPORT.
+ */
+enum class HoldDisposition(val status: AmlCaseStatus) {
+    CLEAR(AmlCaseStatus.CLEARED),
+    BLOCK(AmlCaseStatus.BLOCKED),
+}
+
+/** One analyst's proposed decision on a held payment's case, waiting for a second analyst. */
+data class HoldDecisionProposal(
+    val outcome: HoldDisposition,
+    val reason: String,
+    val proposedBy: String,
+    val proposedAt: Instant,
+)
+
+/**
+ * A decision on a held payment's case was refused by the four-eyes rule: it was made by one analyst
+ * alone, by the proposer confirming their own proposal, or against a proposal that is not the one
+ * pending. An [IllegalStateException] so it can never be mistaken for a validation error.
+ */
+class HoldDecisionFourEyesException(message: String) : IllegalStateException(message)
+
 data class AmlCase(
     val id: UUID,
     val idempotencyKey: String,
@@ -79,7 +105,18 @@ data class AmlCase(
     val requestHash: String? = null,
     /** `null` for rows written before provenance was recorded: unknown, so never treated as a system origin. */
     val origin: CaseOrigin? = null,
+    /** The pending (or, once decided, the confirmed) four-eyes proposal of a held payment's case. */
+    val holdProposal: HoldDecisionProposal? = null,
 ) {
+    /**
+     * ADR-0374 point 3: a case the hold intake opened releases or rejects a held payment when it is
+     * decided, so its terminal decision takes two analysts. Keyed on [origin], the one field only the
+     * intake writes; a case under a hold key with any other origin cannot be decided at all
+     * ([isForeignClaimOnHoldKey]).
+     */
+    val requiresFourEyesHoldDecision: Boolean
+        get() = origin == CaseOrigin.PAYMENT_HOLD_INTAKE
+
     /**
      * False while the owning party is not established: no party at all, or (rows from before a
      * missing party could be stored) the account id standing in for it (#3413).
@@ -127,6 +164,77 @@ data class AmlCase(
         // analyst's and the sandbox auto-clear alike — recorded `decidedAt`/`updatedAt` as
         // 1970-01-01, straight into the DB columns and onto `aml.case.status_changed.v1`. Both
         // unit-test callers already passed a real value, so nothing observed it (#5837).
+        now: Instant,
+    ): AmlCase {
+        // The invariant lives here, not in a route: every single-step decision goes through this
+        // method, so none can decide a held payment's case alone.
+        if (requiresFourEyesHoldDecision && targetStatus in TERMINAL_STATUSES) {
+            throw HoldDecisionFourEyesException(
+                "A held payment's case is decided by two analysts: propose the decision at " +
+                    "POST /api/v1/aml/cases/$id/hold-decision/proposal and have a different analyst confirm it at " +
+                    "POST /api/v1/aml/cases/$id/hold-decision/confirmation",
+            )
+        }
+        return decide(targetStatus, decisionReason, assignedAnalyst, decidedBy, now)
+    }
+
+    /**
+     * First half of a held payment's decision: [proposedBy] proposes [outcome] for [reason]. Changes
+     * no status and emits nothing a rail acts on. A later proposal replaces a pending one; a
+     * confirmation restates what it confirms, so it cannot land on the replacement.
+     */
+    fun proposeHoldDecision(outcome: HoldDisposition, reason: String, proposedBy: String, now: Instant): AmlCase {
+        if (!requiresFourEyesHoldDecision) {
+            throw HoldDecisionFourEyesException(
+                "Only a held payment's case is decided through a hold-decision proposal",
+            )
+        }
+        if (status in TERMINAL_STATUSES) throw HoldDecisionFourEyesException("The case is already decided: $status")
+        require(reason.isNotBlank()) { "reason is required" }
+        require(proposedBy.isNotBlank()) { "proposedBy is required" }
+        return copy(
+            holdProposal = HoldDecisionProposal(outcome, reason.trim(), proposedBy.trim(), now),
+            updatedAt = now,
+        )
+    }
+
+    /**
+     * Second half: a DIFFERENT analyst, [confirmedBy], confirms the pending proposal, restating its
+     * [outcome] and [reason]. Only here does the case reach CLEARED or BLOCKED. The four-eyes rule is
+     * the fleet's [Proposal.approve].
+     */
+    fun confirmHoldDecision(outcome: HoldDisposition, reason: String, confirmedBy: String, now: Instant): AmlCase {
+        if (!requiresFourEyesHoldDecision) {
+            throw HoldDecisionFourEyesException(
+                "Only a held payment's case is decided through a hold-decision proposal",
+            )
+        }
+        val proposal =
+            holdProposal ?: throw HoldDecisionFourEyesException("No decision has been proposed for this case")
+        if (status in TERMINAL_STATUSES) throw HoldDecisionFourEyesException("The case is already decided: $status")
+        if (outcome != proposal.outcome || reason.trim() != proposal.reason) {
+            throw HoldDecisionFourEyesException(
+                "The pending proposal is not the one confirmed; read it again before confirming",
+            )
+        }
+        try {
+            Proposal(
+                id.toString(),
+                proposal.outcome,
+                proposal.proposedBy,
+                proposal.proposedAt,
+            ).approve(confirmedBy.trim(), now)
+        } catch (e: MakerCheckerViolation) {
+            throw HoldDecisionFourEyesException(e.message ?: "four-eyes: the confirmer must differ from the proposer")
+        }
+        return decide(proposal.outcome.status, proposal.reason, assignedAnalyst, confirmedBy, now)
+    }
+
+    private fun decide(
+        targetStatus: AmlCaseStatus,
+        decisionReason: String?,
+        assignedAnalyst: String?,
+        decidedBy: String,
         now: Instant,
     ): AmlCase {
         require(canTransitionTo(targetStatus)) { "Invalid AML case status transition: $status -> $targetStatus" }
@@ -178,6 +286,9 @@ data class AmlCase(
         const val PAYMENT_HOLD_KEY_PREFIX = "payment-hold:"
 
         /** Key namespaces only this service's own jobs and consumers write; the create endpoint refuses them. */
+        /** The statuses a rail acts on; on a held payment's case only a confirmation reaches them. */
+        val TERMINAL_STATUSES = setOf(AmlCaseStatus.CLEARED, AmlCaseStatus.BLOCKED)
+
         val RESERVED_KEY_PREFIXES = listOf(PACK_MONITORING_KEY_PREFIX, PAYMENT_HOLD_KEY_PREFIX)
 
         /**

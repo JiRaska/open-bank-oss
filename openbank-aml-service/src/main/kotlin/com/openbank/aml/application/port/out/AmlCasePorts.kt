@@ -56,6 +56,15 @@ interface AmlCaseRepository {
     suspend fun update(amlCase: AmlCase, event: OutboxMessage): AmlCase
 
     /**
+     * Writes a held payment's case [decided] — a proposal, or its confirmation — and [event], if any,
+     * in one transaction under a lock on the case. [readAs] is the case as the caller read it: if the
+     * stored status, party or proposal differs from it, someone changed the case in between (another
+     * proposal replaced the one being confirmed), so nothing is written and
+     * [CaseChangedConcurrentlyException] is thrown.
+     */
+    suspend fun writeHoldDecision(readAs: AmlCase, decided: AmlCase, event: OutboxMessage?): AmlCase
+
+    /**
      * Cases that know their account but not their party: `party_id` is missing, or is a copy of
      * `account_id` (rows from before a missing party could be stored, #3413). Bounded by [limit] and
      * ordered least recently attempted first, so cases that cannot be resolved (an account the

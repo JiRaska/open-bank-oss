@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: AML Service API
-  version: 1.6.0
+  version: 1.7.0
   description: >-
     Anti-Money Laundering screening case lifecycle — submit, review, and decide AML cases.
   license:
@@ -153,6 +153,10 @@ paths:
     put:
       tags: [AML Cases]
       summary: Update AML case decision
+      description: >-
+        Single-analyst decision. On a case the held-payment intake opened, CLEARED and BLOCKED are
+        refused with 409: such a case is decided by two analysts through
+        /api/v1/aml/cases/{caseId}/hold-decision/proposal and /hold-decision/confirmation (ADR-0374).
       operationId: updateAmlDecision
       parameters:
         - $ref: '#/components/parameters/caseId'
@@ -165,6 +169,95 @@ paths:
       responses:
         '200':
           description: Decision applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AmlCaseResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/aml/cases/{caseId}/hold-decision/proposal:
+    post:
+      tags: [AML Cases]
+      summary: Propose the decision on a held payment's case (four-eyes, first analyst)
+      description: >-
+        ADR-0374 point 3. Only a case the held-payment intake opened. Records the proposal; changes no
+        status and emits no event. A later proposal replaces a pending one. Human compliance staff only.
+      operationId: proposeHoldDecision
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HoldDecisionRequest'
+      responses:
+        '201':
+          description: Proposal recorded; a different analyst confirms it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HoldDecisionProposalResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [AML Cases]
+      summary: Read the pending decision proposal of a held payment's case
+      operationId: getHoldDecisionProposal
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      responses:
+        '200':
+          description: The proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HoldDecisionProposalResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/aml/cases/{caseId}/hold-decision/confirmation:
+    post:
+      tags: [AML Cases]
+      summary: Confirm the proposed decision on a held payment's case (four-eyes, second analyst)
+      description: >-
+        A different analyst than the proposer restates the pending proposal's outcome and reason. Only
+        this moves the case to CLEARED or BLOCKED and emits aml.case.status_changed.v1. 409 when the
+        caller proposed it, when the restated outcome or reason differ from the pending proposal, or
+        when there is none.
+      operationId: confirmHoldDecision
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HoldDecisionRequest'
+      responses:
+        '200':
+          description: Case decided
           content:
             application/json:
               schema:
@@ -629,6 +722,37 @@ components:
           deprecated: true
           description: Ignored. The decider is taken from the authenticated caller.
 
+    HoldDisposition:
+      type: string
+      enum: [CLEAR, BLOCK]
+      description: CLEAR releases the held payment (case CLEARED); BLOCK rejects it (case BLOCKED).
+    HoldDecisionRequest:
+      type: object
+      required: [outcome, reason]
+      properties:
+        outcome:
+          $ref: '#/components/schemas/HoldDisposition'
+        reason:
+          type: string
+          minLength: 1
+    HoldDecisionProposalResponse:
+      type: object
+      required: [caseId, status, outcome, reason, proposedBy, proposedAt]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/AmlCaseStatus'
+        outcome:
+          $ref: '#/components/schemas/HoldDisposition'
+        reason:
+          type: string
+        proposedBy:
+          type: string
+        proposedAt:
+          type: string
+          format: date-time
     OutcomeCatalogueResponse:
       type: object
       required: [vocabularyId, vocabularyRevision, vocabularyHash, entries]

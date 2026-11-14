@@ -8,6 +8,7 @@ import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.AmlRiskLevel
 import com.openbank.aml.domain.model.CaseOrigin
+import com.openbank.aml.domain.model.HoldDisposition
 import com.openbank.aml.domain.model.ScreeningType
 import java.util.UUID
 
@@ -57,9 +58,24 @@ data class UpdateAmlDecisionCommand(
     val fourEyesProposalId: UUID? = null,
 )
 
+/** One analyst's proposal, or a different analyst's confirmation, of a held payment's case decision. */
+data class HoldDecisionCommand(
+    val caseId: UUID,
+    val outcome: HoldDisposition,
+    val reason: String,
+    /** The authenticated caller, never a field of the request. */
+    val analyst: String,
+)
+
 interface AmlCaseUseCase {
     suspend fun createCase(command: CreateAmlCaseCommand): AmlCase
     suspend fun getCase(caseId: UUID): AmlCase
     suspend fun listCases(query: ListAmlCasesQuery): List<AmlCase>
     suspend fun updateDecision(command: UpdateAmlDecisionCommand): AmlCase
+
+    /** ADR-0374 point 3: proposes a held payment's decision. Changes no status and emits no event. */
+    suspend fun proposeHoldDecision(command: HoldDecisionCommand): AmlCase
+
+    /** Confirms the pending proposal as a different analyst; the only way such a case is decided. */
+    suspend fun confirmHoldDecision(command: HoldDecisionCommand): AmlCase
 }

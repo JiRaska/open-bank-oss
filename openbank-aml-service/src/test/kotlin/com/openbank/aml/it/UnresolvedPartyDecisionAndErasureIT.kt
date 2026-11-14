@@ -93,6 +93,15 @@ class UnresolvedPartyDecisionAndErasureIT {
             .singleOrNull()
     }
 
+    private fun proposeAs(caseId: UUID, analyst: String, outcome: String, reason: String) = onEventLoop {
+        pool.preparedQuery(
+            """
+            UPDATE aml_cases SET hold_proposal_outcome = $2, hold_proposal_reason = $3, hold_proposed_by = $4,
+                   hold_proposed_at = now() WHERE case_id = $1
+            """.trimIndent(),
+        ).execute(Tuple.of(caseId, outcome, reason, analyst)).awaitSuspending()
+    }
+
     private fun holdCase(payment: UUID): Case? = caseByKey("payment-hold:domestic:$payment")
 
     /** Status-changed events of [caseId] in the outbox, oldest first. */
@@ -172,7 +181,7 @@ class UnresolvedPartyDecisionAndErasureIT {
     }
 
     @Test
-    @TestSecurity(user = "u-operator", roles = ["ROLE_OPERATOR"])
+    @TestSecurity(user = "u-operator", roles = ["ROLE_OPERATOR", "ROLE_COMPLIANCE"])
     @OidcSecurity(
         claims = [
             Claim(key = "azp", value = "openbank-admin-ui"),
@@ -193,12 +202,15 @@ class UnresolvedPartyDecisionAndErasureIT {
         val blocked = holdCase(BLOCKED_HOLD)!!
         assertThat(blocked.party).isNull()
 
-        // The decision the rail is waiting for is taken while nobody knows whose case this is.
+        // The decision the rail is waiting for is taken while nobody knows whose case this is. A held
+        // payment's case takes two analysts (ADR-0374 point 3): a colleague's proposal is seeded, and
+        // this analyst confirms it.
+        proposeAs(blocked.id, "u-colleague", "BLOCK", "listed counterparty")
         Given {
             contentType("application/json")
-            body("""{"targetStatus":"BLOCKED","decisionReason":"listed counterparty"}""")
+            body("""{"outcome":"BLOCK","reason":"listed counterparty"}""")
         } When {
-            put("/api/v1/aml/cases/${blocked.id}/decision")
+            post("/api/v1/aml/cases/${blocked.id}/hold-decision/confirmation")
         } Then {
             statusCode(HTTP_OK)
             body("status", equalTo("BLOCKED"))

@@ -12,7 +12,9 @@ import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.ScreeningType
 import com.openbank.aml.infrastructure.rest.dto.CreateAmlCaseRequest
+import com.openbank.aml.infrastructure.rest.dto.HoldDecisionRequest
 import com.openbank.aml.infrastructure.rest.dto.UpdateAmlDecisionRequest
+import com.openbank.aml.infrastructure.rest.dto.toHoldProposalResponse
 import com.openbank.aml.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
@@ -30,6 +32,7 @@ import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
+import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
@@ -194,6 +197,52 @@ class AmlCaseResource(
     }
 
     /**
+     * ADR-0374 point 3: the first half of a held payment's decision. One analyst proposes CLEAR or
+     * BLOCK with a reason; no status changes and no event leaves. Compliance only, and only a human
+     * staff token: the role is the analyst's, and the identity check refuses any service account
+     * that may hold it in some realm.
+     */
+    @POST
+    @Path("/{caseId}/hold-decision/proposal")
+    @RolesAllowed(HOLD_DECISION_ROLE)
+    @Authorize(action = "amlCase.holdDecision.propose", resource = "#caseId")
+    @Operation(summary = "Propose the decision on a held payment's case (four-eyes, first analyst)")
+    suspend fun proposeHoldDecision(@PathParam("caseId") caseId: UUID, request: HoldDecisionRequest?): Response {
+        requireHumanAnalyst(identity)
+        val command = requireNotNull(request) { "request body is required" }.toCommand(caseId, identity.principal.name)
+        val proposed = amlCaseUseCase.proposeHoldDecision(command)
+        return Response.status(Response.Status.CREATED).entity(proposed.toHoldProposalResponse()).build()
+    }
+
+    /** The proposal a second analyst is asked to confirm; 404 when none has been made. */
+    @GET
+    @Path("/{caseId}/hold-decision/proposal")
+    @RolesAllowed(HOLD_DECISION_ROLE)
+    @Authorize(action = "amlCase.read", resource = "#caseId")
+    @Operation(summary = "Read the pending decision proposal of a held payment's case")
+    suspend fun getHoldDecisionProposal(@PathParam("caseId") caseId: UUID): Response {
+        val proposal = amlCaseUseCase.getCase(caseId).toHoldProposalResponse()
+            ?: throw NotFoundException("No decision has been proposed for AML case $caseId")
+        return Response.ok(proposal).build()
+    }
+
+    /**
+     * The second half: a DIFFERENT analyst confirms the pending proposal by restating its outcome
+     * and reason. Only this decides the case, and only this emits the status-changed event the rail
+     * releases or rejects the payment on.
+     */
+    @POST
+    @Path("/{caseId}/hold-decision/confirmation")
+    @RolesAllowed(HOLD_DECISION_ROLE)
+    @Authorize(action = "amlCase.holdDecision.confirm", resource = "#caseId")
+    @Operation(summary = "Confirm the proposed decision on a held payment's case (four-eyes, second analyst)")
+    suspend fun confirmHoldDecision(@PathParam("caseId") caseId: UUID, request: HoldDecisionRequest?): Response {
+        requireHumanAnalyst(identity)
+        val command = requireNotNull(request) { "request body is required" }.toCommand(caseId, identity.principal.name)
+        return Response.ok(amlCaseUseCase.confirmHoldDecision(command).toResponse()).build()
+    }
+
+    /**
      * Pack-monitoring cases are confidential (ADR-0371 §7): readable by the compliance role only.
      * A rail-opened TRANSACTION_MONITORING case is not one and stays visible to its operators.
      */
@@ -203,6 +252,7 @@ class AmlCaseResource(
         const val IDEMPOTENCY_SERVICE = "aml-service"
         const val CASES_PATH = "/api/v1/aml/cases"
         const val MONITORING_ROLE = "ROLE_COMPLIANCE"
+        const val HOLD_DECISION_ROLE = "ROLE_COMPLIANCE"
     }
 }
 
@@ -230,6 +280,17 @@ internal fun requireNamedMachineCaller(identity: SecurityIdentity) {
     if (AML_CASE_CREATE_STAFF_ROLES.any(identity::hasRole) && ServiceAccountIdentity.isHumanStaff(identity)) return
     if (!ServiceAccountIdentity.isOneOf(identity, AML_CASE_CREATE_CALLERS)) {
         throw ForbiddenException("caller is not a named AML case-open service")
+    }
+}
+
+/**
+ * A held payment's decision is taken by people. A role alone does not say so: the CI realm gives a
+ * service account ROLE_COMPLIANCE, and the deployed one gives another ROLE_OPERATOR. So the caller
+ * must also present a human staff token.
+ */
+internal fun requireHumanAnalyst(identity: SecurityIdentity) {
+    if (!ServiceAccountIdentity.isHumanStaff(identity)) {
+        throw ForbiddenException("a held payment's case is decided by human analysts only")
     }
 }
 
