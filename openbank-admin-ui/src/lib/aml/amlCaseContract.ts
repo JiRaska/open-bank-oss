@@ -101,3 +101,23 @@ export function partyDisplayName(party: { legalName?: string | null; tradingName
 export function caseAgeHours(createdAt: string, now: Date = new Date()): number {
   return Math.max(0, Math.floor((now.getTime() - Date.parse(createdAt)) / 3_600_000))
 }
+
+const RISK_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 } as const
+const STATUS_RANK = { ESCALATED: 0, OPEN: 1, UNDER_REVIEW: 1, BLOCKED: 2, CLEARED: 2 } as const
+
+/**
+ * The officer's work queue: cases still needing a decision before closed ones; among those,
+ * escalations first, then by RISK (a critical sanctions hit under review outranks a medium
+ * open alert), then oldest first. Status alone used to win, which put medium "screening
+ * unavailable" cases above a critical sanctions hit (seen live 2026-11-14).
+ */
+export function compareWorkQueue(a: AmlCase, b: AmlCase): number {
+  return STATUS_RANK[a.status] - STATUS_RANK[b.status]
+    || RISK_RANK[a.riskLevel] - RISK_RANK[b.riskLevel]
+    || Date.parse(a.createdAt) - Date.parse(b.createdAt)
+}
+
+/** "5 h" under two days, then whole days: "3388 h" is unreadable at a glance. */
+export function formatCaseAge(hours: number, t: (cs: string, en: string) => string): string {
+  return hours < 48 ? `${hours} h` : `${Math.floor(hours / 24)} ${t('dní', 'days')}`
+}

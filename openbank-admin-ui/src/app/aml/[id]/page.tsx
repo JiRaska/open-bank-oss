@@ -28,7 +28,7 @@ import { PageHeader, ShortId, StatusBadge } from '@/components/ui'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
-  allowedTransitions, caseAgeHours, isOpenAmlStatus, parseAmlCase, parseAmlCases, requiresReason,
+  allowedTransitions, caseAgeHours, formatCaseAge, isOpenAmlStatus, parseAmlCase, parseAmlCases, requiresReason,
   type AmlCase, type AmlStatus,
 } from '@/lib/aml/amlCaseContract'
 import { fetchPartySummary, type AmlPartySummary } from '@/lib/aml/usePartyNames'
@@ -236,7 +236,7 @@ export default function AmlCaseDetailPage() {
         ) : <>
           <PageHeader
             title={subject}
-            subtitle={`${amlCase.screeningType.replaceAll('_', ' ')} · ${t('otevřen před', 'open for')} ${ageH < 48 ? `${ageH} h` : `${Math.floor(ageH / 24)} ${t('dní', 'days')}`}`}
+            subtitle={`${amlCase.screeningType.replaceAll('_', ' ')} · ${t('otevřen', 'open for')} ${formatCaseAge(ageH, t)}`}
             icon={<ShieldAlert size={20} aria-hidden="true" />}
             actions={<div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <StatusBadge status={amlCase.riskLevel} />
