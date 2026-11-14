@@ -54,3 +54,16 @@ test_shared_service_account_may_not_drive_the_agreement_steps if {
 		not "operator-kyb-review" in rest.allowed_reasons with input as {"principal": shared, "action": action}
 	}
 }
+
+test_statutory_representation_uses_distinct_staff_and_machine_grants if {
+    staff_publisher := {"service_account": false, "type": "HUMAN", "id": "test-kyc", "roles": ["ROLE_KYC"]}
+    delegation := {"service_account": true, "client_id": "openbank-delegation", "type": "HUMAN", "id": "service-account-openbank-delegation", "roles": ["ROLE_API"]}
+    shared := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]}
+    operator := {"service_account": false, "type": "HUMAN", "id": "test-operator", "roles": ["ROLE_OPERATOR"]}
+    rest.allow.allow with input as {"principal": staff_publisher, "action": "kyb.statutory-representation.publish"}
+    not rest.allow.allow with input as {"principal": operator, "action": "kyb.statutory-representation.publish"}
+    rest.allow.allow with input as {"principal": delegation, "action": "kyb.statutory-representation.inspect"}
+    not rest.allow.allow with input as {"principal": delegation, "action": "kyb.statutory-representation.publish"}
+    not rest.allow.allow with input as {"principal": staff_publisher, "action": "kyb.statutory-representation.inspect"}
+    not rest.allow.allow with input as {"principal": shared, "action": "kyb.statutory-representation.inspect"}
+}
