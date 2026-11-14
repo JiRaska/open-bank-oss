@@ -307,6 +307,8 @@ Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has
 
 ## 5. Residual risks / assumptions
 
+Outbox v2 acknowledges `transaction_outbox` rows only when a dispatcher owns the current claim token. A stale worker may still deliver an event, so downstream deduplication by event ID remains required. The compatibility rollout pauses all v1 dispatchers before v2 claims begin. The existing SENT retention and synthetic origin rules continue to apply.
+
 - **Booked balance is now a ledger projection (ADR-0039 Phase D-2).** The saga no longer debits/credits
   balance-service directly; it posts the ledger journal and `placeHold`s the synchronous cover. The
   booked movement and the cover-hold release both land asynchronously in balance-service as it projects

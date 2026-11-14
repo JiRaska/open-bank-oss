@@ -143,11 +143,13 @@ sequenceDiagram
   loop @Scheduled každých 5s (SKIP pokud běží)
     D->>DB: listProcessable(dávka 25)
     D->>K: publishWithResilience (CircuitBreaker + Retry + Timeout + Bulkhead)
-    D->>DB: markSent / markFailed
+    D->>DB: markClaimsSent / markClaimFailed
   end
 ```
 
 **Proč outbox:** transakční konzistence mezi zápisem do DB a publikací do Kafky. Doručení at-least-once; dispatcher obaluje každou publikaci do SmallRye Fault Tolerance (`@CircuitBreaker`, `@Retry`, `@Timeout`, `@Bulkhead`) a nikdy nenechá scheduler spadnout.
+
+Outbox v2 (ADR-0327) nárokuje nejstarší neodeslanou událost každého agregátu. Nezávislé agregáty se odesílají souběžně. Potvrzení vyžaduje aktuální token nároku. Chyba odloží další pokus a po vyčerpání pokusů řádek přejde do stavu `DEAD`. Doručení probíhá alespoň jednou a příjemci odstraňují duplicity podle ID události. Přechod na v2 nejprve zastaví předchozí dispečer.
 
 ## Klíčové porty
 

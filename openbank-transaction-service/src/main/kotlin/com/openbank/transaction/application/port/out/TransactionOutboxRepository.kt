@@ -4,10 +4,10 @@
 
 package com.openbank.transaction.application.port.out
 
-import com.openbank.libs.persistence.outbox.OutboxRepository
+import com.openbank.libs.persistence.outbox.ClaimFencedOutboxRepositoryV2
 
 /** Outbound port for draining the transactional outbox (read pending, mark sent/failed). */
-interface TransactionOutboxRepository : OutboxRepository {
+interface TransactionOutboxRepository : ClaimFencedOutboxRepositoryV2 {
 
     /**
      * Persist an outbox row within the caller's active transaction so the outbox row and the

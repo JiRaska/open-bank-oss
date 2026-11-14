@@ -5,6 +5,7 @@ package com.openbank.transaction.infrastructure.outbox
 
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher
+import com.openbank.libs.persistence.outbox.OutboxDispatch
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxRepository
@@ -16,17 +17,13 @@ import org.eclipse.microprofile.faulttolerance.Bulkhead
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
+import java.time.Duration
 
 /**
  * Drains the transaction transactional outbox (ADR-0050 / ADR-0049 D3).
  *
- * **N4 — cross-pod row claim (#1201).** `concurrentExecution = SKIP` only prevents in-JVM
- * overlap; it does not stop two pods from both running this scheduled method. `replicas: 1` is
- * steady-state only — an Argo Rollouts canary window runs the old and new pod simultaneously
- * for the whole rollout duration, and both dispatch on their own tick.
- * `TransactionOutboxRepositoryImpl` therefore implements [OutboxRepository.claimProcessable] as
- * an atomic `FOR UPDATE SKIP LOCKED` claim, not the unclaimed-peek default, so two concurrently
- * running pods can never both select and publish the same row.
+ * Each batch claims the oldest unsent event per aggregate. Acknowledgements can change
+ * a row only while the worker still owns its claim token.
  */
 @ApplicationScoped
 class TransactionOutboxDispatcher(
@@ -35,6 +32,8 @@ class TransactionOutboxDispatcher(
     @ConfigProperty(name = "openbank.outbox.dispatch-enabled", defaultValue = "false")
     private val dispatchEnabled: Boolean,
     metrics: DomainMetrics,
+    @ConfigProperty(name = "openbank.outbox.poll-interval", defaultValue = "5s")
+    override val dispatchPollInterval: Duration,
 ) : AbstractOutboxDispatcher(metrics) {
 
     override val outboxRepository: OutboxRepository get() = repo
@@ -54,7 +53,7 @@ class TransactionOutboxDispatcher(
         if (dispatchEnabled) dispatchScheduledBatch()
     }
 
-    @Bulkhead(1)
+    @Bulkhead(OutboxDispatch.SEND_CONCURRENCY)
     @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000)
     @Retry(maxRetries = 2, delay = 200, jitter = 100)
     @Timeout(3000)
