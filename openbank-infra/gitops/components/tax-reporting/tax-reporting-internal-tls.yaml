@@ -2,7 +2,9 @@
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
 # Private-CA CLIENT certificate for tax-reporting-service's east-west mTLS calls (8443 listeners,
-# client auth REQUIRED) — the pension company's ledger-service and treasury-service (ADR-0337).
+# client auth REQUIRED) — the pension company's ledger-service and treasury-service (ADR-0337) and
+# the pension-service / pension-fund-service internal-TLS listeners. ca.crt is the trust anchor
+# for all of them; tls.crt/tls.key are this service's client identity.
 # ASVS V9.1 forbids a new plaintext inter-service edge: these calls carry a bearer token and the
 # cluster has no service mesh. Same shape as treasury-internal-tls.
 apiVersion: cert-manager.io/v1
@@ -19,6 +21,7 @@ spec:
   privateKey:
     algorithm: ECDSA
     size: 256
+    rotationPolicy: Always
   commonName: tax-reporting-service.tax-reporting.svc
   issuerRef:
     name: openbank-ca
