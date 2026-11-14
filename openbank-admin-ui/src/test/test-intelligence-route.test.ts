@@ -16,6 +16,7 @@ afterEach(() => {
   delete process.env.OPENBANK_TEST_INTELLIGENCE_STALE_AFTER_DAYS
     delete process.env.OPENBANK_EVIDENCE_STORE_URL
     delete process.env.OPENBANK_TEST_INTELLIGENCE_SNAPSHOT_URL
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true }))
 })
@@ -435,9 +436,17 @@ describe('GET /api/test-intelligence', () => {
   })
 
   it('projects each active journey verdict onto the components it covers, and never a planned one', async () => {
+    // The fixture's evidence is dated 2026-10-31 and the route ages evidence against the clock
+    // (OPENBANK_TEST_INTELLIGENCE_STALE_AFTER_DAYS). Read against the real clock the verdict turns
+    // 'stale' a fortnight later and the test fails on a date, not on a defect. Pin the clock to a
+    // day after the fixture; only Date is faked, so fetch and timers still run.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-01T00:00:00.000Z'))
     const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-matrix-'))
     dirs.push(dir)
     const file = path.join(dir, 'report.json')
+    // Relative to now: a fixed date ages past the journey's freshness limit and turns 'stale'.
+    const passedAt = new Date(Date.now() - 60_000).toISOString()
     const component = (name: string) => ({ component: name, released: true, moneyPath: false, evidence: [],
       coverage: { state: 'unknown', observedAt: null, source: 'none', environment: 'ci' }, testInfrastructure: { declared: [], observed: [] } })
     writeFileSync(file, JSON.stringify({
@@ -446,7 +455,7 @@ describe('GET /api/test-intelligence', () => {
       syntheticJourneys: [
         { id: 'fx-rates-read', title: 'FX', status: 'active', state: 'unknown', severity: 'page', schedule: '*/10 * * * *', environment: 'sandbox', covers: ['openbank-fx-service'], falsifies: 'x', blocker: null },
         { id: 'admin-operator-access', title: 'Operator', status: 'active', state: 'unknown', severity: 'page', executor: 'github-actions', schedule: '13 */2 * * *', environment: 'sandbox', covers: ['openbank-admin-ui'], falsifies: 'x', blocker: null,
-          ci: { state: 'passed', observedAt: '2026-10-31T06:23:08.282Z' } },
+          ci: { state: 'passed', observedAt: passedAt } },
         { id: 'sepa-credit-transfer', title: 'SEPA', status: 'planned', state: 'blocked', severity: 'page', schedule: null, environment: 'sandbox', covers: ['openbank-account-service'], falsifies: 'x', blocker: '#4348' },
       ],
       totals: { components: 3, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
@@ -469,7 +478,7 @@ describe('GET /api/test-intelligence', () => {
     const synthetic = (name: string) => body.components.find((c: { component: string }) => c.component === name)
       .evidence.filter((e: { kind: string }) => e.kind === 'synthetic')
     expect(synthetic('openbank-fx-service')).toEqual([expect.objectContaining({ state: 'failed', source: 'journey:fx-rates-read' })])
-    expect(synthetic('openbank-admin-ui')).toEqual([expect.objectContaining({ state: 'passed', source: 'journey:admin-operator-access', observedAt: '2026-10-31T06:23:08.282Z' })])
+    expect(synthetic('openbank-admin-ui')).toEqual([expect.objectContaining({ state: 'passed', source: 'journey:admin-operator-access', observedAt: passedAt })])
     expect(synthetic('openbank-account-service')).toEqual([])
     // The headline totals must count a projected failure, and a k6 row is dated by its run,
     // never by the Prometheus query time (no completed run in this fixture => null).

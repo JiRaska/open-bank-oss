@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sanctions-service
     app.kubernetes.io/part-of: sanctions
   annotations:
-    openbank.tech/policy-checksum: "1410a8048c8aca12"
+    openbank.tech/policy-checksum: "af3b1b4b70e5d461"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2176,6 +2176,10 @@ data:
             - kyb.case.reject
             - kyb.case.review.resolve
             - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
+            - kyb.monitoring.finding.decide    # #16028: decide an ongoing-monitoring finding (human reviewer only)
+            - kyb.monitoring.queue.list        # #16028: ongoing-monitoring holds queue
+            - kyb.monitoring.exit.propose      # #16028: four-eyes exit, maker
+            - kyb.monitoring.exit.confirm      # #16028: four-eyes exit, checker (code refuses checker == maker)
         ROLE_AUDITOR:
           grant:
             - audit.trail.inspect

@@ -226,3 +226,7 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
+
+The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `PENSION_FUND_SERVICE_URL=https://pension-fund-service.pension-fund.svc:8443`. This is the period-end fund aggregate read already admitted for `service-account-openbank-tax-reporting` alone. It is now reachable in the deployed pod. Transport is the 8443 client-auth-required listener (see "Required client authentication on the parallel TLS listener"), with the server hostname verified. Residual risk: none new.
