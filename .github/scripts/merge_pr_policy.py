@@ -11,6 +11,11 @@ import hashlib
 import re
 
 POLICY_PATH = '.github/scripts/merge-train.py'
+# A payload sanity bound, not a policy decision. It was 500_000 until merge-train.py passed it on
+# 2026-11-07 (#14891, 508_801 B), after which every App-merged agent PR lost its merge record
+# (#16187). The base64 bound follows from it: 4/3 expansion plus GitHub's newline every 60 chars.
+MAX_POLICY_BLOB_BYTES = 4_000_000
+MAX_POLICY_BLOB_BASE64 = (MAX_POLICY_BLOB_BYTES + 2) // 3 * 4 * 61 // 60 + 64
 # Deliberately bounded reconstruction, not a Python sandbox. Whole-source identities from
 # the canonical first parents of #13750, #13725, #13794 and #13770/#13847 were independently reviewed.
 # Any additional whole-source identity requires the same explicit review before extension.
@@ -42,6 +47,16 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '4a1ee1d5b71c0866893c86c1d56a4f686b3f3d8d',
     '6e04deb65dc7f6594a5037592e95321b41a53bf3',
     '8e5b4dfe28d6bf527fa8e677f21e902b35ca3949',
+    # Pre-merge policy for #15897, #15960, #16005; structural check passes, see #16187.
+    'bdc11a54da45ff594f12d72eb7b2b3bf35139a0f',
+    # Pre-merge policy for #15898, #15948, #15983, #15989, #16017, #16020, #16021; structural check passes, see #16187.
+    '9337dc5bf351dd3c9310b1ac9dafeea6ee1f2976',
+    # Pre-merge policy for #15879, #15959, #15976, #16018, #16026, #16032, #16041, #16097; structural check passes, see #16187.
+    'b03f72aa290b53f9826007b8a745fb77ea15b9ec',
+    # Pre-merge policy for #16102, #16114, #16119, #16124; structural check passes, see #16187.
+    '19f3b8c002b9f09439ca152b581121eba0e83274',
+    # Pre-merge policy for main at 2026-11-14 (d907564cdc); structural check passes, see #16187.
+    '231ad0e824f57749b3cfa482ba10593557cbec2f',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
@@ -149,8 +164,8 @@ def premerge_policy_context(pull, repo, github, expected_context):
             tree_sha = entry['sha']
     blob = github.get(f'/repos/{repo}/git/blobs/{blob_sha}')
     if (blob.get('sha') != blob_sha or blob.get('encoding') != 'base64'
-            or type(blob.get('size')) is not int or not 0 < blob['size'] <= 500_000
-            or not isinstance(blob.get('content'), str) or len(blob['content']) > 700_000):
+            or type(blob.get('size')) is not int or not 0 < blob['size'] <= MAX_POLICY_BLOB_BYTES
+            or not isinstance(blob.get('content'), str) or len(blob['content']) > MAX_POLICY_BLOB_BASE64):
         raise ValueError('pre-merge policy blob is invalid')
     try:
         raw = base64.b64decode(''.join(blob['content'].split()), validate=True)
