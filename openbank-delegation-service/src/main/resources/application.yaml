@@ -159,6 +159,38 @@ mp:
         ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    incoming:
+      # Domestic payment outcomes -> spend reservation settlement (DomesticPaymentOutcomeConsumer).
+      # group / auto.offset.reset ship WITH the consumer in this image, NESTED (a dotted one-liner
+      # is quoted by the YAML source and never reaches the connector, #686/#2945); a GitOps
+      # msg-override naming this channel must wait until an image carrying it is deployed.
+      # `latest`: this consumer switches on BEFORE the rail binds payments and the edge stops
+      # confirming on 2xx, so nothing older than the group depends on it; `earliest` would replay
+      # a week of edge-settled outcomes as a burst of conflicts.
+      domestic-payment-events-in:
+        enabled: ${openbank.delegation.payment-outcome-consumer.enabled}
+        connector: smallrye-kafka
+        topic: openbank.domestic.payment.events
+        client:
+          id: delegation-service-payment-outcomes-${quarkus.uuid}
+        group:
+          id: delegation-service-domestic-payment-outcomes
+        auto:
+          offset:
+            reset: latest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        # A rethrow parks the record instead of stopping the channel (SmallRye's default `fail`).
+        # Explicit per-service topic, NESTED (the dotted one-liner is inert, #5745/#5752).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.delegation.domestic-payment-events-in
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+          key:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
     outgoing:
       delegation-events-out:
         connector: smallrye-kafka
@@ -280,6 +312,11 @@ openbank:
     # New domestic reservations fail closed until the downstream binding consumer is deployed.
     # Existing neutral reservations and exact replays retain their established behavior.
     spend-reservation-state-events-enabled: false
+    # ADR-0249 D3 amendment (#16000): settle domestic-payment reservations from the payment's
+    # OUTCOME. OFF: the channel below only exists while this is true, so the KafkaUser ACLs and the
+    # DLQ topic can land in any order. Switch-on order: this consumer -> rail binding -> edge switch.
+    payment-outcome-consumer:
+      enabled: ${OPENBANK_DELEGATION_PAYMENT_OUTCOME_CONSUMER_ENABLED:false}
     lifecycle-approvals:
       # Evidence reads are safe. Proposal/decision routes remain unreachable until the governed
       # execution path has the revision/CAS integration and two-review rollout approval.

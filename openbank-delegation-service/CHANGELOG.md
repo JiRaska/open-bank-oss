@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.24.1...delegation-service-v0.25.0) (2026-11-14)
+
+
+### Features
+
+* **delegation:** settle domestic spend reservations from the payment outcome ([#16124](https://github.com/JiRaska/open-bank-oss/issues/16124)) ([62dd38c](https://github.com/JiRaska/open-bank-oss/commit/62dd38c25fb6a71f8df15e530a63c879871b6d39))
+
 ## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.24.0...delegation-service-v0.24.1) (2026-11-14)
 
 
