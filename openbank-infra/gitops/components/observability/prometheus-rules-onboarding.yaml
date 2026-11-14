@@ -183,46 +183,22 @@ spec:
             severity: critical
           annotations:
             summary: "A sanctions list change has not reached a customer as a re-screening case within 24h"
-            description: "openbank_kyc_rescreen_backlog_oldest_age_seconds is over 86400: the oldest kyc_screening_triggers row still PENDING or OPEN_FAILED was enqueued more than 24 hours ago, so a customer the list change could match has had no re-screening case opened. openbank_kyc_rescreen_backlog_pending says how many are waiting. Check the case coordinator (OPEN_FAILED rows carry failed_reason), the kyc.screening-trigger.retry heartbeat, and KYC_COORDINATOR_OPEN_FAILED outbox events for parked rows, which need an operator to open the case and reconcile the row. Runbook: kyc-service docs 05-operations, Re-screening backlog."
+            description: "openbank_kyc_rescreen_backlog_oldest_age_seconds is over 86400: the oldest kyc_screening_triggers row still PENDING, OPEN_FAILED or DEFERRED was enqueued more than 24 hours ago, so a customer the list change could match has had no re-screening case opened. openbank_kyc_rescreen_backlog_pending says how many are waiting. Check the case coordinator (OPEN_FAILED rows carry failed_reason), the kyc.screening-trigger.retry heartbeat, and KYC_COORDINATOR_OPEN_FAILED outbox events for parked rows, which need an operator to open the case and reconcile the row. Runbook: kyc-service docs 05-operations, Re-screening backlog."
         - alert: KycRescreenLoopDisabledWithPending
-          # Issue #15961. The trigger loop switched off (screening-triggers.enabled or
-          # retry-enabled false) while undrained triggers remain: nothing will ever open those
-          # cases. A distinct series from an empty queue, so "off and empty" (the shipped
-          # default) reads 0 and stays quiet, and the cold-pod NaN cannot fire either.
+          # Issue #15961. The trigger loop is switched off (openbank.kyc.screening-triggers.enabled
+          # false, the ONE switch for every path that opens a case) while undrained triggers
+          # remain. While off, the consumer still records every SANCTIONS_LIST_CHANGED as a
+          # PENDING row (coalesced to one per party), so this series sees every change that has
+          # not reached a customer; turning the switch on drains them. A distinct series from an
+          # empty queue, so "off and empty" reads 0 and stays quiet, and the cold-pod NaN cannot
+          # fire either.
           expr: max by (namespace) (openbank_kyc_rescreen_loop_disabled_with_pending) > 0
           for: 30m
           labels:
             severity: warning
           annotations:
             summary: "KYC re-screening loop is switched off with list changes still pending"
-            description: "openbank_kyc_rescreen_loop_disabled_with_pending is 1: kyc-service's ADR-0256 trigger loop is disabled but kyc_screening_triggers still holds PENDING or OPEN_FAILED rows (openbank_kyc_rescreen_backlog_pending), so those customers will not be re-screened. Either re-enable the loop (KYC_SCREENING_TRIGGERS_ENABLED and KYC_SCREENING_TRIGGERS_RETRY_ENABLED) or reconcile each row by hand. While the loop is off, list changes arriving now are acked and counted as openbank_kyc_sanctions_list_change_events_total{outcome=\"disabled\"}, not queued. Runbook: kyc-service docs 05-operations, Re-screening backlog."
-        - alert: KycSanctionsListChangeDroppedWhileDisabled
-          # Issue #15961. With openbank.kyc.screening-triggers.enabled false the consumer acks a
-          # SANCTIONS_LIST_CHANGED record WITHOUT writing a trigger row, so the backlog gauges
-          # (and KycRescreenLoopDisabledWithPending) cannot see it: the change is simply lost for
-          # re-screening. The only trace is this counter's `disabled` outcome.
-          #
-          # Queueing the row while off instead was rejected: ScreeningTriggerRetryJob is gated
-          # only on retry-enabled and would claim the expired-lease PENDING row and call the
-          # case coordinator, i.e. it would switch the loop on behind the rollout gate.
-          #
-          # Same two branches as KycSanctionsListChangeUnrecognised: the counter is registered
-          # lazily on its first increment, so the series is born positive and increase() alone
-          # misses the first burst after every pod start. Cold pod: no series, no operand, no
-          # fire. Loop on: the `disabled` outcome is never counted, no fire.
-          expr: |
-            sum by (namespace) (
-              (increase(openbank_kyc_sanctions_list_change_events_total{outcome="disabled"}[1h]) > 0)
-              or
-              (openbank_kyc_sanctions_list_change_events_total{outcome="disabled"} > 0
-                unless openbank_kyc_sanctions_list_change_events_total{outcome="disabled"} offset 1h)
-            ) > 0
-          labels:
-            severity: warning
-          annotations:
-            subject_period: continuous
-            summary: "Sanctions list changes are being dropped unscreened while the KYC re-screening loop is off"
-            description: "openbank_kyc_sanctions_list_change_events_total{outcome=\"disabled\"} moved within the last hour: kyc-service received SANCTIONS_LIST_CHANGED with KYC_SCREENING_TRIGGERS_ENABLED=false and acked it without queueing a re-screening trigger. Customers that change could match will not be re-screened, and enabling the loop later does not recover it. Either enable the loop or record the affected publications (logged under `[sanctions-list-changes-in]` at debug) for replay once it is on. Runbook: kyc-service docs 05-operations, Re-screening backlog."
+            description: "openbank_kyc_rescreen_loop_disabled_with_pending is 1: kyc-service's ADR-0256 trigger loop is disabled but kyc_screening_triggers still holds PENDING, OPEN_FAILED or DEFERRED rows (openbank_kyc_rescreen_backlog_pending), so those customers will not be re-screened. Enable the loop (KYC_SCREENING_TRIGGERS_ENABLED=true) and the retry job drains the queue in batches, or reconcile each row by hand. While the loop is off, list changes arriving now are still queued (one PENDING row per party) and counted as openbank_kyc_sanctions_list_change_events_total{outcome=\"recorded_while_disabled\"}, so nothing is lost. Runbook: kyc-service docs 05-operations, Re-screening backlog."
         - alert: OnboardingProjectionWireFormatMismatch
           # #4353/#4692/#6248. sca-service published DEVICE_ENROLLED without the discriminator in
           # the payload body; onboarding's parser fell through to `?: return`, and 15 enrolments

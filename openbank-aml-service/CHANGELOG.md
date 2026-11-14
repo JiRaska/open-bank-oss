@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.18.0...aml-service-v0.19.0) (2026-11-13)
+
+
+### Features
+
+* **aml:** persist immutable shadow pack epochs ([#15684](https://github.com/JiRaska/open-bank-oss/issues/15684)) ([791cbf1](https://github.com/JiRaska/open-bank-oss/commit/791cbf15681415671b6f01ac8c6c2fa7659c2320))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.17.0...aml-service-v0.18.0) (2026-11-13)
 
 
