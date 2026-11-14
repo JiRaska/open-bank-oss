@@ -1,0 +1,276 @@
+{
+  "events": [
+    {
+      "eventId": "1",
+      "eventTime": "2026-11-13T12:59:47.229Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED",
+      "workflowExecutionStartedEventAttributes": {
+        "workflowType": {
+          "name": "DomesticPaymentWorkflow"
+        },
+        "taskQueue": {
+          "name": "openbank-domestic-payments"
+        },
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNiI\u003d"
+            }
+          ]
+        },
+        "workflowExecutionTimeout": "315360000s",
+        "workflowRunTimeout": "315360000s",
+        "workflowTaskTimeout": "10s",
+        "originalExecutionRunId": "70b3a987-f666-4278-9eb0-36d10b143c5c",
+        "identity": "history-recorder@origin-main",
+        "firstExecutionRunId": "70b3a987-f666-4278-9eb0-36d10b143c5c",
+        "attempt": 1,
+        "header": {}
+      }
+    },
+    {
+      "eventId": "2",
+      "eventTime": "2026-11-13T12:59:47.229Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "openbank-domestic-payments"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "3",
+      "eventTime": "2026-11-13T12:59:47.230Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "history-recorder@origin-main"
+      }
+    },
+    {
+      "eventId": "4",
+      "eventTime": "2026-11-13T12:59:47.232Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "history-recorder@origin-main",
+        "sdkMetadata": {
+          "langUsedFlags": [
+            1
+          ]
+        },
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "5",
+      "eventTime": "2026-11-13T12:59:47.232Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "454eb847-5c40-39f5-b2cd-9f31becc775e",
+        "activityType": {
+          "name": "ScreenPayment"
+        },
+        "taskQueue": {
+          "name": "openbank-domestic-payments"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNiI\u003d"
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "600s",
+        "scheduleToStartTimeout": "600s",
+        "startToCloseTimeout": "600s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "3",
+        "retryPolicy": {
+          "initialInterval": "2s",
+          "backoffCoefficient": 2.0,
+          "maximumInterval": "200s",
+          "maximumAttempts": 3
+        }
+      }
+    },
+    {
+      "eventId": "6",
+      "eventTime": "2026-11-13T12:59:47.232Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "5",
+        "identity": "history-recorder@origin-main",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "7",
+      "eventTime": "2026-11-13T12:59:47.234Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IkJMT0NLIg\u003d\u003d"
+            }
+          ]
+        },
+        "scheduledEventId": "5",
+        "startedEventId": "6",
+        "identity": "history-recorder@origin-main"
+      }
+    },
+    {
+      "eventId": "8",
+      "eventTime": "2026-11-13T12:59:47.234Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "openbank-domestic-payments"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "9",
+      "eventTime": "2026-11-13T12:59:47.234Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "8",
+        "identity": "history-recorder@origin-main"
+      }
+    },
+    {
+      "eventId": "10",
+      "eventTime": "2026-11-13T12:59:47.236Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "8",
+        "identity": "history-recorder@origin-main",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "11",
+      "eventTime": "2026-11-13T12:59:47.236Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "e9f3b3f4-e4d1-387d-a897-76af7fde34eb",
+        "activityType": {
+          "name": "RejectPayment"
+        },
+        "taskQueue": {
+          "name": "openbank-domestic-payments"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNiI\u003d"
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "600s",
+        "scheduleToStartTimeout": "600s",
+        "startToCloseTimeout": "600s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "9",
+        "retryPolicy": {
+          "initialInterval": "2s",
+          "backoffCoefficient": 2.0,
+          "maximumInterval": "200s",
+          "maximumAttempts": 3
+        }
+      }
+    },
+    {
+      "eventId": "12",
+      "eventTime": "2026-11-13T12:59:47.236Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "11",
+        "identity": "history-recorder@origin-main",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "13",
+      "eventTime": "2026-11-13T12:59:47.237Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {},
+        "scheduledEventId": "11",
+        "startedEventId": "12",
+        "identity": "history-recorder@origin-main"
+      }
+    },
+    {
+      "eventId": "14",
+      "eventTime": "2026-11-13T12:59:47.237Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "openbank-domestic-payments"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "15",
+      "eventTime": "2026-11-13T12:59:47.238Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "14",
+        "identity": "history-recorder@origin-main"
+      }
+    },
+    {
+      "eventId": "16",
+      "eventTime": "2026-11-13T12:59:47.239Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "14",
+        "identity": "history-recorder@origin-main",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "17",
+      "eventTime": "2026-11-13T12:59:47.239Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED",
+      "workflowExecutionCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IlJFSkVDVEVEIg\u003d\u003d"
+            }
+          ]
+        },
+        "workflowTaskCompletedEventId": "15"
+      }
+    }
+  ]
+}

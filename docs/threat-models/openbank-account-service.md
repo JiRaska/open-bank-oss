@@ -1210,3 +1210,7 @@ Tests: `DelegationAuthorityFactsTest` (wire mapping, unreadable validity window,
 never becoming a refusal, owner allowed through a failed lookup),
 `DelegatedDebitAuthorityTest` (the ALLOW names the permitting grant, a refusal names none).
 Rollback: revert the commit; nothing is migrated and nothing calls the route.
+
+## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
+
+The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `ACCOUNT_SERVICE_URL=https://account-service.accounts.svc:8443`. The caller and route are not new. The read is the CRS/FATCA `/active` roster under `service-account-openbank-tax-reporting` (ROLE_API), already admitted and tested in `account_rest_ext.rego`. Before this the client config never bound (it was nested under `kafka:`, #16056), so the edge existed only on paper. Transport is the private-CA mTLS listener: client cert `tax-reporting-internal-tls`, server hostname verified, bearer-only auth permission (#12511), so the certificate is transport auth and never an identity. Residual risk: none new. The ingress allow-list widens by one namespace, and authz still pins the principal id.
