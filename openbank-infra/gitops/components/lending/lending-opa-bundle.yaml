@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: lending-service
     app.kubernetes.io/part-of: lending
   annotations:
-    openbank.tech/policy-checksum: "18f45be211246212"
+    openbank.tech/policy-checksum: "a4be572e3260d6bd"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2403,6 +2403,7 @@ data:
             - kyb.monitoring.queue.list        # #16028: ongoing-monitoring holds queue
             - kyb.monitoring.exit.propose      # #16028: four-eyes exit, maker
             - kyb.monitoring.exit.confirm      # #16028: four-eyes exit, checker (code refuses checker == maker)
+            - kyb.monitoring.exit.withdraw     # #16028: the proposing person withdraws their own pending exit proposal
         ROLE_AUDITOR:
           grant:
             - audit.trail.inspect
