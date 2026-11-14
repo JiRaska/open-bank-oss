@@ -127,7 +127,7 @@ class JurisdictionReferenceDataIT {
         assertThat(shipped).containsExactlyInAnyOrder(
             "$EU_LIST/HIGH_RISK/FATF_HIGH_RISK=$EU_ROWS",
             "FATF_CALL_FOR_ACTION/HIGH_RISK/FATF_HIGH_RISK=3",
-            "FATF_INCREASED_MONITORING/RISK_FACTOR/FATF_HIGH_RISK=18",
+            "FATF_INCREASED_MONITORING/RISK_FACTOR/COUNTRY_RISK_FACTOR=18",
         )
 
         val uncited = query(

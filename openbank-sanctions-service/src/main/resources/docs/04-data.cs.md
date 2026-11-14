@@ -92,7 +92,7 @@ uvedeny, je rozhodnutí compliance zaznamenané v migraci, která je přidá.
 Žádný řádek nemá `EMBARGO`: nařízení EU ukládá posílenou due diligence, nikoli zákaz, a ani ono,
 ani prohlášení FATF embargo země nevyhlašuje. Řádky `RISK_FACTOR` nikdy nejsou nálezem prověření
 (ADR-0032, dodatek z 14. 11. 2026): šedý seznam FATF je rizikový faktor pro hodnocení rizika
-klienta, ne důvod k přezkumu.
+klienta, ne důvod k přezkumu. Tyto řádky mají `list_type = COUNTRY_RISK_FACTOR`, což není žádná prověřovací listina, takže je žádné prověření — této ani předchozí verze — nevybere; proto je návrat k předchozí verzi bezpečný bez ručního kroku.
 
 **Stárnutí.** Tyto listiny se mění několikrát ročně a nic je neimportuje, proto každý řádek nese
 datum svého vydání (`published_on`) a datum posledního porovnání se zdrojem (`verified_on`).

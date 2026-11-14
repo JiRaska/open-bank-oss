@@ -93,7 +93,7 @@ that adds them.
 No row carries `EMBARGO`: the EU regulation requires enhanced due diligence, not a prohibition,
 and neither it nor a FATF statement declares a country embargo. `RISK_FACTOR` rows are never a
 screen finding (ADR-0032, amendment of 2026-11-14): the FATF grey list is a risk factor for
-customer risk scoring, not a review trigger.
+customer risk scoring, not a review trigger. Those rows sit under `list_type = COUNTRY_RISK_FACTOR`, which is no screening list, so no screen — of this release or the previous one — ever selects them; that is what keeps a rollback safe without a manual step.
 
 **Ageing.** These lists change several times a year and nothing imports them, so each row carries
 the date of its publication (`published_on`) and the date it was last compared with the source

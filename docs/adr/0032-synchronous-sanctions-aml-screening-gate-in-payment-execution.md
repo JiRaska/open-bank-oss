@@ -164,7 +164,9 @@ Two decisions follow and are deliberate:
    unusual — the de-risking the FATF statement asks institutions not to do. The rows are loaded
    (so the data is correct and its age is alerted on) and are a customer-risk input; the binding
    EU list still sends a country it lists to review independently, so a country on both is still
-   reviewed, because of the EU row. Customer risk scoring does not read the rows yet; until it
+   reviewed, because of the EU row. The rows sit under `list_type = COUNTRY_RISK_FACTOR`, a slot
+   no screen consults, so a release that predates `RISK_FACTOR` never selects them and a rollback
+   is safe without a manual step. Customer risk scoring does not read the rows yet; until it
    does, the grey list informs no automated decision.
 
 ## References

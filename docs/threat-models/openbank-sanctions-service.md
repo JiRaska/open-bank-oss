@@ -230,8 +230,11 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
   negative (new):** a row mis-labelled `RISK_FACTOR` would screen CLEAR without any error; the
   measure of every shipped FATF row is pinned by `FatfJurisdictionStatementsIT`, and a grey-only
   country (KW) is asserted CLEAR while a call-for-action country is asserted `POTENTIAL_HIT` on
-  every profile. **Rollback hazard:** the previous release cannot parse `RISK_FACTOR`; the V24
-  rollback note requires deleting the rows before deploying it. **Residual:** customer risk scoring
+  every profile. **Rollback:** the previous release has no `RISK_FACTOR` and would refuse a screen
+  that selected such a row (`valueOf` throws), so grey-list rows sit under `list_type =
+  COUNTRY_RISK_FACTOR`, which no screen's list set contains; the old read path, copied verbatim
+  into `JurisdictionRollbackSafetyIT`, returns its main-branch result for KP, KE, KW and PT
+  against the migrated data, with no manual step. **Residual:** customer risk scoring
   does not read the grey-list rows yet, so the grey list informs no automated decision; the next
   FATF plenary (February 2027) must be loaded by hand before the verification alert fires on
   2027-04-13.

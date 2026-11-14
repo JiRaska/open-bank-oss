@@ -37,12 +37,19 @@
 --     enhanced due diligence on these jurisdictions and expects a risk-based approach, not
 --     de-risking), so it must not send every payment to, say, Kuwait or Iraq to review. The rows
 --     are loaded so the data is correct and its age is observed; customer risk scoring is the
---     consumer it is meant for.
+--     consumer it is meant for (not wired yet).
+--     These rows use list_type = COUNTRY_RISK_FACTOR, a slot that is not a screening list: every
+--     read of this table (SanctionsJurisdictionRepositoryImpl, unchanged since V21) selects only
+--     list_type = ANY(<SanctionsListType names of the screen>), so no screen of this release or of
+--     the previous one ever selects them. That is what makes the previous release, whose
+--     JurisdictionMeasure has no RISK_FACTOR, safe against this data (JurisdictionRollbackSafetyIT).
 --
--- Rollback: DELETE FROM sanctions_jurisdictions WHERE source_list IN ('FATF_CALL_FOR_ACTION',
--- 'FATF_INCREASED_MONITORING') AND version = 1; then restore the two-value measure CHECK. The
--- DELETE must run BEFORE the previous release is deployed: that release cannot parse RISK_FACTOR
--- and would fail a screen whose country is a grey-list row.
+-- Rollback property: the previous release runs unchanged against the migrated schema and data.
+-- It never selects a COUNTRY_RISK_FACTOR row, and the three call-for-action rows are HIGH_RISK,
+-- which it parses; its screen outcomes are identical (KP, IR, MM were already HIGH_RISK via the
+-- EU list). No manual step is needed. To remove the data as well, a later forward migration:
+-- DELETE FROM sanctions_jurisdictions WHERE source_list IN ('FATF_CALL_FOR_ACTION',
+-- 'FATF_INCREASED_MONITORING') AND version = 1.
 
 ALTER TABLE sanctions_jurisdictions DROP CONSTRAINT sanctions_jurisdictions_measure_check;
 ALTER TABLE sanctions_jurisdictions ADD CONSTRAINT sanctions_jurisdictions_measure_check
@@ -70,7 +77,7 @@ FROM (VALUES
 
 INSERT INTO sanctions_jurisdictions
     (list_type, source_list, country_code, measure, version, source_ref, published_on, verified_on)
-SELECT 'FATF_HIGH_RISK',
+SELECT 'COUNTRY_RISK_FACTOR',
        'FATF_INCREASED_MONITORING',
        listed.country_code,
        'RISK_FACTOR',
