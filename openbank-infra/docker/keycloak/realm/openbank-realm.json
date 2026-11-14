@@ -1453,6 +1453,7 @@
       ],
       "realmRoles": [
         "ROLE_ADMIN",
+        "ROLE_COMPLIANCE",
         "ROLE_OPERATOR",
         "ROLE_VIEWER"
       ],
