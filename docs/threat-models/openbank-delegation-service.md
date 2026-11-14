@@ -69,6 +69,10 @@ and require a human operator plus OPA; client applications do not receive a bank
    its M2M identity. OPA permits precisely `delegation.disclosure.verify` and
    `delegation.disclosure.release` for that identity, never the shared backend client. Every
    unavailable state is a uniform 404 and the only successful payload is a sealed PDF derivative.
+10. delegation-service → private KYB authority listener (#10247). KYB requires a trusted client
+    certificate and an OIDC bearer on 8443. The generated policy admits only the Delegation
+    workload on that port and preserves existing KYB HTTP peers on 8157. Statutory collection
+    remains disabled until the deployed KYB authority route and named bearer policy are verified.
 
 ## Threats and mitigations
 

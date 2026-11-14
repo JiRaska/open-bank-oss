@@ -44,9 +44,13 @@ When `openbank.kyb.monitoring.enabled` is true, the service registers the entity
 
 The KYB image fixes client certificate authentication at build time. The sandbox listener on
 8443 verifies the private CA and still requires an OIDC bearer for API calls. Its ingress admits
-only the Delegation workload, whose named bearer can read current statutory evidence
-after #15662. Port 8157 continues serving the existing callers. Verify the exact KYB image's
-listener posture before applying the TLS certificate and port configuration.
+only the Delegation workload. Port 8157 continues serving the existing callers.
+
+The mounted certificate is supplied through KYB-specific environment variables. Earlier images
+ignore these variables and continue serving 8157 during the rollout. After the certificate is ready,
+verify the new image's two-listener posture. Deploy the statutory authority route from #15662 and
+verify its policy admits the named Delegation workload before deploying the collection consumer.
+The sandbox collection flag stays off while those checks run.
 
 ## Shared build dependencies
 
