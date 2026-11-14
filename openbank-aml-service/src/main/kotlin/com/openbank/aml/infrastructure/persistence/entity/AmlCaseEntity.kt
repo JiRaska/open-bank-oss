@@ -80,6 +80,10 @@ class AmlCaseEntity : PanacheEntity() {
     @Column(name = "origin", length = 32)
     var origin: String? = null
 
+    /** Service that opened the case, from its authenticated caller; null for manual cases and rows before V17. */
+    @Column(name = "movement_service", length = 64)
+    var movementService: String? = null
+
     /** When the resolution sweep last tried and failed to find this case's party; orders the sweep. */
     @Column(name = "party_resolution_attempted_at")
     var partyResolutionAttemptedAt: Instant? = null
