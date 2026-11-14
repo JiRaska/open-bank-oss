@@ -44,7 +44,7 @@ no external network connection in sandbox. Sandbox `maskedPan` is synthetic (no 
 | `GET /{id}/secure-details` (synthetic PAN/CVV) | `ROLE_OPERATOR`, and only the verified `service-account-openbank-edge` principal (named-caller check + OPA rule) |
 
 All mutations require `Idempotency-Key` or `X-Operator-Id` header; resource-level
-`@Authorize` enforces OPA policy (ADR-0034, advisory→enforce).
+`@Authorize` enforces OPA policy (ADR-0034); the advisory window has ended and the deployed manifest sets `AUTHZ_ENFORCE=true`.
 
 ### Customer-facing masked card reads
 
@@ -87,7 +87,7 @@ customer to stop taking other precautions. Everything below exists to make those
 
 | STRIDE | Threat | Mitigation |
 |---|---|---|
-| **E**oP | A caller obtains approvals for a card it does not own | `@RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN)` and `@Authorize(action = "card.authorization.decide", resource = "#id")`. The OPA rule grants this action only to the verified card-processing issuer identity. Until enforcement is enabled, the endpoint still relies on the role gate. |
+| **E**oP | A caller obtains approvals for a card it does not own | `@RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN)` and `@Authorize(action = "card.authorization.decide", resource = "#id")`. The OPA rule grants this action only to the verified card-processing issuer identity, and the deployed manifest runs `AUTHZ_ENFORCE=true`, so the OPA decision is binding on top of the role gate. |
 | **T**ampering | The caller supplies its own spend totals, so a compromised caller could under-report and slip past a limit | Accepted and explicit: the totals are inputs, because this service holds no authorisation history. The trust boundary is that only trusted rails may call it (no `ROLE_CUSTOMER`). When spend tracking lands, the totals become server-derived and this row narrows — flagged in the response today as `spendTracking: false` so no client presents them as measured |
 | **S**poofing | An unknown card id is used to fish for a permissive default | An unknown card **declines** (`CARD_NOT_ACTIVE`) rather than 404s. The acquirer needs an answer, and the safe answer to "may this unknown card spend" is no; it also avoids an existence oracle on card ids |
 | **D**oS | A customer locks themselves out of every rail | `CHIP_AND_PIN` deliberately has no toggle. A customer able to disable every channel could not pay at any terminal and could not recover from one either |
