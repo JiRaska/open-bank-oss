@@ -178,6 +178,39 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.kyb.party-events-in
+      # Findings of ongoing monitoring (ADR-0376 D6): MONITORED_SUBJECT_MATCHED about a subject
+      # this service registered is recorded on its business case for an operator. The topic is
+      # shared with every other sanctions event, which the consumer tells apart by the `ce-type`
+      # HEADER and acks.
+      #
+      # The channel exists only while monitoring is switched on (`enabled` below). Switched off,
+      # the pod opens no consumer for this topic, so it starts whether or not the topic's ACL and
+      # the dead-letter topic have been applied yet: the deploy does not depend on their order.
+      #
+      # `group.id`, `auto.offset.reset` and the dead-letter topic are the NESTED form on purpose.
+      # The dotted one-liner (as on party-events-in above) is quoted by the YAML source and never
+      # reaches the connector in the deployed pod; nested, each resolves to the plain property. So
+      # this channel needs no override ConfigMap and no second deploy: the image carries its own
+      # consumer group, and KybMonitoringWireShapeIT asserts that name on a real broker.
+      #
+      # `earliest`, because the group is new and the alternative loses findings: with `latest` a
+      # finding produced between the first registration and the consumer's first assignment is
+      # never read. From the beginning of the topic everything that is not a finding for this
+      # service is acked by header, and a finding is idempotent on its id.
+      sanctions-monitoring-in:
+        enabled: ${openbank.kyb.monitoring.enabled}
+        connector: smallrye-kafka
+        topic: openbank.sanctions.screening.event
+        group:
+          id: kyb-service-sanctions-monitoring
+        auto:
+          offset:
+            reset: earliest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.kyb.sanctions-monitoring-in
 
 openbank:
   authz:
@@ -233,6 +266,26 @@ openbank:
       # off the service logs a warning at boot and records no screening at all — an unscreened case
       # never reads as a screened one.
       enabled: ${OPENBANK_KYB_SCREENING_ENABLED:false}
+    monitoring:
+      # Registers the entity and every screened related party of an APPROVED business case with
+      # sanctions-service's monitored-subject registry (ADR-0376), and withdraws them when the case
+      # ends or a party leaves it, so a later listing raises a finding and the case is reviewed.
+      #
+      # OFF by default. It needs three things the deployment supplies: sanctions-service's own
+      # `openbank.sanctions.monitoring.enabled` (registration is answered 503 without it), the
+      # route to sanctions-service that `screening.enabled` above also needs, and that switch
+      # itself — a case approved with screening off carries nobody to register. Turn them on in
+      # that order. While this is off the service logs a warning at boot, calls nothing, opens no
+      # consumer for the findings topic, and keeps recording what it owes the registry, which is
+      # sent once it is on. Nothing is registered while it is off, so no finding for this service
+      # is produced; after an off/on cycle the consumer group resumes where it stopped.
+      enabled: ${OPENBANK_KYB_MONITORING_ENABLED:false}
+      # A confirmed registration is sent again after this long. Lower it to re-assert the whole
+      # book after the registry lost state, then restore it.
+      reassert-after: ${OPENBANK_KYB_MONITORING_REASSERT_AFTER:P7D}
+      relay:
+        every: 30s
+        batch-size: 50
     representation:
       # A single statutory member with a SOLE rule is confirmed without an operator (no second
       # signatory can exist). Kill switch: false sends every rule to human confirmation.
@@ -321,6 +374,12 @@ authz:
       # gate off, reading green about a control that was not there.
       screening:
         enabled: true
+      # The registration relay does not tick in @QuarkusTest: the ITs call the run themselves, so
+      # what a test observes is its own run and not a tick that happened to land in between.
+      # KybMonitoringWireShapeIT re-enables it to prove the real schedule runs.
+      monitoring:
+        relay:
+          every: "off"
 "%prod":
   quarkus:
     # The sanctions-service rest-client uses a named TLS bucket over sanctions-service's

@@ -14,6 +14,7 @@ import com.openbank.account.domain.model.PocketResolution
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.domain.money.CurrencyCode
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.util.UUID
 
 data class OpenAccountCommand(
@@ -132,6 +133,41 @@ data class RevokeAuthorizationCommand(
 
 data class ListAuthorizationsQuery(val accountId: UUID)
 
+/**
+ * One ACCOUNT-scoped delegation grant, as the admission chain's authority step needs it
+ * (ADR-0375 D1).
+ *
+ * Flat on purpose: this crosses a service boundary to a rail that must not learn the shape of
+ * this service's projection. The grant id and grantor travel with it because an ALLOW has to name
+ * the grant that permitted the debit — a grant is revocable, so nothing after the fact can
+ * reconstruct which one was live.
+ */
+/**
+ * The owner and the grants, read together (ADR-0375 D1).
+ *
+ * **Why one answer and not two calls.** The authority decision compares the actor with the account
+ * OWNER before it looks at any grant, so owner and grants must come from ONE snapshot. A rail that
+ * resolved the owner through a separate lookup could decide the OWNER short-circuit against a
+ * different owner than the one its write-time proof later compares under the binding row lock —
+ * two reads, two answers, and the window between them is invisible in both.
+ *
+ * [ownerPartyId] is null exactly when the account is unknown, which is also when [grants] is
+ * empty: the pair stays indistinguishable from an account that exists and has no grant, so this is
+ * still not an existence oracle.
+ */
+data class AccountDelegationFacts(val ownerPartyId: UUID?, val grants: List<AccountDelegationFact>)
+
+data class AccountDelegationFact(
+    val grantId: UUID,
+    val grantorPartyId: UUID,
+    val accountId: UUID,
+    val granteePartyId: UUID,
+    val capabilities: Set<String>,
+    val active: Boolean,
+    val validFrom: OffsetDateTime,
+    val validTo: OffsetDateTime?,
+)
+
 interface AuthorizationUseCase {
     suspend fun grantAuthorization(
         command: GrantAuthorizationCommand,
@@ -155,6 +191,32 @@ interface AuthorizationUseCase {
      * account rather than throwing, so a caller cannot use it as an existence oracle.
      */
     suspend fun effectiveAccess(accountId: UUID): List<com.openbank.account.domain.model.AccountAccessEntry>
+
+    /**
+     * The grant facts a rail needs to decide [AdmissionStep.AUTHORITY] itself (ADR-0375 D1).
+     *
+     * **Why facts and not a verdict.** [authorizeDelegatedPayment] answers the whole question,
+     * which is right for the edge pre-flight and wrong for the admission chain: the chain's
+     * authority step is a pure function whose capability is an ARGUMENT, so a rail asking about
+     * `ACCOUNT_INITIATE_PAYMENT` and a rail asking about a future capability must not both be
+     * answered by a method that hard-codes `PAYMENT_ONLY`. Handing over the grants lets one pure
+     * kernel serve every rail and keeps the capability at the call site, which is the defect
+     * ADR-0375 D7 was opened for.
+     *
+     * **Ownership is applied here, not by the caller.** Only grants whose grantor actually owns
+     * the account are returned, because a projection row keyed on (accountId, granteePartyId)
+     * alone is authority in itself — see the KDoc on [DelegatedAccessGrant.grantorPartyId]. A
+     * caller cannot re-derive that; it does not know the owner.
+     *
+     * **Scope, stated rather than implied.** ACCOUNT-scoped grants only, and grants only — the
+     * legacy `account_authorizations` arm that [authorizeDelegatedPayment] still ORs in is NOT
+     * represented. A party permitted solely by a legacy row is therefore absent from these facts.
+     * That divergence is already instrumented by the dual-run disagreement counter rather than
+     * being discovered later from a refusal.
+     *
+     * Returns an empty list for an unknown account, so it is not an existence oracle.
+     */
+    suspend fun delegationFacts(accountId: UUID, partyId: UUID): AccountDelegationFacts
 
     /**
      * Amount-aware variant for the payment path (ADR-0232 D3 / AC6): a delegated

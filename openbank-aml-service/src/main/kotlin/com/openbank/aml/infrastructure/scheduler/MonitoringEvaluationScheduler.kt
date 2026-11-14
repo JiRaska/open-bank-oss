@@ -13,6 +13,7 @@ import com.openbank.aml.application.port.out.MonitoringEvaluationRepository
 import com.openbank.aml.application.port.out.MovementCounterReader
 import com.openbank.aml.application.port.out.SuspiciousTransactionReportRepository
 import com.openbank.aml.domain.model.AmlCase
+import com.openbank.aml.domain.model.CaseOrigin
 import com.openbank.aml.domain.model.ScreeningType
 import com.openbank.aml.domain.monitoring.CounterScheme
 import com.openbank.aml.domain.monitoring.MonitoringEvaluationRecord
@@ -164,6 +165,7 @@ class MonitoringEvaluationScheduler(
             // One case per party, scenario and window: createCase returns the existing one for this key.
             idempotencyKey = AmlCase.PACK_MONITORING_KEY_PREFIX +
                 "${hit.partyId}:${hit.scenarioCode}:${hit.windowStart.epochSecond}",
+            origin = CaseOrigin.PACK_EVALUATION,
             partyId = hit.partyId,
             accountId = null,
             transactionId = null,

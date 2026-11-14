@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.38.0...account-service-v0.39.0) (2026-11-13)
+
+
+### Features
+
+* **account:** serve the grant facts a rail decides authority from (ADR-0375 D1) ([#15948](https://github.com/JiRaska/open-bank-oss/issues/15948)) ([36ce5bb](https://github.com/JiRaska/open-bank-oss/commit/36ce5bb4cc46f8dbcb919fa13d1f68750011bd3e))
+
 ## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.37.0...account-service-v0.38.0) (2026-11-13)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.1.0...transaction-service-v2.2.0) (2026-11-13)
+
+
+### Features
+
+* **customer-edge,transaction,ledger:** scope synthetic transfer canary ([#15669](https://github.com/JiRaska/open-bank-oss/issues/15669)) ([96f24f2](https://github.com/JiRaska/open-bank-oss/commit/96f24f28f5ac894be0821ef939a0d7019a19abc4))
+
 ## [2.1.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.0.1...transaction-service-v2.1.0) (2026-11-12)
 
 

@@ -694,6 +694,10 @@ executions. Require server-side drainage evidence before retirement, retain arti
 for recovery, and keep changes under the existing two-review money-path process.
 No new payment command, retry policy, API contract or schema is introduced.
 
+## Synthetic transfer admission (#7284)
+
+Synthetic own-account transfers require a verified edge client and trusted taint on a dedicated route. The route fixes the amount and currency and derives the daily idempotency key. A retry preserves the original transaction and its journal classification.
+
 ## 2026-11-11 - Label key domain rename (no reach change)
 
 The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys

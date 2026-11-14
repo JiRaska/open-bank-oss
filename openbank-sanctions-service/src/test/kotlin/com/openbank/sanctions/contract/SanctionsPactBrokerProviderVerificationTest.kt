@@ -105,6 +105,15 @@ class SanctionsPactBrokerProviderVerificationTest {
         if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
             testIdentityAssociation.setTestIdentity(null)
         }
+        // The ongoing-monitoring interactions name their caller in the provider state.
+        context?.let {
+            MonitoringPactStates.actAs(
+                it.interaction.providerStates.mapNotNull { s ->
+                    s.name
+                },
+                testIdentityAssociation,
+            )
+        }
         context?.verifyInteraction()
     }
 
@@ -150,4 +159,22 @@ class SanctionsPactBrokerProviderVerificationTest {
     fun stateListRefreshWithheld() {
         // Intentionally empty — see the KDoc above.
     }
+
+    /**
+     * Ongoing-monitoring states (kyb-service pact, ADR-0376). The caller each of them names is
+     * applied in [verifyPacts], as in [SanctionsPactProviderVerificationTest]; what is arranged here is the registry and the feature switch.
+     */
+    @State(MonitoringPactStates.KYB_CALLER)
+    fun stateKybCallerMonitoringEnabled() = MonitoringPactStates.kybCallerWithMonitoringEnabled(dataSource)
+
+    @State(MonitoringPactStates.KYB_SUBJECT_REGISTERED)
+    fun stateKybSubjectRegistered() = MonitoringPactStates.kybSubjectRegistered(dataSource)
+
+    /** 403 comes from who is calling, before anything is read; the switch is on so that it cannot be a 503. */
+    @State(MonitoringPactStates.SHARED_CLIENT)
+    fun stateSharedFleetClient() = MonitoringPactStates.enableMonitoring()
+
+    /** The registration, the list change and the match are one flow in MonitoredSubjectMatchedMessageProducers. */
+    @State(MonitoringPactStates.KYB_SUBJECT_MATCHED)
+    fun stateKybSubjectMatched() = MonitoringPactStates.enableMonitoring()
 }

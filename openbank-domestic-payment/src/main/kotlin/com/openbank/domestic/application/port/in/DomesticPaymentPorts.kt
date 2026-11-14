@@ -49,6 +49,8 @@ data class CreateDomesticPaymentCommand(
     val initiatorScope: InitiatorScope = InitiatorScope.General,
     /** Opaque customer binding asserted by the verified customer-edge workload. */
     val customerSubmissionScope: String? = null,
+    /** Original business submission digest supplied only when the Edge releases a mode-bound approval. */
+    val originalSubmissionKeyDigest: String? = null,
 ) {
     init {
         require((delegationId == null) == (reservationId == null)) {
@@ -77,7 +79,12 @@ data class TransitionDomesticPaymentStatusCommand(
 interface DomesticPaymentUseCase {
     suspend fun createPayment(command: CreateDomesticPaymentCommand): CreateDomesticPaymentResult
     suspend fun getPayment(paymentId: UUID): DomesticPayment
-    suspend fun findCustomerSubmission(idempotencyKey: String, debtorAccountId: UUID, scope: String): DomesticPayment?
+    suspend fun findCustomerSubmission(
+        idempotencyKey: String,
+        debtorAccountId: UUID,
+        scope: String,
+        originalSubmissionKeyDigest: String? = null,
+    ): DomesticPayment?
     suspend fun listPayments(query: ListDomesticPaymentsQuery): List<DomesticPayment>
     suspend fun transitionStatus(command: TransitionDomesticPaymentStatusCommand): DomesticPayment
 }
@@ -87,7 +94,8 @@ interface DomesticPaymentUseCase {
  *
  * It is deliberately a separate port from [DomesticPaymentUseCase]: the existing public owner
  * endpoint cannot accidentally opt into delegated identity/context merely by populating fields on
- * [CreateDomesticPaymentCommand]. No REST adapter is wired to this port in the expand-first stage.
+ * [CreateDomesticPaymentCommand]. Its only REST adapter is `POST /api/v1/domestic-payments/delegated`,
+ * reachable by the verified customer-edge identity alone (#16000 part 3).
  */
 interface DelegatedDomesticPaymentUseCase {
     /**
@@ -98,8 +106,19 @@ interface DelegatedDomesticPaymentUseCase {
     suspend fun createDelegatedPayment(
         reservationId: UUID,
         command: CreateDomesticPaymentCommand,
+        claim: DelegatedPaymentClaim? = null,
     ): DelegatedDomesticPaymentResult
 }
+
+/**
+ * What the verified customer-edge caller asserts about a delegated payment (#16000 part 3).
+ *
+ * Never a source of truth: the projection is. It exists so that an edge which believes it is
+ * acting for a different delegation or a different customer than the reservation records is
+ * REFUSED, rather than having its belief silently replaced by the projection's tuple — a payment
+ * the caller did not mean is worse than no payment.
+ */
+data class DelegatedPaymentClaim(val delegationId: UUID, val actingPartyId: UUID)
 
 sealed interface DelegatedDomesticPaymentResult {
     data class Accepted(val result: CreateDomesticPaymentResult) : DelegatedDomesticPaymentResult
@@ -115,6 +134,17 @@ sealed interface DelegatedDomesticPaymentResult {
 
     /** Account-service could not prove debit-account ownership; retryable future mapping = 503. */
     data object AccountAuthorityUnavailable : DelegatedDomesticPaymentResult
+
+    /**
+     * The grant that bought the reservation no longer authorises this debit (ADR-0375 D1);
+     * future mapping = 403, definitive, NOT retryable.
+     *
+     * Distinct from [AccountAuthorityUnavailable] on purpose, and the distinction is the control:
+     * one says the authority was read and has been withdrawn, the other says it could not be read.
+     * Collapsing them would either retry a refusal forever or refuse on an outage — and a refusal
+     * on the money path is indistinguishable to the customer from a revoked mandate.
+     */
+    data class DelegationAuthorityWithdrawn(val reason: String) : DelegatedDomesticPaymentResult
 }
 
 interface ApplyDelegatedSpendReservationStateUseCase {

@@ -14,7 +14,7 @@ info:
   # 1.26 -> 1.27 (#10247): document the sole statutory signing requirement for preview and offer.
   # 1.27 -> 1.28 (#15716): approval replay binds to the frozen payload; 409 on a reused SCA challenge.
   # 1.28 -> 1.30 (#12317): original domestic submission claim and receipt lookup (1.29 is claimed by #15682).
-  version: 1.30.0
+  version: 1.29.0
 servers:
   - url: http://localhost:8126
 tags:

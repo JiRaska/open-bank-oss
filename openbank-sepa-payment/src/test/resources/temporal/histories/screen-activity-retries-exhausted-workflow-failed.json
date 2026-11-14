@@ -1,0 +1,197 @@
+{
+  "events": [
+    {
+      "eventId": "1",
+      "eventTime": "2026-11-13T16:06:54.915Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED",
+      "workflowExecutionStartedEventAttributes": {
+        "workflowType": {
+          "name": "SepaPaymentWorkflow"
+        },
+        "taskQueue": {
+          "name": "sepa-history-recording"
+        },
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAxNiI\u003d"
+            }
+          ]
+        },
+        "workflowExecutionTimeout": "315360000s",
+        "workflowRunTimeout": "315360000s",
+        "workflowTaskTimeout": "10s",
+        "originalExecutionRunId": "11827c11-2163-494d-801b-832bf4864d3d",
+        "identity": "sepa-history-recorder",
+        "firstExecutionRunId": "11827c11-2163-494d-801b-832bf4864d3d",
+        "attempt": 1,
+        "header": {}
+      }
+    },
+    {
+      "eventId": "2",
+      "eventTime": "2026-11-13T16:06:54.915Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "sepa-history-recording"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "3",
+      "eventTime": "2026-11-13T16:06:54.915Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "sepa-history-recorder"
+      }
+    },
+    {
+      "eventId": "4",
+      "eventTime": "2026-11-13T16:06:54.919Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "sepa-history-recorder",
+        "sdkMetadata": {
+          "langUsedFlags": [
+            1
+          ]
+        },
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "5",
+      "eventTime": "2026-11-13T16:06:54.919Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "bbd72872-f843-3f07-9c2d-243f82b88b0f",
+        "activityType": {
+          "name": "ScreenPayment"
+        },
+        "taskQueue": {
+          "name": "sepa-history-recording"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAxNiI\u003d"
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "600s",
+        "scheduleToStartTimeout": "600s",
+        "startToCloseTimeout": "600s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "3",
+        "retryPolicy": {
+          "initialInterval": "2s",
+          "backoffCoefficient": 2.0,
+          "maximumInterval": "200s",
+          "maximumAttempts": 3
+        }
+      }
+    },
+    {
+      "eventId": "6",
+      "eventTime": "2026-11-13T16:07:00.922Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "5",
+        "identity": "sepa-history-recorder",
+        "attempt": 3
+      }
+    },
+    {
+      "eventId": "7",
+      "eventTime": "2026-11-13T16:07:00.926Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_FAILED",
+      "activityTaskFailedEventAttributes": {
+        "failure": {
+          "message": "synthetic transient repository failure",
+          "source": "JavaSDK",
+          "stackTrace": "com.openbank.sepa.application.workflow.SepaPaymentWorkflowHistoryRecorder.activitiesFor$lambda$0(SepaPaymentWorkflowHistoryRecorder.kt:214)\nio.mockk.MockKStubScope$answers$1.invoke(API.kt:2315)\nio.mockk.MockKStubScope$answers$1.invoke(API.kt:2315)\nio.mockk.FunctionAnswer.answer(Answers.kt:19)\nio.mockk.impl.stub.AnswerAnsweringOpportunity.answer(AnswerAnsweringOpportunity.kt:14)\nio.mockk.impl.stub.MockKStub.answer(MockKStub.kt:56)\nio.mockk.impl.recording.states.AnsweringState.call(AnsweringState.kt:16)\nio.mockk.impl.recording.CommonCallRecorder.call(CommonCallRecorder.kt:53)\nio.mockk.impl.stub.MockKStub.handleInvocation(MockKStub.kt:271)\nio.mockk.impl.instantiation.JvmMockFactoryHelper$mockHandler$1.invocation(JvmMockFactoryHelper.kt:24)\nio.mockk.proxy.jvm.advice.Interceptor.call(Interceptor.kt:21)\nio.mockk.proxy.jvm.advice.BaseAdvice.handle(BaseAdvice.kt:42)\nio.mockk.proxy.jvm.advice.jvm.JvmMockKProxyInterceptor.interceptNoSuper(JvmMockKProxyInterceptor.java:44)\ncom.openbank.sepa.application.port.out.SepaPaymentRepository$Subclass0.findById(Unknown Source)\ncom.openbank.sepa.application.workflow.SepaPaymentActivitiesImpl$screenPayment$1.invokeSuspend(SepaPaymentActivitiesImpl.kt:67)\ncom.openbank.sepa.application.workflow.SepaPaymentActivitiesImpl$screenPayment$1.invoke(SepaPaymentActivitiesImpl.kt)\ncom.openbank.sepa.application.workflow.SepaPaymentActivitiesImpl$screenPayment$1.invoke(SepaPaymentActivitiesImpl.kt)\ncom.openbank.sepa.application.workflow.RecordingActivities$runOnVertxContext$1.invokeSuspend(SepaPaymentWorkflowHistoryRecorder.kt:292)\nkotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)\nkotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)\nkotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:256)\nkotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:54)\nkotlinx.coroutines.BuildersKt__BuildersKt.runBlockingImpl(Builders.kt:30)\nkotlinx.coroutines.BuildersKt.runBlockingImpl(Unknown Source)\nkotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK(Builders.concurrent.kt:172)\nkotlinx.coroutines.BuildersKt.runBlockingK(Unknown Source)\nkotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK$default(Builders.concurrent.kt:157)\nkotlinx.coroutines.BuildersKt.runBlockingK$default(Unknown Source)\ncom.openbank.sepa.application.workflow.RecordingActivities.runOnVertxContext(SepaPaymentWorkflowHistoryRecorder.kt:292)\ncom.openbank.sepa.application.workflow.SepaPaymentActivitiesImpl.screenPayment(SepaPaymentActivitiesImpl.kt:66)\njava.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)\njava.base/java.lang.reflect.Method.invoke(Method.java:565)\nio.temporal.internal.activity.RootActivityInboundCallsInterceptor$POJOActivityInboundCallsInterceptor.executeActivity(RootActivityInboundCallsInterceptor.java:64)\nio.temporal.internal.activity.RootActivityInboundCallsInterceptor.execute(RootActivityInboundCallsInterceptor.java:43)\nio.temporal.internal.activity.ActivityTaskExecutors$BaseActivityTaskExecutor.execute(ActivityTaskExecutors.java:107)\nio.temporal.internal.activity.ActivityTaskHandlerImpl.handle(ActivityTaskHandlerImpl.java:124)\nio.temporal.internal.worker.ActivityWorker$TaskHandlerImpl.handleActivity(ActivityWorker.java:290)\nio.temporal.internal.worker.ActivityWorker$TaskHandlerImpl.handle(ActivityWorker.java:254)\nio.temporal.internal.worker.ActivityWorker$TaskHandlerImpl.handle(ActivityWorker.java:217)\nio.temporal.internal.worker.PollTaskExecutor.lambda$process$0(PollTaskExecutor.java:93)\njava.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)\njava.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)\njava.base/java.lang.Thread.run(Thread.java:1474)\n",
+          "applicationFailureInfo": {
+            "type": "java.lang.IllegalStateException"
+          }
+        },
+        "scheduledEventId": "5",
+        "startedEventId": "6",
+        "identity": "sepa-history-recorder",
+        "retryState": "RETRY_STATE_MAXIMUM_ATTEMPTS_REACHED"
+      }
+    },
+    {
+      "eventId": "8",
+      "eventTime": "2026-11-13T16:07:00.926Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "sepa-history-recording"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "9",
+      "eventTime": "2026-11-13T16:07:00.926Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "8",
+        "identity": "sepa-history-recorder"
+      }
+    },
+    {
+      "eventId": "10",
+      "eventTime": "2026-11-13T16:07:00.967Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "8",
+        "identity": "sepa-history-recorder",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "11",
+      "eventTime": "2026-11-13T16:07:00.967Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_FAILED",
+      "workflowExecutionFailedEventAttributes": {
+        "failure": {
+          "message": "Activity task failed",
+          "cause": {
+            "message": "synthetic transient repository failure",
+            "source": "JavaSDK",
+            "stackTrace": "com.openbank.sepa.application.workflow.SepaPaymentWorkflowHistoryRecorder.activitiesFor$lambda$0(SepaPaymentWorkflowHistoryRecorder.kt:214)\nio.mockk.MockKStubScope$answers$1.invoke(API.kt:2315)\nio.mockk.MockKStubScope$answers$1.invoke(API.kt:2315)\nio.mockk.FunctionAnswer.answer(Answers.kt:19)\nio.mockk.impl.stub.AnswerAnsweringOpportunity.answer(AnswerAnsweringOpportunity.kt:14)\nio.mockk.impl.stub.MockKStub.answer(MockKStub.kt:56)\nio.mockk.impl.recording.states.AnsweringState.call(AnsweringState.kt:16)\nio.mockk.impl.recording.CommonCallRecorder.call(CommonCallRecorder.kt:53)\nio.mockk.impl.stub.MockKStub.handleInvocation(MockKStub.kt:271)\nio.mockk.impl.instantiation.JvmMockFactoryHelper$mockHandler$1.invocation(JvmMockFactoryHelper.kt:24)\nio.mockk.proxy.jvm.advice.Interceptor.call(Interceptor.kt:21)\nio.mockk.proxy.jvm.advice.BaseAdvice.handle(BaseAdvice.kt:42)\nio.mockk.proxy.jvm.advice.jvm.JvmMockKProxyInterceptor.interceptNoSuper(JvmMockKProxyInterceptor.java:44)\ncom.openbank.sepa.application.port.out.SepaPaymentRepository$Subclass0.findById(Unknown Source)\ncom.openbank.sepa.application.workflow.SepaPaymentActivitiesImpl$screenPayment$1.invokeSuspend(SepaPaymentActivitiesImpl.kt:67)\ncom.openbank.sepa.application.workflow.SepaPaymentActivitiesImpl$screenPayment$1.invoke(SepaPaymentActivitiesImpl.kt)\ncom.openbank.sepa.application.workflow.SepaPaymentActivitiesImpl$screenPayment$1.invoke(SepaPaymentActivitiesImpl.kt)\ncom.openbank.sepa.application.workflow.RecordingActivities$runOnVertxContext$1.invokeSuspend(SepaPaymentWorkflowHistoryRecorder.kt:292)\nkotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)\nkotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)\nkotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:256)\nkotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:54)\nkotlinx.coroutines.BuildersKt__BuildersKt.runBlockingImpl(Builders.kt:30)\nkotlinx.coroutines.BuildersKt.runBlockingImpl(Unknown Source)\nkotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK(Builders.concurrent.kt:172)\nkotlinx.coroutines.BuildersKt.runBlockingK(Unknown Source)\nkotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK$default(Builders.concurrent.kt:157)\nkotlinx.coroutines.BuildersKt.runBlockingK$default(Unknown Source)\ncom.openbank.sepa.application.workflow.RecordingActivities.runOnVertxContext(SepaPaymentWorkflowHistoryRecorder.kt:292)\ncom.openbank.sepa.application.workflow.SepaPaymentActivitiesImpl.screenPayment(SepaPaymentActivitiesImpl.kt:66)\njava.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)\njava.base/java.lang.reflect.Method.invoke(Method.java:565)\nio.temporal.internal.activity.RootActivityInboundCallsInterceptor$POJOActivityInboundCallsInterceptor.executeActivity(RootActivityInboundCallsInterceptor.java:64)\nio.temporal.internal.activity.RootActivityInboundCallsInterceptor.execute(RootActivityInboundCallsInterceptor.java:43)\nio.temporal.internal.activity.ActivityTaskExecutors$BaseActivityTaskExecutor.execute(ActivityTaskExecutors.java:107)\nio.temporal.internal.activity.ActivityTaskHandlerImpl.handle(ActivityTaskHandlerImpl.java:124)\nio.temporal.internal.worker.ActivityWorker$TaskHandlerImpl.handleActivity(ActivityWorker.java:290)\nio.temporal.internal.worker.ActivityWorker$TaskHandlerImpl.handle(ActivityWorker.java:254)\nio.temporal.internal.worker.ActivityWorker$TaskHandlerImpl.handle(ActivityWorker.java:217)\nio.temporal.internal.worker.PollTaskExecutor.lambda$process$0(PollTaskExecutor.java:93)\njava.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)\njava.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)\njava.base/java.lang.Thread.run(Thread.java:1474)\n",
+            "applicationFailureInfo": {
+              "type": "java.lang.IllegalStateException"
+            }
+          },
+          "activityFailureInfo": {
+            "scheduledEventId": "5",
+            "startedEventId": "6",
+            "identity": "sepa-history-recorder",
+            "activityType": {
+              "name": "ScreenPayment"
+            },
+            "activityId": "bbd72872-f843-3f07-9c2d-243f82b88b0f",
+            "retryState": "RETRY_STATE_MAXIMUM_ATTEMPTS_REACHED"
+          }
+        },
+        "workflowTaskCompletedEventId": "9"
+      }
+    }
+  ]
+}

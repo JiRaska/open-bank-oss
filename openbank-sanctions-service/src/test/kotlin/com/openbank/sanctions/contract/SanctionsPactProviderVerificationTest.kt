@@ -17,6 +17,7 @@ import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.sanctions.contract.message.SanctionsListChangeMessageProducers
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -87,6 +88,9 @@ class SanctionsPactProviderVerificationTest {
     @Inject
     lateinit var dataSource: DataSource
 
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         if (context == null) return
@@ -104,6 +108,17 @@ class SanctionsPactProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The ongoing-monitoring interactions name their caller in the provider state: the
+        // registry takes the owner from a service's own token and answers the class-level
+        // principal 403. See MonitoringPactStates.
+        context?.let {
+            MonitoringPactStates.actAs(
+                it.interaction.providerStates.mapNotNull { s ->
+                    s.name
+                },
+                testIdentityAssociation,
+            )
+        }
         context?.verifyInteraction()
     }
 
@@ -186,4 +201,22 @@ class SanctionsPactProviderVerificationTest {
     fun stateListRefreshWithheld() {
         // Intentionally empty — see the KDoc above.
     }
+
+    /**
+     * Ongoing-monitoring states (kyb-service pact, ADR-0376). The caller each of them names is
+     * applied in [verifyPacts]; what is arranged here is the registry and the feature switch.
+     */
+    @State(MonitoringPactStates.KYB_CALLER)
+    fun stateKybCallerMonitoringEnabled() = MonitoringPactStates.kybCallerWithMonitoringEnabled(dataSource)
+
+    @State(MonitoringPactStates.KYB_SUBJECT_REGISTERED)
+    fun stateKybSubjectRegistered() = MonitoringPactStates.kybSubjectRegistered(dataSource)
+
+    /** 403 comes from who is calling, before anything is read; the switch is on so that it cannot be a 503. */
+    @State(MonitoringPactStates.SHARED_CLIENT)
+    fun stateSharedFleetClient() = MonitoringPactStates.enableMonitoring()
+
+    /** The registration, the list change and the match are one flow in MonitoredSubjectMatchedMessageProducers. */
+    @State(MonitoringPactStates.KYB_SUBJECT_MATCHED)
+    fun stateKybSubjectMatched() = MonitoringPactStates.enableMonitoring()
 }

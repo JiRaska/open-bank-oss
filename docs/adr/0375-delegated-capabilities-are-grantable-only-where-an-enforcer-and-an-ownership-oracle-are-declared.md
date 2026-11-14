@@ -236,6 +236,32 @@ be built or dropped, check whether its route already exists and is gated on a ne
 A census that skips that step proposes product work for what is actually a one-line
 correction.
 
+Applied to the account side, that rule paid again. `GET /accounts/{id}` serves the account
+RECORD and asked for `ACCOUNT_READ_BALANCES`; balances have their own route, so
+`ACCOUNT_VIEW_DETAILS` was grantable and read by nothing. Both statement routes asked
+`ownsAccount` alone, so three presets handed out `ACCOUNT_DOWNLOAD_STATEMENTS` and every
+delegate who used it was refused. Both are corrections.
+
+Their blast radius is **not** zero, unlike the card pair, and that difference is the
+reason to measure rather than assume symmetry: the `Účetní` and `Pokladník` presets grant
+`ACCOUNT_READ_BALANCES` without `ACCOUNT_VIEW_DETAILS`, which is precisely why they could
+drill into the record at all. A forward migration corrects the preset catalog. Grants
+already minted are deliberately left alone — a grant carries what the grantor agreed to,
+and widening one after the fact would be the delegation service editing somebody's
+mandate — so an existing grantee of those two roles keeps balances and transactions and
+loses the drill-down until the grantor re-shares.
+
+What remains unenforced after this is the set that genuinely needs features rather than a
+corrected gate: `ACCOUNT_PROPOSE_PAYMENT`, `ACCOUNT_MANAGE_BENEFICIARIES`,
+`ACCOUNT_MANAGE_LIMITS`, `CARD_VIEW_TRANSACTIONS` and the two object types with no owner
+to ask. `ACCOUNT_MANAGE_LIMITS` is ADR-0374's Limits step and should not be built twice.
+`ACCOUNT_MANAGE_BENEFICIARIES` is the one with a design question rather than a missing
+route: payees are a PARTY-level book at the edge, not an account-scoped one, so an
+account grant does not map onto them without deciding whose payee list a delegate is
+managing. `DELEGATION_MANAGE` is a different case again — admin-ui already drops it from
+the preset picker by hand, with a comment stating this ADR's rule before the ADR existed,
+so the honest end state is that it stays unassignable until sub-delegation exists.
+
 **D8 — ADR-0223 is unchanged, and this says why.** OPA keeps deciding channel and role
 policy; `@Authorize` still runs first. The Authority step answers a different question
 over data the sidecar does not hold and must not cache — grant state, resource

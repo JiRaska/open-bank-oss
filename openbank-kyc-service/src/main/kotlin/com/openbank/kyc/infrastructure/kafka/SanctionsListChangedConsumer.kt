@@ -52,9 +52,12 @@ import java.util.UUID
  *   (OPEN_FAILED trigger + KYC_COORDINATOR_OPEN_FAILED outbox row) and ACKED, because the retry
  *   job owns re-attempt. Rethrowing would double-book that role.
  *
- * The whole handler is gated on `openbank.kyc.screening-triggers.enabled` (default false): the
- * ADR-0256 contract's rollout sequence deploys the adapter disabled until the Pact verification,
- * sandbox coordinator exercise and operator-task metrics land.
+ * `openbank.kyc.screening-triggers.enabled` (default false) is the ONE switch deciding whether
+ * the loop opens cases — here and in [com.openbank.kyc.infrastructure.trigger.ScreeningTriggerRetryJob].
+ * The ADR-0256 contract's rollout sequence deploys it off until the Pact verification, sandbox
+ * coordinator exercise and operator-task metrics land. Off does NOT mean dropped: the change is
+ * still recorded, one DEFERRED trigger row per candidate party (coalesced, no coordinator call,
+ * counted `recorded_while_disabled`), and turning the switch on drains them (issue #15961).
  */
 @ApplicationScoped
 class SanctionsListChangedConsumer {
@@ -128,11 +131,6 @@ class SanctionsListChangedConsumer {
     }
 
     private suspend fun handleChanged(node: JsonNode) {
-        if (!enabled.toBoolean()) {
-            log.debugf("[sanctions-list-changes-in] ADR-0256 trigger loop disabled — acking")
-            count(OUTCOME_DISABLED)
-            return
-        }
         val publicationId = runCatching { UUID.fromString(node.path("publicationId").asText()) }.getOrNull()
         if (publicationId == null) {
             log.warnf(
@@ -149,6 +147,23 @@ class SanctionsListChangedConsumer {
             changedExternalIds = node.path("changedExternalIds").map { it.asText() },
             deactivatedExternalIds = node.path("deactivatedExternalIds").map { it.asText() },
         )
+        if (!enabled.toBoolean()) {
+            // Switch off: record, never act. Same retry-then-rethrow as the live path — losing the
+            // row here is exactly the defect this branch exists to prevent.
+            val recorded = EventRetry.withRetry(log, "ADR-0256 sanctions-list-changed recording", publicationId) {
+                screeningTriggerService.recordListChange(change, candidateLimit.toInt())
+            }
+            log.infof(
+                "[sanctions-list-changes-in] trigger loop OFF — publication %s chunk %d: %d candidates, %d deferred, %d coalesced",
+                publicationId,
+                change.chunkIndex,
+                recorded.candidates,
+                recorded.candidates - recorded.duplicates,
+                recorded.duplicates,
+            )
+            count(OUTCOME_RECORDED_WHILE_DISABLED)
+            return
+        }
         // Retry-then-rethrow for INFRASTRUCTURE failure only; coordinator failure is durably
         // recorded inside the service and must not reach the DLQ (see class doc).
         val result = EventRetry.withRetry(log, "ADR-0256 sanctions-list-changed handling", publicationId) {
@@ -172,7 +187,9 @@ class SanctionsListChangedConsumer {
         const val METRIC_EVENTS = "openbank.kyc.sanctions_list_change_events"
         const val OUTCOME_HANDLED = "handled"
         const val OUTCOME_STORM = "storm"
-        const val OUTCOME_DISABLED = "disabled"
+
+        /** Switch off: queued as deferred triggers, no case opened yet (drained when on). */
+        const val OUTCOME_RECORDED_WHILE_DISABLED = "recorded_while_disabled"
         const val OUTCOME_IGNORED = "ignored"
         const val OUTCOME_MALFORMED = "malformed"
         const val OUTCOME_UNRECOGNISED = "unrecognised"

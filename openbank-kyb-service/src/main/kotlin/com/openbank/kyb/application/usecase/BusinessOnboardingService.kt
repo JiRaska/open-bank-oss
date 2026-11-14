@@ -8,6 +8,8 @@ import com.openbank.kyb.application.port.`in`.AcceptDisclosuresCommand
 import com.openbank.kyb.application.port.`in`.AnswerQuestionnaireCommand
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
+import com.openbank.kyb.application.port.`in`.CompleteExitCommand
+import com.openbank.kyb.application.port.`in`.DecideMonitoringFindingCommand
 import com.openbank.kyb.application.port.`in`.DisposeFindingCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.LookupCommand
@@ -34,6 +36,7 @@ import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.InvitationTokens
 import com.openbank.kyb.application.port.out.KybMetricsPort
 import com.openbank.kyb.application.port.out.MandateRequest
+import com.openbank.kyb.application.port.out.MonitoringRegistrationStore
 import com.openbank.kyb.application.port.out.PartyGateway
 import com.openbank.kyb.domain.model.AcceptedDisclosure
 import com.openbank.kyb.domain.model.AgreementConflictException
@@ -91,6 +94,8 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     @Inject lateinit var ubo: BeneficialOwnershipPort
 
     @Inject lateinit var screening: RelatedPartyScreeningService
+
+    @Inject lateinit var monitoringStore: MonitoringRegistrationStore
 
     private val log = Logger.getLogger(BusinessOnboardingService::class.java)
 
@@ -365,6 +370,40 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     }
 
     /**
+     * One monitoring finding on an approved case is decided. Nothing an applicant can read
+     * changes, and nothing is published — unless this is the decision that makes an exit owed (the
+     * first confirmed sanctions match): then `BUSINESS_RELATIONSHIP_EXIT_REQUIRED` goes out, once,
+     * with the write that records the decision.
+     */
+    override suspend fun decideMonitoringFinding(cmd: DecideMonitoringFindingCommand): BusinessOnboardingCase {
+        val case = get(cmd.caseId)
+        val now = Instant.now(clock)
+        val decided = case.monitoringFindingDecided(cmd.findingId, cmd.disposition, cmd.operator, cmd.reason, now)
+        log.infof(
+            "kyb case %s: monitoring finding %s set to %s by %s",
+            cmd.caseId,
+            cmd.findingId,
+            cmd.disposition,
+            cmd.operator,
+        )
+        val exitNowOwed = case.monitoring.exitOwedSince == null && decided.monitoring.exitOwedSince != null
+        return cases.update(decided, if (exitNowOwed) KybEvents.exitRequired(decided, now, cmd.operator) else null)
+    }
+
+    /** The exit has been carried out: monitoring ends, and the same write withdraws the subjects. */
+    override suspend fun completeExit(cmd: CompleteExitCommand): BusinessOnboardingCase {
+        val case = get(cmd.caseId)
+        val completed = case.exitCompleted(cmd.operator, cmd.evidence, Instant.now(clock))
+        log.infof("kyb case %s: exit recorded as completed by %s", cmd.caseId, cmd.operator)
+        return cases.update(completed, null)
+    }
+
+    override suspend fun listMonitoringHolds(page: Int, size: Int): List<BusinessOnboardingCase> =
+        cases.listMonitoringHolds(page, size)
+
+    override suspend fun monitoringStates(caseId: UUID): Map<String, String> = monitoringStore.statesOf(caseId)
+
+    /**
      * An event, not a request: nobody is there to retry a conflict, and a nacked record is
      * dead-lettered — so a write that lost the race is re-read and re-applied here. The transition
      * is idempotent, and the last attempt lets the conflict propagate.
@@ -527,7 +566,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
                     authority = if (joint) "JOINT" else "SOLE",
                     requiredSignatures = requiredSignatures,
                     source = if (signer.representativeIndex != null) "REGISTRY" else "POWER_OF_ATTORNEY",
-                    evidenceRef = "kyb-case:${case.id}:signature:${signer.signatureRef}",
+                    evidenceRef = case.mandateEvidenceRef(signer),
                 ),
             )
         }
