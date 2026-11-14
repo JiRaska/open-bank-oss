@@ -295,6 +295,40 @@ data class DelegationGrant(
     private fun nextLifecycleRevision(): Long = Math.addExact(lifecycleRevision, 1)
 
     companion object {
+        /**
+         * Resource types a NEW offer may name (ADR-0375 D5 + D6).
+         *
+         * `CAPABILITY_MATRIX` still lists PAYMENT and STATEMENT, and must: historical grants carry
+         * them, and this aggregate is how such a row is read back. What they may no longer be is
+         * OFFERED, and the reason is the two clauses together rather than the ownership oracle
+         * alone.
+         *
+         * D5 leaves PAYMENT and STATEMENT ownership `UNVERIFIABLE` by measurement — a statement is
+         * addressed by `(accountId, currency, legalSequence)` and has no route resolving its own
+         * id, and a payment id resolves in no single service across six rails. D6 then makes the
+         * rendered sealed artifact the ONE delivery mechanism for a shared object, and
+         * `ExternalDisclosureService.issue` requires `resourceType == DOCUMENT`. So even once an
+         * oracle existed, a grant over these two types could never be delivered: the mechanism
+         * refuses them by type.
+         *
+         * Nothing is lost. A statement already renders as a document
+         * (`/api/v1/statements/{accountId}/{currency}/{legalSequence}/document`), so sharing one
+         * with an outsider is a DOCUMENT grant over that artifact — which works end to end,
+         * oracle and atomic view counting included. Ongoing access to an account's statements is a
+         * different thing and has its own capability, `ACCOUNT_DOWNLOAD_STATEMENTS`.
+         *
+         * This turns a runtime refusal into a declared one. Offers already failed: the oracle
+         * answered UNVERIFIABLE and the service refuses to mint a grant over an unverified
+         * resource, so no working path changes — only the error a grantor sees, and the fact that
+         * the vocabulary now says so instead of discovering it per request.
+         */
+        val OFFERABLE_RESOURCE_TYPES = setOf(
+            DelegationResourceType.ACCOUNT,
+            DelegationResourceType.SAVINGS_GOAL,
+            DelegationResourceType.CARD,
+            DelegationResourceType.DOCUMENT,
+        )
+
         val OBJECT_RESOURCE_TYPES = setOf(
             DelegationResourceType.PAYMENT,
             DelegationResourceType.STATEMENT,

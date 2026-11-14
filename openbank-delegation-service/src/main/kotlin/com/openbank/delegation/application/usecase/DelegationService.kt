@@ -94,6 +94,14 @@ class DelegationUnsupportedConstraintException(val code: String, message: String
 
         /** Exposure needs transformed-artifact and atomic view-count enforcement before it can be offered. */
         const val CODE_EXPOSURE_UNSUPPORTED = "EXPOSURE_UNSUPPORTED"
+
+        /**
+         * ADR-0375 D5+D6 — the resource type cannot be delivered, so it cannot be offered.
+         * Distinct from an ownership failure on purpose: this one is a property of the TYPE and no
+         * amount of verification changes it, so a grantor retrying with a different resource id
+         * learns nothing from an ownership error.
+         */
+        const val CODE_RESOURCE_TYPE_NOT_OFFERABLE = "RESOURCE_TYPE_NOT_OFFERABLE"
     }
 }
 
@@ -214,6 +222,7 @@ class DelegationService(
     }
 
     private suspend fun validateCandidate(command: DelegationCandidate): ValidatedCandidate {
+        rejectUnofferableResourceType(command)
         rejectUnsupportedExposure(command)
         requireCallerIs(command.callerPartyId, command.grantorPartyId)
         val grantorAuthority = verifyGrantorAuthority(command)
@@ -275,6 +284,25 @@ class DelegationService(
         )
     } else {
         command.actorPartyId ?: command.grantorPartyId
+    }
+
+    /**
+     * ADR-0375 D5+D6. PAYMENT and STATEMENT have no ownership oracle AND no delivery mechanism —
+     * the sealed disclosure accepts DOCUMENT only — so they are refused here, before the ownership
+     * lookup that would also have refused them. Checked in `validateCandidate`, which offer and
+     * preview share, so preview cannot promise what offer will refuse.
+     */
+    private fun rejectUnofferableResourceType(command: DelegationCandidate) {
+        if (command.resourceType !in DelegationGrant.OFFERABLE_RESOURCE_TYPES) {
+            throw DelegationUnsupportedConstraintException(
+                code = DelegationUnsupportedConstraintException.CODE_RESOURCE_TYPE_NOT_OFFERABLE,
+                message = "resourceType ${command.resourceType} cannot be offered: it has no " +
+                    "ownership oracle and no delivery mechanism (ADR-0375 D5/D6). Share a statement " +
+                    "as the DOCUMENT its render produces, or use ACCOUNT_DOWNLOAD_STATEMENTS for " +
+                    "ongoing access to an account's statements. Historical grants of this type stay " +
+                    "readable for audit.",
+            )
+        }
     }
 
     private fun rejectUnsupportedExposure(command: DelegationCandidate) {

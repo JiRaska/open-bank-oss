@@ -48,3 +48,31 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 The original consumed SCA challenge replays only the same entity, initiator, instruction kind
 and canonical frozen payload. A changed instruction with the same challenge receives HTTP 409
 before a new request or outbox event can be written.
+
+## Which resource types a new offer may name (ADR-0375 D5 + D6)
+
+`CAPABILITY_MATRIX` still lists `PAYMENT` and `STATEMENT`, and must: historical grants carry them
+and the aggregate is how such a row is read back. `OFFERABLE_RESOURCE_TYPES` is the narrower set a
+**new** offer may name — `ACCOUNT`, `SAVINGS_GOAL`, `CARD`, `DOCUMENT` — and `validateCandidate`
+refuses anything else with `RESOURCE_TYPE_NOT_OFFERABLE`, before the ownership lookup.
+
+**Why those two, and why the type rather than the id.** D5 leaves their ownership `UNVERIFIABLE` by
+measurement: a statement is addressed by `(accountId, currency, legalSequence)` and no route
+resolves a statement id, and a payment id resolves in no single service across six rails. D6 then
+makes the rendered sealed artifact the one delivery mechanism for a shared object, and
+`ExternalDisclosureService.issue` requires `resourceType == DOCUMENT`. So even once an oracle
+existed, a grant over these two could never be *delivered* — the mechanism refuses them by type.
+Reporting that as an ownership failure would invite the grantor to retry with a different resource
+id, and no id would ever work.
+
+**Nothing is lost.** A statement already renders as a document
+(`GET /api/v1/statements/{accountId}/{currency}/{legalSequence}/document`), so sharing one with an
+outsider is a `DOCUMENT` grant over that artifact — oracle and atomic view counting included.
+Ongoing access to an account's statements is a different thing with its own capability,
+`ACCOUNT_DOWNLOAD_STATEMENTS` (D7).
+
+This turns a runtime refusal into a declared one: offers already failed on the UNVERIFIABLE oracle,
+so no working path changes — only the error the grantor sees, and the fact that the vocabulary now
+says so instead of each request discovering it. The `delegation-capability-enforcement` gate derives
+its subjects from the matrix **intersected with** this set, so a type nobody can offer needs no
+declared enforcer.

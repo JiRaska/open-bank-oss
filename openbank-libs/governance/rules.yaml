@@ -3574,33 +3574,6 @@ delegation_capability_enforcement:
         ADR-0375 D7 correction. PUT /customer/v1/cards/{id}/controls toggles contactless, online,
         ATM and abroad — channels, not limits — and was gated on CAP_CARD_MANAGE_LIMITS. Now gated
         on CAP_CARD_MANAGE_CHANNELS. Same preset reasoning as CARD_MANAGE_STATUS.
-    - resource_type: PAYMENT
-      capability: OBJECT_READ
-      status: unenforced
-      issue: 3615
-      shared_capability: true
-      why: >
-        The matrix permits sharing a single payment; no route serves a shared payment to a grantee
-        (the edge's payment reads are owner-only IDOR guards). Measured: no production file names
-        both OBJECT_READ and PAYMENT. Scan-unverifiable because OBJECT_READ is enforced for
-        DOCUMENT — see scan_limit above.
-        ADR-0375 D5 gave DOCUMENT an ownership oracle and deliberately did NOT give one to PAYMENT:
-        a payment id resolves in no single service — six rails own payments and nothing maps an id
-        to its rail — so there is no owner to ask. The honest fix is to remove this pair from
-        CAPABILITY_MATRIX, which is a behaviour change (it refuses offers the app makes today) and
-        belongs with the offer-time refusal, not here.
-    - resource_type: STATEMENT
-      capability: OBJECT_READ
-      status: unenforced
-      issue: 3615
-      shared_capability: true
-      why: >
-        As PAYMENT/OBJECT_READ: statement-service has no delegation code, and no production file
-        names both OBJECT_READ and STATEMENT. It also has no oracle to build — measured
-        2026-11-12, every statement-service route is addressed by accountId and there is no
-        statement object carrying an id of its own, so a STATEMENT resourceId refers to nothing
-        the owning service can resolve. Remove from CAPABILITY_MATRIX with the refusal slice.
-
 readiness_attestations:
   principle: >
     openbank-libs/governance/attestations.yaml is the ONLY hand-entered input to the

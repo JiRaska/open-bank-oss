@@ -140,8 +140,33 @@ def strip_comments(src: str) -> str:
 # angle brackets, so anything of the form `Map<[^>]*>` truncates at the inner `>` and the
 # matrix silently parses to empty. Match up to the `= mapOf(` instead.
 MATRIX_START = re.compile(r"CAPABILITY_MATRIX\b[^=]*=\s*mapOf\s*\(")
+# ADR-0375 D5+D6. The matrix still lists PAYMENT and STATEMENT so historical grants deserialise,
+# but a grantor can only be OFFERED the types in this set, so only those pairs are subjects. Parsed
+# rather than listed here, for the same reason the matrix is: a hand-kept copy of the thing being
+# checked reads as passing when it falls behind.
+OFFERABLE_START = re.compile(r"OFFERABLE_RESOURCE_TYPES\b[^=]*=\s*setOf\s*\(")
 RESOURCE_ENTRY = re.compile(r"DelegationResourceType\.([A-Z_]+)\s+to\s+setOf\s*\(")
 CAPABILITY_REF = re.compile(r"DelegationCapability\.([A-Z_]+)")
+
+
+def parse_offerable(src: str) -> set[str]:
+    """Parse `OFFERABLE_RESOURCE_TYPES` into a set of resource-type names. Empty = unparseable, and
+    every caller fails closed on that rather than treating "no offerable types" as a clean pass."""
+    stripped = "\n".join(
+        line for line in src.splitlines() if not line.strip().startswith("//") and not line.strip().startswith("*")
+    )
+    start = OFFERABLE_START.search(stripped)
+    if not start:
+        return set()
+    depth, i = 1, start.end()
+    while i < len(stripped) and depth:
+        if stripped[i] == "(":
+            depth += 1
+        elif stripped[i] == ")":
+            depth -= 1
+        i += 1
+    body = stripped[start.end():i - 1]
+    return set(re.findall(r"DelegationResourceType\.([A-Z_]+)", body))
 
 
 def parse_matrix(src: str) -> dict[str, set[str]]:
@@ -214,7 +239,20 @@ def findings(
 ) -> tuple[list[str], int, list[str], list[str]]:
     matrix_src = (root / MATRIX_FILE).read_text(encoding="utf-8")
     matrix = parse_matrix(matrix_src)
-    pairs = {(r, c) for r, caps in matrix.items() for c in caps}
+    offerable = parse_offerable(matrix_src)
+    if not offerable:
+        return (
+            [
+                f"OFFERABLE_RESOURCE_TYPES could not be parsed from {MATRIX_FILE} — refusing to "
+                "report a vacuous pass over zero subjects"
+            ],
+            0,
+            unenforced,
+            shared_notes,
+        )
+    # A pair is a subject only if its resource type can still be offered. A type that cannot be
+    # offered needs no enforcer: nothing can create a grant that would reach one.
+    pairs = {(r, c) for r, caps in matrix.items() if r in offerable for c in caps}
 
     rules = yaml.safe_load(rules_path.read_text(encoding="utf-8")) or {}
     declared_list = ((rules.get("delegation_capability_enforcement") or {}).get("declared")) or []
@@ -344,6 +382,21 @@ def self_test() -> int:
         (parsed.get("CARD") == {"CARD_VIEW"}, "a single-line setOf( ... ) entry is parsed whole"),
         (parsed.get("DOCUMENT") == {"OBJECT_READ"}, "the last entry is not truncated"),
         (parse_matrix("object X { val other = mapOf<String, String>() }") == {}, "no matrix parses to empty, which the caller must treat as a refusal"),
+        # ADR-0375 D5+D6: subjects are the OFFERABLE pairs, so this parser decides the scope.
+        (
+            parse_offerable(
+                "val OFFERABLE_RESOURCE_TYPES = setOf(\n"
+                "    DelegationResourceType.ACCOUNT,\n"
+                "    // DelegationResourceType.STATEMENT, // cannot be delivered\n"
+                "    DelegationResourceType.DOCUMENT,\n"
+                ")\n"
+            ) == {"ACCOUNT", "DOCUMENT"},
+            "offerable types parse, and a type named only in a comment is NOT offerable",
+        ),
+        (
+            parse_offerable("val OTHER = setOf(DelegationResourceType.ACCOUNT)") == set(),
+            "an absent OFFERABLE_RESOURCE_TYPES parses to empty, which the caller fails closed on",
+        ),
     ]
 
     token = re.compile(r"(?<![A-Za-z0-9_])CARD_VIEW(?![A-Za-z0-9_])")
