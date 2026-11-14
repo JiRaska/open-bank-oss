@@ -3532,6 +3532,45 @@ def carrier_holds_strict(p: dict, now: float | None = None) -> bool:
     return age is None or age <= CARRIER_PRIORITY_S
 
 
+def fix_preempts_strict_self_test(check) -> None:
+    """ADR-0343 amendment 2026-11-14: on a red main a green fix pre-empts a strict reservation whose CI
+    is still running (#15991 behind #16005/#16009, #16096 behind #15976); a GREEN holder, which merges
+    this tick, is never interrupted. Pure: git is stubbed (ancestry: only heads named cur-* contain main)."""
+    now = 2_000_000_000.0
+
+    class _R:
+        def __init__(self, rc=0, out=""):
+            self.returncode, self.stdout = rc, out
+
+    def git(*a, **_k):
+        if a[:2] == ("merge-base", "--is-ancestor"):
+            return _R(0 if a[3].startswith("cur-") else 1)
+        if a[:2] == ("show", "-s"):
+            return _R(0, str(int(now) - 60))
+        return _R(0, "")
+
+    strict_pr = {"number": 16005, "head_sha": "cur-strict", "app": {}}
+    fix_pr = {"number": 15991, "head_sha": "old-fix", "app": {}}
+    fixes = {15991: ["Validate manifests"]}
+    holder, _to = strict_reservation(git, "b", [("pending", strict_pr), ("green", fix_pr)], now=now, fixes=fixes)
+    check("main red: a green fix pre-empts a strict reservation still in CI (holder freed for the fix)",
+          holder is None, f"holder={holder}")
+    holder, _to = strict_reservation(git, "b", [("green", strict_pr), ("green", fix_pr)], now=now, fixes=fixes)
+    check("main red: a strict holder already GREEN (merging this tick) is not interrupted by a fix",
+          holder == 16005, f"holder={holder}")
+    holder, _to = strict_reservation(git, "b", [("pending", strict_pr)], now=now, fixes={})
+    check("main green / no fix: a strict PR in CI still holds main", holder == 16005, f"holder={holder}")
+    fix_cur = {**fix_pr, "head_sha": "cur-fix"}
+    holder, _to = strict_reservation(git, "b", [("pending", strict_pr), ("pending", fix_cur)], now=now, fixes=fixes)
+    check("main red: the updated fix, CI running on its combined head, is the holder", holder == 15991, f"holder={holder}")
+    fix_pending = {"number": 15991, "head_sha": "cur-fix", "app": {}, "fix": ["Validate manifests"]}
+    other_fix = {"number": 15987, "head_sha": "old-fix2", "app": {}}
+    holder, _to = strict_reservation(git, "b", [("pending", fix_pending), ("green", other_fix)], now=now,
+                                     fixes={15987: ["Validate manifests"]})
+    check("main red: a fix in CI on its combined head is not pre-empted by another green fix",
+          holder == 15991, f"holder={holder}")
+
+
 def train_turn_main_red_self_test(check) -> None:
     """The train's turn after a strict merge, with a red main and without (2026-11-13: fixes #15991/#15987
     waited ~2 h behind "train's turn" while no train could be built over the red main)."""
@@ -3863,6 +3902,7 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
     now = time.time() if now is None else now
     holder, timed_out = None, []
     fixes = fixes or {}
+    holder_state, holder_is_fix = None, False
     ordered = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes else 1)
     for state, view in ordered:
         n, head = view["number"], view["head_sha"]
@@ -3885,6 +3925,18 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
             timed_out.append(n)
         elif holder is None:
             holder = n
+            holder_state = state
+            holder_is_fix = bool(view.get("fix"))  # a fix's combined head in CI (fix_head_state) is a fix too
+    # Main-red fix pre-emption (ADR-0343 amendment 2026-11-14): a non-fix reservation whose CI is still
+    # RUNNING does not hold main while a green fix waits. Since no train moves on a red main, holding it
+    # for a strict PR's 30-60 min CI (re-run each time main moves) left the fix — the one PR that can turn
+    # main green — waiting behind a reservation that only exists because main moved (#15991 behind
+    # #16005/#16009, #16096 behind #15976). A GREEN holder merges this tick and is never interrupted; the
+    # pre-empted PR keeps its CI and regains main once main is green (it is behind then, so re-updated).
+    if holder is not None and fixes and holder not in fixes and not holder_is_fix and holder_state == "pending":
+        log(f"#{holder:>6} strict    reservation pre-empted: main is red and fix "
+            f"{', '.join(f'#{f}' for f in sorted(fixes))} is served first; main returns once green")
+        holder = None
     return holder, timed_out
 
 
@@ -4056,6 +4108,9 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
             main_health_checked = True
             if defer_recovered_main_red(gh, base, main_red, summary):
                 return
+        if current and state == "pending" and fixes and not fix and not view.get("fix"):
+            log(f"#{n:>6} strict    up to date, CI running: pre-empted by main-red fix — holds nothing until main is green")
+            continue
         if current and state == "pending":
             log(f"#{n:>6} strict    up to date, CI running: main reserved for it")
             summary["in_flight"] = True
@@ -5516,6 +5571,7 @@ def self_test() -> int:
 
     retry_planner_self_test(check)
     train_turn_main_red_self_test(check)
+    fix_preempts_strict_self_test(check)
     branch_updater_self_test(check)
     git_memo_self_test(check)
     packed_fixture_self_test(check)
