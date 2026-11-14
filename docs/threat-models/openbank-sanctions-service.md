@@ -270,8 +270,10 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
   the Redis store refuses maker == checker. **No machine path is paused:** `sanctions.clear` has no
   `ROLE_API`, no service rule grants it to a `service-account-*`, and the screening callers use
   `sanctions.create`. The residual noted 2026-10-08 (a service account holding `ROLE_OPERATOR`)
-  is unchanged by this: base `rest.rego` `matrix-allows` already excludes machine principals, so
-  such a caller is denied before the four-eyes step is reached; four-eyes does not narrow it. **Availability
+  is narrowed, not closed: the sanctions rule `operator-sanctions-write` has no machine exclusion,
+  so a service account holding `ROLE_OPERATOR` (one per realm today) still passes OPA for
+  `sanctions.clear`, but no service code calls `POST /review`, and with enforcement on such a call
+  parks at 202 and needs a different checker. Excluding machines from that rule is a follow-up. **Availability
   dependency:** the approval queue now depends on `redis.sanctions.svc`; if it is down an
   operator's clear fails instead of proceeding — correct for this control. Residual: approvals
   are Redis records with the interceptor TTL, not durable audit; the disposition audit trail is
