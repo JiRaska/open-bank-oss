@@ -20,8 +20,9 @@ class AmlCaseEntity : PanacheEntity() {
     @Column(name = "idempotency_key", nullable = false, unique = true)
     lateinit var idempotencyKey: String
 
-    @Column(name = "party_id", nullable = false)
-    lateinit var partyId: UUID
+    /** Null while the owning party is not established (V15); see `AmlCase.partyId`. */
+    @Column(name = "party_id")
+    var partyId: UUID? = null
 
     @Column(name = "account_id")
     var accountId: UUID? = null
@@ -74,4 +75,12 @@ class AmlCaseEntity : PanacheEntity() {
     /** #10916: request fingerprint the case was created under; null for rows predating V9. */
     @Column(name = "request_hash", length = 64)
     var requestHash: String? = null
+
+    /** `CaseOrigin` name; null for rows written before V15 or by a pod that predates it. */
+    @Column(name = "origin", length = 32)
+    var origin: String? = null
+
+    /** When the resolution sweep last tried and failed to find this case's party; orders the sweep. */
+    @Column(name = "party_resolution_attempted_at")
+    var partyResolutionAttemptedAt: Instant? = null
 }

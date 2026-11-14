@@ -30,8 +30,9 @@
    path into the lending DB. The versioned `loan.exposure_fact` envelope (#9890) carries
    the loan, application and party identifiers, native amounts, recorded status and effective
    time. The same lending topic ACL controls producer access. Repayment and final-state facts
-   commit with their local source changes. The cash confirmation fact follows both completed
-   disbursement postings and commits with the existing disbursement event.
+   commit with their local source changes. The cash confirmation fact follows the posted loan
+   journal and a Transaction acknowledgement in status `COMPLETED`. Same-key acknowledgements
+   use the same status check. Lending commits the fact with the existing disbursement event.
 4. **Service → credit bureau / risk-parameter / valuation feeds (ports).** `@Default` no-op today; real
    integrations land later as build-time-gated `@Alternative` adapters — each a future trust boundary.
 5. **Service → its own Postgres schema.** Intra-service tables only; no cross-schema reads.

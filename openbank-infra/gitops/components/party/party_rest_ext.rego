@@ -148,3 +148,17 @@ allowed_reasons contains "service-delegation-mandate-read" if {
 	machine_named("service-account-openbank-delegation")
 	input.action in {"party.mandate.read"}
 }
+
+allowed_reasons contains "kyb-publishes-statutory-representation" if {
+    input.principal.type == "HUMAN"
+    input.principal.service_account == true
+    machine_named("service-account-openbank-kyb")
+    input.action == "party.statutory-representation.publish"
+}
+
+allowed_reasons contains "delegation-inspects-statutory-representation" if {
+    input.principal.type == "HUMAN"
+    input.principal.service_account == true
+    machine_named("service-account-openbank-delegation")
+    input.action == "party.statutory-representation.inspect"
+}

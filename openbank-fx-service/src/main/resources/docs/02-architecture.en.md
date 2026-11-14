@@ -155,3 +155,7 @@ The dispatcher wraps the Kafka publish with MicroProfile Fault Tolerance: `@Bulk
 ## ČNB policy rates and minimum-reserve facts
 
 `CnbPolicyRateIngestionScheduler` reads the ČNB history for the 2W repo, discount and lombard rates and the minimum-reserve workbook. Its default daily trigger is 14:45 Europe/Prague; a separate trigger runs after startup and then every 24 hours. Each feed is attempted independently, the full history is upserted idempotently, and workflow success is recorded only when every feed succeeds. Inspect the per-feed fetch outcome and freshness metrics when one feed fails; a successful sibling feed does not hide that failure. Newly inserted or revised facts are published on the compacted `openbank.fx.cnb-policy-rate.published` topic for downstream as-of calculations. This pipeline is separate from the existing daily FX fixing ingestion above.
+
+## Fraud scoring call (ADR-0377 D3)
+
+The conversion's fraud-scoring call to fraud-service (`FraudScoringPort`) now uses the shared typed risk context. An FX conversion moves money between the holder's own currency pockets, so it sends no payee: the counterparty is `Unknown(NOT_APPLICABLE_OWN_ACCOUNT)` and the initiation mode is `CUSTOMER_PRESENT`. No account identifier of a third party leaves this service on that call.

@@ -163,16 +163,35 @@ class SanctionsListChangedConsumerTest {
     }
 
     @Test
-    fun `the trigger loop stays off unless enabled, acking real diffs untouched`(): Unit = runBlocking {
+    fun `with the loop off a real diff is RECORDED, never handled and never dropped`(): Unit = runBlocking {
         consumer.enabled = "false"
         consumer.candidateLimit = "500"
+        val captured = slot<ScreeningTriggerService.ListChange>()
+        coEvery { screeningTriggerService.recordListChange(capture(captured), 500) } returns
+            ScreeningTriggerService.HandleResult(candidates = 3, opened = 0, failed = 0, duplicates = 1)
+        val publicationId = UUID.randomUUID()
+
+        consumer.consume(changed(publicationId))
+
+        coVerify(exactly = 1) { screeningTriggerService.recordListChange(any(), 500) }
+        coVerify(exactly = 0) { screeningTriggerService.handleListChange(any(), any()) }
+        assertThat(captured.captured.publicationId).isEqualTo(publicationId)
+        assertThat(counted(SanctionsListChangedConsumer.OUTCOME_RECORDED_WHILE_DISABLED)).isEqualTo(1.0)
+        assertThat(counted(SanctionsListChangedConsumer.OUTCOME_HANDLED)).isZero()
+        assertThat(counted(SanctionsListChangedConsumer.OUTCOME_UNRECOGNISED)).isZero()
+    }
+
+    @Test
+    fun `with the loop on a diff is handled, not merely recorded`(): Unit = runBlocking {
+        enable()
+        coEvery { screeningTriggerService.handleListChange(any(), 500) } returns
+            ScreeningTriggerService.HandleResult(candidates = 1, opened = 1, failed = 0, duplicates = 0)
 
         consumer.consume(changed())
 
-        coVerify(exactly = 0) { screeningTriggerService.handleListChange(any(), any()) }
-        // Recognised and deliberately not acted on — distinct from `unrecognised`.
-        assertThat(counted(SanctionsListChangedConsumer.OUTCOME_DISABLED)).isEqualTo(1.0)
-        assertThat(counted(SanctionsListChangedConsumer.OUTCOME_UNRECOGNISED)).isZero()
+        coVerify(exactly = 0) { screeningTriggerService.recordListChange(any(), any()) }
+        assertThat(counted(SanctionsListChangedConsumer.OUTCOME_HANDLED)).isEqualTo(1.0)
+        assertThat(counted(SanctionsListChangedConsumer.OUTCOME_RECORDED_WHILE_DISABLED)).isZero()
     }
 
     @Test

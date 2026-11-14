@@ -9,6 +9,10 @@ import com.openbank.fraud.domain.model.FraudScore
 import com.openbank.fraud.domain.model.FraudVerdict
 import com.openbank.fraud.domain.model.ScoreRequest
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.fincrime.CounterpartyAccount
+import com.openbank.libs.fincrime.CounterpartyScheme
+import com.openbank.libs.fincrime.InitiationChannel
+import com.openbank.libs.fincrime.InitiationMode
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
@@ -67,6 +71,11 @@ data class ScoreFraudRequest(
     val rail: String,
     val accountId: UUID? = null,
     val counterpartyId: UUID? = null,
+    // ADR-0377 D3, additive: the payee account, how the operation was initiated, and through
+    // which channel. All optional on the wire so every existing caller (and pact) stays valid.
+    val counterparty: CounterpartyWire? = null,
+    val initiationMode: String? = null,
+    val channel: String? = null,
 )
 
 /**
@@ -88,12 +97,34 @@ data class ScoreFraudRequest(
  * The bound is the *storage* contract, so it cannot silently drift back: `currency` must be exactly
  * the three upper-case letters ISO 4217 defines and the column holds.
  */
+/** The payee account on the wire. Personal data: never logged; fraud-service keys it on arrival. */
+data class CounterpartyWire(val scheme: String? = null, val value: String? = null) {
+    override fun toString(): String = "CounterpartyWire(scheme=$scheme, value=<redacted>)"
+}
+
 private fun ScoreFraudRequest.validate() {
     require(currency.matches(ISO_4217)) { "currency must be a 3-letter ISO 4217 code" }
     require(rail.isNotBlank()) { "rail is required" }
+    counterparty?.let { cp ->
+        require(CounterpartyScheme.entries.any { it.name == cp.scheme }) {
+            "counterparty.scheme must be one of ${CounterpartyScheme.entries}"
+        }
+        val value = cp.value
+        require(!value.isNullOrBlank() && value.length <= MAX_COUNTERPARTY_LENGTH) {
+            "counterparty.value is required and at most $MAX_COUNTERPARTY_LENGTH characters"
+        }
+    }
+    require(initiationMode == null || InitiationMode.entries.any { it.name == initiationMode }) {
+        "initiationMode must be one of ${InitiationMode.entries}"
+    }
+    require(channel == null || InitiationChannel.entries.any { it.name == channel }) {
+        "channel must be one of ${InitiationChannel.entries}"
+    }
 }
 
 private val ISO_4217 = Regex("^[A-Z]{3}$")
+
+private const val MAX_COUNTERPARTY_LENGTH = 64
 
 data class ScoreFraudResponse(val verdict: String, val score: Int, val reasons: List<String>, val ruleVersion: String)
 
@@ -103,6 +134,11 @@ private fun ScoreFraudRequest.toDomain() = ScoreRequest(
     rail = rail,
     accountId = accountId,
     counterpartyId = counterpartyId,
+    counterparty = counterparty?.let { cp ->
+        CounterpartyAccount.of(CounterpartyScheme.valueOf(cp.scheme.orEmpty()), cp.value.orEmpty())
+    },
+    initiationMode = initiationMode?.let(InitiationMode::valueOf),
+    channel = channel?.let(InitiationChannel::valueOf),
 )
 
 internal fun FraudScore.toResponse(): ScoreFraudResponse {

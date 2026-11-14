@@ -26,7 +26,7 @@ interface BorrowerAccountLookupPort {
  * same shape `account-service` uses for the welcome bonus.
  */
 interface BorrowerCreditPort {
-    /** Idempotent per [reference] — a retried disbursement call is a no-op, not a second credit. */
+    /** Succeeds once the credit is confirmed. Retrying [reference] refers to the same transaction. */
     fun credit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit>
 
     /**

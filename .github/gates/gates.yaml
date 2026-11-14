@@ -124,11 +124,26 @@ gates:
     rationale: "The counting gh shim sits first on PATH in CI gates, Services CI changes, CodeQL and the merge-train build. A shim that altered arguments, output or exit code, or that died on an unwritable log, would break every job it measures; one that logged field values would publish them in step summaries. Its self-test proves each of those is caught."
     review_after: "2027-05-10"
     budget_seconds: 30
-    # One subject per assertion the harness makes (passthrough, exit code, stderr, log line, no values, report, unwritable log, missing counter).
-    min_subjects: 8
+    # One subject per assertion the harness makes (passthrough, exit code, stderr, log line, no values, report, unwritable log, missing counter,
+    # Python request logged / query not logged / no env no log, budget over-enforce / over-warn / within / warn-only default / undeclared).
+    min_subjects: 16
     selftest_exempt: "is-a-test-suite - the run: IS the shim's own --self-test, which fails when the passthrough is sabotaged"
     run: |
       bash .github/scripts/gh-call-counter.sh --self-test
+
+  - id: api-call-budget-coverage
+    name: "Every job that counts GitHub API calls declares a per-run budget, and every budget names such a job"
+    group: lint
+    mode: enforced
+    rationale: "The repository's GITHUB_TOKEN core quota is shared by every run; when one job's spend grows, CodeQL and other required checks on unrelated PRs fail with 'API rate limit exceeded for installation'. gh-call-counter.sh warns when a counted job exceeds its line in .github/api-call-budgets.yaml, which only works while each counted job has a line. A counted job without one reports budget=undeclared and can never warn; a line whose job was renamed checks nothing."
+    review_after: "2027-05-14"
+    budget_seconds: 30
+    # Ten jobs install the counter today; a parse that finds far fewer has lost the workflows.
+    min_subjects: 10
+    selftest: python3 .github/scripts/check-api-call-budgets.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-api-call-budgets.py --root .
 
   - id: verification-metadata-additive-check
     name: "Dependabot metadata refresh accepts only additive verification metadata (#15355)"
@@ -6840,6 +6855,20 @@ gates:
       # the first run of these probes reported "rejected" on a YAML error in the fixture itself,
       # which is why the output is read and not the exit code.
       python3 .github/scripts/check-delegation-capability-enforcement.py --enforce
+  - id: value-movement-admission-coverage
+    name: "every value-moving module is classified, and an instructed one binds the admission chain with a real FRAUD check (ADR-0377 D2, enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 12   # 1.3s warm / 2.7s cold on a laptop, 3043 .kt files read (2026-11-13)
+    rationale: "A module that books value without binding the payment admission chain is a path around authority, limits, sanctions and fraud, and nothing listed such paths: ADR-0377 D2 found one that posts straight to the transactions API outside every rail. The scope is derived from value-sink call sites in src/main (TransactionsApi booking calls, @POST clients on journal/balance/clearing paths, hand-built sink URLs), never listed; the registry only classifies it and is checked both ways, and its pending states are shrink-only so a module that binds the chain cannot keep its exemption."
+    review_after: "2027-03-31"
+    verified: "2026-11-13 -- real tree: PASS, 16 modules derived from 3043 .kt files (9 instructed, all pending-chain because no service binds the chain yet; 7 bank-own). Falsified six ways against the real tree, each restored afterwards: a registry line deleted -> exit 1, 1 UNCLASSIFIED finding; a line for a non-existent module -> exit 1, 1 STALE finding; pending-chain removed from an instructed line -> exit 1, 1 'declared fully bound' finding; a new file posting to a transactions URL added to a module outside the set -> exit 1, 1 UNCLASSIFIED finding naming file:line; a chain Builder added to a pending-chain module -> exit 1, 1 STALE pending-chain finding; --root at an empty directory -> exit 2 with SUBJECTS=UNRESOLVED. Self-test: 30 named checks."
+    min_subjects: 12   # 16 value-moving modules derived today (2026-11-13)
+    selftest: python3 .github/scripts/check-value-movement-admission.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-value-movement-admission.py"]
+    run: |
+      python3 .github/scripts/check-value-movement-admission.py
   - id: enforcement-reachability
     name: "a declared enforcement function has a production caller (ADR-0232, issue #3615)"
     group: kotlin
