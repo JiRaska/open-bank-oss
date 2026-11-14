@@ -280,8 +280,10 @@ openbank:
       # is not an option.
       treasury-service:
         tls-configuration-name: internal-authority
-      # pension-service and pension-fund-service (pension reporting aggregates): the same 8443
-      # private-CA listener, client auth REQUIRED, same client identity.
+      # pension-service and pension-fund-service (pension reporting aggregates), both on 8443.
+      # pension-fund-service requires a client certificate (this identity). pension-service is
+      # server TLS, verified against openbank-ca; pension-service does not yet require a client
+      # certificate.
       pension-service:
         tls-configuration-name: internal-authority
       pension-fund-service:

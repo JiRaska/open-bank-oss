@@ -146,9 +146,11 @@ spec:
             # deployed pod never falls back to application.yaml's localhost defaults, and because
             # gen-network-policies.py derives each upstream's ingress allow-list from these env URLs.
             # Each upstream's rego admits service-account-openbank-tax-reporting for exactly the
-            # reporting reads it serves. pension and pension-fund are called on their private-CA mTLS
-            # listener (8443, client cert REQUIRED): %prod rest-client TLS bucket internal-authority,
-            # server cert verified with hostname verification (their internal-tls dnsNames).
+            # reporting reads it serves. Both on 8443 via %prod rest-client TLS bucket
+            # internal-authority, server cert verified with hostname verification (internal-tls
+            # dnsNames). pension-fund REQUIRES a client certificate (mTLS). pension-service is server
+            # TLS, verified against openbank-ca; pension-service does not yet require a client
+            # certificate.
             - name: PENSION_SERVICE_URL
               value: https://pension-service.pension.svc:8443
             - name: PENSION_FUND_SERVICE_URL
