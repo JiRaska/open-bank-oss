@@ -16,6 +16,7 @@ afterEach(() => {
   delete process.env.OPENBANK_TEST_INTELLIGENCE_STALE_AFTER_DAYS
     delete process.env.OPENBANK_EVIDENCE_STORE_URL
     delete process.env.OPENBANK_TEST_INTELLIGENCE_SNAPSHOT_URL
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true }))
 })
@@ -435,6 +436,12 @@ describe('GET /api/test-intelligence', () => {
   })
 
   it('projects each active journey verdict onto the components it covers, and never a planned one', async () => {
+    // The fixture's evidence is dated 2026-10-31 and the route ages evidence against the clock
+    // (OPENBANK_TEST_INTELLIGENCE_STALE_AFTER_DAYS). Read against the real clock the verdict turns
+    // 'stale' a fortnight later and the test fails on a date, not on a defect. Pin the clock to a
+    // day after the fixture; only Date is faked, so fetch and timers still run.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-01T00:00:00.000Z'))
     const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-matrix-'))
     dirs.push(dir)
     const file = path.join(dir, 'report.json')
