@@ -120,3 +120,16 @@ allowed_reasons contains "compliance-aml-monitoring-and-report" if {
 		"amlReport.withdraw",
 	}
 }
+
+# The terminal decision on the case of a HELD payment (ADR-0374 point 3, #16003) is four-eyes: one
+# compliance analyst proposes, a different one confirms, and only the confirmation releases or
+# rejects the payment. This rule decides who may act at all; the service decides that the
+# confirmer differs from the proposer and restates the proposal. Compliance only — not operators
+# or admins, whose `amlCase.updateDecision` grant cannot reach a hold case (the service refuses a
+# single-step terminal decision on it) — and never a machine principal.
+allowed_reasons contains "compliance-aml-hold-decision" if {
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	"ROLE_COMPLIANCE" in input.principal.roles
+	input.action in {"amlCase.holdDecision.propose", "amlCase.holdDecision.confirm"}
+}
