@@ -6,9 +6,9 @@
 --   monitoring_exit_proposal_withdrawn_by   account that withdrew it (always the proposer's person)
 --   monitoring_exit_proposal_withdrawn_at   when
 -- Nullable, no default: metadata-only. NO BACKFILL: inventing a person id or an expiry would
--- fabricate who proposed. A row of the V15 shape (no person id or no expiry) is inert under the new
+-- fabricate who proposed. A row of the V16 shape (no person id or no expiry) is inert under the new
 -- rule (ExitProposal.isPersonBound): never open, so any reviewer may propose over it, and never
--- confirmable. Monitoring is not switched on anywhere, so V15 has never carried a real proposal.
+-- confirmable. Monitoring is not switched on anywhere, so V16 has never carried a real proposal.
 --
 -- Rollback: roll the code back first, then
 --   ALTER TABLE kyb_cases DROP COLUMN monitoring_exit_proposal_withdrawn_at,

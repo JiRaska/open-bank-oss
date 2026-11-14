@@ -137,6 +137,9 @@ above.
 
 ## 8. Change log
 
+- **2026-11-14** — Four-eyes on statutory representation publication: the staff member who
+  publishes a rule must not be the principal recorded as its `attestedBy` (exact principal
+  comparison); a same-person publish answers 403 `SEPARATION_OF_DUTIES`.
 - **2026-11-13** — First pass, with ongoing monitoring of approved business cases (ADR-0376, kyb
   side), shipped disabled. New outbound edge to the monitored-subject registry under the service's
   own client, new inbound events from the sanctions screening topic, two new stores
@@ -145,7 +148,7 @@ above.
   requires. The onboarding screen is unchanged.
 - **2026-11-14** — Switch-on blockers (#16028): a monitoring hold keeps party activation pending and
   a confirmed sanctions match prevents it (T6, T8); exit completion is four-eyes and bound to an
-  ended relationship in kyb and in party-service (T8, V15 columns the previous release does not
+  ended relationship in kyb and in party-service (T8, V16 columns the previous release does not
   map); four dedicated reviewer actions on `ROLE_KYC_REVIEWER` (§3);
   `BUSINESS_RELATIONSHIP_EXIT_REQUIRED` is no longer published (T6); withdrawn rows are re-asserted
   and withdrawals are sent while the switch is off (T10).

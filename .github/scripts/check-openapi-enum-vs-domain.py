@@ -93,6 +93,11 @@ MIN_SHARED = 2
 # Spec-vs-domain drift that exists today, each with the issue that owns it.
 # Format: "<service>:<sorted spec values>" -> reason
 BASELINE: dict[str, str] = {
+    # Real spec drift, invisible until the gate read enums with a primary constructor (#16140).
+    "openbank-delegation-service:PAYMENT,SDD_MANDATE,STANDING_ORDER":
+        "#16140 — spec omits ApprovalKind PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE.",
+    "openbank-treasury-service:LONG_FINAL,LONG_INITIAL,NONE,SHORT_FINAL,SHORT_INITIAL":
+        "#16140 — spec advertises NONE, which StubType does not have.",
     # NOT drift — the wire spelling of an ABSENT value (ADR-0344 D4). A stored cash-flow row whose
     # floating rate is not known yet has no rate source: `rateSource` is null in the domain, exactly
     # as libs-finance's own `ProjectedCashFlow.rateSource`, and is published and stored as MISSING
@@ -284,7 +289,12 @@ SPEC_ENUM_INLINE = re.compile(r"enum:\s*\[([^\]]*)\]")
 SPEC_ENUM_BLOCK = re.compile(
     r"enum:[ \t]*\n((?:[ \t]*(?:-[ \t]*\S+|#[^\n]*)[ \t]*\n)+)"
 )
-KOTLIN_ENUM = re.compile(r"enum\s+class\s+(\w+)\s*(?::[^{]*)?\{([^}]*)\}")
+# Only the enum HEADER is matched by regex; what follows the name — an optional primary
+# constructor `(...)`, which may nest parens and carry string literals, then an optional
+# `: Supertype` — is walked by `_enum_bodies`. A regex that allowed only `: Supertype` there
+# skipped every constructor enum (aml `HoldDisposition(val status: AmlCaseStatus)`), and a
+# naive `\([^)]*\)` stops at the first `)` of a nested default argument.
+KOTLIN_ENUM_HEAD = re.compile(r"\benum\s+class\s+(\w+)")
 BLOCK_ITEM = re.compile(r"^[ \t]*-[ \t]*[\"\']?([A-Za-z0-9_]+)[\"\']?[ \t]*$", re.M)
 # A constant is the leading identifier of a member; the rest of a member may be a constructor
 # call (`ACTIVE("active")`) or an override block, and must not be mined for tokens. A member may
@@ -349,13 +359,58 @@ def spec_enums(text: str) -> set[frozenset[str]]:
     return out
 
 
+def _skip_balanced(text: str, i: int) -> int:
+    """`text[i]` is `(`; return the index just past its matching `)`, or -1 if unbalanced.
+    String and char literals are skipped so a `)` inside `")"` does not close the list."""
+    depth = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c in "\"'":
+            i += 1
+            while i < n and text[i] != c:
+                i += 2 if text[i] == "\\" else 1
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return -1
+
+
+def _enum_bodies(text: str) -> list[tuple[str, str]]:
+    """(name, body) of every `enum class` in `text`; body is the text between `{` and `}`."""
+    out: list[tuple[str, str]] = []
+    for m in KOTLIN_ENUM_HEAD.finditer(text):
+        i = m.end()
+        while i < len(text) and text[i].isspace():
+            i += 1
+        if i < len(text) and text[i] == "(":
+            i = _skip_balanced(text, i)
+            if i < 0:
+                continue
+        brace = text.find("{", i)
+        if brace < 0:
+            continue
+        between = text[i:brace].strip()
+        if between and not between.startswith(":"):
+            continue  # not an enum declaration shape we understand; skip rather than guess
+        end = text.find("}", brace)
+        if end < 0:
+            continue
+        out.append((m.group(1), text[brace + 1 : end]))
+    return out
+
+
 def kotlin_enums(root: Path) -> dict[str, frozenset[str]]:
     out: dict[str, frozenset[str]] = {}
     for kt in sorted(root.rglob("*.kt")):
-        for m in KOTLIN_ENUM.finditer(kt.read_text(encoding="utf-8", errors="replace")):
-            vals = _kotlin_values(m.group(2))
+        for name, body in _enum_bodies(kt.read_text(encoding="utf-8", errors="replace")):
+            vals = _kotlin_values(body)
             if len(vals) >= 2:
-                out[m.group(1)] = vals
+                out[name] = vals
     return out
 
 
@@ -519,6 +574,46 @@ def self_test() -> int:
             failures += 1
         else:
             print(f"  ok    {name}")
+
+    # Enum DECLARATIONS, not just bodies. A primary constructor sits between the name and `{`;
+    # a header parser that only allows `: Supertype` there skips the whole enum, and the spec
+    # enum it serves then falls back to a wrong best-overlap pairing — the aml
+    # `HoldDisposition(val status: AmlCaseStatus)` shape, which made #16107 report a false drift.
+    def _decl(text: str) -> dict[str, frozenset[str]]:
+        return {n: _kotlin_values(b) for n, b in _enum_bodies(text)}
+
+    decl_cases: list[tuple[str, dict[str, frozenset[str]], dict[str, frozenset[str]]]] = [
+        ("an enum with a primary constructor is read",
+         _decl("enum class HoldDisposition(val status: AmlCaseStatus) {\n"
+               "    RELEASE(AmlCaseStatus.CLEARED),\n    BLOCK(AmlCaseStatus.CONFIRMED);\n}"),
+         {"HoldDisposition": frozenset({"RELEASE", "BLOCK"})}),
+        ("nested parens in the constructor (a default argument that is a call) are read",
+         _decl('enum class Kind(val code: String = listOf("a", ")").first(), val n: Int = max(1, 2))'
+               ' : Marker {\n    ALPHA("x"),\n    BETA("y");\n}\n'
+               "enum class Next { ONE, TWO }"),
+         {"Kind": frozenset({"ALPHA", "BETA"}), "Next": frozenset({"ONE", "TWO"})}),
+        ("a supertype-only header is still read",
+         _decl("enum class S : Marker { A1, B1 }"), {"S": frozenset({"A1", "B1"})}),
+    ]
+    for name, got, want in decl_cases:
+        if got != want:
+            print(f"  FAIL  {name}: got {got}, want {want}")
+            failures += 1
+        else:
+            print(f"  ok    {name}")
+
+    # ...and a constructor enum, once read, is still compared: a spec that drifts from it
+    # must be reported, not silently paired elsewhere.
+    ctor_domain = _decl(
+        "enum class ScreeningDecision(val terminal: Boolean = check(listOf(1))) {\n"
+        "    CLEAR(true), REVIEW(false), BLOCK(true);\n}"
+    )
+    m = best_match(frozenset({"CLEAR", "BLOCK", "ESCALATE"}), ctor_domain)
+    if m is None or m[0] != "ScreeningDecision" or m[1] == frozenset({"CLEAR", "BLOCK", "ESCALATE"}):
+        print(f"  FAIL  a mismatched spec vs a constructor enum is still reported: {m}")
+        failures += 1
+    else:
+        print("  ok    a mismatched spec vs a constructor enum is still reported")
 
     block = spec_enums("        enum:\n          - OPEN\n          - CLOSED\n")
     if block != {frozenset({"OPEN", "CLOSED"})}:

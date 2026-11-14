@@ -34,6 +34,7 @@ import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistrySearchQuery
+import com.openbank.kyb.domain.model.RepresentationMode
 import com.openbank.kyb.infrastructure.rest.dto.AcceptDisclosuresRequest
 import com.openbank.kyb.infrastructure.rest.dto.AttestRepresentationRequest
 import com.openbank.kyb.infrastructure.rest.dto.AttestationResponse
@@ -59,6 +60,7 @@ import com.openbank.kyb.infrastructure.rest.dto.SignRequest
 import com.openbank.kyb.infrastructure.rest.dto.StartCaseRequest
 import com.openbank.kyb.infrastructure.rest.dto.UboResponse
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.governance.StaffIdentity
 import com.openbank.libs.security.Roles
 import com.openbank.libs.security.StaffIdentities
@@ -67,6 +69,7 @@ import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
@@ -513,6 +516,10 @@ class KybResource {
         requireNotNull(identifier) { "path parameter 'identifier' is required" }
         val signers = requireNotNull(request?.confirmedSigners) { "confirmedSigners is required" }
         val hash = requireNotNull(request.ruleTextHash) { "ruleTextHash is required" }
+        val mode = request.confirmedMode?.let { RepresentationMode.valueOf(it.name) }
+        if (mode != null && !ServiceAccountIdentity.isHumanStaff(identity)) {
+            throw ForbiddenException("confirmed representation mode requires an authenticated staff reviewer")
+        }
         val attested = representation.attest(
             AttestRepresentationCommand(
                 scheme = IdentifierScheme.valueOf(scheme.uppercase()),
@@ -522,6 +529,7 @@ class KybResource {
                 confirmedRoles = request.confirmedRoles.orEmpty(),
                 operator = identity.principal?.name ?: "operator",
                 note = request.note,
+                confirmedMode = mode,
             ),
         )
         return Response.ok(AttestationResponse.from(attested)).build()

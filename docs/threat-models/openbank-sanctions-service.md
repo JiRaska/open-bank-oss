@@ -218,6 +218,37 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
 
 ## 7. Change log
 
+- **2026-11-14** — **Ongoing monitoring switched on in the sandbox deployment
+  (`SANCTIONS_MONITORING_ENABLED=true`).** The surface of section 6b is now live there: the
+  registration operations accept requests instead of answering 503, and the delta and sweep run
+  every 60 seconds. No threat row changes. Measured at the flip: the registry is empty and the
+  only registering caller (kyb-service) still has its own registration switch off, so no subject
+  is monitored and no finding can be raised until that caller is switched on separately; list
+  changes run at roughly 700 to 1,600 changed entries a day, well inside the delta's bound of
+  5 entries per tick (7,200 a day), and the queue trigger writes nothing while the registry is
+  empty (M9). The new `SanctionsMonitoringCronIT` drives the real scheduler rather than calling
+  the runs directly, so a scheduled path that lost its Vert.x context would now fail a test (M6,
+  M10). Rollback: set the variable back to `false`.
+- **2026-11-14** — **FATF jurisdiction statements of 2026-10-30 loaded; a measure that never
+  screens (#15723, ADR-0032 amendment).** V24 loads `FATF_CALL_FOR_ACTION` (KP, IR
+  countermeasures; MM enhanced due diligence; all `HIGH_RISK` → review) and
+  `FATF_INCREASED_MONITORING` (18 countries, new measure `RISK_FACTOR`, which the screen drops
+  before it becomes a match). No existing outcome changes: KP, IR and MM were already `HIGH_RISK`
+  through the EU list. **STRIDE-T / data integrity:** the publisher refuses automated retrieval,
+  so the rows were taken from an official government republication (Japan MOF translations, SHA-256
+  recorded in `source_ref` and the migration header) and cross-checked against FinCEN; the four
+  jurisdictions removed by the plenary (BG, CI, CD, MC) are asserted absent. **Silent false
+  negative (new):** a row mis-labelled `RISK_FACTOR` would screen CLEAR without any error; the
+  measure of every shipped FATF row is pinned by `FatfJurisdictionStatementsIT`, and a grey-only
+  country (KW) is asserted CLEAR while a call-for-action country is asserted `POTENTIAL_HIT` on
+  every profile. **Rollback:** the previous release has no `RISK_FACTOR` and would refuse a screen
+  that selected such a row (`valueOf` throws), so grey-list rows sit under `list_type =
+  COUNTRY_RISK_FACTOR`, which no screen's list set contains; the old read path, copied verbatim
+  into `JurisdictionRollbackSafetyIT`, returns its main-branch result for KP, KE, KW and PT
+  against the migrated data, with no manual step. **Residual:** customer risk scoring
+  does not read the grey-list rows yet, so the grey list informs no automated decision; the next
+  FATF plenary (February 2027) must be loaded by hand before the verification alert fires on
+  2027-04-13.
 - **2026-11-12** — **Ongoing monitoring of registered subjects (ADR-0376), shipped disabled.**
   New store of personal data (`sanctions_monitored_subjects`, `sanctions_monitoring_findings`,
   `sanctions_monitored_subject_names`, V23), two new inbound operations (`PUT`/`DELETE

@@ -18,6 +18,7 @@ import com.openbank.kyb.domain.model.RegistrySearchQuery
 import com.openbank.kyb.domain.model.RegistrySearchResult
 import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.domain.model.RepresentationDecision
+import com.openbank.kyb.domain.model.RepresentationMode
 import com.openbank.libs.governance.StaffIdentity
 import java.time.LocalDate
 import java.util.UUID
@@ -93,6 +94,7 @@ data class AttestRepresentationCommand(
     val confirmedRoles: List<String>,
     val operator: String,
     val note: String? = null,
+    val confirmedMode: RepresentationMode? = null,
 )
 
 interface RepresentationAttestationUseCase {

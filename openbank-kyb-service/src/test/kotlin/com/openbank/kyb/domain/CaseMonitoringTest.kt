@@ -246,7 +246,7 @@ class CaseMonitoringTest {
     private val reviewerC = StaffIdentity("reviewer-c", "staff-c", strongAuth = true)
 
     @Test
-    fun `an exit proposal of the V15 shape is inert - replaceable by anyone, never confirmable`() {
+    fun `an exit proposal of the V16 shape is inert - replaceable by anyone, never confirmable`() {
         val owed = owedOn(CaseStatus.REJECTED)
         for (legacy in listOf(
             ExitProposal(t1, "legacy", evidence),

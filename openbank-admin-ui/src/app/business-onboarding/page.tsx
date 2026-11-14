@@ -17,6 +17,8 @@ const SVC = 'kyb-service'
 
 /** One page of the review queue. Asked for explicitly; the service's own default is 20. */
 const QUEUE_PAGE = 200
+type Queue = 'review' | 'active'
+type ConfirmedMode = 'SOLE' | 'JOINT_N' | 'JOINT_ALL'
 
 // ── Types (mirror kyb openapi Case / RepresentationDecision / Attestation) ──────
 
@@ -59,6 +61,7 @@ interface Attestation {
   parsedSigners: number | null
   confirmedSigners: number
   confirmedRoles: string[]
+  confirmedMode?: ConfirmedMode | null
   attestedBy: string
   attestedAt: string
   supersededAt: string | null
@@ -119,6 +122,7 @@ function AttestationForm({
   const [roles, setRoles] = useState<string>(
     (standing?.confirmedRoles ?? decision.parserSuggestsRoles).join(', '),
   )
+  const [mode, setMode] = useState(standing?.confirmedMode ?? '')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -135,12 +139,20 @@ function AttestationForm({
           setError(t('Počet podpisů musí být celé číslo alespoň 1.', 'The signature count must be a whole number of at least 1.'))
           return
         }
+        if ((mode === 'SOLE' && parsed !== 1) || (mode && mode !== 'SOLE' && parsed < 2)) {
+          setError(t(
+            'Počet podpisů neodpovídá potvrzenému způsobu zastoupení.',
+            'The signature count does not match the confirmed representation mode.',
+          ))
+          return
+        }
         const res = await fetch(svcUrl(SVC, `/api/v1/kyb/representation/${scheme}/${identifier}`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             confirmedSigners: parsed,
             confirmedRoles: roles.split(',').map(r => r.trim()).filter(Boolean),
+            ...(mode ? { confirmedMode: mode } : {}),
             // The hash of the text THIS form rendered. If the register moved since, the service
             // answers 409 rather than recording a confirmation of a rule nobody read.
             ruleTextHash: decision.ruleTextHash,
@@ -173,7 +185,7 @@ function AttestationForm({
     })
     if (wasSkipped(outcome)) return false
     return succeeded
-  }, [flight, scheme, identifier, signers, roles, note, decision.ruleTextHash, onAttested, t])
+  }, [flight, scheme, identifier, signers, roles, mode, note, decision.ruleTextHash, onAttested, t])
 
   return (
     <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
@@ -200,6 +212,21 @@ function AttestationForm({
             spellCheck={false}
             aria-label={t('Funkce, které musí podepsat', 'Offices that must sign')}
           />
+        </label>
+        <label style={{ display: 'grid', gap: 5, fontSize: 12, color: 'var(--text-secondary)' }}>
+          {t('Potvrzený způsob zastoupení', 'Confirmed representation mode')}
+          <select
+            className="input"
+            value={mode}
+            onChange={e => setMode(e.target.value as ConfirmedMode | '')}
+          >
+            <option value="" disabled={standing?.confirmedMode != null}>
+              {t('Vyberte pro ověření pověření', 'Select to verify delegations')}
+            </option>
+            <option value="SOLE">{t('Samostatně', 'One representative')}</option>
+            <option value="JOINT_N">{t('Společně, stanovený počet', 'Jointly, fixed count')}</option>
+            <option value="JOINT_ALL">{t('Společně, všichni zástupci', 'Jointly, all representatives')}</option>
+          </select>
         </label>
       </div>
       <label style={{ display: 'grid', gap: 5, fontSize: 12, color: 'var(--text-secondary)' }}>
@@ -246,7 +273,62 @@ function AttestationForm({
 
 // ── One entity's representation panel ───────────────────────────────────────────
 
-function RepresentationPanel({ scheme, identifier }: { scheme: string; identifier: string }) {
+function PublishStatutoryRule({ caseId, attestationId }: { caseId: string; attestationId: string }) {
+  const { t } = useLanguage()
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null)
+  const flight = useSingleFlight()
+
+  const publish = async () => {
+    await flight.run(`kyb-publish:${caseId}:${attestationId}`, async () => {
+      setBusy(true)
+      setMessage(null)
+      try {
+        const res = await fetch(svcUrl(SVC, `/api/v1/kyb/cases/${caseId}/statutory-representation`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attestationId }),
+          signal: AbortSignal.timeout(8000),
+        })
+        if (res.status === 404) {
+          setMessage({
+            error: true,
+            text: t(
+              'Podepsané podklady nejsou úplné nebo se potvrzení změnilo. Obnovte případ a ověřte stav.',
+              'The signed evidence is incomplete or the confirmation changed. Refresh the case and check its status.',
+            ),
+          })
+          return
+        }
+        if (!res.ok || (await res.json()).attestationId !== attestationId) {
+          setMessage({ error: true, text: t('Zveřejnění se nezdařilo.', 'Publication failed.') })
+          return
+        }
+        setMessage({ error: false, text: t('Pravidlo zastoupení bylo zveřejněno.', 'Representation rule published.') })
+      } catch {
+        setMessage({ error: true, text: t('Zveřejnění se nezdařilo.', 'Publication failed.') })
+      } finally {
+        setBusy(false)
+      }
+    })
+  }
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button type="button" className="btn btn-secondary" onClick={publish} disabled={busy} aria-busy={busy}>
+        {t('Zveřejnit pravidlo pro pověření', 'Publish rule for delegations')}
+      </button>
+      {message && <div role={message.error ? 'alert' : 'status'}>{message.text}</div>}
+    </div>
+  )
+}
+
+function RepresentationPanel({ caseId, active, scheme, identifier }: {
+  caseId: string
+  active: boolean
+  scheme: string
+  identifier: string
+}) {
   const { t, language } = useLanguage()
   const [decision, setDecision] = useState<Decision | null>(null)
   const [history, setHistory] = useState<Attestation[] | null>(null)
@@ -308,6 +390,8 @@ function RepresentationPanel({ scheme, identifier }: { scheme: string; identifie
     return <DataUnavailable kind={unavail} service={SVC} feature={t('způsob zastoupení', 'representation rule')} lang={language} />
   }
   if (!decision) return null
+  const attestation = decision.state === 'ATTESTED' ? decision.attestation : null
+  const publishableMode = attestation?.confirmedMode === 'JOINT_N' || attestation?.confirmedMode === 'JOINT_ALL'
 
   const stateLabel: Record<DecisionState, string> = {
     ATTESTED: t('Potvrzeno člověkem', 'Confirmed by a human'),
@@ -394,6 +478,12 @@ function RepresentationPanel({ scheme, identifier }: { scheme: string; identifie
         />
       </Can>
 
+      {active && attestation && publishableMode && (
+        <Can permission="business-onboarding:publish">
+          <PublishStatutoryRule key={attestation.id} caseId={caseId} attestationId={attestation.id} />
+        </Can>
+      )}
+
       <div style={{ marginTop: 10 }}>
         <button
           type="button"
@@ -438,6 +528,9 @@ export default function BusinessOnboardingPage() {
   const [unavail, setUnavail] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
+  const [queue, setQueue] = useState<Queue>('review')
+  const [page, setPage] = useState(0)
+  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null)
   const loadGeneration = useRef(0)
 
   const load = useCallback(async () => {
@@ -450,7 +543,9 @@ export default function BusinessOnboardingPage() {
       // silently truncated array made the count label below assert "20 cases awaiting review" for
       // a queue of any size, while the search box filtered only that first page.
       const res = await fetch(
-        svcUrl(SVC, '/api/v1/kyb/cases', { page: '0', size: String(QUEUE_PAGE) }),
+        svcUrl(SVC, '/api/v1/kyb/cases', {
+          page: String(page), size: String(QUEUE_PAGE), ...(queue === 'active' ? { status: 'ACTIVE' } : {}),
+        }),
         { signal: AbortSignal.timeout(6000) },
       )
       if (generation !== loadGeneration.current) return
@@ -471,7 +566,27 @@ export default function BusinessOnboardingPage() {
     } finally {
       if (generation === loadGeneration.current) setLoading(false)
     }
-  }, [])
+  }, [page, queue])
+
+  const resetPage = () => {
+    loadGeneration.current += 1
+    setCases([])
+    setUnavail(null)
+    setLoading(true)
+    setSelectedCaseId(null)
+  }
+
+  const selectQueue = (next: Queue) => {
+    if (next === queue) return
+    resetPage()
+    setPage(0)
+    setQueue(next)
+  }
+
+  const selectPage = (next: number) => {
+    resetPage()
+    setPage(next)
+  }
 
   useEffect(() => {
     load()
@@ -489,7 +604,9 @@ export default function BusinessOnboardingPage() {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id))
   }, [cases, language, query])
 
-  const queueLabel = (count: number) => language === 'cs'
+  const queueLabel = (count: number) => queue === 'active'
+    ? t(`Aktivní případy na této stránce (${count})`, `Active cases on this page (${count})`)
+    : language === 'cs'
     ? `${count} ${count === 1 ? 'případ' : count >= 2 && count <= 4 ? 'případy' : 'případů'} ke kontrole`
     : `${count} ${count === 1 ? 'case' : 'cases'} awaiting review`
 
@@ -506,10 +623,22 @@ export default function BusinessOnboardingPage() {
           <RefreshCw size={14} aria-hidden="true" style={{ marginRight: '4px' }} />{t('Obnovit', 'Refresh')}
         </button>}
       />
+      <Can permission="business-onboarding:publish">
+        <div role="group" aria-label={t('Stav firemních případů', 'Business case status')} style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <button type="button" className="btn btn-secondary" aria-pressed={queue === 'review'} onClick={() => selectQueue('review')}>
+            {t('Ke kontrole', 'Awaiting review')}
+          </button>
+          <button type="button" className="btn btn-secondary" aria-pressed={queue === 'active'} onClick={() => selectQueue('active')}>
+            {t('Aktivní případy', 'Active cases')}
+          </button>
+        </div>
+      </Can>
       {loading && cases.length === 0 ? (
         <LoadingState
           label={t('Načítám frontu…', 'Loading the queue…')}
-          description={t('Hledám případy, které čekají na posouzení zastoupení.', 'Looking for cases awaiting a representation review.')}
+          description={queue === 'active'
+            ? t('Hledám aktivní firemní případy.', 'Looking for active business cases.')
+            : t('Hledám případy, které čekají na posouzení zastoupení.', 'Looking for cases awaiting a representation review.')}
         />
       ) : unavail ? (
         <DataUnavailable kind={unavail} service={SVC} feature={t('firemní onboarding', 'business onboarding')} lang={language} />
@@ -517,18 +646,20 @@ export default function BusinessOnboardingPage() {
         <div className="card" style={{ padding: '40px', textAlign: 'center' }}>
           <ShieldAlert size={28} style={{ color: 'var(--success)', marginBottom: '10px' }} />
           <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
-            {t('Žádný případ ke kontrole', 'No case awaiting review')}
+            {queue === 'active'
+              ? t('Žádný aktivní případ', 'No active case')
+              : t('Žádný případ ke kontrole', 'No case awaiting review')}
           </div>
-          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+          {queue === 'review' && <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
             {t('Každá firma ve frontě už má potvrzené zastoupení.', 'Every company in the queue has a confirmed representation.')}
-          </div>
+          </div>}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <section className="card" aria-label={t('Filtr fronty', 'Queue filter')} style={{ padding: 14 }}>
             <div aria-live="polite" style={{ fontSize: 12, marginBottom: 10 }}>
               <strong>{queueLabel(cases.length)}</strong>
-              {cases.length >= QUEUE_PAGE && (
+              {queue === 'review' && cases.length >= QUEUE_PAGE && (
                 <span style={{ color: 'var(--text-secondary)' }}>
                   {' · '}
                   {t(
@@ -571,10 +702,38 @@ export default function BusinessOnboardingPage() {
                   {c.extract.representatives.map(r => `${r.fullName}${r.role ? ` (${r.role})` : ''}`).join(' · ')}
                 </div>
               )}
-              <RepresentationPanel scheme={c.scheme} identifier={c.identifier} />
+              {queue === 'active' && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  aria-expanded={selectedCaseId === c.id}
+                  onClick={() => setSelectedCaseId(id => id === c.id ? null : c.id)}
+                  style={{ marginTop: 10 }}
+                >
+                  {t('Zobrazit zastoupení', 'View representation')}
+                </button>
+              )}
+              {(queue === 'review' || selectedCaseId === c.id) && (
+                <RepresentationPanel
+                  caseId={c.id}
+                  active={c.status === 'ACTIVE'}
+                  scheme={c.scheme}
+                  identifier={c.identifier}
+                />
+              )}
             </div>
           ))}
         </div>
+      )}
+      {queue === 'active' && (page > 0 || cases.length >= QUEUE_PAGE) && (
+        <nav aria-label={t('Stránky aktivních případů', 'Active case pages')} style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <button type="button" className="btn btn-secondary" onClick={() => selectPage(page - 1)} disabled={loading || page === 0}>
+            {t('Předchozí', 'Previous')}
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={() => selectPage(page + 1)} disabled={loading || cases.length < QUEUE_PAGE}>
+            {t('Další', 'Next')}
+          </button>
+        </nav>
       )}
     </div>
   </AuthGuard>

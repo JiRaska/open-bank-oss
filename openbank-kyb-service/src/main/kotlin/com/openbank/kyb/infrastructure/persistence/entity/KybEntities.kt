@@ -46,6 +46,9 @@ class BusinessOnboardingCaseEntity : PanacheEntity() {
     @Column(name = "required_signatures")
     var requiredSignatures: Int? = null
 
+    @Column(name = "representation_attestation_id")
+    var representationAttestationId: UUID? = null
+
     @Column(name = "signers_json", nullable = false, columnDefinition = "TEXT")
     var signersJson: String = "[]"
 
@@ -93,7 +96,7 @@ class BusinessOnboardingCaseEntity : PanacheEntity() {
     @Column(name = "monitoring_exit_evidence", columnDefinition = "TEXT")
     var monitoringExitEvidence: String? = null
 
-    /** A pending (or, once confirmed, the confirmed) exit proposal: by whom, when, on what evidence (V15). */
+    /** A pending (or, once confirmed, the confirmed) exit proposal: by whom, when, on what evidence (V16). */
     @Column(name = "monitoring_exit_proposed_at")
     var monitoringExitProposedAt: Instant? = null
 
@@ -103,7 +106,7 @@ class BusinessOnboardingCaseEntity : PanacheEntity() {
     @Column(name = "monitoring_exit_proposal_evidence", columnDefinition = "TEXT")
     var monitoringExitProposalEvidence: String? = null
 
-    /** V16: the proposer's person (four-eyes compares persons), the proposal's expiry and withdrawal. */
+    /** V17: the proposer's person (four-eyes compares persons), the proposal's expiry and withdrawal. */
     @Column(name = "monitoring_exit_proposer_person_id", length = 64)
     var monitoringExitProposerPersonId: String? = null
 
@@ -185,6 +188,9 @@ class RepresentationAttestationEntity : PanacheEntity() {
 
     @Column(name = "confirmed_signers", nullable = false)
     var confirmedSigners: Int = 0
+
+    @Column(name = "confirmed_mode")
+    var confirmedMode: String? = null
 
     @Column(name = "confirmed_roles", nullable = false, columnDefinition = "TEXT")
     lateinit var confirmedRoles: String

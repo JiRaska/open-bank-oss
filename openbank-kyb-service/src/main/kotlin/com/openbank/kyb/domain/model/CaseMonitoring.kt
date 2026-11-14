@@ -80,7 +80,7 @@ data class ExitProposal(
 ) {
     /**
      * Whether this is a four-eyes proposal under the person rule at all: it names the proposer's
-     * person AND has an expiry. A row without either (the V15 shape) is inert: never open, so a
+     * person AND has an expiry. A row without either (the V16 shape) is inert: never open, so a
      * fresh proposal may replace it, and never confirmable. Nothing is backfilled.
      */
     val isPersonBound: Boolean
