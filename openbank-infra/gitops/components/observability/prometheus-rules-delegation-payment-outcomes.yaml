@@ -34,6 +34,8 @@ spec:
             severity: warning
             team: delegation
           annotations:
+            # Event-driven consumer: records arrive continuously, not on a schedule.
+            subject_period: continuous
             summary: "delegation-service acked domestic payment events it could not classify"
             description: >-
               {{ $value | humanize }} record(s) on openbank.domestic.payment.events in the last 15
@@ -60,6 +62,7 @@ spec:
             severity: warning
             team: delegation
           annotations:
+            subject_period: continuous
             summary: "Domestic payment outcomes contradict delegated spend reservations"
             description: >-
               {{ $value | humanizePercentage }} of settling payment outcomes in the last 30 minutes

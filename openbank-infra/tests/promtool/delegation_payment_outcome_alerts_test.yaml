@@ -20,6 +20,7 @@ tests:
               severity: warning
               team: delegation
             exp_annotations:
+              subject_period: continuous
               summary: "delegation-service acked domestic payment events it could not classify"
               description: "1 record(s) on openbank.domestic.payment.events in the last 15 minutes had an unknown or missing ce-type, or an unreadable outcome body. A spend reservation they were meant to settle stays RESERVED and keeps consuming the grantee's ceiling."
               runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/delegation-alerts.md#delegationpaymentoutcomeunrecognised"
@@ -70,6 +71,7 @@ tests:
               severity: warning
               team: delegation
             exp_annotations:
+              subject_period: continuous
               summary: "Domestic payment outcomes contradict delegated spend reservations"
               description: "20% of settling payment outcomes in the last 30 minutes found their reservation already in the opposite terminal state."
               runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/delegation-alerts.md#delegationpaymentoutcomeconflictrate"
