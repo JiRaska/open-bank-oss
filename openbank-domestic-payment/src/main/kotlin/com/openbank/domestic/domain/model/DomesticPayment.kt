@@ -6,10 +6,50 @@ package com.openbank.domestic.domain.model
 
 import com.openbank.libs.domain.money.Money
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
 enum class DomesticPaymentStatus {
+    RECEIVED,
+
+    /**
+     * Parked by the admission chain before anything irrevocable happened (ADR-0374 D3): a control
+     * wants a human, or could not answer. Left only by the chain's re-evaluation, a case decision or
+     * the hold's expiry, never by the operator status endpoint.
+     */
+    HELD,
+    VALIDATED,
+    SENT_TO_CLEARING,
+    SETTLED,
+    REJECTED,
+    RETURNED,
+    CANCELLED,
+    ;
+
+    /**
+     * The status a customer channel is shown. A held payment reads as RECEIVED, accepted and not yet
+     * processed, which is all the customer may know: that it is held, and by which control, is not
+     * theirs to learn (ADR-0374 D13). Operator reads keep the real status.
+     */
+    val customerFacing: CustomerFacingPaymentStatus
+        get() = when (this) {
+            RECEIVED, HELD -> CustomerFacingPaymentStatus.RECEIVED
+            VALIDATED -> CustomerFacingPaymentStatus.VALIDATED
+            SENT_TO_CLEARING -> CustomerFacingPaymentStatus.SENT_TO_CLEARING
+            SETTLED -> CustomerFacingPaymentStatus.SETTLED
+            REJECTED -> CustomerFacingPaymentStatus.REJECTED
+            RETURNED -> CustomerFacingPaymentStatus.RETURNED
+            CANCELLED -> CustomerFacingPaymentStatus.CANCELLED
+        }
+}
+
+/**
+ * The payment statuses a customer channel can be shown: the vocabulary the customer submission
+ * lookup publishes. Its own type, so a status added to [DomesticPaymentStatus] cannot reach a
+ * customer until someone decides here what the customer sees for it.
+ */
+enum class CustomerFacingPaymentStatus {
     RECEIVED,
     VALIDATED,
     SENT_TO_CLEARING,
@@ -17,6 +57,41 @@ enum class DomesticPaymentStatus {
     REJECTED,
     RETURNED,
     CANCELLED,
+    ;
+
+    /** The same-named rail status, for a response whose field is typed as the rail's. */
+    val asRailStatus: DomesticPaymentStatus get() = DomesticPaymentStatus.valueOf(name)
+}
+
+/**
+ * What a customer channel is told about why a payment was rejected.
+ *
+ * A reason is shown only when it is the customer's to act on. A reason that names a control (a
+ * sanctions hit, a fraud decline, an AML hold, a blocked account, which may itself be an AML
+ * block) is not the customer's to learn (ADR-0374 D13, tipping-off), and reads as [DECLINED],
+ * whatever the admission switch says. Its own type,
+ * with an exhaustive mapping from [DomesticRejectReason], so a reason added there cannot reach a
+ * customer until someone decides here what the customer sees for it.
+ */
+enum class CustomerFacingRejectReason {
+    INVALID_ACCOUNT_NUMBER,
+    INVALID_BANK_CODE,
+    BENEFICIARY_ACCOUNT_CLOSED,
+    INSUFFICIENT_FUNDS,
+    AMOUNT_LIMIT_EXCEEDED,
+    TECHNICAL_ERROR,
+
+    /**
+     * Rejected, and which control refused it is not the customer's to learn: telling a customer that
+     * a payment was stopped for a sanctions hit or a fraud suspicion is tipping-off. A neutral reason
+     * rather than none, so a client never renders an empty one. The detail is withheld with it.
+     */
+    DECLINED,
+    ;
+
+    /** The same-named rail reason, for a response typed as the rail's. */
+    val asRailReason: DomesticRejectReason
+        get() = DomesticRejectReason.valueOf(name)
 }
 
 enum class DomesticPaymentPriority { STANDARD, URGENT, INSTANT }
@@ -32,8 +107,40 @@ enum class DomesticRejectReason {
     AML_HOLD,
     SANCTIONS_HIT,
     FRAUD_SUSPECTED,
+
+    /** The debtor account may not be debited: frozen, closed, dormant or not yet active (ADR-0374 D4). */
+    DEBTOR_ACCOUNT_BLOCKED,
     TECHNICAL_ERROR,
+
+    /**
+     * The neutral reason a customer channel is shown in place of one that names a control
+     * ([CustomerFacingRejectReason.DECLINED]). The rail never rejects a payment with it.
+     */
+    DECLINED,
+    ;
+
+    /** What a customer channel is shown for this reason; see [CustomerFacingRejectReason]. */
+    val customerFacing: CustomerFacingRejectReason
+        get() = when (this) {
+            INVALID_ACCOUNT_NUMBER -> CustomerFacingRejectReason.INVALID_ACCOUNT_NUMBER
+            INVALID_BANK_CODE -> CustomerFacingRejectReason.INVALID_BANK_CODE
+            BENEFICIARY_ACCOUNT_CLOSED -> CustomerFacingRejectReason.BENEFICIARY_ACCOUNT_CLOSED
+            INSUFFICIENT_FUNDS -> CustomerFacingRejectReason.INSUFFICIENT_FUNDS
+            AMOUNT_LIMIT_EXCEEDED -> CustomerFacingRejectReason.AMOUNT_LIMIT_EXCEEDED
+            TECHNICAL_ERROR -> CustomerFacingRejectReason.TECHNICAL_ERROR
+            AML_HOLD, SANCTIONS_HIT, FRAUD_SUSPECTED, DEBTOR_ACCOUNT_BLOCKED, DECLINED ->
+                CustomerFacingRejectReason.DECLINED
+        }
 }
+
+/** What the case of a hold decided. A hold that nobody decides has none and ends by expiry. */
+enum class HoldDecision { RELEASE, REJECT }
+
+/**
+ * A fraud score as the rail remembers it for one payment: what fraud-service answered, never an
+ * adapter's stand-in for an unreachable one. [verdict] is the verdict's name as it was received.
+ */
+data class RecordedFraudScore(val verdict: String, val score: Int, val ruleVersion: String)
 
 data class DomesticPayment(
     val id: UUID,
@@ -95,6 +202,42 @@ data class DomesticPayment(
     val aggregateRevision: Long = 1,
     /** Absent when no authenticated customer scope was captured at submission. */
     val customerSubmissionScope: String? = null,
+    /**
+     * When the admission chain first HELD this payment (ADR-0374 D3), kept after the hold ends. The
+     * hold's expiry and its age are measured from here. Null for a payment that was never held.
+     */
+    val heldAt: Instant? = null,
+    /**
+     * When the case of the hold was requested, in the transaction that wrote the `PAYMENT_HELD`
+     * event. Null while a hold is only being re-evaluated. Once set the hold is its case's to
+     * decide: no automatic re-evaluation releases it, and a repeated admission answers "held for
+     * review" without asking any control again.
+     */
+    val holdCaseRequestedAt: Instant? = null,
+    /**
+     * Which review of this hold is the current one, counted from 1. A hold normally has one. It gets
+     * another when, at release, a control reports something no reviewer has seen.
+     */
+    val holdReview: Int = 1,
+    /**
+     * What the current review's case was shown, and so what its decision covers: one
+     * `STEP:REASON:FINGERPRINT` for every control that answered "review" when the case was
+     * requested, the fingerprint being of that control's evidence. A case decision covers exactly
+     * these and nothing else. Empty for a case requested only because a control could not answer.
+     */
+    val holdCaseReasons: Set<String> = emptySet(),
+    /**
+     * What the hold's case decided, recorded on the row when the decision is accepted and applied
+     * by whichever workflow run reaches it. Null until a decision is accepted. The row is the only
+     * place the decision lives, so a run that dies after the decision loses nothing.
+     */
+    val holdDecision: HoldDecision? = null,
+    /**
+     * The fraud score the admission chain first obtained for this payment, reused by every later
+     * evaluation of it. Fraud-service keeps every score it gives and counts them, so asking again
+     * for the same payment would add to what it holds against the account.
+     */
+    val admissionFraudScore: RecordedFraudScore? = null,
     /** Original business submission digest supplied only when the Edge releases a mode-bound approval. */
     val originalSubmissionKeyDigest: String? = null,
 ) {
@@ -134,7 +277,7 @@ data class DomesticPayment(
                 DomesticPaymentStatus.RETURNED,
                 DomesticPaymentStatus.CANCELLED,
                 -> submittedAt ?: now
-                DomesticPaymentStatus.RECEIVED -> submittedAt
+                DomesticPaymentStatus.RECEIVED, DomesticPaymentStatus.HELD -> submittedAt
             },
             settledAt = when (targetStatus) {
                 DomesticPaymentStatus.SETTLED,
@@ -145,14 +288,36 @@ data class DomesticPayment(
             },
             updatedAt = now,
             aggregateRevision = aggregateRevision + 1,
+            heldAt = if (targetStatus == DomesticPaymentStatus.HELD) now else heldAt,
         )
+    }
+
+    /**
+     * When this hold ends in rejection if nobody releases it, [term] after it began. Null for a
+     * payment that is not HELD. A row held by a build from before `held_at` existed falls back to
+     * its last write, which was the move to HELD.
+     */
+    fun holdExpiresAt(term: Duration): Instant? =
+        if (status == DomesticPaymentStatus.HELD) (heldAt ?: updatedAt).plus(term) else null
+
+    /** The same held payment with its case marked as requested at [at] for [reasons]. */
+    fun withHoldCaseRequested(at: Instant, reasons: Set<String>): DomesticPayment {
+        require(status == DomesticPaymentStatus.HELD) { "Only a HELD payment has a case to request, not $status" }
+        return if (holdCaseRequestedAt != null) this else copy(holdCaseRequestedAt = at, holdCaseReasons = reasons)
     }
 
     fun canTransitionTo(targetStatus: DomesticPaymentStatus): Boolean = when (status) {
         DomesticPaymentStatus.RECEIVED -> targetStatus in setOf(
+            DomesticPaymentStatus.HELD,
             DomesticPaymentStatus.VALIDATED,
             DomesticPaymentStatus.REJECTED,
             DomesticPaymentStatus.CANCELLED,
+        )
+
+        // Nothing has left the bank yet, so a hold ends in exactly two ways: admitted or refused.
+        DomesticPaymentStatus.HELD -> targetStatus in setOf(
+            DomesticPaymentStatus.VALIDATED,
+            DomesticPaymentStatus.REJECTED,
         )
 
         DomesticPaymentStatus.VALIDATED -> targetStatus in setOf(

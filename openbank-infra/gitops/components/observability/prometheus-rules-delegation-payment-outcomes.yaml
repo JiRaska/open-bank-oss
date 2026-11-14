@@ -1,0 +1,70 @@
+# Delegated spend settlement from domestic payment outcomes (ADR-0249 D3 amendment, #16000).
+#
+# delegation-service's DomesticPaymentOutcomeConsumer settles a domestic-payment spend reservation
+# from the payment's OUTCOME. It counts every record it reads in
+# openbank_delegation_payment_outcome_events_total{outcome=...}; every outcome series is registered
+# at 0 when the consumer is constructed.
+#
+# Re-derived at t=0 on a cold pod: every series reads 0, so increase() is 0 and the conflict ratio
+# is 0/0 = NaN, and neither rule can fire from boot. With the switch OFF the channel does not exist,
+# the consumer is never constructed and no series exists at all: also silent, by design (an off
+# consumer is not a failing one).
+#
+# Runbook: docs/runbooks/delegation-alerts.md.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-delegation-payment-outcome-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.delegation.payment-outcomes
+      interval: 1m
+      rules:
+        # A record the consumer could not classify: a ce-type it does not know on the rail's topic,
+        # no ce-type at all, or a status-changed / finalized-absent body it could not read. It was
+        # ACKED (a poison pill fails identically forever), so if it was an outcome, its reservation
+        # is now stranded RESERVED until someone settles it by hand. One is enough to look.
+        - alert: DelegationPaymentOutcomeUnrecognised
+          expr: sum(increase(openbank_delegation_payment_outcome_events_total{outcome="unrecognised"}[15m])) > 0
+          for: 1m
+          labels:
+            severity: warning
+            team: delegation
+          annotations:
+            # Event-driven consumer: records arrive continuously, not on a schedule.
+            subject_period: continuous
+            summary: "delegation-service acked domestic payment events it could not classify"
+            description: >-
+              {{ $value | humanize }} record(s) on openbank.domestic.payment.events in the last 15
+              minutes had an unknown or missing ce-type, or an unreadable outcome body. A spend
+              reservation they were meant to settle stays RESERVED and keeps consuming the
+              grantee's ceiling.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/delegation-alerts.md#delegationpaymentoutcomeunrecognised"
+
+        # An outcome that contradicts the reservation's terminal state (SETTLED for a RELEASED one,
+        # REJECTED/CANCELLED/absent for a CONFIRMED one). A trickle is out-of-order delivery; a
+        # sustained share means a second writer settles reservations against the outcome — before
+        # the edge switch that is the edge still confirming on the rail's 2xx (#16000).
+        - alert: DelegationPaymentOutcomeConflictRate
+          expr: |
+            (
+              sum(rate(openbank_delegation_payment_outcome_events_total{outcome="conflict"}[30m]))
+                /
+              sum(rate(openbank_delegation_payment_outcome_events_total{outcome=~"confirmed|released|returned_released|already_settled|conflict"}[30m]))
+            ) > 0.05
+            and
+            sum(increase(openbank_delegation_payment_outcome_events_total{outcome="conflict"}[30m])) >= 3
+          for: 15m
+          labels:
+            severity: warning
+            team: delegation
+          annotations:
+            subject_period: continuous
+            summary: "Domestic payment outcomes contradict delegated spend reservations"
+            description: >-
+              {{ $value | humanizePercentage }} of settling payment outcomes in the last 30 minutes
+              found their reservation already in the opposite terminal state.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/delegation-alerts.md#delegationpaymentoutcomeconflictrate"
