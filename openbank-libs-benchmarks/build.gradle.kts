@@ -61,10 +61,12 @@ sourceSets.named("jmh") {
 
 jmh {
     jmhVersion = "1.37"
-    // The gate's contract: -f 1 -wi 3 -i 3 -prof gc -rf json, serial GC, fixed heap. Allocation
-    // per op does not need long iterations to converge, so one second each keeps the whole run
-    // to a few minutes.
-    fork = 1
+    // The gate's contract: -f 3 -wi 3 -i 3 -prof gc -rf json, serial GC, fixed heap, default JIT
+    // (escape analysis ON, as in production). Three forks because what C2 scalar-replaces is
+    // decided per fork: the gate compares the LOWEST per-fork mean (check-bench-alloc-baseline.py
+    // fork_floor), so one fork on a high plateau cannot redden unchanged code. Allocation per op
+    // does not need long iterations to converge, so one second each.
+    fork = 3
     warmupIterations = 3
     iterations = 3
     warmup = "1s"
@@ -72,12 +74,7 @@ jmh {
     profilers = listOf("gc")
     resultFormat = "JSON"
     resultsFile = layout.buildDirectory.file("reports/jmh/results.json")
-    // Escape analysis OFF: the gated number is the bytes the CODE allocates, not the bytes C2
-    // happened to scalar-replace in this fork. With it on, unchanged sources measured
-    // LendingBench.aprcTinyAnnual at 592 / 616 / 632 / 656 B/op across CI runs and three
-    // benchmarks had to be exempted as bimodal; with it off, every benchmark's fork-to-fork
-    // spread is under 0.05 %. Wall-clock is report-only, so slowing it costs the gate nothing.
-    jvmArgs = listOf("-XX:+UseSerialGC", "-Xmx512m", "-XX:-DoEscapeAnalysis")
+    jvmArgs = listOf("-XX:+UseSerialGC", "-Xmx512m")
     failOnError = true
 }
 
