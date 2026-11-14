@@ -15,7 +15,6 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
-import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.CancellationException
@@ -59,20 +58,6 @@ interface PartyStatutoryRuleRestClient {
     @GET
     @Path("/{id}/statutory-representation")
     suspend fun latest(@PathParam("id") principalPartyId: UUID): StatutoryRuleResponse
-}
-
-@OidcClientFilter("m2m")
-@RegisterRestClient(configKey = "kyb-service")
-@RegisterProvider(SyntheticTaintClientFilter::class)
-@Path("/api/v1/kyb/cases")
-interface KybStatutoryRuleRestClient {
-    @GET
-    @Path("/{id}/statutory-representation/{attestationId}/current")
-    suspend fun verify(
-        @PathParam("id") caseId: UUID,
-        @PathParam("attestationId") attestationId: UUID,
-        @QueryParam("entityPartyId") entityPartyId: UUID,
-    ): Response
 }
 
 @ApplicationScoped
