@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Alert-noise controls added 2026-11-14 (prometheus-rules-jobs.yaml):
+#
+#  * openbank.tech/failure-is-finding — a scanner that exits non-zero BY DESIGN when it finds
+#    something (keycloak-realm-drift) is carried by its own domain alert, so the generic
+#    CronJobLatestRunFailed / CronJobSuccessStale must stay quiet for it. Before this, one realm
+#    drift raised four alerts at once. The control case proves the generic rules still fire for
+#    an ordinary CronJob with the same failure.
+#
+# time() starts at the epoch in promtool; every case is evaluated past the 180000s budget.
+rule_files:
+  - prometheus-rules-jobs.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "a failure-is-finding scanner is silent in the generic rules; an ordinary cron is not"
+    input_series:
+      # both CronJobs: tier 180000, last success at t=0, latest Job failed
+      - series: 'kube_cronjob_annotations{job="kube-state-metrics",namespace="iam",cronjob="scanner",annotation_openbank_tech_max_success_age_seconds="180000",annotation_openbank_tech_failure_is_finding="true"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_annotations{job="kube-state-metrics",namespace="iam",cronjob="plain",annotation_openbank_tech_max_success_age_seconds="180000"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_status_last_successful_time{job="kube-state-metrics",namespace="iam",cronjob="scanner"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_status_last_successful_time{job="kube-state-metrics",namespace="iam",cronjob="plain"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="iam",cronjob="scanner"}'
+        values: '0x3600'
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="iam",cronjob="plain"}'
+        values: '0x3600'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="iam",job_name="scanner-1",owner_kind="CronJob",owner_name="scanner"}'
+        values: '1x3600'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="iam",job_name="plain-1",owner_kind="CronJob",owner_name="plain"}'
+        values: '1x3600'
+      - series: 'kube_job_created{job="kube-state-metrics",namespace="iam",job_name="scanner-1"}'
+        values: '100x3600'
+      - series: 'kube_job_created{job="kube-state-metrics",namespace="iam",job_name="plain-1"}'
+        values: '100x3600'
+      - series: 'kube_job_status_failed{job="kube-state-metrics",namespace="iam",job_name="scanner-1"}'
+        values: '1x3600'
+      - series: 'kube_job_status_failed{job="kube-state-metrics",namespace="iam",job_name="plain-1"}'
+        values: '1x3600'
+    alert_rule_test:
+      - eval_time: 55h
+        alertname: CronJobLatestRunFailed
+        exp_alerts:
+          - exp_labels:
+              namespace: iam
+              job_name: plain-1
+              owner_name: plain
+              job: kube-state-metrics
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: "CronJob iam/plain: latest run failed"
+              description: "The most recent Job of this CronJob (plain-1) failed and no newer run exists yet. Resolves on the next successful run. Read the pod: kubectl -n iam logs job/plain-1 --all-containers"
+      - eval_time: 55h
+        alertname: CronJobSuccessStale
+        exp_alerts:
+          - exp_labels:
+              namespace: iam
+              cronjob: plain
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: "CronJob iam/plain has not succeeded for 2d 6h 59m 59s"
+              description: "Its declared budget (annotation openbank.tech/max-success-age-seconds) is exceeded. The latest run may have failed, hung, been skipped or never been scheduled. A CronJob with spec.suspend=true is exempt, so this one is not suspended. If it is a control (a drift scanner, verifier or probe), nothing it guards has been checked for that long. Start with kubectl -n iam get cronjob plain -o wide and kubectl -n iam get jobs --sort-by=.status.startTime"
+

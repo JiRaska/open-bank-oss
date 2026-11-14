@@ -79,17 +79,26 @@ spec:
 
         # A detector that quietly stops running is indistinguishable from a clean realm.
         - alert: KeycloakRealmDriftScanStale
-          # 26h: the schedule is daily (03:40 UTC); allow one missed run plus slack.
+          # Means "the scan has not RUN", which is the one state KeycloakRealmDrift above cannot
+          # see (it compares last schedule to last success, so a CronJob that never schedules
+          # keeps both stale and the comparison false). It used to read last SUCCESS, and the
+          # scan exits non-zero by design whenever it finds drift -- so every drift episode
+          # fired this as well, and the generic CronJobLatestRunFailed and CronJobSuccessStale
+          # on top: four alerts for one fact (measured 2026-11-14, all four firing together).
+          # The CronJob now carries openbank.tech/failure-is-finding, which removes it from the
+          # two generic rules, and this one asks only whether a run was scheduled at all.
           expr: >-
-            time() - kube_cronjob_status_last_successful_time{namespace="iam",
+            time() - kube_cronjob_status_last_schedule_time{namespace="iam",
             cronjob="keycloak-realm-drift"} > 93600
           for: 30m
           labels:
             severity: warning
             component: iam
           annotations:
-            summary: "keycloak-realm-drift has not completed successfully in >26h"
+            summary: "keycloak-realm-drift has not been scheduled in >26h"
             description: >-
-              The realm parity scan has not had a successful run in over 26 hours. Treat the
-              realm's conformance to its template as UNKNOWN, not healthy — an absent signal
-              reads exactly like a clean one.
+              The realm parity scan has not even started in over 26 hours (CronJob suspended,
+              deleted, or the controller is not scheduling). Treat the realm's conformance to its
+              template as UNKNOWN, not healthy — an absent signal reads exactly like a clean one.
+              A scan that runs and FAILS is KeycloakRealmDrift, whose report ConfigMap says
+              whether it found drift or could not capture the realm (`captureFailed`).

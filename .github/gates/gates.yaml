@@ -1516,6 +1516,31 @@ gates:
     run: |
       python3 .github/scripts/check-alert-window-vs-subject-period.py --enforce
 
+  # Alert-rule hygiene ratchet (2026-11-14). The week's top flappers were the rules whose noise
+  # cannot be judged by reading them -- statistical bands and linear projections -- and none
+  # had been replayed against history before it shipped. New alerts need `for:` >= 1m (or a
+  # stated for_zero_reason), a runbook_url, and, for a stddev/predict_linear rule, a
+  # `backtest:` annotation from openbank-infra/scripts/alert-backtest.py. Existing gaps are
+  # baselined both ways, so the list only shrinks. ENFORCED.
+  - id: alert-rule-hygiene
+    name: "new alert rules carry for:, runbook and (statistical) a backtest (enforced)"
+    group: gitops
+    budget_seconds: 20
+    mode: enforced
+    rationale: >-
+      TrafficDropAnomaly, SpanLatencyTrendAnomaly and NodeDiskWillFillIn4h fired 16, 18 and 66
+      separate times in seven days with no outage, while a critical sat unacted for 70h amid
+      the noise. A 3-sigma band on near-flat synthetic traffic is narrower than sampling
+      jitter, which no reviewer can see in the YAML; only a replay against recorded history
+      can, so the rule must say it was replayed.
+    review_after: "2027-02-14"
+    min_subjects: 250   # 306 alert rules in gitops PrometheusRules on 2026-11-14
+    selftest_inputs: [".github/scripts/check-alert-rule-hygiene.py"]
+    selftest: |
+      python3 .github/scripts/check-alert-rule-hygiene.py --self-test
+    run: |
+      python3 .github/scripts/check-alert-rule-hygiene.py --enforce
+
   # A route prefix moves Alertmanager's WHOLE HTTP surface, /api/v2/alerts included, so a
   # hand-configured client pointed at the bare service URL posts every notification into a 404
   # and drops it. ENFORCED.

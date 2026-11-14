@@ -1,0 +1,55 @@
+# Alert-noise meta-alert (2026-11-14). Its own PrometheusRule so its 7-day subquery is not
+# evaluated alongside the job rules in promtool (tests/promtool/alert_noise_flapping_test.yaml).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-alert-noise
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    # Flap budget (2026-11-14). AlertFiringTooLong catches an alert nobody resolves; this
+    # catches the opposite wallpaper — an alert that fires and clears over and over, so each
+    # page looks new and none is acted on. It counts FIRING ONSETS (a firing sample with no
+    # firing sample a minute earlier), which is what reaches Alertmanager. Not
+    # changes(ALERTS_FOR_STATE): that value is the activeAt timestamp, so every pending
+    # flicker counts — 11,754 "changes" for TrafficDropAnomaly over the same 7d in which it
+    # fired 16 times. Measured at introduction: 19 alertnames over budget. The weekly
+    # alert-noise-weekly.yml workflow turns the firing set into one tracking issue.
+    # Own group at 10m: the [7d:1m] subquery is ~1.6s, and nothing else reads its output.
+    - name: openbank.platform.alert-noise
+      interval: 10m
+      rules:
+        - alert: AlertRuleFlapping
+          expr: |
+            sum by (alert_name, alert_severity) (
+              label_replace(
+                label_replace(
+                  count_over_time(
+                    (
+                      ALERTS{alertstate="firing", alertname!~"Watchdog|InfoInhibitor|AlertRuleFlapping"}
+                        unless
+                      ALERTS{alertstate="firing"} offset 1m
+                    )[7d:1m]
+                  ),
+                  "alert_name", "$1", "alertname", "(.*)"
+                ),
+                "alert_severity", "$1", "severity", "(.*)"
+              )
+            ) > 14
+          keep_firing_for: 1h
+          labels:
+            severity: info
+            team: platform
+          annotations:
+            summary: "{{ $labels.alert_name }} ({{ $labels.alert_severity }}) fired {{ $value }} separate times in 7 days"
+            description: >-
+              More than two firing onsets a day on average. Each one reaches Alertmanager as a
+              new notification, so a flapping rule trains on-call to ignore it and buries the
+              real ones. Backtest a fix before changing the rule
+              (openbank-infra/scripts/alert-backtest.py --calibrate), then retune (magnitude
+              floor, longer for:, keep_firing_for over scrape gaps), demote to a recording rule
+              plus dashboard, or fix the subject.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-infra/scripts/alert-backtest.py"
+            for_zero_reason: "the expression is already a 7-day count; a for: would only delay a weekly-scale signal"
