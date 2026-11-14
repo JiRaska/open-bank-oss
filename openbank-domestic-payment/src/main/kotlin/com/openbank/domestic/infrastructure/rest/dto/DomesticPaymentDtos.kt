@@ -74,6 +74,59 @@ data class CreateDomesticPaymentRequest(
     )
 }
 
+/**
+ * #16000 part 3 — a payment the verified customer-edge creates for a delegate, bound to the spend
+ * reservation delegation-service already holds for it.
+ *
+ * [reservationId] selects the projection row; [delegationId] and [actingPartyId] are what the edge
+ * believes and are CHECKED against that row, never trusted in place of it. The debtor account,
+ * amount and currency are checked against the reservation too (amount and currency in the
+ * repository, under the binding row lock). There is no `customerSubmissionScope`: the delegate's
+ * replay binding is the reservation itself.
+ */
+data class CreateDelegatedDomesticPaymentRequest(
+    val reservationId: UUID?,
+    val delegationId: UUID?,
+    val actingPartyId: UUID?,
+    val debtorAccountId: UUID?,
+    val debtorAccountNumber: String?,
+    val debtorBankCode: String?,
+    val debtorName: String?,
+    val creditorAccountNumber: String?,
+    val creditorBankCode: String?,
+    val creditorName: String?,
+    val amount: BigDecimal?,
+    val currency: String?,
+    val variableSymbol: String? = null,
+    val specificSymbol: String? = null,
+    val constantSymbol: String? = null,
+    val messageForPayee: String? = null,
+    val priority: String? = null,
+    val statementLabel: String? = null,
+    val endToEndId: String? = null,
+) {
+    fun toCommand(idempotencyKey: String, synthetic: Boolean): CreateDomesticPaymentCommand =
+        CreateDomesticPaymentCommand(
+            idempotencyKey = idempotencyKey,
+            debtorAccountId = requireNotNull(debtorAccountId) { "debtorAccountId is required" },
+            debtorAccountNumber = requireNotNull(debtorAccountNumber) { "debtorAccountNumber is required" },
+            debtorBankCode = requireNotNull(debtorBankCode) { "debtorBankCode is required" },
+            debtorName = requireNotNull(debtorName) { "debtorName is required" },
+            creditorAccountNumber = requireNotNull(creditorAccountNumber) { "creditorAccountNumber is required" },
+            creditorBankCode = requireNotNull(creditorBankCode) { "creditorBankCode is required" },
+            creditorName = requireNotNull(creditorName) { "creditorName is required" },
+            amount = inboundAmount(amount, currency),
+            variableSymbol = variableSymbol,
+            specificSymbol = specificSymbol,
+            constantSymbol = constantSymbol,
+            messageForPayee = messageForPayee,
+            priority = DomesticPaymentPriority.valueOf(priority ?: DomesticPaymentPriority.STANDARD.name),
+            statementLabel = statementLabel,
+            endToEndId = endToEndId,
+            synthetic = synthetic,
+        )
+}
+
 /** A domestic payment moves a strictly positive amount; Money itself admits zero and negatives. */
 internal fun inboundAmount(amount: BigDecimal?, currency: String?): Money {
     val parsed = Money.parseInbound(amount, currency)

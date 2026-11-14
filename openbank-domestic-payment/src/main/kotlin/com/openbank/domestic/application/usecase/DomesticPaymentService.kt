@@ -8,6 +8,7 @@ import com.openbank.domestic.application.port.`in`.CreateDomesticPaymentCommand
 import com.openbank.domestic.application.port.`in`.CreateDomesticPaymentResult
 import com.openbank.domestic.application.port.`in`.DelegatedDomesticPaymentResult
 import com.openbank.domestic.application.port.`in`.DelegatedDomesticPaymentUseCase
+import com.openbank.domestic.application.port.`in`.DelegatedPaymentClaim
 import com.openbank.domestic.application.port.`in`.DomesticPaymentUseCase
 import com.openbank.domestic.application.port.`in`.ListDomesticPaymentsQuery
 import com.openbank.domestic.application.port.`in`.TransitionDomesticPaymentStatusCommand
@@ -179,6 +180,7 @@ class DomesticPaymentService(
     override suspend fun createDelegatedPayment(
         reservationId: UUID,
         command: CreateDomesticPaymentCommand,
+        claim: DelegatedPaymentClaim?,
     ): DelegatedDomesticPaymentResult {
         require(command.originalSubmissionKeyDigest == null) {
             "Original submission digest is supported only for customer-edge approval releases"
@@ -191,6 +193,14 @@ class DomesticPaymentService(
         }
 
         val snapshot = binding.snapshot
+        if (claim != null && claim.delegationId != snapshot.delegationId) {
+            return DelegatedDomesticPaymentResult.ReservationMismatch("delegationId does not match the reservation")
+        }
+        if (claim != null && claim.actingPartyId != snapshot.granteePartyId) {
+            return DelegatedDomesticPaymentResult.ReservationMismatch(
+                "acting party is not the reservation grantee",
+            )
+        }
         val normalizedCommand = DomesticPaymentRequestFingerprint.normalize(command)
         val debtorIban = CzechDomesticIban.fromAccountNumber(
             accountNumber = normalizedCommand.debtorAccountNumber,

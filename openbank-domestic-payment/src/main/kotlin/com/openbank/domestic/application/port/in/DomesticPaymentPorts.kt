@@ -94,7 +94,8 @@ interface DomesticPaymentUseCase {
  *
  * It is deliberately a separate port from [DomesticPaymentUseCase]: the existing public owner
  * endpoint cannot accidentally opt into delegated identity/context merely by populating fields on
- * [CreateDomesticPaymentCommand]. No REST adapter is wired to this port in the expand-first stage.
+ * [CreateDomesticPaymentCommand]. Its only REST adapter is `POST /api/v1/domestic-payments/delegated`,
+ * reachable by the verified customer-edge identity alone (#16000 part 3).
  */
 interface DelegatedDomesticPaymentUseCase {
     /**
@@ -105,8 +106,19 @@ interface DelegatedDomesticPaymentUseCase {
     suspend fun createDelegatedPayment(
         reservationId: UUID,
         command: CreateDomesticPaymentCommand,
+        claim: DelegatedPaymentClaim? = null,
     ): DelegatedDomesticPaymentResult
 }
+
+/**
+ * What the verified customer-edge caller asserts about a delegated payment (#16000 part 3).
+ *
+ * Never a source of truth: the projection is. It exists so that an edge which believes it is
+ * acting for a different delegation or a different customer than the reservation records is
+ * REFUSED, rather than having its belief silently replaced by the projection's tuple — a payment
+ * the caller did not mean is worse than no payment.
+ */
+data class DelegatedPaymentClaim(val delegationId: UUID, val actingPartyId: UUID)
 
 sealed interface DelegatedDomesticPaymentResult {
     data class Accepted(val result: CreateDomesticPaymentResult) : DelegatedDomesticPaymentResult
