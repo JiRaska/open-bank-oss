@@ -1,0 +1,4 @@
+{
+  "_comment": "ADR-0370 U7: known version skew (mock valid against main, not against the latest release tag). May only shrink; it empties as releases catch up. Regenerate with --record.",
+  "skew": []
+}
