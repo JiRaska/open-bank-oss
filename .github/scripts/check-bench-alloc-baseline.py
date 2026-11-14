@@ -79,17 +79,12 @@ ABS_TOLERANCE_BYTES = 16.0
 # measured FACTS, not of scope: an entry naming no @Benchmark is a finding, and one that ALSO
 # has a baseline entry is a finding, so it can only shrink by being noticed. Re-measure with
 # `-f 5` before adding to it; a sharp before/after difference is NOT bimodality.
-UNSTABLE: dict[str, str] = {
-    "com.openbank.libs.benchmarks.OutboxDispatchBench.concurrentReadyBatch":
-        "2026-11-09: five unchanged-source forks (SerialGC, 512 MiB, 3+3x1s) measured 11088 / 11088 / 11064 / 12664 / 12688 B/op; two allocation plateaus on the ready path. Runs and is reported, not compared.",
-    "com.openbank.libs.benchmarks.MoneyBench.allocate":
-        "2026-09-30: 1592 / 1680 / 1680 / 1680 B/op over four -f 1 runs, then 1680 / 1560 / 1680 with "
-        "a 5-iteration warmup (7.7 % spread, no code change) — C2 escape analysis on the BigInteger "
-        "largest-remainder loop settles differently per fork",
-    "com.openbank.libs.benchmarks.MoneyBench.split":
-        "2026-09-30: 1536 / 2056 / 1536 / 1536 B/op over four -f 1 runs (33.9 % spread, no code change); "
-        "same path as allocate (split delegates to it)",
-}
+# Empty since 2026-11-14: the harness runs with -XX:-DoEscapeAnalysis (build.gradle.kts), which
+# removed the per-fork C2 plateaus that put MoneyBench.allocate/split and
+# OutboxDispatchBench.concurrentReadyBatch here (and made LendingBench.aprcTinyAnnual read
+# 592..656 B/op on unchanged code). Three -f runs then spread under 0.05 % on every benchmark.
+# Re-measure with escape analysis still off before adding an entry back.
+UNSTABLE: dict[str, str] = {}
 
 PACKAGE_RE = re.compile(r"^\s*package\s+([A-Za-z0-9_.]+)", re.M)
 CLASS_RE = re.compile(r"^(?:open\s+|abstract\s+)*class\s+([A-Za-z0-9_]+)", re.M)

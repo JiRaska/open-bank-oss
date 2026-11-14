@@ -72,7 +72,12 @@ jmh {
     profilers = listOf("gc")
     resultFormat = "JSON"
     resultsFile = layout.buildDirectory.file("reports/jmh/results.json")
-    jvmArgs = listOf("-XX:+UseSerialGC", "-Xmx512m")
+    // Escape analysis OFF: the gated number is the bytes the CODE allocates, not the bytes C2
+    // happened to scalar-replace in this fork. With it on, unchanged sources measured
+    // LendingBench.aprcTinyAnnual at 592 / 616 / 632 / 656 B/op across CI runs and three
+    // benchmarks had to be exempted as bimodal; with it off, every benchmark's fork-to-fork
+    // spread is under 0.05 %. Wall-clock is report-only, so slowing it costs the gate nothing.
+    jvmArgs = listOf("-XX:+UseSerialGC", "-Xmx512m", "-XX:-DoEscapeAnalysis")
     failOnError = true
 }
 
