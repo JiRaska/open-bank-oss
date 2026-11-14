@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.15.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.14.1...admin-ui-v4.15.0) (2026-11-14)
+
+
+### Features
+
+* **admin-ui:** show statutory-return catalogues and operate their lifecycle ([#16154](https://github.com/JiRaska/open-bank-oss/issues/16154)) ([90412dc](https://github.com/JiRaska/open-bank-oss/commit/90412dc9f6b5b80268ba5feaa71a7a13b0b858c4))
+
 ## [4.14.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.14.0...admin-ui-v4.14.1) (2026-11-14)
 
 
