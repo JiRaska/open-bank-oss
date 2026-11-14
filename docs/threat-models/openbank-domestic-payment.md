@@ -1045,3 +1045,53 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## 2026-11-13 — The delegated debit re-asks its authority at create time (ADR-0375 D1)
+
+`createDelegatedPayment` now reads account-service's
+`GET /api/v1/accounts/{accountId}/delegation/authority-facts` (existing action `account.read`,
+existing `openbank-services` bearer, no new identity and no new OPA action) and decides with the
+pure kernel `DelegatedDebitAuthority`. The capability asked for is `ACCOUNT_INITIATE_PAYMENT`,
+supplied as an argument.
+
+**Boundary change, and the hole it closes.** Authority for a delegated debit was established once,
+at reserve time, by `SpendReservationService.evaluateLockedGrant` under a row lock. Nothing
+re-established it afterwards: `DelegationService.revoke` emits `DelegationRevoked` and releases no
+reservation (there is no revoke-to-release wiring anywhere in the fleet), and `SpendReservation`
+carries no TTL, so a `RESERVED` row persists until confirmed or released. The reserve-to-create
+window was therefore **unbounded**, and a grant revoked inside it left a reservation that still
+bought the payment.
+
+- **Elevation of privilege:** a delegate whose grant has been revoked, suspended, expired,
+  renounced, or narrowed to exclude the payment capability is now refused at create time, before
+  any payment row or outbox message is written. Previously the only thing standing between a
+  withdrawn grant and a live debit was whether anyone had released the reservation, which nothing
+  does automatically.
+- **Spoofing:** both lookup arguments come from the durable reservation snapshot, not the request,
+  so a caller cannot select the account whose grants are consulted or the party they are consulted
+  for. A test pins this with a command that deliberately names a different account and actor.
+- **Denial of service:** the new call is on the delegated create path only (owner-funded payments
+  do not touch it, and the shared helper decides the OWNER case before it looks at the lookup at
+  all). An unreachable account-service yields `AccountAuthorityUnavailable` — the existing retryable
+  503 semantic — never a refusal. This asymmetry is the control: refusing on an outage would be
+  indistinguishable to the customer, to support and in the audit trail from a revoked mandate, and
+  `DelegationAuthorityClient` is written so that no transport failure, HTTP status (404 included) or
+  malformed grant can become an empty list.
+- **Repudiation:** the refusal carries the reason code from the kernel
+  (`AUTHORITY_NO_GRANT`), and an allowed delegated debit's evidence names the grant
+  (`grant_id`, `grantor_party_id`) that permitted it — a grant is revocable, so nothing after the
+  fact can reconstruct which one was live when the money moved.
+- **Information disclosure:** no new data crosses the boundary beyond grant and party UUIDs the
+  rail already handles; nothing new is persisted or logged. The facts endpoint answers only about
+  the (account, party) pair the rail already holds.
+- **Tampering:** none. The read is advisory-free — it can only refuse or hold, never widen.
+
+**Residual risk.** The check is a point-in-time read before the write; a revocation landing between
+the read and the commit is not caught, which is the same bound the existing ownership proof carries.
+It is also the delegated path only — the owner-funded path is unaffected by design.
+
+Tests: `DelegatedDomesticPaymentServiceTest` — revoked grant refused, capability narrowed refused,
+read capabilities not accepted for a debit, unavailable holds rather than refuses, and the lookup
+arguments taken from the snapshot and not the command. Falsified: removing the step fails all five;
+making unavailable read as a refusal fails exactly the one written for it.
+Rollback: revert the commit; no migration, no config, no new identity.
