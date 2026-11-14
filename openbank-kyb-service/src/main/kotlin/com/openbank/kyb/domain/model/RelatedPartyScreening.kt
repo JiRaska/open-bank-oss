@@ -6,6 +6,7 @@ package com.openbank.kyb.domain.model
 
 import java.security.MessageDigest
 import java.time.Instant
+import java.time.LocalDate
 
 /** Why a subject is on the case. A person who is both keeps the first role found; see [CaseScreening.subjectsOf]. */
 enum class ScreeningSubjectKind {
@@ -233,6 +234,52 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
             return all.filter { it.name.isNotBlank() }.distinctBy { it.key }
         }
 
+        /**
+         * What the register says about each subject besides its name, keyed like [subjectsOf].
+         *
+         * Sent with the screen so a name match can be confirmed or ruled out on date of birth and
+         * nationality, and so an entity registered in a listed jurisdiction is caught without a
+         * name match at all. Deliberately NOT stored on [ScreeningSubject]: it is re-derived from
+         * the extract on every screen, so a persisted screening never disagrees with the register.
+         * A person listed twice (director and owner) gets whichever fact either listing carries.
+         */
+        fun identitiesOf(extract: RegistryExtract, owners: List<BeneficialOwner>): Map<String, SubjectIdentity> {
+            val found = mutableMapOf<String, SubjectIdentity>()
+            fun put(name: String, organisation: Boolean, identity: SubjectIdentity) {
+                if (name.isBlank()) return
+                val key = keyOf(name, organisation)
+                found[key] = found[key]?.orElse(identity) ?: identity
+            }
+            put(
+                extract.legalName,
+                !extract.isSoleTrader,
+                SubjectIdentity(country = extract.identifier.country ?: extract.registeredAddress?.countryCode),
+            )
+            extract.representatives.forEach {
+                put(
+                    it.fullName,
+                    false,
+                    SubjectIdentity(country = it.address?.countryCode, dateOfBirth = it.dateOfBirth),
+                )
+            }
+            owners.forEach {
+                put(
+                    it.fullName,
+                    it.corporate,
+                    if (it.corporate) {
+                        SubjectIdentity(country = it.countryRegistered)
+                    } else {
+                        SubjectIdentity(
+                            country = it.countryOfResidence,
+                            dateOfBirth = it.dateOfBirth,
+                            nationality = it.nationality,
+                        )
+                    },
+                )
+            }
+            return found
+        }
+
         private fun subject(kind: ScreeningSubjectKind, name: String, organisation: Boolean) = ScreeningSubject(
             key = keyOf(name, organisation),
             kind = kind,
@@ -252,4 +299,21 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
             return digest.joinToString("") { "%02x".format(it) }.take(KEY_HEX_CHARS)
         }
     }
+}
+
+/** Facts about a screened subject besides its name; every field is optional because registers differ. */
+data class SubjectIdentity(
+    /** ISO 3166-1 alpha-2: registration country of an entity, residence of a person. */
+    val country: String? = null,
+    val dateOfBirth: LocalDate? = null,
+    val nationality: String? = null,
+    val aliases: List<String> = emptyList(),
+) {
+    /** This identity, with gaps filled from [other]. */
+    fun orElse(other: SubjectIdentity) = SubjectIdentity(
+        country = country ?: other.country,
+        dateOfBirth = dateOfBirth ?: other.dateOfBirth,
+        nationality = nationality ?: other.nationality,
+        aliases = (aliases + other.aliases).distinct(),
+    )
 }

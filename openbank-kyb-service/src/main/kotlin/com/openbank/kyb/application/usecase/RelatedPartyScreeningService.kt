@@ -14,6 +14,7 @@ import com.openbank.kyb.domain.model.CaseScreening
 import com.openbank.kyb.domain.model.ScreeningSubject
 import com.openbank.kyb.domain.model.ScreeningSubjectKind
 import com.openbank.kyb.domain.model.ScreeningVerdict
+import com.openbank.kyb.domain.model.SubjectIdentity
 import com.openbank.kyb.domain.model.UboFinding
 import io.quarkus.runtime.Startup
 import jakarta.annotation.PostConstruct
@@ -97,6 +98,7 @@ class RelatedPartyScreeningService {
             finding.reportableOwners,
             case.declarations?.peps.orEmpty().map { it.name },
         )
+        val identities = CaseScreening.identitiesOf(extract, finding.reportableOwners)
         val now = Instant.now(clock)
         val current = (case.screening ?: CaseScreening(emptyList())).rebuilt(fresh, finding.source)
         val next = current.copy(
@@ -104,7 +106,7 @@ class RelatedPartyScreeningService {
                 if (!subject.current || subject.sanctions != ScreeningVerdict.PENDING) {
                     subject
                 } else {
-                    screenOne(case, subject, now)
+                    screenOne(case, subject, identities[subject.key] ?: SubjectIdentity(), now)
                 }
             },
         )
@@ -114,6 +116,7 @@ class RelatedPartyScreeningService {
     private suspend fun screenOne(
         case: BusinessOnboardingCase,
         subject: ScreeningSubject,
+        identity: SubjectIdentity,
         now: Instant,
     ): ScreeningSubject = try {
         val result = port.screen(
@@ -122,6 +125,7 @@ class RelatedPartyScreeningService {
                 subjectId = subjectId(case, subject),
                 organisation = subject.organisation,
                 idempotencyKey = "kyb-screen:${case.id}:${subject.key}",
+                identity = identity,
             ),
         )
         metrics.relatedPartyScreened(outcome(result.sanctions, result.pep))
