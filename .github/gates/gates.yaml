@@ -3399,9 +3399,7 @@ gates:
       the only reader of that lane for ~60 workflows; its state machine (open/refresh/reopen/
       escalate/close, never close on an unreadable tick) must stay falsified.
     min_subjects: 10
-    selftest: |
-      python3 .github/scripts/standing-red-sentinel.py --self-test
-    selftest_expect: pass
+    selftest_exempt: "is-a-test-suite - the run: IS the sentinel's --self-test; three sabotages (streak, open, cancelled filter) each make it fail"
     run: |
       python3 .github/scripts/standing-red-sentinel.py --self-test
 

@@ -97,7 +97,7 @@ labels:
     description: "main-red watch (#4019): one open issue per watched workflow, closed when main goes green."
   - name: standing-red
     color: "b60205"
-    description: "Standing-red sentinel: one open issue per scheduled workflow red on its last runs; closed when green."
+    description: "Standing-red sentinel: one issue per scheduled workflow that stays red; closed when green."
   - name: standing-red-escalated
     color: "b60205"
     description: "Standing-red sentinel: the workflow stayed red 72h+ with its issue open."
