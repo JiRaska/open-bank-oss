@@ -6,10 +6,10 @@
 --   hold_proposal_withdrawn_by   account that withdrew it (always the proposer's person)
 --   hold_proposal_withdrawn_at   when
 -- Nullable, no default: metadata-only on Postgres. NO BACKFILL: inventing a person id or an expiry
--- would fabricate who proposed. A row of the V17 shape (no person id or no expiry) is inert under
+-- would fabricate who proposed. A row of the V18 shape (no person id or no expiry) is inert under
 -- the new rule (HoldDecisionProposal.isPersonBound): never open, so any compliance person may make
 -- a fresh proposal over it, and never confirmable. The held-payment intake has been off in every
--- environment, so V17 has never carried a real proposal; this is a guarantee, not a migration step.
+-- environment, so V18 has never carried a real proposal; this is a guarantee, not a migration step.
 --
 -- Rollback: roll the code back first, then
 --   ALTER TABLE aml_cases DROP COLUMN hold_proposal_withdrawn_at;

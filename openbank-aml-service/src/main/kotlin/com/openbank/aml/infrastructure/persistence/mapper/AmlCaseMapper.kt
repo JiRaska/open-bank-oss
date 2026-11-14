@@ -35,6 +35,7 @@ fun AmlCase.toEntity() = AmlCaseEntity().also {
     it.updatedAt = updatedAt
     it.requestHash = requestHash
     it.origin = origin?.name
+    it.movementService = movementService
     it.writeHoldProposal(holdProposal)
 }
 
@@ -92,4 +93,5 @@ fun AmlCaseEntity.toDomain() = AmlCase(
     // A name this build does not know (written by a newer pod) reads as unknown, never as a system origin.
     origin = origin?.let { name -> CaseOrigin.entries.firstOrNull { it.name == name } },
     holdProposal = readHoldProposal(),
+    movementService = movementService,
 )

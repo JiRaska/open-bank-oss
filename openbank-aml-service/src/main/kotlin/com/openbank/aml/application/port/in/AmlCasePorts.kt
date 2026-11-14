@@ -33,6 +33,11 @@ data class CreateAmlCaseCommand(
      * the Redis record is gone. `null` for callers with no HTTP request (onboarding screening).
      */
     val requestHash: String? = null,
+    /**
+     * The service whose authenticated machine identity opened the case, so a reader knows which
+     * service [transactionId] belongs to. `null` for a staff-created case and every non-HTTP opener.
+     */
+    val movementService: String? = null,
 )
 
 data class ListAmlCasesQuery(

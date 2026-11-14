@@ -78,6 +78,7 @@ class AmlCaseService(
             idempotencyKey = command.idempotencyKey,
             requestHash = command.requestHash,
             origin = command.origin,
+            movementService = command.movementService,
             partyId = command.partyId,
             accountId = command.accountId,
             transactionId = command.transactionId,

@@ -189,7 +189,7 @@ class AmlCaseHoldDecisionTest {
     }
 
     @Test
-    fun `a proposal of the V17 shape is inert - replaceable by anyone, never confirmable`() {
+    fun `a proposal of the V18 shape is inert - replaceable by anyone, never confirmable`() {
         for (legacy in listOf(
             HoldDecisionProposal(HoldDisposition.CLEAR, "fine", "alice", t0),
             HoldDecisionProposal(HoldDisposition.CLEAR, "fine", "alice", t0, proposerPersonId = "staff-a"),

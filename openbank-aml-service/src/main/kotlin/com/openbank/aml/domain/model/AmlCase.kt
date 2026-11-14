@@ -83,7 +83,7 @@ data class HoldDecisionProposal(
 ) {
     /**
      * Whether this is a four-eyes proposal under the person rule at all: it names the proposer's
-     * person AND has an expiry. A row without either (the V17 shape, written before persons were
+     * person AND has an expiry. A row without either (the V18 shape, written before persons were
      * compared) is inert: it is never open, so a fresh proposal may replace it, and it can never be
      * confirmed ([Proposal.approveBy] refuses a proposal with no person). Nothing is backfilled.
      */
@@ -155,6 +155,12 @@ data class AmlCase(
     val origin: CaseOrigin? = null,
     /** The pending (or, once decided, the confirmed) four-eyes proposal of a held payment's case. */
     val holdProposal: HoldDecisionProposal? = null,
+    /**
+     * Service (e.g. `openbank-domestic-payment`) whose verified machine identity opened the case;
+     * [transactionId] is an id in THAT service. `null` for a manual (staff) case and for rows
+     * written before V17, which cannot be backfilled.
+     */
+    val movementService: String? = null,
 ) {
     /**
      * ADR-0374 point 3: a case the hold intake opened releases or rejects a held payment when it is
