@@ -1243,7 +1243,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-fd1d0136@sha256:a4998d157a4aa66eee85ce884c64ce7f2a069b3a3aecdb8a8524181f4a8bcac0
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-243f130f@sha256:7a7c40052525a50cb537d4e97dfa828031b80088da1dfed2f62dc889fd74a01e
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -3592,7 +3592,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-548fa683@sha256:c4597f02fbb1ecaedf1a4d85ffa54963c7b09f2fa3aa66e1c848c18384c3ed49
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-243f130f@sha256:010d7cd340bd6dc9604461d0f46fb3870fc9e9fa24939f3c728c1f0c489287bd
 
           imagePullPolicy: IfNotPresent
           ports:
