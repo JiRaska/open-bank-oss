@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.application.usecase
 
+import com.openbank.delegation.application.port.`in`.PaymentOutcomeResult
 import com.openbank.delegation.application.port.`in`.ReserveSpendCommand
 import com.openbank.delegation.application.port.`in`.ReserveSpendResult
 import com.openbank.delegation.application.port.out.DelegationRepository
@@ -17,10 +18,13 @@ import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
+import com.openbank.delegation.domain.model.PaymentMoneyEffect
 import com.openbank.delegation.domain.model.SpendDecision
 import com.openbank.delegation.domain.model.SpendRefusalReason
 import com.openbank.delegation.domain.model.SpendReservation
+import com.openbank.delegation.domain.model.SpendReservationOperationType
 import com.openbank.delegation.domain.model.SpendReservationState
+import com.openbank.delegation.domain.model.SpendSettlementTransition
 import com.openbank.delegation.domain.model.SpendWindow
 import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.domain.money.Money
@@ -330,6 +334,65 @@ class SpendReservationServiceTest {
         assertThat(reserved.occurredAt).isBetween(before, after)
     }
 
+    private fun reserveDomestic(): SpendReservation {
+        val command = ReserveSpendCommand(
+            callerPartyId = grantee,
+            delegationId = currentGrant.id,
+            amount = czk("100.00"),
+            idempotencyKey = UUID.randomUUID().toString(),
+            operationType = SpendReservationOperationType.DOMESTIC_PAYMENT,
+        )
+        return runBlocking { service.reserve(command) }.reservation
+    }
+
+    private fun outcome(reservation: SpendReservation, effect: PaymentMoneyEffect): PaymentOutcomeResult {
+        val grantId = currentGrant.id
+        return runBlocking { service.applyPaymentOutcome(grantId, reservation.id, effect) }
+    }
+
+    private fun stateOf(reservation: SpendReservation) = reservations.all().single { it.id == reservation.id }.state
+
+    @Test
+    fun `payment outcomes settle a domestic reservation and replays are no-ops`() {
+        val settled = reserveDomestic()
+        assertThat(outcome(settled, PaymentMoneyEffect.MOVED)).isEqualTo(PaymentOutcomeResult.CONFIRMED)
+        assertThat(outcome(settled, PaymentMoneyEffect.MOVED)).isEqualTo(PaymentOutcomeResult.ALREADY_SETTLED)
+        assertThat(stateOf(settled)).isEqualTo(SpendReservationState.CONFIRMED)
+
+        val rejected = reserveDomestic()
+        assertThat(outcome(rejected, PaymentMoneyEffect.NEVER_MOVED)).isEqualTo(PaymentOutcomeResult.RELEASED)
+        assertThat(outcome(rejected, PaymentMoneyEffect.MOVED)).isEqualTo(PaymentOutcomeResult.CONFLICT)
+        assertThat(stateOf(rejected)).isEqualTo(SpendReservationState.RELEASED)
+    }
+
+    @Test
+    fun `only RETURNED releases a CONFIRMED reservation, and it is audited as a release`() {
+        val confirmed = reserveDomestic()
+        outcome(confirmed, PaymentMoneyEffect.MOVED)
+        assertThat(outcome(confirmed, PaymentMoneyEffect.NEVER_MOVED)).isEqualTo(PaymentOutcomeResult.CONFLICT)
+        assertThat(stateOf(confirmed)).isEqualTo(SpendReservationState.CONFIRMED)
+
+        assertThat(
+            outcome(confirmed, PaymentMoneyEffect.RETURNED),
+        ).isEqualTo(PaymentOutcomeResult.RETURNED_RELEASED)
+        assertThat(stateOf(confirmed)).isEqualTo(SpendReservationState.RELEASED)
+        assertThat(reservations.events.last()).isInstanceOf(SpendReleased::class.java)
+    }
+
+    @Test
+    fun `an unknown reservation or grant, or a non-domestic reservation, settles nothing`() {
+        val plain = reserve("10.00").reservation
+        assertThat(outcome(plain, PaymentMoneyEffect.NEVER_MOVED)).isEqualTo(PaymentOutcomeResult.CONFLICT)
+        assertThat(stateOf(plain)).isEqualTo(SpendReservationState.RESERVED)
+
+        val unknownId = UUID.randomUUID()
+        val grantId = currentGrant.id
+        assertThat(runBlocking { service.applyPaymentOutcome(grantId, unknownId, PaymentMoneyEffect.MOVED) })
+            .isEqualTo(PaymentOutcomeResult.UNKNOWN_RESERVATION)
+        coEvery { delegationRepository.findById(grantId) } returns null
+        assertThat(outcome(plain, PaymentMoneyEffect.MOVED)).isEqualTo(PaymentOutcomeResult.UNKNOWN_RESERVATION)
+    }
+
     /**
      * Counts for real instead of returning canned answers, so the "reserved counts / confirmed
      * counts / released does not" rule is exercised by every test above rather than restated.
@@ -381,20 +444,16 @@ class SpendReservationServiceTest {
         override suspend fun findById(grantId: UUID, reservationId: UUID): SpendReservation? =
             rows[reservationId]?.takeIf { it.grantId == grantId }
 
-        override suspend fun settle(
+        override suspend fun applyTransition(
             grantId: UUID,
             reservationId: UUID,
-            target: SpendReservationState,
+            transition: SpendSettlementTransition,
             settledAt: OffsetDateTime,
             auditEvent: (SpendReservation) -> DomainEvent,
         ): SpendReservation? {
             val existing = findById(grantId, reservationId) ?: return null
-            if (existing.state != SpendReservationState.RESERVED) return null
-            val settled = when (target) {
-                SpendReservationState.CONFIRMED -> existing.confirm(settledAt)
-                SpendReservationState.RELEASED -> existing.release(settledAt)
-                SpendReservationState.RESERVED -> return null
-            }
+            if (existing.state != transition.from) return null
+            val settled = existing.copy(state = transition.to, settledAt = settledAt)
             rows[reservationId] = settled
             events += auditEvent(settled)
             return settled

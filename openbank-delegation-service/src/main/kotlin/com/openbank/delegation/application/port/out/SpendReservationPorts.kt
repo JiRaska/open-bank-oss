@@ -8,7 +8,7 @@ import com.openbank.delegation.domain.model.CountedSpend
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.SpendDecision
 import com.openbank.delegation.domain.model.SpendReservation
-import com.openbank.delegation.domain.model.SpendReservationState
+import com.openbank.delegation.domain.model.SpendSettlementTransition
 import com.openbank.delegation.domain.model.SpendWindow
 import com.openbank.libs.domain.event.DomainEvent
 import java.time.OffsetDateTime
@@ -57,18 +57,19 @@ interface SpendReservationRepository {
     suspend fun findById(grantId: UUID, reservationId: UUID): SpendReservation?
 
     /**
-     * Move a reservation out of RESERVED under a compare-and-set on its current state, so a
-     * confirm and a release racing on the same reservation cannot both land. Returns null when the
-     * row was not in RESERVED — the caller decides whether that is a replay or a conflict.
+     * Move a reservation [SpendSettlementTransition.from] -> [SpendSettlementTransition.to] under a
+     * compare-and-set on its current state, so a confirm and a release racing on the same
+     * reservation cannot both land. Returns null when the grant or reservation is absent or the row
+     * was not in the expected state — the caller decides whether that is a replay or a conflict.
      *
      * [auditEvent] is written to the outbox in the same transaction as the state change, and only
-     * when the compare-and-set actually won: the losing side of a confirm/release race changed
-     * nothing, so auditing it would record a settlement that never happened.
+     * when the compare-and-set actually won: the losing side changed nothing, so auditing it would
+     * record a settlement that never happened.
      */
-    suspend fun settle(
+    suspend fun applyTransition(
         grantId: UUID,
         reservationId: UUID,
-        target: SpendReservationState,
+        transition: SpendSettlementTransition,
         settledAt: OffsetDateTime,
         auditEvent: (SpendReservation) -> DomainEvent,
     ): SpendReservation?
