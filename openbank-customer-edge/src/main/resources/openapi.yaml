@@ -3864,57 +3864,6 @@ paths:
         '403':
           description: Caller lacks customer access or may not act for the requested business
 
-  /domestic-payments/submissions/lookup:
-    post:
-      tags: [Payments]
-      summary: Reconcile an ambiguous domestic payment submission
-      description: >-
-        Send the original Idempotency-Key and debit account after an ambiguous create response.
-        This is a read and consumes no SCA challenge. FOUND returns the identifier and current state
-        of the persisted instruction for the same customer and debit authority. UNKNOWN includes
-        uncommitted, missing and unscoped legacy submissions, revoked or unmatched authority,
-        upstream unavailability, and company requests keyed by a separate co-signature approval.
-        UNKNOWN makes no claim about whether money moved. Keep the pending warning in that case.
-      operationId: lookupDomesticPaymentSubmission
-      security:
-        - customerOidc: [payments:read]
-      parameters:
-        - name: Idempotency-Key
-          in: header
-          required: true
-          schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[ -~]+$'}
-        - name: X-Acting-For
-          in: header
-          required: false
-          description: Use the same verified business context as the original submission.
-          schema: {type: string, format: uuid}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [debtorAccountId]
-              properties:
-                debtorAccountId: {type: string, format: uuid}
-                amount:
-                  type: string
-                  description: Original CZK amount, useful when more than one delegation covers the account.
-      responses:
-        '200':
-          description: Current durable state, or UNKNOWN
-          headers:
-            Cache-Control:
-              schema: {type: string, enum: [no-store]}
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DomesticPaymentSubmission'
-        '400':
-          description: Malformed lookup or missing Idempotency-Key
-        '403':
-          description: Caller lacks customer access or may not act for the requested business
-
   /domestic-payments/{paymentId}:
     get:
       tags: [Payments]
