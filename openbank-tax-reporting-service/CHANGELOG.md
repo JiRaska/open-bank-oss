@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.54.2](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.54.1...tax-reporting-service-v0.54.2) (2026-11-14)
+
+
+### Bug Fixes
+
+* **tax-reporting:** wire pension and CRS/FATCA upstream URLs in gitops ([#16074](https://github.com/JiRaska/open-bank-oss/issues/16074)) ([5dea3db](https://github.com/JiRaska/open-bank-oss/commit/5dea3db98e0038be7e9efa2f0cfcc4280a05a13e))
+
 ## [0.54.1](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.54.0...tax-reporting-service-v0.54.1) (2026-11-13)
 
 

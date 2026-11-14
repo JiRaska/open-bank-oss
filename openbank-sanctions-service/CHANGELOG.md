@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.20.0...sanctions-service-v0.21.0) (2026-11-14)
+
+
+### Features
+
+* **sanctions:** load FATF jurisdiction statements of October 2026 ([#16097](https://github.com/JiRaska/open-bank-oss/issues/16097)) ([4d7b4eb](https://github.com/JiRaska/open-bank-oss/commit/4d7b4eb09e18df7320e93069832a7f70e6153393))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.19.1...sanctions-service-v0.20.0) (2026-11-13)
 
 
