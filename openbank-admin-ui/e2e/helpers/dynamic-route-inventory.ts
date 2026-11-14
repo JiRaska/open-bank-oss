@@ -20,6 +20,7 @@ export type DynamicRouteFixture = {
 
 export const DYNAMIC_ROUTE_FIXTURES: Record<string, DynamicRouteFixture> = {
   '/accounts/[id]': { path: '/accounts/account-42', kind: 'known-fixture-id', evidence: 'party-related-accounts-recovery.spec.ts', existingPopulatedSpec: false },
+  '/aml/[id]': { path: '/aml/11111111-1111-4111-8111-111111111111', kind: 'known-fixture-id', evidence: 'aml-case-detail.spec.ts', existingPopulatedSpec: true },
   '/approvals/delegation/[id]': { path: '/approvals/delegation/018f4a3c-1b2d-7e00-9a11-000000000010', kind: 'known-fixture-id', evidence: 'delegation-approval-evidence.spec.ts', existingPopulatedSpec: true },
   '/approvals/sca/[id]': { path: '/approvals/sca/bde18d9e-3e49-4f4e-98cc-a56646ccbc61', kind: 'known-fixture-id', evidence: 'src/test/operator-approval-workbench.test.tsx (component fixture; render only)', existingPopulatedSpec: false },
   '/approvals/settlement/[id]': { path: '/approvals/settlement/bde18d9e-3e49-4f4e-98cc-a56646ccbc61', kind: 'known-fixture-id', evidence: 'src/test/operator-approval-workbench.test.tsx (component fixture; render only)', existingPopulatedSpec: false },

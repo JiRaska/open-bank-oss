@@ -128,6 +128,9 @@ class DomesticPaymentEntity : PanacheEntity() {
     @Column(name = "customer_submission_scope", length = 64, updatable = false)
     var customerSubmissionScope: String? = null
 
+    @Column(name = "original_submission_key_digest", length = 64, updatable = false)
+    var originalSubmissionKeyDigest: String? = null
+
     @Column(name = "delegation_id")
     var delegationId: UUID? = null
 

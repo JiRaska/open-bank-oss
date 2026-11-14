@@ -88,7 +88,7 @@ class SctInstRealKafkaOutboxIT {
                 String::class.java,
             ),
         ).isEqualTo("smallrye-kafka")
-        val paymentId = submitClaimingSynthetic()
+        val paymentId = submitClaimingSyntheticSctInstPayment()
         assertThat(paymentOrigin(paymentId)).isFalse()
         markLegacyOriginUnknown(paymentId)
         settle(paymentId, suppliedSynthetic = true)
@@ -148,7 +148,7 @@ class SctInstRealKafkaOutboxIT {
         ],
     )
     fun `trusted synthetic origin survives later unmarked transitions through Kafka`() {
-        val paymentId = submitClaimingSynthetic()
+        val paymentId = submitClaimingSyntheticSctInstPayment()
         assertThat(paymentOrigin(paymentId)).isTrue()
         assertThat(rows(paymentId).single().synthetic).isTrue()
         settle(paymentId, suppliedSynthetic = false)
@@ -176,33 +176,6 @@ class SctInstRealKafkaOutboxIT {
             }
         }
         awaitSent(paymentId)
-    }
-
-    private fun submitClaimingSynthetic(): UUID {
-        val key = UUID.randomUUID().toString()
-        return UUID.fromString(
-            given().contentType(ContentType.JSON)
-                .header("Idempotency-Key", key)
-                .header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE)
-                .body(
-                    """
-                    {
-                      "idempotencyKey": "$key",
-                      "debtorAccountId": "${UUID.randomUUID()}",
-                      "debtorIban": "CZ6508000000192000145399",
-                      "debtorName": "Test Debtor",
-                      "creditorIban": "DE89370400440532013000",
-                      "creditorName": "Test Creditor",
-                      "creditorBic": "COBADEFFXXX",
-                      "amount": 99.99,
-                      "currency": "EUR",
-                      "endToEndId": "E2E-$key"
-                    }
-                    """.trimIndent(),
-                )
-                .`when`().post("/api/v1/sepa-instant")
-                .then().statusCode(201).extract().path<String>("paymentId"),
-        )
     }
 
     private fun settle(paymentId: UUID, suppliedSynthetic: Boolean) {
@@ -315,4 +288,31 @@ class SctInstRealKafkaOutboxIT {
         const val SYNTHETIC_ACTOR = "service-account-openbank-sepa-instant-fixture"
         const val TOPIC = "openbank.sepa.instant.events"
     }
+}
+
+internal fun submitClaimingSyntheticSctInstPayment(): UUID {
+    val key = UUID.randomUUID().toString()
+    return UUID.fromString(
+        given().contentType(ContentType.JSON)
+            .header("Idempotency-Key", key)
+            .header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE)
+            .body(
+                """
+                {
+                  "idempotencyKey": "$key",
+                  "debtorAccountId": "${UUID.randomUUID()}",
+                  "debtorIban": "CZ6508000000192000145399",
+                  "debtorName": "Test Debtor",
+                  "creditorIban": "DE89370400440532013000",
+                  "creditorName": "Test Creditor",
+                  "creditorBic": "COBADEFFXXX",
+                  "amount": 99.99,
+                  "currency": "EUR",
+                  "endToEndId": "E2E-$key"
+                }
+                """.trimIndent(),
+            )
+            .`when`().post("/api/v1/sepa-instant")
+            .then().statusCode(201).extract().path<String>("paymentId"),
+    )
 }

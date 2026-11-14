@@ -122,6 +122,31 @@ describe('payment detail by-id loading', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('shows a held domestic payment with its real status instead of an error', async () => {
+    paymentType = 'DOMESTIC'
+    vi.stubGlobal('fetch', vi.fn(async () => json(domesticPayment({ status: 'HELD', creditorName: 'Held creditor' }))))
+
+    await act(async () => { render(<PaymentDetailPage />) })
+
+    expect(await screen.findByText('Held creditor')).toBeInTheDocument()
+    const held = screen.getAllByText('HELD')
+    expect(held.some(element => element.className.includes('badge-warning'))).toBe(true)
+    expect(screen.queryByText('Reject reason')).not.toBeInTheDocument()
+  })
+
+  it('shows the reject reason and detail of a rejected domestic payment', async () => {
+    paymentType = 'DOMESTIC'
+    vi.stubGlobal('fetch', vi.fn(async () => json(domesticPayment({
+      status: 'REJECTED', rejectReason: 'DEBTOR_ACCOUNT_BLOCKED', rejectDetail: 'debtor account may not be debited',
+    }))))
+
+    await act(async () => { render(<PaymentDetailPage />) })
+
+    expect(await screen.findByText('DEBTOR_ACCOUNT_BLOCKED')).toBeInTheDocument()
+    expect(screen.getByText('Reject reason')).toBeInTheDocument()
+    expect(screen.getByText('debtor account may not be debited')).toBeInTheDocument()
+  })
+
   it('keeps a verified same-route preview when live evidence is malformed', async () => {
     window.sessionStorage.setItem(`ob:row:payments:${PAYMENT_ID}`, JSON.stringify(sepaPayment({
       creditorName: 'Verified saved creditor',

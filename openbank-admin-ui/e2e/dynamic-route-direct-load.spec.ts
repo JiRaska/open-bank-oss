@@ -19,6 +19,7 @@ const expectedTerminalText: Record<string, RegExp> = {
   '/docs/threat-models/[service]': /Threat model|No threat model has been published/i,
   '/services/[name]/docs/[[...slug]]': /01-overview|Architecture|No documents/i,
   '/accounts/[id]': /Nothing found/,
+  '/aml/[id]': /AML case|AML případ|Customer|Klient/i,
   '/cards/[id]': /Nothing found|Failed to load|not available/i,
   '/iaops/agents/[agentId]': /Nothing found/,
   '/iaops/cases/[caseId]': /Nothing found/,
@@ -91,7 +92,11 @@ test.describe('read-only direct loads for dynamic pages', () => {
         if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
           return route.fulfill({ status: 405, contentType: 'application/json', body: '{"error":"read_only_smoke"}' })
         }
-        return route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"fixture_not_found"}' })
+        // The fleet's error envelope (libs-runtime ApiError), which every service declares for 404,
+        // so the mock is a response the real BFF could relay; `error` stays for the BFF classifier.
+        return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({
+          traceId: 'e2e-direct-load', status: 404, code: 'NOT_FOUND', message: 'fixture_not_found', error: 'fixture_not_found',
+        }) })
       })
 
       const response = await page.goto(fixture.path, { waitUntil: 'domcontentloaded' })

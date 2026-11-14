@@ -138,6 +138,31 @@ class CaseScreeningTest {
     }
 
     @Test
+    fun `an ownership lookup that could not be made removes nobody from the subject list`() {
+        val before = CaseScreening(
+            CaseScreening.subjectsOf(
+                extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
+                listOf(owner("Karel Vlastník")),
+            ).map { it.copy(sanctions = ScreeningVerdict.CLEAR) },
+            UboSource.REGISTER,
+        )
+        // What an outage of the register produces: the same case, no owners.
+        val withoutOwners = CaseScreening.subjectsOf(
+            extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
+            emptyList(),
+        )
+
+        val duringOutage = before.rebuilt(withoutOwners, UboSource.UNAVAILABLE)
+
+        // The owner is still a current subject (and so still monitored), and nothing is approvable.
+        assertThat(duringOutage.subjects.filter { it.current }.map { it.name }).contains("Karel Vlastník")
+        assertThat(duringOutage.complete).isFalse()
+        // Control: when the register ANSWERS without the owner, the owner has left.
+        assertThat(before.rebuilt(withoutOwners, UboSource.REGISTER).subjects.map { it.name })
+            .doesNotContain("Karel Vlastník")
+    }
+
+    @Test
     fun `a hit and a PEP both require review, and everyone clear does not`() {
         val subjects = CaseScreening.subjectsOf(
             extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
