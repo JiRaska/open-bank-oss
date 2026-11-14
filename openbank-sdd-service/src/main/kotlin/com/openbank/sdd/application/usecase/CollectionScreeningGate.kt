@@ -19,6 +19,7 @@ import com.openbank.sdd.domain.model.SddMandate
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
+import java.util.UUID
 
 /**
  * Sanctions gate in front of a collection's release (ADR-0032, ADR-0353 D4). Screens the debtor and
@@ -39,9 +40,13 @@ class CollectionScreeningGate(private val screening: SanctionsScreeningPort, pri
 
     fun screen(mandate: SddMandate, instruction: CollectionInstruction): Uni<AuthorisationResult?> {
         val key = "sdd-screen-${mandate.id}-${instruction.dueDate}"
+        // One nonce per presentation attempt: retries inside the adapter reuse it (dedupe), but a held
+        // collection presented again gets a FRESH screen, never sanctions-service's stored answer for
+        // the old key (which would replay a stale CLEAR after a list update or a name change).
+        val attempt = "$key-${UUID.randomUUID()}"
         return Uni.combine().all().unis(
-            screening.screen(mandate.debtorName, ScreeningRole.DEBTOR, "$key:debtor"),
-            screening.screen(mandate.creditorName, ScreeningRole.CREDITOR, "$key:creditor"),
+            screening.screen(mandate.debtorName, ScreeningRole.DEBTOR, "$attempt:debtor"),
+            screening.screen(mandate.creditorName, ScreeningRole.CREDITOR, "$attempt:creditor"),
         ).with { d, c -> listOf(d, c) }
             .onItem().transformToUni { results -> decide(mandate, key, results) }
             .onFailure(ScreeningUnavailableException::class.java).recoverWithUni { ex ->
@@ -79,7 +84,9 @@ class CollectionScreeningGate(private val screening: SanctionsScreeningPort, pri
         matchedEntity: String?,
     ): Uni<Unit> = amlCases.openCase(
         OpenAmlCaseCommand(
-            idempotencyKey = "$key:aml",
+            // Bound to the verdict: a later, worse verdict (REVIEW, then BLOCK) opens its own case
+            // instead of colliding with the first one's key and being dropped as a replay.
+            idempotencyKey = "$key:aml:$alertCode:$severity",
             mandateId = mandate.id,
             debtorAccountId = mandate.accountId,
             customerReference = mandate.umr,
@@ -91,7 +98,8 @@ class CollectionScreeningGate(private val screening: SanctionsScreeningPort, pri
     ).map { }
         .onFailure().recoverWithItem { ex ->
             // Best effort: the verdict is already rendered and must not flip on a case-store outage.
-            log.errorf(ex, "aml.case.open_failed mandate_id=%s alert=%s", mandate.id, alertCode)
+            // ERROR plus a stable event name, so a lost case (including a 409 key reuse) is alertable.
+            log.errorf(ex, "aml.case.open_failed mandate_id=%s alert=%s severity=%s", mandate.id, alertCode, severity)
         }
 
     private fun held(reason: String): AuthorisationResult = AuthorisationResult.Reject(REASON_CODE, reason)

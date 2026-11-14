@@ -87,4 +87,21 @@ class CollectionScreeningGateTest {
         aml.fail = true
         assertThat(run()).isInstanceOf(AuthorisationResult.Reject::class.java)
     }
+
+    @Test
+    fun `a re-presented collection is screened under fresh keys, never a replayed stored answer`() {
+        run()
+        run()
+        assertThat(sanctions.keys).hasSize(4).doesNotHaveDuplicates()
+    }
+
+    @Test
+    fun `a worse later verdict opens its own AML case instead of colliding with the first key`() {
+        sanctions.statuses[ScreeningRole.DEBTOR] = ScreeningMatchStatus.POTENTIAL_HIT
+        sanctions.scores[ScreeningRole.DEBTOR] = 0.7
+        run()
+        sanctions.statuses[ScreeningRole.DEBTOR] = ScreeningMatchStatus.HIT
+        run()
+        assertThat(aml.opened.map { it.idempotencyKey }).hasSize(2).doesNotHaveDuplicates()
+    }
 }

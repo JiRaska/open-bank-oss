@@ -18,9 +18,11 @@ class FakeSanctions : SanctionsScreeningPort {
     val scores = mutableMapOf<ScreeningRole, Double>()
     var unavailable = false
     val screened = mutableListOf<Pair<String, ScreeningRole>>()
+    val keys = mutableListOf<String>()
 
     override fun screen(name: String, role: ScreeningRole, idempotencyKey: String): Uni<ScreeningResult> {
         screened += name to role
+        keys += idempotencyKey
         if (unavailable) return Uni.createFrom().failure(ScreeningUnavailableException(IllegalStateException("down")))
         val status = statuses[role] ?: ScreeningMatchStatus.CLEAR
         return Uni.createFrom().item(
