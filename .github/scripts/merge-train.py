@@ -69,6 +69,7 @@ import io
 import json
 import os
 import pathlib
+import posixpath
 import re
 import shlex
 import subprocess
@@ -1106,7 +1107,21 @@ APPENDED_GATE_KEYS = frozenset({"name", "group", "mode", "run", "selftest", "sel
                                 "verified", "needs_base", "when"})
 APPENDED_GATE_EXEC_KEYS = ("run", "selftest")
 GATE_KEY_RE = re.compile(r"^    ([A-Za-z_][A-Za-z0-9_]*):(.*)$")
-GATE_CMD_RE = re.compile(r"(?:python3|bash) (\.github/scripts/[A-Za-z0-9_./-]+\.(?:py|sh))((?: [A-Za-z0-9_./=:,@+-]+)*)")
+GATE_CMD_RE = re.compile(r"(python3|bash) (\.github/scripts/[A-Za-z0-9_./-]+\.(?:py|sh))((?: [A-Za-z0-9_./=:,@+-]+)*)")
+
+
+def appended_gate_script_ok(interpreter: str, path: str) -> bool:
+    """A script an appended gate may invoke: a canonical path (no `.`/`..` segment, no `//`, so a glob
+    like check-*.py cannot be walked out of .github/scripts/), the interpreter matching the extension,
+    and trainable gate or test code (never PRIVILEGED_GATE_CODE)."""
+
+    if posixpath.normpath(path) != path or any(seg in ("", ".", "..") for seg in path.split("/")):
+        return False
+    if not path.startswith(".github/scripts/"):
+        return False
+    if (interpreter == "python3") != path.endswith(".py"):
+        return False
+    return gate_code(path)
 
 
 def appended_gate_problem(gid: str, lines: list[str]) -> str | None:
@@ -1138,7 +1153,7 @@ def appended_gate_problem(gid: str, lines: list[str]) -> str | None:
             return f"new gate {gid!r}: {k} is empty"
         for c in cmds:
             m = GATE_CMD_RE.fullmatch(c)
-            if not m or not gate_code(m.group(1)):
+            if not m or not appended_gate_script_ok(m.group(1), m.group(2)):
                 return f"new gate {gid!r}: {k} line {c[:60]!r} is not a plain call of a trainable gate script"
     return None
 
@@ -5788,6 +5803,9 @@ def self_test() -> int:
         "an env key": base_g + "  - id: g-j\n    env: {PYTHONPATH: x}\n    run: python3 .github/scripts/check-a.py\n",
         "an unknown key": base_g + "  - id: g-k\n    requires: [g-one]\n    run: python3 .github/scripts/check-a.py\n",
         "no run at all": base_g + "  - id: g-l\n    mode: enforced\n",
+        "a path walking out of .github/scripts": base_g + "  - id: g-m\n    run: python3 .github/scripts/check-x/../../workflows/x.py\n",
+        "a ./ segment": base_g + "  - id: g-n\n    run: python3 .github/scripts/./check-a.py\n",
+        "bash on a .py": base_g + "  - id: g-o\n    run: bash .github/scripts/check-a.py\n",
     }
     for shape, new in refused.items():
         why = gates_append_problem(base_g, new, {"g-main"})
