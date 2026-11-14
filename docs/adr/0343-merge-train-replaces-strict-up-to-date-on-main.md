@@ -683,6 +683,12 @@ Decision (proposed):
 
 What it does not fix: throughput. One carrier at a time remains the ceiling of the ordinary lane, and the stacked-carrier switch stays off until its carrier resolver knows the holder base (#15772). Expected effect, to measure after enabling: expedite label-to-merge p50 under 30 min with the same query.
 
+### Amendment (2026-11-14) — a main-red fix pre-empts a strict reservation that is still in CI
+
+Observed twice on 2026-11-13/14: main went red on `Validate manifests`, a green PR fixing it was classified `fix ... served first, alone`, and in the same tick was held behind `main reserved for strict-lane #<n>` — a `.github`/gates PR that happened to be armed, holding main while its own CI ran (30-60 min, restarted whenever main moved). Since the 2026-11-13 change that gives no train a turn while main is red, nothing else moved either. #15991 waited behind #16005 and #16009 (~13:40-15:56Z); #16096 waited behind #15976 (~09:43Z).
+
+Decision: while main is red and at least one green strict-lane PR is a fix (`strict_fixes`, the same test that ranks fixes first), a reservation whose holder is not a fix and whose CI is still PENDING does not hold main (`strict_reservation`). The fix is then update-branched and becomes the holder on its combined head, as before. Precedence on a red main is therefore: a GREEN holder (it merges this tick, never interrupted) > a fix > a non-fix reservation still in CI. The pre-empted PR is not released and gets no `strict-released` marker: its CI keeps running, it simply holds nothing while the fix is served, and once main is green it competes for main as any strict PR does (behind main after the fix merges, so update-branched again). What qualifies as a fix is unchanged here; narrowing that test (a fix must have run the failing job on its head, #16013 / #16006) applies to pre-emption automatically, because pre-emption reads the same `strict_fixes` set. A strict carrier already open is unaffected.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
