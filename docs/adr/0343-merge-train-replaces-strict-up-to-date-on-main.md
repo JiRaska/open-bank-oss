@@ -489,6 +489,27 @@ lane can starve the other — the strict turn returns as soon as a train merges,
 or the turn expires. A reservation already running, a green up-to-date strict PR, and the main-red
 fix path are unchanged.
 
+### Amendment (2026-11-14) — the train's turn survives fast-lane and bot merges
+
+Observed 2026-11-14, 15:40-19:30Z, with green strict-lane PRs queued all afternoon. Strict carriers ran back to back, and train candidates such as #16141 and #15662 waited for hours. Main was red for most of 18:00-19:00Z, when correctly no train was built. The train logs show what happened once it was green again:
+- 18:55Z: strict #16173 merged. Main's head was a strict merge, so the train had its turn.
+- 19:10Z: settle answered "train's turn after a strict-lane merge (4 train candidate(s) waiting)". The build in that tick then aborted on an exhausted API quota.
+- Between the two ticks, fast-lane #16034 merged on top of #16173.
+- 19:15Z: main's head was no longer a strict merge, so rule 2 of the 2026-10-21 amendment saw no turn. Settle built strict carrier #16176 over the four waiting candidates.
+
+Rule 2 read only main's HEAD. Any merge that is neither strict nor train ended the train's turn, whether a fast-lane PR the train releases itself or a deploy bot. With a steady strict supply, the turn was lost whenever such a merge landed inside it.
+
+Rule 2 now reads main's first-parent chain, newest first, up to `TRAIN_TURN_DEPTH` (6) commits, with one PR read per commit:
+- a train merge (`verified on train`) ends the walk: the train had its turn, so none is owed;
+- a strict-lane merge (`strict lane:`) opens the turn, bounded by `TRAIN_TURN_S` from that merge's committer time;
+- any other merge is stepped over.
+
+**Bound.** With main green and train candidates waiting, the strict lane starts no reservation and no strict carrier for `TRAIN_TURN_S` (30 min) after each strict merge, unless a train merges first. Fast-lane and bot merges no longer shorten that window. So between two strict starts the train has a full window to publish. Once a carrier is open, rule 1 holds the strict lane for at most `CARRIER_PRIORITY_S`.
+
+The strict lane's wait is bounded too: at most `TRAIN_TURN_S` plus `CARRIER_PRIORITY_S` after its previous merge, so neither lane can starve the other. A train that cannot be built does not freeze the strict lane, because the window still expires. With no train candidates, the strict lane is unchanged.
+
+A tick lost inside the window, to quota or to a runner, still costs that tick, but it no longer costs the turn. The main-red rule is unchanged: no turn while main is red, so a fix is served at once. The batch-preservation and no-race rules of #15882 are untouched, because this changes only *whether* the strict lane may start.
+
 ### Amendment (2026-10-21) — event-driven trigger, cron as heartbeat (#13400)
 
 The train now also runs on `push` to main, `workflow_run: completed` of every required-context producer (Services CI, CI, Secret scan, OPA policy, Security scan, Issue hygiene) and `pull_request_target: [auto_merge_enabled]`, because the `*/10` cron fired 127 of ~235 expected ticks over 39 h (median gap 17 min); triggers carry no authority — no job reads the event payload, every checkout is `ref: main`, the `merge-train` concurrency group coalesces a burst into one pending run, and `--check-declaration` enforces the first two.
