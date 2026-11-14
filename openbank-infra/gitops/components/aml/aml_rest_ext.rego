@@ -71,7 +71,7 @@ allowed_reasons contains "operator-aml-case-create" if {
 
 # amlCase.create by the payment/FX services' OWN machine principals (ROLE_API only), which open a
 # case when a screening gate refers a transfer (AmlServiceClient in domestic-payment, sepa-payment,
-# sepa-instant and fx-service). Identity-gated, never a role: ROLE_API is held by every service
+# sepa-instant, fx-service and sdd-service). Identity-gated, never a role: ROLE_API is held by every service
 # account. The shared `service-account-openbank-services` is deliberately absent. Keep this set
 # equal to AML_CASE_CREATE_CALLERS in AmlCaseResource.kt (AmlCaseCreateCallerGuardTest pins it):
 # while AUTHZ_ENFORCE=false that Kotlin check is the enforcing half and this rule is the one the
@@ -83,6 +83,7 @@ allowed_reasons contains "service-aml-case-create-m2m" if {
 		"service-account-openbank-sepa-payment",
 		"service-account-openbank-sepa-instant",
 		"service-account-openbank-fx",
+		"service-account-openbank-sdd",
 	}
 	machine_named(named_client)
 	input.action == "amlCase.create"
