@@ -829,7 +829,7 @@ paths:
                 properties:
                   attestationId: {type: string, format: uuid}
         '400': {description: Missing attestation identifier}
-        '403': {description: Only authenticated KYB staff can publish}
+        '403': {description: Only authenticated KYB staff can publish, and never the staff member who attested the rule (SEPARATION_OF_DUTIES)}
         '404': {description: Case or complete verified statutory evidence unavailable, or the attestation changed}
   /api/v1/kyb/cases/{id}/statutory-representation/{attestationId}/current:
     get:

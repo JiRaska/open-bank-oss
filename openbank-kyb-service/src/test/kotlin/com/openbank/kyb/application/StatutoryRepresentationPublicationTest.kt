@@ -8,6 +8,7 @@ import com.openbank.kyb.application.port.out.BusinessOnboardingCaseRepository
 import com.openbank.kyb.application.port.out.RepresentationAttestationRepository
 import com.openbank.kyb.application.port.out.StatutoryRepresentationEvidence
 import com.openbank.kyb.application.port.out.StatutoryRepresentationPublisher
+import com.openbank.kyb.application.usecase.SeparationOfDutiesException
 import com.openbank.kyb.application.usecase.StatutoryRepresentationPublicationService
 import com.openbank.kyb.domain.model.AgreementRecord
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
@@ -33,9 +34,12 @@ import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
+
+private const val PUBLISHER = "fixture-publishing-reviewer"
 
 class StatutoryRepresentationPublicationTest {
     private val cases = mockk<BusinessOnboardingCaseRepository>()
@@ -73,9 +77,9 @@ class StatutoryRepresentationPublicationTest {
         coEvery { attestations.findLatestFor(identifier) } returns attestation
         coEvery { party.publishStatutoryRule(entity, capture(evidence)) } returns Unit
 
-        assertThat(service.publish(caseId, UUID.randomUUID())).isNull()
+        assertThat(service.publish(caseId, UUID.randomUUID(), PUBLISHER)).isNull()
         coVerify(exactly = 0) { party.publishStatutoryRule(any(), any()) }
-        assertThat(service.publish(caseId, attestation.id)).isEqualTo(attestation.id)
+        assertThat(service.publish(caseId, attestation.id, PUBLISHER)).isEqualTo(attestation.id)
         assertThat(evidence.captured.ruleTextHash).isEqualTo(attestation.ruleTextHash)
         assertThat(evidence.captured.requiredSignatures).isEqualTo(2)
         assertThat(evidence.captured.requiredOffices).containsExactlyElementsOf(offices)
@@ -102,7 +106,7 @@ class StatutoryRepresentationPublicationTest {
         coEvery { attestations.findLatestFor(identifier) } returns attestation.copy(id = UUID.randomUUID())
 
         assertThat(service.isCurrent(caseId, entity, attestation.id)).isFalse()
-        assertThat(service.publish(caseId, attestation.id)).isNull()
+        assertThat(service.publish(caseId, attestation.id, PUBLISHER)).isNull()
         coVerify(exactly = 0) { party.publishStatutoryRule(any(), any()) }
     }
 
@@ -117,7 +121,7 @@ class StatutoryRepresentationPublicationTest {
         )
         coEvery { attestations.findLatestFor(identifier) } returns attestation
 
-        repeat(4) { assertThat(service.publish(caseId, attestation.id)).isNull() }
+        repeat(4) { assertThat(service.publish(caseId, attestation.id, PUBLISHER)).isNull() }
         coVerify(exactly = 0) { party.publishStatutoryRule(any(), any()) }
     }
 
@@ -129,9 +133,30 @@ class StatutoryRepresentationPublicationTest {
         coEvery { attestations.findLatestFor(identifier) } returnsMany listOf(partialAll, fullAll)
         coEvery { party.publishStatutoryRule(entity, any()) } returns Unit
 
-        assertThat(service.publish(caseId, partialAll.id)).isNull()
-        assertThat(service.publish(caseId, fullAll.id)).isEqualTo(fullAll.id)
+        assertThat(service.publish(caseId, partialAll.id, PUBLISHER)).isNull()
+        assertThat(service.publish(caseId, fullAll.id, PUBLISHER)).isEqualTo(fullAll.id)
         coVerify(exactly = 1) { party.publishStatutoryRule(entity, match { it.representatives.size == 3 }) }
+    }
+
+    @Test
+    fun `the attester cannot also publish the rule`(): Unit = runBlocking {
+        coEvery { cases.findById(caseId) } returns activeCase()
+        coEvery { attestations.findLatestFor(identifier) } returns attestation
+        coEvery { party.publishStatutoryRule(entity, any()) } returns Unit
+
+        assertThatThrownBy { runBlocking { service.publish(caseId, attestation.id, attestation.attestedBy) } }
+            .isInstanceOf(SeparationOfDutiesException::class.java)
+        coVerify(exactly = 0) { party.publishStatutoryRule(any(), any()) }
+    }
+
+    @Test
+    fun `a different staff member may publish the attested rule`(): Unit = runBlocking {
+        coEvery { cases.findById(caseId) } returns activeCase()
+        coEvery { attestations.findLatestFor(identifier) } returns attestation
+        coEvery { party.publishStatutoryRule(entity, any()) } returns Unit
+
+        assertThat(service.publish(caseId, attestation.id, "fixture-second-reviewer")).isEqualTo(attestation.id)
+        coVerify(exactly = 1) { party.publishStatutoryRule(entity, any()) }
     }
 
     private fun activeCase(
