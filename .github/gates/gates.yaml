@@ -3370,6 +3370,41 @@ gates:
     run: |
       python3 .github/scripts/merge-train-stall-watch.py --check-declaration
 
+  - id: watch-outcome-declared
+    name: "every scheduled watch names its outcome CLEAN/FOUND/SKIPPED/UNREADABLE (ratchet, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 10   # offline; reads workflow files and the scripts they invoke
+    review_after: "2027-05-14"
+    rationale: >-
+      2026-11-09..14 three watches were red for days on READ failures (a short page, a 409,
+      a moving index) while one subject they watched was genuinely red; one boolean carried
+      three answers, so the reds were ignored. A red watch must mean only "this watch is blind".
+      Re-examine when BASELINE is empty.
+    min_subjects: 5
+    selftest: |
+      python3 .github/scripts/check-watch-outcome.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-watch-outcome.py
+
+  - id: standing-red-sentinel-selftest
+    name: "standing-red sentinel: streak, dedupe, escalation and close logic falsified (enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 10   # offline fixtures plus a scan of the workflow tree
+    review_after: "2027-05-14"
+    rationale: >-
+      A scheduled workflow has no PR and no author, so its red reaches nobody. The sentinel is
+      the only reader of that lane for ~60 workflows; its state machine (open/refresh/reopen/
+      escalate/close, never close on an unreadable tick) must stay falsified.
+    min_subjects: 10
+    selftest: |
+      python3 .github/scripts/standing-red-sentinel.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/standing-red-sentinel.py --self-test
+
   - id: auto-deploy-red-watch-declaration
     name: "auto-deploy red watch reads the scheduled lane only, via a falsified script (issue #9130, enforced)"
     group: registry

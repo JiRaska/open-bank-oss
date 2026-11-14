@@ -157,6 +157,14 @@ jobs:
                 echo "retaining run ${run_id}: live run is completed"
                 continue
               fi
+              # HTTP 409 "has not been queued yet": the run is `queued` in the API but still
+              # waiting on a concurrency group, so GitHub refuses the cancel. Nothing is wrong
+              # with the run or this watch; the next tick retries. 11 of 20 ticks went red on
+              # this alone (2026-11-09..14), which taught readers to ignore the watch.
+              if grep -q 'has not been queued yet' <<<"$cancel_error"; then
+                echo "::notice title=watch-outcome::SKIPPED run ${run_id}: not yet cancellable (waiting on concurrency); retried next tick"
+                continue
+              fi
               echo "$cancel_error" >&2
               exit 1
             fi
@@ -206,6 +214,13 @@ jobs:
               echo "::warning title=CI stalled-build dry run::${title}"
               continue
             fi
-            gh api --method POST "repos/${REPO}/actions/runs/${run_id}/cancel" >/dev/null
+            if ! cancel_error=$(gh api --method POST "repos/${REPO}/actions/runs/${run_id}/cancel" 2>&1); then
+              if grep -q 'has not been queued yet' <<<"$cancel_error"; then
+                echo "::notice title=watch-outcome::SKIPPED run ${run_id}: not yet cancellable; retried next tick"
+                continue
+              fi
+              echo "$cancel_error" >&2
+              exit 1
+            fi
             gh issue create --repo "$REPO" --title "$title" --body "$body" --label fleet-health
           done

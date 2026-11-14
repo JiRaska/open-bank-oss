@@ -74,18 +74,28 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from watch_outcome import emit  # noqa: E402  — CLEAN/FOUND/UNREADABLE, gate watch-outcome-declared
+
 WORKFLOW = ".github/workflows/auto-deploy-red-watch.yml"
 WORKFLOW_ID = "auto-deploy.yml"
 LANE = "schedule"
 THRESHOLD = 3
-# R4: one unfiltered page. GitHub's filtered workflow-runs index has returned Sept/Oct 2
-# results while the unfiltered page contained current runs (#9419). Leave room for push,
-# dispatch, in-progress and cancelled runs before applying R1 locally; never paginate.
-PER_PAGE = 50
+# R4: bounded UNFILTERED pages. GitHub's filtered workflow-runs index has returned Sept/Oct 2
+# results while the unfiltered page contained current runs (#9419), so the lane is selected
+# locally. One page used to be enough; measured 2026-11-14 a 100-run page held 72
+# `workflow_run`, 22 `push`, 3 dispatch and only 3 scheduled runs, and the old 50-run page held
+# ONE — so the watch failed "could not read the scheduled lane" on 20 of 20 ticks while the
+# lane it exists to watch was genuinely red. Read up to MAX_PAGES and stop as soon as
+# THRESHOLD verdicts are in hand: one call on a normal tick, MAX_PAGES at worst.
+PER_PAGE = 100
+MAX_PAGES = 4
 MAX_PAGE_AGE = timedelta(hours=6)
-# A verdict older than the three-hour cron interval may omit a newer tick. GitHub can
-# delay the schedule; until that tick arrives the watch errors rather than mutating an issue.
-MAX_LANE_AGE = timedelta(hours=3)
+# GitHub drops and delays scheduled ticks under load: the `23 */3` cron measured 7.6h and
+# 9.2h gaps on 2026-11-14. A three-hour bound therefore made the watch unreadable most of
+# the day. The bound now only rejects a lane that has produced no verdict for half a day,
+# which is itself a fact worth a red run.
+MAX_LANE_AGE = timedelta(hours=12)
 
 
 # --------------------------------------------------------------------------- pure logic
@@ -163,16 +173,24 @@ def require_current_population(runs: list[dict], now: datetime) -> None:
 # --------------------------------------------------------------------------- online lane
 
 
-def fetch_runs(repo: str, per_page: int = PER_PAGE) -> list[dict]:
-    """One bounded unfiltered call (R4); select the scheduled lane locally."""
-    path = f"repos/{repo}/actions/workflows/{WORKFLOW_ID}/runs?per_page={per_page}"
-    out = subprocess.run(
-        ["gh", "api", path, "--jq", ".workflow_runs"],
-        check=True, capture_output=True, text=True,
-    ).stdout
-    runs = json.loads(out)
-    if not isinstance(runs, list):
-        raise RuntimeError(f"unexpected shape from {path}: {type(runs).__name__}")
+def fetch_runs(repo: str, per_page: int = PER_PAGE, max_pages: int = MAX_PAGES) -> list[dict]:
+    """Bounded unfiltered pages (R4); stop once THRESHOLD lane verdicts are in hand."""
+    runs: list[dict] = []
+    seen: set = set()
+    for page in range(1, max_pages + 1):
+        path = f"repos/{repo}/actions/workflows/{WORKFLOW_ID}/runs?per_page={per_page}&page={page}"
+        out = subprocess.run(
+            ["gh", "api", path, "--jq", ".workflow_runs"],
+            check=True, capture_output=True, text=True,
+        ).stdout
+        batch = json.loads(out)
+        if not isinstance(batch, list):
+            raise RuntimeError(f"unexpected shape from {path}: {type(batch).__name__}")
+        # A run created between page reads shifts the next page by one: drop the repeat.
+        runs.extend(r for r in batch if r.get("id") not in seen)
+        seen.update(r.get("id") for r in batch)
+        if len(lane_verdicts(runs)) >= THRESHOLD or len(batch) < per_page:
+            break
     return runs
 
 
@@ -299,7 +317,7 @@ def self_test() -> int:
     with patch.object(subprocess, "run", side_effect=fake_gh) as gh:
         fetched = fetch_runs("example/repo")
     check("API regression: one bounded unfiltered request, no stale event/status index",
-          gh.call_count == 1 and "?per_page=50" in gh.call_args.args[0][2]
+          gh.call_count == 1 and "?per_page=100&page=1" in gh.call_args.args[0][2]
           and "event=" not in gh.call_args.args[0][2]
           and "status=" not in gh.call_args.args[0][2])
     require_current_population(fetched, now)
@@ -324,21 +342,46 @@ def self_test() -> int:
                     if r["event"] == "schedule" else r for r in current]
     check("freshness: a delayed scheduled tick within three hours remains usable",
           not rejected(delayed_tick))
-    missed_one = [dict(r, created_at="2026-10-06T12:44:00Z")
-                  if r["event"] == "schedule" else r for r in current]
-    check("freshness: one missing three-hour tick cannot close or reopen",
-          rejected(missed_one))
     missed_two = [dict(r, created_at="2026-10-06T09:36:00Z")
                   if r["event"] == "schedule" else r for r in current]
-    check("freshness: two missing three-hour ticks cannot close or reopen",
-          rejected(missed_two))
+    check("freshness: GitHub dropping two ticks (measured 7.6h/9.2h gaps) stays readable",
+          not rejected(missed_two))
+    half_day = [dict(r, created_at="2026-10-06T03:00:00Z")
+                if r["event"] == "schedule" else r for r in current]
+    check("freshness: a lane silent for over twelve hours is unreadable, not green",
+          rejected(half_day))
+
+    # 2026-11-14 live shape: the scheduled lane sits past page 1 behind workflow_run noise.
+    noise = [dict(_run(1000 + i, "workflow_run", "skipped"), created_at="2026-10-06T16:00:00Z")
+             for i in range(100)]
+    deep = [dict(_run(7, "schedule", "failure"), created_at="2026-10-06T15:00:00Z"),
+            dict(_run(6, "schedule", "failure"), created_at="2026-10-06T08:00:00Z"),
+            dict(_run(5, "schedule", "failure"), created_at="2026-10-06T01:00:00Z")]
+    pages = {1: noise, 2: [noise[-1], *deep]}  # page 2 repeats one run: a run landed mid-read
+
+    def paged_gh(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        n = int(argv[2].rsplit("page=", 1)[1])
+        return subprocess.CompletedProcess(argv, 0, json.dumps(pages.get(n, [])), "")
+
+    with patch.object(subprocess, "run", side_effect=paged_gh) as gh:
+        fetched = fetch_runs("example/repo")
+    check("2026-11-14: lane behind 100 workflow_run runs is read from page 2 and escalates",
+          gh.call_count == 2 and not rejected(fetched) and evaluate(fetched)["stuck"]
+          and len(fetched) == 103)
+    check("2026-11-14 negative: the same history cut to page 1 (the old read) is unreadable",
+          rejected(noise))
     at_1650 = datetime(2026, 10, 6, 16, 50, tzinfo=timezone.utc)
     omitted_green = [_run(8, "push", "success"), _run(7, "schedule", "failure"),
                      _run(6, "schedule", "failure"), _run(5, "schedule", "failure")]
     for run, stamp in zip(omitted_green, ["16:40", "12:44", "09:36", "06:50"], strict=True):
         run["created_at"] = f"2026-10-06T{stamp}:00Z"
-    check("Oct 6 16:50: fresh push plus stale red lane cannot reopen #9419",
-          evaluate(omitted_green)["stuck"] and rejected(omitted_green, at_1650))
+    # #9419's omission came from the FILTERED index; the unfiltered pages read now carry every
+    # run, so a 4h-old newest tick is the newest truth, not a hole. The guard that remains is
+    # the twelve-hour bound, held below — the price of tolerating GitHub's dropped ticks.
+    check("Oct 6 16:50: a 4h-old scheduled red is readable on an unfiltered page (#9419 trade)",
+          evaluate(omitted_green)["stuck"] and not rejected(omitted_green, at_1650))
+    check("Oct 6: the same red read 13h later is unreadable, never stuck-by-default",
+          rejected(omitted_green, at_1650 + timedelta(hours=13)))
     arrived = _run(9, "schedule", "success")
     arrived["id"] = 37488239667
     arrived["created_at"] = "2026-10-06T15:31:31Z"
@@ -416,12 +459,15 @@ def main() -> int:
             err = getattr(e, "stderr", "") or str(e)
             print(f"::error::the watch could not read the {LANE} lane of {WORKFLOW_ID}: "
                   f"{err.strip()[:400]}", file=sys.stderr)
+            emit("UNREADABLE", f"{LANE} lane of {WORKFLOW_ID}: {err.strip()[:200]}")
             return 1
         v = evaluate(runs)
         text = json.dumps(v, indent=2)
         print(text)
         if a.json:
             Path(a.json).write_text(text)
+        emit("FOUND" if v["stuck"] else "CLEAN",
+             f"{WORKFLOW_ID} {LANE} lane: {v['population']} verdicts, stuck={v['stuck']}")
         return 2 if v["stuck"] else 0
 
     ap.error("pick one of --self-test / --check-declaration / --evaluate")
