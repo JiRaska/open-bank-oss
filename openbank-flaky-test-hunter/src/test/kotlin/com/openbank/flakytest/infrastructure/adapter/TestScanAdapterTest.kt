@@ -6,6 +6,7 @@
 package com.openbank.flakytest.infrastructure.adapter
 
 import com.openbank.flakytest.infrastructure.config.FlakyTestHunterConfig
+import com.openbank.flakytest.infrastructure.config.WriterBaseRef
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -33,6 +34,8 @@ class TestScanAdapterTest {
         override fun githubRepo() = "JiRaska/open-bank-oss"
 
         override fun githubToken() = Optional.empty<String>()
+
+        override fun writerBaseRef() = WriterBaseRef.MAIN
 
         override fun llmGatewayUrl() = "http://litellm.ai-platform:4000"
 

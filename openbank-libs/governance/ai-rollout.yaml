@@ -219,7 +219,7 @@ auditTrail:
     - Bounded source pilot completed with model-backed diagnoses and a persisted ticket proposal (dated evidence, 2026-11-10)
     - Human agent-PR merge independently verified in the merge store, outbox and separate audit store
   planned:
-    - First live policy-allowed mechanical repair PR from the deployed bounded writer
+    - First live policy-allowed mechanical repair PR from the deployed bounded writer, against the seeded qualification/flaky-test-hunter branch (ADR-0031 D9 amendment 2026-11-14; the only eligible repair is gate-blocked on main)
     - By-actor live query endpoint (audit-service)
     - Independently attested runtime evidence of KMS-signed anchors
     - ai_attribution populated in evidence bundle

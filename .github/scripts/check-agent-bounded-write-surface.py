@@ -71,6 +71,54 @@ ADAPTER = (
     / "GitHubProposalAdapter.kt"
 )
 
+CONFIG = (
+    REPO
+    / "openbank-flaky-test-hunter"
+    / "src"
+    / "main"
+    / "kotlin"
+    / "com"
+    / "openbank"
+    / "flakytest"
+    / "infrastructure"
+    / "config"
+    / "FlakyTestHunterConfig.kt"
+)
+
+# ADR-0031 D9 amendment 2026-11-14: the ONLY refs the writer may read from or open a PR against.
+# `main` is production; the qualification branch is the protected, seeded target that proves the
+# live write path (the one eligible repair is a defect test-runblocking-unit-guard keeps off main).
+# Widening this set is a write-surface decision, so it lives here and not in Kotlin alone.
+ALLOWED_BASE_REFS = {"main", "qualification/flaky-test-hunter"}
+BASE_REF_ENUM = re.compile(r"enum\s+class\s+WriterBaseRef\b[^{]*\{(.*?)\}", re.S)
+BASE_REF_VALUE = re.compile(r'\b[A-Z][A-Z0-9_]*\s*\(\s*"([^"]*)"\s*\)')
+# A ref spelled directly in a GitHub path bypasses WriterBaseRef: the writer must take its ref
+# from configuration, or a hard-coded literal could diverge from the declared set unseen.
+HARDCODED_REF_PATH = re.compile(r"(/git/ref/heads/[A-Za-z0-9]|[?&]ref=[A-Za-z0-9])")
+
+MANIFEST = REPO / "openbank-infra" / "gitops" / "components" / "flaky-test-hunter" / "flaky-test-hunter.yaml"
+ENV_VALUE = r"-\s*name:\s*{name}\s*\n\s*value:\s*\"?([^\"\n]+?)\"?\s*$"
+
+
+def evaluate_manifest(manifest: str, config_source: str) -> list[str]:
+    """The scan snapshot and the writer must name the SAME ref, or scan and write disagree."""
+    snap = re.search(ENV_VALUE.format(name="SNAPSHOT_REF"), manifest, re.M)
+    writer = re.search(ENV_VALUE.format(name="FLAKY_TEST_HUNTER_WRITER_BASE_REF"), manifest, re.M)
+    if not snap or not writer:
+        return ["the flaky-test-hunter manifest must set both SNAPSHOT_REF and FLAKY_TEST_HUNTER_WRITER_BASE_REF"]
+    enum = BASE_REF_ENUM.search(config_source)
+    names = dict(re.findall(r'\b([A-Z][A-Z0-9_]*)\s*\(\s*"([^"]*)"\s*\)', enum.group(1))) if enum else {}
+    ref = names.get(writer.group(1).strip().upper().replace("-", "_"))
+    if ref is None:
+        return [f"FLAKY_TEST_HUNTER_WRITER_BASE_REF={writer.group(1)!r} names no WriterBaseRef value"]
+    if ref != snap.group(1).strip():
+        return [
+            f"SNAPSHOT_REF={snap.group(1)!r} but the writer targets {ref!r} — the agent would scan one "
+            "tree and repair another"
+        ]
+    return []
+
+
 PREFIX_CONST = re.compile(
     r'\bOWN_TEST_SOURCE_PREFIX\s*(?::\s*String\s*)?=\s*"([^"]*)"'
 )
@@ -129,6 +177,36 @@ def evaluate(source: str, money_path: set[str]) -> list[str]:
                     f"{what}. The agent proposes; a human disposes (ADR-0031 D9)."
                 )
 
+    return findings
+
+
+def evaluate_base_refs(config_source: str, adapter_source: str) -> list[str]:
+    """The writer's refs come from one closed enum whose values are all in ALLOWED_BASE_REFS."""
+    findings: list[str] = []
+    enum = BASE_REF_ENUM.search(config_source)
+    if not enum:
+        findings.append(
+            "FlakyTestHunterConfig declares no `enum class WriterBaseRef` — the writer's target ref "
+            "is no longer a closed set"
+        )
+    else:
+        values = BASE_REF_VALUE.findall(enum.group(1))
+        if not values:
+            findings.append("WriterBaseRef declares no ref values — the bound would pass vacuously")
+        if "main" not in values:
+            findings.append("WriterBaseRef no longer offers `main` — production would have no target")
+        for value in values:
+            if value not in ALLOWED_BASE_REFS:
+                findings.append(
+                    f"WriterBaseRef offers {value!r}, which is not in ALLOWED_BASE_REFS "
+                    f"{sorted(ALLOWED_BASE_REFS)} — widening the writer's target refs needs an ADR-0031 "
+                    "D9 decision and an edit to this gate, not a Kotlin enum value alone"
+                )
+    for literal in STRING_LITERAL.findall(adapter_source):
+        if HARDCODED_REF_PATH.search(literal):
+            findings.append(
+                f"the adapter spells a ref directly in {literal!r} — take it from WriterBaseRef"
+            )
     return findings
 
 
@@ -211,6 +289,44 @@ def self_test() -> int:
         False,
     )
 
+    def ref_case(label: str, config_src: str, adapter_src: str, want_findings: bool) -> None:
+        got = evaluate_base_refs(config_src, adapter_src)
+        if bool(got) != want_findings:
+            fails.append(f"{label}: expected findings={want_findings}, got {got}")
+
+    good_enum = 'enum class WriterBaseRef(val ref: String) {\n MAIN("main"),\n QUALIFICATION("qualification/flaky-test-hunter"),\n}\n'
+    good_adapter = 'send("GET", "/git/ref/heads/${baseRef.ref}", null)\nsend("GET", "/contents/$path?ref=${baseRef.ref}", null)\n'
+    ref_case("the two declared refs, taken from config, are clean", good_enum, good_adapter, False)
+    ref_case(
+        "an extra ref value is FLAGGED",
+        good_enum.replace("}\n", ' RELEASE("release/x"),\n}\n'),
+        good_adapter,
+        True,
+    )
+    ref_case("a removed enum is FLAGGED", "", good_adapter, True)
+    ref_case("an enum without main is FLAGGED", 'enum class WriterBaseRef(val ref: String) { Q("qualification/flaky-test-hunter") }', good_adapter, True)
+    ref_case("a hard-coded heads ref is FLAGGED", good_enum, 'send("GET", "/git/ref/heads/main", null)\n', True)
+    ref_case("a hard-coded contents ref is FLAGGED", good_enum, 'send("GET", "/contents/$path?ref=release", null)\n', True)
+
+    def manifest(snap: str, writer: str) -> str:
+        return (
+            f"          env:\n            - name: SNAPSHOT_REF\n              value: {snap}\n"
+            f"            - name: FLAKY_TEST_HUNTER_WRITER_BASE_REF\n              value: {writer}\n"
+        )
+
+    for label, snap, writer, want in [
+        ("main/main is clean", "main", "main", False),
+        ("qualification on both sides is clean", "qualification/flaky-test-hunter", "qualification", False),
+        ("snapshot main, writer qualification is FLAGGED", "main", "qualification", True),
+        ("snapshot qualification, writer main is FLAGGED", "qualification/flaky-test-hunter", "main", True),
+        ("an unknown writer value is FLAGGED", "main", "release", True),
+    ]:
+        got = evaluate_manifest(manifest(snap, writer), good_enum)
+        if bool(got) != want:
+            fails.append(f"manifest {label}: expected findings={want}, got {got}")
+    if evaluate_manifest("", good_enum) == []:
+        fails.append("a manifest with neither env var is not flagged")
+
     # A fixture-only self-test cannot notice that this script's subjects stopped existing.
     if not ADAPTER.exists():
         fails.append(f"the adapter this gate checks is missing: {ADAPTER}")
@@ -241,7 +357,7 @@ def self_test() -> int:
         return 1
     print(
         f"self-test ok: bounded write surface is falsifiable "
-        f"({8 + len(FORBIDDEN_ENDPOINTS)} cases + a live read of the adapter and rules.yaml)"
+        f"({20 + len(FORBIDDEN_ENDPOINTS)} cases + a live read of the adapter and rules.yaml)"
     )
     return 0
 
@@ -268,12 +384,25 @@ def main() -> int:
 
     gatelib.subjects(len(money), "money_path_services entries the bound is checked against")
 
-    findings = evaluate(ADAPTER.read_text(), money) + duplicate_bounds(MAIN_SRC)
+    if not CONFIG.exists():
+        print(f"::error::{CONFIG} not found — this check must not pass vacuously.")
+        return 1
+    findings = (
+        evaluate(ADAPTER.read_text(), money)
+        + duplicate_bounds(MAIN_SRC)
+        + evaluate_base_refs(CONFIG.read_text(), ADAPTER.read_text())
+        + (
+            evaluate_manifest(MANIFEST.read_text(), CONFIG.read_text())
+            if MANIFEST.exists()
+            else [f"{relative(MANIFEST)} not found — the snapshot/writer ref agreement cannot be checked"]
+        )
+    )
     if not findings:
         print(
             "agent bounded write surface: flaky-test-hunter's GitHub writer is still confined to "
             f"its own src/test tree, outside all {len(money)} money_path_services, with no "
-            "merge/approve/review-request endpoint, declared in exactly one place."
+            "merge/approve/review-request endpoint, declared in exactly one place, targeting only "
+            f"{sorted(ALLOWED_BASE_REFS)}."
         )
         return 0
 

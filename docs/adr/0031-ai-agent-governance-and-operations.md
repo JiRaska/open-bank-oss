@@ -453,3 +453,27 @@ without rewriting historical actors or evidence. Duplicates preserve original ob
 changed policy identities conflict. Deploy the new reader/UI and verify capabilities and actual
 image readiness before policy backfill; an old UI can drop the new proof and must not be used
 as an audit-completeness check. No deployment hold, Pact gate or review requirement is waived.
+
+## Amendment 2026-11-14: phase-3 proof runs against a seeded qualification branch
+
+The phase-3 writer has exactly one eligible repair: adding `: Unit` to an expression-body
+`runBlocking` test in its own test tree. The enforced `test-runblocking-unit-guard` gate keeps that
+shape off `main`, and the writer scans a `main` snapshot and re-reads `main` before writing. A live,
+policy-allowed repair PR against `main` therefore cannot occur, and planting the defect on `main`
+would either be refused by CI or leave a test silently not running there. The 2026-11-10 evidence
+correctly stops at a ticket for that reason.
+
+Decision: the phase-3 live-write proof runs against the protected branch
+`qualification/flaky-test-hunter`, cut from `main` with one seeded defect in the agent's own test
+tree. The writer's ref is a closed enum (`WriterBaseRef`: `main`, `qualification`); an unknown value
+fails at boot. Scan snapshot and writer must name the same ref. Both bounds, and the two-value set
+itself, are held by `check-agent-bounded-write-surface.py`, so widening the target refs needs this
+ADR and that gate, not a configuration change.
+
+What this does not change: the bounded path, the single mechanical repair, the charter and OPA
+pre-flight, fail-closed behaviour, and human disposition. The qualification branch is protected
+like `main` against direct pushes; the agent opens a PR into it and a human merges. Every
+qualification PR body says the defect was seeded and that it is not a repair of `main`, and the
+phase-3 evidence must say the same. Production returns to `main` by reverting the GitOps ref.
+A merged qualification PR proves the live write path end to end; it is not evidence that the agent
+finds organic defects, and it grants no wider write scope.

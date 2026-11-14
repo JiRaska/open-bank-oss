@@ -11,6 +11,7 @@ import com.openbank.flakytest.application.port.out.GitHubProposalPort.Companion.
 import com.openbank.flakytest.domain.model.FlakyTestCheckType
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.infrastructure.config.FlakyTestHunterConfig
+import com.openbank.flakytest.infrastructure.config.WriterBaseRef
 import com.openbank.libs.security.EgressPolicy
 import com.openbank.libs.security.EgressRequest
 import com.openbank.libs.security.EgressResolver
@@ -76,7 +77,7 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
                     log.warnf("Refusing ambiguous Unit-return repair for finding %s", finding.id)
                     return@withContext null
                 }
-                val baseSha = getMainSha() ?: return@withContext null
+                val baseSha = getBaseSha() ?: return@withContext null
                 val branch = prBranchFor(finding.id)
                 if (!createBranch(branch, baseSha)) return@withContext null
                 val title = "fix(flaky-test-hunter): restore JUnit test execution"
@@ -116,8 +117,10 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
             BoundedTestPath.isSafe(finding.filePath) &&
             fix == ADD_EXPLICIT_UNIT_RETURN_TYPE
 
-    private fun getMainSha(): String? {
-        val response = send("GET", "/git/ref/heads/main", null) ?: return null
+    private val baseRef: WriterBaseRef get() = config.writerBaseRef()
+
+    private fun getBaseSha(): String? {
+        val response = send("GET", "/git/ref/heads/${baseRef.ref}", null) ?: return null
         if (response.status !in OK_RANGE) return null
         return objectMapper.readTree(response.bodyAsString()).path("object").path("sha").asText().takeIf {
             it.isNotBlank()
@@ -125,7 +128,7 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
     }
 
     private fun getFile(path: String): SourceFile? {
-        val response = send("GET", "/contents/$path?ref=main", null) ?: return null
+        val response = send("GET", "/contents/$path?ref=${baseRef.ref}", null) ?: return null
         if (response.status !in OK_RANGE) return null
         val body = objectMapper.readTree(response.bodyAsString())
         val sha = body.path("sha").asText()
@@ -167,18 +170,26 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
             the diff and merge it through the repository's ordinary protected-branch policy.
 
             Refs ADR-0031 D9 and #5281.
-        """.trimIndent()
+        """.trimIndent() + qualificationNotice()
         val request = objectMapper.writeValueAsString(
             mapOf(
                 "title" to title,
                 "head" to branch,
-                "base" to "main",
+                "base" to baseRef.ref,
                 "body" to body,
             ),
         )
         val response = send("POST", "/pulls", request) ?: return null
         if (response.status !in OK_RANGE) return null
         return objectMapper.readTree(response.bodyAsString()).path("html_url").asText().takeIf { it.isNotBlank() }
+    }
+
+    /** A qualification PR must never read as an organic repair of `main` in the evidence trail. */
+    private fun qualificationNotice(): String = if (baseRef == WriterBaseRef.MAIN) {
+        ""
+    } else {
+        "\n\nQualification run: this targets `${baseRef.ref}`, whose defect was SEEDED on purpose to " +
+            "prove the live writer path (ADR-0031 D9 amendment 2026-11-14). It is not a repair of `main`."
     }
 
     private fun send(method: String, path: String, body: String?): EgressResponse? {
