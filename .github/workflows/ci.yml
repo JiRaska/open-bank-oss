@@ -331,6 +331,8 @@ jobs:
           OPENBANK_E2E_SERVER: "production"
           OPENBANK_E2E_PREBUILT: "true"
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e/playwright.xml"
+          # ADR-0370 U7: every checked /api/svc mock, replayed by the version-skew step below.
+          OPENBANK_CONTRACT_CAPTURE: "${{ github.workspace }}/openbank-admin-ui/build/test-results/e2e/contract-capture.jsonl"
 
       # ADR-0370 U2: quarantined tests (e2e/flaky-quarantine.json) are excluded from the gating
       # run above and run here, non-gating, so a fix can be seen before the entry expires.
@@ -365,6 +367,16 @@ jobs:
           OPENBANK_E2E_PREBUILT: "true"
           OPENBANK_E2E_PERF: "only"
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e-perf/playwright.xml"
+
+      # ADR-0370 U7: replay the captured mocks against each service's openapi.yaml at its latest
+      # release tag. A mock valid on this branch but not against the released spec means the UI
+      # depends on a shape the deployed service does not serve yet. Non-gating until it has a
+      # run history; it needs one ls-remote and one shallow tag fetch.
+      - name: Contract version skew (non-gating)
+        if: always() && steps.browser_e2e.outcome != 'skipped'
+        continue-on-error: true
+        timeout-minutes: 5
+        run: node scripts/contract-version-skew.ts build/test-results/e2e/contract-capture.jsonl
 
       # ADR-0370 U2: a test that passed only on retry is otherwise invisible behind `retries: 1`.
       # Advisory until the flake rate has a measured baseline: warns and writes the step summary.
