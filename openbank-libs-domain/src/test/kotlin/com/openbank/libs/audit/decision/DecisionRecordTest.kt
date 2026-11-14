@@ -18,6 +18,14 @@ class DecisionRecordTest {
 
     private fun digest() = InputDigest.sha256(mapOf("principal" to "party-1", "action" to "account.freeze"))
 
+    private fun shadowOutcome() = DecisionOutcome.Shadow(
+        result = DecisionOutcome.Shadow.Result.INCOMPLETE,
+        epoch = Long.MAX_VALUE,
+        artifactHash = InputDigest("a".repeat(64)),
+        approvedEvidenceHash = InputDigest("b".repeat(64)),
+        outputHash = InputDigest("c".repeat(64)),
+    )
+
     private fun retentionFor(decisionClass: DecisionClass) = when (decisionClass) {
         DecisionClass.CREDIT -> DecisionRetentionClass.CREDIT_EVIDENCE
         else -> DecisionRetentionClass.AUDIT_LOG_5Y
@@ -299,6 +307,7 @@ class DecisionRecordTest {
                 DecisionClass.FRAUD -> DecisionOutcome.Fraud.PASS
                 DecisionClass.CREDIT -> DecisionOutcome.Credit.APPROVE
                 DecisionClass.AGENT -> DecisionOutcome.Agent.PROPOSED
+                DecisionClass.SHADOW -> shadowOutcome()
             }
             authzRecord(decisionClass = decisionClass, outcome = outcome, retentionClass = correct)
             assertThatThrownBy {
@@ -371,6 +380,22 @@ class DecisionRecordTest {
     }
 
     @Test
+    fun `shadow evidence uses its own versioned wire outcome and requires its exact pins`() {
+        val outcome = shadowOutcome()
+        val wire = with(DecisionOutcome) { outcome.toMap() }
+        assertThat(wire).containsEntry("kind", "SHADOW_V1").containsEntry("epoch", Long.MAX_VALUE.toString())
+        assertThat(DecisionOutcome.fromMap(wire)).isEqualTo(outcome)
+        assertThatThrownBy { DecisionOutcome.fromMap(wire + ("epoch" to "01")) }
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("DecisionOutcome.epoch")
+        assertThatThrownBy { DecisionOutcome.fromMap(wire + ("epoch" to "0")) }
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("DecisionOutcome.epoch")
+        assertThatThrownBy { DecisionOutcome.fromMap(wire - "approvedEvidenceHash") }
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("approvedEvidenceHash")
+        assertThatThrownBy { authzRecord(decisionClass = DecisionClass.FRAUD, outcome = outcome) }
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("decisionClass=FRAUD")
+    }
+
+    @Test
     fun `DecisionRecord round-trips every decisionClass through toMap fromMap`() {
         DecisionClass.entries.forEach { decisionClass ->
             val outcome = when (decisionClass) {
@@ -378,6 +403,7 @@ class DecisionRecordTest {
                 DecisionClass.FRAUD -> DecisionOutcome.Fraud.REVIEW
                 DecisionClass.CREDIT -> DecisionOutcome.Credit.REFER
                 DecisionClass.AGENT -> DecisionOutcome.Agent.EXECUTED
+                DecisionClass.SHADOW -> shadowOutcome()
             }
             val record = authzRecord(decisionClass = decisionClass, outcome = outcome).copy(
                 reasons = listOf(

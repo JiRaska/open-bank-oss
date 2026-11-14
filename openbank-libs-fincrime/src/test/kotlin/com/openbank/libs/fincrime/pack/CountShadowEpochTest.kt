@@ -6,6 +6,9 @@ package com.openbank.libs.fincrime.pack
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.openbank.libs.audit.decision.DecisionClass
+import com.openbank.libs.audit.decision.DecisionOutcome
+import com.openbank.libs.audit.decision.DecisionRecord
 import com.openbank.libs.fincrime.vocabulary.FincrimeVocabularyJson
 import com.openbank.libs.governance.MakerCheckerViolation
 import org.assertj.core.api.Assertions.assertThat
@@ -15,7 +18,11 @@ import org.junit.jupiter.api.Test
 import java.security.KeyPairGenerator
 import java.security.Signature
 import java.time.Instant
+import java.util.Base64
 import java.util.UUID
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.startCoroutine
 
 class CountShadowEpochTest {
     private val signer = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
@@ -116,6 +123,152 @@ class CountShadowEpochTest {
         }
         val result = candidate.evaluate(candidate.reference, at, oversized.observations)
         assertThat(result).isEqualTo(CountEvaluation.Incomplete(CountEvaluationFailure.INVALID_INPUT))
+    }
+
+    @Test
+    fun `the existing DecisionRecord preserves exact shadow pins for both outcomes and domains`() {
+        for (domain in PackDomain.entries) {
+            val (baseline, candidate) = fixtures(domain)
+            val replay = CountShadowReplay.evidence(baseline, candidate, cases)
+            val pinned = verify(epoch(replay), candidate, replay)
+            val evaluated = DecisionRecord.fromMap(
+                pinned.decisionRecord(UUID.randomUUID(), "synthetic-subject", at, listOf(input), atomic = true),
+            )
+            val incomplete = DecisionRecord.fromMap(
+                pinned.decisionRecord(UUID.randomUUID(), "synthetic-subject", at, emptyList(), atomic = false),
+            )
+            assertThat(evaluated.decisionClass).isEqualTo(DecisionClass.SHADOW)
+            assertThat(evaluated.engine.id).isEqualTo(candidate.reference.id)
+            assertThat(evaluated.engine.version).isEqualTo(candidate.reference.revision.toString())
+            assertThat(evaluated.atomic).isTrue()
+            assertThat(incomplete.atomic).isFalse()
+            val first = evaluated.outcome as DecisionOutcome.Shadow
+            val second = incomplete.outcome as DecisionOutcome.Shadow
+            assertThat(first.result).isEqualTo(DecisionOutcome.Shadow.Result.EVALUATED)
+            assertThat(second.result).isEqualTo(DecisionOutcome.Shadow.Result.INCOMPLETE)
+            assertThat(first.artifactHash.hex).isEqualTo(candidate.reference.contentHash)
+            assertThat(first.approvedEvidenceHash.hex).isEqualTo(replay.digest)
+            assertThat(first.epoch).isEqualTo(1)
+            assertThat(first.outputHash).isNotEqualTo(second.outputHash)
+            assertThat(evaluated.inputDigest).isNotEqualTo(incomplete.inputDigest)
+            val oversized = List(CompiledCountPack.MAX_RULES + 1) { input }
+            assertThatIllegalArgumentException().isThrownBy {
+                pinned.decisionRecord(UUID.randomUUID(), "synthetic-subject", at, oversized, atomic = false)
+            }
+        }
+    }
+
+    @Test
+    fun `durable ledger schedules both domains independently and replays after a rollback`() = immediate {
+        for (domain in PackDomain.entries) {
+            val (baseline, candidate) = fixtures(domain)
+            val publishAt = at.minusMillis(500)
+            val first = signed(epoch(CountShadowReplay.evidence(baseline, candidate, cases)))
+            val rollback = signed(
+                epoch(CountShadowReplay.evidence(candidate, baseline, cases)).copy(
+                    number = 2,
+                    effectiveAt = at.plusSeconds(2),
+                ),
+            )
+            val store = MemoryEpochStore()
+            val trust = trusted(baseline, candidate, first, rollback)
+            val writer = CountShadowEpochLedger(store, trust)
+            val secondReplica = CountShadowEpochLedger(store, trust)
+            assertThat(writer.publish(domain, first, null, publishAt)).isEqualTo(CountShadowAppendOutcome.APPENDED)
+            assertThat(secondReplica.pin(domain, publishAt)).isNull()
+            assertThat(writer.publish(domain, rollback, null, publishAt)).isEqualTo(CountShadowAppendOutcome.CONFLICT)
+            assertThat(writer.publish(domain, rollback, 1, publishAt)).isEqualTo(CountShadowAppendOutcome.APPENDED)
+            val firstPin = requireNotNull(secondReplica.pin(domain, at))
+            assertThat(firstPin.evaluate(at, listOf(input)).pack).isEqualTo(candidate.reference)
+            val rolledBack = requireNotNull(secondReplica.pin(domain, at.plusSeconds(2)))
+            assertThat(rolledBack.evaluate(at.plusSeconds(2), listOf(input)).pack).isEqualTo(baseline.reference)
+            assertThat(firstPin.evaluate(at, listOf(input)).epoch).isEqualTo(1)
+            assertThat(
+                writer.publish(domain, first, null, at.plusSeconds(3)),
+            ).isEqualTo(CountShadowAppendOutcome.REPLAYED)
+            val conflicting = signed(first.epoch.copy(proposalId = UUID.randomUUID()))
+            assertThat(writer.publish(domain, conflicting, null, at)).isEqualTo(CountShadowAppendOutcome.CONFLICT)
+            assertThat(first.digest).isNotEqualTo(conflicting.digest)
+        }
+        Unit
+    }
+
+    @Test
+    fun `durable publish refuses unapproved backdated skipped and unrelated snapshots`() {
+        val domain = PackDomain.FRAUD
+        val (baseline, candidate) = fixtures(domain)
+        val publishAt = at.minusMillis(500)
+        val first = signed(epoch(CountShadowReplay.evidence(baseline, candidate, cases)))
+        val badNext =
+            signed(first.epoch.copy(number = 2, effectiveAt = at.plusSeconds(1), proposalId = UUID.randomUUID()))
+        val skipped = signed(first.epoch.copy(number = 4, proposalId = UUID.randomUUID()))
+        val store = MemoryEpochStore()
+        val writer = CountShadowEpochLedger(store, trusted(baseline, candidate, first, badNext, skipped))
+        val unapproved = signed(first.epoch.copy(proposalId = UUID.randomUUID()))
+        for (attempt in listOf(unapproved to publishAt, first to at.plusMillis(1), skipped to publishAt)) {
+            assertThatIllegalArgumentException().isThrownBy {
+                immediate { writer.publish(domain, attempt.first, null, attempt.second) }
+            }
+        }
+        immediate { writer.publish(domain, first, null, publishAt) }
+        assertThatIllegalArgumentException().isThrownBy { immediate { writer.publish(domain, badNext, 1, publishAt) } }
+        assertThatIllegalArgumentException().isThrownBy {
+            immediate { CountShadowEpochLedger(store, trusted(baseline, candidate)).pin(domain, at) }
+        }
+        assertThatIllegalArgumentException().isThrownBy { SignedCountShadowEpoch(first.epoch, "broken") }
+        assertThatIllegalArgumentException().isThrownBy {
+            val raw = Base64.getEncoder().encodeToString(ByteArray(64))
+            SignedCountShadowEpoch(first.epoch, raw.dropLast(3) + "B==")
+        }
+        assertThatIllegalArgumentException().isThrownBy { RecordedCountShadowEpoch(domain, 1, first, publishAt) }
+        assertThatIllegalArgumentException().isThrownBy {
+            RecordedCountShadowEpoch(domain, null, first, at.plusMillis(1))
+        }
+    }
+
+    private fun signed(epoch: CountShadowEpoch) =
+        SignedCountShadowEpoch(epoch, Base64.getEncoder().encodeToString(sign(epoch)))
+
+    private fun trusted(
+        baseline: CompiledCountPack,
+        candidate: CompiledCountPack,
+        vararg approved: SignedCountShadowEpoch,
+    ): CountShadowTrust = object : CountShadowTrust {
+        override fun keys() = this@CountShadowEpochTest.keys()
+
+        override suspend fun compiledPack(domain: PackDomain, reference: PackRef) =
+            listOf(baseline, candidate).singleOrNull { it.domain == domain && it.reference == reference }
+
+        override suspend fun approvedReplay(epoch: CountShadowEpoch, domain: PackDomain) =
+            approved.singleOrNull { it.epoch == epoch && candidate.domain == domain }?.epoch?.replay
+    }
+
+    private fun <T> immediate(block: suspend () -> T): T {
+        var result: Result<T>? = null
+        block.startCoroutine(object : Continuation<T> {
+            override val context = EmptyCoroutineContext
+            override fun resumeWith(value: Result<T>) {
+                result = value
+            }
+        })
+        return requireNotNull(result).getOrThrow()
+    }
+
+    private class MemoryEpochStore : CountShadowEpochStore {
+        private val history = mutableListOf<RecordedCountShadowEpoch>()
+
+        override suspend fun latest(domain: PackDomain) = history.lastOrNull { it.domain == domain }
+
+        override suspend fun recorded(domain: PackDomain, number: Long) =
+            history.singleOrNull { it.domain == domain && it.envelope.epoch.number == number }
+
+        override suspend fun effectiveAt(domain: PackDomain, at: Instant) =
+            history.lastOrNull { it.domain == domain && it.envelope.epoch.effectiveAt <= at }
+
+        override suspend fun append(record: RecordedCountShadowEpoch): CountShadowAppendOutcome {
+            history += record
+            return CountShadowAppendOutcome.APPENDED
+        }
     }
 
     private fun fixtures(domain: PackDomain): Pair<CompiledCountPack, CompiledCountPack> {

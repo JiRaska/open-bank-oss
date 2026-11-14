@@ -90,7 +90,7 @@ env:
   # Expedite lane (ADR-0343 amendment 2026-11-13): one extra carrier holding ONE `merge-priority:expedite`
   # PR may run beside one ordinary carrier and merges first; the overtaken carrier is rebuilt with no
   # verdict. "false" is the rollback: the label only reorders, as before. The cap bounds the CI it costs.
-  MERGE_TRAIN_EXPEDITE_LANE: "false"
+  MERGE_TRAIN_EXPEDITE_LANE: "true"
   MERGE_TRAIN_EXPEDITE_DAILY_CAP: "6"
 
 jobs:

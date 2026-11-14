@@ -11,7 +11,8 @@ info:
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
   # 1.12.0 -> 1.13.0: additive durable company-scoped business payment batch drafts.
-  version: 1.14.0
+  # 1.14.0 -> 1.16.0: optional original-submission digest header and bound approval release route (1.15.0 is claimed by #15976).
+  version: 1.16.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -38,6 +39,8 @@ paths:
         X-Idempotency-Replayed=true. Reusing the key for a different normalized payment command,
         actor scope, delegation or reservation is refused with 409 IDEMPOTENCY_KEY_REUSED. A
         pre-upgrade row without a durable request fingerprint also fails closed with that response.
+        For a mode-bound business approval release, verified customer-edge supplies the original-key digest.
+        The digest binds that release to the same namespace as prior direct payments and is required on exact replay.
         A ROLE_API machine may create only as a scoped initiator declared in rules.yaml
         scoped_payment_initiators (ADR-0335 D5, e.g. pension-service), and only from its one
         configured debtor account; anything else is 403 before the key is claimed.
@@ -48,6 +51,13 @@ paths:
           required: true
           schema:
             type: string
+        - name: X-OpenBank-Original-Submission-Key-Digest
+          in: header
+          required: false
+          description: Original business submission digest for approval releases by verified customer-edge only.
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
       requestBody:
         required: true
         content:
@@ -68,7 +78,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/DomesticPaymentResponse'
         '409':
-          description: Idempotency-Key is already bound to a different or unverifiable legacy request
+          description: Rail or original submission key is already bound to a different or unverifiable request
           content:
             application/problem+json:
               schema:
@@ -113,14 +123,63 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/domestic-payments/approval-releases:
+    post:
+      tags: [Domestic Payments]
+      summary: Release a mode-bound domestic approval
+      description: >-
+        Verified customer-edge sends the approval ID as the rail key and the original business
+        submission digest as separate metadata. Uses the unchanged frozen domestic instruction.
+      operationId: releaseDomesticPaymentApproval
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: The approval ID used as the rail transport key.
+          schema: {type: string, minLength: 1, maxLength: 128}
+        - name: X-OpenBank-Original-Submission-Key-Digest
+          in: header
+          required: true
+          schema: {type: string, pattern: '^[0-9a-f]{64}$'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDomesticPaymentRequest'
+      responses:
+        '201':
+          description: Payment created, or the durable result of an exact approval release replay
+          headers:
+            X-Idempotency-Replayed:
+              description: Present and true only when this response replays an existing payment.
+              schema: {type: string, enum: ['true']}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomesticPaymentResponse'
+        '400':
+          description: Missing or malformed release metadata or invalid domestic instruction
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Rail or original submission key is already bound to a different or unverifiable request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/IdempotencyConflictResponse'
+
   /api/v1/domestic-payments/submissions/lookup:
     post:
       tags: [Domestic Payments]
       summary: Look up a customer payment submission
       description: >-
-        Read-only endpoint for the verified customer-edge workload. Matches the original key,
-        debit account and stored customer submission scope. A missing or mismatched record
-        returns UNKNOWN and makes no claim about whether a payment was made.
+        Read-only endpoint for the verified customer-edge workload. Matches the rail key, debit account,
+        stored customer submission scope and original submission digest. For ordinary direct submissions
+        omit the digest and supply the original key. For mode-bound releases supply the approval ID as
+        the rail key and the original digest. A missing or mismatched record returns UNKNOWN.
       operationId: lookupDomesticPaymentSubmission
       security:
         - bearerAuth: []
@@ -139,6 +198,10 @@ paths:
               properties:
                 debtorAccountId: {type: string, format: uuid}
                 customerSubmissionScope: {type: string, pattern: '^[0-9a-f]{64}$'}
+                originalSubmissionKeyDigest:
+                  type: string
+                  pattern: '^[0-9a-f]{64}$'
+                  description: Required to reconcile a mode-bound approval release.
       responses:
         '200':
           description: Current durable state, or UNKNOWN when the exact submission cannot be established
@@ -571,6 +634,10 @@ components:
             status:
               type: string
               enum: [RECEIVED, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
+            originalSubmissionKeyDigest:
+              type: string
+              pattern: '^[0-9a-f]{64}$'
+              description: Stored digest echoed on an exact mode-bound release match only.
           additionalProperties: false
 
     CreateDomesticPaymentRequest:
