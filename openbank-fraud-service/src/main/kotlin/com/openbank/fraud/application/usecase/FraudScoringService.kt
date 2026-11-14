@@ -5,6 +5,7 @@
 package com.openbank.fraud.application.usecase
 
 import com.openbank.fraud.application.port.`in`.ScoreFraudUseCase
+import com.openbank.fraud.application.port.out.CounterpartyKeyPort
 import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.FraudScoreRepository
 import com.openbank.fraud.application.port.out.FraudThresholdRepository
@@ -13,6 +14,7 @@ import com.openbank.fraud.application.port.out.PayeeHistoryRepository
 import com.openbank.fraud.application.port.out.ScoredRecord
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
 import com.openbank.fraud.domain.model.FraudScore
+import com.openbank.fraud.domain.model.FraudVerdict
 import com.openbank.fraud.domain.model.ScoreRequest
 import com.openbank.fraud.domain.model.VelocityWindow
 import com.openbank.fraud.domain.rules.FraudRuleEngine
@@ -75,13 +77,18 @@ class FraudScoringService @Inject constructor(
     @Inject
     lateinit var thresholdRepo: FraudThresholdRepository
 
+    // Same field-injection reason as above (ADR-0377 D3 counterparty keying).
+    @Inject
+    lateinit var counterpartyKeys: CounterpartyKeyPort
+
     private val log = Logger.getLogger(FraudScoringService::class.java)
 
     override suspend fun score(request: ScoreRequest): FraudScore {
-        val enriched = enrichWithPayeeHistory(enrichWithVelocity(request))
+        val enriched = enrichWithPayeeHistory(enrichWithVelocity(keyCounterparty(request)))
         val thresholds = thresholdRepo.findActive(Instant.now(clock)) // null -> engine fails closed (REVIEW)
         val result = FraudRuleEngine.score(enriched, thresholds) // the ONLY thing that determines the verdict
         repository.save(enriched, result)
+        recordAllowedPayee(enriched, result.verdict)
         metrics.recordVerdict(result.verdict, enriched.rail)
         runShadow(enriched, result) // logs + metrics only; its outcome is discarded
         // ADR-0220 D3.5 (issue #2749): same fire-and-forget, side-effect-only slot as runShadow —
@@ -147,8 +154,35 @@ class FraudScoringService @Inject constructor(
      */
     private suspend fun enrichWithPayeeHistory(request: ScoreRequest): ScoreRequest {
         val accountId = request.accountId ?: return request
-        val counterpartyId = request.counterpartyId ?: return request
-        val history = payeeHistoryRepo.findHistory(accountId, counterpartyId.toString())
+        val payeeKey = request.payeeKey ?: return request
+        val history = payeeHistoryRepo.findHistory(accountId, payeeKey)
         return request.copy(isNewPayee = history == null)
+    }
+
+    /**
+     * ADR-0377 D3: replaces the caller's raw payee account with its keyed pseudonym and drops the
+     * raw value, so nothing downstream (audit row, hold, shadow log) can see it. With no key
+     * configured the counterparty is unavailable — never hashed unkeyed — and the rule behaves as
+     * before D3, which the metric makes visible.
+     */
+    private fun keyCounterparty(request: ScoreRequest): ScoreRequest {
+        val account = request.counterparty ?: return request
+        val ref = counterpartyKeys.key(account)
+        if (ref == null) metrics.recordCounterpartyKeyMissing()
+        return request.copy(counterparty = null, counterpartyRef = ref)
+    }
+
+    /**
+     * ADR-0377 D3: a `counterpartyRef` payee has no other writer — the `transaction.initiated`
+     * signal only carries an internal target account id — so without this a payee at another bank
+     * would read as new on every payment, forever. Recorded only on [FraudVerdict.ALLOW]: a held or
+     * declined payment must not make its payee "established" (a retry after a REVIEW is reviewed
+     * again). The legacy counterpartyId key keeps its signal-plane writer and is not touched here.
+     */
+    private suspend fun recordAllowedPayee(request: ScoreRequest, verdict: FraudVerdict) {
+        if (verdict != FraudVerdict.ALLOW) return
+        val accountId = request.accountId ?: return
+        val ref = request.counterpartyRef ?: return
+        payeeHistoryRepo.recordPayment(accountId, ref, null, Instant.now(clock))
     }
 }
