@@ -275,9 +275,11 @@ mp:
     rest-client:
       party-service:
         tls-configuration-name: party-authority
-      # Both authority providers trust the mounted Delegation client certificate.
+      # The private KYB listener trusts the Delegation client certificate.
       kyb-service:
         url: ${KYB_SERVICE_URL:https://localhost:8443}
+        connect-timeout: 2000
+        read-timeout: 2000
         tls-configuration-name: party-authority
       document-service:
         tls-configuration-name: disclosure

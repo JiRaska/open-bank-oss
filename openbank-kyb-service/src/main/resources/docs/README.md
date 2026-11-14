@@ -2,6 +2,11 @@
 
 Legal-entity verification and business onboarding (ADR-0284).
 
+## Statutory representation contract verification
+
+The Delegation consumer contract checks current and stale revisions and refusal of the shared
+workload identity. The KYB provider replays those interactions against its HTTP resource in CI.
+
 ## Interface
 
 The committed `src/main/resources/openapi.yaml` defines the API contract. Read `/q/openapi` on the running service for the exact paths, request bodies, responses, and contract version of its image.

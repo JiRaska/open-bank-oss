@@ -2,6 +2,13 @@
 
 Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over products (accounts, savings goals, cards) and single objects (payment, statement, document).
 
+## KYB authority client
+
+The statutory representation read contract uses the named Delegation workload and the private
+KYB listener over mTLS in deployed profiles. The client declares 2-second connect and read limits.
+Pact replays current, stale, and unauthorized revisions against KYB. The JOINT signing flow consumes
+this contract once its source and transport prerequisites are deployed.
+
 ## Interface
 
 The committed `src/main/resources/openapi.yaml` defines the API contract. Read `/q/openapi` on the running service for the exact paths, request bodies, responses, and contract version of its image.
