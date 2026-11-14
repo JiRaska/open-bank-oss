@@ -29,7 +29,7 @@
     { "templateId": "F01.03", "rowRef": "r0210", "colRef": "c0010", "datapointId": 32450, "meaning": "OTHER RESERVES" },
     { "templateId": "F01.03", "rowRef": "r0250", "colRef": "c0010", "datapointId": 32456, "meaning": "PROFIT OR LOSS ATTRIBUTABLE TO OWNERS" },
     { "templateId": "F01.03", "rowRef": "r0300", "colRef": "c0010", "datapointId": 32464, "meaning": "TOTAL EQUITY" },
-    { "templateId": "F01.03", "rowRef": "r0310", "colRef": "c0010", "datapointId": null, "meaning": "TOTAL EQUITY AND LIABILITIES" },
+    { "templateId": "F01.03", "rowRef": "r0310", "colRef": "c0010", "datapointId": 32654, "meaning": "TOTAL EQUITY AND LIABILITIES" },
     { "templateId": "F02.00", "rowRef": "r0010", "colRef": "c0010", "datapointId": 33853, "meaning": "INTEREST INCOME" },
     { "templateId": "F02.00", "rowRef": "r0051", "colRef": "c0010", "datapointId": 152255, "meaning": "INTEREST INCOME ON FINANCIAL ASSETS AT AMORTISED COST" },
     { "templateId": "F02.00", "rowRef": "r0090", "colRef": "c0010", "datapointId": 33803, "meaning": "INTEREST EXPENSE" },

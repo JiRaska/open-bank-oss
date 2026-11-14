@@ -19,6 +19,23 @@ cat > "$tmp/bin/python3" <<'STUB'
 if [ "${1:-}" = ".github/scripts/verify-successful-service-ci.py" ]; then
   if [ "${2:-}" = "--resolve-reconcile-sources" ]; then
     echo "$*" >> "$SERVICE_CI_LOG"
+    if [ "${RESOLVER_MODE:-}" = partial ]; then
+      # The real resolver read every run and proved some services only: exit 3, proven half
+      # on stdout. RESOLVER_UNRESOLVED names the services it found no source for.
+      resolved='{}'; unresolved='[]'
+      for svc in $(jq -r '.[]' <<< "${3:?}"); do
+        if [[ " ${RESOLVER_UNRESOLVED:-} " == *" $svc "* ]]; then
+          unresolved="$(jq -cn --argjson old "$unresolved" --arg svc "$svc" '$old + [$svc]')"
+        else
+          resolved="$(jq -cn --argjson old "$resolved" --arg svc "$svc" --arg sha "$RESOLVER_SHA" \
+            '$old + {($svc): {sha: $sha, run_id: "fixture-run", attempt: 2}}')"
+        fi
+      done
+      echo "::error::reconcile source refused: no source for ${RESOLVER_UNRESOLVED:-}" >&2
+      jq -cn --argjson r "$resolved" --argjson u "${RESOLVER_FORGED_UNRESOLVED:-$unresolved}" \
+        '{resolved: $r, unresolved: $u}'
+      exit 3
+    fi
     if [ -z "${GH_TOKEN:-}" ] || [ "${RESOLVER_MODE:-failure}" != "success" ] || \
        [ -z "${RESOLVER_SHA:-}" ]; then
       echo "::error::no successful historical Services CI source" >&2
@@ -542,6 +559,56 @@ printf 'class Example\n' > "$positive/openbank-demo-service/src/main/Example.kt"
   echo "PASS: exact Services CI proof for three services is one batch verifier call"
 )
 echo "PASS: mid-history source recovery selects exact successful CI/Pact SHA over a mismatched latest-main version"
+
+# One service without a proven source must not strand its proven peer (2026-11-11..13: a
+# sanctions-service fix sat undeployed for two days because anacredit and card-issuance had no
+# Services CI source, and the batch resolver refused the whole reconcile). The resolver now
+# answers exit 3 with the proven half; the gate refuses only the named member.
+(
+  cd "$positive"
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR
+  mkdir -p openbank-stray-service/src/main
+  printf 'plugins {}\n' > openbank-stray-service/build.gradle.kts
+  printf 'class Stray\n' > openbank-stray-service/src/main/Stray.kt
+  git add openbank-stray-service
+  git commit -qm 'a service no Services CI run has ever built'
+  OLDER_SHA="$(git rev-list --max-parents=0 HEAD)"
+  CURRENT_SHA="$(git rev-parse HEAD)"
+  export OLDER_SHA CURRENT_SHA GITHUB_SHA="$CURRENT_SHA" GITHUB_REF=refs/heads/main
+  export EVENT_NAME=schedule GITHUB_EVENT_NAME=schedule GH_TOKEN=fixture-token
+  export BROKER_MODE=source-ready LATEST_MAIN_SHA="$OLDER_SHA" INPUT_CODEPLOY=false
+  export SERVICES='["openbank-demo-service","openbank-stray-service"]'
+  export SERVICE_CI_MODE=success SERVICE_CI_EXPECTED_SOURCE="$OLDER_SHA"
+  export RESOLVER_MODE=partial RESOLVER_SHA="$OLDER_SHA" RESOLVER_UNRESOLVED=openbank-stray-service
+  export IMAGE_TAGS="{\"openbank-demo-service\":\"sandbox-${CURRENT_SHA:0:8}\",\"openbank-stray-service\":\"sandbox-${CURRENT_SHA:0:8}\"}"
+  export IMAGE_DIGESTS='{"openbank-demo-service":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","openbank-stray-service":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
+  export BUILD_IMAGE_TAG="sandbox-${CURRENT_SHA:0:8}"
+  : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"; : > "$SERVICE_CI_LOG"
+  PACT_CLI_MODE=success bash .github/scripts/can-i-deploy-gate.sh >"$tmp/partial-log" 2>&1 || true
+  if ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT" || \
+     ! grep -q '^blocked=\["openbank-stray-service"\]$' "$GITHUB_OUTPUT" || \
+     ! grep -F -- "--pacticipant openbank-demo-service --version $OLDER_SHA" "$PACT_CLI_LOG" >/dev/null || \
+     grep -q -- '--pacticipant openbank-stray-service' "$PACT_CLI_LOG" || \
+     ! grep -q 'reconcile source refused for openbank-stray-service' "$tmp/partial-log"; then
+    echo "FAIL: an unresolved service stranded its proven peer, or was itself let through" >&2
+    cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$SERVICE_CI_LOG" "$tmp/partial-log" >&2
+    exit 1
+  fi
+  echo "PASS: unresolved reconcile source refuses only its own member; the proven peer deploys"
+
+  # A partial answer that does not exactly partition the request is not trusted.
+  : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"; : > "$SERVICE_CI_LOG"
+  if RESOLVER_FORGED_UNRESOLVED='["openbank-stray-service","openbank-invented-service"]' PACT_CLI_MODE=success \
+       bash .github/scripts/can-i-deploy-gate.sh >"$tmp/partial-forged-log" 2>&1 || \
+     grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT" || \
+     grep -q '^can-i-deploy ' "$PACT_CLI_LOG"; then
+    echo "FAIL: a malformed partial resolver answer was trusted" >&2
+    cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$tmp/partial-forged-log" >&2
+    exit 1
+  fi
+  echo "PASS: a partial resolver answer that does not partition the request refuses the whole set"
+)
+
 
 # The push lane shares the block-classification/reporting path. Exercise it on Bash 3.2 too:
 # the JSON-backed class/reason maps must preserve the REGRESSION label without associative arrays.

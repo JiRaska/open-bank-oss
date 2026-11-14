@@ -31,7 +31,7 @@ metadata:
   namespace: delegation
   labels:
     app.kubernetes.io/part-of: delegation
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -73,7 +73,7 @@ metadata:
   namespace: delegation
   labels:
     app.kubernetes.io/part-of: delegation
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

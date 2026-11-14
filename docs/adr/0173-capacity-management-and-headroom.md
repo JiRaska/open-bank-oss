@@ -87,7 +87,7 @@ trade we want.
   Deployments vs 125 files mentioning `requests:`. Given §2 makes requests a correctness input, a
   missing request is a scheduling defect and belongs in admission, not in review. *(Pending)*
 - **D3 — Fix the FinOps tier drift.** `card-issuance`, `sdd-service` and `interest-service` carry
-  `openbank.io/finops-tier: T1` labels and live HTTPScaledObjects, but `rules.yaml: finops.declared`
+  `open-bank.tech/finops-tier: T1` labels and live HTTPScaledObjects, but `rules.yaml: finops.declared`
   lists only `notification-service` and `product-catalog` — and still asserts "only 2 services have a
   declared tier today". `check-finops-tiers.py` cannot catch this: it validates the declared side only,
   and is advisory. *(Pending — `finops-tier-drift`, target 2026-09-30.)*

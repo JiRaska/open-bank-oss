@@ -114,6 +114,11 @@ listed in `GsftBatch.rejected` with the reason, for correction and a follow-up t
 `T_PAYMENT` counts only persons actually rendered. Only batch-level errors (bank code, batch
 number, rate day) fail the render.
 
+Before requesting balances, GSFT excludes deposit accounts whose holder or opening is tainted by
+CEÚ. Each excluded account contributes once to `SYNTHETIC_ACCOUNTS_DROPPED`, and distinct
+synthetic holders continue to contribute to `SYNTHETIC_DEPOSITORS_DROPPED`. Balances for
+remaining deposits still use the strict read at the requested reference date.
+
 ## Data sourcing
 
 `GsftSnapshotPort.snapshot(D)` (adapter `infrastructure/returns/gsft/GsftSnapshotAdapter`) returns

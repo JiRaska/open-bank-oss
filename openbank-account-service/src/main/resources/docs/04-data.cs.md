@@ -70,6 +70,8 @@ Flyway, neměnné historické skripty, forward-only:
 | `V5__technical_accounts.sql` | Rozšíření `type` o `TECHNICAL`, partial index |
 | `V6__create_account_outbox.sql` | Tabulka `account_outbox` (transakční outbox pattern) |
 
+| `V34__account_freeze_origin.sql` | Sloupec `accounts.freeze_origin` (`OPERATOR`, `PARTY_STANDING`, null mimo stav `FROZEN`) a `chk_accounts_freeze_origin`. Zaznamenává, kdo účet zmrazil, aby návrat klienta do dobrého stavu zrušil jen zmrazení způsobená stavem klienta (ADR-0374 D4). Dříve zmrazené řádky mají null a berou se jako zmrazení operátorem |
+
 > Pozn.: V3 byla mergnuta do V4 (chybný design rejected v review).
 
 ## Indexy

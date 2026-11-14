@@ -4,4 +4,4 @@ metadata:
   name: devops-agent
   labels:
     app.kubernetes.io/part-of: openbank
-    openbank.io/component: devops-agent
+    open-bank.tech/component: devops-agent

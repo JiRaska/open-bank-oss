@@ -4,4 +4,4 @@ metadata:
   name: finrep
   labels:
     app.kubernetes.io/part-of: openbank
-    openbank.io/component: finrep
+    open-bank.tech/component: finrep

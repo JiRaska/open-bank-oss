@@ -1,0 +1,4 @@
+{
+  "_comment": "ADR-0370 U2. A quarantined test still runs, in a separate non-gating step, until it is fixed. Entry: test ('<spec file> › <title>'), owner, issue ('#n'), expires (YYYY-MM-DD, at most 30 days ahead), reason. An expired entry fails the admin-ui-flake-quarantine gate.",
+  "quarantine": []
+}

@@ -63,11 +63,13 @@ import base64
 import contextlib
 import datetime
 import fnmatch
+import http.client
 import inspect
 import io
 import json
 import os
 import pathlib
+import posixpath
 import re
 import shlex
 import subprocess
@@ -75,6 +77,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
@@ -96,6 +99,16 @@ CARRIER_LABEL = "merge-train"
 # fix for a red main, which always goes first). Agents run under the owner's token, so this is a
 # policy, not an identity check: agents never apply it (CLAUDE.md, Multi-agent).
 EXPEDITE_LABEL = "merge-priority:expedite"
+# Expedite lane (ADR-0343 amendment 2026-11-13): ONE extra carrier, holding exactly one expedited member,
+# may be published over live main while one ordinary carrier is still running, and merges first; the
+# overtaken carrier then fails its "main moved" check and is rebuilt with no verdict. The carrier is
+# identified by the App's own EXPEDITE_CONTEXT status on its head, never by its branch name: the
+# `train/<run>-<attempt>` shape is hard-coded in merge_train_carrier.py, check-security-checklist.py and
+# security.yml, and an expedite carrier is judged by exactly the same rules as any other carrier.
+EXPEDITE_CONTEXT = "merge-train/expedite-carrier"
+EXPEDITE_CARRIER_TITLE = "merge-train expedite carrier"
+EXPEDITE_LANE_DEFAULT = False      # MERGE_TRAIN_EXPEDITE_LANE; "false" = the label only reorders, as before
+EXPEDITE_DAILY_CAP_DEFAULT = 6     # expedite carriers per UTC day; the label is a policy, not an identity
 TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
 # Strict carrier (ADR-0343 amendment 2026-11-05): green strict-lane PRs that are BEHIND main are
 # batched into one execution-free tree over live main (`git merge-tree --write-tree` in settle, no
@@ -229,6 +242,7 @@ RERUN_CONTEXT = "merge-train/rerun"              # App marker: this carrier's in
 RELEASED_CONTEXT = "merge-train/strict-released"  # App marker: this head's reservation timed out once (#14302)
 CARRIER_YIELD_CONTEXT = "merge-train/carrier-yielded"   # App marker: a green carrier waited one tick for this GREEN holder head
 DEFER_CONTEXT = "merge-train/strict-deferral"   # App marker: this running strict head yielded once to a carrier
+STRICT_READY_CONTEXT = "merge-train/strict-ready-hold"   # App marker: no carrier was built for one tick for this GREEN holder head (#15827)
 # Speculative stacking (ADR-0343 amendment 2026-11-09): while a strict holder H is reserved and its CI
 # runs on an up-to-date head h, the train carrier is published over h instead of over main, so the two
 # CIs run at once instead of one after the other. Build is unchanged (it builds over main, with main's
@@ -767,9 +781,10 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
     for f in pr.get("files") or []:
         if unsafe_path(f):
             return False, "a path contains a control character — manual lane, never a train"
-        if untrainable(f):
+        if untrainable(f) and not (f == GATES_YAML and pr.get("gates_append") is True):
             return False, f"touches {f} (workflows, gates, generators, inventory) — manual lane, never a train"
-    if pr.get("special_paths") and any(gate_code(f) for f in pr.get("files") or []):
+    if pr.get("special_paths") and any(gate_code(f) or (f == GATES_YAML and pr.get("gates_append") is True)
+                                       for f in pr.get("files") or []):
         # The strict lane refuses a symlink/gitlink outright; on the train publish would halve the
         # whole carrier for it. Gate code next to one never rides (review of #13750).
         return False, "gate code next to a symlink or gitlink — never a train"
@@ -820,7 +835,7 @@ def strict_lane_state(pr: dict, required: list[str], checks: dict[str, str | Non
     if any(m in SPECIAL_MODES for m in modes):
         return None, "adds a symlink or gitlink — never the strict lane"
     untrainable = untrainable or FAIL_CLOSED_UNTRAINABLE
-    if not any(untrainable(f) for f in files):
+    if not any(untrainable(f) and not (f == GATES_YAML and pr.get("gates_append") is True) for f in files):
         return None, "not manual-lane"
     ok, why = qualifies(pr, required, checks, app, untrainable=lambda _f: False, extra=extra)
     if ok:
@@ -1071,6 +1086,142 @@ def assert_train_branch(name: str) -> None:
         raise ValueError(f"refusing ref {name!r}: not of the form train/<run_id>-<attempt> or train/strict-<run_id>-<attempt>")
 
 
+# gates.yaml APPEND (ADR-0343 amendment 2026-11-14): a member whose only change to gates.yaml is new,
+# whole `- id:` entries rides a train like gate code. #13837 kept every gates.yaml edit strict because one
+# edit can retire or weaken a PRIVILEGED gate without touching its script, and settle runs with no YAML
+# parser. An append cannot: every existing entry must survive BYTE-FOR-BYTE and in order, the header
+# before the first entry is unchanged, a new id collides with no id on main, and a new entry can neither
+# start a top-level key (every line indented under it) nor define a YAML anchor (which would redefine an
+# alias a LATER entry already uses). Anything else returns a reason and the member stays strict.
+GATE_ENTRY_RE = re.compile(r"^  - id:\s*([^\s#]+)\s*(#.*)?$")
+YAML_ANCHOR_RE = re.compile(r"(?:^|[\s:\[{,-])&[A-Za-z0-9_.-]")
+# A new entry's own shape (review of #16109): its id is a plain token (a quoted id is a YAML duplicate the
+# line scan would not see); its keys come from the set gates.yaml already uses, never `env:` (PATH or
+# PYTHONPATH would redirect every later command) and never a second `id:`; and the only EXECUTABLE fields,
+# `run:` and `selftest:`, may do nothing but invoke one trainable gate or test script per line with plain
+# arguments. A free shell line would run inside the judging shard beside the existing gates and could
+# rewrite a privileged gate's script on the shared tree before that gate runs.
+GATE_PLAIN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+APPENDED_GATE_KEYS = frozenset({"name", "group", "mode", "run", "selftest", "selftest_inputs", "selftest_expect",
+                                "selftest_exempt", "min_subjects", "rationale", "review_after", "budget_seconds",
+                                "verified", "needs_base", "when"})
+APPENDED_GATE_EXEC_KEYS = ("run", "selftest")
+GATE_KEY_RE = re.compile(r"^    ([A-Za-z_][A-Za-z0-9_]*):(.*)$")
+GATE_CMD_RE = re.compile(r"(python3|bash) (\.github/scripts/[A-Za-z0-9_./-]+\.(?:py|sh))((?: [A-Za-z0-9_./=:,@+-]+)*)")
+
+
+def appended_gate_script_ok(interpreter: str, path: str) -> bool:
+    """A script an appended gate may invoke: a canonical path (no `.`/`..` segment, no `//`, so a glob
+    like check-*.py cannot be walked out of .github/scripts/), the interpreter matching the extension,
+    and trainable gate or test code (never PRIVILEGED_GATE_CODE)."""
+
+    if posixpath.normpath(path) != path or any(seg in ("", ".", "..") for seg in path.split("/")):
+        return False
+    if not path.startswith(".github/scripts/"):
+        return False
+    if (interpreter == "python3") != path.endswith(".py"):
+        return False
+    return gate_code(path)
+
+
+def appended_gate_problem(gid: str, lines: list[str]) -> str | None:
+    """Why one new gate entry (its lines after `  - id:`) may not ride a train, or None."""
+    if not GATE_PLAIN_ID_RE.fullmatch(gid):
+        return f"new gate id {gid!r} is not a plain token"
+    key, exec_lines, seen = None, {}, set()
+    for ln in lines:
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            continue
+        m = GATE_KEY_RE.match(ln)
+        if m:
+            key, value = m.group(1), m.group(2).strip()
+            if key not in APPENDED_GATE_KEYS or key in seen:
+                return f"new gate {gid!r} sets {key!r}, which an appended gate may not"
+            seen.add(key)
+            if key in APPENDED_GATE_EXEC_KEYS:
+                exec_lines[key] = [] if value.split("#")[0].strip() in ("|", "|-", "|+", ">", ">-", ">+") else [value]
+            continue
+        if not ln.startswith("      "):
+            return f"new gate {gid!r} has a line outside any of its keys"
+        if key in exec_lines:
+            exec_lines[key].append(ln.strip())
+    if "run" not in exec_lines:
+        return f"new gate {gid!r} has no run"
+    for k, cmds in exec_lines.items():
+        cmds = [c for c in cmds if c and not c.startswith("#")]
+        if not cmds:
+            return f"new gate {gid!r}: {k} is empty"
+        for c in cmds:
+            m = GATE_CMD_RE.fullmatch(c)
+            if not m or not appended_gate_script_ok(m.group(1), m.group(2)):
+                return f"new gate {gid!r}: {k} line {c[:60]!r} is not a plain call of a trainable gate script"
+    return None
+
+
+def gate_blocks(text: str) -> tuple[str, list[str]]:
+    """(header before the first `  - id:` line, one text block per entry up to the next one)."""
+    head: list[str] = []
+    blocks: list[list[str]] = []
+    for ln in text.splitlines(keepends=True):
+        if GATE_ENTRY_RE.match(ln.rstrip("\r\n")):
+            blocks.append([ln])
+        elif blocks:
+            blocks[-1].append(ln)
+        else:
+            head.append(ln)
+    return "".join(head), ["".join(b) for b in blocks]
+
+
+def gates_append_problem(old: str | None, new: str | None, main_ids: set[str] | frozenset = frozenset()) -> str | None:
+    """None when `new` is `old` plus whole new gate entries only (see GATE_ENTRY_RE above), else why not."""
+    if old is None or new is None:
+        return "gates.yaml is missing on one side"
+    if old == new:
+        return "gates.yaml is unchanged"
+    old_head, old_blocks = gate_blocks(old)
+    new_head, new_blocks = gate_blocks(new)
+    if not old_blocks:
+        return "gates.yaml has no `- id:` entries to append to"
+    if new_head != old_head:
+        return "the text before the first gate entry changed"
+    added: list[str] = []
+    j = 0
+    for b in new_blocks:
+        if j < len(old_blocks) and b == old_blocks[j]:
+            j += 1
+        else:
+            added.append(b)
+    if j != len(old_blocks):
+        return "an existing gate entry was changed, moved or removed"
+    taken = {GATE_ENTRY_RE.match(b.splitlines()[0]).group(1).strip("'\"") for b in old_blocks} | set(main_ids)
+    for b in added:
+        lines = b.splitlines()
+        gid = GATE_ENTRY_RE.match(lines[0]).group(1)
+        if gid.strip("'\"") in taken:
+            return f"new gate id {gid!r} already exists"
+        taken.add(gid)
+        for ln in lines:
+            if YAML_ANCHOR_RE.search(ln) or "\t" in ln:
+                return f"new gate {gid!r} defines a YAML anchor or uses a tab"
+        for ln in lines[1:]:
+            if ln.strip() and not ln.startswith("    ") and not ln.lstrip().startswith("#"):
+                return f"new gate {gid!r} has a line not indented under its entry"
+        why = appended_gate_problem(gid, lines[1:])
+        if why:
+            return why
+    return None
+
+
+def gates_append_at(git, old_rev: str, new_rev: str, main_rev: str | None = None) -> str | None:
+    """gates_append_problem over two revisions read execution-free with `git show`; `main_rev`'s ids
+    are taken too (main may have added the same id since the member branched)."""
+    def text(rev: str) -> str | None:
+        r = git("show", f"{rev}:{GATES_YAML}", check=False)
+        return r.stdout if r.returncode == 0 else None
+    main_ids = gate_ids(text(main_rev) or "") if main_rev else set()
+    return gates_append_problem(text(old_rev), text(new_rev), main_ids)
+
+
 def gate_ids(text: str) -> set[str]:
     """The `- id:` set of a gates.yaml, by line scan (no YAML parse under `python3 -I -S`)."""
     return {m.group(1) for ln in text.splitlines() for m in [GATE_ID_RE.match(ln)] if m}
@@ -1303,7 +1454,13 @@ class TrainBuilder:
         for m in members:
             r = self.git("merge", "--squash", "--no-commit", m.ref, check=False)
             staged = changed_paths(self.git, cached=True) if r.returncode == 0 else []
-            if r.returncode != 0 or not staged or any(unsafe_path(f) or self.untrainable(f) for f in staged):
+            # gates.yaml rides only as a pure append over what this train has built so far (HEAD).
+            appended = (GATES_YAML in staged and r.returncode == 0 and gates_append_problem(
+                self.git("show", f"HEAD:{GATES_YAML}", check=False).stdout or None,
+                self.git("show", f":{GATES_YAML}", check=False).stdout or None,
+                gate_ids(self.git("show", f"{base}:{GATES_YAML}", check=False).stdout)) is None)
+            if r.returncode != 0 or not staged or any(
+                    unsafe_path(f) or (self.untrainable(f) and not (f == GATES_YAML and appended)) for f in staged):
                 self.git("merge", "--abort", check=False)
                 self.git("reset", "-q", "--hard", "HEAD")
                 self.attempted.append(m.number)
@@ -1319,8 +1476,8 @@ class TrainBuilder:
             self.attempted.append(m.number)
             self.git("commit", "-q", "-m", squash_message(m))
             applied.append(m.number)
-            if any(gate_code(f) for f in staged):
-                gate.append(m.number)
+            if any(gate_code(f) for f in staged) or GATES_YAML in staged:
+                gate.append(m.number)   # an appended gate is judged like gate code: never with a regen commit
         regen = False
         if applied:
             try:
@@ -1428,11 +1585,18 @@ class Verified:
     dropped: list[int]
 
 
-def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: str,
+def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: str | None,
                         outputs: list[str]) -> Verified:
     """Re-derive the train execution-free and require the bundle to match it step by step.
     Returns publish's OWN commit chain (commit-tree over verified trees) — the bundle's commits are
-    never pushed. Raises Reject."""
+    never pushed. Raises Reject.
+
+    `bundle_tip=None` (#15827): re-derive the members' chain over `base` from their live heads alone,
+    with nothing taken from the bundle. Used only when a declared member left the batch after build,
+    so the bundle's per-member commits no longer line up; there is no regeneration commit (the caller
+    refuses that case), so every tree pushed is a merge-tree of live, re-verified heads."""
+    if bundle_tip is None:
+        return _rederive_train(git, base, members)
     if not SHA_RE.fullmatch(bundle_tip):
         raise Reject("bundle tip is not a full sha", member_fault=False)
     chain = git("rev-list", "--reverse", "--first-parent", f"{base}..{bundle_tip}").stdout.split()
@@ -1462,7 +1626,10 @@ def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: 
             raise Reject(f"bundle has no commit for #{m.number}", member_fault=False)
         if git.tree(chain[idx]) != tree:
             raise Reject(f"bundle commit for #{m.number} differs from the merge-tree rebuild", member_fault=False)
-        if any(gate_code(f) for f in changed_paths(git, own_tree, tree)):
+        moved = changed_paths(git, own_tree, tree)
+        if GATES_YAML in moved and gates_append_at(git, own_tree, tree) is not None:
+            raise Reject(f"#{m.number} changes gates.yaml beyond a pure append", member_fault=True)
+        if any(gate_code(f) for f in moved) or GATES_YAML in moved:
             gate.append(m.number)
         own = git("commit-tree", tree, "-p", own, "-m", own_member_message(m.number, m.head_sha)).stdout.strip()
         own_tree = tree
@@ -1486,6 +1653,30 @@ def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: 
                     raise Reject(f"regeneration commit touches {path}, which is not a declared derived output")
         own = git("commit-tree", git.tree(regen), "-p", own, "-m", OWN_REGEN_MSG).stdout.strip()
         own_tree = git.tree(regen)
+    if not applied:
+        raise Reject("no member applied", member_fault=False)
+    extra = git.special_entries(own) - git.special_entries(base)
+    if extra:
+        raise Reject(f"train tree contains a symlink/gitlink main does not: {sorted(p for _, _, p in extra)[:3]}")
+    return Verified(own, own_tree, applied, dropped)
+
+
+def _rederive_train(git: Git, base: str, members: list[Member]) -> Verified:
+    """verify_bundle_train without a bundle: publish's own chain, merge-tree only, nothing executed."""
+    own, own_tree = base, git.tree(base)
+    applied: list[int] = []
+    dropped: list[int] = []
+    for m in members:
+        r = git("merge-tree", "--write-tree", own, m.head_sha, check=False)
+        if r.returncode not in (0, 1):
+            raise Reject(f"merge-tree failed for #{m.number}: rc={r.returncode}", member_fault=False)
+        tree = r.stdout.split()[0] if r.stdout.split() else ""
+        if r.returncode == 1 or tree == own_tree:
+            dropped.append(m.number)
+            continue
+        own = git("commit-tree", tree, "-p", own, "-m", own_member_message(m.number, m.head_sha)).stdout.strip()
+        own_tree = tree
+        applied.append(m.number)
     if not applied:
         raise Reject("no member applied", member_fault=False)
     extra = git.special_entries(own) - git.special_entries(base)
@@ -1681,7 +1872,9 @@ def api(method: str, path: str, body: dict | None = None, token: str | None = No
         except urllib.error.HTTPError as e:
             code, headers, text = e.code, e.headers, e.read().decode(errors="replace")[:300]
             _note_ratelimit(headers)
-        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+        except (urllib.error.URLError, ConnectionError, TimeoutError, http.client.HTTPException) as e:
+            # HTTPException covers IncompleteRead: a response body cut off mid-read (run 43181889887,
+            # publish died on 330268 of 356777 bytes). Same class as a reset: retried on a GET only.
             code, headers, text = None, None, f"{type(e).__name__}: {e}"
         delay = api_retry_delay(method, code, headers, attempt)
         if delay is None:
@@ -2173,9 +2366,10 @@ class GitHub:
         if code != 200:
             log(f"::error::merge train: tracking issue #{number} not closed ({code}): {json.dumps(detail)[:200]}")
 
-    def create_carrier(self, branch: str) -> int | None:
+    def create_carrier(self, branch: str, expedite: bool = False) -> int | None:
         assert_train_branch(branch)
-        kind = "strict carrier" if STRICT_TRAIN_BRANCH_RE.fullmatch(branch) else "carrier"
+        kind = ("strict carrier" if STRICT_TRAIN_BRANCH_RE.fullmatch(branch)
+                else "expedite carrier" if expedite else "carrier")
         code, data = api("POST", f"/repos/{self.repo}/pulls", {
             "title": f"merge-train {kind} {branch}", "head": branch, "base": self.branch, "draft": True,
             "body": f"{COMMENT_MARK}\nMerge-train {kind} (ADR-0343): CI on this head verifies one "
@@ -2189,6 +2383,19 @@ class GitHub:
 
     def close_carrier(self, n: int) -> None:
         api("PATCH", f"/repos/{self.repo}/pulls/{int(n)}", {"state": "closed"})
+
+    def expedite_carriers_today(self, day: str) -> int | None:
+        """Expedite carriers the App opened on UTC `day` (YYYY-MM-DD), open or closed, from ONE search call
+        scoped to the App's own PRs created that day (a repo opens hundreds of PRs a day, so paging the PR
+        list cannot reach back reliably). Every hit is re-checked: author, title prefix, day. None = the
+        search answered incompletely or not at all; the caller then fails closed."""
+        bot = BOT_LOGIN.removesuffix("[bot]")
+        q = urllib.parse.quote(f'repo:{self.repo} is:pr author:app/{bot} created:{day} in:title "{EXPEDITE_CARRIER_TITLE}"')
+        code, data = api("GET", f"/search/issues?q={q}&per_page=100")   # an outage still raises ApiAbort
+        if code != 200:
+            log(f"::warning::expedite daily count unreadable ({code}) — the lane stays closed")
+            return None
+        return count_expedite_hits(data, day)
 
 
 def is_carrier(pr: dict, repo: str) -> bool:
@@ -2206,6 +2413,70 @@ def is_strict_carrier(pr: dict, repo: str) -> bool:
 
 def any_carrier_open(gh, repo: str) -> bool:
     return any(is_carrier(p, repo) or is_strict_carrier(p, repo) for p in gh.open_prs())
+
+
+def count_expedite_hits(data, day: str) -> int | None:
+    """Expedite carriers in one /search/issues answer; None when it is not a complete answer."""
+    if not isinstance(data, dict) or data.get("incomplete_results") or not isinstance(data.get("items"), list):
+        return None
+    items = data["items"]
+    if not isinstance(data.get("total_count"), int) or data["total_count"] > len(items):
+        return None   # more hits than one page holds: far over any cap, and uncounted
+    return sum(1 for p in items
+               if (p.get("user") or {}).get("login") == BOT_LOGIN and "pull_request" in p
+               and (p.get("title") or "").startswith(EXPEDITE_CARRIER_TITLE)
+               and (p.get("created_at") or "")[:10] == day)
+
+
+def is_expedite_carrier(gh, p: dict) -> bool:
+    """A train carrier publish marked as the expedite lane's (App status on its head)."""
+    return gh.app_statuses(p["head"]["sha"]).get(EXPEDITE_CONTEXT, ("", ""))[0] == "success"
+
+
+def carrier_member_numbers(git, gh, p: dict) -> set[int] | None:
+    """Member PR numbers of an open train carrier, read execution-free from its own chain; None = unreadable."""
+    sha, branch = p["head"]["sha"], p["head"]["ref"]
+    if git("fetch", "-q", "origin", f"+refs/heads/{branch}:refs/merge-train/expedite-probe", check=False).returncode != 0:
+        return None
+    if git("rev-parse", "refs/merge-train/expedite-probe", check=False).stdout.strip() != sha:
+        return None
+    chain = parse_own_chain(git, sha)
+    return None if chain is None else {n for n, _ in chain[1]}
+
+
+def expedite_problem(gh, git, repo: str, n: int, cap: int, today: str | None = None) -> str | None:
+    """Why the expedite lane may NOT open a carrier for #n right now; None = it may. Read from live data
+    by settle (to open the window) and again by publish (never trusting settle's output). Bounds
+    (ADR-0343 amendment 2026-11-13): exactly one carrier open and it is an ordinary, unstacked train
+    carrier that does not already hold #n; no strict carrier; #n armed, open and carrying the label;
+    fewer than `cap` expedite carriers opened today."""
+    prs = gh.open_prs()
+    if any(is_strict_carrier(p, repo) for p in prs):
+        return "a strict carrier is open"
+    carriers = [p for p in prs if is_carrier(p, repo)]
+    if len(carriers) != 1:
+        return f"{len(carriers)} train carrier(s) open, the lane needs exactly one to overtake"
+    c = carriers[0]
+    marks = gh.app_statuses(c["head"]["sha"])
+    if marks.get(EXPEDITE_CONTEXT, ("", ""))[0] == "success":
+        return "an expedite carrier is already open"
+    if marks.get(STACK_CONTEXT, ("", ""))[0] == "success":
+        return "the open carrier is stacked over a strict holder"
+    pr = next((p for p in prs if p["number"] == n), None)
+    if pr is None or pr.get("draft") or not pr.get("auto_merge") or not is_expedited(pr):
+        return f"#{n} is not an open, armed PR carrying {EXPEDITE_LABEL}"
+    members = carrier_member_numbers(git, gh, c)
+    if members is None:
+        return f"carrier #{c['number']}: members unreadable"
+    if n in members:
+        return f"#{n} already rides carrier #{c['number']}"
+    day = today or time.strftime("%Y-%m-%d", time.gmtime())
+    used = gh.expedite_carriers_today(day)
+    if used is None:
+        return "today's expedite carrier count is unreadable"
+    if used >= cap:
+        return f"daily cap reached ({used}/{cap} expedite carriers on {day})"
+    return None
 
 
 def pr_view(repo: str, p: dict, files: list[str]) -> dict:
@@ -2321,6 +2592,12 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         files = changed_paths(git, f"{base}...{fetched}")
         view = pr_view(repo, p, files)
         view["special_paths"] = [x for c in entries if c.new_mode in SPECIAL_MODES for x in c.paths]
+        if GATES_YAML in files:
+            fork = git("merge-base", base, fetched, check=False).stdout.strip()
+            why_not = gates_append_at(git, fork, fetched, base) if fork else "no merge base"
+            view["gates_append"] = why_not is None
+            if why_not:
+                log(f"#{p['number']:>6} gates.yaml not a pure append ({why_not}) — strict lane")
         app = gh.app_statuses(fetched)
         if any(p["head"]["ref"].startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES):
             chain = remember_approval_chain(gh, git, base, fetched)
@@ -2416,12 +2693,16 @@ def write_manifest(path: str, batch: list[Member]) -> None:
 
 
 def declared_batch(manifest_text: str, train: list[Member], sizes: dict[int, int | None],
-                   batch_size: int) -> list[Member]:
+                   batch_size: int, tolerate_moved: bool = False):
     """The batch build declared, admitted only member by member against LIVE data. The manifest is
     untrusted (build ran generators over PR data), so it can only SELECT: every entry must be a
     live train candidate at exactly its live head, and the selection obeys the same size cap as
     select_batch. Re-planning instead would reject a legitimate bundle whenever any candidate
-    changed state in the minutes between build and publish. Raises Reject."""
+    changed state in the minutes between build and publish. Raises Reject.
+
+    `tolerate_moved` (#15827): a declared member that is no longer a live candidate at its declared
+    head (a bot rewrote or closed it) is left OUT instead of rejecting the batch; returns
+    (batch, moved). Leaving a member out can only shrink the selection, never add to it."""
     lines = manifest_text.splitlines()
     if not lines:
         raise Reject("bundle carries no member manifest", member_fault=False)
@@ -2432,14 +2713,25 @@ def declared_batch(manifest_text: str, train: list[Member], sizes: dict[int, int
         if not mm or int(mm.group(1)) in want:
             raise Reject("member manifest is malformed", member_fault=False)
         want[int(mm.group(1))] = mm.group(2)
-    for n, head in want.items():
-        if n not in live or live[n].head_sha != head:
-            raise Reject(f"declared member #{n} is no longer a live train candidate at that head — the next tick rebuilds",
-                         member_fault=False)
-    batch = [m for m in train if m.number in want]
-    if len(batch) > max(1, batch_size):
-        raise Reject(f"declared batch of {len(batch)} exceeds the batch size of {batch_size}", member_fault=False)
-    return batch
+    moved = [n for n, head in want.items() if n not in live or live[n].head_sha != head]
+    for n in moved:
+        if n not in live:
+            # Closed or disarmed since build — or never a candidate at all (a tampered manifest). The
+            # selection only shrinks either way, but the second must stay visible.
+            log(f"::warning::declared member #{n} is not a live train candidate at all (closed, disarmed, or never "
+                f"one — check the build manifest)")
+        else:
+            log(f"::notice::declared member #{n} moved: declared head {want[n][:12]}, live {live[n].head_sha[:12]}")
+    if moved and not tolerate_moved:
+        raise Reject(f"declared member #{moved[0]} is no longer a live train candidate at that head — the next tick rebuilds",
+                     member_fault=False)
+    if len(want) > max(1, batch_size):
+        raise Reject(f"declared batch of {len(want)} exceeds the batch size of {batch_size}", member_fault=False)
+    batch = [m for m in train if m.number in want and m.number not in moved]
+    if not batch:
+        raise Reject("no declared member is still a live train candidate at its head — the next tick rebuilds",
+                     member_fault=False)
+    return (batch, moved) if tolerate_moved else batch
 
 
 def live_base(gh, git) -> str:
@@ -2448,10 +2740,16 @@ def live_base(gh, git) -> str:
 
 
 # --------------------------------------------------------------------------- the three modes
-def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_size: int) -> list[int]:
+def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_size: int,
+               expedite: int | None = None) -> list[int]:
     base = live_base(gh, git)
     with planning_reads():           # build writes nothing to GitHub; publish re-plans live
         _fast, batch, sizes = plan_batch(gh, git, repo, base, batch_size)
+        if expedite is not None:
+            # Expedite lane: a one-member train, that PR alone, or nothing. Publish re-validates everything.
+            _fast, train, sizes = plan_train(gh, git, repo, base)
+            batch = [m for m in train if m.number == expedite][:1]
+            log(f"build: expedite lane for #{expedite}: {'one-member train' if batch else 'not a live candidate, no train'}")
     builder.sizes, builder.default_size = sizes, batch_size
     capped = sorted({sizes[m.number] for m in batch if sizes.get(m.number)})
     if capped:
@@ -2621,10 +2919,20 @@ def mark_unverifiable(gh, batch: list[Member]) -> None:
 
 
 def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str, batch_size: int,
-                 stack: tuple[int, str] | None = None) -> str:
+                 stack: tuple[int, str] | None = None, expedite: int | None = None,
+                 expedite_cap: int = EXPEDITE_DAILY_CAP_DEFAULT) -> str:
     """Returns one of: idle, in-flight, rejected, published. `stack` = (holder PR, holder head) from
-    settle's speculative-stacking window: re-validated from live data here, never trusted as given."""
-    if any_carrier_open(gh, repo):   # a train carrier, or a strict carrier holding the strict reservation
+    settle's speculative-stacking window: re-validated from live data here, never trusted as given.
+    `expedite` = the PR of settle's expedite window, likewise re-validated (expedite_problem)."""
+    if expedite is not None:
+        if stack is not None:
+            log("::warning::expedite and stacking windows together — refusing both")
+            return "rejected"
+        why = expedite_problem(gh, git, repo, expedite, expedite_cap)
+        if why:
+            log(f"::notice::expedite lane for #{expedite} closed since settle: {why}")
+            return "in-flight"
+    elif any_carrier_open(gh, repo):   # a train carrier, or a strict carrier holding the strict reservation
         return "in-flight"
     branch = train_branch(run_id, attempt)
     base = live_base(gh, git)
@@ -2634,38 +2942,74 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
         return "idle"
     manifest = os.path.join(bundle_dir, MANIFEST_FILE)
     try:
-        batch = declared_batch(pathlib.Path(manifest).read_text() if os.path.isfile(manifest) else "",
-                               train, sizes, batch_size)
+        batch, moved = declared_batch(pathlib.Path(manifest).read_text() if os.path.isfile(manifest) else "",
+                                      train, sizes, batch_size, tolerate_moved=True)
     except Reject as exc:
         log(f"::warning::train rejected: {exc}")
         return "rejected"
+    if moved:
+        log(f"::notice::declared member(s) {moved} no longer live train candidates at their declared heads — "
+            f"left out, the rest re-derived this tick (#15827)")
     log(f"publish: declared batch {[m.number for m in batch]}")
+    if expedite is not None and [m.number for m in batch] != [expedite]:
+        log(f"::warning::expedite lane: declared batch is not exactly [#{expedite}] — rejected")
+        return "rejected"
     outputs = derived_output_patterns(git("show", f"{base}:{REGEN_INVENTORY}", check=False).stdout)
     if not outputs:
         log("::error::origin/main declares no DERIVED_OUTPUTS — refusing")
         return "rejected"
-    try:
-        if git("bundle", "verify", bundle, check=False).returncode != 0:
-            raise Reject("bundle does not verify against this clone (stale base or corrupt)", member_fault=False)
-        git("fetch", "-q", bundle, f"+{BUNDLE_REF}:refs/merge-train/bundle")
-        tip = git("rev-parse", "refs/merge-train/bundle").stdout.strip()
-        v = verify_bundle_train(git, base, batch, tip, outputs)
-        live = {m.number: m for m in train}
-        cap = batch_cap([live[n] for n in v.applied if n in live], sizes, batch_size)
-        if len(v.applied) > cap:
-            raise Reject(f"train applies {len(v.applied)} member(s), over the bisect cap of {cap}", member_fault=False)
-    except Reject as exc:
-        log(f"::warning::train rejected: {exc}")
-        if exc.member_fault:
-            mark_unverifiable(gh, batch)
-        return "rejected"
-    for n in v.dropped:
-        gh.comment(n, DROP_MESSAGE)
-    heads = {m.number: m.head_sha for m in batch}
-    for n in v.applied:
-        if not live_source_intent(gh, n, heads[n]):
-            log(f"::notice::#{n} source intent or head changed — carrier not published")
+    live = {m.number: m for m in train}
+    rederive = bool(moved)
+    declared_n = len(batch) + len(moved)
+    inputs = regen_inventory_fragments(git("show", f"{base}:{REGEN_INVENTORY}", check=False).stdout)
+    while True:
+        try:
+            if git("bundle", "verify", bundle, check=False).returncode != 0:
+                raise Reject("bundle does not verify against this clone (stale base or corrupt)", member_fault=False)
+            git("fetch", "-q", bundle, f"+{BUNDLE_REF}:refs/merge-train/bundle")
+            tip = git("rev-parse", "refs/merge-train/bundle").stdout.strip()
+            if rederive:
+                # Publish executes nothing, so a re-derived train can carry no regeneration commit. Decided
+                # from main's inventory, never from the (untrusted) bundle: a remaining member touching a
+                # declared generator INPUT may need one — whether or not the original batch did — so the
+                # next tick rebuilds instead (a carrier missing it would fail derived-drift and could blame
+                # an innocent member). Belt: a bundle chain longer than its declared members carries an
+                # extra commit, which can only be a regeneration commit.
+                touching = [m.number for m in batch
+                            if any(frag in f for f in changed_paths(git, f"{base}...{m.head_sha}") for frag in inputs)]
+                chain_len = len(git("rev-list", "--first-parent", f"{base}..{tip}", check=False).stdout.split())
+                if touching or chain_len > declared_n or (
+                        git("log", "-1", "--format=%s", tip, check=False).stdout.strip() == REGEN_COMMIT_SUBJECT):
+                    why = (f"remaining member(s) {touching} touch generator inputs" if touching
+                           else "the bundle carries a regeneration commit")
+                    raise Reject(f"a member left the batch and {why}; publish cannot regenerate — the next tick rebuilds",
+                                 member_fault=False)
+            v = verify_bundle_train(git, base, batch, None if rederive else tip, outputs)
+            cap = batch_cap([live[n] for n in v.applied if n in live], sizes, batch_size)
+            if len(v.applied) > cap:
+                raise Reject(f"train applies {len(v.applied)} member(s), over the bisect cap of {cap}", member_fault=False)
+        except Reject as exc:
+            log(f"::warning::train rejected: {exc}")
+            if exc.member_fault:
+                mark_unverifiable(gh, batch)
             return "rejected"
+        heads = {m.number: m.head_sha for m in batch}
+        gone = [n for n in v.applied if not live_source_intent(gh, n, heads[n])]
+        if not gone:
+            break
+        # #15827: one member moving (release-please rewrites its branch after every merge to main, deploy
+        # bots supersede and close) no longer discards the batch. It is left out and the rest is re-derived
+        # from live heads in this tick; every remaining member is re-read live again on the next pass.
+        log(f"::notice::#{', #'.join(map(str, gone))} source intent or head changed — left out, the rest re-derived")
+        batch = [m for m in batch if m.number not in gone]
+        rederive = True
+        if not batch:
+            log("::notice::no declared member is left — carrier not published")
+            return "rejected"
+    if not rederive:
+        # A re-derived train's drops may come only from a member having left, so no drop notice is sent.
+        for n in v.dropped:
+            gh.comment(n, DROP_MESSAGE)
     if stack:
         hn, hh = stack
         why = stack_target_problem(gh, git, base, hn, hh)
@@ -2692,9 +3036,17 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
             # Over main it could merge past a holder that already yielded once: never pre-empted twice.
             log(f"::notice::#{hn} already yielded once — carrier not published over main either")
             return "rejected"
+    if expedite is not None and v.applied != [expedite]:
+        log(f"::warning::expedite lane: train applies {v.applied}, not exactly [#{expedite}] — rejected")
+        return "rejected"
     Pusher(git, branch, gh.remote).push(v.tip)
     gh.post_status(v.tip, "success", f"tree={v.tree}", context=RECORD_CONTEXT)
-    gh.create_carrier(branch)
+    if expedite is not None:
+        # Marked BEFORE the carrier exists: settle identifies an expedite carrier by this status alone.
+        gh.post_status(v.tip, "success", f"expedite lane: #{expedite} alone over {base[:12]}", context=EXPEDITE_CONTEXT)
+        gh.create_carrier(branch, expedite=True)
+    else:
+        gh.create_carrier(branch)
     record_deferral(gh, git, repo, base, branch)
     log(f"published {branch} over {base[:12]}: members {v.applied}, dropped {v.dropped}")
     return "published"
@@ -2724,8 +3076,23 @@ def defer_recovered_main_red(gh, base: str, main_red: dict[str, str], summary: d
 
 
 
+def expedite_candidate(gh, git, repo: str, train_waiting: list, cap: int) -> int | None:
+    """The first expedited train candidate the lane may serve now, or None. Order is the train's own."""
+    labels = {p["number"]: p for p in gh.open_prs()}
+    for m in train_waiting:
+        if not is_expedited(labels.get(m.number) or {}):
+            continue
+        why = expedite_problem(gh, git, repo, m.number, cap)
+        if why is None:
+            return m.number
+        log(f"expedite lane: #{m.number} not served — {why}")
+        return None   # one expedited PR per tick: the first in order, never a later one past it
+    return None
+
+
 def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str = "",
-                strict_cap: int = STRICT_BATCH_CAP_DEFAULT, stack: bool = SPECULATIVE_STACK_DEFAULT) -> dict:
+                strict_cap: int = STRICT_BATCH_CAP_DEFAULT, stack: bool = SPECULATIVE_STACK_DEFAULT,
+                expedite: bool = EXPEDITE_LANE_DEFAULT, expedite_cap: int = EXPEDITE_DAILY_CAP_DEFAULT) -> dict:
     """Judge every finished App carrier (strict carriers first), build the next strict carrier when the
     strict lane is free, then post the fast lane from live data. `run_id`/`attempt` name the strict
     carrier branch; without them (or at `strict_cap` 1) the strict lane behaves exactly as before."""
@@ -2755,7 +3122,10 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     if strict_carrier_open:
         summary["in_flight"] = True
         carrier_in_flight = True
-    for p in [p for p in gh.open_prs() if is_carrier(p, repo)]:
+    pending_carrier = None   # the one ordinary carrier still running CI, the only one the expedite lane overtakes
+    # Expedite carriers first (ADR-0343 amendment 2026-11-13): a green one merges in this tick before the
+    # carrier it overtook is judged, and that one then fails "main moved" with no verdict.
+    for p in sorted([p for p in gh.open_prs() if is_carrier(p, repo)], key=lambda p: not is_expedite_carrier(gh, p)):
         sha, branch, carrier = p["head"]["sha"], p["head"]["ref"], p["number"]
         # Speculative stacking: judged BEFORE any verdict on the carrier's own CI, so a red stacked carrier
         # over a holder without a verdict can never blame, bisect or halve anything.
@@ -2837,6 +3207,8 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                 continue
         if not failing and pending:
             summary["in_flight"] = True
+            if stacked_over is None and not is_expedite_carrier(gh, p):
+                pending_carrier = carrier
             if carrier_holds_strict(p):
                 carrier_in_flight = True
             else:
@@ -3061,8 +3433,12 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     summary["main_red"] = sorted(main_red)
     fragments = regen_inventory_fragments(regen_text)
     fast, train_waiting = partition(git, base, cands, fragments)
+    # While main is red no train is built (plan_train serves only fixes), so the train's turn after a strict
+    # merge would hold the strict lane, which is the lane that serves the fix, for TRAIN_TURN_S with nobody
+    # using it; every further strict or bot merge restarted that wait (2026-11-13: fixes #15991/#15987 sat
+    # behind "train's turn" for ~2 h of red main). An open carrier still keeps its turn.
     yield_why = train_turn(gh, git, base, train_waiting,
-                           any(is_carrier(p, repo) and carrier_holds_strict(p) for p in gh.open_prs()))
+                           any(is_carrier(p, repo) and carrier_holds_strict(p) for p in gh.open_prs()), main_red=main_red)
     if holder is None and not yield_why and not main_red:
         # A reservation already running is never affected; the fast lane only gets the gap between two.
         yield_why = fast_turn(gh, git, base,
@@ -3143,13 +3519,46 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             f"over the same main during its CI (bounded deferral)")
         summary["in_flight"] = False
         summary["deferral_window"] = n
+    if (expedite and not shadow and pending_carrier is not None and summary["in_flight"]
+            and holder is None and not strict_carrier_open and not main_red
+            and not summary["updated"] and not summary["strict"] and not summary["merged"]
+            and not summary.get("stack_window") and not summary.get("deferral_window")):
+        n = expedite_candidate(gh, git, repo, train_waiting, expedite_cap)
+        if n is not None:
+            log(f"expedite lane: #{n} may ride its own carrier over main {base[:12]} beside carrier #{pending_carrier}")
+            summary["in_flight"] = False
+            summary["expedite_window"] = n
+    # Strict priority (#15827): a holder GREEN on a head that contains live main but not merged in this
+    # tick's strict_lane (a train in flight, merge refused, source intent re-read, main moved under the
+    # read) would be pushed behind main by the next carrier and restart its full CI. For ONE tick per
+    # holder head no carrier is built, so the holder merges next tick; the marker bounds the hold, so a
+    # holder that still cannot merge never stalls the fast lane twice.
+    train_open = next((p["number"] for p in gh.open_prs() if is_carrier(p, repo)), None)
+    ready = next((v for st, v in strict if v["number"] == holder and st == "green"), None)
+    # An open carrier already blocks every publish; the hold is for the NEXT carrier only.
+    if (ready is not None and not shadow and holder not in summary["merged"] and not summary["in_flight"]
+            and train_open is None and not strict_carrier_open
+            and git("merge-base", "--is-ancestor", gh.main_sha(), ready["head_sha"], check=False).returncode == 0):
+        if gh.app_statuses(ready["head_sha"]).get(STRICT_READY_CONTEXT, ("", ""))[0] != "success":
+            gh.post_status(ready["head_sha"], "success", f"no carrier built for one tick over main {base[:12]}",
+                           context=STRICT_READY_CONTEXT)
+            log(f"strict-lane #{holder} green and up to date but not merged this tick: no carrier is built this tick "
+                f"(strict priority, once per head)")
+            summary["in_flight"] = True
+            summary["strict_ready_hold"] = holder
+        else:
+            log(f"strict-lane #{holder} green and up to date, already held a tick for it — the fast lane proceeds")
     # Fast lane, from live data only — nothing here reads a stored classification. Held while main is
     # reserved for a strict-lane PR (or was just moved by one): GitHub auto-merge acts on this status,
-    # and a merge now would put the reserved head behind main again.
+    # and a merge now would put the reserved head behind main again. Held as well while a train carrier
+    # is open (#15827): a disjoint PR released by native auto-merge moves main under the carrier, and
+    # settle then rejects the green carrier as "main moved since publish" — the carrier always lost.
+    train_open = next((p["number"] for p in gh.open_prs() if is_carrier(p, repo)), None)   # re-read: may have changed
     hold = (f"main reserved for strict-lane #{holder}" if holder is not None
             else f"a strict carrier is open over main (#{summary.get('strict_carrier', '?')})" if strict_carrier_open
             else "strict-lane update-branch requested" if summary["updated"]
-            else "a strict-lane PR merged; main moved" if summary["strict"] else None)
+            else "a strict-lane PR merged; main moved" if summary["strict"]
+            else f"train carrier #{train_open} is in flight over main" if train_open is not None else None)
     for m in fast:
         if hold:
             log(f"#{m.number:>6} fast      held: {hold} — next tick")
@@ -3276,7 +3685,33 @@ def carrier_holds_strict(p: dict, now: float | None = None) -> bool:
     return age is None or age <= CARRIER_PRIORITY_S
 
 
-def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now: float | None = None) -> str | None:
+def train_turn_main_red_self_test(check) -> None:
+    """The train's turn after a strict merge, with a red main and without (2026-11-13: fixes #15991/#15987
+    waited ~2 h behind "train's turn" while no train could be built over the red main)."""
+    saved = globals()["last_merge_was_strict"]
+    globals()["last_merge_was_strict"] = lambda *_a, **_k: True
+    try:
+        git = lambda *_a, **_k: subprocess.CompletedProcess([], 0, stdout="1000\n", stderr="")
+        waiting = [object()]
+        green = train_turn(None, git, "b", waiting, False, now=1001)
+        red = train_turn(None, git, "b", waiting, False, now=1001, main_red={"Validate manifests": "failure"})
+        red_carrier = train_turn(None, git, "b", waiting, True, now=1001, main_red={"Validate manifests": "failure"})
+    finally:
+        globals()["last_merge_was_strict"] = saved
+    check("train's turn: green main, strict merge just landed, a train candidate waits -> the train goes next",
+          bool(green) and "train's turn" in green, f"{green!r}")
+    check("train's turn: red main -> no turn, the strict lane serves the fix at once",
+          red is None, f"{red!r}")
+    check("train's turn: red main with an open carrier -> the carrier still keeps its turn",
+          red_carrier == "a train carrier is open over main", f"{red_carrier!r}")
+    settle_src = inspect.getsource(mode_settle)
+    call = settle_src[settle_src.find("train_turn("):][:400]
+    check("train's turn: settle hands main_red to train_turn (the call site is the fix as much as the rule)",
+          "main_red=main_red" in call.split("\n\n")[0], call[:200])
+
+
+def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now: float | None = None,
+               main_red: dict | None = None) -> str | None:
     """Why the strict lane must not START a reservation (update-branch) this tick, or None. Lane
     fairness (ADR-0343): (1) an open carrier is the train's in-flight turn — a reservation started
     under it holds the carrier once green and then voids it by merging (#13529, 2026-10-21); (2) right
@@ -3285,6 +3720,10 @@ def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now:
     longer a strict merge), or the turn expires. A reservation already running is never affected."""
     if carrier_open:
         return "a train carrier is open over main"
+    if main_red:
+        # No train is built over a red main (plan_train serves only fixes), so this turn would hold the
+        # strict lane that serves the fix for TRAIN_TURN_S with nobody using it.
+        return None
     if not train_waiting or not last_merge_was_strict(gh, git, base):
         return None
     now = time.time() if now is None else now
@@ -4322,6 +4761,18 @@ def check_declaration() -> int:
         fails.append("settle must carry MERGE_TRAIN_SPECULATIVE_STACK")
     if "STACK_HEAD: ${{ needs.settle.outputs.stack_head }}" not in jobs.get("publish", ""):
         fails.append("publish must receive settle's stacking window (stack_pr / stack_head)")
+    # Expedite lane's rollback switch and cap: declared outright, carried by settle, its window handed on.
+    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_LANE: "(true|false)"\s*$', code, re.MULTILINE):
+        fails.append('MERGE_TRAIN_EXPEDITE_LANE must be declared as "true" or "false" ("false" = no expedite lane)')
+    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_DAILY_CAP: "[1-9][0-9]*"\s*$', code, re.MULTILINE):
+        fails.append("MERGE_TRAIN_EXPEDITE_DAILY_CAP must be declared as a positive integer")
+    if "EXPEDITE_LANE: ${{ env.MERGE_TRAIN_EXPEDITE_LANE }}" not in jobs.get("settle", ""):
+        fails.append("settle must carry MERGE_TRAIN_EXPEDITE_LANE")
+    for job in ("build", "publish"):
+        if "EXPEDITE_PR: ${{ needs.settle.outputs.expedite_pr }}" not in jobs.get(job, ""):
+            fails.append(f"{job} must receive settle's expedite window (expedite_pr)")
+    if "EXPEDITE_DAILY_CAP: ${{ env.MERGE_TRAIN_EXPEDITE_DAILY_CAP }}" not in jobs.get("publish", ""):
+        fails.append("publish must carry MERGE_TRAIN_EXPEDITE_DAILY_CAP (it re-checks the cap live)")
     # The safety is a runtime property: settle must consult the live ruleset before merging, whatever the flag says.
     guard_src = inspect.getsource(mode_settle)
     if "gh.merge_guard()" not in guard_src or inspect.getsource(ruleset_guard).count("integration_id") < 1:
@@ -4595,19 +5046,25 @@ class FakeGitHub:
         self.stuck_writes.append(None)
         self.stuck_open = (None, None)
 
-    def create_carrier(self, branch):
+    def create_carrier(self, branch, expedite=False):
         n = 9000 + len(self.carriers)
         self.carriers[n] = {"number": n, "state": "open", "draft": True, "user": {"login": BOT_LOGIN}, "created_at": "",
+                            "expedite": expedite,
                             "head": {"ref": branch, "sha": self.g("rev-parse", branch).stdout.strip(), "repo": {"full_name": "o/r"}}}
         return n
 
     def close_carrier(self, n): self.carriers[n]["state"] = "closed"
 
+    def expedite_carriers_today(self, day):
+        if getattr(self, "expedite_unreadable", False):
+            return None
+        return getattr(self, "expedite_used", 0) + sum(1 for c in self.carriers.values() if c.get("expedite"))
+
 
 class HttpFixture:
     """The GitHub REST API as `GitHub` sees it, served from a FakeGitHub: patched in place of
     urllib.request.urlopen, so the REAL GitHub class, api() and its retry policy run. `faults` is a list
-    of [predicate(method, path), (code, headers) | "reset", times] — `times` None = every attempt."""
+    of [predicate(method, path), (code, headers) | "reset" | "incomplete", times] — `times` None = every attempt."""
 
     def __init__(self, fake, faults=None):
         self.fake, self.faults, self.calls = fake, [list(f) for f in (faults or [])], []
@@ -4629,6 +5086,8 @@ class HttpFixture:
                     f[2] -= 1
                 if f[1] == "reset":
                     raise ConnectionResetError("connection reset by peer")
+                if f[1] == "incomplete":
+                    raise http.client.IncompleteRead(b"{", 99)
                 code, hdrs = f[1]
                 h = email.message.Message()
                 for k, v in hdrs.items():
@@ -4775,6 +5234,10 @@ def _synthetic_origin(root: str) -> None:
     pr("p2", {"docs/two.md": "2\n"})
     pr("p3", {"bad.txt": "x\n"})
     pr("p4", {"docs/four.md": "4\n"})
+    # Train members (protected build-logic/) that touch NO generator input: a re-derived train may carry them.
+    pr("pE1", {"build-logic/e1.txt": "1\n"})
+    pr("pE2", {"build-logic/e2.txt": "2\n"})
+    pr("pE3", {"build-logic/e3.txt": "3\n"})
     pr("pR", {"services/r.txt": "r\n", "count.txt": "2\n"})
     pr("pL", {"docs/l.md": "l\n"}, link=("docs-link", "/etc/passwd"))
     pr("pG", {SYN_GENERATOR: "import os,pathlib\npathlib.Path('leaked.txt').write_text(os.environ.get('GH_TOKEN','none'))\n"})
@@ -4810,7 +5273,9 @@ def _synthetic_origin(root: str) -> None:
     pr("pJ1", {".github/scripts/merge-train.py": f"open({os.path.join(os.path.dirname(root), 'strict-member-ran')!r}, 'w').write('ran')\n"})
     pr("pJ2", {".github/workflows/merge-train.yml": "name: train\n"})
     pr("pGY", {GATES_YAML: "gates:\n  - id: g-one\n    run: true\n"})                  # retires g-two
-    pr("pGA", {GATES_YAML: SYN_GATES_YAML + "  - id: g-three\n    run: true\n"})      # adds g-three
+    # adds g-three AND edits g-one, so it is not a pure append and still takes the strict lane
+    pr("pGA", {GATES_YAML: SYN_GATES_YAML.replace("run: true", "run: 'true'", 1) + "  - id: g-three\n    run: true\n"})
+    pr("pGP", {GATES_YAML: SYN_GATES_YAML + "  - id: g-four\n    run: python3 .github/scripts/check-g-four.py\n"})      # a pure append
     # Non-judge strict members (plain scripts under .github/scripts): batched together.
     pr("pP1", {".github/scripts/p1.py": "print(1)\n"})
     pr("pP2", {".github/scripts/p2.py": "print(2)\n"})
@@ -5093,7 +5558,7 @@ def retry_planner_self_test(check) -> None:
         check("retry planner: current CI declares the selected receiver and direct gate dependency",
               "name: Receive trusted ruleset evidence" in workflow
               and "needs: [agent-admission, ruleset-evidence]" in workflow
-              and "needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-rbac-contract]" in workflow)
+              and "needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-coverage, ui-rbac-contract]" in workflow)
     finally:
         globals()["_http_open"], globals()["_api_sleep"] = saved[:2]
         if saved[2] is None:
@@ -5129,7 +5594,11 @@ def retry_planner_self_test(check) -> None:
 # first-parent lineage case: spawns=18,070 at 678 cases, measured on the merged tree; ceiling 18,500 (~2.4 %).
 # All three merged (#15430 over #15400 + #15374): spawns=19,251 at 696 cases, measured on the merged tree;
 # ceiling 19,700 (~2.3 %).
-SELF_TEST_SPAWN_CEILING = 19700
+# #15827 (moved member re-derived in publish, fast path held under a carrier, strict-ready hold): 12 cases,
+# ~6 more ticks: spawns=19,929 at 708 cases, measured locally on 2026-11-12; ceiling 20,400 (~2.4 %).
+# Expedite lane (ADR-0343 amendment 2026-11-13): eleven cases E1-E11, ~17 more ticks: spawns=21,143 at 720 cases,
+# measured locally on 2026-11-13; ceiling 21,400 (~1.2 %).
+SELF_TEST_SPAWN_CEILING = 21400
 
 # A green carrier and a green, up-to-date strict holder cannot both keep their verification: whichever
 # merges first moves main under the other. Strict first voids the carrier (rebuild ~50 min, measured
@@ -5201,6 +5670,7 @@ def self_test() -> int:
             fails.append(f"{label}: {detail} [clock: time.time={time.time():.0f} last_reservation={last_reservation}]")
 
     retry_planner_self_test(check)
+    train_turn_main_red_self_test(check)
     branch_updater_self_test(check)
     git_memo_self_test(check)
     packed_fixture_self_test(check)
@@ -5298,6 +5768,56 @@ def self_test() -> int:
               not ok and "manual lane" in why and U(f) and not gate_code(f), why)
         check(f"strict lane: gates.yaml ({shape}) IS in the strict lane",
               strict_lane_state({**base_pr, "files": [f]}, req, green, None, U, [], None, None)[0] == "green")
+    # ADR-0343 amendment 2026-11-14: a pure APPEND of whole new gate entries rides a train; every other
+    # gates.yaml shape keeps the strict lane. Each refused shape below is one the append rule must catch.
+    base_g = "# header\ngates:\n  - id: g-one\n    run: |\n      true\n  - id: g-two\n    run: true\n"
+    add = "  - id: g-new\n    mode: enforced\n    run: |\n      python3 .github/scripts/check-new.py --root .\n"
+    check("gates append: a new entry at the end is a pure append", gates_append_problem(base_g, base_g + add) is None)
+    mid = base_g.replace("  - id: g-two", add + "  - id: g-two")
+    full = base_g + ("  - id: g-full\n    name: full\n    group: lint\n    mode: enforced\n    budget_seconds: 30\n"
+                     "    selftest_inputs:\n      - .github/scripts/check-full.py\n    rationale: >-\n      why it exists\n"
+                     "    run: |\n      # comment\n      python3 .github/scripts/check-full.py --root .\n"
+                     "    selftest: python3 .github/scripts/test-check-full.py\n")
+    check("gates append: a realistic new gate (block run, selftest, inputs, rationale) is a pure append",
+          gates_append_problem(base_g, full) is None, f"{gates_append_problem(base_g, full)!r}")
+    check("gates append: a new entry between two entries is a pure append", gates_append_problem(base_g, mid) is None)
+    refused = {
+        "an existing entry edited": base_g.replace("run: true", "run: 'true # weakened'") + add,
+        "an existing entry removed": base_g.replace("  - id: g-two\n    run: true\n", "") + add,
+        "entries reordered": "# header\ngates:\n  - id: g-two\n    run: true\n  - id: g-one\n    run: |\n      true\n" + add,
+        "the header changed": base_g.replace("# header", "# header\nother: 1") + add,
+        "a new id that already exists": base_g + "  - id: g-two\n    run: false\n",
+        "a new id taken on main": base_g + "  - id: g-main\n    run: true\n",
+        "a new entry defining an anchor": base_g + "  - id: g-a\n    run: &r true\n",
+        "a new entry starting a top-level key": base_g + "  - id: g-b\n    run: true\nother: 1\n",
+        "a line appended into an existing block scalar": base_g.replace("      true\n", "      true\n      exit 0\n"),
+        "no change at all": base_g,
+        "a quoted id duplicating an existing one": base_g + '  - id: "g-one"\n    run: python3 .github/scripts/check-a.py\n',
+        "a second id key inside the new entry": base_g + "  - id: g-c\n    id: g-one\n    run: python3 .github/scripts/check-a.py\n",
+        "a free shell line in run": base_g + "  - id: g-d\n    run: |\n      printf x > .github/scripts/check-adr-registry.sh\n",
+        "a chained command in run": base_g + "  - id: g-e\n    run: python3 .github/scripts/check-a.py; rm -rf .\n",
+        "a redirect argument": base_g + "  - id: g-f\n    run: python3 .github/scripts/check-a.py >out\n",
+        "python3 -c": base_g + "  - id: g-g\n    run: python3 -c 'print(1)'\n",
+        "a non-gate script": base_g + "  - id: g-h\n    run: python3 .github/scripts/regen-helper.py\n",
+        "a selftest with free shell": base_g + "  - id: g-i\n    run: python3 .github/scripts/check-a.py\n    selftest: echo ok\n",
+        "an env key": base_g + "  - id: g-j\n    env: {PYTHONPATH: x}\n    run: python3 .github/scripts/check-a.py\n",
+        "an unknown key": base_g + "  - id: g-k\n    requires: [g-one]\n    run: python3 .github/scripts/check-a.py\n",
+        "no run at all": base_g + "  - id: g-l\n    mode: enforced\n",
+        "a path walking out of .github/scripts": base_g + "  - id: g-m\n    run: python3 .github/scripts/check-x/../../workflows/x.py\n",
+        "a ./ segment": base_g + "  - id: g-n\n    run: python3 .github/scripts/./check-a.py\n",
+        "bash on a .py": base_g + "  - id: g-o\n    run: bash .github/scripts/check-a.py\n",
+    }
+    for shape, new in refused.items():
+        why = gates_append_problem(base_g, new, {"g-main"})
+        check(f"gates append: {shape} is refused", why is not None, f"{why!r}")
+    check("gates append: a missing file on either side is refused",
+          gates_append_problem(None, base_g + add) is not None and gates_append_problem(base_g, None) is not None)
+    ok, why = qualifies({**base_pr, "files": [GATES_YAML], "gates_append": True}, req, green, None, U)
+    check("qualifies: a pure gates.yaml append is a train CANDIDATE", ok, why)
+    check("strict lane: a pure gates.yaml append is NOT in the strict lane",
+          strict_lane_state({**base_pr, "files": [GATES_YAML], "gates_append": True}, req, green, None, U, [], None, None)[0] is None)
+    ok, why = qualifies({**base_pr, "files": [GATES_YAML], "gates_append": False}, req, green, None, U)
+    check("qualifies: a gates.yaml change that is not a pure append stays manual lane", not ok and "manual lane" in why, why)
     # ...while an unrelated (non-privileged) gate's CODE change still rides a train.
     ok, why = qualifies({**base_pr, "files": [".github/scripts/check-unrelated.py"]}, req, green, None, U)
     check("qualifies: an unrelated gate's check script still rides a train (#13837 control)", ok, why)
@@ -5843,7 +6363,8 @@ def self_test() -> int:
             base0 = gh.main_sha()
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
                        "pX": 33, "pF": 34, "pW2": 36, "pS": 37, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62, "pK": 38, "pM": 39,
-                       "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pPc": 85, "pPR": 86, "pPx": 87, "pP1": 88, "pPbad": 89, "pP2": 90, "pRG": 91, "pFoo": 92}
+                       "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pPc": 85, "pPR": 86, "pPx": 87, "pP1": 88, "pPbad": 89, "pP2": 90, "pRG": 91, "pFoo": 92,
+                       "pE1": 93, "pE2": 94, "pE3": 95, "pGP": 96}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -6417,13 +6938,24 @@ def self_test() -> int:
             mode_build(gh, Git(bdir), b, "o/r", out, 8)
             gh.prs[2]["auto_merge"] = None
             st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
-            check("race: a declared member that was disarmed after build is refused",
-                  st == "rejected" and not any(c["state"] == "open" for c in gh.carriers.values()), st)
+
+            def published_members():
+                c = [c for c in gh.carriers.values() if c["state"] == "open"]
+                return [n for n, _ in (parse_own_chain(gh.g, c[-1]["head"]["sha"]) or ("", []))[1]] if c else None
+            check("race (#15827): a declared member disarmed after build is left out; the rest touches generator "
+                  "inputs (docs/), so it is refused rather than published without regeneration",
+                  st == "rejected" and published_members() is None, f"{st} {published_members()}")
+            for c in gh.carriers.values():
+                c["state"] = "closed"
             gh.prs[2]["auto_merge"] = {"x": 1}
-            # NEGATIVE: a manifest naming a PR that was never a candidate (forged by the build job).
+            # NEGATIVE: a manifest naming a PR that was never a candidate (forged by the build job). It can
+            # only shrink the selection: the forged entry never reaches the carrier.
             pathlib.Path(out, MANIFEST_FILE).write_text(f"1 {gh.prs[1]['head']['sha']}\n2 {gh.prs[2]['head']['sha']}\n35 {gh.g('rev-parse', 'pW').stdout.strip()}\n")
             st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
-            check("manifest: a member that is not a live candidate is refused", st == "rejected", st)
+            check("manifest: a member that is not a live candidate never reaches the carrier",
+                  st == "rejected" and published_members() is None, f"{st} {published_members()}")
+            for c in gh.carriers.values():
+                c["state"] = "closed"
             pathlib.Path(out, MANIFEST_FILE).write_text(f"1 {'0' * 40}\n")
             st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
             check("manifest: a member at a head other than its live head is refused", st == "rejected", st)
@@ -6436,6 +6968,79 @@ def self_test() -> int:
             os.unlink(os.path.join(out, MANIFEST_FILE))
             st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
             check("manifest: a bundle with no member manifest is refused", st == "rejected", st)
+            reset()
+
+            # #15827: a batch of THREE, one member's head moves between build and publish (release-please
+            # rewrites its branch after every merge to main). The other two are published THIS tick over
+            # a re-derived chain. Must-FAIL case: today's publish rejected the whole batch
+            # ("declared member #2 is no longer a live train candidate at that head").
+            def bot_rewrite(n):
+                ref = gh.prs[n]["head"]["ref"]
+                old = gh.prs[n]["head"]["sha"]
+                new = gh.g("commit-tree", f"{old}^{{tree}}", "-p", old, "-m", "bot rewrite").stdout.strip()
+                gh.g("branch", "-f", ref, new)
+                gh.prs[n]["head"]["sha"] = new
+                return old
+
+            for moved_at in ("before-plan", "at-intent"):
+                open_only("pE1", "pE2", "pE3")
+                counter[0] += 1
+                bdir = clone("build")
+                b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",), overlay_roots=(".github/scripts",))
+                out = os.path.join(root, f"bundle-{counter[0]}")
+                built = mode_build(gh, Git(bdir), b, "o/r", out, 8)
+                if moved_at == "before-plan":
+                    bot_rewrite(94)
+                    st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+                else:
+                    # The head moves after publish planned and verified: only live_source_intent sees it.
+                    real_intent = globals()["live_source_intent"]
+
+                    def racing_intent(g, n, head, _real=real_intent):
+                        if n == 94 and gh.prs[94]["head"]["sha"] == head:
+                            bot_rewrite(94)
+                        return _real(g, n, head)
+                    globals()["live_source_intent"] = racing_intent
+                    try:
+                        st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+                    finally:
+                        globals()["live_source_intent"] = real_intent
+                members = published_members()
+                check(f"#15827 ({moved_at}): batch of 3, one head moves between build and publish -> carrier of the other 2 published this tick",
+                      built == [93, 94, 95] and st == "published" and members == [93, 95], f"built={built} st={st} members={members}")
+                tipc = [c for c in gh.carriers.values() if c["state"] == "open"]
+                check(f"#15827 ({moved_at}): the re-derived carrier is the merge-tree of the two live heads, nothing of the moved one",
+                      bool(tipc) and gh.g("cat-file", "-e", f"{tipc[-1]['head']['sha']}:build-logic/e2.txt", check=False).returncode != 0
+                      and gh.g("cat-file", "-e", f"{tipc[-1]['head']['sha']}:build-logic/e3.txt", check=False).returncode == 0,
+                      str(tipc[-1]["head"]["sha"] if tipc else None))
+                reset()
+
+            # NEGATIVE (#15827): a member leaves a batch whose bundle carries a regeneration commit. That
+            # commit was derived WITH the member; publish runs nothing, so it is still rejected.
+            open_only("p1", "pR")
+            counter[0] += 1
+            bdir = clone("build")
+            b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",), overlay_roots=(".github/scripts",))
+            out = os.path.join(root, f"bundle-{counter[0]}")
+            built = mode_build(gh, Git(bdir), b, "o/r", out, 8)
+            bot_rewrite(1)
+            st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+            check("#15827: a member leaving a batch with a regeneration commit -> still rejected, nothing published",
+                  st == "rejected" and not any(c["state"] == "open" for c in gh.carriers.values()), f"built={built} st={st}")
+            reset()
+
+            # NEGATIVE (review of #15882): the member that leaves touches no generator input, but the two that
+            # REMAIN do (their union needs regeneration). Never published without it, whatever the bundle says.
+            open_only("pE1", "p1", "pR")
+            counter[0] += 1
+            bdir = clone("build")
+            b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",), overlay_roots=(".github/scripts",))
+            out = os.path.join(root, f"bundle-{counter[0]}")
+            built = mode_build(gh, Git(bdir), b, "o/r", out, 8)
+            bot_rewrite(93)
+            st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+            check("#15827: remaining members touching generator inputs -> not published without regeneration",
+                  st == "rejected" and not any(c["state"] == "open" for c in gh.carriers.values()), f"built={built} st={st}")
             reset()
 
             # NEGATIVE: a symlink in the train tree.
@@ -6814,9 +7419,10 @@ def self_test() -> int:
                   and gh.app_statuses(gh.prs[34]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0] == "success")
             check("fast lane: a docs/adr member is not fast-laned, and settle takes no state input",
                   33 not in sm["fast"] and not gh.app_statuses(gh.prs[33]["head"]["sha"])
-                  # run_id/attempt name the strict carrier branch and strict_cap bounds it: none is a classification.
+                  # run_id/attempt name the strict carrier branch and strict_cap bounds it; expedite/expedite_cap
+                  # are the lane's switch and cap: none is a classification.
                   and set(mode_settle.__code__.co_varnames[:mode_settle.__code__.co_argcount])
-                  == {"gh", "git", "repo", "shadow", "run_id", "attempt", "strict_cap", "stack"})
+                  == {"gh", "git", "repo", "shadow", "run_id", "attempt", "strict_cap", "stack", "expedite", "expedite_cap"})
             reset()
 
             # Bundle verification, directly.
@@ -7529,6 +8135,157 @@ def self_test() -> int:
             gh.updates.clear()
             reset()
 
+            # GATES.YAML APPEND (ADR-0343 amendment 2026-11-14): a member that only appends a gate entry rides a
+            # train carrier and merges; before the amendment it took the strict lane (update-branch, no carrier).
+            open_only("pGP")
+            s, st = tick()
+            oc = [c for c in gh.carriers.values() if c["state"] == "open"]
+            check("gates append (e2e): a pure gates.yaml append is published on a train carrier, no update-branch",
+                  st == "published" and len(oc) == 1 and carrier_members(oc[0]) == [96] and gh.updates == [],
+                  f"{s} st={st} carriers={[carrier_members(c) for c in oc]} updates={gh.updates}")
+            s, st = tick()
+            check("gates append (e2e): the carrier verifies and the append merges", 96 in gh.merged, f"{s} merged={gh.merged}")
+            reset()
+
+            # EXPEDITE LANE (ADR-0343 amendment 2026-11-13): an ordinary carrier for p1 is running; p2 carries
+            # merge-priority:expedite. With the lane on, p2 rides its own one-member carrier over main, merges
+            # first, and p1's carrier is rejected as "main moved" with nobody blamed.
+            def exp_tick(on=True, cap=6):
+                s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False, expedite=on, expedite_cap=cap)
+                if s["in_flight"]:
+                    return s, "in-flight"
+                counter[0] += 1
+                bdir = clone("build")
+                b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",),
+                                 overlay_roots=(".github/scripts",))
+                b.env["PROBE_OUT"] = probe
+                out = os.path.join(root, f"bundle-{counter[0]}")
+                w = s.get("expedite_window")
+                mode_build(gh, Git(bdir), b, "o/r", out, 8, expedite=w)
+                return s, mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8,
+                                       expedite=w, expedite_cap=cap)
+
+            def exp_open():
+                return [c for c in gh.carriers.values() if c["state"] == "open"]
+
+            def exp_setup(label="p2"):
+                open_only("p1")
+                s0, st0 = tick()
+                gh.pending_shas.update(c["head"]["sha"] for c in exp_open())
+                open_only("p2")
+                gh.prs[numbers[label]]["labels"] = [{"name": EXPEDITE_LABEL}]
+                return s0, st0
+
+            def exp_reset():
+                gh.pending_shas.clear()
+                for k in ("expedite_used", "expedite_unreadable"):
+                    if hasattr(gh, k):
+                        delattr(gh, k)
+                reset()
+
+            hit = lambda t, d="2026-11-13", u=BOT_LOGIN: {"title": t, "created_at": f"{d}T10:00:00Z",
+                                                          "user": {"login": u}, "pull_request": {}}
+            good = f"{EXPEDITE_CARRIER_TITLE} train/1-1"
+            counts = [count_expedite_hits({"total_count": 3, "incomplete_results": False,
+                                           "items": [hit(good), hit(good, u="someone"), hit("merge-train carrier train/2-1")]},
+                                          "2026-11-13"),
+                      count_expedite_hits({"total_count": 1, "incomplete_results": False, "items": [hit(good, d="2026-11-12")]},
+                                          "2026-11-13"),
+                      count_expedite_hits({"total_count": 1, "incomplete_results": True, "items": [hit(good)]}, "2026-11-13"),
+                      count_expedite_hits({"total_count": 150, "incomplete_results": False, "items": [hit(good)]}, "2026-11-13"),
+                      count_expedite_hits({"message": "rate limited"}, "2026-11-13")]
+            check("expedite (E0): the daily count counts only the App's expedite carriers of that day, else fails closed",
+                  counts == [1, 0, None, None, None], f"{counts}")
+            s0, st0 = exp_setup()
+            s, st = exp_tick(on=False)
+            check("expedite (E1): lane off -> the label only reorders; nothing is built beside a running carrier",
+                  st0 == "published" and st == "in-flight" and not s.get("expedite_window") and len(exp_open()) == 1,
+                  f"{s0} {st0} {s} {st}")
+            s, st = exp_tick()
+            oc = exp_open()
+            ex = [c for c in oc if c.get("expedite")]
+            eg = Git(clone("expchk"))
+            eg("fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
+            ech = parse_own_chain(eg, ex[0]["head"]["sha"]) if ex else None
+            check("expedite (E2): lane on -> #2 alone on a second carrier over main, marked by the App",
+                  s.get("expedite_window") == 2 and st == "published" and len(oc) == 2 and len(ex) == 1
+                  and ech is not None and ech[0] == gh.main_sha() and [n for n, _ in ech[1]] == [2]
+                  and gh.app_statuses(ex[0]["head"]["sha"]).get(EXPEDITE_CONTEXT, ("", ""))[0] == "success"
+                  and gh.merged == [], f"{s} st={st} open={[(c['number'], c.get('expedite')) for c in oc]} chain={ech}")
+            gh.pending_shas.update(c["head"]["sha"] for c in ex)                # its CI runs
+            s, st = exp_tick()
+            check("expedite (E3): with an expedite carrier open, no third carrier is built",
+                  st == "in-flight" and len(exp_open()) == 2 and not s.get("expedite_window"), f"{s} {st}")
+            gh.pending_shas.difference_update(c["head"]["sha"] for c in ex)   # the expedite carrier goes green
+            s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False, expedite=True)
+            check("expedite (E4): the green expedite carrier merges first while the overtaken carrier still runs",
+                  gh.merged == [2] and 1 not in gh.merged and len(exp_open()) == 1, f"{s} merged={gh.merged}")
+            gh.pending_shas.clear()                                             # the overtaken carrier goes green
+            s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False, expedite=True)
+            p1_blamed = (any(n == 1 for n, _ in gh.comments)
+                         or gh.app_statuses(gh.prs[1]["head"]["sha"]).get(STATUS_CONTEXT, ("", ""))[0] == "failure")
+            check("expedite (E5): the overtaken carrier is closed as main moved, nobody blamed, nothing bisected",
+                  gh.merged == [2] and not exp_open() and not p1_blamed and not s["culprits"] and not s["bisected"],
+                  f"{s} merged={gh.merged} comments={gh.comments}")
+            for _ in range(6):
+                s, st = exp_tick()
+                if 1 in gh.merged:
+                    break
+                gh.pending_shas.clear()
+            check("expedite (E6): the overtaken member is rebuilt and merges after the expedited one",
+                  gh.merged[:2] == [2, 1], f"merged={gh.merged}")
+            exp_reset()
+
+            exp_setup()
+            earlier = gh.expedite_carriers_today("")   # expedite carriers the fixture already opened today
+            gh.expedite_used = 6 - earlier
+            s, st = exp_tick(cap=6)
+            capped = (st, s.get("expedite_window"))
+            gh.expedite_used = 5 - earlier
+            s, st = exp_tick(cap=6)
+            check("expedite (E7): at the daily cap no expedite carrier is built; one under it, it is",
+                  capped == ("in-flight", None) and s.get("expedite_window") == 2 and st == "published",
+                  f"capped={capped} under={s.get('expedite_window')} {st}")
+            exp_reset()
+
+            exp_setup()
+            s, st = exp_tick()                                       # the expedite carrier for #2 is published
+            both = [c["number"] for c in exp_open()]
+            gh.pending_shas.clear()                                  # both carriers go green in the same tick
+            s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False, expedite=True)
+            p1_blamed = (any(n == 1 for n, _ in gh.comments)
+                         or gh.app_statuses(gh.prs[1]["head"]["sha"]).get(STATUS_CONTEXT, ("", ""))[0] == "failure")
+            check("expedite (E11): both carriers green in one tick -> the expedite one is judged first and merges",
+                  st == "published" and len(both) == 2 and gh.merged == [2] and 1 not in gh.merged
+                  and not exp_open() and not p1_blamed and not s["culprits"] and not s["bisected"],
+                  f"{s} st={st} carriers={both} merged={gh.merged} open={exp_open()}")
+            exp_reset()
+
+            exp_setup()
+            gh.expedite_unreadable = True
+            s, st = exp_tick()
+            check("expedite (E8): an unreadable daily count fails closed",
+                  st == "in-flight" and not s.get("expedite_window") and len(exp_open()) == 1, f"{s} {st}")
+            exp_reset()
+
+            exp_setup(label="p1")                                   # the expedited PR already rides the carrier
+            s, st = exp_tick()
+            why9 = expedite_problem(gh, Git(clone("expchk")), "o/r", 1, 6)
+            check("expedite (E9): a PR already on the running carrier gets no second one",
+                  st == "in-flight" and not s.get("expedite_window") and len(exp_open()) == 1
+                  and why9 is not None and "already rides" in why9, f"{s} {st} why={why9}")
+            exp_reset()
+
+            exp_setup()
+            open_only("pW")
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}   # a strict holder runs CI
+            s, st = exp_tick()
+            held = (st, s.get("expedite_window"), len([c for c in exp_open() if c.get("expedite")]))
+            check("expedite (E10): never beside a running strict reservation (the holder is not pre-empted)",
+                  held[1] is None and held[2] == 0, f"{s} {st} held={held}")
+            gh.head_checks.clear()
+            exp_reset()
+
             # SPECULATIVE STACKING (ADR-0343 amendment 2026-11-09): while strict holder pW (35) runs CI on an
             # up-to-date head h, the train carrier for p1 is published over h, never merged before pW, and
             # accepted after pW's merge only when main's tree is h's tree. Each case below is must-FAIL for
@@ -7735,6 +8492,57 @@ def self_test() -> int:
             check("stacking (S10): MERGE_TRAIN_SPECULATIVE_STACK false -> the bounded deferral window as before",
                   "stack_window" not in s and s.get("deferral_window") == 35, f"{s}")
             gh.head_checks.clear()
+            reset()
+
+            # #15827 (b): the disjoint fast path never releases a PR while a train carrier is in flight.
+            # Measured 2026-11-12: #15817 was posted "fast lane: disjoint from main ... and the batch" at
+            # 10:45 under carrier #15834 (published 10:41), auto-merge merged it, and settle rejected the
+            # green carrier as "main moved since publish". Must-FAIL case: without the hold, 34 is posted.
+            open_only("p1")
+            _, st = tick()
+            gh.pending_shas.update(c["head"]["sha"] for c in gh.carriers.values() if c["state"] == "open")
+            open_only("pF")
+            s = settle_now()
+            check("#15827 (b): a disjoint fast-lane PR is held while a train carrier is in flight",
+                  st == "published" and s["fast"] == [] and 34 not in gh.merged
+                  and gh.app_statuses(gh.prs[34]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0] != "success",
+                  f"st={st} {s}")
+            gh.pending_shas.clear()
+            s = settle_now()                      # the carrier is green: it merges, nothing was moved under it
+            check("#15827 (b): the carrier then merges over the main it was published on",
+                  1 in gh.merged and not s["rejected"], f"{s} merged={gh.merged}")
+            s = settle_now()
+            check("#15827 (b): with no carrier open the fast-lane PR is released", 34 in s["fast"], str(s))
+            reset()
+
+            # #15827 (c): a strict holder GREEN on an up-to-date head that did not merge this tick (here: the
+            # merge is refused once) gets ONE tick in which no fast carrier is built, so the next carrier
+            # does not push it behind main and restart its full CI (#15747 was reset three times). Must-FAIL
+            # case: without the hold a carrier of #1 is published this tick.
+            open_only("pW")                       # strict-lane, up to date with main, green
+            open_only("p1")                       # a green train candidate
+            pw_head = gh.prs[35]["head"]["sha"]
+            gh.refuse_merge.add(35)
+            s, st = tick()
+            check("#15827 (c): green up-to-date strict holder + fast candidates -> no fast carrier published that tick",
+                  st == "in-flight" and s.get("strict_ready_hold") == 35
+                  and not any(c["state"] == "open" for c in gh.carriers.values()) and gh.merged == [],
+                  f"{s} st={st}")
+            gh.refuse_merge.discard(35)
+            s, st = tick()
+            check("#15827 (c): the holder merges next tick, on its own un-updated head",
+                  gh.merged[:1] == [35] and gh.updates == [] and gh.prs[35]["head"]["sha"] == pw_head,
+                  f"{s} st={st} merged={gh.merged} updates={gh.updates}")
+            reset()
+            # Bounded: a holder that still cannot merge holds the fast lane ONCE per head, never twice.
+            open_only("pW")
+            open_only("p1")
+            gh.refuse_merge.add(35)
+            tick()
+            s, st = tick()
+            check("#15827 (c): a holder already held for once does not stall the fast lane again",
+                  st == "published" and "strict_ready_hold" not in s, f"{s} st={st}")
+            gh.refuse_merge.discard(35)
             reset()
 
             # BOUNDED STRICT DEFERRAL (#13400): a strict reservation whose CI is still running yields
@@ -9115,6 +9923,22 @@ def self_test() -> int:
                     ok, detail = False, f"{type(exc).__name__}: {exc}"
                 check("api: Retry-After and a reset are retried on a GET; a write is never retried", ok, detail)
 
+                # (e1) a body cut off mid-read (IncompleteRead) is retried on a GET; a write is not.
+                try:
+                    fx, real = with_http([[lambda m, p: True, "incomplete", 1]])
+                    got = api("GET", "/repos/o/r/git/ref/heads/main")
+                    ok = got[0] == 200 and slept == [API_BACKOFF_BASE_S] and len(fx.calls) == 2
+                    fx, real = with_http([[lambda m, p: m == "POST", "incomplete", None]])
+                    try:
+                        api("POST", f"/repos/o/r/statuses/{'a' * 40}", {"state": "success", "context": "x", "description": ""})
+                        ok = False
+                    except ApiAbort:
+                        ok = ok and len(fx.calls) == 1
+                    detail = f"slept={slept} calls={fx.calls}"
+                except BaseException as exc:          # the code before this change: IncompleteRead escapes api()
+                    ok, detail = False, f"{type(exc).__name__}: {exc}"
+                check("api: an IncompleteRead is retried on a GET; a write is never retried", ok, detail)
+
                 # (e2) a bare 500 is transient (run 41640891760: check-runs page 2 -> 500 killed the tick).
                 # Stubbed at _http_open: 500 then 200 succeeds; 500 always raises ApiAbort after
                 # API_RETRY_ATTEMPTS; 404 is returned at once; a page-2 failure never yields a partial list.
@@ -9302,6 +10126,14 @@ def main() -> int:
                     help="publish: settle's stacking window, holder PR number (re-validated live)")
     ap.add_argument("--stack-head", default=os.environ.get("STACK_HEAD", ""),
                     help="publish: settle's stacking window, holder head sha (re-validated live)")
+    ap.add_argument("--expedite-lane", choices=["true", "false"],
+                    default=os.environ.get("EXPEDITE_LANE", "true" if EXPEDITE_LANE_DEFAULT else "false"),
+                    help="settle: open an expedite window beside one running carrier (ADR-0343 amendment 2026-11-13)")
+    ap.add_argument("--expedite-cap", type=int,
+                    default=int(os.environ.get("EXPEDITE_DAILY_CAP", str(EXPEDITE_DAILY_CAP_DEFAULT))),
+                    help="settle/publish: expedite carriers per UTC day")
+    ap.add_argument("--expedite-pr", default=os.environ.get("EXPEDITE_PR", ""),
+                    help="build/publish: settle's expedite window, the one PR number (re-validated live)")
     ap.add_argument("--out", default="", help="build: directory for train.bundle")
     ap.add_argument("--bundle", default="", help="publish: directory holding train.bundle")
     ap.add_argument("--run-id", default="")
@@ -9363,7 +10195,8 @@ def run_mode(gh, args, ap) -> int:
     if args.mode == "build":
         if not args.out:
             ap.error("build needs --out")
-        applied = mode_build(gh, Git(workdir), TrainBuilder(workdir), args.repo, args.out, args.batch_size)
+        applied = mode_build(gh, Git(workdir), TrainBuilder(workdir), args.repo, args.out, args.batch_size,
+                             expedite_arg(args, ap))
         write_output("has_train", "true" if applied else "false")
         write_output("has_drops", "true" if os.path.isfile(os.path.join(args.out, DROPS_FILE)) else "false")
         return 0
@@ -9377,16 +10210,30 @@ def run_mode(gh, args, ap) -> int:
             if not (re.fullmatch(r"[0-9]+", args.stack_pr) and SHA_RE.fullmatch(args.stack_head)):
                 ap.error("--stack-pr must be a PR number and --stack-head a full sha")
             stack = (int(args.stack_pr), args.stack_head)
-        log(f"publish: {mode_publish(gh, git, args.repo, args.bundle, args.run_id, args.attempt, args.batch_size, stack)}")
+        result = mode_publish(gh, git, args.repo, args.bundle, args.run_id, args.attempt, args.batch_size, stack,
+                              expedite_arg(args, ap), args.expedite_cap)
+        log(f"publish: {result}")
         return 0
     s = mode_settle(gh, git, args.repo, args.shadow, run_id=args.run_id, attempt=args.attempt,
-                    strict_cap=args.strict_batch_cap, stack=args.speculative_stack == "true")
+                    strict_cap=args.strict_batch_cap, stack=args.speculative_stack == "true",
+                    expedite=args.expedite_lane == "true", expedite_cap=args.expedite_cap)
     log(f"settle: {s}")
     write_output("in_flight", "true" if s["in_flight"] else "false")
     window = s.get("stack_window")
     write_output("stack_pr", str(window[0]) if window else "")
     write_output("stack_head", window[1] if window else "")
+    write_output("expedite_pr", str(s["expedite_window"]) if s.get("expedite_window") else "")
     return 0
+
+
+def expedite_arg(args, ap) -> int | None:
+    if not args.expedite_pr:
+        return None
+    if not re.fullmatch(r"[0-9]{1,9}", args.expedite_pr):
+        ap.error("--expedite-pr must be a PR number")
+    if args.expedite_cap < 1:
+        ap.error("--expedite-cap must be a positive integer")
+    return int(args.expedite_pr)
 
 
 if __name__ == "__main__":

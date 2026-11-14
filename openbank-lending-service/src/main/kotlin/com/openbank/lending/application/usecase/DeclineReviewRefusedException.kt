@@ -18,5 +18,22 @@ class DeclineReviewRefusedException(val code: String, message: String) : Illegal
 
         /** The bounded window after the decline has elapsed. */
         const val WINDOW_ELAPSED: String = "REVIEW_WINDOW_ELAPSED"
+
+        /** The review already has a decision. */
+        const val ALREADY_DECIDED: String = "REVIEW_ALREADY_DECIDED"
+
+        /**
+         * The reviewer's principal name equals the applicant's party id. That is ALL it detects: staff
+         * principals are not party ids, and the platform has no staff-to-party identity mapping, so a
+         * member of staff reviewing their own decline as a customer is not caught here.
+         */
+        const val SELF_REVIEW: String = "SELF_REVIEW"
+
+        /**
+         * An overturn would open a successor that intake itself would refuse today: origination is not
+         * allowed for the product (compliance pack), a FLOATING rate while floating origination is off,
+         * or rate terms invalid against the recomputed first due date. The review stays REQUESTED.
+         */
+        const val SUCCESSOR_NOT_ORIGINABLE: String = "SUCCESSOR_NOT_ORIGINABLE"
     }
 }

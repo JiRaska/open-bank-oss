@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/products-v0.4.0...products-v0.5.0) (2026-11-14)
+
+
+### Features
+
+* **products:** prove synthetic fincrime packs offline ([#15680](https://github.com/JiRaska/open-bank-oss/issues/15680)) ([d2418a1](https://github.com/JiRaska/open-bank-oss/commit/d2418a1f92b9bde5addcdfa3f980acc9b486bc03))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/products-v0.3.2...products-v0.4.0) (2026-11-06)
 
 

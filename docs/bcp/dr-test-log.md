@@ -73,6 +73,14 @@ Format:
 
 ## 2026-07-26 — Live restore drill: ledger-db PITR from S3 into a scratch CNPG cluster
 
+> **Clarification (added later; the entries are not rewritten).** This log holds two entries for the
+> same drill. They disagree on the RPO (the earlier entry reports ~4h45m, this one reports not
+> measured) and on the number of attempts. The RPO line in this entry is the supported one: the
+> 4h45m is the interval between the base backup and the drill start, not a data-loss window. The
+> evidence for the single data point both entries agree on (restore ~84 s, 96 `journal_entries`
+> matching the primary) is the same run. Which entry's attempt count is right cannot be told from
+> the repository; follow-up.
+
 - **Type**: live-restore (a real restore was executed; this was **not** a failover, so it does
   not substitute for a `dr_drill`)
 - **Scope**: `openbank-ledger-service` only (`ledger-db`, sandbox). The other ~19 CNPG

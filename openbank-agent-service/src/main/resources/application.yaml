@@ -286,8 +286,9 @@ catalog-review:
 # Agent policy gate (ADR-0031 D2/D9). The PDP is now the live OPA sidecar (ADR-0018):
 # agent.policy.enforcement controls D9 (ADR-0031): `advisory` audits every decision but never
 # blocks (safe to flip to `block` once an OPA sidecar is present in every deploy target).
-# With `block`, AgentPolicyGate blocks DENY calls UNLESS the PDP itself is unavailable, in which
-# case it degrades to advisory + logs a warn (so a dead OPA sidecar does not lock the assistant).
+# With `block`, AgentPolicyGate blocks every DENY call, INCLUDING when the PDP itself errors or is
+# unavailable (fail closed: a dead OPA sidecar halts all tool calls; outcome pdp_unavailable_denied).
+# An unset value means advisory; a set but unrecognised value is treated as block (logged at ERROR).
 # Set AGENT_POLICY_ENFORCEMENT=block in the k8s deployment env to enable enforcement in the sandbox.
 agent:
   # API key for the openai-compat model backend. Empty in the committed config; supplied at runtime

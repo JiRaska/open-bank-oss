@@ -89,6 +89,30 @@ Idempotency-Key: ...
 
 Reasons: `AML_HOLD`, `COURT_ORDER`, `FRAUD_INVESTIGATION`, `CUSTOMER_REQUEST`.
 
+### Account standing
+
+Every response that returns an account carries `standing`, the answer to "may money leave or
+enter this account now" (ADR-0374 D4). Payment rails read it with the account instead of
+interpreting `status`.
+
+```json
+"standing": { "mayDebit": false, "mayCredit": false, "reason": "ACCOUNT_FROZEN" }
+```
+
+| `status` | `mayDebit` | `mayCredit` | `reason` |
+|---|---|---|---|
+| `ACTIVE` | true | true | null |
+| `DORMANT` | false | true | `ACCOUNT_DORMANT` |
+| `PENDING_ACTIVATION` | false | false | `ACCOUNT_PENDING_ACTIVATION` |
+| `FROZEN` | false | false | `ACCOUNT_FROZEN` |
+| `CLOSED` | false | false | `ACCOUNT_CLOSED` |
+
+**Party standing.** When party-service reports a party as `SUSPENDED` or `CLOSED`, every `ACTIVE`
+account the party owns is frozen. When the party is `ACTIVE` again those freezes are lifted. A
+freeze placed through `POST .../freeze` is never lifted by a party event, and freezing an account
+that is frozen because of its party makes the freeze the operator's. `reason` is `ACCOUNT_FROZEN`
+in both cases. No customer notification is sent for a party-standing freeze.
+
 ### Authorizations
 
 ```http

@@ -508,7 +508,7 @@ spec:
       - ServerSideApply=true
     managedNamespaceMetadata:
       labels:
-        openbank.io/plane: platform
+        open-bank.tech/plane: platform
         # The eBPF probe is privileged by design — restricted would block it.
         pod-security.kubernetes.io/enforce: privileged
         pod-security.kubernetes.io/audit: privileged

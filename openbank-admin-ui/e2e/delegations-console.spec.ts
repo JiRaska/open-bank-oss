@@ -15,7 +15,7 @@
 // BFF); the BFF handlers themselves are the real ones running in `next dev`.
 
 import AxeBuilder from '@axe-core/playwright'
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 const PARTY = '018f4a3c-1b2d-7e00-9a11-000000000001'

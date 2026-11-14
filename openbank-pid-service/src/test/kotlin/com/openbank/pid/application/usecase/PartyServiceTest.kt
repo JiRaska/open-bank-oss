@@ -290,6 +290,26 @@ class PartyServiceTest {
     }
 
     @Test
+    fun `linkCaseEvidence on an erased party is refused and publishes nothing`(): Unit = runBlocking {
+        val party = testParty().copy(
+            caseLifecycle = testCaseLifecycle(status = LifecycleCaseStatus.OPEN),
+            erasedAt = now(),
+        )
+        coEvery { partyRepository.findById(party.id) } returns party
+
+        assertThatThrownBy {
+            runBlocking {
+                service.linkCaseEvidence(
+                    LinkCaseEvidenceCommand(partyId = party.id, evidenceRef = "evidence-123", actor = "pid-reviewer"),
+                )
+            }
+        }.isInstanceOf(PartyErasedException::class.java)
+
+        coVerify(exactly = 0) { eventPublisher.publish(any()) }
+        coVerify(exactly = 0) { evidenceLinkPort.recordLink(any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `transitionCase rejects invalid PID lifecycle transition`(): Unit = runBlocking {
         val party = testParty().copy(
             caseLifecycle = testCaseLifecycle(status = LifecycleCaseStatus.OPEN),

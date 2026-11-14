@@ -113,11 +113,12 @@ and require a human operator plus OPA; client applications do not receive a bank
 | T38 | A customer shares a document they are not entitled to disclose, or shares a broad live API | The intended issuer path will re-read the linked grant, require `ACTIVE`, require the authenticated grantor and require `DOCUMENT` + `OBJECT_READ`; D7 is an immutable single-object emission rather than a new product-service authorization path. Residual: this command/API is not yet implemented, so no production control should claim these checks have run. |
 | T39 | Disclosure evidence exposes unnecessary recipient or device data | The storage schema deliberately retains one human recipient label and the event time required for grantor transparency, but not recipient account identity, IP address, user-agent, raw link or raw OTP. View rows are append-only so a later counter update cannot erase earlier access evidence. Residual: retention, data-subject access and audit-envelope routing must be specified with the sealed-export integration before external exposure. |
 | T40 | A compromised client changes an approval-group member or threshold after the owner completes SCA, or manages an organization's roster through a stale/forged profile | The edge first requests a versioned, server-canonical SHA-256 reference over operation, owner, group id/revision, trimmed name, sorted unique members and threshold. The approving device signs that reference in `DynamicLinkingData`; sca-service compares it exactly in the atomic consume gate. The edge forwards the authenticated human separately from the selected owner, and delegation-service revalidates that actor's current organization mandate before every create, revise or deactivate and consumes that actor's SCA—not the entity's. Any changed field, revoked authority or actor mismatch refuses before persistence. Group revisions are monotonic and every full roster is stored and published transactionally, so downstream operation snapshots can retain the exact authority they evaluated. Cross-tenant reads collapse to 404. Residual: groups are configuration only; non-SOLO execution remains refused until resource-policy binding, immutable per-operation snapshots and an atomic distinct-actor decision ledger land. |
+| T41 | A forged, replayed, reordered or misclassified payment event confirms or releases a spend reservation it should not (ADR-0249 D3 amendment, #16000) | Only domestic-payment holds Write on `openbank.domestic.payment.events` (KafkaUser ACL); delegation-service holds Read on it and its own group, and Write only on its DLQ. Dispatch is on the outbox `ce-type` header compared to literals, never on a body field, so a body cannot promote itself into a settlement. A settlement is a compare-and-set from the state the domain names, under the grant row lock: SETTLED only from RESERVED; REJECTED/CANCELLED/finalized-absent only from RESERVED; RETURNED is the single transition allowed out of CONFIRMED (`PaymentOutcomeSettlement.decide`), so a stale or forged rejection can never re-open a ceiling already spent through. The event's `delegationId` must own the `reservationId` and the reservation must be a DOMESTIC_PAYMENT one. Replays are no-ops; contradictions are acked and counted (`conflict`), unclassifiable records counted (`unrecognised`), both alerted. The consumer is off by default and, while off, the channel does not exist. Residual: a compromised domestic-payment producer can still settle any domestic reservation with a well-formed outcome; until the edge switch an edge-confirmed reservation whose payment is REJECTED stays CONFIRMED (counted conflict); a RETURNED release of a CONFIRMED reservation writes no second state-stream snapshot, so the stream shows CONFIRMED while the row and the SpendReleased audit event show RELEASED. |
 
 ## Outbound authentication (added 2026-08-06)
 
 Every REST client this service owns — sca-service, pid-service, party-service, account-service,
-card-issuance —
+card-issuance, document-service —
 carries the shared `openbank-services` client-credentials token via
 `OidcClientRequestReactiveFilter`. Before the outbound-authentication fix, the original four called
 out with **no Authorization header**
@@ -142,6 +143,40 @@ bundle, not introduced here. It is why the callee-side rules gate on action, not
 
 No test could see this: every test mocks the client interface, so nothing exercises the wire. The
 gap closes only with a consumer pact or a run against a deployed stack.
+
+### Document ownership read (added 2026-11-12, ADR-0375 D5)
+
+A sixth outbound edge: `DocumentOwnershipRestClient` calls document-service
+`GET /api/v1/documents/{id}/owner` before an OBJECT_READ grant over a document is minted. It is the
+narrowest of the six and deliberately does NOT ride the shared identity above.
+
+- **Principal.** The NAMED `m2m` oidc-client (`openbank-delegation`, ROLE_API only), so the callee
+  sees `service-account-openbank-delegation` rather than the fleet-wide subject. document-service's
+  OPA extension pins `document.verifyOwnership` to that exact subject and **vetoes every other
+  caller explicitly** — the veto is load-bearing, because base `rest.rego` grants the customer edge
+  the whole `document.` family. Measured with `opa eval` against the generated bundle, not read off
+  the rego: the allow fires for that subject with reason `service-delegation-document-ownership`,
+  while the shared subject, the edge and `document.read` all resolve false.
+- **Why not `document.read`.** That action returns the whole metadata record and is granted to other
+  subjects. The authority needed to MINT a delegation must not also be able to read the document the
+  delegation is over, so the new action answers only who owns it.
+- **Information disclosure.** The response is `{id, partyId}`. A 404 covers both an unknown document
+  and one with no owner recorded, so the boundary does not leak document existence to a caller that
+  guesses ids.
+- **What this closes.** Before it, this client answered `UNVERIFIABLE` for every object resource
+  type and the offer path refuses on that, so NO object grant could be minted at all — while
+  customer-edge's reader for a document grant was already built. Both sides' tests were green
+  because each mocked the other. T1 (a grant naming a stranger's resource) is now actually enforced
+  for DOCUMENT instead of being enforced by universal refusal.
+- **Residual, unchanged in kind.** As with the five clients above, no test exercises the wire: the
+  tests mock the client interface. The `opa eval` probe covers the authorization half — the half
+  that was wrong — not the transport half. A missing filter would surface as `UNVERIFIABLE`, i.e.
+  as the fail-closed verdict naming the check rather than the cause, exactly as recorded above.
+- **PAYMENT and STATEMENT still answer `UNVERIFIABLE`, and by measurement rather than omission.**
+  statement-service is addressed by `accountId` and holds no statement object with an id of its own;
+  a payment id resolves in no single service, since six rails own payments and nothing maps an id to
+  its rail. Neither has an owner to ask, so both remain refused at the writer until those pairs
+  leave `CAPABILITY_MATRIX`.
 
 ## Out of scope (tracked as follow-ups)
 
@@ -194,6 +229,17 @@ gap closes only with a consumer pact or a run against a deployed stack.
   management applies its own current-mandate checks.
 
 ## Change log
+
+- **2026-11-12** — **Document ownership read added as a sixth outbound edge** (ADR-0375 D5).
+  `DocumentOwnershipRestClient` reads `GET /api/v1/documents/{id}/owner` on the NAMED `m2m`
+  principal (`service-account-openbank-delegation`, ROLE_API), under document-service's own OPA
+  action `document.verifyOwnership`, which is pinned to that subject and vetoed for every other
+  caller. New outbound network path and new privilege, both narrow: the response carries only
+  `{id, partyId}`, and the action deliberately excludes `document.read`. Elevation of privilege is
+  bounded by the callee-side pin rather than by this service's own restraint. What it closes: the
+  DOCUMENT branch previously returned `UNVERIFIABLE`, which the offer path refuses, so no object
+  grant of any type could be minted while a reader for one was already deployed. Rollback: revert
+  the branch; the service returns to refusing every object grant, which is fail-closed.
 
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `delegation_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
@@ -375,3 +421,19 @@ schema/decision-ledger path is healthy; rollback flips the flag before reverting
 Recertification confirmation (`POST /recertifications/{id}/confirm`) admits only customer-edge, recognised by `ServiceAccountIdentity` (openbank-libs-runtime): a verified JWT with `azp` = `openbank-edge` and `preferred_username` = `service-account-openbank-edge`. It is never recognised by the principal name, which Quarkus takes from a username claim. A token carrying that username but issued to another client is refused with 403.
 
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+## Business approval replay
+
+A payment approval retry authenticates the same initiator and entity at the existing boundary.
+A consumed SCA challenge can only replay the original instruction kind and canonical payload.
+A changed instruction is refused before another approval or outbox record can be written.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

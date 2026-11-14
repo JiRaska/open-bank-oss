@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.19.0...fraud-service-v0.20.0) (2026-11-14)
+
+
+### Features
+
+* **fraud:** accept the payee as a keyed pseudonym and add one typed fraud risk context (ADR-0377 D3) ([#16026](https://github.com/JiRaska/open-bank-oss/issues/16026)) ([a14f28a](https://github.com/JiRaska/open-bank-oss/commit/a14f28a01c90a4dfb358be880ccd78f4b5dbc82c))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.18.4...fraud-service-v0.19.0) (2026-11-13)
+
+
+### Features
+
+* **aml:** persist immutable shadow pack epochs ([#15684](https://github.com/JiRaska/open-bank-oss/issues/15684)) ([791cbf1](https://github.com/JiRaska/open-bank-oss/commit/791cbf15681415671b6f01ac8c6c2fa7659c2320))
+* **fraud:** persist append-only shadow pack epochs ([#15673](https://github.com/JiRaska/open-bank-oss/issues/15673)) ([98de2af](https://github.com/JiRaska/open-bank-oss/commit/98de2af93cda311be409c514196ab26c3f881089))
+
 ## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.18.3...fraud-service-v0.18.4) (2026-11-12)
 
 

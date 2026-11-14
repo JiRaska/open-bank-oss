@@ -648,12 +648,12 @@ spec:
             namespace: kyc
             cluster: kyc-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(2)
+          expr: vector(3)
           labels:
             namespace: ledger-pension-co
             cluster: ledger-pension-co-db
         - record: openbank:cnpg_cluster_instances_declared
-          expr: vector(2)
+          expr: vector(3)
           labels:
             namespace: ledger
             cluster: ledger-db

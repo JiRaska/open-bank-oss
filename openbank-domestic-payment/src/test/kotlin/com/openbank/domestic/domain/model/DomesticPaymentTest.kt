@@ -49,6 +49,66 @@ class DomesticPaymentTest {
     }
 
     @Test
+    fun `a payment is held only from RECEIVED and a hold ends admitted or rejected, nothing else`() {
+        val clock = java.time.Clock.systemUTC()
+        assertThat(DomesticPaymentStatus.entries.filter { payment(it).canTransitionTo(DomesticPaymentStatus.HELD) })
+            .containsExactly(DomesticPaymentStatus.RECEIVED)
+        assertThat(DomesticPaymentStatus.entries.filter { payment(DomesticPaymentStatus.HELD).canTransitionTo(it) })
+            .containsExactly(DomesticPaymentStatus.VALIDATED, DomesticPaymentStatus.REJECTED)
+
+        val held = payment().transitionTo(DomesticPaymentStatus.HELD, clock = clock)
+        // Nothing was submitted: a held payment has not passed the controls yet.
+        assertThat(held.submittedAt).isNull()
+        assertThat(held.aggregateRevision).isEqualTo(2)
+        assertThat(held.transitionTo(DomesticPaymentStatus.VALIDATED, clock = clock).submittedAt).isNotNull()
+    }
+
+    @Test
+    fun `a customer channel is shown a held payment as received and every other status as it is`() {
+        assertThat(DomesticPaymentStatus.HELD.customerFacing).isEqualTo(CustomerFacingPaymentStatus.RECEIVED)
+        assertThat(DomesticPaymentStatus.entries.filter { it.customerFacing.asRailStatus != it })
+            .containsExactly(DomesticPaymentStatus.HELD)
+        assertThat(CustomerFacingPaymentStatus.entries.map { it.name }).doesNotContain("HELD")
+    }
+
+    @Test
+    fun `a customer channel is told a reason only when it is theirs to act on, never one that names a control`() {
+        val shown = DomesticRejectReason.entries.associateWith { it.customerFacing.asRailReason }
+
+        // Named one by one: a reason added later must be placed here on purpose.
+        // Never null: a client is given a neutral reason to render, not an empty one.
+        assertThat(shown.filterValues { it == DomesticRejectReason.DECLINED }.keys).containsExactlyInAnyOrder(
+            DomesticRejectReason.AML_HOLD,
+            DomesticRejectReason.SANCTIONS_HIT,
+            DomesticRejectReason.FRAUD_SUSPECTED,
+            DomesticRejectReason.DEBTOR_ACCOUNT_BLOCKED,
+            DomesticRejectReason.DECLINED,
+        )
+        shown.filterValues {
+            it != DomesticRejectReason.DECLINED
+        }.forEach { (reason, seen) -> assertThat(seen).isEqualTo(reason) }
+    }
+
+    @Test
+    fun `a hold records when it began and keeps that after it ends, and its case is requested once`() {
+        val clock = Clock.fixed(Instant.parse("2026-11-13T10:00:00Z"), ZoneOffset.UTC)
+        val later = Clock.fixed(Instant.parse("2026-11-13T12:00:00Z"), ZoneOffset.UTC)
+        val held = payment(DomesticPaymentStatus.RECEIVED).transitionTo(DomesticPaymentStatus.HELD, clock = clock)
+        assertThat(held.heldAt).isEqualTo(clock.instant())
+        assertThat(held.holdCaseRequestedAt).isNull()
+
+        val requested = held.withHoldCaseRequested(clock.instant(), setOf("SANCTIONS:SANCTIONS_POTENTIAL_MATCH"))
+        val again = requested.withHoldCaseRequested(later.instant(), setOf("FRAUD:FRAUD_REVIEW"))
+        assertThat(again.holdCaseRequestedAt).isEqualTo(clock.instant())
+        assertThat(again.holdCaseReasons).containsExactly("SANCTIONS:SANCTIONS_POTENTIAL_MATCH")
+
+        val released = requested.transitionTo(DomesticPaymentStatus.VALIDATED, clock = later)
+        assertThat(released.heldAt).isEqualTo(clock.instant())
+        assertThatThrownBy { released.withHoldCaseRequested(later.instant(), emptySet()) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
     fun `delegation and reservation form an indivisible pair`() {
         assertThatThrownBy {
             payment().copy(delegationId = UUID.randomUUID())

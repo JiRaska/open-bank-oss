@@ -45,6 +45,8 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // ADR-0371: the monitoring intake IT proves the dead-letter path against a real broker.
+    testImplementation(libs.testcontainers.redpanda)
 
     // Shared authz conformance kit (issue #467) — AmlCaseSecurityTest pilot migration.
     testImplementation(project(":openbank-libs-testing"))

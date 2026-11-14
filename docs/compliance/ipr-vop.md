@@ -27,10 +27,10 @@ liability-shift regime, or the PSP self-attestation duties — see [Known gaps](
 
 | IPR obligation | What the regulation requires | Implementation in this repo | Service / ADR | Status |
 |---|---|---|---|---|
-| **Verification of Payee** (Art. 5c) | Before a credit transfer is authorised, the payer's PSP must check the payee name against the account identifier (IBAN) and flag a mismatch to the payer. | `openbank-vop-service` runs a pure, deterministic name-match policy returning the four EPC outcomes `MATCH` / `CLOSE_MATCH` / `NO_MATCH` / `NO_DATA`. It **warns rather than blocks** and **fails open** as `NO_DATA` when data is unavailable. | `openbank-vop-service`, [ADR-0171](../adr/0171-verification-of-payee-for-outbound-credit-transfers.md) | Partial — service live; advisory-only |
+| **Verification of Payee** (Art. 5c) | Before a credit transfer is authorised, the payer's PSP must check the payee name against the account identifier (IBAN) and flag a mismatch to the payer. | `openbank-vop-service` runs a pure, deterministic name-match policy returning the four EPC outcomes `MATCH` / `CLOSE_MATCH` / `NO_MATCH` / `NO_DATA`. It **warns rather than blocks** and **fails open** as `NO_DATA` when data is unavailable. The only caller is the optional customer route `/vop/verify` in `openbank-customer-edge`; the SEPA and instant payment handlers neither call it nor require it, so verification is not enforced in the payment flow (#15759). | `openbank-vop-service`, [ADR-0171](../adr/0171-verification-of-payee-for-outbound-credit-transfers.md) | Partial — service live; optional customer route, not enforced in the payment flow (#15759) |
 | **SCT Inst 10-second timing** (Art. 5a) | The payee's account must be credited (or the payer informed of rejection) within 10 seconds of the payment order, at any time of day. | `SctInstPaymentService` arms an execution deadline (`executionTimeoutAt = now + timeoutSeconds`) when the payment is cleared, and drives a dedicated `TIMEOUT` terminal state via `SctInstPaymentTimeout`. The window is `openbank.sct-inst.execution-timeout-seconds`, **default `10`**. | `openbank-sepa-instant` | Implemented (against the in-house scheme simulator; no live interbank leg) |
 | **Charge parity** (Art. 5b) | Charges for an instant credit transfer must not exceed the charges for a non-instant (standard) SCT. | Both rails build the pacs.008 with the same scheme-level charge bearer `ChargeBearer.SLEV` in their `SchemeGatewayAdapter`, so the network-side charging model is identical across SCT and SCT Inst. | `openbank-sepa-instant`, `openbank-sepa-payment` | Partial — charge-bearer parity is modelled; see gap note below |
-| **Sanctions screening** (Art. 5d) | PSPs must verify at least daily whether their own payment-service users are listed persons/entities, immediately after a listing change — rather than screening every individual instant transaction. | The sanctions list data is refreshed on an operator-configurable schedule (`SanctionsListService` holds `cronHour` / `cronMinute` / `cronDays`). Instant payments **additionally** call a synchronous per-payment screen (`POST /api/v1/sanctions/screen`) via `SanctionsScreeningPort`, which **fails closed** (`ADR-0032 §C`) — a stricter posture than the IPR baseline. | `openbank-sanctions-service`, `openbank-sepa-instant` | Implemented (both cadences present) |
+| **Sanctions screening** (Art. 5d) | PSPs must verify at least daily whether their own payment-service users are listed persons/entities, immediately after a listing change — rather than screening every individual instant transaction. | The sanctions list data is refreshed on an operator-configurable schedule (`SanctionsListService` holds `cronHour` / `cronMinute` / `cronDays`). The service-user (customer) screening that Art. 5d describes is driven by `KYC_SCREENING_TRIGGERS_ENABLED` in `openbank-kyc-service`, which defaults to `false` and is not set in the GitOps manifest, so it does not run (#15723). Instant payments **additionally** call a synchronous per-payment screen (`POST /api/v1/sanctions/screen`) via `SanctionsScreeningPort`, which **fails closed** (`ADR-0032 §C`) — a stricter posture than the IPR baseline. | `openbank-sanctions-service`, `openbank-sepa-instant` | Partial — list refresh and per-payment screen run; automated customer re-screening is off (#15723) |
 
 ### Notes on the evidence
 
@@ -46,11 +46,11 @@ liability-shift regime, or the PSP self-attestation duties — see [Known gaps](
   This repository does **not** contain a per-rail tariff in `openbank-billing-service` that proves
   the *priced* SCT Inst fee equals the SCT fee; that pricing parity is a billing-configuration and
   operational control, not something enforced in code today.
-- **Sanctions cadence**: IPR Art. 5d deliberately moves the primary control to *daily screening of
-  the PSP's own client base* rather than per-transaction screening. This platform does both — a
-  scheduled list refresh plus a synchronous per-payment screen on the instant rail. The
+- **Sanctions cadence**: the scheduled list refresh runs, but customer re-screening is disabled today (see the table row). IPR Art. 5d deliberately moves the primary control to *daily screening of
+  the PSP's own client base* rather than per-transaction screening. This platform runs a
+  scheduled list refresh plus a synchronous per-payment screen on the instant rail; the daily client-base screening itself is not running. The
   per-transaction screen is an additional control, not a substitute for the daily client-base
-  screening obligation, which remains an operational duty.
+  screening obligation, which is currently unmet in code.
 
 ## Known gaps (honest) <a name="known-gaps-honest"></a>
 
@@ -60,7 +60,7 @@ as covered:
 - **Fraud reimbursement / liability shift.** The IPR's VoP regime carries a liability consequence:
   where a PSP fails to provide a correct VoP result and the payer suffers loss, the PSP may be
   liable to reimburse. No reimbursement, liability-shift, or VoP-result-linked refund workflow
-  exists in the codebase. VoP here is advisory only.
+  exists in the codebase. VoP here is advisory only, and optional (#15759).
 - **Reachability (send + receive) mandate.** IPR requires PSPs already offering SCT to be reachable
   for both sending and receiving SCT Inst by the regulatory deadlines. The platform settles against
   an internal scheme simulator with no live interbank reachability, so this obligation is out of

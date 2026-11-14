@@ -7,7 +7,7 @@ info:
   title: OpenBank Sanctions Service — events
   # 1.0.0 -> 1.1.0 (#15723): additive optional screening-profile fields; CZ_TERRORISTS, which
   # /api/v3 screens already emit, added to the match list enum.
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Screening, review and list-change events on openbank.sanctions.screening.event, plus minimal,
     non-PII oversight wake-ups for high-risk screening (ADR-0031 D9). All use the durable outbox.
@@ -45,6 +45,8 @@ channels:
         $ref: '#/components/messages/sanctionsListChanged'
       sanctionsListChangeStorm:
         $ref: '#/components/messages/sanctionsListChangeStorm'
+      monitoredSubjectMatched:
+        $ref: '#/components/messages/monitoredSubjectMatched'
 
   oversightTriggers:
     address: openbank.oversight-triggers
@@ -93,6 +95,14 @@ operations:
     summary: Signal that targeted list-change publication was withheld.
     messages:
       - $ref: '#/channels/sanctionsEvents/messages/sanctionsListChangeStorm'
+
+  publishMonitoredSubjectMatched:
+    action: send
+    channel:
+      $ref: '#/channels/sanctionsEvents'
+    summary: Publish one finding of ongoing monitoring to the service that owns the subject.
+    messages:
+      - $ref: '#/channels/sanctionsEvents/messages/monitoredSubjectMatched'
 
   publishOversightSanctionChecked:
     action: send
@@ -168,6 +178,22 @@ components:
         - $ref: '#/components/messageTraits/outboxHeaders'
       payload:
         $ref: '#/components/schemas/SanctionsListChangeStormPayload'
+
+    monitoredSubjectMatched:
+      name: MONITORED_SUBJECT_MATCHED
+      x-openbank-hand-built: true
+      contentType: application/json
+      description: |
+        A subject registered for ongoing monitoring matches one version of a list entry
+        (ADR-0376). Emitted once per (subject, list entry, version of the entry's names), in the
+        transaction that records the finding. It names the subject by the owning service's own
+        reference and carries no customer name, date of birth or nationality. Only the service
+        named in ownerService acts on it; deduplicate on findingId. It must never reach a
+        customer-facing surface.
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/MonitoredSubjectMatchedPayload'
 
     oversightSanctionChecked:
       name: SanctionChecked
@@ -334,6 +360,69 @@ components:
         occurredAt:
           type: string
           format: date-time
+
+    MonitoredSubjectMatchedPayload:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, aggregateId, aggregateType, findingId, ownerService, subjectRef, entityType, matchKind, listType, listEntryRef, listEntryVersion, matchScore, matchStatus, detection, occurredAt, sourceService]
+      properties:
+        schemaVersion:
+          type: integer
+          const: 1
+        aggregateId:
+          type: string
+          format: uuid
+          description: Equal to findingId.
+        aggregateType:
+          type: string
+          const: MonitoringFinding
+        findingId:
+          type: string
+          format: uuid
+        ownerService:
+          type: string
+          description: The client id of the service that registered the subject (taken from its token, e.g. openbank-kyb); it should open the review case.
+        subjectRef:
+          type: string
+          description: The owning service's reference for the subject (for kyc-service, the party id).
+        entityType:
+          type: string
+          enum: [INDIVIDUAL, ORGANIZATION, VESSEL, AIRCRAFT]
+        matchKind:
+          type: string
+          enum: [SANCTIONS, TERRORIST, PEP, JURISDICTION]
+        listType:
+          type: string
+          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC, CZ_TERRORISTS]
+        listEntryRef:
+          type: string
+          description: >-
+            `id:<external id>` of the list entry, `name:<listed name>` for an entry without one, or
+            `id:country:<code>:<publication>:<measure>:v<n>` for a jurisdiction row.
+        listEntryVersion:
+          type: string
+          description: Version of the entry's names (or of the jurisdiction row) the subject matched.
+        matchScore:
+          type: number
+          minimum: 0
+          maximum: 1
+        matchStatus:
+          type: string
+          enum: [POTENTIAL_HIT, HIT]
+          description: What a live screen would report for this single match.
+        detection:
+          type: string
+          enum: [LIST_DELTA, BASELINE_SWEEP, PERIODIC_SWEEP]
+          description: >-
+            LIST_DELTA: the entry was added or changed. BASELINE_SWEEP: the subject's first full
+            evaluation, which may repeat what its onboarding screen already reported.
+            PERIODIC_SWEEP: a later full evaluation.
+        occurredAt:
+          type: string
+          format: date-time
+        sourceService:
+          type: string
+          const: sanctions-service
 
     SanctionsListChangeStormPayload:
       type: object

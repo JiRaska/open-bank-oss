@@ -645,3 +645,13 @@ writing `booking_proven_at`. The pacs.008 now carries the EPC payment type (`Pmt
 change-log entry.
 
 - **2026-11-01 — Shared unsettled-outcome vocabulary (#13669).** The five shared `outcome` label values of `openbank_payment_unsettled_total` (`mismatch`, `failed-replay`, `conflict`, `unexpected-status`, `transport-error`) now come from one `UnsettledOutcome` type in `openbank-client-transaction` instead of a per-service copy. **Threats addressed:** *repudiation / silent loss of alerting* — two copies of a closed label set could drift, renaming a series an alert selects on so the alert reads zero while bookings fail; one definition removes that drift path. Wire values are byte-identical, pinned by literal-label tests in the client module and the service. No behaviour, endpoint, permission, retry or data change; no new labels and no payment identities in labels. Rollback: revert the refactor; the series names do not change either way.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

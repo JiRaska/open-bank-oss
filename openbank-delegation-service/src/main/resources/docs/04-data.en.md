@@ -19,3 +19,63 @@ organization delegation requires explicit sole signing authority with a quorum
 of one. A joint mandate or incomplete representation evidence needs a separate
 statutory signing workflow. Employee approval groups retain their own
 management and operation rules.
+
+## Resource-ownership reads, per resource type (ADR-0375 D5)
+
+A grant is authority in itself once a product service projects it, so before an offer is minted this
+service asks the service that OWNS the resource whether the grantor really owns it. The answer is
+fail-closed in both failing directions: `NOT_OWNED` refuses, and so does `UNVERIFIABLE` — a lookup
+that could not be performed is not permission.
+
+| resource type | asked of | status |
+|---|---|---|
+| `ACCOUNT`, `SAVINGS_GOAL` | account-service (a savings goal is keyed on its owning account, ADR-0153) | resolved |
+| `CARD` | card-issuance-service | resolved |
+| `DOCUMENT` | document-service `GET /api/v1/documents/{id}/owner`, action `document.verifyOwnership` | resolved (ADR-0375 D5) |
+| `PAYMENT`, `STATEMENT` | nothing — see below | always `UNVERIFIABLE`, so every such offer is refused |
+
+The document read uses the NAMED `m2m` OIDC client, so it authenticates as
+`service-account-openbank-delegation` (ROLE_API only) and not as the shared `openbank-services`
+identity, which document-service refuses for that action. `M2mOidcClientIdentityWiringTest` pins the
+client selection.
+
+`PAYMENT` and `STATEMENT` are refused by measurement, not because the work is unfinished.
+statement-service is addressed by `accountId` and holds no statement object with an id of its own,
+so a `STATEMENT` resource id refers to nothing its owning service can resolve. A payment id resolves
+in no single service: six rails own payments and nothing maps an id to its rail. Neither type has an
+owner to ask, so both stay refused until those pairs leave the capability matrix.
+
+### Preset catalog corrections are forward migrations (ADR-0375 D7)
+
+The role-preset catalog is seeded by migration, and a preset can be wrong in a way nothing notices
+while the enforcement around it is also wrong. `Účetní` and `Pokladník` grant
+`ACCOUNT_READ_BALANCES` without `ACCOUNT_VIEW_DETAILS`; that was invisible for as long as the edge's
+account-detail read asked for the balances capability. V33 adds the missing capability to both
+presets.
+
+It touches the CATALOG only. Grants already minted are immutable snapshots — a grant carries what
+the grantor agreed to at the time, and widening one afterwards would be this service editing
+somebody's mandate. An existing grantee of those two roles keeps balances and transactions and
+loses the account-detail drill-down until the grantor re-shares from the corrected preset.
+
+## Spend reservations settled by the payment outcome (ADR-0249 D3 amendment, #16000)
+
+A domestic-payment spend reservation is settled by what happened to the payment, not by the rail
+having accepted it. `DomesticPaymentOutcomeConsumer` reads `openbank.domestic.payment.events`
+(group `delegation-service-domestic-payment-outcomes`) and dispatches on the `ce-type` header:
+
+| Event | Reservation |
+|---|---|
+| `domestic.payment.status-changed`, `newStatus` SETTLED | RESERVED → CONFIRMED |
+| … REJECTED, CANCELLED; `domestic.delegated-spend.finalized-absent` | RESERVED → RELEASED |
+| … RETURNED | RESERVED or CONFIRMED → RELEASED (the only way out of CONFIRMED) |
+| no `reservationId`, a non-terminal status, `created`, `held` | unchanged (`ignored`) |
+| any other or missing `ce-type`, unreadable body | unchanged (`unrecognised`, alerted) |
+
+A redelivered outcome is a no-op; a contradicting one is acked and counted as `conflict`. Every
+record is counted in `openbank_delegation_payment_outcome_events_total{outcome}`. Only a failed
+write is dead-lettered, to `openbank.dlq.delegation.domestic-payment-events-in`.
+
+The consumer is off until `OPENBANK_DELEGATION_PAYMENT_OUTCOME_CONSUMER_ENABLED=true`; while off,
+the channel does not exist. Switch-on order: this consumer, then the rail's reservation binding,
+then the edge stops confirming on the rail's 2xx.

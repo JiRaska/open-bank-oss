@@ -6,6 +6,7 @@ package com.openbank.lending.infrastructure.rest
 
 import com.openbank.lending.application.usecase.CreditOfferEligibilityService
 import com.openbank.lending.domain.model.CreditOfferDecision
+import com.openbank.lending.domain.model.FirstDueDate
 import com.openbank.lending.domain.model.OfferSurface
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.authz.Authorize
@@ -104,7 +105,7 @@ class CustomerQuoteResource(
         ),
         now = Instant.now(clock),
         validityDuration = QUOTE_VALIDITY,
-        firstDueDate = LocalDate.now(clock).withDayOfMonth(1).plusMonths(2),
+        firstDueDate = FirstDueDate.forApplicationOn(LocalDate.now(clock)),
     )
 
     /**

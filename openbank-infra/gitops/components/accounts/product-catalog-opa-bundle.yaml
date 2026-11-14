@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: product-catalog
     app.kubernetes.io/part-of: accounts
   annotations:
-    openbank.tech/policy-checksum: "394b4ae6154c4a6c"
+    openbank.tech/policy-checksum: "e3eb692099698e79"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -902,6 +902,15 @@ data:
     	input.action == "catalog.publish"
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "CATALOG_SCOPE_PUBLISH"}
     	role in input.principal.roles
+    }
+
+    # The handler requires the verified Admin UI JWT and matches its derived authority to the exact
+    # revision's pack policy. These authorities carry no catalog authoring or publishing grant.
+    allowed_reasons contains "fincrime-catalog-shadow-review" if {
+        catalog_staff
+        input.action == "catalog.revisionApproval.decide"
+        some authority in {"FINCRIME_AML_APPROVER", "FINCRIME_FRAUD_APPROVER"}
+        authority in input.principal.roles
     }
 
     catalog_staff if {
@@ -2227,6 +2236,10 @@ data:
             - kyb.case.reject
             - kyb.case.review.resolve
             - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
+            - kyb.monitoring.finding.decide    # #16028: decide an ongoing-monitoring finding (human reviewer only)
+            - kyb.monitoring.queue.list        # #16028: ongoing-monitoring holds queue
+            - kyb.monitoring.exit.propose      # #16028: four-eyes exit, maker
+            - kyb.monitoring.exit.confirm      # #16028: four-eyes exit, checker (code refuses checker == maker)
         ROLE_AUDITOR:
           grant:
             - audit.trail.inspect

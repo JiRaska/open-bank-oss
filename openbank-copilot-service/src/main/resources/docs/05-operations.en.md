@@ -47,7 +47,13 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 
 ## AI-generated reply marker (EU AI Act Art. 50(1))
 
-Every `ChatReply` from `POST /api/v1/copilot/chat` (answers, refusals and error fallbacks alike) carries
+Every `ChatReply` from the non-streaming `POST /api/v1/copilot/chat` (answers, refusals and error fallbacks alike) carries
 `aiGenerated: true` and a short Czech `disclosure` string (API contract 1.6.0, additive). Clients must make
 the marker visible to the customer. Not done yet: the system-prompt rule to state it is an AI when asked
 (needs a new prompt version and a live eval re-recording) and rendering the marker in the mobile app.
+
+Stream (`POST /api/v1/copilot/chat/stream`): the same marker is sent as response headers on every outcome,
+`X-AI-Generated: true` and `X-AI-Disclosure` (the same Czech text, UTF-8 percent-encoded), before the first
+event (API contract 1.7.0, additive). Headers are used because existing stream clients render every
+`data:` line as reply text, so an inline element would be shown to the customer, while an unread header is
+ignored. Not done yet: localisation of the disclosure, and reading the headers in the mobile app.

@@ -209,3 +209,14 @@ the outgoing body from the accepted fields and preserves the submitted answer or
 ## Notification page contract
 
 `GET /notifications` returns `{ items, total, unreadCount, page, size }` (`PersonalNotificationPage`). The edge always forwards the token party to notification-service, so `total` and `unreadCount` cover that party's whole history (never negative) rather than the returned page, and `unreadCount` is never null here, unlike the unscoped operator list upstream. `limit` is clamped to 1–100 (default 20) and `page` to 0 or more before the upstream call; `size` echoes the applied limit. Items are metadata only: the rendered body is never returned, and `subject`, `sentAt`, `visibleAt`, `readAt` and `templateRevision` may be null.
+
+## Reconcile a domestic submission after a timeout
+
+Send `POST /customer/v1/domestic-payments/submissions/lookup` with the original
+`Idempotency-Key` header and a JSON body containing `debtorAccountId`. Use the same
+`X-Acting-For` context if the original payment was submitted for a company. For a delegated
+account, supply the original CZK `amount` when several grants cover the account.
+
+`FOUND` contains the durable `paymentId` and current `status`. `UNKNOWN` means the
+edge could not establish the original instruction. Keep the pending warning and never start a
+new payment from this result. This lookup consumes no SCA and sends no payment.

@@ -96,3 +96,27 @@ allowed_reasons contains "service-agent-aml-case-read" if {
 	machine_named("service-account-openbank-agent")
 	input.action in {"amlCase.list", "amlCase.read"}
 }
+
+# ADR-0371 §5-§7: four-eyes disposition of transaction-monitoring cases and the suspicious-transaction
+# report. The compliance role only, and only a human: an operator, an admin, a viewer, a customer and
+# every machine principal get no reason here, so they are denied. The verbs are deliberately outside
+# base rest.rego's {list, read} set (`inspect`, not `read`): `operator-read-any` grants every
+# operator any action ending in `.read`/`.list`, and a report must never ride on that grant. The
+# compliance role is not in the role-action matrix for these actions either, so `matrix-allows`
+# cannot reach them. Who may approve what a colleague proposed is decided in the service (the
+# approver must differ from the proposer); this rule only decides who may act at all.
+allowed_reasons contains "compliance-aml-monitoring-and-report" if {
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	"ROLE_COMPLIANCE" in input.principal.roles
+	input.action in {
+		"amlMonitoring.propose",
+		"amlMonitoring.decide",
+		"amlMonitoring.inspect",
+		"amlReport.draft",
+		"amlReport.inspect",
+		"amlReport.approve",
+		"amlReport.file",
+		"amlReport.withdraw",
+	}
+}

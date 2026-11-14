@@ -105,6 +105,10 @@ The daily run is automated by `FxRevaluationScheduler`. To re-run for a business
 
 `JournalPartitionMaintainer` rolls forward automatically. Verify partitions: `\d+ journal_entries`. Lifecycle actions are in `partition_lifecycle_audit`. A non-empty `journal_entries_default` (DEFAULT_NONEMPTY audit row) means roll-forward fell behind — investigate before it blocks new partition ATTACH.
 
+## Observability note: frozen-period refusals
+
+With `openbank.ledger.period-lock.mode=enforce` every refusal increments `openbank_ledger_period_lock_decisions_total{outcome="refused"}` (tags `operation`, `period_type`) and the HTTP response carries `code=ACCOUNTING_PERIOD_FROZEN`. A fiscal-year refusal carries `ACCOUNTING_YEAR_CLOSED` and has no counter of its own; find it by the response code in access logs. This is documentation only: no alert rule is defined for either code, and a non-zero `refused` count is expected whenever a caller back-dates into a closed month.
+
 ## Tech-stack version matrix
 
 | Component | Version |
@@ -170,3 +174,10 @@ cannot report for any other participant.
 ## Offline historical FINREP replay
 
 The build defines an explicit `historicalFinrepPactTest` task that replays one validated historical FINREP Pact artifact locally against the ledger provider. It is not broker verification: it never changes broker selectors, never publishes results, and refuses to run unless the supplied provider commit is a 40-hex SHA that is an ancestor of `origin/main`. It is not part of the default build.
+
+## Synthetic transfer proof (#7284)
+
+The dedicated `openbank-synthetic-transfer-verifier` client can read one synthetic journal
+matching both configured fixture accounts, the CZK 0.01 amount and the requested transaction.
+The account IDs come from the sandbox fixture configuration. The proof excludes ordinary
+postings and refuses ambiguous or incomplete journal evidence.

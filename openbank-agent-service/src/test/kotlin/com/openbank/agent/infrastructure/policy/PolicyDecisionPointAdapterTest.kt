@@ -16,8 +16,8 @@ import java.io.IOException
 /**
  * The two PDP adapters, exercised at the edge that matters: neither may ever produce an implicit
  * allow, and a transport failure must be distinguishable from an explicit policy DENY
- * (`pdpError`), because AgentPolicyGate keys its BLOCK -> ADVISORY fallback on that flag rather
- * than on the free-form reason text.
+ * (`pdpError`), because AgentPolicyGate selects its `pdp_unavailable_denied` outcome from that
+ * structured flag rather than from the free-form reason text.
  */
 class PolicyDecisionPointAdapterTest {
 
@@ -69,15 +69,15 @@ class PolicyDecisionPointAdapterTest {
     }
 
     @Test
-    fun `a missing result body is a DENY, not an allow, and is not flagged as a transport error`() {
+    fun `a missing result body is a DENY, not an allow, and is flagged as a PDP error`() {
         val client = mockk<OpaClient>()
         every { client.decision(any()) } returns OpaResponse(result = null)
 
         val decision = opa(client).evaluate(query)
 
         assertThat(decision.allow).isFalse()
-        assertThat(decision.reason).isEqualTo("OPA returned no decision")
-        assertThat(decision.pdpError).isFalse()
+        assertThat(decision.reason).contains("OPA returned no decision")
+        assertThat(decision.pdpError).isTrue()
     }
 
     @Test

@@ -61,7 +61,7 @@
       "id": "D2",
       "title": "Policy-gated MCP (OPA before every tools/call)",
       "status": "built",
-      "detail": "AgentPolicyGate enforces + audits every tool call. AGENT_POLICY_ENFORCEMENT=block in both the deployment and the agents.yaml declaration (reconciled #743), via an in-process charter allow-list (ADR-0080, #700) plus an OPA sidecar serving the agents.rego bundle over localhost:8181 as the external PDP (#638). Fails safe — a PDP connectivity error degrades to advisory."
+      "detail": "AgentPolicyGate enforces + audits every tool call. AGENT_POLICY_ENFORCEMENT=block in both the deployment and the agents.yaml declaration (reconciled #743), via an in-process charter allow-list (ADR-0080, #700) plus an OPA sidecar serving the agents.rego bundle over localhost:8181 as the external PDP (#638). Fails closed in block mode — a PDP connectivity error denies every tool call (#15758)."
     },
     {
       "id": "D3",
@@ -190,7 +190,7 @@
   "facts": {
     "agentCharters": {
       "source": "openbank-libs/governance/agents.yaml",
-      "sha256": "b507ff3d567e8805",
+      "sha256": "f6a3e2b32aef4de1",
       "count": 23,
       "ids": [
         "compliance-officer",
@@ -466,7 +466,7 @@
     "provenance": {
       "curated": {
         "source": "openbank-libs/governance/ai-rollout.yaml",
-        "sha256": "39b4692cb2763371"
+        "sha256": "bf0b09cf9c5c219a"
       },
       "generatedBy": ".github/scripts/gen-ai-governance-snapshot.py"
     }

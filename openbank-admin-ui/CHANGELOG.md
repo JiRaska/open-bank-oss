@@ -1,5 +1,45 @@
 # Changelog
 
+## [4.14.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.13.0...admin-ui-v4.14.0) (2026-11-14)
+
+
+### Features
+
+* **admin-ui:** show HELD domestic payments and their reject reason ([#16040](https://github.com/JiRaska/open-bank-oss/issues/16040)) ([f418453](https://github.com/JiRaska/open-bank-oss/commit/f4184537133c18d309b9e1fa11bf016c9b207e19))
+
+## [4.13.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.12.2...admin-ui-v4.13.0) (2026-11-13)
+
+
+### Features
+
+* **admin-ui:** AML case detail, four-eyes dispositions and FAU report for officers ([#15940](https://github.com/JiRaska/open-bank-oss/issues/15940)) ([d540b8d](https://github.com/JiRaska/open-bank-oss/commit/d540b8d18e963221222d0a0558ca024c11c1ee8a))
+
+
+### Bug Fixes
+
+* **admin-ui:** admit ROLE_COMPLIANCE to the party detail permission ([#15991](https://github.com/JiRaska/open-bank-oss/issues/15991)) ([e67a677](https://github.com/JiRaska/open-bank-oss/commit/e67a677cef2de241ef4ff20240189448c474715d)), closes [#15939](https://github.com/JiRaska/open-bank-oss/issues/15939)
+
+## [4.12.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.12.1...admin-ui-v4.12.2) (2026-11-13)
+
+
+### Bug Fixes
+
+* **agent:** classify a missing OPA result as a PDP error, fail closed on unknown enforcement mode, correct stale fail-open text ([#15813](https://github.com/JiRaska/open-bank-oss/issues/15813)) ([bc62fba](https://github.com/JiRaska/open-bank-oss/commit/bc62fba7201951923ff5c790898a54d57b352118)), closes [#15758](https://github.com/JiRaska/open-bank-oss/issues/15758)
+
+## [4.12.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.12.0...admin-ui-v4.12.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **infra:** move Kubernetes label/annotation keys to the open-bank.tech domain ([#15706](https://github.com/JiRaska/open-bank-oss/issues/15706)) ([fa0151e](https://github.com/JiRaska/open-bank-oss/commit/fa0151eb6c26db8ccb9ea9bdb737c9adb7533a7f))
+
+## [4.12.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.11.0...admin-ui-v4.12.0) (2026-11-12)
+
+
+### Features
+
+* **card-issuance,card-processing:** scope issuer operations to named callers ([#15626](https://github.com/JiRaska/open-bank-oss/issues/15626)) ([ecdbbd0](https://github.com/JiRaska/open-bank-oss/commit/ecdbbd0cd4eb6a486cff3effbb4d08b59dde8890))
+
 ## [4.11.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.10.2...admin-ui-v4.11.0) (2026-11-12)
 
 

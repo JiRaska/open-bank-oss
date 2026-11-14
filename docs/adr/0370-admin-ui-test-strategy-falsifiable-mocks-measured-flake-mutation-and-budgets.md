@@ -1,7 +1,8 @@
 ---
 date: 2026-11-11
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#15685 — U1–U6 are built (U5 mutation and U6 perf runs advisory until baselined); U7–U8 are not"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []

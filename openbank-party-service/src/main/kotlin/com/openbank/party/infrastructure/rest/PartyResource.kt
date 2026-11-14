@@ -268,7 +268,9 @@ class PartyResource {
     @Path("/{id}")
     // ROLE_RISK is admitted on THIS detail read only (owner decision 2026-10-02): a risk officer
     // reviewing large exposures must see the obligor's name. Search and list stay closed to it.
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_RISK", "ROLE_API")
+    // ROLE_COMPLIANCE on the same terms (2026-11-13): an AML officer deciding a case must know who
+    // it is about — the AML case carries only a party id — and is otherwise answered 403 here.
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_RISK", "ROLE_COMPLIANCE", "ROLE_API")
     @Operation(summary = "Get party by ID")
     suspend fun getParty(@PathParam("id") id: UUID): Response =
         Response.ok(directoryDetail(partyUseCase.getParty(id)))

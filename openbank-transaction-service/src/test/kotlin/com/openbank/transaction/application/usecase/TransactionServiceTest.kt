@@ -10,6 +10,7 @@ import com.openbank.libs.domain.money.Money
 import com.openbank.libs.domain.payment.InstructionType
 import com.openbank.libs.domain.payment.PaymentRail
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.synthetic.SyntheticTransferDirection
 import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.transaction.application.port.`in`.InitiateTransactionCommand
 import com.openbank.transaction.application.port.`in`.ListTransactionsQuery
@@ -37,6 +38,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
 import java.math.BigDecimal
 import java.sql.SQLException
@@ -94,14 +96,88 @@ class TransactionServiceTest {
         // The clock is passed EXPLICITLY: the @Inject constructor defaults to Clock.systemUTC(),
         // so a fixed clock held only by the test would describe a different day from the one the
         // service resolves settlement dates against — expectations and subject must share it.
-        service = TransactionService(
-            transactionRepository,
-            eventPublisher,
-            fxRatePort,
-            temporalConfig,
-            workflowClient,
-            clock,
+        service = serviceAt(clock)
+    }
+
+    private fun serviceAt(bookingClock: Clock) = TransactionService(
+        transactionRepository,
+        eventPublisher,
+        fxRatePort,
+        temporalConfig,
+        workflowClient,
+        bookingClock,
+    )
+
+    @ParameterizedTest
+    @CsvSource(
+        "2026-01-06T23:00:01Z,2026-01-07,OUTBOUND",
+        "2026-07-15T22:00:01Z,2026-07-16,OUTBOUND",
+        "2026-07-15T21:59:59Z,2026-07-15,RETURN",
+    )
+    fun `canary books on the Prague date including an in-window return`(
+        instant: String,
+        expectedDate: String,
+        direction: SyntheticTransferDirection,
+    ): Unit = runBlocking {
+        val bookingClock = Clock.fixed(Instant.parse(instant), ZoneOffset.UTC)
+        val bankDate = LocalDate.parse(expectedDate)
+        val command = initiateCommand().copy(
+            synthetic = true,
+            valueDate = bankDate,
+            syntheticTransferDirection = direction,
         )
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        stubWorkflowCommitted(TransactionStatus.COMPLETED, bookingClock)
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+        val result = serviceAt(bookingClock).initiateTransaction(command)
+        assertThat(result.bookingDate).isEqualTo(bankDate)
+        assertThat(result.valueDate).isEqualTo(bankDate)
+        coVerify(exactly = 1) { transactionRepository.save(any(), any()) }
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        "2026-07-15T21:54:55Z,OUTBOUND,outbound booking window is closed",
+        "2026-07-15T22:00:01Z,RETURN,bank date changed before booking",
+    )
+    fun `canary rejects a late forward or stale return before writing`(
+        instant: String,
+        direction: SyntheticTransferDirection,
+        reason: String,
+    ): Unit = runBlocking {
+        val bookingClock = Clock.fixed(Instant.parse(instant), ZoneOffset.UTC)
+        val command = initiateCommand().copy(
+            synthetic = true,
+            valueDate = LocalDate.parse("2026-07-15"),
+            syntheticTransferDirection = direction,
+        )
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+
+        val failure = runCatching { serviceAt(bookingClock).initiateTransaction(command) }.exceptionOrNull()
+        assertThat(failure).isInstanceOf(IllegalStateException::class.java).hasMessageContaining(reason)
+        coVerify(exactly = 0) { transactionRepository.save(any(), any()) }
+        verify(exactly = 0) { workflowClient.newWorkflowStub(any<Class<*>>(), any<WorkflowOptions>()) }
+    }
+
+    @Test
+    fun `canary replays an existing same-day forward after outbound admission closes`(): Unit = runBlocking {
+        val late = Clock.fixed(Instant.parse("2026-07-15T21:59:59Z"), ZoneOffset.UTC)
+        val bankDate = LocalDate.parse("2026-07-15")
+        val command = initiateCommand().copy(
+            synthetic = true,
+            valueDate = bankDate,
+            syntheticTransferDirection = SyntheticTransferDirection.OUTBOUND,
+        )
+        val existing = transaction(command.idempotencyKey).copy(synthetic = true, valueDate = bankDate)
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns existing
+
+        val subject = serviceAt(late)
+        assertThat(subject.initiateTransaction(command)).isEqualTo(existing)
+        val stale = runCatching { subject.initiateTransaction(command.copy(valueDate = bankDate.plusDays(1))) }
+        assertThat(stale.exceptionOrNull()).isInstanceOf(ResourceConflictException::class.java)
+        coVerify(exactly = 0) { transactionRepository.save(any(), any()) }
     }
 
     @Test
@@ -644,15 +720,15 @@ class TransactionServiceTest {
      * state the workflow committed. Any test that stubs this and still sees `update(...)` called by
      * the service has caught the ownership regressing.
      */
-    private fun stubWorkflowCommitted(terminalStatus: TransactionStatus) {
+    private fun stubWorkflowCommitted(terminalStatus: TransactionStatus, bookingClock: Clock = clock) {
         coEvery { transactionRepository.save(any(), any()) } answers {
             firstArg<Transaction>().also { lastSaved = it }
         }
         coEvery { transactionRepository.findById(any()) } answers {
             val saved = lastSaved ?: return@answers null
             when (terminalStatus) {
-                TransactionStatus.COMPLETED -> saved.complete(clock)
-                TransactionStatus.FAILED -> saved.fail("Payment workflow did not complete (state=FAILED)", clock)
+                TransactionStatus.COMPLETED -> saved.complete(bookingClock)
+                TransactionStatus.FAILED -> saved.fail("Payment workflow did not complete (state=FAILED)", bookingClock)
                 else -> saved
             }
         }

@@ -157,6 +157,7 @@ class SctInstPaymentService(
     private fun applyScreening(command: SubmitSctInstCommand): Uni<SctInstPayment> {
         val base = SctInstPayment(
             idempotencyKey = command.idempotencyKey,
+            synthetic = command.synthetic,
             status = SctInstStatus.PENDING,
             debtorAccountId = command.debtorAccountId,
             debtorIban = command.debtorIban,

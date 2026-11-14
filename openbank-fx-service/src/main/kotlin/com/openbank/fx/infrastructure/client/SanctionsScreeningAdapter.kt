@@ -5,6 +5,7 @@
 package com.openbank.fx.infrastructure.client
 
 import com.openbank.fx.application.port.out.SanctionsScreeningPort
+import com.openbank.fx.application.port.out.ScreeningSubject
 import com.openbank.fx.application.port.out.ScreeningUnavailableException
 import com.openbank.libs.fincrime.ScreeningMatchStatus
 import com.openbank.libs.fincrime.ScreeningResult
@@ -30,8 +31,12 @@ class SanctionsScreeningAdapter(@RestClient private val client: SanctionsService
     @Inject
     lateinit var self: SanctionsScreeningAdapter
 
-    override suspend fun screen(name: String, role: ScreeningRole, idempotencyKey: String): ScreeningResult = try {
-        self.screenWithResilience(name, role, idempotencyKey)
+    override suspend fun screen(
+        subject: ScreeningSubject,
+        role: ScreeningRole,
+        idempotencyKey: String,
+    ): ScreeningResult = try {
+        self.screenWithResilience(subject, role, idempotencyKey)
     } catch (ex: Exception) {
         throw ScreeningUnavailableException(ex)
     }
@@ -39,12 +44,23 @@ class SanctionsScreeningAdapter(@RestClient private val client: SanctionsService
     @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
     @Retry(maxRetries = 2, delay = 300, jitter = 150, retryOn = [Exception::class])
     @Timeout(5_000)
-    open suspend fun screenWithResilience(name: String, role: ScreeningRole, idempotencyKey: String): ScreeningResult {
+    open suspend fun screenWithResilience(
+        subject: ScreeningSubject,
+        role: ScreeningRole,
+        idempotencyKey: String,
+    ): ScreeningResult {
         val response = client.screen(
-            ScreenRequest(idempotencyKey = idempotencyKey, entityType = ENTITY_TYPE, name = name),
+            ScreenRequest(
+                idempotencyKey = idempotencyKey,
+                // The party's own kind, never a constant: sanctions-service stores it on the check
+                // and compares it when it decides whether an analyst's clearance covers a subject.
+                entityType = subject.entityType.name,
+                name = subject.primaryName,
+                aliases = subject.aliases,
+            ),
         ).awaitSuspending()
         return ScreeningResult(
-            subject = name,
+            subject = subject.primaryName,
             role = role,
             status = mapStatus(response.status),
             score = response.overallScore ?: 0.0,
@@ -55,9 +71,4 @@ class SanctionsScreeningAdapter(@RestClient private val client: SanctionsService
     /** Unknown / null statuses are ESCALATED, never silently CLEAR (shared parser, ADR-0353 D5). */
     private fun mapStatus(remote: String?): ScreeningMatchStatus =
         ScreeningMatchStatus.fromWire(remote?.takeIf { it == it.trim() })
-
-    private companion object {
-        // Sanctions matching is name-based; entityType is informational. See ADR-0032 scope note.
-        const val ENTITY_TYPE = "INDIVIDUAL"
-    }
 }

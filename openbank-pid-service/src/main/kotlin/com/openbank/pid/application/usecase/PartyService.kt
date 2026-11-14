@@ -401,6 +401,10 @@ class PartyService(
 
     override suspend fun linkCaseEvidence(command: LinkCaseEvidenceCommand): Party {
         val party = getById(command.partyId)
+        // GDPR Art. 17 (#15755): an erased party keeps its case id columns, so the lifecycle check
+        // below would pass. Nothing is stored here (the link is logged and published), so there is
+        // no row write to backstop under the party lock; the check is this read.
+        if (party.erasedAt != null) throw PartyErasedException("Party ${command.partyId} was erased")
         val caseLifecycle = party.caseLifecycle
             ?: throw IllegalStateException("PID case lifecycle is not initialized for party ${command.partyId}")
 

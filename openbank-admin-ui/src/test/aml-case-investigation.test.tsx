@@ -34,7 +34,8 @@ describe('AML case investigation', () => {
   it('shows only validated source-linked nodes and evidence provenance', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ root: history, related: [{ ...related, truncated: true }] })))
     vi.stubGlobal('fetch', fetcher)
-    render(<LanguageProvider initialLanguage="en"><AmlCaseInvestigation initialCaseId={caseId} /></LanguageProvider>)
+    render(<LanguageProvider initialLanguage="en"><AmlCaseInvestigation /></LanguageProvider>)
+    fireEvent.change(screen.getByRole('textbox', { name: 'AML case ID' }), { target: { value: caseId } })
     fireEvent.click(screen.getByRole('button', { name: 'Explore connections' }))
     expect(await screen.findByRole('img', { name: 'Observed AML relationship graph' })).toHaveTextContent('Account')
     expect(screen.getByRole('img', { name: 'Observed AML relationship graph' })).toHaveTextContent('Related case')
@@ -46,7 +47,8 @@ describe('AML case investigation', () => {
 
   it('fails closed on malformed evidence and clears it when the case changes', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ root: history, related: [{ ...related, observations: [] }] }))))
-    render(<LanguageProvider initialLanguage="en"><AmlCaseInvestigation initialCaseId={caseId} /></LanguageProvider>)
+    render(<LanguageProvider initialLanguage="en"><AmlCaseInvestigation /></LanguageProvider>)
+    fireEvent.change(screen.getByRole('textbox', { name: 'AML case ID' }), { target: { value: caseId } })
     fireEvent.click(screen.getByRole('button', { name: 'Explore connections' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('could not be verified safely')
     expect(screen.queryByRole('img', { name: 'Observed AML relationship graph' })).not.toBeInTheDocument()
@@ -54,9 +56,28 @@ describe('AML case investigation', () => {
 
   it('does not retain evidence after access is denied', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 403 })))
-    render(<LanguageProvider initialLanguage="en"><AmlCaseInvestigation initialCaseId={caseId} /></LanguageProvider>)
+    render(<LanguageProvider initialLanguage="en"><AmlCaseInvestigation /></LanguageProvider>)
+    fireEvent.change(screen.getByRole('textbox', { name: 'AML case ID' }), { target: { value: caseId } })
     fireEvent.click(screen.getByRole('button', { name: 'Explore connections' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('not permitted')
     expect(screen.queryByRole('img', { name: 'Observed AML relationship graph' })).not.toBeInTheDocument()
+  })
+
+  it('loads the graph on its own when opened for a case — the register button must not be inert', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ root: history, related: [] })))
+    vi.stubGlobal('fetch', fetcher)
+    render(<LanguageProvider initialLanguage="en"><AmlCaseInvestigation initialCaseId={caseId} fixedCase /></LanguageProvider>)
+    expect(await screen.findByRole('img', { name: 'Observed AML relationship graph' })).toBeInTheDocument()
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(String(fetcher.mock.calls[0][0])).toContain(`/api/context/aml-cases/${caseId}`)
+    expect(screen.queryByRole('button', { name: 'Explore connections' })).toBeNull()
+  })
+
+  it('does not fetch anything without a case id', async () => {
+    const fetcher = vi.fn()
+    vi.stubGlobal('fetch', fetcher)
+    render(<LanguageProvider initialLanguage="en"><AmlCaseInvestigation /></LanguageProvider>)
+    await new Promise(r => setTimeout(r, 10))
+    expect(fetcher).not.toHaveBeenCalled()
   })
 })

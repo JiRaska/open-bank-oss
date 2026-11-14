@@ -171,13 +171,14 @@ Authorization: Bearer <token>
 
 {
   "checkId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "reviewedBy": "compliance@openbank.example",
   "note": "Different person confirmed by passport check — cleared.",
   "newStatus": "CLEAR"
 }
 ```
 
 `newStatus` ∈ `CLEAR | HIT | POTENTIAL_HIT | WHITELISTED | ESCALATED`
+
+The reviewer recorded on the decision is the authenticated principal (the token's `preferred_username`). Do not send a reviewer in the body: a `reviewedBy` field is accepted for compatibility but ignored.
 
 ### Get a specific check
 
@@ -311,3 +312,37 @@ Events are append-only; a subsequent review creates a new `sanctions.review.subm
 - API version in URL. A breaking contract change gets a new parallel major; the six v1 check
   operations are superseded by `/api/v3/...` and remain available for the documented sunset window.
 - Event version in type name (`...v1`). Schema evolution: additive only; breaking = new type + version suffix.
+
+## Ongoing monitoring (ADR-0376)
+
+Available from API contract 3.4.0. Protected like `POST /api/v3/sanctions/screen`: roles `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` and the `sanctions.create` action.
+
+### Register or update a monitored subject
+
+```
+PUT /api/v3/sanctions/monitored-subjects/{subjectRef}
+```
+
+The owner of the registration is the calling service, identified by the client its service-account token was issued to (for example `openbank-kyb`); no request value names it, so a service registers, replaces and deletes only its own subjects. A service that still authenticates through the fleet's shared client `openbank-services` is refused and needs its own client first; kyc-service is in that position today. `subjectRef` is the value that service sends as `subjectId` when it screens the subject, and is scoped to the caller: the same reference under two callers is two subjects. The body carries `entityType`, `name` and optionally `aliases`, `dateOfBirth`, `nationality`, `country`: the same values as on the subject's live screen, and no document identifiers.
+
+| Status | Meaning |
+|---|---|
+| 201 | The subject is now monitored |
+| 200 | It was already registered; identical attributes change nothing, different ones replace the stored ones |
+| 400 | Invalid path value or body (blank name, `null` alias, unknown country format, NUL character) |
+| 403 | The caller is not a service under its own service account: a person's token, the fleet's shared client, or no verified token |
+| 503 | Monitoring is not enabled in this environment; nothing was stored |
+
+The response describes the registration (`ownerService`, `subjectRef`, `registeredAt`, `updatedAt`). It never says whether the subject matches anything.
+
+### Deregister a monitored subject
+
+```
+DELETE /api/v3/sanctions/monitored-subjects/{subjectRef}
+```
+
+Deletes the caller's registry row and its findings. 204 whether or not the caller had registered the subject, and it works while monitoring is disabled; 403 as for registration. A subject another service registered under the same reference is not touched. Call it on offboarding and on erasure.
+
+### Finding event
+
+`MONITORED_SUBJECT_MATCHED` on `openbank.sanctions.screening.event` (type in the `ce-type` header), schema version 1: `findingId`, `ownerService`, `subjectRef`, `entityType`, `matchKind` (`SANCTIONS`, `TERRORIST`, `PEP`, `JURISDICTION`), `listType`, `listEntryRef`, `listEntryVersion`, `matchScore`, `matchStatus`, `detection` (`LIST_DELTA`, `BASELINE_SWEEP`, `PERIODIC_SWEEP`), `occurredAt`, `sourceService`. No customer name is carried. There is no REST operation that returns findings.

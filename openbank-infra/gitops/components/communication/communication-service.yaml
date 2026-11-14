@@ -7,7 +7,7 @@ metadata:
   name: communication-service
   namespace: communication
   annotations:
-    openbank.io/operations-mode: reviewed-gitops
+    open-bank.tech/operations-mode: reviewed-gitops
   labels:
     app.kubernetes.io/name: communication-service
     app.kubernetes.io/part-of: communication
@@ -26,7 +26,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-communication-opa-bundle.sh.
-        openbank.tech/policy-checksum: "de08943d241d3216"
+        openbank.tech/policy-checksum: "4990dfeb51a2d47c"
       labels:
         app.kubernetes.io/name: communication-service
         app.kubernetes.io/part-of: communication

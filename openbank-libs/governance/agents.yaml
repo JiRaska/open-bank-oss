@@ -27,7 +27,7 @@ defaults:
   policy_decision: deny               # deny-by-default; OPA must find a matching allow rule
   enforced: block                     # ADR-0031 D8 gate flipped (#700/#638): declaration now matches
                                       # the deployed AGENT_POLICY_ENFORCEMENT=block (reconcile #743).
-                                      # A PDP connectivity error still degrades to advisory (fail-safe).
+                                      # A PDP connectivity error denies the call (fail closed, #15758).
   audit:
     actor_type: AI_AGENT              # every action -> AuditEvent (ADR-0031 D5)
     capture: [model_id, model_version, prompt_hash, tool_calls, policy_decision]

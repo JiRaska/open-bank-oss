@@ -76,6 +76,8 @@ Zdrojový kandidát #12181 ukládá každý přechod platby s událostí a její
 
 Idempotentní opakování existujícího podání vrátí uloženou platbu bez druhé události. Tato migrace zpětně nevytváří historické přechody; případná chybějící auditní fakta vyžadují samostatnou schválenou rekonciliaci.
 
+Příznak syntetického původu smí nastavit důvěryhodný servisní účet prostřednictvím sdíleného vstupního filtru. Jeho rozhodnutí se při založení uloží k platbě. Každý přechod s událostí přenese uložený příznak do outboxu a následně do hlavičky Kafka. Schémata odpovědí i těl událostí zůstávají stejná. Starší platby mají v PostgreSQL původ neznámý a při odeslání zůstávají bez příznaku.
+
 ## Odolnost a rate limiting
 
 Konfigurováno pod `openbank.resilience` / `openbank.rate-limit` (SmallRye Fault Tolerance): circuit breaker (volume 20, failure ratio 0.3, success threshold 10, 5 s delay), retry (max 2, 100 ms delay, 50 ms jitter), timeout (10 s) a strop souběhu (`max-concurrent-requests: 500`).

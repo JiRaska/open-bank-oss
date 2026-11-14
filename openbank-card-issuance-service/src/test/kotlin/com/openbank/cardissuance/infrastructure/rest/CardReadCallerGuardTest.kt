@@ -78,11 +78,15 @@ class CardReadCallerGuardTest {
     fun `each named principal with ROLE_API only may make its own read and not the other`() {
         val delegation = identity("service-account-openbank-delegation", "ROLE_API")
         val party = identity("service-account-openbank-party", "ROLE_API")
+        val processing = identity("service-account-openbank-card-processing", "ROLE_API")
         assertThatCode { requireNamedCardReader(delegation, CARD_READ_CALLERS) }.doesNotThrowAnyException()
         assertThatCode { requireNamedCardReader(party, CARD_PARTY_LIST_CALLERS) }.doesNotThrowAnyException()
+        assertThatCode { requireNamedCardReader(processing, CARD_READ_CALLERS) }.doesNotThrowAnyException()
         assertThatThrownBy { requireNamedCardReader(delegation, CARD_PARTY_LIST_CALLERS) }
             .isInstanceOf(ForbiddenException::class.java)
         assertThatThrownBy { requireNamedCardReader(party, CARD_READ_CALLERS) }
+            .isInstanceOf(ForbiddenException::class.java)
+        assertThatThrownBy { requireNamedCardReader(processing, CARD_PARTY_LIST_CALLERS) }
             .isInstanceOf(ForbiddenException::class.java)
     }
 

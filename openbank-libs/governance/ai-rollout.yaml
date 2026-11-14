@@ -75,8 +75,8 @@ decisions:
       AgentPolicyGate enforces + audits every tool call. AGENT_POLICY_ENFORCEMENT=block in
       both the deployment and the agents.yaml declaration (reconciled #743), via an
       in-process charter allow-list (ADR-0080, #700) plus an OPA sidecar serving the
-      agents.rego bundle over localhost:8181 as the external PDP (#638). Fails safe — a PDP
-      connectivity error degrades to advisory.
+      agents.rego bundle over localhost:8181 as the external PDP (#638). Fails closed in
+      block mode — a PDP connectivity error denies every tool call (#15758).
   - id: D3
     title: Verifiable agent identity (SPIFFE/SVID + CN cross-check)
     status: built
