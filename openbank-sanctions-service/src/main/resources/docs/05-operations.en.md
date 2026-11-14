@@ -131,6 +131,26 @@ freshly started pod and an alert does not clear on a restart. To clear it:
    `published_on`, and setting `active = false` on the rows it supersedes.
 3. If it did not change, add a migration that only moves `verified_on` for that `source_list`.
 
+#### FATF lists: how they were sourced and when they are next due
+
+fatf-gafi.org refuses automated retrieval (a bot check, which is never to be bypassed). V24 was
+therefore taken from an **official government republication** of the two statements of
+2026-10-30, the Japan Ministry of Finance provisional translations (annex URLs and SHA-256 in the
+V24 header), and cross-checked against the US FinCEN release of the same day. This is the one
+permitted exception to "never from a secondary summary": an official government copy whose hash
+is recorded, checked against a second government source. A grey-list row is `RISK_FACTOR` and
+never changes a screen outcome; a call-for-action row is `HIGH_RISK` (review), never `EMBARGO`.
+
+- **Verification-age alert:** `JurisdictionReferenceDataNotReverified` fires for both FATF lists
+  on **2027-04-13** (verified 2026-11-14 + 150 days; the EU list, verified 2026-11-11, on
+  2027-04-10).
+- **Next required update:** after the **FATF plenary of February 2027** — expect the statements in
+  the second half of February 2027 (window 2027-02-15 to 2027-03-06; confirm the dates on the
+  FATF calendar). Load them within two weeks of publication, and at the latest before
+  2027-04-13. The October 2026 statement says FATF will consider countermeasures on Myanmar if
+  there is no progress by February 2027 — that is a measure change to review, not a routine
+  re-verification.
+
 ### Large backlog of POTENTIAL_HIT reviews
 
 1. Check the pending queue: `GET /api/v1/sanctions/pending`
