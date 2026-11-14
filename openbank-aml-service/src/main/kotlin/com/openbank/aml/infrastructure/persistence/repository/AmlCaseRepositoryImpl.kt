@@ -10,10 +10,8 @@ import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.ScreeningType
 import com.openbank.aml.infrastructure.persistence.entity.AmlCaseEntity
-import com.openbank.aml.infrastructure.persistence.mapper.readHoldProposal
 import com.openbank.aml.infrastructure.persistence.mapper.toDomain
 import com.openbank.aml.infrastructure.persistence.mapper.toEntity
-import com.openbank.aml.infrastructure.persistence.mapper.writeHoldProposal
 import com.openbank.aml.infrastructure.persistence.repository.NativeSql.mutate
 import com.openbank.aml.infrastructure.persistence.repository.NativeSql.select
 import com.openbank.aml.infrastructure.persistence.repository.NativeSql.utc
@@ -106,37 +104,6 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
             .chain { _ -> outboxRepository.persistInTransaction(event) }
             .replaceWith(amlCase)
     }.awaitSuspending()
-
-    override suspend fun writeHoldDecision(readAs: AmlCase, decided: AmlCase, event: OutboxMessage?): AmlCase =
-        Panache.withTransaction {
-            find("caseId", readAs.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
-                .invoke { entity ->
-                    if (entity == null ||
-                        entity.status != readAs.status.name ||
-                        entity.partyId != readAs.partyId ||
-                        entity.readHoldProposal() != readAs.holdProposal
-                    ) {
-                        throw CaseChangedConcurrentlyException(readAs.id)
-                    }
-                    entity.status = decided.status.name
-                    entity.decisionReason = decided.decisionReason
-                    entity.assignedAnalyst = decided.assignedAnalyst
-                    entity.decidedBy = decided.decidedBy
-                    entity.decidedAt = decided.decidedAt
-                    entity.updatedAt = decided.updatedAt
-                    entity.writeHoldProposal(decided.holdProposal)
-                }
-                .chain { _ ->
-                    if (event ==
-                        null
-                    ) {
-                        Uni.createFrom().voidItem()
-                    } else {
-                        outboxRepository.persistInTransaction(event)
-                    }
-                }
-                .replaceWith(decided)
-        }.awaitSuspending()
 
     // Two shapes of "party not established", both resolvable from the account. A missing party is
     // the explicit one (V15). The other is #3413: while `party_id` was NOT NULL the rails satisfied it

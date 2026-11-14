@@ -10,10 +10,12 @@ import com.openbank.aml.application.port.`in`.CreateAmlCaseCommand
 import com.openbank.aml.application.port.`in`.HoldDecisionCommand
 import com.openbank.aml.application.port.`in`.UpdateAmlDecisionCommand
 import com.openbank.aml.application.port.out.AmlCaseRepository
+import com.openbank.aml.application.port.out.HoldDecisionRepository
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.AmlRiskLevel
 import com.openbank.aml.domain.model.CaseOrigin
+import com.openbank.aml.domain.model.HoldDecisionFourEyesException
 import com.openbank.aml.domain.model.HoldDisposition
 import com.openbank.aml.domain.model.ScreeningType
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -43,11 +45,15 @@ class AmlCaseServiceTest {
     private val clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
     private val meters = SimpleMeterRegistry()
     private lateinit var service: AmlCaseService
+    private lateinit var holdDecisions: HoldDecisionRepository
+    private lateinit var holdService: HoldDecisionService
 
     @BeforeEach
     fun setUp() {
         amlCaseRepository = mockk()
         service = AmlCaseService(amlCaseRepository, objectMapper, clock, meters)
+        holdDecisions = mockk()
+        holdService = HoldDecisionService(amlCaseRepository, holdDecisions, objectMapper, clock)
     }
 
     @Test
@@ -235,46 +241,53 @@ class AmlCaseServiceTest {
 
     @Test
     fun `one analyst alone cannot decide the intake's own case through the status endpoint`() {
-        val own = amlCase(AmlCaseStatus.UNDER_REVIEW).copy(idempotencyKey = holdKey, origin = CaseOrigin.PAYMENT_HOLD_INTAKE)
+        val own = amlCase(
+            AmlCaseStatus.UNDER_REVIEW,
+        ).copy(idempotencyKey = holdKey, origin = CaseOrigin.PAYMENT_HOLD_INTAKE)
         coEvery { amlCaseRepository.findById(own.id) } returns own
         for (target in listOf(AmlCaseStatus.CLEARED, AmlCaseStatus.BLOCKED)) {
             assertThatThrownBy {
-                runBlocking { service.updateDecision(UpdateAmlDecisionCommand(own.id, target, "reason", null, "analyst")) }
-            }.isInstanceOf(InvalidAmlCaseStateTransitionException::class.java)
+                runBlocking {
+                    service.updateDecision(UpdateAmlDecisionCommand(own.id, target, "reason", null, "analyst"))
+                }
+            }.isInstanceOf(HoldDecisionFourEyesException::class.java)
                 .hasMessageContaining("hold-decision/proposal")
         }
         coVerify(exactly = 0) { amlCaseRepository.update(any(), any()) }
     }
 
     @Test
-    fun `the intake's own case is proposed with no event and confirmed by a second analyst with origin on the wire`(): Unit =
-        runBlocking {
-            val own = amlCase(AmlCaseStatus.UNDER_REVIEW)
-                .copy(idempotencyKey = holdKey, origin = CaseOrigin.PAYMENT_HOLD_INTAKE, partyId = null)
-            val events = mutableListOf<OutboxMessage?>()
-            coEvery { amlCaseRepository.findById(own.id) } returns own
-            coEvery { amlCaseRepository.writeHoldDecision(any(), any(), any()) } answers {
-                events += thirdArg<OutboxMessage?>()
-                secondArg()
-            }
-
-            val proposed = service.proposeHoldDecision(HoldDecisionCommand(own.id, HoldDisposition.CLEAR, "false positive", "alice"))
-            assertThat(proposed.status).isEqualTo(AmlCaseStatus.UNDER_REVIEW)
-            assertThat(events).containsExactly(null)
-
-            coEvery { amlCaseRepository.findById(own.id) } returns proposed
-            val decided = service.confirmHoldDecision(HoldDecisionCommand(own.id, HoldDisposition.CLEAR, "false positive", "bob"))
-
-            assertThat(decided.status).isEqualTo(AmlCaseStatus.CLEARED)
-            assertThat(decided.decidedBy).isEqualTo("bob")
-            val payload = objectMapper.readTree(events.last()!!.payload)
-            assertThat(payload.get("idempotencyKey").asText()).isEqualTo(holdKey)
-            assertThat(payload.get("newStatus").asText()).isEqualTo("CLEARED")
-            assertThat(payload.has("partyId")).isTrue()
-            assertThat(payload.get("partyId").isNull).isTrue()
-            // ADR-0374: provenance on the wire, so a rail acts only on the intake's own case.
-            assertThat(payload.get("origin").asText()).isEqualTo("PAYMENT_HOLD_INTAKE")
+    fun `a hold case is proposed with no event and confirmed by another analyst with origin`(): Unit = runBlocking {
+        val own = amlCase(AmlCaseStatus.UNDER_REVIEW)
+            .copy(idempotencyKey = holdKey, origin = CaseOrigin.PAYMENT_HOLD_INTAKE, partyId = null)
+        val events = mutableListOf<OutboxMessage?>()
+        coEvery { amlCaseRepository.findById(own.id) } returns own
+        coEvery { holdDecisions.writeHoldDecision(any(), any(), any()) } answers {
+            events += thirdArg<OutboxMessage?>()
+            secondArg()
         }
+
+        val proposed = holdService.proposeHoldDecision(
+            HoldDecisionCommand(own.id, HoldDisposition.CLEAR, "false positive", "alice"),
+        )
+        assertThat(proposed.status).isEqualTo(AmlCaseStatus.UNDER_REVIEW)
+        assertThat(events).containsExactly(null)
+
+        coEvery { amlCaseRepository.findById(own.id) } returns proposed
+        val decided = holdService.confirmHoldDecision(
+            HoldDecisionCommand(own.id, HoldDisposition.CLEAR, "false positive", "bob"),
+        )
+
+        assertThat(decided.status).isEqualTo(AmlCaseStatus.CLEARED)
+        assertThat(decided.decidedBy).isEqualTo("bob")
+        val payload = objectMapper.readTree(events.last()!!.payload)
+        assertThat(payload.get("idempotencyKey").asText()).isEqualTo(holdKey)
+        assertThat(payload.get("newStatus").asText()).isEqualTo("CLEARED")
+        assertThat(payload.has("partyId")).isTrue()
+        assertThat(payload.get("partyId").isNull).isTrue()
+        // ADR-0374: provenance on the wire, so a rail acts only on the intake's own case.
+        assertThat(payload.get("origin").asText()).isEqualTo("PAYMENT_HOLD_INTAKE")
+    }
 
     @Test
     fun `the proposer cannot confirm, and nothing is written`() {
@@ -283,14 +296,19 @@ class AmlCaseServiceTest {
             .proposeHoldDecision(HoldDisposition.BLOCK, "listed", "alice", Instant.now(clock))
         coEvery { amlCaseRepository.findById(proposed.id) } returns proposed
         assertThatThrownBy {
-            runBlocking { service.confirmHoldDecision(HoldDecisionCommand(proposed.id, HoldDisposition.BLOCK, "listed", "alice")) }
-        }.isInstanceOf(InvalidAmlCaseStateTransitionException::class.java).hasMessageContaining("four-eyes")
-        coVerify(exactly = 0) { amlCaseRepository.writeHoldDecision(any(), any(), any()) }
+            runBlocking {
+                holdService.confirmHoldDecision(
+                    HoldDecisionCommand(proposed.id, HoldDisposition.BLOCK, "listed", "alice"),
+                )
+            }
+        }.isInstanceOf(HoldDecisionFourEyesException::class.java).hasMessageContaining("four-eyes")
+        coVerify(exactly = 0) { holdDecisions.writeHoldDecision(any(), any(), any()) }
     }
 
     /**
      * Byte-identity of a case the intake did not open: the status-changed payload of a REST case is
-     * exactly what it was before hold-decision four-eyes existed. A literal, so a new field fails it.
+     * exactly what it was before hold-decision four-eyes existed (this test mapper renders the timestamp
+     * through the origin-stripping tree, as main does). A literal, so a new field fails it.
      */
     @Test
     fun `a legacy case's status-changed event is byte-identical`(): Unit = runBlocking {
@@ -307,9 +325,10 @@ class AmlCaseServiceTest {
 
         assertThat(event.captured.eventType).isEqualTo("aml.case.status_changed.v1")
         assertThat(event.captured.payload).isEqualTo(
-            "{\"caseId\":\"$id\",\"partyId\":\"$party\",\"previousStatus\":\"UNDER_REVIEW\",\"newStatus\":\"CLEARED\"," +
+            "{\"caseId\":\"$id\",\"partyId\":\"$party\"," +
+                "\"previousStatus\":\"UNDER_REVIEW\",\"newStatus\":\"CLEARED\"," +
                 "\"decisionReason\":\"false positive\",\"assignedAnalyst\":null,\"decidedBy\":\"analyst\"," +
-                "\"occurredAt\":1705320000.000000000,\"transactionId\":\"$txn\",\"alertCode\":\"TM-900\"," +
+                "\"occurredAt\":1.70532E+9,\"transactionId\":\"$txn\",\"alertCode\":\"TM-900\"," +
                 "\"idempotencyKey\":\"legacy-1\"}",
         )
     }

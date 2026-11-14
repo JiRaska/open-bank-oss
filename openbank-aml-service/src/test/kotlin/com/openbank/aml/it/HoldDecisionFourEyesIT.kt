@@ -31,19 +31,21 @@ import java.util.UUID
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class HoldDecisionFourEyesIT : MonitoringDecisionITSupport() {
 
-    private fun seedHoldCase(caseId: UUID, payment: String) {
+    // Explicit row ids far above both the BIGSERIAL and the Hibernate pooled sequence: other classes
+    // in the same database draw from those, and an implicit id collided with one of theirs.
+    private fun seedHoldCase(rowId: Long, caseId: UUID, payment: String) {
         rows(
             """
             INSERT INTO aml_cases
-              (case_id, idempotency_key, party_id, account_id, customer_reference, screening_type, risk_level,
+              (id, case_id, idempotency_key, party_id, account_id, customer_reference, screening_type, risk_level,
                status, alert_code, origin, screened_at, created_at, updated_at)
-            VALUES ($1, $2, NULL, $3, 'ref', 'TRANSACTION_MONITORING', 'HIGH', 'UNDER_REVIEW', 'PAYMENT_HELD',
+            VALUES ($4, $1, $2, NULL, $3, 'ref', 'TRANSACTION_MONITORING', 'HIGH', 'UNDER_REVIEW', 'PAYMENT_HELD',
                     'PAYMENT_HOLD_INTAKE', now(), now(), now())
-            ON CONFLICT DO NOTHING
             """.trimIndent(),
             caseId,
             "payment-hold:domestic:$payment",
             ACCOUNT,
+            rowId,
         )
     }
 
@@ -69,28 +71,64 @@ class HoldDecisionFourEyesIT : MonitoringDecisionITSupport() {
     @Test
     @Order(1)
     @TestSecurity(user = "alice", roles = ["ROLE_COMPLIANCE", "ROLE_OPERATOR"])
-    @OidcSecurity(claims = [Claim(key = "azp", value = HUMAN_CLIENT), Claim(key = "sub", value = "alice"), Claim(key = "preferred_username", value = "alice")])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "azp",
+                value = HUMAN_CLIENT,
+            ), Claim(key = "sub", value = "alice"), Claim(key = "preferred_username", value = "alice"),
+        ],
+    )
     fun `(1) the single-step endpoint refuses a terminal decision on a hold case and points at the proposal routes`() {
-        seedHoldCase(HOLD_CASE, "00000000-0000-4000-8000-00000000e011")
-        seedHoldCase(REPLACED_CASE, "00000000-0000-4000-8000-00000000e012")
-        seedCase(LEGACY_CASE, PARTY, "TRANSACTION_MONITORING")
+        seedHoldCase(900_000_001L, HOLD_CASE, "00000000-0000-4000-8000-00000000e011")
+        seedHoldCase(900_000_002L, REPLACED_CASE, "00000000-0000-4000-8000-00000000e012")
+        rows(
+            """
+            INSERT INTO aml_cases
+              (id, case_id, idempotency_key, party_id, customer_reference, screening_type, risk_level, status,
+               alert_code, origin, screened_at, created_at, updated_at)
+            VALUES (900000003, $1, 'it:legacy-4eyes', $2, 'ref', 'TRANSACTION_MONITORING', 'MEDIUM', 'OPEN',
+                    'TM-900', 'REST', now(), now(), now())
+            """.trimIndent(),
+            LEGACY_CASE,
+            PARTY,
+        )
+        assertThat(
+            rows("SELECT 1 FROM aml_cases WHERE case_id IN ($1, $2, $3)", HOLD_CASE, REPLACED_CASE, LEGACY_CASE),
+        ).hasSize(3)
         for (target in listOf("CLEARED", "BLOCKED")) {
-            put(HOLD_CASE, target).then().statusCode(409).body("message", org.hamcrest.Matchers.containsString("hold-decision/proposal"))
+            put(
+                HOLD_CASE,
+                target,
+            ).then().statusCode(409).body("message", org.hamcrest.Matchers.containsString("hold-decision/proposal"))
         }
         assertThat(case(HOLD_CASE).getString("status")).isEqualTo("UNDER_REVIEW")
         assertThat(anyEvents(HOLD_CASE)).isEmpty()
         // Control: a case the intake did not open keeps its single-analyst decision and its event shape.
-        put(LEGACY_CASE, "CLEARED").then().statusCode(200).body("status", equalTo("CLEARED")).body("decidedBy", equalTo("alice"))
+        put(
+            LEGACY_CASE,
+            "CLEARED",
+        ).then().statusCode(200).body("status", equalTo("CLEARED")).body("decidedBy", equalTo("alice"))
         assertThat(statusEvents(LEGACY_CASE)).singleElement().satisfies({ assertThat(it).doesNotContain("origin") })
     }
 
     @Test
     @Order(2)
     @TestSecurity(user = "alice", roles = ["ROLE_COMPLIANCE"])
-    @OidcSecurity(claims = [Claim(key = "azp", value = HUMAN_CLIENT), Claim(key = "sub", value = "alice"), Claim(key = "preferred_username", value = "alice")])
-    fun `(2) alice proposes; nothing is decided and nothing is emitted, and she cannot confirm herself`() {
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "azp",
+                value = HUMAN_CLIENT,
+            ), Claim(key = "sub", value = "alice"), Claim(key = "preferred_username", value = "alice"),
+        ],
+    )
+    fun `(2) alice proposes, nothing is decided and nothing is emitted, and she cannot confirm herself`() {
         propose(HOLD_CASE, "CLEAR", "false positive").then().statusCode(201)
-            .body("proposedBy", equalTo("alice")).body("outcome", equalTo("CLEAR")).body("status", equalTo("UNDER_REVIEW"))
+            .body(
+                "proposedBy",
+                equalTo("alice"),
+            ).body("outcome", equalTo("CLEAR")).body("status", equalTo("UNDER_REVIEW"))
         assertThat(case(HOLD_CASE).getString("status")).isEqualTo("UNDER_REVIEW")
         assertThat(anyEvents(HOLD_CASE)).isEmpty()
         confirm(HOLD_CASE, "CLEAR", "false positive").then().statusCode(409)
@@ -119,7 +157,14 @@ class HoldDecisionFourEyesIT : MonitoringDecisionITSupport() {
     @Test
     @Order(4)
     @TestSecurity(user = "carol", roles = ["ROLE_COMPLIANCE"])
-    @OidcSecurity(claims = [Claim(key = "azp", value = HUMAN_CLIENT), Claim(key = "sub", value = "carol"), Claim(key = "preferred_username", value = "carol")])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "azp",
+                value = HUMAN_CLIENT,
+            ), Claim(key = "sub", value = "carol"), Claim(key = "preferred_username", value = "carol"),
+        ],
+    )
     fun `(4) carol replaces the pending proposal of the second case`() {
         propose(REPLACED_CASE, "BLOCK", "second look").then().statusCode(201).body("proposedBy", equalTo("carol"))
     }
@@ -127,7 +172,14 @@ class HoldDecisionFourEyesIT : MonitoringDecisionITSupport() {
     @Test
     @Order(5)
     @TestSecurity(user = "bob", roles = ["ROLE_COMPLIANCE"])
-    @OidcSecurity(claims = [Claim(key = "azp", value = HUMAN_CLIENT), Claim(key = "sub", value = "bob"), Claim(key = "preferred_username", value = "bob")])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "azp",
+                value = HUMAN_CLIENT,
+            ), Claim(key = "sub", value = "bob"), Claim(key = "preferred_username", value = "bob"),
+        ],
+    )
     fun `(5) bob confirms only what was proposed, and exactly one event leaves, with origin`() {
         confirm(HOLD_CASE, "BLOCK", "false positive").then().statusCode(409)
         confirm(HOLD_CASE, "CLEAR", "a different reason").then().statusCode(409)
@@ -145,14 +197,18 @@ class HoldDecisionFourEyesIT : MonitoringDecisionITSupport() {
         assertThat(stored.getString("decided_by")).isEqualTo("bob")
         assertThat(stored.getString("decision_reason")).isEqualTo("false positive")
         assertThat(statusEvents(HOLD_CASE)).singleElement().satisfies({
-            assertThat(it).contains("\"origin\":\"PAYMENT_HOLD_INTAKE\"", "\"newStatus\":\"CLEARED\"", "\"decidedBy\":\"bob\"")
+            assertThat(
+                it,
+            ).contains("\"origin\":\"PAYMENT_HOLD_INTAKE\"", "\"newStatus\":\"CLEARED\"", "\"decidedBy\":\"bob\"")
         })
         // Decided once: a second confirmation is refused and writes nothing.
         confirm(HOLD_CASE, "CLEAR", "false positive").then().statusCode(409)
         assertThat(statusEvents(HOLD_CASE)).hasSize(1)
         // The replaced proposal is confirmed as it now stands.
         confirm(REPLACED_CASE, "BLOCK", "second look").then().statusCode(200).body("status", equalTo("BLOCKED"))
-        assertThat(statusEvents(REPLACED_CASE)).singleElement().satisfies({ assertThat(it).contains("\"origin\":\"PAYMENT_HOLD_INTAKE\"") })
+        assertThat(statusEvents(REPLACED_CASE)).singleElement().satisfies({
+            assertThat(it).contains("\"origin\":\"PAYMENT_HOLD_INTAKE\"")
+        })
     }
 
     private companion object {

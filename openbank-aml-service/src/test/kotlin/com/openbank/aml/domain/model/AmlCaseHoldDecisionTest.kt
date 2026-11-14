@@ -10,13 +10,16 @@ import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
 
-/** ADR-0374 point 3 in the aggregate: one analyst alone cannot move a held payment's case to a status a rail acts on. */
+/** ADR-0374 point 3 in the aggregate: one analyst alone cannot decide a held payment's case. */
 class AmlCaseHoldDecisionTest {
 
     private val t0 = Instant.parse("2026-11-14T10:00:00Z")
     private val t1 = Instant.parse("2026-11-14T10:05:00Z")
 
-    private fun case(origin: CaseOrigin? = CaseOrigin.PAYMENT_HOLD_INTAKE, status: AmlCaseStatus = AmlCaseStatus.UNDER_REVIEW) = AmlCase(
+    private fun case(
+        origin: CaseOrigin? = CaseOrigin.PAYMENT_HOLD_INTAKE,
+        status: AmlCaseStatus = AmlCaseStatus.UNDER_REVIEW,
+    ) = AmlCase(
         id = UUID.fromString("00000000-0000-4000-8000-00000000d001"),
         idempotencyKey = if (origin == CaseOrigin.PAYMENT_HOLD_INTAKE) "payment-hold:domestic:p1" else "rest-1",
         partyId = null,
@@ -51,9 +54,15 @@ class AmlCaseHoldDecisionTest {
 
     @Test
     fun `a non-terminal step stays one analyst's`() {
-        assertThat(case(status = AmlCaseStatus.OPEN).transitionTo(AmlCaseStatus.UNDER_REVIEW, null, "alice", "alice", t1).status)
+        assertThat(
+            case(
+                status = AmlCaseStatus.OPEN,
+            ).transitionTo(AmlCaseStatus.UNDER_REVIEW, null, "alice", "alice", t1).status,
+        )
             .isEqualTo(AmlCaseStatus.UNDER_REVIEW)
-        assertThat(case().transitionTo(AmlCaseStatus.ESCALATED, "senior", null, "alice", t1).status).isEqualTo(AmlCaseStatus.ESCALATED)
+        assertThat(
+            case().transitionTo(AmlCaseStatus.ESCALATED, "senior", null, "alice", t1).status,
+        ).isEqualTo(AmlCaseStatus.ESCALATED)
     }
 
     @Test
@@ -109,7 +118,9 @@ class AmlCaseHoldDecisionTest {
     fun `a case the intake did not open keeps the single-step decision and has no proposal route`() {
         for (origin in listOf(null) + (CaseOrigin.entries - CaseOrigin.PAYMENT_HOLD_INTAKE)) {
             val other = case(origin = origin)
-            assertThat(other.transitionTo(AmlCaseStatus.CLEARED, "fine", null, "alice", t1).status).isEqualTo(AmlCaseStatus.CLEARED)
+            assertThat(
+                other.transitionTo(AmlCaseStatus.CLEARED, "fine", null, "alice", t1).status,
+            ).isEqualTo(AmlCaseStatus.CLEARED)
             assertThatThrownBy { other.proposeHoldDecision(HoldDisposition.CLEAR, "fine", "alice", t0) }
                 .isInstanceOf(HoldDecisionFourEyesException::class.java)
         }

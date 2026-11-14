@@ -8,7 +8,6 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.port.`in`.CreateAmlCaseCommand
-import com.openbank.aml.application.port.`in`.HoldDecisionCommand
 import com.openbank.aml.application.port.`in`.ListAmlCasesQuery
 import com.openbank.aml.application.port.`in`.UpdateAmlDecisionCommand
 import com.openbank.aml.application.port.out.AmlCaseRepository
@@ -17,7 +16,6 @@ import com.openbank.aml.domain.event.toCreatedEvent
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.CaseOrigin
-import com.openbank.aml.domain.model.HoldDecisionFourEyesException
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
@@ -177,40 +175,10 @@ class AmlCaseService(
             )
         } catch (ex: IllegalArgumentException) {
             throw InvalidAmlCaseStateTransitionException(ex.message ?: "Invalid AML case state transition")
-        } catch (ex: HoldDecisionFourEyesException) {
-            throw InvalidAmlCaseStateTransitionException(ex.message ?: "A held payment's case needs two analysts")
         }
 
         // ADR-0050: the transition and its status-changed event commit atomically via the outbox.
-        return amlCaseRepository.update(updated, statusChangedEvent(amlCase, updated))
-    }
-
-    // ADR-0374 point 3. A proposal writes no outbox row at all, so nothing a rail listens to can
-    // leave on it; only the confirmation emits the status-changed event, origin included.
-    override suspend fun proposeHoldDecision(command: HoldDecisionCommand): AmlCase {
-        val amlCase = amlCaseRepository.findById(command.caseId) ?: throw AmlCaseNotFoundException(command.caseId)
-        val proposed =
-            holdStep {
-                amlCase.proposeHoldDecision(command.outcome, command.reason, command.analyst, Instant.now(clock))
-            }
-        return amlCaseRepository.writeHoldDecision(amlCase, proposed, event = null)
-    }
-
-    override suspend fun confirmHoldDecision(command: HoldDecisionCommand): AmlCase {
-        val amlCase = amlCaseRepository.findById(command.caseId) ?: throw AmlCaseNotFoundException(command.caseId)
-        val decided =
-            holdStep {
-                amlCase.confirmHoldDecision(command.outcome, command.reason, command.analyst, Instant.now(clock))
-            }
-        return amlCaseRepository.writeHoldDecision(amlCase, decided, statusChangedEvent(amlCase, decided))
-    }
-
-    private inline fun holdStep(step: () -> AmlCase): AmlCase = try {
-        step()
-    } catch (ex: HoldDecisionFourEyesException) {
-        throw InvalidAmlCaseStateTransitionException(ex.message ?: "A held payment's case needs two analysts")
-    } catch (ex: IllegalArgumentException) {
-        throw InvalidAmlCaseStateTransitionException(ex.message ?: "Invalid hold decision")
+        return amlCaseRepository.update(updated, objectMapper.statusChangedEvent(amlCase, updated))
     }
 
     private fun initialStatus(riskLevel: com.openbank.aml.domain.model.AmlRiskLevel): AmlCaseStatus = when (riskLevel) {
@@ -227,28 +195,6 @@ class AmlCaseService(
         aggregateId = amlCase.id,
         eventType = EVENT_CASE_CREATED,
         payload = objectMapper.writeValueAsString(amlCase.toCreatedEvent(now)),
-    )
-
-    private fun statusChangedEvent(previous: AmlCase, current: AmlCase): OutboxMessage = OutboxMessage(
-        eventId = UUID.randomUUID(),
-        aggregateId = current.id,
-        eventType = EVENT_STATUS_CHANGED,
-        payload = objectMapper.statusChangedPayload(
-            AmlCaseStatusChangedEvent(
-                caseId = current.id,
-                partyId = current.partyId,
-                previousStatus = previous.status,
-                newStatus = current.status,
-                decisionReason = current.decisionReason,
-                assignedAnalyst = current.assignedAnalyst,
-                decidedBy = current.decidedBy,
-                occurredAt = current.updatedAt,
-                transactionId = current.transactionId,
-                alertCode = current.alertCode,
-                idempotencyKey = current.idempotencyKey,
-                origin = current.origin?.takeIf { it == CaseOrigin.PAYMENT_HOLD_INTAKE }?.name,
-            ),
-        ),
     )
 
     companion object {
@@ -272,3 +218,26 @@ internal fun ObjectMapper.statusChangedPayload(event: AmlCaseStatusChangedEvent)
     tree.remove("origin")
     return writeValueAsString(tree)
 }
+
+/** The status-changed event of a transition from [previous] to [current]; `origin` only for the hold intake's case. */
+internal fun ObjectMapper.statusChangedEvent(previous: AmlCase, current: AmlCase): OutboxMessage = OutboxMessage(
+    eventId = UUID.randomUUID(),
+    aggregateId = current.id,
+    eventType = AmlCaseService.EVENT_STATUS_CHANGED,
+    payload = statusChangedPayload(
+        AmlCaseStatusChangedEvent(
+            caseId = current.id,
+            partyId = current.partyId,
+            previousStatus = previous.status,
+            newStatus = current.status,
+            decisionReason = current.decisionReason,
+            assignedAnalyst = current.assignedAnalyst,
+            decidedBy = current.decidedBy,
+            occurredAt = current.updatedAt,
+            transactionId = current.transactionId,
+            alertCode = current.alertCode,
+            idempotencyKey = current.idempotencyKey,
+            origin = current.origin?.takeIf { it == CaseOrigin.PAYMENT_HOLD_INTAKE }?.name,
+        ),
+    ),
+)

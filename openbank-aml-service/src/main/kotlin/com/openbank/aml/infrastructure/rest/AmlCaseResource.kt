@@ -6,6 +6,7 @@ package com.openbank.aml.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
+import com.openbank.aml.application.port.`in`.HoldDecisionUseCase
 import com.openbank.aml.application.port.`in`.ListAmlCasesQuery
 import com.openbank.aml.application.usecase.AmlCaseNotFoundException
 import com.openbank.aml.domain.model.AmlCase
@@ -57,6 +58,7 @@ private val log = Logger.getLogger(AmlCaseResource::class.java)
 @Tag(name = "AML Cases", description = "AML screening case lifecycle")
 class AmlCaseResource(
     private val amlCaseUseCase: AmlCaseUseCase,
+    private val holdDecisionUseCase: HoldDecisionUseCase,
     private val idempotencyStore: IdempotencyStore,
     private val objectMapper: ObjectMapper,
 ) {
@@ -210,7 +212,7 @@ class AmlCaseResource(
     suspend fun proposeHoldDecision(@PathParam("caseId") caseId: UUID, request: HoldDecisionRequest?): Response {
         requireHumanAnalyst(identity)
         val command = requireNotNull(request) { "request body is required" }.toCommand(caseId, identity.principal.name)
-        val proposed = amlCaseUseCase.proposeHoldDecision(command)
+        val proposed = holdDecisionUseCase.proposeHoldDecision(command)
         return Response.status(Response.Status.CREATED).entity(proposed.toHoldProposalResponse()).build()
     }
 
@@ -239,7 +241,7 @@ class AmlCaseResource(
     suspend fun confirmHoldDecision(@PathParam("caseId") caseId: UUID, request: HoldDecisionRequest?): Response {
         requireHumanAnalyst(identity)
         val command = requireNotNull(request) { "request body is required" }.toCommand(caseId, identity.principal.name)
-        return Response.ok(amlCaseUseCase.confirmHoldDecision(command).toResponse()).build()
+        return Response.ok(holdDecisionUseCase.confirmHoldDecision(command).toResponse()).build()
     }
 
     /**

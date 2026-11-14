@@ -4,6 +4,7 @@
 
 package com.openbank.aml.domain.model
 
+import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.governance.MakerCheckerViolation
 import com.openbank.libs.governance.Proposal
 import java.time.Instant
@@ -72,9 +73,14 @@ data class HoldDecisionProposal(
 /**
  * A decision on a held payment's case was refused by the four-eyes rule: it was made by one analyst
  * alone, by the proposer confirming their own proposal, or against a proposal that is not the one
- * pending. An [IllegalStateException] so it can never be mistaken for a validation error.
+ * pending. A conflict (409), never a validation error.
  */
-class HoldDecisionFourEyesException(message: String) : IllegalStateException(message)
+class HoldDecisionFourEyesException(message: String, cause: Throwable? = null) :
+    ResourceConflictException(message, cause = cause)
+
+private fun refuseHold(refused: Boolean, message: () -> String) {
+    if (refused) throw HoldDecisionFourEyesException(message())
+}
 
 data class AmlCase(
     val id: UUID,
@@ -184,12 +190,10 @@ data class AmlCase(
      * confirmation restates what it confirms, so it cannot land on the replacement.
      */
     fun proposeHoldDecision(outcome: HoldDisposition, reason: String, proposedBy: String, now: Instant): AmlCase {
-        if (!requiresFourEyesHoldDecision) {
-            throw HoldDecisionFourEyesException(
-                "Only a held payment's case is decided through a hold-decision proposal",
-            )
+        refuseHold(!requiresFourEyesHoldDecision) {
+            "Only a held payment's case is decided through a hold-decision proposal"
         }
-        if (status in TERMINAL_STATUSES) throw HoldDecisionFourEyesException("The case is already decided: $status")
+        refuseHold(status in TERMINAL_STATUSES) { "The case is already decided: $status" }
         require(reason.isNotBlank()) { "reason is required" }
         require(proposedBy.isNotBlank()) { "proposedBy is required" }
         return copy(
@@ -204,18 +208,15 @@ data class AmlCase(
      * the fleet's [Proposal.approve].
      */
     fun confirmHoldDecision(outcome: HoldDisposition, reason: String, confirmedBy: String, now: Instant): AmlCase {
-        if (!requiresFourEyesHoldDecision) {
-            throw HoldDecisionFourEyesException(
-                "Only a held payment's case is decided through a hold-decision proposal",
-            )
+        refuseHold(!requiresFourEyesHoldDecision) {
+            "Only a held payment's case is decided through a hold-decision proposal"
         }
-        val proposal =
-            holdProposal ?: throw HoldDecisionFourEyesException("No decision has been proposed for this case")
-        if (status in TERMINAL_STATUSES) throw HoldDecisionFourEyesException("The case is already decided: $status")
-        if (outcome != proposal.outcome || reason.trim() != proposal.reason) {
-            throw HoldDecisionFourEyesException(
-                "The pending proposal is not the one confirmed; read it again before confirming",
-            )
+        val proposal = holdProposal
+        refuseHold(proposal == null) { "No decision has been proposed for this case" }
+        proposal!!
+        refuseHold(status in TERMINAL_STATUSES) { "The case is already decided: $status" }
+        refuseHold(outcome != proposal.outcome || reason.trim() != proposal.reason) {
+            "The pending proposal is not the one confirmed; read it again before confirming"
         }
         try {
             Proposal(
@@ -225,7 +226,10 @@ data class AmlCase(
                 proposal.proposedAt,
             ).approve(confirmedBy.trim(), now)
         } catch (e: MakerCheckerViolation) {
-            throw HoldDecisionFourEyesException(e.message ?: "four-eyes: the confirmer must differ from the proposer")
+            throw HoldDecisionFourEyesException(
+                e.message ?: "four-eyes: the confirmer must differ from the proposer",
+                e,
+            )
         }
         return decide(proposal.outcome.status, proposal.reason, assignedAnalyst, confirmedBy, now)
     }

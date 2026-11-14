@@ -47,19 +47,12 @@ fun AmlCaseEntity.writeHoldProposal(proposal: HoldDecisionProposal?) {
 
 /** The stored proposal; `null` unless all four columns are set and the outcome is one this build knows. */
 fun AmlCaseEntity.readHoldProposal(): HoldDecisionProposal? {
-    val outcome = holdProposalOutcome?.let { name -> HoldDisposition.entries.firstOrNull { it.name == name } }
-    val reason = holdProposalReason
-    val by = holdProposedBy
-    val at = holdProposedAt
-    return if (outcome == null ||
-        reason == null ||
-        by == null ||
-        at == null
-    ) {
-        null
-    } else {
-        HoldDecisionProposal(outcome, reason, by, at)
-    }
+    val outcome =
+        holdProposalOutcome?.let { name -> HoldDisposition.entries.firstOrNull { it.name == name } } ?: return null
+    val reason = holdProposalReason ?: return null
+    val by = holdProposedBy ?: return null
+    val at = holdProposedAt ?: return null
+    return HoldDecisionProposal(outcome, reason, by, at)
 }
 
 fun AmlCaseEntity.toDomain() = AmlCase(

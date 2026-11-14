@@ -72,7 +72,9 @@ interface AmlCaseUseCase {
     suspend fun getCase(caseId: UUID): AmlCase
     suspend fun listCases(query: ListAmlCasesQuery): List<AmlCase>
     suspend fun updateDecision(command: UpdateAmlDecisionCommand): AmlCase
+}
 
+interface HoldDecisionUseCase {
     /** ADR-0374 point 3: proposes a held payment's decision. Changes no status and emits no event. */
     suspend fun proposeHoldDecision(command: HoldDecisionCommand): AmlCase
 
