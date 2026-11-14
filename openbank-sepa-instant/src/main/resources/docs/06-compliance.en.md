@@ -57,6 +57,9 @@ sequenceDiagram
 - **Contract** (Art. 6(1)(b)) — executing the instant payment the customer instructed.
 - **Legal obligation** (Art. 6(1)(c)) — AML/sanctions screening and record-keeping (mandatory for instant payments).
 
+### Disclosure to fraud-service (ADR-0377 D3)
+The fraud-scoring call sends the creditor account identifier (IBAN) to fraud-service over the existing mutually-authenticated internal hop. The value is typed so it is never null and is redacted in logs. This rail neither hashes nor stores it for fraud purposes; fraud-service keeps only an HMAC pseudonym of it, which is still personal data. Purpose: payee-novelty fraud signal, covered by the legal-obligation basis above. Scoring here is still shadow-only: the verdict is logged, the payment is not held.
+
 ### Data subject rights
 | Right | Application |
 |---|---|

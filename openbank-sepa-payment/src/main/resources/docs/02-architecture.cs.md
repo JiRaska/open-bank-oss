@@ -171,3 +171,7 @@ sequenceDiagram
 3. **Transakční outbox** — řádek DB a outbox zpráva commitují společně; publikace do Kafky je asynchronní přes dispatcher.
 4. **Idempotence na hraně** — `Idempotency-Key` povinný při create; deduplikace v Redisu a přes UNIQUE `idempotency_key` v DB.
 5. **Žádné side-effecty překlápějící verdikt** — otevření AML případu je best-effort a nikdy nemění rozhodnutí screeningu.
+
+## Volání fraud scoringu (ADR-0084, ADR-0377 D3)
+
+Po screeningu linka volá `POST /api/v1/fraud/score` ve fraud-service přes `FraudScoringPort` po stávajícím vzájemně autentizovaném interním spojení. Požadavek nově nese příjemce: IBAN věřitele jako typovanou protistranu (`CounterpartyRef.fromIban`, nikdy null) a způsob iniciace. Klientské DTO hodnotu v `toString()` maskuje, takže se nedostane do logů. Fraud-service z ní vytvoří HMAC pseudonym a surovou hodnotu zahodí; tato služba ji pro účely fraud nehashuje ani neukládá. Scoring na této lince zůstává jen ve stínovém režimu: verdikt jiný než ALLOW se zaloguje, platba se nepodrží a selhání scoringu platbu neblokuje.
