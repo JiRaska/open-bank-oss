@@ -1094,6 +1094,53 @@ def assert_train_branch(name: str) -> None:
 # alias a LATER entry already uses). Anything else returns a reason and the member stays strict.
 GATE_ENTRY_RE = re.compile(r"^  - id:\s*([^\s#]+)\s*(#.*)?$")
 YAML_ANCHOR_RE = re.compile(r"(?:^|[\s:\[{,-])&[A-Za-z0-9_.-]")
+# A new entry's own shape (review of #16109): its id is a plain token (a quoted id is a YAML duplicate the
+# line scan would not see); its keys come from the set gates.yaml already uses, never `env:` (PATH or
+# PYTHONPATH would redirect every later command) and never a second `id:`; and the only EXECUTABLE fields,
+# `run:` and `selftest:`, may do nothing but invoke one trainable gate or test script per line with plain
+# arguments. A free shell line would run inside the judging shard beside the existing gates and could
+# rewrite a privileged gate's script on the shared tree before that gate runs.
+GATE_PLAIN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+APPENDED_GATE_KEYS = frozenset({"name", "group", "mode", "run", "selftest", "selftest_inputs", "selftest_expect",
+                                "selftest_exempt", "min_subjects", "rationale", "review_after", "budget_seconds",
+                                "verified", "needs_base", "when"})
+APPENDED_GATE_EXEC_KEYS = ("run", "selftest")
+GATE_KEY_RE = re.compile(r"^    ([A-Za-z_][A-Za-z0-9_]*):(.*)$")
+GATE_CMD_RE = re.compile(r"(?:python3|bash) (\.github/scripts/[A-Za-z0-9_./-]+\.(?:py|sh))((?: [A-Za-z0-9_./=:,@+-]+)*)")
+
+
+def appended_gate_problem(gid: str, lines: list[str]) -> str | None:
+    """Why one new gate entry (its lines after `  - id:`) may not ride a train, or None."""
+    if not GATE_PLAIN_ID_RE.fullmatch(gid):
+        return f"new gate id {gid!r} is not a plain token"
+    key, exec_lines, seen = None, {}, set()
+    for ln in lines:
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            continue
+        m = GATE_KEY_RE.match(ln)
+        if m:
+            key, value = m.group(1), m.group(2).strip()
+            if key not in APPENDED_GATE_KEYS or key in seen:
+                return f"new gate {gid!r} sets {key!r}, which an appended gate may not"
+            seen.add(key)
+            if key in APPENDED_GATE_EXEC_KEYS:
+                exec_lines[key] = [] if value.split("#")[0].strip() in ("|", "|-", "|+", ">", ">-", ">+") else [value]
+            continue
+        if not ln.startswith("      "):
+            return f"new gate {gid!r} has a line outside any of its keys"
+        if key in exec_lines:
+            exec_lines[key].append(ln.strip())
+    if "run" not in exec_lines:
+        return f"new gate {gid!r} has no run"
+    for k, cmds in exec_lines.items():
+        cmds = [c for c in cmds if c and not c.startswith("#")]
+        if not cmds:
+            return f"new gate {gid!r}: {k} is empty"
+        for c in cmds:
+            m = GATE_CMD_RE.fullmatch(c)
+            if not m or not gate_code(m.group(1)):
+                return f"new gate {gid!r}: {k} line {c[:60]!r} is not a plain call of a trainable gate script"
+    return None
 
 
 def gate_blocks(text: str) -> tuple[str, list[str]]:
@@ -1131,19 +1178,22 @@ def gates_append_problem(old: str | None, new: str | None, main_ids: set[str] | 
             added.append(b)
     if j != len(old_blocks):
         return "an existing gate entry was changed, moved or removed"
-    taken = {GATE_ENTRY_RE.match(b.splitlines()[0]).group(1) for b in old_blocks} | set(main_ids)
+    taken = {GATE_ENTRY_RE.match(b.splitlines()[0]).group(1).strip("'\"") for b in old_blocks} | set(main_ids)
     for b in added:
         lines = b.splitlines()
         gid = GATE_ENTRY_RE.match(lines[0]).group(1)
-        if gid in taken:
+        if gid.strip("'\"") in taken:
             return f"new gate id {gid!r} already exists"
         taken.add(gid)
         for ln in lines:
-            if YAML_ANCHOR_RE.search(ln):
-                return f"new gate {gid!r} defines a YAML anchor"
+            if YAML_ANCHOR_RE.search(ln) or "\t" in ln:
+                return f"new gate {gid!r} defines a YAML anchor or uses a tab"
         for ln in lines[1:]:
             if ln.strip() and not ln.startswith("    ") and not ln.lstrip().startswith("#"):
                 return f"new gate {gid!r} has a line not indented under its entry"
+        why = appended_gate_problem(gid, lines[1:])
+        if why:
+            return why
     return None
 
 
@@ -5210,7 +5260,7 @@ def _synthetic_origin(root: str) -> None:
     pr("pGY", {GATES_YAML: "gates:\n  - id: g-one\n    run: true\n"})                  # retires g-two
     # adds g-three AND edits g-one, so it is not a pure append and still takes the strict lane
     pr("pGA", {GATES_YAML: SYN_GATES_YAML.replace("run: true", "run: 'true'", 1) + "  - id: g-three\n    run: true\n"})
-    pr("pGP", {GATES_YAML: SYN_GATES_YAML + "  - id: g-four\n    run: true\n"})      # a pure append
+    pr("pGP", {GATES_YAML: SYN_GATES_YAML + "  - id: g-four\n    run: python3 .github/scripts/check-g-four.py\n"})      # a pure append
     # Non-judge strict members (plain scripts under .github/scripts): batched together.
     pr("pP1", {".github/scripts/p1.py": "print(1)\n"})
     pr("pP2", {".github/scripts/p2.py": "print(2)\n"})
@@ -5706,9 +5756,15 @@ def self_test() -> int:
     # ADR-0343 amendment 2026-11-14: a pure APPEND of whole new gate entries rides a train; every other
     # gates.yaml shape keeps the strict lane. Each refused shape below is one the append rule must catch.
     base_g = "# header\ngates:\n  - id: g-one\n    run: |\n      true\n  - id: g-two\n    run: true\n"
-    add = "  - id: g-new\n    mode: enforced\n    run: python3 x.py\n"
+    add = "  - id: g-new\n    mode: enforced\n    run: |\n      python3 .github/scripts/check-new.py --root .\n"
     check("gates append: a new entry at the end is a pure append", gates_append_problem(base_g, base_g + add) is None)
     mid = base_g.replace("  - id: g-two", add + "  - id: g-two")
+    full = base_g + ("  - id: g-full\n    name: full\n    group: lint\n    mode: enforced\n    budget_seconds: 30\n"
+                     "    selftest_inputs:\n      - .github/scripts/check-full.py\n    rationale: >-\n      why it exists\n"
+                     "    run: |\n      # comment\n      python3 .github/scripts/check-full.py --root .\n"
+                     "    selftest: python3 .github/scripts/test-check-full.py\n")
+    check("gates append: a realistic new gate (block run, selftest, inputs, rationale) is a pure append",
+          gates_append_problem(base_g, full) is None, f"{gates_append_problem(base_g, full)!r}")
     check("gates append: a new entry between two entries is a pure append", gates_append_problem(base_g, mid) is None)
     refused = {
         "an existing entry edited": base_g.replace("run: true", "run: 'true # weakened'") + add,
@@ -5721,6 +5777,17 @@ def self_test() -> int:
         "a new entry starting a top-level key": base_g + "  - id: g-b\n    run: true\nother: 1\n",
         "a line appended into an existing block scalar": base_g.replace("      true\n", "      true\n      exit 0\n"),
         "no change at all": base_g,
+        "a quoted id duplicating an existing one": base_g + '  - id: "g-one"\n    run: python3 .github/scripts/check-a.py\n',
+        "a second id key inside the new entry": base_g + "  - id: g-c\n    id: g-one\n    run: python3 .github/scripts/check-a.py\n",
+        "a free shell line in run": base_g + "  - id: g-d\n    run: |\n      printf x > .github/scripts/check-adr-registry.sh\n",
+        "a chained command in run": base_g + "  - id: g-e\n    run: python3 .github/scripts/check-a.py; rm -rf .\n",
+        "a redirect argument": base_g + "  - id: g-f\n    run: python3 .github/scripts/check-a.py >out\n",
+        "python3 -c": base_g + "  - id: g-g\n    run: python3 -c 'print(1)'\n",
+        "a non-gate script": base_g + "  - id: g-h\n    run: python3 .github/scripts/regen-helper.py\n",
+        "a selftest with free shell": base_g + "  - id: g-i\n    run: python3 .github/scripts/check-a.py\n    selftest: echo ok\n",
+        "an env key": base_g + "  - id: g-j\n    env: {PYTHONPATH: x}\n    run: python3 .github/scripts/check-a.py\n",
+        "an unknown key": base_g + "  - id: g-k\n    requires: [g-one]\n    run: python3 .github/scripts/check-a.py\n",
+        "no run at all": base_g + "  - id: g-l\n    mode: enforced\n",
     }
     for shape, new in refused.items():
         why = gates_append_problem(base_g, new, {"g-main"})
