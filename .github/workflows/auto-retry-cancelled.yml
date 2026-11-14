@@ -170,6 +170,9 @@ jobs:
             .github/scripts/select-ci-reconcile-candidates.py
             .github/scripts/gh-retry.sh
             .github/scripts/gh-transient-patterns.txt
+            .github/scripts/gh-call-counter.sh
+            .github/scripts/gh_call_counter_site/sitecustomize.py
+            .github/api-call-budgets.yaml
           sparse-checkout-cone-mode: false
           persist-credentials: false
       # Through gh_retry, like every other API call in this workflow. Bare, this call was the one
@@ -179,6 +182,9 @@ jobs:
       # The wait is capped short on purpose: the frequent 30-minute scan overlaps six ticks,
       # and the hourly deep scan overlaps three hours of completions. A quota-limited tick can
       # be re-covered without leaving a runner asleep for the whole installation reset window.
+      - name: gh-call-counter install
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh install
       - name: Read recent completions from the four watched workflows
         id: read-runs
         env:
@@ -258,6 +264,10 @@ jobs:
             --lookback-minutes "${{ steps.read-runs.outputs.lookback }}")
           echo "retry=$(jq -c '.retry' <<< "${candidates}")" >> "${GITHUB_OUTPUT}"
           echo "flakes=$(jq -c '.flakes' <<< "${candidates}")" >> "${GITHUB_OUTPUT}"
+      - name: gh-call-counter report
+        if: always()
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh report
 
   retry:
     name: Re-run spot-killed run (once)
@@ -311,6 +321,9 @@ jobs:
             .github/scripts/spot-kill-retry.sh
             .github/scripts/gh-retry.sh
             .github/scripts/gh-transient-patterns.txt
+            .github/scripts/gh-call-counter.sh
+            .github/scripts/gh_call_counter_site/sitecustomize.py
+            .github/api-call-budgets.yaml
           sparse-checkout-cone-mode: false
           # Under `with:`, not in the step below. #9730 inserted the assert step directly above
           # this key, which moved it into that step's `run:` script: every candidate then died on
@@ -318,6 +331,9 @@ jobs:
           # checkout silently fell back to persisting the token in a job holding `actions: write`.
           persist-credentials: false
 
+      - name: gh-call-counter install
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh install
       - name: Assert the sparse checkout is complete
         run: |
           set -euo pipefail
@@ -405,6 +421,10 @@ jobs:
   # A separate job, not a step: a guard that fails in place is either skipped or strips the
   # job of dependents. `retry` has none today, but keeping escalation independent of what the
   # retry step does next is the pattern CLAUDE.md records.
+      - name: gh-call-counter report
+        if: always()
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh report
   raise-issue:
     name: Raise issue on retry failure
     needs: [discover, retry]

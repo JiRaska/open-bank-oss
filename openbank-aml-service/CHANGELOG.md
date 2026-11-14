@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.20.0...aml-service-v0.21.0) (2026-11-14)
+
+
+### Features
+
+* **aml:** record which service owns a case's movement, from the authenticated caller ([#16168](https://github.com/JiRaska/open-bank-oss/issues/16168)) ([6bdd3c8](https://github.com/JiRaska/open-bank-oss/commit/6bdd3c83dd0c78a9a0f1eea07c9a0e7b7432c989))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.19.0...aml-service-v0.20.0) (2026-11-14)
 
 

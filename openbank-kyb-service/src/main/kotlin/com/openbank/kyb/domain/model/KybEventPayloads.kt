@@ -230,12 +230,12 @@ data class BusinessOnboardingCompleted(
 }
 
 /**
- * An operator confirmed a sanctions match that ongoing monitoring found on an approved business
- * customer, so the relationship has to end (ADR-0376 D8). Published once per case. The case
- * keeps its status and stays monitored; this event is what tells the services
- * that hold the party, the mandates and the accounts that an exit is owed. It carries no reason
- * and no finding: why is in the case, which only operators read, and it must never reach a
- * customer-facing surface before the bank has acted.
+ * NOT PUBLISHED (#16028 item 4). Defined by ADR-0376 D8 as the signal that an approved business
+ * relationship has to end after a confirmed sanctions match; it was never emitted on a live
+ * system (monitoring has been switched off since it shipped). `openbank.kyb.events` is read by a
+ * customer-facing projection and landed in the analytics warehouse, so a confirmed match must not
+ * travel there. The type stays as the record of the shape the contract declared; the channel an
+ * exit workflow reads is #15992's to decide.
  */
 data class BusinessRelationshipExitRequired(
     override val eventType: String,

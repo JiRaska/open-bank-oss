@@ -2,6 +2,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+import Link from 'next/link'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AUTHORITY_UUID } from '@/lib/context/authorityHistory'
 import { amlReferences, parseAmlCaseNetwork, sharedAmlReferences, type AmlCaseEvidenceHistory } from '@/lib/context/amlCaseEvidence'
@@ -71,7 +72,12 @@ export function AmlCaseInvestigation({ initialCaseId = '', fixedCase = false }: 
       <button className="btn btn-primary" disabled={state === 'loading'}>{t('Prozkoumat vazby', 'Explore connections')}</button>
     </form>}
     {state === 'loading' && <p role="status">{t('Načítám evidenci…', 'Loading evidence…')}</p>}
-    {state === 'denied' && <p role="alert">{t('Přístup k tomuto AML případu nebyl povolen.', 'Access to this AML case was not permitted.')}</p>}
+    {/* context-service answers 403 without an ACTIVE investigation assignment for this case
+        (need-to-know, NO_ACTIVE_ASSIGNMENT) — the expected state for an unassigned case, not a fault. */}
+    {state === 'denied' && <p role="status" style={{ color: 'var(--text-secondary)' }}>
+      {t('Graf vazeb se zobrazí jen vyšetřovateli s aktivním přiřazením k tomuto případu (need-to-know). Přiřazení navrhuje a schvaluje administrátor v ', 'The evidence graph is shown only to an investigator with an active assignment to this case (need-to-know). An administrator proposes and approves assignments in ')}
+      <Link href="/audit">{t('Auditu → Přiřazení k vyšetřování', 'Audit → Investigation assignments')}</Link>.
+    </p>}
     {state === 'error' && <p role="alert">{t('Evidenci případu nelze bezpečně ověřit.', 'Case evidence could not be verified safely.')}</p>}
     {history && <>
       <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('Události do', 'Events through')}: {history.effectiveAt} · {t('Zaznamenáno do', 'Known through')}: {history.knownAt}</p>

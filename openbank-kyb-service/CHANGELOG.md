@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.10.0...kyb-service-v0.11.0) (2026-11-14)
+
+
+### Features
+
+* **kyb:** publish verified statutory representation rules ([#15662](https://github.com/JiRaska/open-bank-oss/issues/15662)) ([3e1956f](https://github.com/JiRaska/open-bank-oss/commit/3e1956fab5bc3cc9c83adffcc5351ddf1172289e))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.9.0...kyb-service-v0.10.0) (2026-11-13)
 
 

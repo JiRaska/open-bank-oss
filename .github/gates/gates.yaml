@@ -124,11 +124,26 @@ gates:
     rationale: "The counting gh shim sits first on PATH in CI gates, Services CI changes, CodeQL and the merge-train build. A shim that altered arguments, output or exit code, or that died on an unwritable log, would break every job it measures; one that logged field values would publish them in step summaries. Its self-test proves each of those is caught."
     review_after: "2027-05-10"
     budget_seconds: 30
-    # One subject per assertion the harness makes (passthrough, exit code, stderr, log line, no values, report, unwritable log, missing counter).
-    min_subjects: 8
+    # One subject per assertion the harness makes (passthrough, exit code, stderr, log line, no values, report, unwritable log, missing counter,
+    # Python request logged / query not logged / no env no log, budget over-enforce / over-warn / within / warn-only default / undeclared).
+    min_subjects: 16
     selftest_exempt: "is-a-test-suite - the run: IS the shim's own --self-test, which fails when the passthrough is sabotaged"
     run: |
       bash .github/scripts/gh-call-counter.sh --self-test
+
+  - id: api-call-budget-coverage
+    name: "Every job that counts GitHub API calls declares a per-run budget, and every budget names such a job"
+    group: lint
+    mode: enforced
+    rationale: "The repository's GITHUB_TOKEN core quota is shared by every run; when one job's spend grows, CodeQL and other required checks on unrelated PRs fail with 'API rate limit exceeded for installation'. gh-call-counter.sh warns when a counted job exceeds its line in .github/api-call-budgets.yaml, which only works while each counted job has a line. A counted job without one reports budget=undeclared and can never warn; a line whose job was renamed checks nothing."
+    review_after: "2027-05-14"
+    budget_seconds: 30
+    # Ten jobs install the counter today; a parse that finds far fewer has lost the workflows.
+    min_subjects: 10
+    selftest: python3 .github/scripts/check-api-call-budgets.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-api-call-budgets.py --root .
 
   - id: verification-metadata-additive-check
     name: "Dependabot metadata refresh accepts only additive verification metadata (#15355)"
@@ -6498,6 +6513,26 @@ gates:
     selftest_inputs: [".github/scripts/check-authz-enforce-money-path.py"]
     run: |
       python3 .github/scripts/check-authz-enforce-money-path.py . --enforce
+
+  # Four-eyes ENFORCED in the deployed manifest (#15748, ADR-0155). The policy flags an action
+  # four_eyes_required, but AuthorizeInterceptor acts on it only with authz.four-eyes.enforce=true
+  # (code default false), and on 2026-11-11 no manifest set it — every dual-control action ran on
+  # one operator. Subjects are derived from @Authorize sites with rest.rego's own scope/verb/action
+  # rule; an exception lives in rules.yaml four_eyes_enforcement.allowlist and FAILS the gate once
+  # expired, once stale (service already enforces), or when dated more than 120 days out.
+  - id: four-eyes-enforce-deployed
+    rationale: "A service that owns a four-eyes action but leaves AUTHZ_FOUR_EYES_ENFORCE unset executes every flagged money-path call on a single operator while the policy, approval store and inbox all read as a working control (#15748)."
+    review_after: "2027-02-15"
+    budget_seconds: 60   # ~6 s CPU locally (one gitops parse + a src/main walk); I/O-bound on a busy runner
+    min_subjects: 20   # 26 modules own a four-eyes @Authorize action today (2026-11-11)
+    name: "services owning a four-eyes action enforce it in the deployed manifest (enforced, #15748)"
+    group: security
+    mode: enforced
+    selftest: python3 .github/scripts/check-four-eyes-enforce.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-four-eyes-enforce.py"]
+    run: |
+      python3 .github/scripts/check-four-eyes-enforce.py
 
   # @RolesAllowed ⇒ realm parity (issue #2404). The JWT-role half of the check above: a role
   # name that exists in no realm never matches, so the endpoint answers 403 to every caller,
