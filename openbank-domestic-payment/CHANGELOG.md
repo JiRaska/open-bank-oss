@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.7.0...domestic-payment-v1.8.0) (2026-11-14)
+
+
+### Features
+
+* **domestic-payment:** bind the authority step to the delegated debit (ADR-0375 D1) ([#15959](https://github.com/JiRaska/open-bank-oss/issues/15959)) ([4ede591](https://github.com/JiRaska/open-bank-oss/commit/4ede5912979c22f6377e5997272fbe8b75b4e78e))
+
 ## [1.7.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.6.2...domestic-payment-v1.7.0) (2026-11-14)
 
 
