@@ -33,6 +33,7 @@ object KybEvents {
     const val COMPLETED = BusinessOnboardingCompleted.EVENT_TYPE
     const val REJECTED = BusinessOnboardingRejected.EVENT_TYPE
     const val ABANDONED = BusinessOnboardingAbandoned.EVENT_TYPE
+    const val EXIT_REQUIRED = BusinessRelationshipExitRequired.EVENT_TYPE
 
     /** Module directory minus the `openbank-` prefix — the fleet's audit attribution convention. */
     const val SOURCE_SERVICE = "kyb-service"
@@ -272,6 +273,34 @@ object KybEvents {
                 occurredAt = at,
                 actorId = actor,
                 actorType = actorType(actor),
+                sourceService = SOURCE_SERVICE,
+            ),
+        )
+    }
+
+    /** An operator decided an approved relationship has to end; see [BusinessRelationshipExitRequired]. */
+    fun exitRequired(case: BusinessOnboardingCase, at: Instant, actorId: String): KybEvent {
+        val f = fields(case)
+        return KybEvent(
+            eventType = EXIT_REQUIRED,
+            aggregateId = case.id,
+            occurredAt = at,
+            payload = BusinessRelationshipExitRequired(
+                eventType = EXIT_REQUIRED,
+                caseId = f.caseId,
+                status = f.status,
+                identifierScheme = f.scheme,
+                identifier = f.identifier,
+                country = f.country,
+                legalName = f.legalName,
+                legalFormClass = f.legalFormClass,
+                initiatorPartyId = f.initiator,
+                entityPartyId = f.entity,
+                requiredSignatures = f.required,
+                signedCount = f.signed,
+                occurredAt = at,
+                actorId = actorId,
+                actorType = actorType(actorId),
                 sourceService = SOURCE_SERVICE,
             ),
         )

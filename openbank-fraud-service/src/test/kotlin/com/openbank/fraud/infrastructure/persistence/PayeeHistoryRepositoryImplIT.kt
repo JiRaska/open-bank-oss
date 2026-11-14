@@ -216,6 +216,7 @@ class PayeeHistoryRepositoryImplIT {
         val repo = PayeeHistoryRepositoryImpl(
             pool,
             object : FraudMetricsPort {
+                override fun recordCounterpartyKeyMissing() = Unit
                 override fun recordVerdict(verdict: FraudVerdict, rail: String) = Unit
                 override fun recordShadowScore(score: Double) = Unit
                 override fun recordSignalReplaySuppressed(aggregate: String) {

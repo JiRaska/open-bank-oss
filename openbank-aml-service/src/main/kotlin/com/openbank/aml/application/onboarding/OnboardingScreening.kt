@@ -10,6 +10,7 @@ import com.openbank.aml.application.port.`in`.UpdateAmlDecisionCommand
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.AmlRiskLevel
+import com.openbank.aml.domain.model.CaseOrigin
 import com.openbank.aml.domain.model.ScreeningType
 import java.util.UUID
 
@@ -32,6 +33,7 @@ class OnboardingScreening(private val amlUseCase: AmlCaseUseCase, private val au
         val case = amlUseCase.createCase(
             CreateAmlCaseCommand(
                 idempotencyKey = idempotencyKey(partyId),
+                origin = CaseOrigin.ONBOARDING_SCREENING,
                 partyId = partyId,
                 accountId = null,
                 transactionId = null,

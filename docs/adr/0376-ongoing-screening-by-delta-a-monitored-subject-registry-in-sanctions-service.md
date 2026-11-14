@@ -2,7 +2,7 @@
 date: 2026-11-12
 decision-status: proposed
 delivery-status: partial
-followup: "#15723 — the producer half is built and disabled; registering subjects and consuming the finding in kyc-service and kyb-service is a later slice of that issue"
+followup: "#15723 — the producer half and the kyb-service half are built and disabled; registering subjects and consuming the finding in kyc-service is a later slice of that issue"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
@@ -202,7 +202,53 @@ reports its own `DISABLED` outcome, and the liveness heartbeats are not register
 ## Delivery check
 
 `delivery-status` is `partial`: the registry, both paths, the finding event and the two REST
-operations are built and disabled; nothing registers a subject and nothing consumes the event.
+operations are built and disabled. kyb-service registers the subjects of its approved business
+cases and consumes the finding (see the delivery note below), also disabled; kyc-service does
+neither yet.
+
+**Delivery note (kyb-service slice).** kyb-service is the first owner. On every write of a
+business case that was ever approved it records, in the same transaction, which screened subjects
+must be registered or withdrawn; a scheduled relay delivers that to the registry under the
+service's own client. A finding addressed to it is recorded for an operator, once per finding id.
+What this ADR left open or assumed, and what the slice does:
+
+1. **A finding never changes the owner's case (refines D6).** D6 says the owning service opens a
+   review. In kyb a finding is a row beside the case with its own decision; "under review" is read
+   off the findings and is not a status. An approved case keeps its status, its `updatedAt` does
+   not move and no lifecycle event is published, so no applicant-facing path and no consumer can
+   tell that monitoring matched.
+2. **A confirmed match on an approved customer is an exit, not a rejection (new: D8 below).**
+3. **The reference is not the `subjectId` of the live screen (deviates from D1).** D1 keys the
+   registry by the id the onboarding screen used, so that a clearance recorded for that screen
+   binds monitoring too. kyb's screening id for a person embeds a hash of the name, and a
+   reference travels in a URL path and on an event. kyb therefore registers each subject under a
+   random UUID that its database generates, one per case and subject, and leaves the onboarding
+   screen untouched. The price is the binding D1 wanted: a clearance recorded in sanctions-service
+   under the screening id does not apply to the registry reference, so the registry's first
+   evaluation can repeat a finding that was already cleared. Restoring the binding needs the
+   registry to accept the screening id as an alias of a registration (follow-up of #15723); it is
+   a blocker for switching monitoring on, together with item 4.
+4. **The baseline repeats onboarding.** Registering an approved case makes the registry's first
+   sweep report what the onboarding screen already reported, as D6's `BASELINE_SWEEP` allows, and
+   each such finding waits for an operator. Not solved here; see the follow-up issues of #15723.
+5. **Only name and entity type are registered.** That is what kyb's onboarding screen sends.
+
+**D8 — A confirmed finding on an approved relationship requires an exit, and monitoring outlasts
+the decision.** Neither ADR-0256 nor ADR-0284 decides what follows a confirmed sanctions match on
+a customer who is already approved. The owning service must not treat it as an onboarding
+rejection: the customer has a party, mandates and possibly accounts, and a rejection both tells
+consumers that none of that exists and ends monitoring. Instead the fact that the relationship
+has to end is derived from the confirmed finding itself, the case keeps its status, and the owner
+publishes a distinct event (`BUSINESS_RELATIONSHIP_EXIT_REQUIRED` for kyb) that carries no reason
+and no finding. The case stays registered whatever happens to its status — an applicant
+abandoning it, a timer, a rejection — until an operator records, with evidence, that the exit has
+been carried out; only that ends monitoring. Carrying the exit out (restricting the party,
+revoking mandates, closing accounts) is a workflow this ADR does not design; until it exists the
+owed exit is surfaced by an alert and executed by hand, and that is a blocker for switching
+monitoring on.
+
+Both commands below now print kyb-service files. The ADR is `shipped` when kyc-service appears in
+both as well.
 
 Built, from the repository root:
 
@@ -214,12 +260,19 @@ grep -c 'MONITORED_SUBJECT_MATCHED' openbank-contracts/openbank-sanctions-servic
 
 Each prints a number greater than zero.
 
-Not delivered, and how to tell. Both commands print nothing today; the ADR is `shipped` when the
-first prints a caller in another service and the second prints a consumer:
+Callers and consumers outside sanctions-service, as the tree has them:
 
 ```bash
-git grep -l 'monitored-subjects' -- 'openbank-*/src/main' ':!openbank-sanctions-service'
-git grep -l 'MONITORED_SUBJECT_MATCHED' -- 'openbank-*/src/main' ':!openbank-sanctions-service'
+git grep -l 'monitored-subjects' -- 'openbank-*/src/main/*' ':!openbank-sanctions-service'
+git grep -l 'MONITORED_SUBJECT_MATCHED' -- 'openbank-*/src/main/*' ':!openbank-sanctions-service'
+```
+
+The pathspec ends in `/*` on purpose. As first written (`'openbank-*/src/main'`) it matched no
+file at all, sanctions-service's own included, so the check printed nothing whatever the tree
+held; the known positive is the same command without the exclusion:
+
+```bash
+git grep -l 'monitored-subjects' -- 'openbank-*/src/main/*'
 ```
 
 ## Compliance impact

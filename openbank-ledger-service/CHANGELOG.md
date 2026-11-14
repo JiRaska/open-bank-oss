@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.46.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.45.1...ledger-service-v1.46.0) (2026-11-13)
+
+
+### Features
+
+* **customer-edge,transaction,ledger:** scope synthetic transfer canary ([#15669](https://github.com/JiRaska/open-bank-oss/issues/15669)) ([96f24f2](https://github.com/JiRaska/open-bank-oss/commit/96f24f28f5ac894be0821ef939a0d7019a19abc4))
+
 ## [1.45.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.45.0...ledger-service-v1.45.1) (2026-11-13)
 
 

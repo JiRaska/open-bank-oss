@@ -93,6 +93,22 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # ADR-0374 D13: the case of a held payment is opened from the rail's own PAYMENT_HELD event
+      # (channel `payment-held-in`, same consumer group as above, off until the chain is switched
+      # on for the rail). One Read grant per rail that adopts the chain; domestic is the first.
+      # The channel rethrows, so it has its own dead-letter topic to write to.
+      - resource:
+          type: topic
+          name: openbank.domestic.payment.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.aml.payment-held-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
 ---
 # ── ExternalSecret: aml-service keystore ─────────────────────────────────
 # Projects the Strimzi-minted per-user keystore (user.p12 + user.password)

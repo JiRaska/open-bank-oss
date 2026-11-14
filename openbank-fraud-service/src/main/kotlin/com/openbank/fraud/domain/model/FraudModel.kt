@@ -4,6 +4,9 @@
 
 package com.openbank.fraud.domain.model
 
+import com.openbank.libs.fincrime.CounterpartyAccount
+import com.openbank.libs.fincrime.InitiationChannel
+import com.openbank.libs.fincrime.InitiationMode
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -49,7 +52,19 @@ data class ScoreRequest(
     // accountId/counterpartyId pair is present to look up, matching the fail-silent-until-enriched
     // contract the velocity fields already established.
     val isNewPayee: Boolean = false,
-)
+    // ADR-0377 D3: the caller's normalised payee account (personal data, toString redacted). Only
+    // FraudScoringService reads it, keys it into [counterpartyRef] and then drops it, so the raw
+    // identifier never reaches persistence, the hold service or the shadow log.
+    val counterparty: CounterpartyAccount? = null,
+    // The keyed pseudonym of [counterparty] (`cp2:<keyId>:<hmac hex>`), set server-side only.
+    // Preferred over counterpartyId as the payee-history key when present.
+    val counterpartyRef: String? = null,
+    val initiationMode: InitiationMode? = null,
+    val channel: InitiationChannel? = null,
+) {
+    /** The payee-history key: the typed [counterpartyRef] when sent, else the legacy [counterpartyId]. */
+    val payeeKey: String? get() = counterpartyRef ?: counterpartyId?.toString()
+}
 
 /**
  * Scoring result. [score] is a deterministic numeric risk score (0 = no risk); [verdict] is the
