@@ -34,6 +34,8 @@ dependencies {
     // #13169: the account-service operations and DTOs are generated from its openapi.yaml (ADR-0319).
     implementation(project(":openbank-client-account"))
     testImplementation(libs.mockk)
+    // @TestSecurity: VopRateLimitHttpIT drives a real authenticated request through the filter.
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)

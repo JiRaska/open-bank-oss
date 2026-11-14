@@ -15,7 +15,10 @@ import com.openbank.fraud.domain.model.ScoreRequest
 import com.openbank.fraud.domain.model.VelocityAggregate
 import com.openbank.fraud.domain.model.VelocityWindow
 import com.openbank.fraud.domain.rules.FraudThresholdFixtures
+import com.openbank.fraud.infrastructure.security.HmacCounterpartyKeyer
 import com.openbank.libs.domain.feature.OnlineFeatureStore
+import com.openbank.libs.fincrime.CounterpartyRef
+import com.openbank.libs.fincrime.InitiationMode
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -26,6 +29,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Instant
+import java.util.Optional
 import java.util.UUID
 
 class FraudScoringServiceTest {
@@ -36,6 +40,7 @@ class FraudScoringServiceTest {
     private val payeeHistoryRepo = mockk<PayeeHistoryRepository>()
     private val featureStore = mockk<OnlineFeatureStore>(relaxed = true)
     private val mlModel = mockk<MlModelPort>(relaxed = true)
+    private val keyer = HmacCounterpartyKeyer(Optional.of("unit-test-key"), Optional.of("t1"))
 
     // shadowEnabled = false: these tests assert the rules behaviour; the shadow plane is covered by
     // FraudScoringShadowZeroDriftTest. With it off, featureStore/mlModel are never touched.
@@ -57,6 +62,7 @@ class FraudScoringServiceTest {
             it.fraudHoldService = mockk(relaxed = true)
             // ADR-0347: the active threshold set is read per score; these suites run on the seed.
             it.thresholdRepo = mockk { coEvery { findActive(any()) } returns FraudThresholdFixtures.SEED_V1 }
+            it.counterpartyKeys = keyer
         }
 
     private fun request(accountId: UUID = UUID.randomUUID()) = ScoreRequest(
@@ -393,5 +399,116 @@ class FraudScoringServiceTest {
         val result = service.score(req)
 
         assertThat(result.reasons).doesNotContain("new-payee-high-amount")
+    }
+
+    /**
+     * ADR-0377 D3: the typed payee key drives the new-payee rule. payeeHistoryRepo is backed by a
+     * set here so the test observes the write fraud-service itself makes on an ALLOW.
+     */
+    @Test
+    fun `new-payee rule keys on the counterparty pseudonym, silent once an ALLOW established it`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val account = CounterpartyRef.fromIban("DE89 3704 0044 0532 0130 00").account
+        val ref = keyer.key(account)!!
+        val known = mutableSetOf<Pair<UUID, String>>()
+        coEvery { repository.save(any(), any()) } returns UUID.randomUUID()
+        coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+        coEvery { payeeHistoryRepo.findHistory(any(), any()) } answers {
+            if ((firstArg<UUID>() to secondArg<String>()) in known) establishedPayeeHistory() else null
+        }
+        coEvery { payeeHistoryRepo.recordPayment(any(), any(), any(), any()) } answers {
+            known += firstArg<UUID>() to secondArg<String>()
+        }
+        // counterpartyId differs on every call: only the ref can make the second payment "known".
+        fun req(amount: String) = ScoreRequest(
+            amount = BigDecimal(amount),
+            currency = "EUR",
+            rail = "SEPA",
+            accountId = accountId,
+            counterpartyId = UUID.randomUUID(),
+            counterparty = account,
+            initiationMode = InitiationMode.CUSTOMER_PRESENT,
+        )
+
+        val first = service.score(req("15000"))
+        assertThat(first.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(first.reasons).contains("new-payee-high-amount")
+        assertThat(known).isEmpty() // a REVIEW does not establish the payee
+
+        assertThat(service.score(req("50")).verdict).isEqualTo(FraudVerdict.ALLOW)
+        assertThat(known).containsExactly(accountId to ref)
+
+        val second = service.score(req("15000"))
+        assertThat(second.reasons).doesNotContain("new-payee-high-amount")
+        coVerify(exactly = 3) { payeeHistoryRepo.findHistory(accountId, ref) }
+    }
+
+    @Test
+    fun `legacy counterpartyId requests are looked up as before and never written by scoring`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val counterpartyId = UUID.randomUUID()
+        coEvery { repository.save(any(), any()) } returns UUID.randomUUID()
+        coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+        coEvery { payeeHistoryRepo.findHistory(accountId, counterpartyId.toString()) } returns null
+
+        service.score(request(accountId).copy(counterpartyId = counterpartyId))
+
+        coVerify(exactly = 1) { payeeHistoryRepo.findHistory(accountId, counterpartyId.toString()) }
+        coVerify(exactly = 0) { payeeHistoryRepo.recordPayment(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `missing HMAC key - counterparty is unavailable, rule cannot fire, metric counts it`(): Unit = runBlocking {
+        val unkeyed = FraudScoringService(
+            repository,
+            metrics,
+            velocityRepo,
+            payeeHistoryRepo,
+            featureStore,
+            mlModel,
+            java.time.Clock.systemUTC(),
+            false,
+        ).also {
+            it.fraudHoldService = mockk(relaxed = true)
+            it.thresholdRepo = mockk { coEvery { findActive(any()) } returns FraudThresholdFixtures.SEED_V1 }
+            it.counterpartyKeys = HmacCounterpartyKeyer(Optional.empty(), Optional.empty())
+        }
+        val saved = slot<ScoreRequest>()
+        coEvery { repository.save(capture(saved), any()) } returns UUID.randomUUID()
+        coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+
+        val result = unkeyed.score(
+            ScoreRequest(
+                amount = BigDecimal("15000"),
+                currency = "EUR",
+                rail = "SEPA",
+                accountId = UUID.randomUUID(),
+                counterparty = CounterpartyRef.fromIban("DE89370400440532013000").account,
+            ),
+        )
+
+        assertThat(result.reasons).doesNotContain("new-payee-high-amount")
+        coVerify(exactly = 0) { payeeHistoryRepo.findHistory(any(), any()) }
+        coVerify(exactly = 0) { payeeHistoryRepo.recordPayment(any(), any(), any(), any()) }
+        verify(exactly = 1) { metrics.recordCounterpartyKeyMissing() }
+        assertThat(saved.captured.counterparty).isNull()
+        assertThat(saved.captured.counterpartyRef).isNull()
+    }
+
+    @Test
+    fun `the raw identifier is dropped before persistence and never printed`(): Unit = runBlocking {
+        val saved = slot<ScoreRequest>()
+        coEvery { repository.save(capture(saved), any()) } returns UUID.randomUUID()
+        coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+        coEvery { payeeHistoryRepo.findHistory(any(), any()) } returns establishedPayeeHistory()
+        coEvery { payeeHistoryRepo.recordPayment(any(), any(), any(), any()) } returns Unit
+        val request = request().copy(counterparty = CounterpartyRef.fromIban("DE89370400440532013000").account)
+        assertThat(request.toString()).doesNotContain("0532013000")
+
+        service.score(request)
+
+        assertThat(saved.captured.counterparty).isNull()
+        assertThat(saved.captured.counterpartyRef).startsWith("cp2:t1:")
+        assertThat(saved.captured.toString()).doesNotContain("0532013000")
     }
 }

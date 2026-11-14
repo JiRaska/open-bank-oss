@@ -16,6 +16,7 @@ the `obp` CLI. A released component (`version.txt`): every product change is a r
 ./gradlew :openbank-products:run --args="compile my-draft.json"              # raw canonical IR on stdout, revisionHash on stderr
 ./gradlew :openbank-products:run --args="compile my-draft.json --json"       # {ok, revisionHash, ir}: the MCP product_compile report
 ./gradlew :openbank-products:run --args="test"                               # golden scenarios, shared runner
+./gradlew :openbank-products:run --args="fincrime proof"                     # offline synthetic AML and fraud replay
 ./gradlew :openbank-products:run --args="simulate savings-fixed --portfolio portfolios/savings-sample.json --from 2026-01-01T00:00:00Z --to 2026-02-01T00:00:00Z"
 ./gradlew :openbank-products:run --args="explain savings-fixed --rule scheduled.fee"
 ./gradlew :openbank-products:run --args='explain savings-fixed --instruction {"ruleId":"fee.maintenance"}'
@@ -60,6 +61,13 @@ The reference term deposit refuses any posting that would take it below zero, as
 A scheduled savings fee still posts in full on a dormant account (accepted in IR v1, #14207). See "Replay findings" in
 `openbank-libs/docs/product-ir.md`.
 
-Everything runs offline against the one pure interpreter in `openbank-libs-domain`; output is
-canonical JSON. Rates, fees and thresholds in the reference products are illustrative shapes, not
-anyone's commercial terms.
+The product commands use the pure interpreter in `openbank-libs-domain`. Rates, fees and thresholds
+in the reference products are illustrative. Output is canonical JSON.
+
+## Synthetic financial-crime proof
+
+`obp fincrime proof` takes no input files. It runs the bundled AML and fraud fixtures through the
+JSON source compilers and `CountPackReplay` in `openbank-libs-fincrime`. Each domain compares two
+revisions at a fixed count boundary and checks that a missing observation produces an incomplete
+result. The report includes both pack hashes, the shared input hash, actual evaluated rule counts
+and the observed results. It is offline test evidence for ADR-0354.

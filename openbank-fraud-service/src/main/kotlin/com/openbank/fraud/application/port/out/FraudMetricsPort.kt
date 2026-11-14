@@ -50,4 +50,11 @@ interface FraudMetricsPort {
      * a producer defect, not a tolerable degradation.
      */
     fun recordSignalMissingEventTime()
+
+    /**
+     * Record that a request carried a counterparty but no HMAC key is configured, so the payee
+     * could not be keyed and the new-payee rule did not see it (ADR-0377 D3). Expected flat zero
+     * once the key is provisioned.
+     */
+    fun recordCounterpartyKeyMissing()
 }
