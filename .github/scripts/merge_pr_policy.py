@@ -47,6 +47,21 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '4a1ee1d5b71c0866893c86c1d56a4f686b3f3d8d',
     '6e04deb65dc7f6594a5037592e95321b41a53bf3',
     '8e5b4dfe28d6bf527fa8e677f21e902b35ca3949',
+    # #16187: pre-merge sources of App-merged agent PRs whose records failed since 2026-11-07.
+    # Whole source is in git history (no fixture); each passes requires_exact_head for agent/
+    # and codex/ heads, census in #16187. PRs per identity follow.
+    'c3c231206bd89e1a6e4cc82087c47861849925ec',  # #14599
+    'c3f5f84addc56993e48fc6f7584d13c56f116dd1',  # #14878
+    '52f3adac4f19689cdea66469f38eab941cdac70a',  # #14950
+    '878155c9d9551e81368eedbb080a4180df4a3e6b',  # #15030, #15052
+    'cc286f6df37486f27da067d09b398c2b463dbd70',  # #15045
+    'd5ac0cb4874158b37b2efa58ecffea12c39f03bb',  # #15117, #15129, #15194, #15217, #15227, #15242
+    'aa9e387f7ad18478ef0a715663b2a1b9c5bb25d2',  # #15254, #15258, #15285, #15293, #15295, #15345, #15364, #15365, #15408
+    'c4a78ce15a290af44c6fda30557dd615ac5934b2',  # #15429, #15432, #15454
+    'b8f977da6f6f493fdd1f9097c1e6517b85015c42',  # #15527, #15528, #15531
+    'dca24c7fe6f72939b8de3d6945f5b90effe01226',  # #15534, #15535, #15537, #15540, #15544, #15547, #15548, #15686, #15691, #15692, #15720, #15743, #15783
+    '4c030ee32eed2424d3842e8742e2c6fe4665d400',  # #15697
+    'cd5f45e08b013b172805f2b9282cec2b2c550a8c',  # #15699, #15701, #15726, #15740, #15745, #15768, #15771, #15824, #15889, #15892
     # Pre-merge policy for #15897, #15960, #16005; structural check passes, see #16187.
     'bdc11a54da45ff594f12d72eb7b2b3bf35139a0f',
     # Pre-merge policy for #15898, #15948, #15983, #15989, #16017, #16020, #16021; structural check passes, see #16187.
