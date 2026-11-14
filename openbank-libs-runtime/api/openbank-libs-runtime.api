@@ -2007,6 +2007,14 @@ public final class com/openbank/libs/security/SecurityTelemetry$AuthzDecision : 
 public final class com/openbank/libs/security/SecurityTelemetry$Companion {
 }
 
+public final class com/openbank/libs/security/StaffIdentities {
+	public static final field AMR_CLAIM Ljava/lang/String;
+	public static final field INSTANCE Lcom/openbank/libs/security/StaffIdentities;
+	public static final field PERSON_ID_CLAIM Ljava/lang/String;
+	public final fun from (Lorg/eclipse/microprofile/jwt/JsonWebToken;)Lcom/openbank/libs/governance/StaffIdentity;
+	public final fun getSECOND_FACTOR_AMR ()Ljava/util/Set;
+}
+
 public final class com/openbank/libs/storage/ObjectStoreBlobEntity : io/quarkus/hibernate/reactive/panache/kotlin/PanacheEntityBase {
 	public field content [B
 	public field contentType Ljava/lang/String;
