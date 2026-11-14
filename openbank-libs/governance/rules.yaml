@@ -4715,6 +4715,50 @@ security_sensitive_paths:
       - "src/main/kotlin/**/BusinessPaymentBatchDraftResource.kt"
       - "src/main/kotlin/**/BusinessPaymentBatchDraftEntity.kt"
     cardholder: []
+  # openbank-delegation-service is money-path (it decides and records who may move someone else's
+  # money, and SpendReservationService is the authoritative spend counter) and was UNDECLARED, so
+  # every judgement box on every PR touching it failed closed and the negative-PCI exception was
+  # structurally unavailable. Declared here, measured against the tree rather than copied from a
+  # sibling.
+  #
+  # `auth_crypto_payment` is deliberately near-total. This service IS an authorization service:
+  # the use cases mint authority, the domain models hold ceilings and signing state, the events are
+  # the authority record on the wire, the entities store it (including the disclosure secret and OTP
+  # HASHES), and every REST resource creates or reads it. A narrower list would be a false claim
+  # about which of its paths are sensitive, and the point of this key is to let the gate auto-answer
+  # the boxes it genuinely can — PII and cardholder — not to make the auth box disappear.
+  openbank-delegation-service:
+    auth_crypto_payment:
+      - src/main/kotlin/**/application/usecase/**
+      - src/main/kotlin/**/application/port/**
+      - src/main/kotlin/**/domain/model/**
+      - src/main/kotlin/**/domain/event/**
+      - src/main/kotlin/**/infrastructure/rest/**
+      - src/main/kotlin/**/infrastructure/client/**
+      - src/main/kotlin/**/infrastructure/signing/**
+      - src/main/kotlin/**/infrastructure/authz/**
+      - src/main/kotlin/**/infrastructure/idempotency/**
+      - src/main/kotlin/**/infrastructure/persistence/**
+      - src/main/kotlin/**/infrastructure/messaging/**
+      - src/main/kotlin/**/infrastructure/outbox/**
+      - src/main/kotlin/**/infrastructure/*Job.kt
+    # Party display names SNAPSHOTTED at offer time (`grantorName`, `granteeName` — ADR-0232 #3604),
+    # the external-disclosure `recipientLabel`, and the eligibility/authority lookups that carry a
+    # counterparty's identity. Nothing else in the service holds personal data: a grant is party ids,
+    # capabilities and a validity window.
+    pii:
+      - src/main/kotlin/**/domain/model/DelegationGrant.kt
+      - src/main/kotlin/**/domain/model/DelegationPortfolio.kt
+      - src/main/kotlin/**/domain/model/ExternalDisclosure.kt
+      - src/main/kotlin/**/infrastructure/persistence/entity/DelegationGrantEntity.kt
+      - src/main/kotlin/**/infrastructure/persistence/entity/ExternalDisclosureEntity.kt
+      - src/main/kotlin/**/*Party*.kt
+      - src/main/kotlin/**/*Eligibility*.kt
+      - src/main/kotlin/**/*Portfolio*.kt
+      - src/main/kotlin/**/*Disclosure*.kt
+    # Measured, not assumed: no file under src/main mentions a PAN, cardholder, CVV/CVC, EMV or card
+    # tokenisation. Delegation over a CARD names the card by id and never touches its data.
+    cardholder: []
   openbank-account-service:
     auth_crypto_payment:
       - "src/main/kotlin/**/ApprovalResource.kt"
