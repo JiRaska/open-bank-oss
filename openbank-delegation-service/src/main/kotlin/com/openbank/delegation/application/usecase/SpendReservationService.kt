@@ -5,9 +5,11 @@
 package com.openbank.delegation.application.usecase
 
 import com.openbank.delegation.application.port.`in`.CallerPartyId
+import com.openbank.delegation.application.port.`in`.PaymentOutcomeResult
 import com.openbank.delegation.application.port.`in`.ReserveSpendCommand
 import com.openbank.delegation.application.port.`in`.ReserveSpendResult
 import com.openbank.delegation.application.port.`in`.ReserveSpendUseCase
+import com.openbank.delegation.application.port.`in`.SettleSpendOnPaymentOutcomeUseCase
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.application.port.out.ReserveOutcome
 import com.openbank.delegation.application.port.out.SpendReservationRepository
@@ -19,11 +21,15 @@ import com.openbank.delegation.domain.model.CountedSpend
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
+import com.openbank.delegation.domain.model.DomesticPaymentOutcome
+import com.openbank.delegation.domain.model.PaymentOutcomeSettlement
+import com.openbank.delegation.domain.model.SettlementDecision
 import com.openbank.delegation.domain.model.SpendCeilings
 import com.openbank.delegation.domain.model.SpendDecision
 import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.delegation.domain.model.SpendReservationOperationType
 import com.openbank.delegation.domain.model.SpendReservationState
+import com.openbank.delegation.domain.model.SpendSettlementTransition
 import com.openbank.delegation.domain.model.SpendWindows
 import com.openbank.libs.domain.event.DomainEvent
 import jakarta.enterprise.context.ApplicationScoped
@@ -59,7 +65,8 @@ class SpendReservationService(
     private val delegationRepository: DelegationRepository,
     private val reservationRepository: SpendReservationRepository,
     private val clock: Clock,
-) : ReserveSpendUseCase {
+) : ReserveSpendUseCase,
+    SettleSpendOnPaymentOutcomeUseCase {
 
     @Inject
     constructor(
@@ -150,7 +157,17 @@ class SpendReservationService(
     ): SpendReservation {
         val grant = loadForGrantee(delegationId, callerPartyId)
         val now = OffsetDateTime.now(clock)
-        val settled = reservationRepository.settle(delegationId, reservationId, target, now) { reservation ->
+        val transition = when (target) {
+            SpendReservationState.CONFIRMED -> SpendSettlementTransition.CONFIRM
+            SpendReservationState.RELEASED -> SpendSettlementTransition.RELEASE
+            SpendReservationState.RESERVED -> error("RESERVED is not a settlement target")
+        }
+        val settled = reservationRepository.applyTransition(
+            delegationId,
+            reservationId,
+            transition,
+            now,
+        ) { reservation ->
             settlementEvent(grant, reservation, target, now)
         }
         if (settled != null) return settled
@@ -161,6 +178,50 @@ class SpendReservationService(
         throw SpendReservationStateException(
             "reservation $reservationId is ${current.state} and cannot become $target",
         )
+    }
+
+    /**
+     * ADR-0249 D3 (amended, #16000): the payment's OUTCOME settles the reservation. The decision is
+     * the domain's ([PaymentOutcomeSettlement]); this only applies it as a compare-and-set and, when
+     * a concurrent settle wins the race, re-decides once against the state that won. A conflict is
+     * reported, never thrown: an out-of-order or stale outcome must not wedge the consumer.
+     */
+    override suspend fun applyPaymentOutcome(
+        delegationId: UUID,
+        reservationId: UUID,
+        outcome: DomesticPaymentOutcome,
+    ): PaymentOutcomeResult {
+        val grant = delegationRepository.findById(delegationId) ?: return PaymentOutcomeResult.UNKNOWN_RESERVATION
+        repeat(MAX_OUTCOME_ATTEMPTS) {
+            val current = reservationRepository.findById(delegationId, reservationId)
+                ?: return PaymentOutcomeResult.UNKNOWN_RESERVATION
+            if (current.operationType != SpendReservationOperationType.DOMESTIC_PAYMENT) {
+                return PaymentOutcomeResult.CONFLICT
+            }
+            when (val decision = PaymentOutcomeSettlement.decide(outcome, current.state)) {
+                SettlementDecision.AlreadySettled -> return PaymentOutcomeResult.ALREADY_SETTLED
+                SettlementDecision.Conflict -> return PaymentOutcomeResult.CONFLICT
+                is SettlementDecision.Apply -> {
+                    val now = OffsetDateTime.now(clock)
+                    val transition = decision.transition
+                    val settled = reservationRepository.applyTransition(
+                        delegationId,
+                        reservationId,
+                        transition,
+                        now,
+                    ) { reservation -> settlementEvent(grant, reservation, transition.to, now) }
+                    if (settled != null) {
+                        return when (transition) {
+                            SpendSettlementTransition.CONFIRM -> PaymentOutcomeResult.CONFIRMED
+                            SpendSettlementTransition.RELEASE -> PaymentOutcomeResult.RELEASED
+                            SpendSettlementTransition.RELEASE_RETURNED_AFTER_CONFIRM ->
+                                PaymentOutcomeResult.RETURNED_RELEASED
+                        }
+                    }
+                }
+            }
+        }
+        return PaymentOutcomeResult.CONFLICT
     }
 
     /**
@@ -220,5 +281,10 @@ class SpendReservationService(
             throw DelegationNotFoundException(delegationId)
         }
         return grant
+    }
+
+    private companion object {
+        /** One retry covers a single lost race; a second loss means the row is genuinely contested. */
+        const val MAX_OUTCOME_ATTEMPTS = 2
     }
 }

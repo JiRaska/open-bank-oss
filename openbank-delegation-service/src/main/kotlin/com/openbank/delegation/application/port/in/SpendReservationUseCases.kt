@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.application.port.`in`
 
+import com.openbank.delegation.domain.model.DomesticPaymentOutcome
 import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.delegation.domain.model.SpendReservationOperationType
 import com.openbank.libs.domain.money.Money
@@ -40,4 +41,34 @@ interface ReserveSpendUseCase {
      * reservation, refused on a confirmed one.
      */
     suspend fun release(delegationId: UUID, reservationId: UUID, callerPartyId: CallerPartyId): SpendReservation
+}
+
+/** What one domestic-payment outcome did to its reservation (ADR-0249 D3 amendment, #16000). */
+enum class PaymentOutcomeResult {
+    CONFIRMED,
+    RELEASED,
+
+    /** A CONFIRMED reservation whose payment was RETURNED gave its headroom back. */
+    RETURNED_RELEASED,
+
+    /** The reservation already carried this outcome: a redelivery, or the edge settled it first. */
+    ALREADY_SETTLED,
+
+    /** The reservation is in the other terminal state, or is not a domestic-payment reservation. */
+    CONFLICT,
+
+    /** No such reservation under that delegation. */
+    UNKNOWN_RESERVATION,
+}
+
+/**
+ * Settles a domestic-payment reservation from the payment's reported outcome. A system path: no
+ * caller party, because the outcome comes from the rail's own event stream, not from a customer.
+ */
+interface SettleSpendOnPaymentOutcomeUseCase {
+    suspend fun applyPaymentOutcome(
+        delegationId: UUID,
+        reservationId: UUID,
+        outcome: DomesticPaymentOutcome,
+    ): PaymentOutcomeResult
 }
