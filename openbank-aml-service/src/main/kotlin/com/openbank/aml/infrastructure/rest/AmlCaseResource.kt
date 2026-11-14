@@ -79,7 +79,7 @@ class AmlCaseResource(
         // libs-runtime maps IllegalArgumentException to 400 (#526, #3624).
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
-        requireNamedMachineCaller(identity)
+        val movementService = requireNamedMachineCaller(identity)
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
         // Key namespaces this service's own jobs and consumers write (ADR-0371 pack evaluation, the
@@ -115,7 +115,10 @@ class AmlCaseResource(
 
         var created = false
         val amlCase = try {
-            amlCaseUseCase.createCase(request.toCommand(idempotencyKey, requestHash)).also { created = true }
+            amlCaseUseCase.createCase(request.toCommand(idempotencyKey, requestHash, movementService)).also {
+                created =
+                    true
+            }
         } finally {
             // Any failure (the exception propagates unchanged) frees the in-flight marker so a
             // retry of the same request can run instead of answering IN_PROGRESS for 5 minutes.
@@ -214,23 +217,28 @@ private val AML_CASE_CREATE_STAFF_ROLES = setOf("ROLE_OPERATOR", "ROLE_ADMIN", "
  * Keycloak client (ROLE_API only). Mirrors `service-aml-case-create-m2m` in aml_rest_ext.rego; the
  * two must list the same principals (`AmlCaseCreateCallerGuardTest` pins this set).
  */
-internal val AML_CASE_CREATE_CALLERS = setOf(
-    "service-account-openbank-domestic-payment",
-    "service-account-openbank-sepa-payment",
-    "service-account-openbank-sepa-instant",
-    "service-account-openbank-fx",
+internal val AML_CASE_CREATE_MOVEMENT_SERVICES = mapOf(
+    "service-account-openbank-domestic-payment" to "openbank-domestic-payment",
+    "service-account-openbank-sepa-payment" to "openbank-sepa-payment",
+    "service-account-openbank-sepa-instant" to "openbank-sepa-instant",
+    "service-account-openbank-fx" to "openbank-fx-service",
 )
+
+internal val AML_CASE_CREATE_CALLERS: Set<String> = AML_CASE_CREATE_MOVEMENT_SERVICES.keys
 
 /**
  * A caller that reached `createCase` through ROLE_API alone must be one of [AML_CASE_CREATE_CALLERS].
  * This is the enforcing half while aml-service runs OPA advisory: without it, ROLE_API — held by
  * every service account in the realm — would let any of them open a case.
+ *
+ * Returns the service the case comes from (#15939): the source of a machine caller, derived from
+ * its VERIFIED principal, or `null` for staff (a manual case).
  */
-internal fun requireNamedMachineCaller(identity: SecurityIdentity) {
-    if (AML_CASE_CREATE_STAFF_ROLES.any(identity::hasRole) && ServiceAccountIdentity.isHumanStaff(identity)) return
-    if (!ServiceAccountIdentity.isOneOf(identity, AML_CASE_CREATE_CALLERS)) {
-        throw ForbiddenException("caller is not a named AML case-open service")
-    }
+internal fun requireNamedMachineCaller(identity: SecurityIdentity): String? {
+    if (AML_CASE_CREATE_STAFF_ROLES.any(identity::hasRole) && ServiceAccountIdentity.isHumanStaff(identity)) return null
+    return ServiceAccountIdentity.verifiedPrincipalName(identity)
+        ?.let(AML_CASE_CREATE_MOVEMENT_SERVICES::get)
+        ?: throw ForbiddenException("caller is not a named AML case-open service")
 }
 
 /** A key in a namespace this service writes itself is never accepted from a caller, whoever it is. */
