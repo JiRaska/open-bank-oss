@@ -10,6 +10,7 @@ import com.openbank.kyb.application.port.out.RegistryUnavailableException
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.application.usecase.CaseNotFoundException
 import com.openbank.kyb.application.usecase.InvitationNotFoundException
+import com.openbank.kyb.application.usecase.SeparationOfDutiesException
 import com.openbank.kyb.application.usecase.StaleAttestationException
 import com.openbank.kyb.domain.model.AgreementConflictException
 import com.openbank.kyb.domain.model.CaseTransitionException
@@ -37,6 +38,13 @@ private fun error(status: Int, code: String, message: String?): Response = Respo
 class StaleAttestationMapper : ExceptionMapper<StaleAttestationException> {
     override fun toResponse(e: StaleAttestationException): Response =
         error(CONFLICT, "REPRESENTATION_RULE_CHANGED", e.message)
+}
+
+/** Four-eyes: the attester of a statutory rule may not also publish it. */
+@Provider
+class SeparationOfDutiesMapper : ExceptionMapper<SeparationOfDutiesException> {
+    override fun toResponse(e: SeparationOfDutiesException): Response =
+        error(FORBIDDEN, "SEPARATION_OF_DUTIES", e.message)
 }
 
 @Provider

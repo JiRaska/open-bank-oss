@@ -14,6 +14,10 @@ describe('business onboarding RBAC contract', () => {
     expect(hasPermission([ROLES.ADMIN], 'business-onboarding:attest')).toBe(true)
     expect(hasPermission([ROLES.OPERATOR], 'business-onboarding:attest')).toBe(true)
     expect(hasPermission([ROLES.KYC], 'business-onboarding:attest')).toBe(true)
+    expect(hasPermission([ROLES.ADMIN], 'business-onboarding:publish')).toBe(true)
+    expect(hasPermission([ROLES.KYC], 'business-onboarding:publish')).toBe(true)
+    expect(hasPermission([ROLES.OPERATOR], 'business-onboarding:publish')).toBe(false)
+    expect(hasPermission([ROLES.COMPLIANCE], 'business-onboarding:publish')).toBe(false)
     // COMPLIANCE gets NEITHER. It is absent from kyb-service's @RolesAllowed on the
     // representation routes, from requireOperator() on GET /cases, from rules.yaml's
     // role_action_matrix for every kyb.* action, and from kyb_rest_ext.rego's
@@ -27,6 +31,7 @@ describe('business onboarding RBAC contract', () => {
   it('keeps the read behind view and the confirmation behind attest', () => {
     expect(page).toContain('<AuthGuard permission="business-onboarding:view">')
     expect(page).toContain('permission="business-onboarding:attest"')
+    expect(page).toContain('permission="business-onboarding:publish"')
     expect(page).toContain('/api/v1/kyb/representation/${scheme}/${identifier}')
   })
 })

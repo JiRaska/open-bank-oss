@@ -43,6 +43,7 @@ allowed_reasons contains "operator-kyb-review" if {
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC"}
 	role in input.principal.roles
 	startswith(input.action, "kyb.")
+    not startswith(input.action, "kyb.statutory-representation.")
 }
 
 # The customer edge proxying the customer's own business onboarding (ADR-0284 D6). Enumerated,
@@ -65,4 +66,19 @@ allowed_reasons contains "edge-service-kyb" if {
 		"kyb.case.sign",
 		"kyb.case.abandon",
 	}
+}
+
+allowed_reasons contains "kyb-staff-publishes-statutory-representation" if {
+    input.principal.type == "HUMAN"
+    not principal_is_machine
+    some role in {"ROLE_ADMIN", "ROLE_KYC"}
+    role in input.principal.roles
+    input.action == "kyb.statutory-representation.publish"
+}
+
+allowed_reasons contains "delegation-inspects-statutory-attestation" if {
+    input.principal.type == "HUMAN"
+    input.principal.service_account == true
+    machine_named("service-account-openbank-delegation")
+    input.action == "kyb.statutory-representation.inspect"
 }

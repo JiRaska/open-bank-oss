@@ -129,6 +129,9 @@ above.
 
 ## 8. Change log
 
+- **2026-11-14** — Four-eyes on statutory representation publication: the staff member who
+  publishes a rule must not be the principal recorded as its `attestedBy` (exact principal
+  comparison); a same-person publish answers 403 `SEPARATION_OF_DUTIES`.
 - **2026-11-13** — First pass, with ongoing monitoring of approved business cases (ADR-0376, kyb
   side), shipped disabled. New outbound edge to the monitored-subject registry under the service's
   own client, new inbound events from the sanctions screening topic, two new stores

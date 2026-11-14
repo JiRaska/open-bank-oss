@@ -566,7 +566,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
                     authority = if (joint) "JOINT" else "SOLE",
                     requiredSignatures = requiredSignatures,
                     source = if (signer.representativeIndex != null) "REGISTRY" else "POWER_OF_ATTORNEY",
-                    evidenceRef = "kyb-case:${case.id}:signature:${signer.signatureRef}",
+                    evidenceRef = case.mandateEvidenceRef(signer),
                 ),
             )
         }
