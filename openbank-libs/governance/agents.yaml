@@ -1197,6 +1197,9 @@ agents:
         - tier: write_proposal
           resources: [github-pr]      # opens a GitHub issue (draft.ticket) by default; gh.pr.open
                                        # stays wired but is rarely used (ADR-0168 Decision)
+          # The only refs gh.pr.open may target (agents.rego pr_base_ref_denied). Must equal
+          # WriterBaseRef; check-agent-bounded-write-surface.py holds the two together.
+          base_refs: [main, qualification/flaky-test-hunter]
       deny:
         - tier: write
           resources: ["*"]            # explicit: no direct write to any test file ever

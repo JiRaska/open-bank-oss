@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.8.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.7.0...domestic-payment-v1.8.0) (2026-11-14)
+
+
+### Features
+
+* **domestic-payment:** bind the authority step to the delegated debit (ADR-0375 D1) ([#15959](https://github.com/JiRaska/open-bank-oss/issues/15959)) ([4ede591](https://github.com/JiRaska/open-bank-oss/commit/4ede5912979c22f6377e5997272fbe8b75b4e78e))
+* **domestic-payment:** create delegated payments bound to their spend reservation ([#16119](https://github.com/JiRaska/open-bank-oss/issues/16119)) ([a591471](https://github.com/JiRaska/open-bank-oss/commit/a591471c10b1ebddd9bab5a79414d37efb9601b7))
+
+## [1.7.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.6.2...domestic-payment-v1.7.0) (2026-11-14)
+
+
+### Features
+
+* **domestic-payment:** run the payment admission chain before a domestic payment is sent (ADR-0374 A3) ([#15976](https://github.com/JiRaska/open-bank-oss/issues/15976)) ([243f130](https://github.com/JiRaska/open-bank-oss/commit/243f130f2d1f097f54c136e8990e377051dd27be))
+
 ## [1.6.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.6.1...domestic-payment-v1.6.2) (2026-11-13)
 
 

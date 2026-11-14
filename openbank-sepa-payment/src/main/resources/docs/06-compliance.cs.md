@@ -31,6 +31,9 @@ Otevření AML případu je best-effort a nikdy nepřeklopí verdikt již vynese
 - **Smlouva** (čl. 6 odst. 1 písm. b) — provedení platební instrukce zákazníka.
 - **Právní povinnost** (čl. 6 odst. 1 písm. c) — AML screening, PSD2/SEPA record-keeping, dodržování sankcí.
 
+### Předání do fraud-service (ADR-0377 D3)
+Volání fraud scoringu posílá identifikátor účtu příjemce (IBAN) do fraud-service po stávajícím vzájemně autentizovaném interním spojení. Hodnota je typovaná, takže nikdy není null, a v logu je maskovaná. Tato platební linka ji pro účely fraud nehashuje ani neukládá; fraud-service si z ní ponechá jen HMAC pseudonym, který je stále osobním údajem. Účel: signál nového příjemce pro detekci podvodů, krytý výše uvedeným právním základem právní povinnosti. Scoring je zde stále jen ve stínovém režimu: verdikt se zaloguje, platba se nepodrží.
+
 ### Práva subjektu údajů
 
 | Právo | Uplatnění |

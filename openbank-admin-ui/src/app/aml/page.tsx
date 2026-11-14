@@ -15,7 +15,7 @@ import { useServiceResource } from '@/lib/services/useServiceResource'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader, ShortId, StatusBadge } from '@/components/ui'
 import { StatCard } from '@/components/ui/StatCard'
-import { caseAgeHours, parseAmlCases, type AmlCase } from '@/lib/aml/amlCaseContract'
+import { caseAgeHours, compareWorkQueue, formatCaseAge, parseAmlCases, type AmlCase } from '@/lib/aml/amlCaseContract'
 import { usePartySummaries } from '@/lib/aml/usePartyNames'
 import { AmlCaseInvestigation } from '@/components/context/AmlCaseInvestigation'
 
@@ -52,12 +52,7 @@ export default function AmlPage() {
     c.status.toLowerCase().includes(search.toLowerCase())
   )
 
-  const riskRank = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 } as const
-  const statusRank = { ESCALATED: 0, OPEN: 1, UNDER_REVIEW: 2, BLOCKED: 3, CLEARED: 4 } as const
-  // Work queue order: what needs a decision first, then by risk, then oldest first (SLA).
-  const ordered = [...filtered].sort((a, b) =>
-    statusRank[a.status] - statusRank[b.status] || riskRank[a.riskLevel] - riskRank[b.riskLevel] ||
-    Date.parse(a.createdAt) - Date.parse(b.createdAt))
+  const ordered = [...filtered].sort(compareWorkQueue)
 
   const highRisk = cases.filter(c => c.riskLevel === 'HIGH' || c.riskLevel === 'CRITICAL')
   const pending = cases.filter(c => c.status === 'OPEN' || c.status === 'UNDER_REVIEW')
@@ -179,7 +174,7 @@ export default function AmlPage() {
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-primary)' }}>
                       <Link href={`/aml/${c.id}`} style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: 'var(--text-primary)', textDecoration: 'none' }} aria-label={`${t('Otevřít AML případ', 'Open AML case')} ${name ?? c.customerReference}`}><UserRoundSearch size={12} aria-hidden="true" />{name ?? (parties[c.partyId] === undefined ? t('Načítám jméno…', 'Loading name…') : t('Jméno nedostupné', 'Name unavailable'))}</Link>
                       <div style={{ marginTop: 2, color: 'var(--text-tertiary)', fontSize: 11, fontFamily: 'var(--font-mono)', overflowWrap: 'anywhere' }}>{c.customerReference}</div>
-                      {open && <div style={{ marginTop: 2, fontSize: 11, color: caseAgeHours(c.createdAt) > 72 ? 'var(--danger-text)' : 'var(--text-tertiary)' }}>{t('otevřeno', 'open')} {caseAgeHours(c.createdAt)} h</div>}
+                      {open && <div style={{ marginTop: 2, fontSize: 11, color: caseAgeHours(c.createdAt) > 72 ? 'var(--danger-text)' : 'var(--text-tertiary)' }}>{t('otevřeno', 'open')} {formatCaseAge(caseAgeHours(c.createdAt), t)}</div>}
                       <div style={{ marginTop: 3, color: 'var(--text-tertiary)' }}><ShortId value={c.id} copyLabel={t('Kopírovat ID případu', 'Copy case ID')} /></div>
                       <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                         <Link href={`/aml/${c.id}`} className="btn btn-primary btn-sm">{open ? t('Posoudit', 'Review') : t('Detail', 'Details')}</Link>

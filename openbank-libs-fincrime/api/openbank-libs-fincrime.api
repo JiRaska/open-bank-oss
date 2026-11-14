@@ -336,9 +336,32 @@ public final class com/openbank/libs/fincrime/admission/DelegatedDebitAuthority 
 
 public final class com/openbank/libs/fincrime/admission/DelegationAuthorityFacts {
 	public static final field INSTANCE Lcom/openbank/libs/fincrime/admission/DelegationAuthorityFacts;
+	public final fun dependencyDown (Ljava/lang/String;)Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup$Unavailable;
 	public final fun grantOf (Lcom/openbank/libs/fincrime/admission/DelegationAuthorityGrantWire;Ljava/util/UUID;Ljava/util/UUID;)Lcom/openbank/libs/fincrime/admission/DelegationFact;
-	public final fun lookupOf (Ljava/util/List;Ljava/util/UUID;Ljava/util/UUID;)Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup;
-	public final fun outcome (Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;Ljava/lang/String;Ljava/time/OffsetDateTime;)Lcom/openbank/libs/fincrime/admission/StepOutcome;
+	public final fun lookupOf (Ljava/util/List;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;)Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup;
+	public final fun lookupOfPayload (Ljava/util/List;Ljava/util/UUID;Ljava/util/UUID;Ljava/lang/String;)Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup;
+	public final fun outcome (Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup;Ljava/util/UUID;Ljava/util/UUID;Ljava/lang/String;Ljava/time/OffsetDateTime;)Lcom/openbank/libs/fincrime/admission/StepOutcome;
+}
+
+public final class com/openbank/libs/fincrime/admission/DelegationAuthorityGrantPayload {
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/fincrime/admission/DelegationAuthorityGrantPayload;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/admission/DelegationAuthorityGrantPayload;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/admission/DelegationAuthorityGrantPayload;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCapabilities ()Ljava/util/List;
+	public final fun getGrantId ()Ljava/lang/String;
+	public final fun getGrantorPartyId ()Ljava/lang/String;
+	public final fun getValidFrom ()Ljava/lang/String;
+	public final fun getValidTo ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class com/openbank/libs/fincrime/admission/DelegationAuthorityGrantWire {
@@ -390,12 +413,14 @@ public abstract interface class com/openbank/libs/fincrime/admission/DelegationF
 }
 
 public final class com/openbank/libs/fincrime/admission/DelegationFactsLookup$Available : com/openbank/libs/fincrime/admission/DelegationFactsLookup {
-	public fun <init> (Ljava/util/List;)V
+	public fun <init> (Ljava/util/List;Ljava/util/UUID;)V
 	public final fun component1 ()Ljava/util/List;
-	public final fun copy (Ljava/util/List;)Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup$Available;
-	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup$Available;Ljava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup$Available;
+	public final fun component2 ()Ljava/util/UUID;
+	public final fun copy (Ljava/util/List;Ljava/util/UUID;)Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup$Available;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup$Available;Ljava/util/List;Ljava/util/UUID;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/admission/DelegationFactsLookup$Available;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getGrants ()Ljava/util/List;
+	public final fun getOwnerPartyId ()Ljava/util/UUID;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
