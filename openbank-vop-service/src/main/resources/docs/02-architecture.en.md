@@ -61,6 +61,8 @@ The one thing that never happens on failure: a silent `MATCH`. Absence of an ans
 
 If Valkey is unreachable we cannot prove a caller is under the limit, so we return 429. That sounds like it contradicts the above, but it does not: **a 429 makes the caller render `no_data`, so the payment still flows with a warning** — VoP's fail-open behaviour reached by a different route. Failing open on the limiter would silently remove the only enumeration control during an outage, buying no payment availability at all.
 
+The limiter never blocks. It runs as a RESTEasy Reactive `@ServerRequestFilter` on the Vert.x event loop, and it calls Valkey through the reactive client (`ReactiveRedisDataSource`). A blocking Valkey call there throws `The current thread cannot be blocked`, and the fail-closed path then answers 429 to every request while Valkey is healthy. That happened on sandbox (#13049), when the filter was a `@Blocking` `ContainerRequestFilter`; the annotation did not move it off the event loop. `VopRateLimitHttpIT` sends real HTTP requests through the filter to catch this.
+
 ## Resilience
 
 `AccountHolderNameLookupAdapter` carries `@CircuitBreaker` / `@Retry` / `@Timeout(3s)`, copying `SanctionsScreeningAdapter`'s shape — including its `self`-injection trick:
