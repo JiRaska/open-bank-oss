@@ -49,7 +49,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sanctions-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "1410a8048c8aca12"
+        openbank.tech/policy-checksum: "af3b1b4b70e5d461"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -157,6 +157,14 @@ spec:
             # in openbank.authz.decisions, none blocks) and restore the allowlist entry in
             # .github/scripts/check-authz-enforce-money-path.py.
             - name: AUTHZ_ENFORCE
+              value: "true"
+            # Ongoing monitoring of registered subjects (ADR-0376): re-screens the monitored
+            # registry against every committed list change (delta, every 60s, bounded per run)
+            # and sweeps each subject at the configured interval. It only opens the registry;
+            # subjects arrive from callers that enable their own registration switch, so turning
+            # this on alone produces no finding. SanctionsMonitoringCronIT drives the real cron.
+            # Rollback: set "false" (registration then answers 503; queued work is kept).
+            - name: SANCTIONS_MONITORING_ENABLED
               value: "true"
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"

@@ -15,6 +15,11 @@ export interface AmlCase {
    * and the service still refuses it for a pack-monitoring case, so the fallback is safe.
    */
   requiresFourEyesDisposition: boolean
+  /**
+   * The service that opened the case, recorded by aml-service from the authenticated caller
+   * (openapi 1.7.0). Null for staff-created cases and for every case created before the field.
+   */
+  sourceService: string | null
 }
 
 const record = (value: unknown): Record<string, unknown> => {
@@ -60,6 +65,7 @@ export function parseAmlCase(value: unknown): AmlCase {
     screenedAt: instant(item.screenedAt, 'screenedAt'), decidedAt: optionalInstant(item.decidedAt, 'decidedAt'),
     createdAt: instant(item.createdAt, 'createdAt'), updatedAt: instant(item.updatedAt, 'updatedAt'),
     requiresFourEyesDisposition: item.requiresFourEyesDisposition === true,
+    sourceService: optionalString(item.sourceService, 'sourceService'),
   }
 }
 
@@ -100,4 +106,24 @@ export function partyDisplayName(party: { legalName?: string | null; tradingName
 /** Whole hours a case has been open; the SLA signal an officer triages by. */
 export function caseAgeHours(createdAt: string, now: Date = new Date()): number {
   return Math.max(0, Math.floor((now.getTime() - Date.parse(createdAt)) / 3_600_000))
+}
+
+const RISK_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 } as const
+const STATUS_RANK = { ESCALATED: 0, OPEN: 1, UNDER_REVIEW: 1, BLOCKED: 2, CLEARED: 2 } as const
+
+/**
+ * The officer's work queue: cases still needing a decision before closed ones; among those,
+ * escalations first, then by RISK (a critical sanctions hit under review outranks a medium
+ * open alert), then oldest first. Status alone used to win, which put medium "screening
+ * unavailable" cases above a critical sanctions hit (seen live 2026-11-14).
+ */
+export function compareWorkQueue(a: AmlCase, b: AmlCase): number {
+  return STATUS_RANK[a.status] - STATUS_RANK[b.status]
+    || RISK_RANK[a.riskLevel] - RISK_RANK[b.riskLevel]
+    || Date.parse(a.createdAt) - Date.parse(b.createdAt)
+}
+
+/** "5 h" under two days, then whole days: "3388 h" is unreadable at a glance. */
+export function formatCaseAge(hours: number, t: (cs: string, en: string) => string): string {
+  return hours < 48 ? `${hours} h` : `${Math.floor(hours / 24)} ${t('dní', 'days')}`
 }
