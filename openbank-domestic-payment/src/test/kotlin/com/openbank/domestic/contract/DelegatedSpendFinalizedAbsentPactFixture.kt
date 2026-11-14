@@ -4,6 +4,7 @@
 
 package com.openbank.domestic.contract
 
+import au.com.dius.pact.provider.MessageAndMetadata
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -12,7 +13,10 @@ import com.openbank.domestic.domain.model.DelegatedSpendBinding
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DelegatedSpendReservationSnapshot
 import com.openbank.domestic.domain.model.DelegatedSpendReservationState
+import com.openbank.domestic.infrastructure.persistence.repository.DelegatedSpendBindingRepositoryImpl
+import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import java.math.BigDecimal
+import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.UUID
 
@@ -30,6 +34,15 @@ object DelegatedSpendFinalizedAbsentPactFixture {
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
 
     fun payload(): String = mapper.writeValueAsString(binding().toFinalizedAbsentEvent())
+
+    /** With the `ce-type` the finalizer's outbox row carries (the repository's own constant). */
+    fun message(): MessageAndMetadata = MessageAndMetadata(
+        payload().toByteArray(StandardCharsets.UTF_8),
+        mapOf(
+            OutboxKafkaHeaders.HEADER_EVENT_TYPE to
+                DelegatedSpendBindingRepositoryImpl.FINALIZED_ABSENT_OUTBOX_EVENT,
+        ),
+    )
 
     fun binding() = DelegatedSpendBinding(
         snapshot = DelegatedSpendReservationSnapshot(
