@@ -693,6 +693,8 @@ A member qualifies when its `gates.yaml` (merge-base against verified head) is t
 - every new id is unused, both on main and in the file;
 - every line of a new entry is indented under it, so no top-level key can be added;
 - no new line defines a YAML anchor, which could redefine an alias that a later entry already reads.
+- the new entry uses only keys the file already uses, never `env:`, never a second `id:`, and a plain, unquoted id;
+- its only executable fields, `run:` and `selftest:`, contain nothing but one plain call per line, `python3 <script>.py` or `bash <script>.sh`, with plain arguments. Each script is a canonical path under `.github/scripts/` that is trainable gate or test code, never privileged gate code. A free shell line would run inside the judging shard beside the existing gates and could rewrite a privileged gate's script on the shared tree before that gate runs. That finding came from the review of #16109.
 
 Anything else returns a reason, and the member stays in the strict lane as before.
 
