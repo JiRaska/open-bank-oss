@@ -89,6 +89,45 @@ Authorization: Bearer <token>
 - Staré záznamy bez `subjectId` nelze nově označit `WHITELISTED`. Subjekt znovu prověř s explicitním
   ID a přezkum proveď nad tímto novým záznamem.
 
+### Profily prověření, země a identifikátor banky (v3)
+
+`POST /api/v3/sanctions/screen` přijímá tři volitelné vstupy. Požadavek bez nich se chová
+a odpovídá přesně jako dosud.
+
+| Pole | Význam |
+|---|---|
+| `profile` | `PAYMENT` nebo `CUSTOMER`. Určuje sadu listin; nelze kombinovat s `listTypes` (400). |
+| `country` | Země protistrany, ISO 3166-1 alpha-2. |
+| `bankIdentifier` | BIC (8 nebo 11 znaků) banky protistrany; kód země v něm se kontroluje stejně jako `country`. |
+
+| Profil | Prověřované listiny | PEP |
+|---|---|---|
+| `PAYMENT` | `OFAC_SDN`, `EU_CONSOLIDATED`, `UN_CONSOLIDATED`, `HM_TREASURY`, `CNB_DOMESTIC`, `CZ_TERRORISTS`, data jurisdikcí | neprověřuje se — jméno PEP platbu nezastaví |
+| `CUSTOMER` | sada `PAYMENT` a navíc `PEP_GLOBAL` | hlásí se zvlášť: `matchKind: PEP` a `pepStatus`; nikdy nezvyšuje `status` ani `overallScore` |
+| *(žádný)* | `listTypes`, nebo všechny povolené listiny | počítá se do `status` jako dosud |
+
+U prověření s profilem nese každá shoda `matchKind` (`SANCTIONS`, `TERRORIST`, `PEP`,
+`JURISDICTION`).
+
+**Jurisdikce.** `country` (nebo země uvnitř `bankIdentifier`), která je v referenčních datech
+jurisdikcí, je shodou bez ohledu na jméno: záznam `EMBARGO` dává `HIT`, záznam `HIGH_RISK`
+`POTENTIAL_HIT` se skóre 0,65, které volající se sdílenou politikou prověřování pošlou k ručnímu
+přezkumu. `programs` u shody nesou opatření s verzí dat a vydání, ze kterého řádek pochází
+(například `HIGH_RISK:v1`, `EU_HIGH_RISK_THIRD_COUNTRIES`). `matchedId` je `country:<kód>:<vydání>:<opatření>:v<verze>`. Rozhodnutí analytika
+(`WHITELISTED`) shodu jurisdikce nikdy nepokrývá: může vyřadit shody jména téhož prověření a
+stav pak určuje sama shoda jurisdikce. Tato data **nemají automatický
+zdroj** — co je načteno, viz `04-data` — a země, která v nich není, se nikdy neshoduje. BIC se
+neporovnává s entitami na listinách, protože importované zdroje identifikátory bank neobsahují.
+
+**Přibližná shoda jména.** Jméno se skóre alespoň 0,85 vůči záznamu listiny je `HIT` v každém
+profilu. Jen profil `CUSTOMER` vrací i jména se skóre 0,65–0,85, jako `POTENTIAL_HIT` (nebo
+`pepStatus: POTENTIAL_HIT` u záznamu PEP): onboarding má pracovníka, kterému lze podobné jméno
+poslat k přezkumu. `PAYMENT` a prověření bez profilu pod 0,85 nehledají, takové jméno tam vyjde
+`CLEAR` — platba zatím nemá stav, ve kterém by na přezkum počkala (#15724).
+
+`/api/v1` je zmrazené: všechny tři vstupy odmítá s 400 a prověření vytvořené s nimi přes
+`/api/v1` nelze číst.
+
 ### Odeslat rozhodnutí o ručním přezkumu
 
 ```http
@@ -98,13 +137,14 @@ Authorization: Bearer <token>
 
 {
   "checkId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "reviewedBy": "compliance@openbank.example",
   "note": "Jiná osoba potvrzena kontrolou pasu — čisto.",
   "newStatus": "CLEAR"
 }
 ```
 
 `newStatus` ∈ `CLEAR | HIT | POTENTIAL_HIT | WHITELISTED | ESCALATED`
+
+Přezkoumávající zaznamenaný u rozhodnutí je přihlášený principal (`preferred_username` z tokenu). Přezkoumávajícího v těle neposílejte: pole `reviewedBy` se z důvodu kompatibility přijme, ale ignoruje se.
 
 ### Získat konkrétní prověření
 
@@ -189,7 +229,7 @@ POST /api/v1/sanctions/lists/refresh-all
 | `EU_CONSOLIDATED` | EU Rada | Konsolidovaný seznam sankcí EU |
 | `UN_CONSOLIDATED` | Rada bezpečnosti OSN | Konsolidovaný seznam OSN |
 | `HM_TREASURY` | UK HM Treasury | UK finanční sankce |
-| `FATF_HIGH_RISK` | FATF | Vysoce rizikové a sledované jurisdikce |
+| `FATF_HIGH_RISK` | FATF | Vysoce rizikové a sledované jurisdikce — bez zdroje entit; země jsou vedeny jako referenční data jurisdikcí |
 | `CNB_DOMESTIC` | Ministerstvo zahraničních věcí (MZV) | Vnitrostátní sankční seznam ČR (zákon č. 1/2023 Sb.) |
 | `CZ_TERRORISTS` | Česká e-Sbírka | Protiteroristická označení (nařízení vlády č. 210/2008 Sb.), import z oficiálních SPARQL otevřených dat |
 
@@ -215,3 +255,37 @@ Topic: `openbank.sanctions.screening.event` (CloudEvents binding, JSON).
 | `sanctions.review.submitted.v1` | POST /review | checkId, reviewedBy, newStatus, reviewNote, reviewedAt |
 
 Eventy jsou append-only; následný přezkum vytváří nový event `sanctions.review.submitted.v1`, nepřepisuje původní event prověření.
+
+## Průběžný monitoring (ADR-0376)
+
+Dostupné od verze API kontraktu 3.4.0. Chráněno stejně jako `POST /api/v3/sanctions/screen`: role `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` a akce `sanctions.create`.
+
+### Registrace nebo aktualizace sledovaného subjektu
+
+```
+PUT /api/v3/sanctions/monitored-subjects/{subjectRef}
+```
+
+Vlastníkem registrace je volající služba, určená klientem, kterému byl vydán její service-account token (například `openbank-kyb`); žádná hodnota požadavku ho neurčuje, takže služba registruje, nahrazuje a maže jen své vlastní subjekty. Služba, která se dosud autentizuje sdíleným klientem flotily `openbank-services`, je odmítnuta a potřebuje nejprve vlastního klienta; v této situaci je dnes kyc-service. `subjectRef` je hodnota, kterou tato služba posílá jako `subjectId` při kontrole subjektu, a platí v rámci volajícího: stejná reference u dvou volajících jsou dva subjekty. Tělo nese `entityType`, `name` a volitelně `aliases`, `dateOfBirth`, `nationality`, `country`: stejné hodnoty jako při živé kontrole subjektu a žádné identifikátory dokladů.
+
+| Stav | Význam |
+|---|---|
+| 201 | Subjekt je nově sledován |
+| 200 | Už byl registrován; stejné atributy nic nemění, jiné nahradí uložené |
+| 400 | Neplatná hodnota v cestě nebo v těle (prázdné jméno, alias `null`, neplatný formát země, znak NUL) |
+| 403 | Volající není služba pod vlastním service accountem: token osoby, sdílený klient flotily, nebo žádný ověřený token |
+| 503 | Monitoring není v tomto prostředí zapnut; nic nebylo uloženo |
+
+Odpověď popisuje registraci (`ownerService`, `subjectRef`, `registeredAt`, `updatedAt`). Nikdy neříká, zda subjekt něčemu odpovídá.
+
+### Odregistrace sledovaného subjektu
+
+```
+DELETE /api/v3/sanctions/monitored-subjects/{subjectRef}
+```
+
+Smaže řádek registru volajícího i jeho nálezy. 204, ať volající subjekt registrován měl, nebo ne, a funguje i při vypnutém monitoringu; 403 jako u registrace. Subjektu, který pod stejnou referencí registrovala jiná služba, se nedotkne. Volá se při ukončení vztahu a při výmazu.
+
+### Událost nálezu
+
+`MONITORED_SUBJECT_MATCHED` na `openbank.sanctions.screening.event` (typ v hlavičce `ce-type`), verze schématu 1: `findingId`, `ownerService`, `subjectRef`, `entityType`, `matchKind` (`SANCTIONS`, `TERRORIST`, `PEP`, `JURISDICTION`), `listType`, `listEntryRef`, `listEntryVersion`, `matchScore`, `matchStatus`, `detection` (`LIST_DELTA`, `BASELINE_SWEEP`, `PERIODIC_SWEEP`), `occurredAt`, `sourceService`. Jméno klienta se nepřenáší. Žádná REST operace nálezy nevrací.

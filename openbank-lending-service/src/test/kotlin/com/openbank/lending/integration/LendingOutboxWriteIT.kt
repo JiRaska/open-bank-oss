@@ -4,6 +4,7 @@
 
 package com.openbank.lending.integration
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -22,7 +23,9 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.TestMethodOrder
+import java.time.Instant
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -75,6 +78,7 @@ class LendingOutboxWriteIT {
 
     private lateinit var applicationId: String
     private lateinit var loanId: String
+    private val json = ObjectMapper()
 
     private companion object {
         const val ADVANCES_TO_FOUR_EYES = 4
@@ -171,7 +175,8 @@ class LendingOutboxWriteIT {
 
         dataSource.connection.use { conn ->
             conn.prepareStatement(
-                "SELECT event_type, payload, created_at FROM lending_outbox WHERE aggregate_id = ?",
+                "SELECT event_type, payload, created_at FROM lending_outbox " +
+                    "WHERE aggregate_id = ? AND event_type = 'loan.disbursed'",
             ).use { ps ->
                 ps.setObject(1, UUID.fromString(loanId))
                 ps.executeQuery().use { rs ->
@@ -188,6 +193,7 @@ class LendingOutboxWriteIT {
                 }
             }
             assertBookingIsOneTransaction(conn)
+            assertDisbursementFact(conn)
             // The loan row carries the terms the application was approved with.
             conn.prepareStatement(
                 "SELECT rate_type, rate_index, spread, reset_frequency_months, next_reset_date, contract_number " +
@@ -203,6 +209,118 @@ class LendingOutboxWriteIT {
                     assertThat(rs.getInt("reset_frequency_months")).isEqualTo(3)
                     assertThat(rs.getDate("next_reset_date").toLocalDate()).isEqualTo(LocalDate.now().plusMonths(4))
                 }
+            }
+        }
+    }
+
+    @Test
+    @Order(6)
+    @TestSecurity(user = "outbox-it-repayment", roles = ["ROLE_LENDING_OFFICER"])
+    fun `repayment commits the paid installment and its exposure fact together`() {
+        val installmentId = firstInstallment()
+        Given { contentType("application/json") } When {
+            post("/api/v1/lending/loans/$loanId/installments/$installmentId/repay")
+        } Then {
+            statusCode(200)
+        }
+        dataSource.connection.use { conn ->
+            conn.prepareStatement(
+                """
+                SELECT i.paid, i.paid_at, i.principal, i.interest, i.xmin::text, f.xmin::text, f.payload,
+                       (SELECT sum(other.principal) FROM installment other
+                        WHERE other.loan_id = i.loan_id AND NOT other.paid)
+                FROM installment i JOIN lending_outbox f ON f.aggregate_id = i.loan_id
+                WHERE i.id = ? AND f.event_type = 'loan.exposure_fact' AND f.payload::jsonb->>'kind' = 'REPAID'
+                """.trimIndent(),
+            ).use { ps ->
+                ps.setObject(1, installmentId)
+                ps.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    assertThat(rs.getBoolean(1)).isTrue()
+                    val paidAt = rs.getTimestamp(2).toInstant()
+                    val fact = json.readTree(rs.getString(7))
+                    assertThat(Instant.parse(fact["effectiveAt"].asText()))
+                        .isBetween(paidAt.minusNanos(1_000), paidAt.plusNanos(1_000))
+                    assertThat(fact["loanStatus"].asText()).isEqualTo("ACTIVE")
+                    assertThat(fact["installmentId"].asText()).isEqualTo(installmentId.toString())
+                    assertThat(fact["principalRepaid"].decimalValue()).isEqualByComparingTo(rs.getBigDecimal(3))
+                    assertThat(fact["interestRepaid"].decimalValue()).isEqualByComparingTo(rs.getBigDecimal(4))
+                    assertThat(fact["unpaidScheduledPrincipal"].decimalValue())
+                        .isEqualByComparingTo(rs.getBigDecimal(8))
+                    assertThat(rs.getString(6)).isEqualTo(rs.getString(5))
+                    assertThat(rs.next()).isFalse()
+                }
+            }
+        }
+    }
+
+    @Test
+    @Order(7)
+    @TestSecurity(user = "outbox-it-risk", roles = ["ROLE_CREDIT_RISK"])
+    fun `write-off commits its terminal exposure fact with the loan status`() {
+        val startedAt = Instant.now()
+        Given {
+            contentType("application/json")
+            body("""{"writtenOffBy":"outbox-it-risk","reason":"synthetic integration fixture"}""")
+        } When {
+            post("/api/v1/lending/loans/$loanId/writeoff")
+        } Then {
+            statusCode(200)
+        }
+        val finishedAt = Instant.now()
+        dataSource.connection.use { conn ->
+            conn.prepareStatement(
+                """
+                SELECT l.status, l.xmin::text, f.xmin::text, f.payload
+                FROM loan l JOIN lending_outbox f ON f.aggregate_id = l.id
+                WHERE l.id = ? AND f.event_type = 'loan.exposure_fact' AND f.payload::jsonb->>'kind' = 'ENDED'
+                """.trimIndent(),
+            ).use { ps ->
+                ps.setObject(1, UUID.fromString(loanId))
+                ps.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    assertThat(rs.getString(1)).isEqualTo("WRITTEN_OFF")
+                    assertThat(rs.getString(3)).isEqualTo(rs.getString(2))
+                    val fact = json.readTree(rs.getString(4))
+                    assertThat(fact["loanStatus"].asText()).isEqualTo("WRITTEN_OFF")
+                    assertThat(Instant.parse(fact["effectiveAt"].asText())).isBetween(startedAt, finishedAt)
+                    assertThat(rs.next()).isFalse()
+                }
+            }
+        }
+    }
+
+    private fun firstInstallment(): UUID = dataSource.connection.use { conn ->
+        conn.prepareStatement("SELECT id FROM installment WHERE loan_id = ? ORDER BY number LIMIT 1").use { ps ->
+            ps.setObject(1, UUID.fromString(loanId))
+            ps.executeQuery().use { rs ->
+                check(rs.next())
+                rs.getObject(1, UUID::class.java)
+            }
+        }
+    }
+
+    private fun assertDisbursementFact(conn: java.sql.Connection) {
+        conn.prepareStatement(
+            """
+            SELECT f.payload, f.xmin::text, d.xmin::text, l.disbursed_at, l.principal, l.status
+            FROM loan l JOIN lending_outbox f ON f.aggregate_id = l.id
+            JOIN lending_outbox d ON d.aggregate_id = l.id AND d.event_type = 'loan.disbursed'
+            WHERE l.id = ? AND f.event_type = 'loan.exposure_fact' AND f.payload::jsonb->>'kind' = 'DISBURSED'
+            """.trimIndent(),
+        ).use { ps ->
+            ps.setObject(1, UUID.fromString(loanId))
+            ps.executeQuery().use { rs ->
+                assertThat(rs.next()).isTrue()
+                val fact = json.readTree(rs.getString(1))
+                val disbursedAt = rs.getObject(4, OffsetDateTime::class.java).toInstant()
+                assertThat(Instant.parse(fact["effectiveAt"].asText()))
+                    .isBetween(disbursedAt.minusNanos(1_000), disbursedAt.plusNanos(1_000))
+                assertThat(Instant.parse(fact["cashConfirmedAt"].asText())).isAfterOrEqualTo(disbursedAt)
+                assertThat(fact["originalPrincipal"].decimalValue()).isEqualByComparingTo(rs.getBigDecimal(5))
+                assertThat(fact["loanStatus"].asText()).isEqualTo(rs.getString(6))
+                assertThat(rs.getString(2)).isEqualTo(rs.getString(3))
+                assertThat(rs.next()).isFalse()
             }
         }
     }

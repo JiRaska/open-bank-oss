@@ -6,6 +6,7 @@
 #
 # party-service ACL surface:
 #   Write + Describe: openbank.party.events    (own domain event output + outbox relay)
+#   Write + Describe: openbank.party.audit     (staff disclosure records, audit-service only)
 #   Read  + Describe: openbank.kyc.events      (KYC case-lifecycle gate, ADR-0267 §2)
 #   Read  + Describe: openbank.aml.events      (AML case-lifecycle gate, ADR-0267 §2)
 #   Read  + Describe: openbank.consent.events  (marketing-consent projection, ADR-0205 D4)
@@ -36,6 +37,12 @@ spec:
       - resource:
           type: topic
           name: openbank.party.events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.party.audit
           patternType: literal
         operations: [Write, Describe]
         host: "*"

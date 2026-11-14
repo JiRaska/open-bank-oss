@@ -50,6 +50,9 @@ to a beneficiary — a primary fraud target.
 | **T**ampering | ACSC verdict triggers double-booking via settlement retry | Idempotency key `domestic-settlement-<paymentId>` on transaction-service; 409 = already-booked success; debit runs once regardless of Temporal retries |
 | **T**ampering | Alter amount/beneficiary in flight | Server-validated instruction; signed/immutable once accepted; audit |
 | **T**ampering / **I**nfo disclosure | Reuse another caller's `Idempotency-Key`, or change amount/beneficiary while receiving the first caller's cached 201 body | Redis is no longer an authority for create-payment responses. A canonical SHA-256 over the complete normalized command, issuer-qualified actor scope, synthetic classification and delegation/reservation binding is stored on `domestic_payments` in the same transaction as the payment and outbox. Exact digest replay returns the durable row; any mismatch and every legacy NULL fingerprint fail closed with 409 `IDEMPOTENCY_KEY_REUSED`. The DB unique key arbitrates concurrent creators; the losing transaction (including its outbox) rolls back before its winner is fingerprint-verified. Cutover is blue/green with creates quiesced and drained for the 15-second request timeout, never a mixed-writer rolling interval. |
+| **T**ampering | A held business release uses a new rail key and repeats an earlier direct payment | Verified customer-edge attaches the authoritative original-key digest to the release header. A PostgreSQL unique index unifies that digest with the same digest of legacy rail keys. A conflict rolls back payment, outbox and any reservation change before returning a generic 409. Exact approval-ID replay compares the digest and full request fingerprint. The frozen rail payload and external event contain no new receipt metadata. |
+| **T**ampering | An older rail ignores new release metadata and executes an approval without the original-key guard | Mode-bound Edge releases use a dedicated route with a mandatory digest and verified workload identity. Older provider versions lack this writer. The route shares the existing atomic payment and outbox transaction. |
+| **T**ampering / **I**nfo disclosure | An ordinary payment uses an approval UUID as its rail key and is mistaken for a released approval | Named customer-edge supplies the rail key, debit account, customer scope and original submission digest. PostgreSQL matches all four. FOUND echoes the stored digest so an older provider's response without proof remains inconclusive. Ordinary direct lookup requires a null digest. |
 | **T**ampering / **E**oP | Forged, replayed or reordered delegated reservation snapshot authorizes a payment | The default-OFF Kafka consumer accepts the exact version-1 envelope and complete immutable tuple only. A domain-separated SHA-256 binds the raw Idempotency-Key without retaining it. PostgreSQL stores the monotonic reservation revision; same/stale revisions are idempotent, contradictory tuples fail to DLQ, and cross-pod timestamps never override the version. Source timestamps are truncated to PostgreSQL's microsecond precision before both persistence and comparison, so a nanosecond-bearing first delivery/redelivery cannot become a false contradiction. The create transaction locks PENDING and revalidates grantee, grantor/debit owner, account, amount, currency, operation, delegation and key hash before atomically inserting payment+created outbox and moving to BOUND. |
 | **T**ampering / **E**oP | A delegated request names the reserved account id but supplies another debtor account number/bank code, or the account has moved to another owner | Before any payment/outbox/workflow side effect, the default-OFF use-case rebuilds the canonical Czech IBAN from the normalized debtor coordinates, requires account-service to resolve it to the exact reserved resource id, and independently requires that id's owner to equal the reservation grantor. A different resolved id/owner is a permanent tuple mismatch; a null result (404 and outage are intentionally indistinguishable in the existing narrow port) is retryable `AccountAuthorityUnavailable`, never authorization. The repository still locks and revalidates the tuple in the create transaction. |
 | **T**ampering / **R**epudiation | Create races an absence finalizer, or a future code path inserts a standalone payment against PENDING and later releases its reservation | Pessimistic row lock plus deferred two-way FKs serialize the race. The inverse link is composite `(reservation_id,payment_id)`, backed by a non-partial unique target, so PENDING+NULL cannot authorize any delegated payment and only the exact BOUND pair can commit; owner rows pass via `MATCH SIMPLE` NULL reservation. Exactly BOUND+payment+created outbox or permanent FINALIZED_ABSENT+absence outbox can commit; failures roll back the entire transaction. Tombstones are retained and delayed RESERVED cannot reopen them. No HTTP callback and no blind delegation TTL release exists. |
@@ -89,6 +92,8 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 5. Residual risks / assumptions
 
+The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit mapped-column projection. This keeps the existing dispatcher available across additive schema expansion. The claim and acknowledgement semantics stay the same.
+
 - **Idempotency-key required** — only an exact, actor-bound retry may replay the durable payment;
   changed or unverifiable legacy requests are rejected with 409.
 - **Global-key collision remains fail-closed:** V1's existing `UNIQUE(idempotency_key)` is intentionally
@@ -112,6 +117,37 @@ not change any existing request's outcome until explicitly flipped.
 - **Finalizer availability trade-off:** a disabled/stalled finalizer retains PENDING rows and reserved
   headroom rather than releasing funds without proof. This fail-closed strand is observable/retryable
   and is safer than a time-only release; the callback is a transactional domestic outbox event.
+- **Admission chain, not delivered with step A (ADR-0374):** (1) the decision on a hold's case is a
+  single analyst's in aml-service, where ADR-0374 D3 asks for four eyes; (2) a hold reserves no funds, so
+  the release evaluates the controls again but not the balance, which is checked where it always was, at booking, where
+  ADR-0374 D13 asks for standing and balance at release; a control that cannot answer at release
+  keeps the payment HELD, which is never a refusal and never a pass; (5) nothing in this service releases the spend reservation of a
+  delegated payment that the chain rejects or whose hold expires; (3) the
+  chain's `AUTHORITY` step is unbound on this rail: authority is decided when the payment is submitted
+  (the customer edge, and the rail's create path), not again by the chain (ADR-0375 D1/D3); (4) between a party's suspension and account-service consuming it the
+  accounts still report `mayDebit`, because the rail reads account standing and not party standing.
+  Each is a precondition of switching the chain on in production, not of merging it off. A hold that
+  outlives its expiry (a lost workflow run) is alerted on: `DomesticPaymentHeldPastExpiry`.
+- **No tipping-off on the customer edge, whatever the admission switch says.** A reject reason that
+  names a control (`SANCTIONS_HIT`, `FRAUD_SUSPECTED`, `AML_HOLD`, `DEBTOR_ACCOUNT_BLOCKED`) reads as
+  the neutral `DECLINED` to the customer edge, with its detail withheld; staff and service callers see
+  the real reason. Strictly narrowing against main, where the first two were readable, and deliberate:
+  telling a customer a payment was stopped for a sanctions hit or a fraud suspicion is tipping-off.
+  The reason is never null, so a client does not render an empty one.
+- **A malformed review answer is not reviewable.** A control that asks for a human but names no
+  evidence (a sanctions review with no matched entry) is answered as UNAVAILABLE in one place
+  (`DomesticAdmissionChain.wellFormed`): no case decision could ever cover it, and holding it for
+  review would request review after review until the hold expires.
+- **Switching fraud enforcement off during a hold releases a fraud-held payment without a decision
+  on its fraud evidence.** That is operator-controlled by configuration and is not changed here; it
+  is made auditable: such a release is counted as `RELEASED_CONTROL_NOT_APPLICABLE` on the hold-end
+  metric and logged at WARN with the lapsed control.
+- **Ending a hold re-checks the hold under the row lock.** A release or reject of a HELD payment is
+  written only if the review number and decision on the row are still the ones it evaluated, so a
+  conclusion computed on an earlier review cannot land after the next review was requested.
+- **Rollback of the image after switch-on** is allowed only with admission off and
+  `openbank_domestic_payments_non_terminal{status="HELD"}` at 0: the previous image has no HELD status
+  and does not poll the admission queue.
 - SCA (sca-service) must gate customer-initiated transfers.
 - **Four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent audit
   trail** (ADR-0155) — a durable-audit requirement for "who approved what, forever" would
@@ -119,6 +155,105 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-11-13** — **Payment admission chain on the domestic rail (ADR-0374 delivery step A, default
+  off).** With `openbank.domestic.admission.enabled` the workflow asks `PaymentAdmissionActivitiesImpl`
+  before anything else; `DomesticAdmissionChain` binds account standing, the ADR-0032 sanctions screen and
+  the ADR-0084 fraud score to the shared chain kernel, which fixes their order and maps a control that
+  cannot answer to a hold. Whether a run goes through admission is one fact, the task queue it is
+  started on (`AdmissionRun`, `DomesticPaymentRuns`). A run on the rail's own queue writes nothing a
+  run of the previous implementation does not write (compared event for event with a history that
+  implementation recorded). Only a build that knows the chain polls the admission queue, so a worker
+  from before it is never handed a task of an admission run and cannot take one down the pre-chain
+  path; with no such worker up, admission runs wait.
+  - **New outbound read (trust boundary):** `GET /api/v1/accounts/{id}` on account-service is now read
+    for `standing.mayDebit`, under the M2M identity the rail already uses for that route. **Tampering /
+    spoofing:** the answer decides whether a payment is rejected, so the rail treats every unusable answer
+    as *unavailable*, never as "may debit": an unknown account, a response without `standing`, a non-2xx
+    and a timeout all hold the payment (`AccountServiceClient.debtorStanding`, `toStandingLookup`).
+    A consumer pact pins the field and account-service replays it on a pull request.
+  - **Elevation of privilege, release path:** a HELD payment is released only by the decision of its
+    own case. `FraudHoldResolutionConsumer` accepts a decision only for the key
+    `PaymentHoldPolicy.caseKey` (`payment-hold:domestic:<paymentId>`), so a case somebody else created
+    for the payment and the fraud hold's case decide nothing. The decision is then written to the
+    payment's row in one guarded statement (`recordHoldDecision`): only for a payment that is HELD
+    with its case requested, once, and only before the hold's expiry. The workflow signal carries no
+    decision at all; a forged, duplicated or lost signal changes no outcome. The key is derivable
+    from the payment id, so it binds a decision to the right case and is not a secret; what stops a
+    forged case is aml-service's provenance rule for that key namespace (see its threat model).
+    Whoever may decide that case in aml-service can release the payment; that decision is a single
+    analyst's today (see residual risks).
+  - **Tampering, a release that skips a control:** an outage of sanctions screening longer than the
+    re-evaluation window turns every payment submitted in it into a case, and none of them was
+    screened. Releasing one on the case decision alone would send an unscreened payment.
+    `PaymentAdmissionActivitiesImpl.release` is the one place a HELD payment becomes VALIDATED, and
+    it evaluates the whole chain again: every bound control must answer and none may refuse. A
+    refusal rejects; a control that still cannot answer leaves the payment HELD.
+  - **Elevation of privilege, a clearance applied to something nobody reviewed:** a case opened
+    for an outage, or for a fraud review, says nothing about a sanctions match that the control
+    reports only at release, and a clearance of a match against one list entry says nothing about
+    a match against another. A case decision covers exactly the evidence the case was shown. It is
+    recorded on the row with the case request (`hold_case_reasons`: step, reason and a fingerprint
+    of that control's evidence, canonical and order-insensitive), and `release` validates only if
+    every "review" in the fresh evaluation is among them. A review whose evidence does not say what
+    was found (a potential match with no matched entry) is never covered: such a payment is never
+    released by a case and ends by its expiry. Residual: the screening contract returns no entry id
+    and no list version, so the fingerprint is of status, score and matched entry per role; an
+    entry changed in place under the same name and score is not told apart. Anything else keeps the payment HELD and requests a further review as
+    a case of its own (`hold_review`, key `payment-hold:domestic:<paymentId>:<n>`). **Trust
+    boundary, aml decision to rail:** the case key arrives from another service and is never parsed
+    to authorise. The rail computes the one canonical key of the review number on the row and
+    accepts a decision only on exact string equality, so no second spelling of a key (`:+2`, `:02`),
+    no other payment's key and no earlier review's key decides anything, and the expiry still runs from the first
+    `held_at`. The customer view does not change while this happens.
+  - **Elevation of privilege, a hold released after its term:** a hold ends in rejection 48 hours
+    after `held_at`. Expiry is checked first and from the row (`concludeHold`), and a decision is
+    not accepted after it, so a late decision, or one accepted while no run was alive to apply it,
+    cannot release the payment (ADR-0374 D3).
+  - **Elevation of privilege, status endpoint:** `PATCH /{id}/status` answers 409 for a HELD payment
+    always, and with the chain on for a RECEIVED payment while a re-drive attempt is left or a workflow
+    run is open (ADR-0374 D13). It starts no workflow, so it could otherwise move a payment past
+    controls that never ran. **Denial of service on one payment:** a RECEIVED payment with its
+    re-drive spent and no open run is picked up by nothing, so there the endpoint allows REJECTED or
+    CANCELLED and still refuses VALIDATED: an operator can refuse a payment admission never finished
+    with and cannot wave it through. When Temporal cannot say whether a run is open the endpoint
+    refuses. The state is counted (`openbank_domestic_payments_redrive_exhausted`) and alerted on.
+    With the chain off a RECEIVED payment keeps the exit it had.
+  - **Denial of service, a hold without a run:** the hold lives on the payment's row (`held_at`,
+    `hold_case_requested_at`, `hold_decision`) and the run keeps no state of it, so a run that dies
+    loses nothing. Admission activities retry without limit and are re-entrant on the row, the
+    re-drive sweep gives a HELD payment without an open run a new one, and a recovered run does not
+    evaluate a payment whose case was requested, so a control answering differently later cannot
+    release what a reviewer holds. `DomesticPaymentHeldPastExpiry` measures the hold's age from
+    `held_at` and fires if all of that failed, or if no worker that knows the chain is running.
+  - **Tampering with another service's state:** the chain evaluates a payment several times, and
+    fraud-service stores and counts every score. The rail keeps the first real score on the payment
+    and reuses it, so one payment adds one score to what fraud-service holds against the account.
+  - **Repudiation / lost hold:** the move to HELD, its status event and the `PAYMENT_HELD` case request
+    are one transaction (`PaymentAdmissionWrites.transition`), so a hold that needs a human cannot exist
+    without its case request, and no case endpoint is called for a hold.
+  - **Information disclosure:** `PAYMENT_HELD` travels on `openbank.domestic.payment.events`, which
+    audit, context and pension also read. It carries the debtor's party id and account reference (both
+    already on that topic) and, as evidence, statuses, scores and the matched list entry; never the
+    debtor or creditor name. The customer is told nothing: no rejection this chain makes sends a
+    notification, `customerSafeReason` renders `DEBTOR_ACCOUNT_BLOCKED` without naming a control
+    (a freeze can be an AML block on the party), and the customer edge reads a HELD payment as
+    RECEIVED on every read of the payment resource and on the submission lookup
+    (`DomesticPaymentStatus.customerFacing`). The same reads withhold the reject reason and detail
+    when the reason names a control: `AML_HOLD`, `SANCTIONS_HIT`, `FRAUD_SUSPECTED` and
+    `DEBTOR_ACCOUNT_BLOCKED` reach the edge as a rejection with no reason
+    (`DomesticRejectReason.customerFacing`). Before this the edge passed `rejectReason` through, so a
+    customer could read `SANCTIONS_HIT` or `FRAUD_SUSPECTED` on their own payment; that predates the
+    chain and is closed by the same mapping. Operators read the real status, reason and detail.
+    Residual: the status-changed event on the rail's topic still carries the real reason to its
+    service consumers.
+  - **Denial of service:** an outage of account-service, sanctions-service or (with fraud enforcement on)
+    fraud-service now HOLDS every payment instead of leaving it RECEIVED. Each is re-evaluated every
+    15 minutes, five times, and only then becomes a case, so a short outage heals with no human and a
+    long one becomes review-queue load: 75 minutes of outage turns every payment submitted in it into one
+    case. A hold nobody decides is rejected after 48 hours, never released. Watch
+    `openbank_payment_admission_step_unavailable_total{step,cause}`.
+  - **Rollback:** set the flag to `false`. Payments already HELD keep their hold path (the activity
+    evaluates a HELD payment whatever the flag says); no schema changes with the flag.
 - **2026-11-08** — **Fraud hold enforced in SANDBOX (#4403).** The sandbox deployment sets
   `OPENBANK_DOMESTIC_FRAUD_ENFORCEMENT_ENABLED` and `DOMESTIC_FRAUD_HOLD_RESOLUTION_CONSUMER_ENABLED`
   together; application defaults stay `false`. New availability exposure, not a new trust boundary: while
@@ -879,3 +1014,116 @@ fingerprint and retry scenarios remain in the same suite. Execution results belo
 exact-head AML Services CI evidence, not the domestic-payment test envelope or this prose.
 This prevents new squatting through this boundary; it does not attest historical case ownership,
 perform remediation or enable fraud enforcement. Hold timeout remains fail closed.
+
+### Customer submission lookup (issue #12317)
+
+- **Spoofing and disclosure.** Only the verified customer-edge service account may assert the
+  submission scope or query it. Customer-edge derives the digest from the authenticated human,
+  effective party, debit account and the actual delegation grant. It revalidates the business
+  context and owner/grant for each lookup. The provider checks the account, key and scope in one
+  query and returns only the identifier and lifecycle state. Key stays in the request header, and
+  the response is non-cacheable. Missing, legacy, foreign and unverifiable submissions all yield
+  `UNKNOWN` on the customer route.
+- **Integrity and replay.** The new scope is immutable and written in the original payment
+  transaction. Both the initial key lookup and unique-constraint race winner compare the existing
+  payload fingerprint and scope. A mismatch, including scoped versus unscoped, cannot replay or
+  create a second payment. No status read changes the payment or consumes SCA.
+- **Deployment and rollback.** Deploy domestic-payment (including the additive nullable column)
+  ahead of customer-edge. Legacy submissions have no proven customer binding. For rollback,
+  revert customer-edge first and preserve the new column. Existing scoped rows stay protected
+  against unscoped replay even with older provider code, because the persisted request fingerprint
+  includes the scope. Co-signature approval requests use a
+  different rail key, and a pre-persistence refusal has no durable receipt. Lookup leaves both
+  outcomes unresolved for the original key.
+
+### Reservation-bound delegated create (#16000 part 3)
+
+`POST /api/v1/domestic-payments/delegated` creates a delegated payment bound to its delegation-service
+spend reservation, so the payment's terminal outcome (not customer-edge's HTTP 2xx) settles the
+reservation.
+
+- **Spoofing.** Only the verified customer-edge service account may call it: `azp` must name the
+  client and `preferred_username` must be that client's own service account. A forged username on
+  another client, a customer token and every other service account are refused 403 before any
+  projection read. No header or body field contributes to identity. The new action
+  `domestic-payment.createDelegated` is ALSO admitted by today's `operator-domestic-payment-write`
+  prefix rule to any ROLE_OPERATOR human, so the code check, not the policy, is the control until
+  the policy change lands (exclusion from that rule plus a grant naming the edge).
+- **Tampering and elevation.** The body names a reservation and states the delegation and acting
+  party the edge believes in. The rail reads the tuple from its own projection and refuses unless the
+  reservation is PENDING/RESERVED and delegation, grantee, debtor account (re-resolved through
+  account-service), grantor ownership, amount, currency and Idempotency-Key hash all match, the last
+  four under the binding row lock. A refusal is a neutral `409 RESERVATION_MISMATCH`; the differing
+  field is logged, not returned.
+- **Repudiation and integrity.** One payment per reservation is a schema fact
+  (`uq_domestic_payments_reservation_id` plus the deferred composite binding FK), and the payment
+  carries `delegationId`/`reservationId` on its created and every status-changed event.
+- **Availability and eventual consistency.** A reservation the projection has not consumed yet is
+  `409 RESERVATION_PROJECTION_PENDING` with `retryable: true`, never an unbound payment. While the
+  projection consumer is off (`DOMESTIC_DELEGATED_SPEND_CONSUMER_ENABLED=false`, the default) every
+  call answers that.
+- **Authority at create time.** The route runs the ADR-0375 D1 create-time authority step on the
+  bound path. The grant state and the account owner come from one lookup, before any write. A
+  revoked grant, or one that does not cover the debtor account, is
+  `409 DELEGATION_AUTHORITY_WITHDRAWN`, which writes no payment and leaves the reservation PENDING.
+  A lookup outage is a retryable `503`, never a refusal.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.
+
+## 2026-11-13 — The delegated debit re-asks its authority at create time (ADR-0375 D1)
+
+`createDelegatedPayment` now reads account-service's
+`GET /api/v1/accounts/{accountId}/delegation/authority-facts` (existing action `account.read`,
+existing `openbank-services` bearer, no new identity and no new OPA action) and decides with the
+pure kernel `DelegatedDebitAuthority`. The capability asked for is `ACCOUNT_INITIATE_PAYMENT`,
+supplied as an argument.
+
+**Boundary change, and the hole it closes.** Authority for a delegated debit was established once,
+at reserve time, by `SpendReservationService.evaluateLockedGrant` under a row lock. Nothing
+re-established it afterwards: `DelegationService.revoke` emits `DelegationRevoked` and releases no
+reservation (there is no revoke-to-release wiring anywhere in the fleet), and `SpendReservation`
+carries no TTL, so a `RESERVED` row persists until confirmed or released. The reserve-to-create
+window was therefore **unbounded**, and a grant revoked inside it left a reservation that still
+bought the payment.
+
+- **Elevation of privilege:** a delegate whose grant has been revoked, suspended, expired,
+  renounced, or narrowed to exclude the payment capability is now refused at create time, before
+  any payment row or outbox message is written. Previously the only thing standing between a
+  withdrawn grant and a live debit was whether anyone had released the reservation, which nothing
+  does automatically.
+- **Spoofing:** both lookup arguments come from the durable reservation snapshot, not the request,
+  so a caller cannot select the account whose grants are consulted or the party they are consulted
+  for. A test pins this with a command that deliberately names a different account and actor.
+- **Denial of service:** the new call is on the delegated create path only (owner-funded payments
+  do not touch it, and the shared helper decides the OWNER case before it looks at the lookup at
+  all). An unreachable account-service yields `AccountAuthorityUnavailable` — the existing retryable
+  503 semantic — never a refusal. This asymmetry is the control: refusing on an outage would be
+  indistinguishable to the customer, to support and in the audit trail from a revoked mandate, and
+  `DelegationAuthorityClient` is written so that no transport failure, HTTP status (404 included) or
+  malformed grant can become an empty list.
+- **Repudiation:** the refusal carries the reason code from the kernel
+  (`AUTHORITY_NO_GRANT`), and an allowed delegated debit's evidence names the grant
+  (`grant_id`, `grantor_party_id`) that permitted it — a grant is revocable, so nothing after the
+  fact can reconstruct which one was live when the money moved.
+- **Information disclosure:** no new data crosses the boundary beyond grant and party UUIDs the
+  rail already handles; nothing new is persisted or logged. The facts endpoint answers only about
+  the (account, party) pair the rail already holds.
+- **Tampering:** none. The read is advisory-free — it can only refuse or hold, never widen.
+
+**Residual risk.** The check is a point-in-time read before the write; a revocation landing between
+the read and the commit is not caught, which is the same bound the existing ownership proof carries.
+It is also the delegated path only — the owner-funded path is unaffected by design.
+
+Tests: `DelegatedDomesticPaymentServiceTest` — revoked grant refused, capability narrowed refused,
+read capabilities not accepted for a debit, unavailable holds rather than refuses, and the lookup
+arguments taken from the snapshot and not the command. Falsified: removing the step fails all five;
+making unavailable read as a refusal fails exactly the one written for it.
+Rollback: revert the commit; no migration, no config, no new identity.

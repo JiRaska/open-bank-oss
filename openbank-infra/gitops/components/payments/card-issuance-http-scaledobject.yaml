@@ -45,8 +45,8 @@ metadata:
   labels:
     app.kubernetes.io/name: card-issuance-service
     app.kubernetes.io/part-of: payments
-    openbank.io/finops-tier: T1
-    openbank.io/adr: "0057"
+    open-bank.tech/finops-tier: T1
+    open-bank.tech/adr: "0057"
 spec:
   hosts:
     - card-issuance-service.payments.svc.cluster.local

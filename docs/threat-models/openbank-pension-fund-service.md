@@ -216,3 +216,17 @@ attributable attestation, not automatic validation of an external document. Hist
 cutover evidence and a due-calendar adapter remain prerequisites for existing funds. Retain source
 intents/receipts with financial history; the service owner must approve retention before go-live.
 Delivery remains disabled by default and deployment/enforcement require a complete live month.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.
+
+## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
+
+The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `PENSION_FUND_SERVICE_URL=https://pension-fund-service.pension-fund.svc:8443`. This is the period-end fund aggregate read already admitted for `service-account-openbank-tax-reporting` alone. It is now reachable in the deployed pod. Transport is the 8443 client-auth-required listener (see "Required client authentication on the parallel TLS listener"), with the server hostname verified. Residual risk: none new.

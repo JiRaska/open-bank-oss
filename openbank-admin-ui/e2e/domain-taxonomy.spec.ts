@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { test, expect } from '@playwright/test'
+import { test, expect } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 // The same canonical declarations feed each view. Namespace intentionally carries

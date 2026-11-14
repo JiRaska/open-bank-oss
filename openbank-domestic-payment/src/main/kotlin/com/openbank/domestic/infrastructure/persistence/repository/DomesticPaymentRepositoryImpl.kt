@@ -7,32 +7,43 @@ package com.openbank.domestic.infrastructure.persistence.repository
 import com.openbank.domestic.application.port.out.DelegatedPaymentSaveOutcome
 import com.openbank.domestic.application.port.out.DomesticBookingWrites
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
+import com.openbank.domestic.application.port.out.HeldPaymentRef
+import com.openbank.domestic.application.port.out.HoldDecisionRecord
+import com.openbank.domestic.application.port.out.PaymentAdmissionWrites
+import com.openbank.domestic.application.usecase.DomesticPaymentIdempotencyConflictException
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DelegatedSpendReservationSnapshot
 import com.openbank.domestic.domain.model.DelegatedSpendReservationState
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
+import com.openbank.domestic.domain.model.HoldDecision
+import com.openbank.domestic.domain.model.RecordedFraudScore
 import com.openbank.domestic.infrastructure.persistence.entity.DelegatedSpendBindingEntity
 import com.openbank.domestic.infrastructure.persistence.entity.DomesticPaymentEntity
+import com.openbank.domestic.infrastructure.persistence.mapper.toColumn
 import com.openbank.domestic.infrastructure.persistence.mapper.toDomain
 import com.openbank.domestic.infrastructure.persistence.mapper.toEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.LockModeType
+import java.sql.SQLException
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
 // Reactive transaction failures can be wrapped by Mutiny/Hibernate in different RuntimeException
 // subtypes. Both catch sites inspect the complete cause chain and immediately rethrow anything
-// other than the one named idempotency constraint.
+// other than either of the named idempotency constraints.
 @Suppress("TooManyFunctions", "TooGenericExceptionCaught")
 class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymentOutboxRepositoryImpl) :
     DomesticPaymentRepository,
     DomesticBookingWrites,
+    PaymentAdmissionWrites,
     PanacheRepository<DomesticPaymentEntity> {
 
     override suspend fun save(payment: DomesticPayment, outboxMessage: OutboxMessage): DomesticPayment = try {
@@ -41,12 +52,7 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
                 .flatMap { outboxRepository.persistWithinCurrentTransaction(outboxMessage).replaceWith(payment) }
         }.awaitSuspending()
     } catch (exception: RuntimeException) {
-        if (!exception.isIdempotencyKeyViolation()) throw exception
-
-        // A concurrent creator committed this key while our transaction was in flight. Postgres
-        // has already rolled our whole transaction back, including its outbox row; return the
-        // winner so the use case can compare its durable request fingerprint before replaying it.
-        findByIdempotencyKey(payment.idempotencyKey) ?: throw exception
+        resolveIdempotencyRace(payment.idempotencyKey, exception)
     }
 
     override suspend fun saveDelegated(
@@ -112,9 +118,14 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
             }
         }.awaitSuspending()
     } catch (exception: RuntimeException) {
-        if (!exception.isIdempotencyKeyViolation()) throw exception
-        val winner = findByIdempotencyKey(payment.idempotencyKey) ?: throw exception
-        DelegatedPaymentSaveOutcome.Replayed(winner)
+        DelegatedPaymentSaveOutcome.Replayed(resolveIdempotencyRace(payment.idempotencyKey, exception))
+    }
+
+    private suspend fun resolveIdempotencyRace(idempotencyKey: String, failure: RuntimeException): DomesticPayment {
+        if (!failure.isIdempotencyKeyViolation()) throw failure
+        // The payment, reservation update and outbox have already rolled back. Only a winner with
+        // the caller's own rail key can replay. A different rail key yields the generic conflict.
+        return findByIdempotencyKey(idempotencyKey) ?: throw DomesticPaymentIdempotencyConflictException()
     }
 
     override suspend fun findById(paymentId: UUID): DomesticPayment? =
@@ -122,6 +133,22 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
 
     override suspend fun findByIdempotencyKey(idempotencyKey: String): DomesticPayment? =
         Panache.withSession { find("idempotencyKey", idempotencyKey).firstResult() }.awaitSuspending()?.toDomain()
+
+    override suspend fun findCustomerSubmission(
+        idempotencyKey: String,
+        debtorAccountId: UUID,
+        scope: String,
+        originalSubmissionKeyDigest: String?,
+    ): DomesticPayment? = Panache.withSession {
+        find(
+            "idempotencyKey = ?1 and debtorAccountId = ?2 and customerSubmissionScope = ?3 " +
+                "and originalSubmissionKeyDigest is not distinct from ?4",
+            idempotencyKey,
+            debtorAccountId,
+            scope,
+            originalSubmissionKeyDigest,
+        ).firstResult()
+    }.awaitSuspending()?.toDomain()
 
     override suspend fun countByStatus(status: DomesticPaymentStatus): Long =
         Panache.withSession { count("status", status.name) }.awaitSuspending()
@@ -162,27 +189,178 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
             ).range(0, limit - 1).list()
         }.awaitSuspending().map { it.paymentId }
 
+    override suspend fun findRedrivableLeastRecentlyChecked(maxAttempts: Int, minAge: Instant, limit: Int): List<UUID> =
+        Panache.withSession {
+            find(
+                "status = ?1 and redriveAttempts < ?2 and createdAt < ?3 " +
+                    "order by runCheckedAt asc nulls first, createdAt asc",
+                DomesticPaymentStatus.RECEIVED.name,
+                maxAttempts,
+                minAge,
+            ).range(0, limit - 1).list()
+        }.awaitSuspending().map { it.paymentId }
+
     override suspend fun recordRedriveAttempt(paymentId: UUID) {
         Panache.withTransaction {
             update("redriveAttempts = redriveAttempts + 1 where paymentId = ?1", paymentId)
         }.awaitSuspending()
     }
 
+    override suspend fun findHeldToReconcile(heldBefore: Instant, limit: Int): List<HeldPaymentRef> =
+        Panache.withSession {
+            find(
+                "status = ?1 and updatedAt < ?2 order by runCheckedAt asc nulls first, updatedAt asc",
+                DomesticPaymentStatus.HELD.name,
+                heldBefore,
+            ).range(0, limit - 1).list()
+        }.awaitSuspending().map { HeldPaymentRef(it.paymentId, it.heldAt ?: it.updatedAt) }
+
+    override suspend fun markRunChecked(paymentId: UUID, at: Instant) {
+        Panache.withTransaction {
+            update("runCheckedAt = ?1 where paymentId = ?2", at, paymentId)
+        }.awaitSuspending()
+    }
+
+    override suspend fun redriveAttempts(paymentId: UUID): Int = Panache.withSession {
+        find("paymentId", paymentId).firstResult()
+    }.awaitSuspending()?.redriveAttempts ?: 0
+
+    override suspend fun countRedriveExhausted(maxAttempts: Int): Long = Panache.withSession {
+        count("status = ?1 and redriveAttempts >= ?2", DomesticPaymentStatus.RECEIVED.name, maxAttempts)
+    }.awaitSuspending()
+
+    override suspend fun oldestHeldAt(): Instant? = Panache.withSession {
+        find("status = ?1 order by heldAt asc nulls last, updatedAt asc", DomesticPaymentStatus.HELD.name).firstResult()
+    }.awaitSuspending()?.let { it.heldAt ?: it.updatedAt }
+
     override suspend fun update(payment: DomesticPayment, outboxMessage: OutboxMessage): DomesticPayment =
-        writeLifecycle(payment, outboxMessage)
+        writeLifecycle(payment, listOf(outboxMessage))
+
+    override suspend fun transition(payment: DomesticPayment, events: List<OutboxMessage>): DomesticPayment =
+        writeLifecycle(payment, events)
+
+    // Locks the row so the check and the insert are one decision: a concurrent release or reject
+    // either commits first (and this writes nothing) or waits for this event to be written.
+    override suspend fun requestCaseWhileHeld(
+        paymentId: UUID,
+        event: OutboxMessage,
+        requestedAt: Instant,
+        reasons: Set<String>,
+    ): Boolean = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "FROM DomesticPaymentEntity WHERE paymentId = :paymentId",
+                DomesticPaymentEntity::class.java,
+            ).setParameter("paymentId", paymentId)
+                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                .singleResultOrNull
+                .flatMap { entity ->
+                    when {
+                        entity?.status != DomesticPaymentStatus.HELD.name -> Uni.createFrom().item(false)
+                        // Already requested: the hold has its case, a second event would say nothing new.
+                        entity.holdCaseRequestedAt != null -> Uni.createFrom().item(true)
+                        else -> {
+                            entity.holdCaseRequestedAt = requestedAt
+                            entity.holdCaseReasons = reasons.toColumn()
+                            outboxRepository.persistWithinCurrentTransaction(event).replaceWith(true)
+                        }
+                    }
+                }
+        }
+    }.awaitSuspending()
+
+    // Locks the row, so two attempts of one release cannot both ask: the second finds the review
+    // already moved on and writes nothing.
+    override suspend fun requestNextReview(
+        paymentId: UUID,
+        fromReview: Int,
+        reasons: Set<String>,
+        event: OutboxMessage,
+    ): Boolean = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "FROM DomesticPaymentEntity WHERE paymentId = :paymentId",
+                DomesticPaymentEntity::class.java,
+            ).setParameter("paymentId", paymentId)
+                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                .singleResultOrNull
+                .flatMap { entity ->
+                    if (entity?.status == DomesticPaymentStatus.HELD.name && (entity.holdReview ?: 1) == fromReview) {
+                        entity.holdReview = fromReview + 1
+                        entity.holdDecision = null
+                        entity.holdCaseReasons = reasons.toColumn()
+                        outboxRepository.persistWithinCurrentTransaction(event).replaceWith(true)
+                    } else {
+                        Uni.createFrom().item(false)
+                    }
+                }
+        }
+    }.awaitSuspending()
+
+    // The row is locked and judged in one transaction, so two deliveries of a decision, or a
+    // decision racing the expiry or a new review, cannot both win.
+    override suspend fun recordHoldDecision(
+        paymentId: UUID,
+        caseKey: String,
+        caseKeyOfReview: (Int) -> String,
+        decision: HoldDecision,
+        at: Instant,
+        expiresAfter: Duration,
+    ): HoldDecisionRecord = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "FROM DomesticPaymentEntity WHERE paymentId = :paymentId",
+                DomesticPaymentEntity::class.java,
+            ).setParameter("paymentId", paymentId)
+                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                .singleResultOrNull
+                .map { entity ->
+                    when {
+                        entity?.status != DomesticPaymentStatus.HELD.name || entity.holdCaseRequestedAt == null ->
+                            HoldDecisionRecord.NO_HOLD
+                        // Exact equality with the one canonical key. The key that arrived is not parsed.
+                        caseKeyOfReview(entity.holdReview ?: 1) != caseKey -> HoldDecisionRecord.OTHER_CASE
+                        entity.holdDecision != null -> HoldDecisionRecord.ALREADY_DECIDED
+                        // held_at is null only on a row held by a build from before the column; its
+                        // last write was the move to HELD.
+                        !(entity.heldAt ?: entity.updatedAt).isAfter(at.minus(expiresAfter)) ->
+                            HoldDecisionRecord.EXPIRED
+                        else -> {
+                            entity.holdDecision = decision.name
+                            HoldDecisionRecord.ACCEPTED
+                        }
+                    }
+                }
+        }
+    }.awaitSuspending()
+
+    // A bulk update guarded by "is null": the first score wins, and neither the revision nor any
+    // other column of the aggregate is touched, so it cannot race a lifecycle write.
+    override suspend fun rememberFraudScore(paymentId: UUID, score: RecordedFraudScore) {
+        Panache.withTransaction {
+            update(
+                "admissionFraudVerdict = ?1, admissionFraudScore = ?2, admissionFraudRuleVersion = ?3 " +
+                    "where paymentId = ?4 and admissionFraudVerdict is null",
+                score.verdict,
+                score.score,
+                score.ruleVersion,
+                paymentId,
+            )
+        }.awaitSuspending()
+    }
 
     override suspend fun acceptForBooking(payment: DomesticPayment, outbox: OutboxMessage): DomesticPayment =
-        writeLifecycle(payment, outbox, acceptedBooking = true)
+        writeLifecycle(payment, listOf(outbox), acceptedBooking = true)
 
     override suspend fun completeBooking(
         payment: DomesticPayment,
         transactionId: UUID,
         outbox: OutboxMessage,
-    ): DomesticPayment = writeLifecycle(payment, outbox, provenTransactionId = transactionId)
+    ): DomesticPayment = writeLifecycle(payment, listOf(outbox), provenTransactionId = transactionId)
 
     private suspend fun writeLifecycle(
         payment: DomesticPayment,
-        outboxMessage: OutboxMessage,
+        outboxMessages: List<OutboxMessage>,
         acceptedBooking: Boolean = false,
         provenTransactionId: UUID? = null,
     ): DomesticPayment = Panache.withTransaction {
@@ -199,6 +377,19 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
                         "Stale domestic payment revision ${payment.aggregateRevision}; " +
                             "current revision is ${entity.aggregateRevision}"
                     }
+                    // A hold's review and decision are written without a revision bump (by the decision
+                    // consumer and by a request for the next review), so a write that ends a hold also
+                    // proves, under this lock, that the hold is still the one it evaluated. Otherwise a
+                    // release computed on review N could land after review N+1 was requested.
+                    if (entity.status == DomesticPaymentStatus.HELD.name) {
+                        check(
+                            (entity.holdReview ?: 1) == payment.holdReview &&
+                                entity.holdDecision == payment.holdDecision?.name,
+                        ) {
+                            "Hold of domestic payment ${payment.id} changed since it was evaluated " +
+                                "(review ${entity.holdReview}, decision ${entity.holdDecision})"
+                        }
+                    }
                     entity.applyBookingTransition(payment, acceptedBooking, provenTransactionId)
                     entity.status = payment.status.name
                     entity.rejectReason = payment.rejectReason?.name
@@ -207,8 +398,21 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
                     entity.settledAt = payment.settledAt
                     entity.updatedAt = payment.updatedAt
                     entity.aggregateRevision = payment.aggregateRevision
+                    // Hold facts only ever go from unset to set; a writer holding an older read of
+                    // the payment must not clear what another transaction recorded meanwhile.
+                    entity.heldAt = entity.heldAt ?: payment.heldAt
+                    if (entity.holdCaseRequestedAt == null && payment.holdCaseRequestedAt != null) {
+                        entity.holdCaseRequestedAt = payment.holdCaseRequestedAt
+                        entity.holdCaseReasons = payment.holdCaseReasons.toColumn()
+                    }
+                    // holdDecision is written by recordHoldDecision alone and never by a lifecycle write.
                 }
-                .flatMap { outboxRepository.persistWithinCurrentTransaction(outboxMessage).replaceWith(payment) }
+                // One after another on the one session; every row is part of this transaction.
+                .flatMap {
+                    outboxMessages.fold(Uni.createFrom().voidItem()) { written, message ->
+                        written.flatMap { outboxRepository.persistWithinCurrentTransaction(message).replaceWithVoid() }
+                    }.replaceWith(payment)
+                }
         }
     }.awaitSuspending()
 
@@ -236,9 +440,12 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
 
     private fun Throwable.isIdempotencyKeyViolation(): Boolean =
         generateSequence(this) { cause -> cause.cause.takeIf { it !== cause } }.any { cause ->
-            val hibernateConstraint = (cause as? org.hibernate.exception.ConstraintViolationException)?.constraintName
-            hibernateConstraint == IDEMPOTENCY_KEY_CONSTRAINT ||
-                cause.message?.contains(IDEMPOTENCY_KEY_CONSTRAINT) == true
+            val constraint = (cause as? org.hibernate.exception.ConstraintViolationException)?.constraintName
+            if (constraint != null && constraint in IDEMPOTENCY_CONSTRAINTS) return@any true
+            val sql = cause as? SQLException ?: return@any false
+            val message = sql.message.orEmpty()
+            val duplicateKey = sql.sqlState == UNIQUE_VIOLATION || message.contains("($UNIQUE_VIOLATION)")
+            duplicateKey && IDEMPOTENCY_CONSTRAINTS.any { message.contains("\"$it\"") }
         }
 
     private fun DelegatedSpendBindingEntity.mismatchWith(payment: DomesticPayment, debitOwnerPartyId: UUID): String? =
@@ -269,6 +476,10 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
         }
 
     private companion object {
-        const val IDEMPOTENCY_KEY_CONSTRAINT = "domestic_payments_idempotency_key_key"
+        const val UNIQUE_VIOLATION = "23505"
+        val IDEMPOTENCY_CONSTRAINTS = setOf(
+            "domestic_payments_idempotency_key_key",
+            "uq_domestic_payment_original_submission_key",
+        )
     }
 }

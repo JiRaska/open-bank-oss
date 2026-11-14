@@ -18,11 +18,19 @@ dependencies {
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.oidc.client.reactive.filter)
+    // Supervisory submission lifecycle: attempts + acknowledgements persisted (Flyway over JDBC,
+    // reads/writes over the reactive client).
+    implementation(libs.quarkus.hibernate.reactive.panache)
+    implementation(libs.quarkus.hibernate.reactive.panache.base)
+    implementation(libs.quarkus.reactive.pg.client)
+    implementation(libs.quarkus.flyway)
+    implementation(libs.quarkus.jdbc.postgresql)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)
+    testImplementation(project(":openbank-libs-testing"))
     // Consumer-driven contract test for the ledger trial-balance call (ADR-0063, git-pact).
     // Consumer side only — finrep is not a Pact provider for anyone, so no libs.pact.provider.
     testImplementation(libs.pact.consumer)

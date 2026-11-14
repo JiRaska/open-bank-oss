@@ -69,10 +69,10 @@ def main() -> int:
                     f"{name}: spec.window={spec.get('window')!r} does not match rules.yaml: "
                     f"slo {kind} window {window!r} — edit rules.yaml, then regenerate the Pyrra object."
                 )
-            label_service = obj.get("metadata", {}).get("labels", {}).get("openbank.io/money-path-service")
+            label_service = obj.get("metadata", {}).get("labels", {}).get("open-bank.tech/money-path-service")
             if label_service != service:
                 violations.append(
-                    f"{name}: metadata.labels['openbank.io/money-path-service']={label_service!r} "
+                    f"{name}: metadata.labels['open-bank.tech/money-path-service']={label_service!r} "
                     f"does not match the owning service {service!r}."
                 )
             if spec.get("alerting", {}).get("absent") is not False:
@@ -87,7 +87,7 @@ def main() -> int:
     # An SLO object naming a service that isn't (or no longer is) money-path is orphaned data.
     money_path_shorts = {short_name(s) for s in money_path_services}
     for name, obj in by_name.items():
-        label_service = obj.get("metadata", {}).get("labels", {}).get("openbank.io/money-path-service")
+        label_service = obj.get("metadata", {}).get("labels", {}).get("open-bank.tech/money-path-service")
         if label_service and short_name(label_service) not in money_path_shorts:
             violations.append(
                 f"{name}: labelled for {label_service!r}, which is not in rules.yaml: "

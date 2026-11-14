@@ -34,7 +34,14 @@ class SanctionsClearanceTest {
     private val entryRepo = mockk<SanctionsEntryRepository>()
     private val importer = mockk<SanctionsImportService>()
     private val now = Instant.parse("2026-10-29T12:00:00Z")
-    private val service = SanctionsService(repo, entryRepo, importer, Clock.fixed(now, ZoneOffset.UTC))
+    private val service =
+        SanctionsService(
+            repo,
+            entryRepo,
+            importer,
+            Clock.fixed(now, ZoneOffset.UTC),
+            ScreeningProfileEvaluator(NoJurisdictions),
+        )
     private val subjectId = UUID.randomUUID()
 
     init {

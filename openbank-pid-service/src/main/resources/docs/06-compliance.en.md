@@ -28,7 +28,7 @@
 |---|---|
 | Access (Art. 15) | `GET /api/v1/parties/{id}` returns the subject's record (encrypted birth number is not exposed) |
 | Rectification (Art. 16) | `PATCH /contact`, `/sync/bankid`, `/sync/rob` — all audit-logged via events |
-| Erasure (Art. 17) | **Restricted** — AMLD 6 (10 years after relationship termination) overrides erasure for identity/KYC data |
+| Erasure (Art. 17) | **Partial** — on `PARTY_ERASED` the party's personal columns and identifiers (encrypted RČ, blind indices, document numbers) are anonymised or deleted in place, the anonymised shell row is kept under an `erased_at` stamp, verification cases linked to the party are anonymised, and the party's RČ blind index is removed from unlinked cases (applicant snapshots kept as possible fraud evidence; a REJECT block survives under an opaque key, which is still personal data, see Retained fraud-block key below). Known gaps: no automated purge of that key at the end of its retention period; the erased person's own unlinked cases (DISTINCT_NEW, open, name-keyed) keep the applicant snapshot because nothing ties them to the party; no backfill of erasures published before the consumer's first poll; no metric or alert on the outcome. The AML record itself is retained by kyc-service. See `04-data` (Erasure) |
 | Restriction (Art. 18) | `PATCH /status` → `SUSPENDED`; relationships can be terminated |
 | Portability (Art. 20) | personal data is structured JSON via the read API (no dedicated export endpoint today — TBD) |
 | Object (Art. 21) | N/A (no marketing/profiling processing in this service) |
@@ -47,9 +47,22 @@ The Czech birth number is a sensitive national identifier. It is stored **only**
 
 | Record | Retention after relationship end |
 |---|---|
-| Party identity + KYC/AML | 10 years (AMLD 6 Art. 40, Czech AML Act) |
+| Party identity + KYC/AML | 10 years (AMLD 6 Art. 40, Czech AML Act) — except after `PARTY_ERASED`, where personal data is anonymised at once and only the shell remains |
 | ID documents | per AML Act retention |
 | `pid_outbox` SENT rows | operational only, prunable |
+| Retained fraud-block key (`RNX:`) and its REJECT decision | until the applicable AML record-keeping period ends (see below); **no automated purge yet** |
+
+### Retained fraud-block key (`RNX:`)
+
+When a party is erased, a verification case that four eyes decided REJECT against that person's national identifier keeps its decision under an opaque key (`04-data`, Erasure). The key is a deterministic hash of the erased person's national-id blind index, so it is **still personal data**. This reference design retains it on the following basis and within the following bound.
+
+- **Lawful basis for retaining it despite Art. 17**:
+  - Art. 17(3)(b): compliance with a legal obligation, namely AML/CFT record-keeping of customer identification and of refused onboardings. Today that is Directive (EU) 2015/849 Art. 40; from 10 July 2027 it is Regulation (EU) 2024/1624 Art. 77. The national transposition sets the period.
+  - Art. 17(3)(e): establishment, exercise or defence of legal claims.
+- **Purpose**: limited to blocking a repeat of a rejected fraudulent identity claim. The key is consulted only by identity resolution to keep that block in force. It has no other use.
+- **Bound**: the key and the REJECT decision it carries must be deleted when the retention period of the applicable AML record-keeping obligation ends. The EU minimum is 5 years after the end of the business relationship or the occasional transaction; the period set by the applicable national law applies.
+- **Known gap**: **no automated purge exists yet**. Nothing in pid deletes the key or the decision when the period ends. This is a follow-up, listed with the other known gaps in `04-data` (Not covered).
+- **Who decides**: the controller of a deployment confirms the basis and the period for its jurisdiction. This repository documents the reference design; it is not legal advice for any particular deployment.
 
 ## DORA mapping (Reg. (EU) 2022/2554)
 

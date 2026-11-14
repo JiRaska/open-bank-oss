@@ -5,7 +5,11 @@
 package com.openbank.fx.infrastructure.client
 
 import com.openbank.fx.application.port.out.FraudScoreCommand
+import com.openbank.fx.application.port.out.ScreeningEntityType
+import com.openbank.fx.application.port.out.ScreeningSubject
+import com.openbank.libs.fincrime.CounterpartyRef
 import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.InitiationMode
 import com.openbank.libs.fincrime.ScreeningMatchStatus
 import com.openbank.libs.fincrime.ScreeningRole
 import io.mockk.every
@@ -29,7 +33,11 @@ class RailWireVocabularyTest {
         val invalid = listOf(null, "", "UNRECOGNISED").map { it to ScreeningMatchStatus.ESCALATED }
         for ((remote, expected) in valid + padded + invalid) {
             every { client.screen(any()) } returns Uni.createFrom().item(ScreenResponse(status = remote))
-            val actual = adapter.screen("Synthetic subject", ScreeningRole.DEBTOR, "wire-contract").status
+            val actual = adapter.screen(
+                ScreeningSubject(listOf("Synthetic subject"), ScreeningEntityType.INDIVIDUAL),
+                ScreeningRole.DEBTOR,
+                "wire-contract",
+            ).status
             assertThat(actual).describedAs("remote=%s", remote).isEqualTo(expected)
         }
     }
@@ -44,6 +52,8 @@ class RailWireVocabularyTest {
             rail = "SYNTHETIC",
             accountId = null,
             counterpartyId = null,
+            counterparty = CounterpartyRef.fromIban("DE89370400440532013000"),
+            initiationMode = InitiationMode.CUSTOMER_PRESENT,
         )
         val valid = FraudVerdict.entries.flatMap { listOf(it.name to it, it.name.lowercase() to it) }
         val padded = FraudVerdict.entries.flatMap {

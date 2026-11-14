@@ -33,8 +33,12 @@ ml_systems:
     basis: >-
       Real-time transaction fraud scoring (ALLOW/CHALLENGE/REVIEW/DECLINE). Fraud prevention
       is not Annex III creditworthiness; the deterministic rule layer is the permanent decision
-      floor (ADR-0139) and the service fails open behind a flag — it can add friction, never
-      autonomously deny a natural person a service.
+      floor (ADR-0139) and the service fails open behind a flag. The ONNX model is shadow-only;
+      the rule-based verdict is NOT advisory everywhere: the domestic payment rail enforces it
+      (`OPENBANK_DOMESTIC_FRAUD_ENFORCEMENT_ENABLED=true` in the payments GitOps manifest;
+      `FraudGate` rejects a DECLINE verdict and holds CHALLENGE/REVIEW or an unscored payment), so
+      it can automatically reject a domestic payment. Where it is enforced, human review of a
+      rejection is tracked in #15751; no other rail is declared to enforce it here.
 
   - id: ml-decisioning-platform
     adr: "ADR-0139, ADR-0140"
@@ -50,7 +54,8 @@ ml_systems:
       never honoured; the caller degrades to the deterministic rule floor — and its sole consumer
       is fraud scoring, so it makes no decision on a natural person. Point-in-time correctness
       (ADR-0140) removes train/serve skew by construction. `deployed: false` here means "acts on
-      its output" — the model runs but its verdict is never enforced.
+      its output" — the ONNX model runs but its verdict is never enforced (the separate rule-based
+      fraud verdict is enforced on the domestic rail, see `fraud-real-time-scoring`).
 
   - id: model-registry-provenance
     adr: "ADR-0141"

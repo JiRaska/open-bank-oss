@@ -237,6 +237,27 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: observability
+    # ci-metrics.open-bank.tech: the authenticated OTLP ingest for CI quality metrics
+    # (observability/httproute-ci-metrics-gateway.yaml). Its own Certificate `ci-metrics-edge-tls`
+    # (not pinned), admitted by the ReferenceGrant ci-metrics-edge-gateway-tls in that file, which
+    # MUST be synced before this listener lands (the Phase-1 RefNotPermitted lesson): merge this
+    # listener in a LATER change than the route file.
+    - name: https-ci-metrics
+      protocol: HTTPS
+      port: 443
+      hostname: ci-metrics.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: ci-metrics-edge-tls
+            namespace: observability
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
     # customer.open-bank.tech (ADR-0324 Phase 4, customer-edge/httproute.yaml). Serves the SAME
     # Secret the nginx Ingress does, `customer-edge-tls`: the mobile app pins this host's SPKI
     # (ADR-0066 S3, rotation Never), so a new certificate would break every installed app.

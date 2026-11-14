@@ -4,4 +4,4 @@ metadata:
   name: docs-truth-agent
   labels:
     app.kubernetes.io/part-of: openbank
-    openbank.io/component: docs-truth-agent
+    open-bank.tech/component: docs-truth-agent

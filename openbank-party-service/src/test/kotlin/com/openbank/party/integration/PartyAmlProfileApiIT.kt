@@ -222,7 +222,7 @@ class PartyAmlProfileApiIT {
     @Test
     @Order(4)
     @TestSecurity(user = "staff-reader", roles = ["ROLE_VIEWER"])
-    fun `staff read the current version and the party GET exposes the derived facts`() {
+    fun `staff read the current version and the general party GET withholds the derived facts`() {
         val id = requireNotNull(personId)
         Given { this } When { get("/api/v1/parties/$id/aml-profile") } Then {
             statusCode(200)
@@ -233,9 +233,10 @@ class PartyAmlProfileApiIT {
         }
         Given { this } When { get("/api/v1/parties/$id") } Then {
             statusCode(200)
-            body("pepFlag", equalTo(true))
-            body("pepCategory", equalTo("MP"))
-            body("crsStatus", equalTo("REPORTABLE"))
+            body("piiMasked", equalTo(true))
+            body("pepFlag", equalTo(null))
+            body("pepCategory", equalTo(null))
+            body("crsStatus", equalTo(null))
         }
     }
 
@@ -354,7 +355,10 @@ class PartyAmlProfileApiIT {
             ps.setObject(1, id)
             assertThat(ps.executeUpdate()).isEqualTo(1)
         }
-        Given { this } When { get("/api/v1/parties/$id") } Then {
+        Given {
+            contentType("application/json")
+            body("""{"reason":"KYC_REVIEW"}""")
+        } When { post("/api/v1/parties/$id/pii-reveal") } Then {
             statusCode(200)
             body("pepFlag", equalTo(true))
             body("fatcaStatus", equalTo(null))

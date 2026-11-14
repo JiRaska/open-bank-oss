@@ -241,6 +241,14 @@ openbank:
       max-attempts: 5
       min-age-minutes: 10
       batch-limit: 20
+    # ADR-0374: the payment admission chain (standing, sanctions, fraud, in that order, with HELD
+    # instead of a silent pass when a control cannot answer). OFF by default; while off the workflow
+    # follows the path it had before and no payment is ever HELD. Switching it on is its own
+    # approved release, and needs `fraud-hold-resolution-in` enabled in the same change, or every
+    # hold ends by expiry.
+    admission:
+      enabled: ${OPENBANK_DOMESTIC_ADMISSION_ENABLED:false}
+      budget: PT30S
     scheme-submission:
       # ADR-0104 D4 Czech clearing pilot. OFF by default; when off, behaviour is exactly as before.
       enabled: ${DOMESTIC_SCHEME_SUBMISSION_ENABLED:false}

@@ -454,7 +454,7 @@ metadata:
   namespace: messaging
   labels:
     app.kubernetes.io/part-of: payments
-    openbank.io/purpose: kafka-mtls-cert-projection
+    open-bank.tech/purpose: kafka-mtls-cert-projection
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

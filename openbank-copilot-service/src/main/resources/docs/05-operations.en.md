@@ -44,3 +44,16 @@ This service's `application.yaml` does not declare the HTTP security response he
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
 
 `CopilotErrorBodySpecConformanceIT` checks that the 501, 403, 404 and 422 error responses match the error-body schema in `openapi.yaml` (#14525). The authenticated cases use `@TestSecurity`, so the module carries `quarkus-test-security` as a test-only dependency; nothing in the shipped service changes.
+
+## AI-generated reply marker (EU AI Act Art. 50(1))
+
+Every `ChatReply` from the non-streaming `POST /api/v1/copilot/chat` (answers, refusals and error fallbacks alike) carries
+`aiGenerated: true` and a short Czech `disclosure` string (API contract 1.6.0, additive). Clients must make
+the marker visible to the customer. Not done yet: the system-prompt rule to state it is an AI when asked
+(needs a new prompt version and a live eval re-recording) and rendering the marker in the mobile app.
+
+Stream (`POST /api/v1/copilot/chat/stream`): the same marker is sent as response headers on every outcome,
+`X-AI-Generated: true` and `X-AI-Disclosure` (the same Czech text, UTF-8 percent-encoded), before the first
+event (API contract 1.7.0, additive). Headers are used because existing stream clients render every
+`data:` line as reply text, so an inline element would be shown to the customer, while an unread header is
+ignored. Not done yet: localisation of the disclosure, and reading the headers in the mobile app.

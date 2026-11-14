@@ -215,18 +215,3 @@ class GoldenScenarioRunner(private val interpreter: ProductInterpreter = Product
         }
     }
 }
-
-/** The committed golden set: every scenario under `product-golden/`, listed in its `index.txt`. */
-object GoldenScenarios {
-    private const val INDEX = "/product-golden/index.txt"
-
-    fun names(): List<String> = text(INDEX).lines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }
-
-    fun load(name: String): GoldenScenario = GoldenScenario.parse(text("/product-golden/$name"))
-
-    fun all(): List<GoldenScenario> = names().map { load(it) }
-
-    private fun text(path: String): String =
-        checkNotNull(GoldenScenarios::class.java.getResourceAsStream(path)) { "missing classpath resource $path" }
-            .readBytes().toString(Charsets.UTF_8)
-}

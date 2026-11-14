@@ -1,0 +1,264 @@
+{
+  "consumer": {
+    "name": "openbank-kyb-service"
+  },
+  "interactions": [
+    {
+      "comments": {
+        "testname": "com.openbank.kyb.contract.KybSanctionsMonitoringPactConsumerTest.a finding owned by another service is not acted on(List)"
+      },
+      "contents": {
+        "content": {
+          "detection": "LIST_DELTA",
+          "findingId": "3b9a6f52-8c1d-4e7a-b2f0-6d5c4e3f2a10",
+          "listEntryRef": "id:pact-monitoring-entry-1",
+          "listEntryVersion": "0f0f",
+          "listType": "OFAC_SDN",
+          "matchKind": "SANCTIONS",
+          "matchScore": 0.95,
+          "matchStatus": "POTENTIAL_HIT",
+          "ownerService": "openbank-kyb",
+          "subjectRef": "7c1d5b0e-2a54-4c8b-9f0e-5d1e6a7b8c03"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "a MONITORED_SUBJECT_MATCHED event",
+      "key": "d7822cfa",
+      "matchingRules": {
+        "body": {
+          "$.detection": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.findingId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.listEntryRef": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.listEntryVersion": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.listType": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.matchKind": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.matchScore": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "decimal"
+              }
+            ]
+          },
+          "$.matchStatus": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "ce-type": "MONITORED_SUBJECT_MATCHED",
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a subject registered by kyb-service matches a changed list entry"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "testname": "com.openbank.kyb.contract.KybSanctionsMonitoringPactConsumerTest.a withdrawal is answered 204(MockServer)"
+      },
+      "description": "DELETE a monitored subject whose business case has ended",
+      "key": "e50564bc",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "kyb-service has registered a subject for ongoing monitoring"
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v3/sanctions/monitored-subjects/7c1d5b0e-2a54-4c8b-9f0e-5d1e6a7b8c02"
+      },
+      "response": {
+        "status": 204
+      },
+      "transport": "http",
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "testname": "com.openbank.kyb.contract.KybSanctionsMonitoringPactConsumerTest.a registration without an identity is refused with 401(MockServer)"
+      },
+      "description": "PUT a monitored subject with no identity at all",
+      "key": "6a6ad7e7",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "entityType": "INDIVIDUAL",
+            "name": "Quentin Exampleson"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "method": "PUT",
+        "path": "/api/v3/sanctions/monitored-subjects/7c1d5b0e-2a54-4c8b-9f0e-5d1e6a7b8c01"
+      },
+      "response": {
+        "status": 401
+      },
+      "transport": "http",
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "testname": "com.openbank.kyb.contract.KybSanctionsMonitoringPactConsumerTest.a registration is acknowledged for the reference and under the caller's own client(MockServer)"
+      },
+      "description": "PUT a related party of an approved business case for ongoing monitoring",
+      "key": "8edda823",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "ongoing monitoring is enabled and the caller is kyb-service under its own service account"
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "entityType": "INDIVIDUAL",
+            "name": "Quentin Exampleson"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "method": "PUT",
+        "path": "/api/v3/sanctions/monitored-subjects/7c1d5b0e-2a54-4c8b-9f0e-5d1e6a7b8c01"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "ownerService": "openbank-kyb",
+            "subjectRef": "7c1d5b0e-2a54-4c8b-9f0e-5d1e6a7b8c01"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "status": 201
+      },
+      "transport": "http",
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "testname": "com.openbank.kyb.contract.KybSanctionsMonitoringPactConsumerTest.a registration through the shared client is refused with 403(MockServer)"
+      },
+      "description": "PUT a monitored subject as the fleet's shared client",
+      "key": "6270e93b",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "the caller presents the fleet's shared client"
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "entityType": "INDIVIDUAL",
+            "name": "Quentin Exampleson"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "method": "PUT",
+        "path": "/api/v3/sanctions/monitored-subjects/7c1d5b0e-2a54-4c8b-9f0e-5d1e6a7b8c01"
+      },
+      "response": {
+        "status": 403
+      },
+      "transport": "http",
+      "type": "Synchronous/HTTP"
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "4.0"
+    },
+    "plugins": [
+
+    ]
+  },
+  "provider": {
+    "name": "openbank-sanctions-service"
+  }
+}

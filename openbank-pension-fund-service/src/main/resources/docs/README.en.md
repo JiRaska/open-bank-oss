@@ -140,3 +140,7 @@ For rollback, restore callers before reverting to a v1-only provider, or retain 
 ## Accounting close evidence
 
 NAV publication retains noncash management-fee delivery intents for separately bound fund and company books. Delivery is disabled by default. Each destination retains its own receipt; a pending destination refuses daily completion, even after close. Retrying a fee uses its NAV id as the required Idempotency-Key. The accounting-day read API exposes retained evidence, not permission to activate enforcement. Full-chart independent reconciliation and another accountant's approval remain required in each book. ADR-0365 mappings need professional approval, reviewed opening balances and a complete live monthly cycle before rollout. Packaged E2E fixtures are synthetic and never qualify that month.
+
+## Mutation testing
+
+The build applies the pitest plugin to the domain package of this money-path service. It runs only from the weekly and manual `pitest.yml` workflow, as an advisory score (ADR-0063), and is not part of `check` or any per-PR gate. Runtime behaviour, the API and the resolved runtime classpath are unchanged.

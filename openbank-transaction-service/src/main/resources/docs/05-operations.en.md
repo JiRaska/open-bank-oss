@@ -78,6 +78,18 @@ Exact latency SLO numbers are TBD until measured in the sandbox; the saga's down
 ### Rail settlement has no Kafka path
 - Settlement from the payment rails reaches this service only over REST (sepa-payment `SettlementAdapter` calls transaction-service, ADR-0108). The former `payment.scheme-accepted` consumer, its channel, topic, DLQ and msg-override ConfigMap were removed on 2026-10-17 because no service ever produced to that topic. If a settlement is missing, look at the calling rail's REST client and the OIDC/OPA decision, not at Kafka lag or a DLQ.
 
+### Synthetic transfer origin
+
+Transaction initiation stores the verified synthetic origin on the transaction and its outbox event.
+The payment worker reloads that value before selecting the ledger posting route and carries it into
+terminal events and reversals. Reusing an idempotency key across synthetic and ordinary origins
+returns HTTP 409. Existing transactions have ordinary origin.
+
+Before configuring a synthetic transfer journey, verify that every payment worker can read the new
+column and that ledger serves the synthetic posting route for the trusted transaction workload.
+During rollback, stop synthetic initiation and drain pending synthetic workflows with a compatible
+worker before running a version that does not understand the origin column.
+
 ## Deploy
 
 GitOps via ArgoCD (sandbox tracks the deploy branch). For image-tag merge conflicts in gitops manifests, take `--ours` (the freshly-built tag), never blind `--theirs`. Verified-signature ruleset requires the commit email match the registered GPG key.
@@ -89,3 +101,13 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Synthetic own-account transfer admission (#7284)
+
+`POST /api/v1/transactions/synthetic-transfer` requires the verified `openbank-edge` workload
+and the request filter's synthetic decision. It derives a fixed CZK 0.01 transfer and the
+own-account exemption from the fixture request. The party, current Europe/Prague booking date
+and direction form the daily idempotency key. The Edge sends that key as `Idempotency-Key`
+and Transaction rejects any mismatch. A new outbound booking closes 305 seconds before bank
+midnight, allowing the 300-second canary deadline plus a 5-second HTTP call. Same-day
+returns can still book in that window. The durable origin controls the synthetic ledger route.

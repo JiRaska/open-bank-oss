@@ -172,6 +172,9 @@ class TerminationServiceTest {
         every { ledger.post(capture(postingSlot)) } returns Uni.createFrom().item(Unit)
         stubPack()
 
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
         val closed = service.settle(loan.id, "officer-2").await().indefinitely()
 
         assertThat(closed.status).isEqualTo(LoanStatus.CLOSED)
@@ -181,6 +184,7 @@ class TerminationServiceTest {
         )
         assertThat(postingSlot[0].amount).isEqualTo(eur("12000.00"))
         assertThat(postingSlot[1].amount).isEqualTo(eur("120.00"))
+        assertExposureEnd(emitted, LoanStatus.CLOSED)
     }
 
     @Test
@@ -295,6 +299,7 @@ class TerminationServiceTest {
         val payload = ObjectMapper().readTree(withdrawn.payload)
         assertThat(payload.get("sourceService")?.asText()).isEqualTo("lending")
         assertThat(payload.get("eventType")?.asText()).isEqualTo("loan.withdrawn")
+        assertExposureEnd(emitted, LoanStatus.UNWOUND)
     }
 
     @Test
@@ -312,6 +317,14 @@ class TerminationServiceTest {
         val payload = ObjectMapper().readTree(accelerated.payload)
         assertThat(payload.get("sourceService")?.asText()).isEqualTo("lending")
         assertThat(payload.get("eventType")?.asText()).isEqualTo("loan.accelerated")
+        assertThat(emitted.map { it.eventType }).doesNotContain(LOAN_EXPOSURE_FACT_EVENT)
+    }
+
+    private fun assertExposureEnd(emitted: List<LendingOutboxMessage>, status: LoanStatus) {
+        val fact = ObjectMapper().readTree(emitted.single { it.eventType == LOAN_EXPOSURE_FACT_EVENT }.payload)
+        assertThat(fact.path("kind").asText()).isEqualTo("ENDED")
+        assertThat(fact.path("loanStatus").asText()).isEqualTo(status.name)
+        assertThat(fact.path("effectiveAt").asText()).isEqualTo(clock.instant().toString())
     }
 
     @Test

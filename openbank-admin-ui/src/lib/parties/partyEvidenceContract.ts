@@ -21,6 +21,8 @@ export interface PartyEvidence {
   address?: { line1: string; city: string; postalCode: string; countryCode: string }
   createdAt: string
   updatedAt: string
+  piiMasked: boolean
+  piiRevealAllowed: boolean
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -31,8 +33,12 @@ function isText(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
-function isOptionalText(value: unknown): value is string | undefined {
-  return value === undefined || isText(value)
+function isOptionalText(value: unknown): value is string | null | undefined {
+  return value == null || isText(value)
+}
+
+function optionalText(value: unknown): string | undefined {
+  return isText(value) ? value : undefined
 }
 
 function isTimestamp(value: unknown): value is string {
@@ -60,10 +66,12 @@ export function parsePartyEvidence(value: unknown, requestedId: string): PartyEv
 
   return {
     id: requestedId, partyType: String(value.partyType), status: String(value.status),
-    legalName: value.legalName, tradingName: value.tradingName as string | undefined,
-    email: value.email, phone: value.phone as string | undefined, kycStatus: String(value.kycStatus),
-    taxId: value.taxId as string | undefined, registrationNumber: value.registrationNumber as string | undefined,
-    nationality: value.nationality as string | undefined, dateOfBirth: value.dateOfBirth as string | undefined,
+    legalName: value.legalName, tradingName: optionalText(value.tradingName),
+    email: value.email, phone: optionalText(value.phone), kycStatus: String(value.kycStatus),
+    taxId: optionalText(value.taxId), registrationNumber: optionalText(value.registrationNumber),
+    nationality: optionalText(value.nationality), dateOfBirth: optionalText(value.dateOfBirth),
     address, createdAt: value.createdAt, updatedAt: value.updatedAt,
+    piiMasked: value.piiMasked === true,
+    piiRevealAllowed: value.piiRevealAllowed === true,
   }
 }

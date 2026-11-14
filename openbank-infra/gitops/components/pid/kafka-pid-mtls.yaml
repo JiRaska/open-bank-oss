@@ -55,6 +55,40 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # GDPR Art. 17 (#15755, ADR-0118): consume PARTY_ERASED from party-service's topic
+      # (channel `party-events-in`; NOT the unprefixed `party.events` pid itself publishes).
+      - resource:
+          type: topic
+          name: openbank.party.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # Granted under BOTH group names on purpose (#8877 pattern, .github/CLAUDE.md "a new Kafka
+      # channel is TWO deploys"): `pid-service-party-erasure` is the group the msg-override
+      # ConfigMap sets in the follow-up that lands once an image carrying the channel is deployed;
+      # `openbank-pid-service` is the fallback group id SmallRye uses until then
+      # (quarkus.application.name). Without the fallback grant every poll answers
+      # GroupAuthorizationException, silently.
+      - resource:
+          type: group
+          name: pid-service-party-erasure
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-pid-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      # #5745: dead-letter topic for the `party-events-in` channel. Without Write here the DLQ send
+      # itself fails and the consumer wedges on the very failure it was meant to park.
+      - resource:
+          type: topic
+          name: openbank.dlq.pid.party-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
 ---
 # ── ExternalSecret: pid-service keystore ────────────────────────────────────
 # Projects the Strimzi-minted pid-service Secret from `messaging` into `pid`.

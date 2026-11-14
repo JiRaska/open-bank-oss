@@ -9,7 +9,7 @@
 // plus two operator reads for participant changes. The contract under test below is
 // PENDING_ACTIVATION, which also exercises the cooling-off notice the lifecycle records.
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 const ID = '11111111-2222-4333-8444-555555555551'

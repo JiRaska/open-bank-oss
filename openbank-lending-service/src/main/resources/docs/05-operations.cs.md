@@ -182,3 +182,17 @@ měsíce a ceny čtení při skutečném objemu dat.
 
 
 Pozorované povinnosti úloh se ukládají odděleně od dokladů skutečných běhů. Vypnutí nebo přesun scheduleru po odmítnutí chybějící práce povinnost neodstraní, ani po restartu. Vyřeší ji skutečně dokončený běh nebo doložená výjimka v ledgeru. Pozorování nevyrábí dokončené běhy ani zpětně neodvozuje nikdy nepozorované plány. Rollback zachová tabulku povinností i běhů.
+
+## Údaje o životním cyklu úvěru s datem účinnosti (#9890)
+
+Lending publikuje událost `loan.exposure_fact` ve verzi 1 do stávajícího tématu událostí Lending.
+Outbox ukládá zaplacení splátky, změnu splátkového kalendáře a konečné splacení, odpis či storno
+ve stejné lokální transakci jako zdrojovou změnu. Událost o čerpání obsahuje původní čas zaúčtování
+a samostatný čas potvrzení převodu prostředků. Lending ji uloží ve stejné outboxové transakci jako
+původní událost o čerpání, jakmile je zaúčtován úvěrový zápis a převod prostředků klientovi vrátí
+stav `COMPLETED`. Stejná kontrola platí při opakování požadavku se stejným klíčem. Zaplacená splátka obsahuje
+uhrazenou jistinu a úrok podle kalendáře a zbývající jistinu podle kalendáře. Oznámení o ukončení
+a zesplatnění mohou předcházet konečnému splacení.
+
+AnaCredit ukládá tyto údaje odděleně. Pro kontrolu úvěrů vzniklých dříve jsou potřeba samostatně
+ověřené historické podklady. Chybějící vstupy pro výkaz eviduje #9890.

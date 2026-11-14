@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v1.1.2...document-service-v1.2.0) (2026-11-12)
+
+
+### Features
+
+* **document:** ownership projection for delegated object grants, with ADR-0375 and its D4 gate ([#15824](https://github.com/JiRaska/open-bank-oss/issues/15824)) ([f15f8c1](https://github.com/JiRaska/open-bank-oss/commit/f15f8c133d3afbabd9bc34b65749559c1bc8eaf3))
+
 ## [1.1.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v1.1.1...document-service-v1.1.2) (2026-11-06)
 
 

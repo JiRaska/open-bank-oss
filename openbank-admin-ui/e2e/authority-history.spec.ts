@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInWithRoles } from './helpers/auth'
 
 const id = '11111111-1111-4111-8111-111111111111'

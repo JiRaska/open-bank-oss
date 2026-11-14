@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Document Service API
-  version: 1.6.0
+  version: 1.7.0
   description: >-
     Document Management — templates, rendering, storage with lifecycle/retention metadata,
     and e-signature ceremonies. Not on the synchronous money path (emits events, never a
@@ -211,6 +211,38 @@ paths:
       responses:
         '200':
           description: Document metadata
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/documents/{id}/owner:
+    get:
+      tags: [Documents]
+      summary: Get the owning party of a document (ownership projection, ADR-0375 D5)
+      description: >
+        Returns the owning party and nothing else, under its own authorization action
+        `document.verifyOwnership` rather than `document.read`. delegation-service calls this
+        before minting an OBJECT_READ grant over a document; the authority to mint a delegation
+        must not also permit reading the document. 404 covers both an unknown document and one
+        with no owner recorded — a caller treats them identically and the distinction would leak
+        existence.
+      operationId: getDocumentOwner
+      parameters:
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '200':
+          description: The document's owning party
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, partyId]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  partyId:
+                    type: string
+                    format: uuid
         '404':
           $ref: '#/components/responses/NotFound'
 

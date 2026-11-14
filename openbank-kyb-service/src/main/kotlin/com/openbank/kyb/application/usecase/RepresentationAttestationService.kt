@@ -139,6 +139,11 @@ open class RepresentationAttestationService : RepresentationAttestationUseCase {
                 "the register text changed since this form was opened; re-read it and confirm again",
             )
         }
+        if (cmd.confirmedMode == RepresentationMode.JOINT_ALL) {
+            require(cmd.confirmedSigners == extract.representatives.size) {
+                "joint-all mode requires every registered representative"
+            }
+        }
         val now = Instant.now(clock)
         val attestation = RepresentationAttestation(
             id = Ids.newId(),
@@ -157,6 +162,7 @@ open class RepresentationAttestationService : RepresentationAttestationUseCase {
             attestedBy = cmd.operator,
             attestedAt = now,
             note = cmd.note,
+            confirmedMode = cmd.confirmedMode,
         )
         val saved = attestations.attest(attestation)
         log.infof(

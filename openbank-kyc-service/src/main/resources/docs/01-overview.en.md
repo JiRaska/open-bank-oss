@@ -12,7 +12,7 @@ A case is opened either by an operator (`POST /api/v1/kyc/cases`) or automatical
 
 ## What the service **does NOT** do
 
-- ❌ Does not run the actual sanctions / PEP screening — it records the **result** of a screen; the screening engine is `sanctions-service` / `aml-service`.
+- ❌ Does not match names against lists itself — when a case opens it asks `sanctions-service` for a customer screen and records the **result**; the screening engine is `sanctions-service`.
 - ❌ Does not own customer master data (name, birth number, address) — that is `party-service`. KYC stores only the `partyId` and compliance findings.
 - ❌ Does not open bank accounts — that is `account-service`. KYC clearance is a precondition consumed by the onboarding flow.
 - ❌ Does not perform per-request idempotency caching — uniqueness is enforced at the domain level (one active case per party).
