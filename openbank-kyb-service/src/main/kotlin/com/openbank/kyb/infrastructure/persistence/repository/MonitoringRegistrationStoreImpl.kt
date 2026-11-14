@@ -109,13 +109,20 @@ class MonitoringRegistrationStoreImpl(private val pool: Pool) : MonitoringRegist
         )
     }
 
-    override suspend fun claimNext(now: Instant, leaseUntil: Instant): MonitoringRegistration? = pool.preparedQuery(
+    override suspend fun claimNext(
+        now: Instant,
+        leaseUntil: Instant,
+        withdrawalsOnly: Boolean,
+    ): MonitoringRegistration? {
+        val claimable = if (withdrawalsOnly) "$CLAIMABLE AND $HELD_BY_REGISTRY_WITHDRAWAL" else CLAIMABLE
         // The outer condition repeats the inner one: of two relays that picked the same row,
         // the second waits for the first's update, sees the lease and takes nothing.
-        "UPDATE kyb_monitored_subjects SET claimed_until = $2 WHERE id = " +
-            "(SELECT id FROM kyb_monitored_subjects WHERE $CLAIMABLE ORDER BY next_attempt_at, id LIMIT 1) " +
-            "AND $CLAIMABLE RETURNING $ROW",
-    ).execute(Tuple.of(now.utc(), leaseUntil.utc())).awaitSuspending().firstOrNull()?.let(::registration)
+        return pool.preparedQuery(
+            "UPDATE kyb_monitored_subjects SET claimed_until = $2 WHERE id = " +
+                "(SELECT id FROM kyb_monitored_subjects WHERE $claimable ORDER BY next_attempt_at, id LIMIT 1) " +
+                "AND $claimable RETURNING $ROW",
+        ).execute(Tuple.of(now.utc(), leaseUntil.utc())).awaitSuspending().firstOrNull()?.let(::registration)
+    }
 
     override suspend fun markSynced(registration: MonitoringRegistration, now: Instant): Boolean {
         val recorded = pool.preparedQuery(
@@ -243,7 +250,11 @@ class MonitoringRegistrationStoreImpl(private val pool: Pool) : MonitoringRegist
          */
         const val HELD = "id = $1 AND generation = $2 AND sync_state = 'PENDING' AND claimed_until = $3"
 
-        const val SETTLED = "desired = 'REGISTERED' AND sync_state IN ('SYNCED', 'REFUSED')"
+        /** Settled either way: a registration or a withdrawal that was confirmed, or refused. */
+        const val SETTLED = "sync_state IN ('SYNCED', 'REFUSED')"
+
+        /** A withdrawal of a subject the registry has held: the row was delivered at least once. */
+        const val HELD_BY_REGISTRY_WITHDRAWAL = "desired = 'WITHDRAWN' AND synced_at IS NOT NULL"
 
         /**
          * The case's last writer did not bring this store up to date, and there is something to

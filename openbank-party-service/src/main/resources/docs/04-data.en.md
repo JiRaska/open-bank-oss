@@ -128,3 +128,12 @@ Then `PARTY_ERASED` is emitted so downstream consumers can erase their projectio
 | `party_outbox` | until SENT + troubleshooting window | replay / audit |
 
 > The 10-year (`governance.yaml`) vs 2555-day (`openbank.gdpr.retention-days`) values are two different knobs — declared policy vs the configured property default. Reconcile before go-live (TBD).
+
+## Statutory representation evidence
+
+Party stores an immutable revision tied to an attestation ID and rule-text
+hash. It records the exact threshold, office requirements, eligible human party
+IDs and the matching statutory mandates. The mandate digest binds the case's shared
+agreement ceremony reference to each separate verified human. The latest published revision is
+available to delegation-service when those mandates are still active. The
+consumer must also check the source attestation with KYB before using it.

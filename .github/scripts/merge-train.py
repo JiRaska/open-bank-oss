@@ -1843,16 +1843,19 @@ def _note_ratelimit(headers) -> None:
 
 def api_stats_line(mode: str) -> str:
     return (f"merge-train {mode}: api requests sent={API_STATS['sent']} memo_hits={API_STATS['memo_hits']} "
+            f"prefetched_heads={API_STATS.get('prefetched', 0)} "
             f"x-ratelimit-used={API_STATS['used'] or '?'} remaining={API_STATS['remaining'] or '?'} "
             f"resource={API_STATS['resource'] or '?'}")
 
 
-def api(method: str, path: str, body: dict | None = None, token: str | None = None) -> tuple[int, object]:
-    """`token` overrides GH_TOKEN for this one call (only update_branch passes one)."""
+def api(method: str, path: str, body: dict | None = None, token: str | None = None,
+        graphql_read: bool = False) -> tuple[int, object]:
+    """`token` overrides GH_TOKEN for this one call (only update_branch passes one). `graphql_read`
+    marks a POST /graphql that is a pure query: it writes nothing, so it leaves the GET memo intact."""
     data = json.dumps(body).encode() if body is not None else None
     memo = (method == "GET" and _MEMO_SCOPE[0] > 0 and not _DECIDING[0]
             and GET_MEMO_RE.match(path) is not None)
-    if method != "GET":
+    if method != "GET" and not (graphql_read and path == "/graphql"):
         _GET_MEMO.clear()
     elif memo and path in _GET_MEMO:
         API_STATS["memo_hits"] += 1
@@ -1865,7 +1868,8 @@ def api(method: str, path: str, body: dict | None = None, token: str | None = No
         API_STATS["sent"] += 1
         try:
             status, raw, _h = _http_open(req, 30)
-            _note_ratelimit(_h)
+            if path != "/graphql":     # the GraphQL bucket's headers must not stand in for core's
+                _note_ratelimit(_h)
             if memo and status == 200:
                 _GET_MEMO[path] = raw or b"null"
             return status, json.loads(raw or b"null")
@@ -1892,6 +1896,86 @@ def get(path: str) -> object:
     if code != 200:
         raise SystemExit(f"::error::GET {path} -> {code}: {data}")
     return data
+
+
+PREFETCH_BATCH = 8        # 20 heads per query hit RESOURCE_LIMITS_EXCEEDED on 2026-11-14; 8 answered 24/24
+PREFETCH_PAGE_ROUNDS = 5  # follow-up rounds for a check suite with more than 100 runs (Services CI's matrix)
+_RUN_FIELDS = "databaseId name status conclusion detailsUrl url startedAt completedAt"
+PREFETCH_FRAGMENT = """fragment H on Commit {
+  oid
+  checkSuites(first: 100) {
+    pageInfo { hasNextPage }
+    nodes {
+      id
+      app { slug }
+      checkRuns(first: 100, filterBy: {checkType: LATEST}) {
+        pageInfo { hasNextPage endCursor }
+        nodes { %s }
+      }
+    }
+  }
+  status { state contexts { context state description targetUrl createdAt creator { login } } }
+}""" % _RUN_FIELDS
+PREFETCH_MORE = ('p%d: node(id: %s) { ... on CheckSuite { checkRuns(first: 100, after: %s, '
+                 'filterBy: {checkType: LATEST}) { pageInfo { hasNextPage endCursor } nodes { ' + _RUN_FIELDS + ' } } } }')
+
+
+def _rest_run(r, sha: str, slug) -> dict | None:
+    if not isinstance(r, dict) or type(r.get("databaseId")) is not int or not r.get("name"):
+        return None
+    return {"id": r["databaseId"], "name": r["name"], "head_sha": sha,
+            "status": str(r.get("status") or "").lower(),
+            "conclusion": str(r["conclusion"]).lower() if r.get("conclusion") else None,
+            "details_url": r.get("detailsUrl"), "html_url": r.get("url"),
+            "started_at": r.get("startedAt"), "completed_at": r.get("completedAt"),
+            "app": {"slug": slug}}
+
+
+def prefetch_payloads(node, sha: str, extra: dict | None = None) -> tuple[list[dict], dict] | None:
+    """GraphQL Commit -> (REST check_runs, REST combined status), or None when it is not COMPLETE.
+    `extra` maps a suite id to the runs its follow-up pages returned; a suite still marked as having
+    a further page without them is incomplete, and so is the head."""
+    if not isinstance(node, dict) or node.get("oid") != sha:
+        return None
+    suites = node.get("checkSuites") or {}
+    if (suites.get("pageInfo") or {}).get("hasNextPage") is not False:
+        return None
+    runs: list[dict] = []
+    for suite in suites.get("nodes") or []:
+        cr = (suite or {}).get("checkRuns") or {}
+        nodes = list(cr.get("nodes") or [])
+        if (cr.get("pageInfo") or {}).get("hasNextPage") is not False:
+            more = (extra or {}).get((suite or {}).get("id"))
+            if more is None:
+                return None
+            nodes += more
+        slug = ((suite or {}).get("app") or {}).get("slug")
+        for r in nodes:
+            rr = _rest_run(r, sha, slug)
+            if rr is None:
+                return None
+            runs.append(rr)
+    st = node.get("status")
+    contexts = (st or {}).get("contexts") or []
+    if len(contexts) > 30:
+        return None   # the REST combined status returns 30; keep exactly what it would have shown
+    statuses = [{"id": len(contexts) - k, "context": c.get("context"), "state": str(c.get("state") or "").lower(),
+                 "description": c.get("description"), "target_url": c.get("targetUrl"),
+                 "created_at": c.get("createdAt"), "creator": {"login": (c.get("creator") or {}).get("login")}}
+                for k, c in enumerate(contexts) if isinstance(c, dict) and c.get("context")]
+    if len(statuses) != len(contexts):
+        return None
+    return runs, {"state": str((st or {}).get("state") or "pending").lower(), "sha": sha,
+                  "total_count": len(statuses), "statuses": statuses}
+
+
+def rest_pages(runs: list[dict]) -> list[list[dict]]:
+    """The REST check-runs pages `paginate` reads (100 each, a short page last; every consumer
+    aggregates over all pages, so order within the set does not change any verdict)."""
+    pages = [runs[i:i + 100] for i in range(0, len(runs), 100)]
+    if not pages or len(pages[-1]) == 100:
+        pages.append([])
+    return pages
 
 
 def paginate(path: str, key: str | None = None) -> list:
@@ -2055,7 +2139,106 @@ class GitHub:
         return get(f"/repos/{self.repo}/git/ref/heads/{self.branch}")["object"]["sha"]
 
     def open_prs(self) -> list[dict]:
-        return paginate(f"/repos/{self.repo}/pulls?state=open&base={self.branch}")
+        prs = paginate(f"/repos/{self.repo}/pulls?state=open&base={self.branch}")
+        if _MEMO_SCOPE[0] > 0 and not _DECIDING[0]:
+            try:
+                self.prefetch_checks([((p.get("head") or {}).get("sha") or "") for p in prs])
+            except Exception as exc:  # noqa: BLE001 - an optimisation: any failure means "read via REST"
+                log(f"::notice::check prefetch failed ({type(exc).__name__}); planning reads fall back to REST")
+        return prs
+
+    def prefetch_checks(self, shas: list[str]) -> int:
+        """Planning only: read every head's check runs and combined status in GraphQL batches and seed the
+        GET memo with the exact REST payloads `checks()`, `ci_activity()` and `extra_checks()` would read.
+
+        Quota: `plan_train` walks every open PR and read `/check-runs` + `/status` per head — two REST
+        calls per PR from the GITHUB_TOKEN core quota every workflow shares (the build job sent ~180
+        requests a run, 2026-11-14). One GraphQL query covers PREFETCH_BATCH heads and is charged to the
+        separate GraphQL bucket. Safety: the memo only serves planning reads; every write's verdict is
+        re-read live under deciding() (`unverified`), so a seeded payload can at worst mis-PLAN a tick,
+        never decide a merge. A head is seeded only when GraphQL saw ALL of it (no further page, fewer
+        than 100 runs, at most 30 statuses — what the REST pages hold); anything else falls back to REST."""
+        # open_prs() is called from many places in one tick; a head already seeded in this planning
+        # scope is not read again (the memo is cleared on exit and by every write, so this never
+        # outlives the data it describes).
+        shas = sorted({s for s in shas if re.fullmatch(r"[0-9a-f]{40}", s or "")
+                       and f"/repos/{self.repo}/commits/{s}/status" not in _GET_MEMO})
+        owner, name = self.repo.split("/", 1)
+        seeded = 0
+        for i in range(0, len(shas), PREFETCH_BATCH):
+            chunk = shas[i:i + PREFETCH_BATCH]
+            fields = " ".join(f'c{j}: object(oid: "{sha}") {{ ...H }}' for j, sha in enumerate(chunk))
+            query = (f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) "
+                     f"{{ {fields} }} }} {PREFETCH_FRAGMENT}")
+            try:
+                code, data = api("POST", "/graphql", {"query": query, "variables": {"owner": owner, "name": name}},
+                                 graphql_read=True)
+            except ApiAbort:
+                return seeded
+            repo_data = (((data or {}).get("data") or {}).get("repository") or None) \
+                if code == 200 and isinstance(data, dict) else None
+            if repo_data is None:
+                log(f"::notice::check prefetch unavailable ({code}); planning reads fall back to REST")
+                return seeded
+            # A partial answer (e.g. RESOURCE_LIMITS_EXCEEDED under one alias) names the alias in each
+            # error's path: only those heads fall back to REST, the rest of the batch is still complete.
+            errors = data.get("errors") or []
+            broken = {e["path"][1] for e in errors if isinstance(e, dict) and len(e.get("path") or []) > 1}
+            if errors and not broken:
+                log("::notice::check prefetch returned unattributed errors; planning reads fall back to REST")
+                return seeded
+            nodes = {j: repo_data.get(f"c{j}") for j in range(len(chunk)) if f"c{j}" not in broken}
+            extra = self._prefetch_more_pages(owner, name, nodes)
+            for j, node in nodes.items():
+                sha = chunk[j]
+                payloads = prefetch_payloads(node, sha, extra)
+                if payloads is None:
+                    continue
+                runs, status = payloads
+                base_path = f"/repos/{self.repo}/commits/{sha}/check-runs"
+                total = len(runs)
+                for k, page in enumerate(rest_pages(runs), 1):
+                    _GET_MEMO[f"{base_path}?per_page=100&page={k}"] = \
+                        json.dumps({"total_count": total, "check_runs": page}).encode()
+                _GET_MEMO[f"/repos/{self.repo}/commits/{sha}/status"] = json.dumps(status).encode()
+                seeded += 1
+        API_STATS["prefetched"] = API_STATS.get("prefetched", 0) + seeded
+        return seeded
+
+    def _prefetch_more_pages(self, owner: str, name: str, nodes: dict) -> dict:
+        """suite id -> its runs after the first 100, read in batched GraphQL follow-ups. A suite that does
+        not finish within PREFETCH_PAGE_ROUNDS stays absent, which makes its head fall back to REST."""
+        pending: dict[str, str] = {}
+        for node in nodes.values():
+            for suite in (((node or {}).get("checkSuites") or {}).get("nodes") or []):
+                info = ((suite or {}).get("checkRuns") or {}).get("pageInfo") or {}
+                if info.get("hasNextPage") and suite.get("id") and info.get("endCursor"):
+                    pending[suite["id"]] = info["endCursor"]
+        got: dict[str, list] = {}
+        done: dict[str, list] = {}
+        for _ in range(PREFETCH_PAGE_ROUNDS):
+            if not pending:
+                break
+            items = list(pending.items())
+            pending = {}
+            for i in range(0, len(items), PREFETCH_BATCH):
+                chunk = items[i:i + PREFETCH_BATCH]
+                fields = " ".join(PREFETCH_MORE % (k, json.dumps(sid), json.dumps(cur)) for k, (sid, cur) in enumerate(chunk))
+                try:
+                    code, data = api("POST", "/graphql", {"query": f"query {{ {fields} }}"}, graphql_read=True)
+                except ApiAbort:
+                    return done
+                if code != 200 or not isinstance(data, dict) or data.get("errors"):
+                    continue          # these suites stay incomplete: their heads fall back to REST
+                for k, (sid, _cur) in enumerate(chunk):
+                    cr = ((((data.get("data") or {}).get(f"p{k}")) or {}).get("checkRuns")) or {}
+                    info = cr.get("pageInfo") or {}
+                    got.setdefault(sid, []).extend(cr.get("nodes") or [])
+                    if info.get("hasNextPage") is False:
+                        done[sid] = got[sid]
+                    elif info.get("hasNextPage") and info.get("endCursor"):
+                        pending[sid] = info["endCursor"]
+        return done
 
     def pr(self, n: int) -> dict:
         return get(f"/repos/{self.repo}/pulls/{int(n)}")
@@ -2550,7 +2733,8 @@ def admission_refusal(git, base: str, view: dict, runner=None) -> str | None:
 
 def live_candidates(gh, git, repo: str, required: list[str], base: str, untrainable,
                     limit: int = 64, strict: list | None = None,
-                    red: list | None = None, main_red: dict[str, str] | None = None) -> tuple[list[Member], dict[int, dict]]:
+                    red: list | None = None, main_red: dict[str, str] | None = None,
+                    cache: dict | None = None) -> tuple[list[Member], dict[int, dict]]:
     """Open PRs that qualify RIGHT NOW. Each head is fetched and must equal the API's head sha, and
     the file list is changed_paths(<base>...<verified head>) — the PR files API stops at
     3000 entries, so a long PR could hide a path there; git has no such cap."""
@@ -2645,7 +2829,7 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         if not ok and strict is not None:
             modes = [m for c in changed_entries(git, f"{base}...{fetched}") for m in (c.old_mode, c.new_mode)]
             state, fixed, swhy = fix_head_state(gh, git, base, view, member_required, checks, app, modes, main_red,
-                                                extra=extra)
+                                                cache=cache, extra=extra)
             if state:
                 view["fix"] = fixed
             else:
@@ -3134,6 +3318,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     # fast lane, or main moves under the reserved head's CI and it is re-updated forever (#13456).
     stuck: list = []
     base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required, stuck)
+    not_fix: dict[int, str] = {}   # summary["not_fix"]: refusals from EVERY settle view this tick, not just the last
     if defer_recovered_main_red(gh, base, main_red, summary):
         return summary
     holder, timed_out = strict_reservation(git, base, strict, shadow,
@@ -3448,6 +3633,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         if TRAIN_BRANCH_RE.fullmatch(branch):
             Pusher(git, branch, gh.remote).delete()
     if acted:  # a carrier was judged: main or member statuses may have changed — read everything again
+        not_fix.update(main_cache.get(NOT_FIX_KEY, {}))
         base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required, stuck)
         holder, timed_out = strict_reservation(git, base, strict, shadow,
                                                fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
@@ -3507,6 +3693,9 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     # below must already see it.
     strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out,
                 yield_why)
+    not_fix.update(main_cache.get(NOT_FIX_KEY, {}))
+    if not_fix:
+        summary["not_fix"] = dict(sorted(not_fix.items()))
     if summary.get("main_health_deferred"):
         return summary
     stack_head = next((v["head_sha"] for st, v in strict if v["number"] == holder and st == "pending"), None)
@@ -3636,7 +3825,7 @@ def _settle_view(gh, git, repo: str, required: list[str]):
         log(f"::notice::main {base[:12]} is red on {', '.join(sorted(main_red))}: no update-branch except onto a fix")
     cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text, referenced_tests(git, base)),
                                   strict=strict, red=red,
-                                  main_red=main_red)
+                                  main_red=main_red, cache=main_cache)
     cands = promote_fixes(gh, git, repo, base, cands, strict, main_red, main_cache)
     return base, regen_text, strict, red, cands, apps, main_red, main_cache
 
@@ -3655,7 +3844,7 @@ def promote_fixes(gh, git, repo: str, base: str, cands: list, strict: list, main
         if view["head_sha"] != m.head_sha:
             keep.append(m)
             continue
-        fixed = fix_contexts(gh, git, base, view, main_red, cache)
+        fixed = fix_contexts(gh, git, base, view, main_red, cache, record=False)
         if not fixed:
             keep.append(m)
             continue
@@ -4134,6 +4323,7 @@ def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict
 
 
 FIX_JOB_OK = frozenset({"success", "skipped", "neutral"})
+NOT_FIX_KEY = ("not_fix",)   # cache slot: PR number -> why a green strict PR is not a main-red fix
 
 
 def fix_job_evidence(main_jobs: dict[str, str | None] | None, head_jobs: dict[str, str | None] | None) -> str | None:
@@ -4143,7 +4333,10 @@ def fix_job_evidence(main_jobs: dict[str, str | None] | None, head_jobs: dict[st
     skipped job leaves an aggregate context (Validate manifests) green without testing the breakage
     (2026-11-13: #16005 touched only merge-train files, skipped Admin UI, and took the fix slot from
     the real fix). Fails closed: no job record on either side, or a main run with no failed job, is
-    no evidence. A job red on main for ANOTHER context also has to pass — over-strict, never loose."""
+    no evidence. A job red on main for ANOTHER context also has to pass — over-strict, never loose.
+    A cancelled or timed-out job counts as failed too: a leaf that hung on main still fails the
+    aggregate, and exempting it would let a head that SKIPPED the leaf read as the fix — the very hole
+    this closes. Never treat a non-OK main job as inconclusive here."""
     if not main_jobs:
         return "no job record for main's red run"
     failed = sorted(n for n, c in main_jobs.items() if c is not None and c not in FIX_JOB_OK)
@@ -4153,6 +4346,14 @@ def fix_job_evidence(main_jobs: dict[str, str | None] | None, head_jobs: dict[st
         return "no job record on the head"
     missing = [f"{n} ({head_jobs.get(n) or 'absent'})" for n in failed if head_jobs.get(n) not in OK_STATES]
     return f"did not run green on the head: {', '.join(missing)}" if missing else None
+
+
+def note_not_fix(cache: dict | None, view: dict, why: str) -> None:
+    """Record why a green strict PR was refused as a main-red fix: settle copies the slot into
+    summary["not_fix"], so a real fix refused (a renamed or restructured job) is visible to a human."""
+    log(f"#{view.get('number', 0):>6} not a fix: {why}")
+    if cache is not None and view.get("number") is not None:
+        cache.setdefault(NOT_FIX_KEY, {})[view["number"]] = why
 
 
 def cached_ctx_jobs(gh, sha: str, ctx: str, cache: dict | None) -> dict[str, str | None] | None:
@@ -4165,11 +4366,15 @@ def cached_ctx_jobs(gh, sha: str, ctx: str, cache: dict | None) -> dict[str, str
     return out
 
 
-def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache: dict | None = None) -> list[str]:
+def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache: dict | None = None,
+                 head_checks: dict[str, str | None] | None = None, record: bool = True) -> list[str]:
     """The main-red contexts this green PR demonstrably fixes: red in main's CI at the PR's own
     merge-base (or nearest ancestor with a verdict), and every job that failed in that red run ran
     green on the PR head (fix_job_evidence). A PR that went green over a base that was still green
-    proves nothing about the breakage and is NOT a fix; nor is one whose CI skipped the failing job."""
+    proves nothing about the breakage and is NOT a fix; nor is one whose CI skipped the failing job.
+    `head_checks`, when given, are the head's verdicts: a context not green there is dropped before any
+    job list is read (the job evidence costs two API reads per head and context). `record` False keeps a
+    refusal out of summary["not_fix"] (a train candidate that is not a fix just stays a candidate)."""
     mb = git("merge-base", view["head_sha"], base, check=False).stdout.strip()
     if not mb:
         return []
@@ -4178,12 +4383,14 @@ def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache
     for ctx in sorted(main_red):
         if ctx in extra and gh.extra_checks(view["head_sha"], {ctx: extra[ctx]}).get(ctx) not in OK_STATES:
             continue   # an extra gate is not required: only its own pinned GREEN on the head proves a fix
+        if head_checks is not None and head_checks.get(ctx) not in OK_STATES:
+            continue
         at_base = main_ci_result(gh, git, ctx, mb, cache)
         if not at_base or at_base[1] != "failure":
             continue
         why = fix_job_evidence(cached_ctx_jobs(gh, at_base[0], ctx, cache), cached_ctx_jobs(gh, view["head_sha"], ctx, cache))
         if why:
-            log(f"#{view.get('number', 0):>6} not a fix for {ctx}: {why}")
+            note_not_fix(cache if record else None, view, f"{ctx} {why}")
             continue
         out.append(ctx)
     return out
@@ -4212,8 +4419,7 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
             return None, [], "up to date, and not the update of a fix behind main"
         claim_from = parents[1]
     claim_checks = checks if claim_from == head else (pinned_checks(gh, claim_from, extra) if extra else gh.checks(claim_from))
-    claimed = [c for c in fix_contexts(gh, git, base, {**view, "head_sha": claim_from}, main_red, cache)
-               if claim_checks.get(c) in OK_STATES]
+    claimed = fix_contexts(gh, git, base, {**view, "head_sha": claim_from}, main_red, cache, head_checks=claim_checks)
     if not claimed:
         return None, [], "claims no main-red context"
     masked = {c: ("success" if c in main_red and c not in claimed and v == "failure" else v) for c, v in checks.items()}
@@ -4226,6 +4432,7 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
             why = (fix_job_evidence(cached_ctx_jobs(gh, at_base[0], c, cache), cached_ctx_jobs(gh, head, c, cache))
                    if at_base else "no main verdict at the claim's base")
             if why:
+                note_not_fix(cache, view, f"combined head: {c} {why}")
                 return None, [], f"combined head: {c} {why}"
     if ok:
         return "green", claimed, f"fix for {', '.join(claimed)} red on main {base[:12]}"
@@ -5681,7 +5888,9 @@ def retry_planner_self_test(check) -> None:
 # measured locally on 2026-11-13; ceiling 21,400 (~1.2 %).
 # Main-red fix job evidence (#16013): two fix_behind cases: spawns=21,402 at 761 cases, measured by the train
 # over main on 2026-11-14; ceiling 21,800 (~1.9 %).
-SELF_TEST_SPAWN_CEILING = 21800
+# Its refinements (refusal in the summary, timed-out main jobs): spawns=21,445 at 764 cases, measured on the
+# merged tree on 2026-11-14; ceiling 21,900 (~2.1 %).
+SELF_TEST_SPAWN_CEILING = 21900
 
 # A green carrier and a green, up-to-date strict holder cannot both keep their verification: whichever
 # merges first moves main under the other. Strict first voids the carrier (rebuild ~50 min, measured
@@ -5742,6 +5951,129 @@ def branch_updater_self_test(check) -> None:
           str(branch_updater_spread_errors(workflow_texts())))
 
 
+def prefetch_self_test(check) -> None:
+    """GraphQL check prefetch: seeds the exact REST memo keys from one query, so checks() sends no REST;
+    an incomplete head, a GraphQL error or a deciding() read all fall back to live REST."""
+    saved = (globals()["_http_open"], os.environ.get("GH_TOKEN"), dict(_GET_MEMO), dict(API_STATS))
+    a, b = "a" * 40, "b" * 40
+    seen: list[str] = []
+    gql = {"mode": "ok"}
+
+    def commit(sha, more=False):
+        return {"oid": sha, "checkSuites": {"pageInfo": {"hasNextPage": False}, "nodes": [
+            {"app": {"slug": "github-actions"}, "checkRuns": {"pageInfo": {"hasNextPage": more}, "nodes": [
+                {"databaseId": 11, "name": "Validate manifests", "status": "COMPLETED", "conclusion": "SUCCESS",
+                 "detailsUrl": "https://github.com/o/r/actions/runs/5/job/6", "url": "https://github.com/o/r/runs/11",
+                 "startedAt": "2026-11-14T10:00:00Z", "completedAt": "2026-11-14T10:05:00Z"},
+                {"databaseId": 12, "name": "Gitleaks", "status": "IN_PROGRESS", "conclusion": None,
+                 "detailsUrl": None, "url": None, "startedAt": "2026-11-14T10:01:00Z", "completedAt": None}]}}]},
+            "status": {"state": "PENDING", "contexts": [
+                {"context": "merge-train", "state": "PENDING", "description": "queued", "targetUrl": None,
+                 "createdAt": "2026-11-14T10:02:00Z", "creator": {"login": "x"}}]}}
+
+    def fake_open(req, timeout):
+        path = req.full_url[len(API):]
+        seen.append(f"{req.get_method()} {path.split('?')[0]}")
+        if path == "/graphql":
+            gql.setdefault("queried", []).append(sorted(x for x in (a, b) if x in (req.data or b"").decode()))
+            if gql["mode"] == "error":
+                return 200, json.dumps({"errors": [{"message": "boom"}]}).encode(), {}
+            if gql["mode"] == "partial":
+                return 200, json.dumps({"data": {"repository": {"c0": commit(a), "c1": None}}, "errors": [
+                    {"type": "RESOURCE_LIMITS_EXCEEDED", "path": ["repository", "c0", "checkSuites"]}]}).encode(), {}
+            return 200, json.dumps({"data": {"repository": {"c0": commit(a), "c1": commit(b, more=True)}}}).encode(), {}
+        if "/pulls?" in path:
+            return 200, json.dumps([{"number": 1, "head": {"sha": a}}, {"number": 2, "head": {"sha": b}}]).encode(), {}
+        if path.endswith("/status"):
+            return 200, json.dumps({"state": "pending", "statuses": [
+                {"id": 1, "context": "merge-train", "state": "pending"}]}).encode(), {}
+        return 200, json.dumps({"total_count": 2, "check_runs": [
+            {"id": 11, "name": "Validate manifests", "status": "completed", "conclusion": "success"},
+            {"id": 12, "name": "Gitleaks", "status": "in_progress", "conclusion": None}]}).encode(), {}
+    globals()["_http_open"] = fake_open
+    try:
+        os.environ["GH_TOKEN"] = "ghs_FIXTURE"
+        gh = GitHub("o/r", "main", "")
+        want = {"Validate manifests": "success", "Gitleaks": None, "merge-train": None}
+        _GET_MEMO.clear()
+        with planning_reads():
+            gh.open_prs()
+            seen.clear()
+            got_a = gh.checks(a)
+            rest_a = list(seen)
+            got_b = gh.checks(b)
+        check("prefetch: a complete head is served from the GraphQL batch with no REST call",
+              got_a == want and rest_a == [], f"{got_a} {rest_a}")
+        check("prefetch: a head with a further page falls back to REST and reads the same verdicts",
+              got_b == want and any("/commits/" + b in x for x in seen), f"{got_b} {seen}")
+        with planning_reads():
+            gh.open_prs()
+            gql["queried"] = []
+            gh.open_prs()
+            gh.open_prs()
+            again = list(gql["queried"])
+        check("prefetch: repeated open_prs() in one scope re-reads only the heads not yet seeded",
+              again == [[b], [b]], str(again))
+        payload = prefetch_payloads(commit(a), a)
+        check("prefetch: payload carries what latest_ci_activity and extra_checks read",
+              payload is not None and payload[0][0]["started_at"] == "2026-11-14T10:00:00Z"
+              and payload[0][0]["app"]["slug"] == "github-actions" and "/actions/runs/5/" in payload[0][0]["details_url"],
+              str(payload))
+        _GET_MEMO.clear()
+        seen.clear()
+        with planning_reads():
+            gh.open_prs()
+            with deciding():
+                gh.checks(a)
+        check("prefetch: a deciding() read never uses the seeded payload (goes live)",
+              any(x.endswith(f"/commits/{a}/status") for x in seen), str(seen))
+        _GET_MEMO.clear()
+        gql["mode"] = "error"
+        seen.clear()
+        with planning_reads():
+            gh.open_prs()
+            got = gh.checks(a)
+        check("prefetch: a GraphQL error falls back to REST with the same verdicts",
+              got == want and any(x.endswith(f"/commits/{a}/status") for x in seen), f"{got} {seen}")
+        _GET_MEMO.clear()
+        gql["mode"] = "partial"
+        seen.clear()
+        with planning_reads():
+            gh.open_prs()
+            got = gh.checks(a)
+        check("prefetch: an alias named in a partial error is not seeded (goes to REST)",
+              got == want and any(x.endswith(f"/commits/{a}/status") for x in seen), f"{got} {seen}")
+        _GET_MEMO.clear()
+        gql["mode"] = "ok"
+        seen.clear()
+        gh.open_prs()
+        check("prefetch: outside planning_reads() no GraphQL query is sent", "POST /graphql" not in seen, str(seen))
+        check("prefetch: a mismatched oid is not seeded", prefetch_payloads(commit(b), a) is None)
+        check("prefetch: REST pages are 100 each with a short page last (an exact multiple gets an empty one)",
+              [len(x) for x in rest_pages(list(range(250)))] == [100, 100, 50]
+              and [len(x) for x in rest_pages(list(range(200)))] == [100, 100, 0] and rest_pages([]) == [[]])
+        paged = commit(b, more=True)
+        paged["checkSuites"]["nodes"][0]["id"] = "S1"
+        extra_run = {"databaseId": 13, "name": "build (x)", "status": "COMPLETED", "conclusion": "FAILURE",
+                     "detailsUrl": None, "url": None, "startedAt": None, "completedAt": None}
+        got = prefetch_payloads(paged, b, {"S1": [extra_run]})
+        check("prefetch: a suite's follow-up pages complete the head (and a red run on page 2 is kept)",
+              got is not None and [r["name"] for r in got[0]][-1] == "build (x)" and got[0][-1]["conclusion"] == "failure",
+              str(got))
+        check("prefetch: a suite with a further page and no follow-up stays incomplete",
+              prefetch_payloads(paged, b, {}) is None)
+    finally:
+        globals()["_http_open"] = saved[0]
+        if saved[1] is None:
+            os.environ.pop("GH_TOKEN", None)
+        else:
+            os.environ["GH_TOKEN"] = saved[1]
+        _GET_MEMO.clear()
+        _GET_MEMO.update(saved[2])
+        API_STATS.clear()
+        API_STATS.update(saved[3])
+
+
 def self_test() -> int:
     fails: list[str] = []
     last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
@@ -5755,6 +6087,7 @@ def self_test() -> int:
     retry_planner_self_test(check)
     train_turn_main_red_self_test(check)
     branch_updater_self_test(check)
+    prefetch_self_test(check)
     git_memo_self_test(check)
     packed_fixture_self_test(check)
 
@@ -9346,6 +9679,8 @@ def self_test() -> int:
             check("main red on a leaf job: a PR that SKIPPED the failing job is not a fix (no update, no merge)",
                   gh.updates == [] and gh.merged == [] and not s1["in_flight"] and s2 is None,
                   f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            check("main red on a leaf job: the refused fix and its reason reach the settle summary",
+                  "Admin UI (skipped)" in (s1.get("not_fix") or {}).get(36, ""), str(s1.get("not_fix")))
             main_red_done()
             s1, s2 = fix_behind({}, tamper=leaf_red("success"))
             check("main red on a leaf job: a PR that RAN the failing job green is the fix (updated, merged)",
@@ -9357,6 +9692,18 @@ def self_test() -> int:
                   and fix_job_evidence({MR: "failure"}, None) is not None
                   and fix_job_evidence({MR: "success"}, {MR: "success"}) is not None
                   and fix_job_evidence({"A": "failure", MR: "failure"}, {"A": "success", MR: "success"}) is None)
+            # A leaf that TIMED OUT (or was cancelled) on main still failed the aggregate: a head that skipped
+            # it is no fix, exactly like a leaf that failed outright (#16005's hole through another door).
+            check("fix evidence: a cancelled or timed-out main job is a failure the head must clear",
+                  fix_job_evidence({"A": "timed_out", MR: "failure"}, {"A": "skipped", MR: "success"}) is not None
+                  and fix_job_evidence({"A": "cancelled", MR: "failure"}, {"A": "skipped", MR: "success"}) is not None
+                  and fix_job_evidence({"A": "timed_out", MR: "failure"}, {"A": "success", MR: "success"}) is None)
+            s1, s2 = fix_behind({}, tamper=lambda _p: (gh.jobs.update({base0: {"Admin UI": "timed_out"}}),
+                                                       gh.head_jobs.update({"Admin UI": "skipped"})))
+            check("main red with a TIMED-OUT leaf beside the failed aggregate: a head that skipped it is REFUSED",
+                  gh.updates == [] and gh.merged == [] and "Admin UI (skipped)" in (s1.get("not_fix") or {}).get(36, ""),
+                  f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            main_red_done()
 
             # The fix path takes manual-lane paths exactly as the strict lane does (pW2 touches
             # .github/scripts — the merge above), and refuses everything strict_lane_state refuses.
@@ -9929,7 +10276,8 @@ def self_test() -> int:
                 return fx, real
 
             def writes(fx):
-                return [c for c in fx.calls if c[0] != "GET"]
+                # POST /graphql here is only the read-only check prefetch (api(..., graphql_read=True)).
+                return [c for c in fx.calls if c[0] != "GET" and not (c[0] == "POST" and c[1] == "/graphql")]
 
             def check_runs_get(method, path):
                 return method == "GET" and "/check-runs" in path
