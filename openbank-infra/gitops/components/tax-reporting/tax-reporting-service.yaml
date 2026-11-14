@@ -141,6 +141,29 @@ spec:
             # hostname verification (ledger-service-internal-tls dnsNames carry this host).
             - name: PENSION_COMPANY_LEDGER_URL
               value: https://ledger-service.ledger-pension-co.svc:8443
+            # quarkus.rest-client.{pension,pension-fund,party,account,balance}-service (#16056 made
+            # the rest-client map bind; before it, none of these were read). Declared HERE so the
+            # deployed pod never falls back to application.yaml's localhost defaults, and because
+            # gen-network-policies.py derives each upstream's ingress allow-list from these env URLs.
+            # Each upstream's rego admits service-account-openbank-tax-reporting for exactly the
+            # reporting reads it serves. Both on 8443 via %prod rest-client TLS bucket
+            # internal-authority, server cert verified with hostname verification (internal-tls
+            # dnsNames). pension-fund REQUIRES a client certificate (mTLS). pension-service is server
+            # TLS, verified against openbank-ca; pension-service does not yet require a client
+            # certificate.
+            - name: PENSION_SERVICE_URL
+              value: https://pension-service.pension.svc:8443
+            - name: PENSION_FUND_SERVICE_URL
+              value: https://pension-fund-service.pension-fund.svc:8443
+            # ADR-0340 B: the CRS/FATCA read models. party and account on their 8443 mTLS
+            # listeners (same internal-authority bucket). balance-service has no 8443 listener yet,
+            # so it stays on plaintext 8103 until one exists (tracked as a follow-up issue).
+            - name: PARTY_SERVICE_URL
+              value: https://party-service.party.svc:8443
+            - name: ACCOUNT_SERVICE_URL
+              value: https://account-service.accounts.svc:8443
+            - name: BALANCE_SERVICE_URL
+              value: http://balance-service.balances.svc:8103
             # openbank.statutory-returns.company-books.opened (CompanyBooks, #12496): the first day
             # of the pension company's books: 2027-01-01, confirmed by owner 2026-10-10. Every
             # company-books return sums frozen periods from this date, so it must equal the real

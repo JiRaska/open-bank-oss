@@ -343,3 +343,6 @@ V9.1 openbank-infra/gitops/components/observability/cronjob-journey-account-over
 V9.1 openbank-infra/gitops/components/observability/cronjob-journey-fx-read.yaml:174: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
 V9.1 openbank-infra/gitops/components/observability/cronjob-journey-wealth-declared-holding.yaml:247: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
 V9.1 openbank-infra/gitops/components/ai-platform/langfuse-exporter.yaml:276: plaintext http:// env value http://langfuse-web.ai-platform.svc:3000
+# tax-reporting -> balance-service (CRS/FATCA statement asOf read, #16074). balance-service has no
+# private-CA mTLS listener yet; the other four tax-reporting upstreams use 8443. Retire with #16075.
+V9.1 openbank-infra/gitops/components/tax-reporting/tax-reporting-service.yaml:164: plaintext http:// env value http://balance-service.balances.svc:8103
