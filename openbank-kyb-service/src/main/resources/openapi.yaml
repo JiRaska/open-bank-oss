@@ -16,7 +16,8 @@ info:
   # and the `monitoring=open` filter on `GET /cases`. Nothing existing changes: a case's `status`,
   # `updatedAt` and every existing route answer the same whatever monitoring found, and
   # `status=MANUAL_REVIEW` still returns MANUAL_REVIEW cases only.
-  version: 1.9.0
+  # 1.9.0 -> 1.10.0: additive — representation mode on the attestation and current-attestation corroboration for Delegation.
+  version: 1.10.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -798,6 +799,60 @@ paths:
               schema: { $ref: '#/components/schemas/UboFinding' }
         '400':
           description: Missing or unparseable scheme/identifier
+  /api/v1/kyb/cases/{id}/statutory-representation:
+    post:
+      tags: [KYB]
+      summary: Publish an active case's verified statutory representation rule to party-service
+      description: >-
+        Staff publication requires a current human attestation and identity-linked signers from
+        the case's verified document ceremony. A fixed quorum requires enough verified signers
+        for the attested count and offices. Joint-all requires all register representatives.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [attestationId]
+              properties:
+                attestationId: {type: string, format: uuid, description: The current confirmation displayed to the reviewer}
+      responses:
+        '200':
+          description: The exact attestation published
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attestationId]
+                properties:
+                  attestationId: {type: string, format: uuid}
+        '400': {description: Missing attestation identifier}
+        '403': {description: Only authenticated KYB staff can publish, and never the staff member who attested the rule (SEPARATION_OF_DUTIES)}
+        '404': {description: Case or complete verified statutory evidence unavailable, or the attestation changed}
+  /api/v1/kyb/cases/{id}/statutory-representation/{attestationId}/current:
+    get:
+      tags: [KYB]
+      summary: Verify that an exact statutory representation attestation remains current
+      description: This check is restricted to the verified delegation service identity.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: attestationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: entityPartyId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204':
+          description: The case's verified statutory attestation is current
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+        '400': {description: Missing entity party}
+        '403': {description: Only delegation-service can verify the source revision}
+        '404':
+          description: Case or entity mismatch, incomplete evidence, or superseded attestation
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
 components:
   securitySchemes:
     bearerAuth:
@@ -933,6 +988,10 @@ components:
           type: integer
           minimum: 1
           description: What the human decided. This is what binds an agreement.
+        confirmedMode:
+          type: [string, 'null']
+          enum: [SOLE, JOINT_N, JOINT_ALL, null]
+          description: Explicitly confirmed mode. Legacy count-only attestations have no confirmed mode.
         confirmedRoles:
           type: array
           items: { type: string }
@@ -946,6 +1005,10 @@ components:
       required: [confirmedSigners, ruleTextHash]
       properties:
         confirmedSigners: { type: integer, minimum: 1 }
+        confirmedMode:
+          type: string
+          enum: [SOLE, JOINT_N, JOINT_ALL]
+          description: An explicit mode is required to publish a joint statutory representation revision.
         confirmedRoles:
           type: array
           items: { type: string }

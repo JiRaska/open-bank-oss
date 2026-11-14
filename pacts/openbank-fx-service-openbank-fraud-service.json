@@ -14,8 +14,10 @@
         "body": {
           "accountId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
           "amount": 100000.00,
+          "counterparty": null,
           "counterpartyId": null,
           "currency": "CZK",
+          "initiationMode": "CUSTOMER_PRESENT",
           "rail": "FX"
         },
         "headers": {
@@ -39,8 +41,10 @@
         "body": {
           "accountId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
           "amount": 100000.00,
+          "counterparty": null,
           "counterpartyId": null,
           "currency": "CZK",
+          "initiationMode": "CUSTOMER_PRESENT",
           "rail": "FX"
         },
         "headers": {

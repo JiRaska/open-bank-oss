@@ -33,7 +33,8 @@ if [ "${1:-}" = ".github/scripts/verify-successful-service-ci.py" ]; then
       done
       echo "::error::reconcile source refused: no source for ${RESOLVER_UNRESOLVED:-}" >&2
       jq -cn --argjson r "$resolved" --argjson u "${RESOLVER_FORGED_UNRESOLVED:-$unresolved}" \
-        '{resolved: $r, unresolved: $u}'
+        --argjson b "${RESOLVER_BUDGET_EXHAUSTED:-false}" \
+        '{resolved: $r, unresolved: $u, budget_exhausted: $b}'
       exit 3
     fi
     if [ -z "${GH_TOKEN:-}" ] || [ "${RESOLVER_MODE:-failure}" != "success" ] || \
@@ -595,6 +596,20 @@ echo "PASS: mid-history source recovery selects exact successful CI/Pact SHA ove
     exit 1
   fi
   echo "PASS: unresolved reconcile source refuses only its own member; the proven peer deploys"
+
+  # Budget exhaustion (2026-11-14): same per-member refusal, but the reason must say the service
+  # was NOT REACHED, not that it has no source, or an operator chases a missing build.
+  : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"; : > "$SERVICE_CI_LOG"
+  RESOLVER_BUDGET_EXHAUSTED=true PACT_CLI_MODE=success \
+    bash .github/scripts/can-i-deploy-gate.sh >"$tmp/budget-log" 2>&1 || true
+  if ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT" || \
+     ! grep -q '^blocked=\["openbank-stray-service"\]$' "$GITHUB_OUTPUT" || \
+     ! grep -q 'refused for openbank-stray-service: not reached before the source-resolution time budget ran out' "$tmp/budget-log"; then
+    echo "FAIL: a budget-exhausted remainder was not refused per member with its own reason" >&2
+    cat "$GITHUB_OUTPUT" "$tmp/budget-log" >&2
+    exit 1
+  fi
+  echo "PASS: budget-exhausted remainder is refused per member as not-reached; the proven peer deploys"
 
   # A partial answer that does not exactly partition the request is not trusted.
   : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"; : > "$SERVICE_CI_LOG"

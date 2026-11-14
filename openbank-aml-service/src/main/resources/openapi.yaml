@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: AML Service API
-  version: 1.6.0
+  version: 1.7.0
   description: >-
     Anti-Money Laundering screening case lifecycle — submit, review, and decide AML cases.
   license:
@@ -737,6 +737,16 @@ components:
             False while the owning party of the case is not established, for example a held payment
             whose rail could not name the debtor's party. The service resolves it from `accountId`
             afterwards; until then `partyId` does not identify a party.
+        movementService:
+          type: string
+          nullable: true
+          maxLength: 64
+          description: >-
+            The service that opened the case, taken from its authenticated machine identity (never
+            from the request), e.g. `openbank-domestic-payment`, `openbank-sepa-payment`,
+            `openbank-sepa-instant` or `openbank-fx-service`. `transactionId` is an id in THAT service
+            (a payment or conversion id). Null for a case opened by staff, by aml-service itself, or
+            before the opener was recorded.
 
     ApiError:
       type: object
