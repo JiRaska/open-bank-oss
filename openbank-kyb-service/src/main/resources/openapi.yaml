@@ -16,7 +16,14 @@ info:
   # and the `monitoring=open` filter on `GET /cases`. Nothing existing changes: a case's `status`,
   # `updatedAt` and every existing route answer the same whatever monitoring found, and
   # `status=MANUAL_REVIEW` still returns MANUAL_REVIEW cases only.
-  version: 1.9.0
+  # 1.9.0 -> 1.10.0: monitoring switch-on blockers (#16028), operator routes only, never live
+  # (monitoring has been switched off since 1.9.0). Exit completion is four-eyes: a new
+  # `monitoring/exit/propose`, and `monitoring/exit/complete` now confirms a proposal made by a
+  # DIFFERENT reviewer, repeating its evidence; both need the relationship to have ended (case
+  # REJECTED or ABANDONED and the entity party CLOSED). The holds queue moves from the
+  # `monitoring=open` filter of `GET /cases` to its own `GET /monitoring/holds`. Additive response
+  # field `Monitoring.exitProposal`. A confirmed sanctions match publishes no event.
+  version: 1.10.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -175,16 +182,6 @@ paths:
           in: query
           schema:
             $ref: '#/components/schemas/CaseStatus'
-        - name: monitoring
-          in: query
-          description: >-
-            Operator only. `open` lists the cases ongoing monitoring holds for an operator — a
-            finding awaiting a decision, or a confirmed sanctions match whose exit is not yet
-            recorded as carried out — oldest first. Such a case keeps the status it was approved
-            in, so this is its own queue and cannot be combined with `status` (400).
-          schema:
-            type: string
-            enum: [open]
         - name: page
           in: query
           schema:
@@ -683,8 +680,11 @@ paths:
         itself and once (409 after that): a later finding about the same subject never reopens or
         replaces an earlier decision. The case's `status` and `updatedAt` do not change. The first
         CONFIRMED finding that is not a PEP match makes an exit owed
-        (`monitoring.exitOwedSince`) and publishes BUSINESS_RELATIONSHIP_EXIT_REQUIRED once; a
-        confirmed PEP match is a risk fact and publishes nothing. The case stays monitored.
+        (`monitoring.exitOwedSince`); nothing is published about it. A confirmed PEP match is a
+        risk fact. The case stays monitored. A case held this way does not become ACTIVE when its
+        entity party is activated: the activation waits, and the decision that clears the last
+        hold applies it (status ACTIVE, `completed` published); after a confirmed sanctions match
+        it is never applied. Requires ROLE_KYC_REVIEWER.
       operationId: decideMonitoringFinding
       parameters:
         - $ref: '#/components/parameters/caseId'
@@ -714,16 +714,91 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/monitoring/holds:
+    get:
+      tags: [KYB]
+      summary: Operators' queue of cases ongoing monitoring holds
+      description: >-
+        The cases with a finding awaiting a decision, or a confirmed sanctions match whose exit is
+        not yet recorded, oldest first. Such a case keeps the status it was approved in. Refused
+        (403) for any request made on a customer's behalf, before anything is looked up. Requires
+        ROLE_KYC_REVIEWER.
+      operationId: listMonitoringHolds
+      parameters:
+        - $ref: '#/components/parameters/customerPartyId'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Cases
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Case'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/kyb/cases/{id}/monitoring/exit/propose:
+    post:
+      tags: [KYB]
+      summary: A reviewer proposes that the exit a confirmed sanctions match requires has been carried out
+      description: >-
+        First half of a four-eyes record. Accepted when an exit is owed, no finding is undecided,
+        and the relationship has demonstrably ended: the case is REJECTED or ABANDONED and
+        party-service records the entity party as CLOSED (409 otherwise). Records the
+        authenticated reviewer, the time and the evidence in `monitoring.exitProposal`, bound to
+        the reviewer's PERSON (token claim person_id; a token without it is refused, 409) and open
+        for 72 hours (`expiresAt`). A pending proposal is never replaced: 409 until its proposer
+        withdraws it (`exit/withdraw`) or it expires. Ends nothing: the case stays monitored.
+        Requires ROLE_KYC_REVIEWER.
+      operationId: proposeMonitoringExit
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteExitRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/kyb/cases/{id}/monitoring/exit/complete:
     post:
       tags: [KYB]
-      summary: Operator records that the exit a confirmed sanctions match requires has been carried out
+      summary: A second reviewer confirms the proposed exit; monitoring ends
       description: >-
-        The only way monitoring of a case with a confirmed sanctions match ends. Accepted when an
-        exit is owed and no finding is still undecided (409 otherwise, and 409 when already
-        recorded). Records the authenticated operator, the time and the evidence, and withdraws
-        the case's subjects from the monitored-subject registry. The case's `status` does not
-        change. This service does not carry the exit out; it records that it was.
+        The only way monitoring of a case with a confirmed sanctions match ends. Confirms the
+        pending, unexpired `monitoring.exitProposal`: the authenticated reviewer must be a different
+        PERSON than its proposer (token claim person_id, so a second account of the proposer is
+        refused) and must carry a second factor (token amr contains otp); a token without
+        person_id is refused. `evidence` must repeat the proposal's evidence (so a proposal replaced after it
+        was read is not confirmed), and the conditions of `exit/propose` must still hold. 409
+        otherwise, and 409 when already recorded. Records the confirmer and withdraws the case's
+        subjects from the monitored-subject registry. The case's `status` does not change. This
+        service does not carry the exit out; it records that it was. Requires ROLE_KYC_REVIEWER.
       operationId: completeMonitoringExit
       parameters:
         - $ref: '#/components/parameters/caseId'
@@ -742,6 +817,30 @@ paths:
                 $ref: '#/components/schemas/Case'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/cases/{id}/monitoring/exit/withdraw:
+    post:
+      tags: [KYB]
+      summary: The proposer withdraws their pending exit proposal
+      description: >-
+        The proposer's PERSON (any of their accounts, token claim person_id) withdraws the pending
+        `monitoring.exitProposal`; who and when stay on it until a new proposal is made. Nobody else
+        can withdraw it; another reviewer waits until it expires (`expiresAt`). Nothing ends. 409
+        when the caller is not the proposer's person, there is no pending proposal, or the exit is
+        already confirmed. Requires ROLE_KYC_REVIEWER.
+      operationId: withdrawMonitoringExit
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1454,6 +1553,11 @@ components:
           oneOf:
             - $ref: '#/components/schemas/ExitCompletion'
             - type: 'null'
+        exitProposal:
+          description: The exit proposal awaiting a second reviewer, or the one that was confirmed.
+          oneOf:
+            - $ref: '#/components/schemas/ExitProposal'
+            - type: 'null'
         findings:
           type: array
           items:
@@ -1469,6 +1573,30 @@ components:
           type: string
         evidence:
           type: string
+    ExitProposal:
+      type: object
+      required: [proposedAt, proposedBy, evidence]
+      properties:
+        proposedAt:
+          type: string
+          format: date-time
+        proposedBy:
+          type: string
+        evidence:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: After this instant the proposal cannot be confirmed and may be replaced.
+        withdrawnBy:
+          type: string
+          nullable: true
+          description: Account that withdrew the proposal (always the proposer's person).
+        withdrawnAt:
+          type: string
+          format: date-time
+          nullable: true
     CompleteExitRequest:
       type: object
       required: [evidence]
@@ -1476,7 +1604,9 @@ components:
         evidence:
           type: string
           minLength: 10
-          description: What was done and where the record of it is. Who records it is the authenticated operator.
+          description: >-
+            What was done and where the record of it is; on `exit/complete`, the evidence of the
+            proposal being confirmed. Who records it is the authenticated reviewer.
     MonitoringFinding:
       type: object
       description: >-

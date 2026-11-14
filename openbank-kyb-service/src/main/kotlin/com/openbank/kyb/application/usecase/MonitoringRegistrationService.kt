@@ -74,25 +74,41 @@ class MonitoringRegistrationService {
                 "ongoing sanctions/PEP monitoring registration is SWITCHED OFF " +
                     "(openbank.kyb.monitoring.enabled=false): approved business cases are NOT registered with " +
                     "the monitored-subject registry, so a later listing of an entity, a representative or a " +
-                    "beneficial owner raises nothing. Registrations owed are recorded and are sent once it is on",
+                    "beneficial owner raises nothing. Registrations owed are recorded and are sent once it is on; " +
+                    "withdrawals of subjects the registry already holds are still sent",
             )
         }
     }
 
-    /** One bounded pass: reconcile, re-assert, then send what is due. */
+    /**
+     * One bounded pass: reconcile, re-assert, then send what is due.
+     *
+     * Switched off, it still sends one thing: the withdrawal of a subject the registry already
+     * holds (#16028 item 6). Stopping the monitoring of a customer whose case ended is the
+     * privacy-positive direction (GDPR Art. 5(1)(c)) and cannot create a finding, and such a row
+     * exists only where registration was once on, so the route to the registry was configured.
+     * Where it was never on there is no such row and nothing is called.
+     */
     suspend fun run(): MonitoringRunOutcome {
-        if (!settings.enabled) return MonitoringRunOutcome.DISABLED
+        if (!settings.enabled) {
+            deliverDue(withdrawalsOnly = true)
+            return MonitoringRunOutcome.DISABLED
+        }
         val now = Instant.now(clock)
         store.casesToReconcile(settings.batchSize).forEach { id -> isolated("reconciling case $id") { reconcile(id) } }
         store.requeueSettledBefore(now.minus(settings.reassertAfter), now, settings.batchSize)
+        deliverDue(withdrawalsOnly = false)
+        return MonitoringRunOutcome.COMPLETED
+    }
+
+    private suspend fun deliverDue(withdrawalsOnly: Boolean) {
         repeat(settings.batchSize) {
             // Claimed one at a time, and the clock read each time: a row the reconciliation
             // just created is due from the moment it was written.
             val claimedAt = Instant.now(clock)
-            val row = store.claimNext(claimedAt, claimedAt.plus(LEASE)) ?: return MonitoringRunOutcome.COMPLETED
+            val row = store.claimNext(claimedAt, claimedAt.plus(LEASE), withdrawalsOnly) ?: return
             isolated("row ${row.id}") { deliver(row) }
         }
-        return MonitoringRunOutcome.COMPLETED
     }
 
     /**

@@ -18,6 +18,7 @@ import com.openbank.kyb.domain.model.RegistrySearchQuery
 import com.openbank.kyb.domain.model.RegistrySearchResult
 import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.domain.model.RepresentationDecision
+import com.openbank.libs.governance.StaffIdentity
 import java.time.LocalDate
 import java.util.UUID
 
@@ -113,7 +114,14 @@ data class DecideMonitoringFindingCommand(
     val operator: String,
 )
 
-data class CompleteExitCommand(val caseId: UUID, val evidence: String, val operator: String)
+/** One reviewer proposes that the owed exit has been carried out, on [evidence]. */
+data class ProposeExitCommand(val caseId: UUID, val evidence: String, val operator: StaffIdentity)
+
+/** The proposing person withdraws the pending exit proposal. */
+data class WithdrawExitCommand(val caseId: UUID, val operator: StaffIdentity)
+
+/** A DIFFERENT reviewer confirms the pending proposal; [evidence] is the proposal's, as read. */
+data class ConfirmExitCommand(val caseId: UUID, val evidence: String, val operator: StaffIdentity)
 
 /**
  * Find a company by name instead of by identifier (issue #9707). [country] selects the register
@@ -178,8 +186,14 @@ interface BusinessOnboardingUseCase {
     /** An operator decides ONE finding of ongoing monitoring on an approved case. */
     suspend fun decideMonitoringFinding(cmd: DecideMonitoringFindingCommand): BusinessOnboardingCase
 
-    /** An operator records that the exit a confirmed sanctions match requires has been carried out. */
-    suspend fun completeExit(cmd: CompleteExitCommand): BusinessOnboardingCase
+    /** A reviewer proposes that the exit a confirmed sanctions match requires has been carried out. */
+    suspend fun proposeExit(cmd: ProposeExitCommand): BusinessOnboardingCase
+
+    /** A different reviewer confirms that proposal (four-eyes); monitoring ends with it. */
+    suspend fun confirmExit(cmd: ConfirmExitCommand): BusinessOnboardingCase
+
+    /** The proposing person withdraws the pending exit proposal; nothing ends. */
+    suspend fun withdrawExit(cmd: WithdrawExitCommand): BusinessOnboardingCase
 
     /** Cases with a monitoring hold: an undecided finding, or an exit owed. The operators' queue. */
     suspend fun listMonitoringHolds(page: Int, size: Int): List<BusinessOnboardingCase>

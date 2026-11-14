@@ -398,6 +398,8 @@ data class MonitoringResponse(
     /** Since when a confirmed sanctions match requires an exit that is not yet recorded as carried out. */
     val exitOwedSince: Instant?,
     val exitCompleted: ExitCompletionResponse?,
+    /** The exit proposal awaiting a second reviewer, or the one that was confirmed. */
+    val exitProposal: ExitProposalResponse? = null,
     val findings: List<MonitoringFindingResponse>,
 ) {
     companion object {
@@ -408,6 +410,16 @@ data class MonitoringResponse(
                 exitOwedSince = m.exitOwedSince,
                 exitCompleted = m.exitCompleted?.let {
                     ExitCompletionResponse(it.completedAt, it.completedBy, it.evidence)
+                },
+                exitProposal = m.exitProposal?.let {
+                    ExitProposalResponse(
+                        it.proposedAt,
+                        it.proposedBy,
+                        it.evidence,
+                        it.expiresAt,
+                        it.withdrawnBy,
+                        it.withdrawnAt,
+                    )
                 },
                 findings = m.findings.map {
                     MonitoringFindingResponse(
@@ -432,8 +444,21 @@ data class MonitoringResponse(
     }
 }
 
-/** An operator's record that an exit has been carried out. Who is the authenticated principal. */
+/**
+ * A reviewer's proposal that an exit has been carried out (`exit/propose`), or a second reviewer's
+ * confirmation of it (`exit/complete`), which repeats the proposal's evidence as read. Who is the
+ * authenticated principal.
+ */
 data class CompleteExitRequest(val evidence: String?)
+
+data class ExitProposalResponse(
+    val proposedAt: Instant,
+    val proposedBy: String,
+    val evidence: String,
+    val expiresAt: Instant? = null,
+    val withdrawnBy: String? = null,
+    val withdrawnAt: Instant? = null,
+)
 
 /** One screened subject of the case, as an operator sees it. */
 data class ScreeningSubjectResponse(

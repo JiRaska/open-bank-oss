@@ -299,7 +299,7 @@ spec:
             severity: warning
           annotations:
             summary: "a sanctions-monitoring finding on an approved business customer has waited a day for review"
-            description: "The oldest undecided monitoring finding in {{ $labels.namespace }} has waited {{ $value | humanizeDuration }} (`openbank_kyb_monitoring_reviews_open` says how many cases have one). Ongoing monitoring matched the entity or a related party of an approved business case against a sanctions, terrorist or PEP list entry. The case keeps its status and appears in no status queue: list such cases with `GET /api/v1/kyb/cases?monitoring=open` and decide each finding with `POST /api/v1/kyb/cases/{id}/monitoring/findings/{findingId}/disposition`. The customer sees no change in the meantime, so nobody will chase it from that side."
+            description: "The oldest undecided monitoring finding in {{ $labels.namespace }} has waited {{ $value | humanizeDuration }} (`openbank_kyb_monitoring_reviews_open` says how many cases have one). Ongoing monitoring matched the entity or a related party of an approved business case against a sanctions, terrorist or PEP list entry. The case keeps its status and appears in no status queue: list such cases with `GET /api/v1/kyb/monitoring/holds` and decide each finding with `POST /api/v1/kyb/cases/{id}/monitoring/findings/{findingId}/disposition`. The customer sees no change in the meantime, so nobody will chase it from that side."
         - alert: KybMonitoringFindingNotRouted
           # A record on the findings channel that this service could not turn into a review of one
           # of its cases: an unknown or missing `ce-type` header (`unrecognised` — the wire-shape
@@ -376,9 +376,10 @@ spec:
         - alert: KybMonitoringExitOwed
           # An operator confirmed a sanctions match on an approved business customer, so the
           # relationship has to end, and nobody has recorded that it did. kyb-service keeps the
-          # case monitored and publishes BUSINESS_RELATIONSHIP_EXIT_REQUIRED; nothing consumes that
-          # event yet, so this alert is what makes somebody carry the exit out. It clears when an
-          # operator records the exit (`monitoring/exit/complete`).
+          # case monitored and publishes nothing about it (#16028: the shared lifecycle topic reaches
+          # a customer-facing projection and the warehouse), so this alert is what makes somebody
+          # carry the exit out. It clears when a second reviewer confirms the exit
+          # (`monitoring/exit/complete`), which needs the case ended and the entity party CLOSED.
           #
           # Cold-pod reading: NaN until the first scheduled run, then a count from the database.
           expr: max by (namespace) (openbank_kyb_monitoring_exits_owed) > 0
@@ -387,7 +388,7 @@ spec:
             severity: critical
           annotations:
             summary: "an approved business relationship must be exited and the exit is not recorded"
-            description: "{{ $value }} business case(s) in {{ $labels.namespace }} carry a CONFIRMED sanctions match found by ongoing monitoring and no record that the relationship was ended (`openbank_kyb_monitoring_exits_oldest_owed_age_seconds` says for how long). The customer is still active: the party, its mandates and its accounts are untouched, and the case stays monitored. No service acts on `BUSINESS_RELATIONSHIP_EXIT_REQUIRED` yet — restrict and exit the relationship by hand, then record it with `POST /api/v1/kyb/cases/{id}/monitoring/exit/complete`, which clears this alert. `GET /api/v1/kyb/cases?monitoring=open` lists the cases."
+            description: "{{ $value }} business case(s) in {{ $labels.namespace }} carry a CONFIRMED sanctions match found by ongoing monitoring and no record that the relationship was ended (`openbank_kyb_monitoring_exits_oldest_owed_age_seconds` says for how long). The customer is still active: the party, its mandates and its accounts are untouched, and the case stays monitored. Nothing is published about it and no service acts on it yet (#15992) — restrict and exit the relationship by hand (reject the case, close the entity party), then one KYC reviewer proposes the exit (`POST /api/v1/kyb/cases/{id}/monitoring/exit/propose`) and a different one confirms it (`.../monitoring/exit/complete`), which clears this alert. `GET /api/v1/kyb/monitoring/holds` lists the cases."
         - alert: KybMonitoringCaseUnreconciled
           # A case's registrations are written in the same transaction as the case — by this
           # release. A pod of the previous release (a rolling deploy, a rollback) writes the case

@@ -135,7 +135,7 @@ tests:
               severity: warning
             exp_annotations:
               summary: "a sanctions-monitoring finding on an approved business customer has waited a day for review"
-              description: "The oldest undecided monitoring finding in kyb has waited 1d 1h 0m 0s (`openbank_kyb_monitoring_reviews_open` says how many cases have one). Ongoing monitoring matched the entity or a related party of an approved business case against a sanctions, terrorist or PEP list entry. The case keeps its status and appears in no status queue: list such cases with `GET /api/v1/kyb/cases?monitoring=open` and decide each finding with `POST /api/v1/kyb/cases/{id}/monitoring/findings/{findingId}/disposition`. The customer sees no change in the meantime, so nobody will chase it from that side."
+              description: "The oldest undecided monitoring finding in kyb has waited 1d 1h 0m 0s (`openbank_kyb_monitoring_reviews_open` says how many cases have one). Ongoing monitoring matched the entity or a related party of an approved business case against a sanctions, terrorist or PEP list entry. The case keeps its status and appears in no status queue: list such cases with `GET /api/v1/kyb/monitoring/holds` and decide each finding with `POST /api/v1/kyb/cases/{id}/monitoring/findings/{findingId}/disposition`. The customer sees no change in the meantime, so nobody will chase it from that side."
   # ---- KybMonitoringFindingNotRouted -----------------------------------------------------------
   - name: cold pod and expected traffic - counters at zero, foreign owners and siblings moving
     interval: 1m
@@ -313,7 +313,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: "an approved business relationship must be exited and the exit is not recorded"
-              description: "1 business case(s) in kyb carry a CONFIRMED sanctions match found by ongoing monitoring and no record that the relationship was ended (`openbank_kyb_monitoring_exits_oldest_owed_age_seconds` says for how long). The customer is still active: the party, its mandates and its accounts are untouched, and the case stays monitored. No service acts on `BUSINESS_RELATIONSHIP_EXIT_REQUIRED` yet — restrict and exit the relationship by hand, then record it with `POST /api/v1/kyb/cases/{id}/monitoring/exit/complete`, which clears this alert. `GET /api/v1/kyb/cases?monitoring=open` lists the cases."
+              description: "1 business case(s) in kyb carry a CONFIRMED sanctions match found by ongoing monitoring and no record that the relationship was ended (`openbank_kyb_monitoring_exits_oldest_owed_age_seconds` says for how long). The customer is still active: the party, its mandates and its accounts are untouched, and the case stays monitored. Nothing is published about it and no service acts on it yet (#15992) — restrict and exit the relationship by hand (reject the case, close the entity party), then one KYC reviewer proposes the exit (`POST /api/v1/kyb/cases/{id}/monitoring/exit/propose`) and a different one confirms it (`.../monitoring/exit/complete`), which clears this alert. `GET /api/v1/kyb/monitoring/holds` lists the cases."
       # The exit was recorded: the alert has a way out.
       - eval_time: 100m
         alertname: KybMonitoringExitOwed

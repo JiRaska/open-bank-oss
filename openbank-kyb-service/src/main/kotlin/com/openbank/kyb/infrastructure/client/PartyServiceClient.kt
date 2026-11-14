@@ -61,6 +61,8 @@ data class PartyCreated(val id: UUID)
 data class PartyRecord(
     val legalName: String,
     val kycStatus: String?,
+    /** `PENDING_KYC | ACTIVE | SUSPENDED | CLOSED | MERGED`; only CLOSED ends a relationship here. */
+    val status: String? = null,
     val address: PartyAddress?,
     // Compliance metadata party-service stores (`parties.pep_flag`, `pep_category`, `fatca_status`,
     // `crs_status`). Nullable and defaulted: a response that does not carry them reads as "not on
@@ -208,7 +210,19 @@ class PartyServiceGateway : PartyGateway {
         return PepProfile(pep = party.pepFlag, category = party.pepCategory)
     }
 
+    @Timeout(PARTY_TIMEOUT_MS)
+    override suspend fun partyClosed(partyId: UUID): Boolean {
+        val party = try {
+            client.getParty(partyId)
+        } catch (e: WebApplicationException) {
+            if (e.response?.status == HTTP_NOT_FOUND) return false
+            throw e
+        }
+        return party.status == PARTY_CLOSED
+    }
+
     private companion object {
+        const val PARTY_CLOSED = "CLOSED"
         const val PARTY_TIMEOUT_MS = 5000L
         const val HTTP_NOT_FOUND = 404
         const val KYC_APPROVED = "APPROVED"
