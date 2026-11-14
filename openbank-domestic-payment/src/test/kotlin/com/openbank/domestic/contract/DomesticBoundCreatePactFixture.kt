@@ -5,14 +5,18 @@
 package com.openbank.domestic.contract
 
 import com.openbank.domestic.application.port.out.AccountLookupPort
+import com.openbank.domestic.application.port.out.DelegationAuthorityPort
 import com.openbank.domestic.application.usecase.CzechDomesticIban
 import com.openbank.domestic.domain.model.DelegatedSpendReservationSnapshot
 import com.openbank.domestic.domain.model.DelegatedSpendReservationState
+import com.openbank.libs.fincrime.admission.DelegationFact
+import com.openbank.libs.fincrime.admission.DelegationFactsLookup
 import io.quarkus.test.junit.QuarkusTestProfile
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.UUID
 
 /**
@@ -60,9 +64,40 @@ object DomesticBoundCreatePactFixture {
     )
 }
 
-/** Enables [BoundCreatePactAccountLookup] for the provider replay classes only. */
+/** Enables the pact's account and delegation-authority stand-ins for the provider replay classes only. */
 class BoundCreatePactProfile : QuarkusTestProfile {
-    override fun getEnabledAlternatives(): Set<Class<*>> = setOf(BoundCreatePactAccountLookup::class.java)
+    override fun getEnabledAlternatives(): Set<Class<*>> =
+        setOf(BoundCreatePactAccountLookup::class.java, BoundCreatePactDelegationAuthority::class.java)
+}
+
+/**
+ * ADR-0375 D1's create-time authority read: the pact's grantee holds one ACTIVE payment grant over
+ * exactly the pact account, owned by the pact grantor. Anything else has no grant.
+ */
+@Alternative
+@ApplicationScoped
+class BoundCreatePactDelegationAuthority : DelegationAuthorityPort {
+    override suspend fun factsFor(accountId: UUID, partyId: UUID): DelegationFactsLookup {
+        val f = DomesticBoundCreatePactFixture
+        if (accountId != f.DEBTOR_ACCOUNT_ID) return DelegationFactsLookup.Available(emptyList(), null)
+        val grants = if (partyId == f.ACTING_PARTY_ID) {
+            listOf(
+                DelegationFact(
+                    grantId = f.DELEGATION_ID,
+                    grantorPartyId = f.GRANTOR_PARTY_ID,
+                    resourceId = f.DEBTOR_ACCOUNT_ID,
+                    granteePartyId = f.ACTING_PARTY_ID,
+                    capabilities = setOf("ACCOUNT_INITIATE_PAYMENT"),
+                    active = true,
+                    validFrom = OffsetDateTime.parse("2026-01-01T00:00:00Z"),
+                    validTo = null,
+                ),
+            )
+        } else {
+            emptyList()
+        }
+        return DelegationFactsLookup.Available(grants, f.GRANTOR_PARTY_ID)
+    }
 }
 
 /** The pact's debtor IBAN is the grantor's pact account; every other IBAN is external. */
