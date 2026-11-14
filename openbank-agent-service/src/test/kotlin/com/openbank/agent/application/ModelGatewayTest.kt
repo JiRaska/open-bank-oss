@@ -9,7 +9,9 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.agent.application.port.out.ModelProvider
 import com.openbank.agent.domain.model.ChatMessage
 import com.openbank.agent.domain.model.ChatRole
+import com.openbank.agent.domain.model.ModelDescriptor
 import com.openbank.agent.domain.model.ModelRequest
+import com.openbank.agent.domain.model.ModelResponse
 import com.openbank.agent.domain.model.StopReason
 import com.openbank.agent.infrastructure.model.MockModelProvider
 import com.openbank.libs.audit.AuditEvent
@@ -74,6 +76,32 @@ class ModelGatewayTest {
             assertThat(event.captured.result).isEqualTo(AuditResult.SUCCESS)
             assertThat(event.captured.payload["prompt_hash"] as String).hasSize(64)
         }
+    }
+
+    @Test
+    fun `the actor id reaches the provider as the request's end-user id`(): Unit = runBlocking {
+        var seen: ModelRequest? = null
+        val capturing = object : ModelProvider {
+            override val key = "mock"
+            override suspend fun complete(model: ModelDescriptor, request: ModelRequest): ModelResponse {
+                seen = request
+                return ModelResponse(content = "ok", modelId = model.id)
+            }
+        }
+        val providers = mockk<Instance<ModelProvider>>()
+        every { providers.iterator() } returns mutableListOf<ModelProvider>(capturing).iterator()
+        val gw = ModelGateway().apply {
+            this.config = mockk<ModelGatewayConfig>().also {
+                every { it.defaultModel() } returns "mock-echo"
+                every { it.models() } returns listOf(entry("mock-echo", "mock", "hosted"))
+            }
+            this.providers = providers
+            this.auditPublisher = this@ModelGatewayTest.auditPublisher
+        }.also { it.init() }
+
+        gw.complete(null, req("hello"), actorId = "ui-assistant")
+
+        assertThat(seen?.endUserId).isEqualTo("ui-assistant")
     }
 
     @Test

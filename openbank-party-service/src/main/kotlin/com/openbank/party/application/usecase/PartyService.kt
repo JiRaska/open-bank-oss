@@ -464,9 +464,9 @@ class PartyService : PartyUseCase {
     //    so a bare date never lists everyone born that day.
     override suspend fun searchParties(query: SearchPartiesQuery): CursorPage<Party> {
         val raw = query.q?.trim().orEmpty()
-        val (birthDates, nameTerm) = splitBirthDate(raw)
+        val (birthDates, nameTerm) = if (query.namesOnly) emptyList<String>() to raw else splitBirthDate(raw)
         // Date first: `15.6.1985` or `Smith 1985-06-15` would otherwise normalise to an identifier.
-        if (birthDates.isEmpty()) {
+        if (!query.namesOnly && birthDates.isEmpty()) {
             normalizeIdentifier(raw)?.let { id ->
                 val limit = query.limit.coerceIn(1, MAX_PAGE_SIZE)
                 val byIndex = if (RodneCislo.parse(raw) is RodneCislo.Parsed) {
@@ -491,7 +491,7 @@ class PartyService : PartyUseCase {
         }
         val afterId = req.cursor?.let { runCatching { UUID.fromString(CursorEncoder.decode(it)) }.getOrNull() }
         // Fetch limit+1 to detect a next page without a second count query.
-        val rows = partyRepo.searchByBusinessKeys(req.term!!, req.limit + 1, afterId, birthDates)
+        val rows = partyRepo.searchByBusinessKeys(req.term!!, req.limit + 1, afterId, birthDates, query.namesOnly)
         val hasNext = rows.size > req.limit
         val pageRows = if (hasNext) rows.dropLast(1) else rows
         val nextCursor = if (hasNext &&

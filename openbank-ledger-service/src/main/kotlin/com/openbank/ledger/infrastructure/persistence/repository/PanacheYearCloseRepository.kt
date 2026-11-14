@@ -5,6 +5,7 @@
 package com.openbank.ledger.infrastructure.persistence.repository
 
 import com.openbank.ledger.application.port.out.YearCloseRepository
+import com.openbank.ledger.application.usecase.YearCloseConflictException
 import com.openbank.ledger.domain.model.YearCloseRecord
 import com.openbank.ledger.domain.model.YearCloseStatus
 import com.openbank.ledger.infrastructure.persistence.entity.YearCloseEntity
@@ -52,16 +53,33 @@ class PanacheYearCloseRepository(private val clock: Clock, private val outboxRep
     }.awaitSuspending().toDomain()
 
     override suspend fun saveAttested(record: YearCloseRecord, outbox: OutboxMessage): YearCloseRecord =
-        // Status flip + outbox row in ONE transaction (transactional outbox, ADR-0003/0050) —
-        // either the attestation and its YearCloseAttested event both commit, or neither does.
+        // A CONDITIONAL flip, not read-then-write: the row must still be DRAFT with the reviewed
+        // hash, the attestor may not be any allocator, and no closing journal may be unattributed
+        // (ADR-0096 D3). Allocation holds FOR UPDATE on this same row for its whole transaction, so the two serialise and a check made earlier in the use case cannot go
+        // stale in between (TOCTOU). The flip and its outbox row commit together (ADR-0003/0050).
         Panache.withTransaction {
-            find("fiscalYear", record.fiscalYear).firstResult().flatMap { existing ->
-                checkNotNull(existing) { "Year close ${record.fiscalYear} vanished during attestation" }
-                existing.status = record.status.name
-                existing.attestedBy = record.attestedBy
-                existing.attestedAt = record.attestedAt
-                existing.updatedAt = Instant.now(clock)
-                outboxRepository.persistInTransaction(outbox).replaceWith(existing)
+            Panache.getSession().flatMap { s ->
+                s.createNativeQuery<Any>(CONDITIONAL_ATTEST_SQL)
+                    .setParameter("by", record.attestedBy)
+                    .setParameter("at", record.attestedAt?.atOffset(java.time.ZoneOffset.UTC))
+                    .setParameter("now", Instant.now(clock).atOffset(java.time.ZoneOffset.UTC))
+                    .setParameter("y", record.fiscalYear)
+                    .setParameter("hash", record.contentHash)
+                    .setParameter("prefix", "year-end-result:${record.fiscalYear}:%")
+                    .executeUpdate()
+            }.flatMap { updated ->
+                if (updated != 1) {
+                    Uni.createFrom().failure(
+                        YearCloseConflictException(
+                            "Year close ${record.fiscalYear} changed while attesting (no longer DRAFT with the " +
+                                "reviewed hash, the attestor allocated, or a closing journal is unattributed) — re-read and retry",
+                        ),
+                    )
+                } else {
+                    outboxRepository.persistInTransaction(outbox)
+                        .flatMap { find("fiscalYear", record.fiscalYear).firstResult() }
+                        .map { checkNotNull(it) { "Year close ${record.fiscalYear} vanished during attestation" } }
+                }
             }
         }.awaitSuspending().toDomain()
 
@@ -94,4 +112,17 @@ class PanacheYearCloseRepository(private val clock: Clock, private val outboxRep
         attestedBy = attestedBy,
         attestedAt = attestedAt,
     )
+
+    private companion object {
+        // Refuses, atomically with the flip: a changed row or hash, an attestor who allocated, and any
+        // closing journal with no attribution. Allocation holds FOR UPDATE on this row for its whole
+        // transaction, so this UPDATE waits for it and then sees its journal and attribution together.
+        const val CONDITIONAL_ATTEST_SQL =
+            "UPDATE ledger_year_close SET status = 'ATTESTED', attested_by = :by, attested_at = :at, " +
+                "updated_at = :now WHERE fiscal_year = :y AND status = 'DRAFT' AND content_hash = :hash " +
+                "AND NOT EXISTS (SELECT 1 FROM ledger_year_close_allocation a " +
+                "WHERE a.fiscal_year = :y AND a.allocated_by = :by) " +
+                "AND NOT EXISTS (SELECT 1 FROM ledger_idempotency i WHERE " +
+                PanacheYearEndAllocationRepository.UNATTRIBUTED_CONDITION + ")"
+    }
 }

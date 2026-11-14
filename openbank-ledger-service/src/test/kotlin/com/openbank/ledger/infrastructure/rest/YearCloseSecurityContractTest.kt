@@ -30,7 +30,7 @@ class YearCloseSecurityContractTest {
 
     @Test
     fun `reads are gated to service, auditor, viewer, operator and admin`() {
-        listOf("trialBalance", "getYearClose").forEach { name ->
+        listOf("trialBalance", "getYearClose", "previewResultAllocation").forEach { name ->
             assertThat(rolesOf(name))
                 .describedAs("%s read roles (financial-control evidence)", name)
                 .containsExactlyInAnyOrder("ROLE_API", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN")
@@ -39,7 +39,7 @@ class YearCloseSecurityContractTest {
 
     @Test
     fun `draft creation and attestation are restricted to operator`() {
-        listOf("createDraft", "attest").forEach { name ->
+        listOf("createDraft", "attest", "allocateResult").forEach { name ->
             assertThat(rolesOf(name))
                 .describedAs("%s roles (statutory close state change)", name)
                 .containsExactlyInAnyOrder("ROLE_OPERATOR")
@@ -50,5 +50,7 @@ class YearCloseSecurityContractTest {
     fun `close draft maker action is distinct from service journal posting`() {
         assertThat(actionOf(YearCloseResource::class.java, "createDraft")).isEqualTo("ledger.close.draft")
         assertThat(actionOf(ClosedPeriodResource::class.java, "createDraft")).isEqualTo("ledger.close.draft")
+        // The result allocation is the year close's maker step (ADR-0096 D3); the attestation reviews it.
+        assertThat(actionOf(YearCloseResource::class.java, "allocateResult")).isEqualTo("ledger.close.draft")
     }
 }

@@ -41,6 +41,20 @@ that is balance-service).
 - Four-eyes approval-decide endpoint: same role set as the gated action, plus a domain-level
   segregation-of-duties check (checker id != maker id) — see §4a.
 
+### GSFT deposit roster (issue #15356)
+
+`tax-reporting-service` calls `GET /api/v1/accounts/reporting/deposits` as its named OIDC
+service account. The endpoint requires `ROLE_API`, checks the verified client identity in
+application code and declares the same caller in OPA. A generic machine role, a human role,
+or a matching display name alone does not grant the roster. The response contains account and
+party identifiers, account number, type and currency. It omits balances and holder details
+and sends `Cache-Control: no-store`.
+
+Each page uses the same Czech reporting day and an immutable account-ID cursor. The query
+uses opening and closure timestamps, and stops the report when a closed record has no
+closure timestamp. This is the account roster source. Eligibility, balance, FX and verified
+holder facts remain separate data sources for the GSFT completeness checks.
+
 ## 4. STRIDE
 
 | Threat | Vector | Mitigation |
@@ -1104,3 +1118,99 @@ revision by id (`GET /api/v2/revisions/{id}`) to pin a new fund's management fee
   the OPA named-caller check are the effective limits.
 
 - **2026-11-07** — **OpenBao TLS leg and dedicated identity for product-IR signing (ADR-0352, #15113) (product-catalog, accounts namespace — the publish-path signer).** New transport, no new authority: the OpenBao Transit leg moves from `http://…:8200` (never reachable, the client refuses http) to OpenBao's TLS-only listener `https://openbao.vault.svc:8203`, certificate from ClusterIssuer `openbank-ca`; the client trusts ONLY the PEM CA named by `openbank.catalog.ir-signing.openbao.ca-file` (a mounted `ca.crt`), not the JVM's public roots, so a public CA cannot vouch for the OpenBao endpoint (**S/T**, `OpenBaoTransportTrustTest` holds both the accept and the reject case). The workload now runs as a dedicated ServiceAccount `accounts/product-catalog`, and OpenBao's kubernetes-auth role `product-catalog-ir-signing` binds to that SA and namespace only, 10-minute tokens, policy `product-ir-sign` (`update` on `transit/sign/product-ir-publish`, nothing else) — so another pod in the namespace cannot log in as this service (**E**). The Transit key is ed25519, non-exportable, no plaintext backup, deletion disallowed, and no workload policy can create, rotate or read it (**T/R**). The mode stays `disabled`; enabling it is a separate change. **Residual:** the TLS listener terminates in-pod and OpenBao re-reads its certificate only on restart or SIGHUP, which nothing sends today — `renewBefore 720h` renews the Secret, not the running listener, so a pod that outlives the 90-day certificate serves an expired one; a reload (or an expiry alert on the served certificate) is required before any consumer leaves mode `disabled`; OpenBao does not require a client certificate on 8203 — authentication is the kubernetes-auth token. Rollback: revert; the key is left in place (inert without the roles).
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.
+
+## 2026-11-11 - Account standing and party-standing propagation (ADR-0374 D4)
+
+**Change.** `AccountResponse` carries `standing` (`mayDebit`, `mayCredit`, `reason`), and a party
+that becomes `SUSPENDED` or `CLOSED` has every `ACTIVE` account it owns frozen by
+`PartyEventConsumer` through `PartyStandingService`. `accounts.freeze_origin` (V34) records who
+placed a freeze: `OPERATOR` or `PARTY_STANDING`. A party that is `ACTIVE` again lifts only the
+`PARTY_STANDING` freezes.
+
+| Threat | Vector | Mitigation |
+|---|---|---|
+| **E**oP | A suspended or AML-blocked party keeps paying because nothing told its accounts | The party status event freezes the accounts; `standing.mayDebit` is false on the lookup the rails use. Covered by a real-database integration test through the real consumer, added with this change; it is not cited by name here until it has a result on `main` |
+| **E**oP | A party event lifts a freeze an operator or a control placed | Only `freeze_origin = PARTY_STANDING` is lifted. A row frozen before V34 has no origin and is treated as an operator freeze. An operator freezing a party-frozen account takes the freeze over |
+| **T**ampering | A forged or replayed `ACTIVE` party event unfreezes accounts | The topic is written by party-service only (broker ACL). It can lift only party freezes, never an operator freeze. See the residual risk on ordering below |
+| **I**nfo disclosure | The standing reason tells the customer they are under AML review | The reason is `ACCOUNT_FROZEN` for every freeze; the origin is not exposed. No customer notification is sent for a party-standing freeze |
+| **D**oS | A party event that cannot be applied is dropped and the accounts stay usable | The failure propagates to the consumer's bounded retry and then the dead-letter topic; it is never swallowed |
+| **R**epudiation | No record of why an account froze | `AccountStatusChanged` carries `reason = PARTY_<status>` and the row carries the origin |
+
+**Residual risks.**
+- Ordering rests on the party topic's per-key order. A dead-lettered `ACTIVE` event replayed after
+  a later `SUSPENDED` would lift the party freeze until the next status event. The event time is
+  not yet compared with the last applied one.
+- Between the party's suspension and the event being consumed the accounts are still `ACTIVE`.
+  Rails that must not rely on that window need the party's standing as well (ADR-0374 step A on
+  the rails reads account standing only).
+- `MERGED` parties are not frozen here: what happens to a merged party's accounts is decided by
+  the merge flow, not by this consumer.
+- Rolling the binary back after V34: drop `chk_accounts_freeze_origin` first, or an old binary's
+  unfreeze of a party-frozen account is refused by the constraint.
+
+## 2026-11-13 — Delegation authority facts for the admission chain (ADR-0375 D1)
+
+New read-only endpoint `GET /api/v1/accounts/{accountId}/delegation/authority-facts`, under the
+EXISTING action `account.read` and the same role set as
+`delegation/payment-authorization` — no new OPA action, so no `rest.rego` change and no bundle
+restamp rides along with it. It returns every ACTIVE, in-window, ACCOUNT-scoped grant held by
+`partyId` whose grantor owns the account: grant id, grantor, capabilities and validity window.
+
+**Why a facts endpoint when a verdict endpoint already exists.** `delegation/payment-authorization`
+hard-codes `PAYMENT_ONLY`. The admission chain's authority step is a pure function whose capability
+is an argument, and a caller handed a verdict cannot ask about the capability its own action names
+— the defect ADR-0375 D7 was opened for. The alternative, six rails each keeping a projection of
+`delegation-events`, is the shape where two copies of a rule drift and the money-path copy is the
+stale one.
+
+- **Information disclosure:** the response names only grants held by the `partyId` the caller
+  already asked about, over the one account it already named. An unknown account answers `200` with
+  an empty list, never `404`, so the endpoint is not an existence oracle; an account that exists but
+  has no grant for that party is indistinguishable from one that does not exist. No balance, holder
+  name, product or IBAN is returned. A party's grants over OTHER accounts are unreachable: the
+  account is a path parameter and ownership of the grant is re-checked against that account's owner.
+  A stolen service credential yields, per call, the grant set for one (account, party) pair the
+  attacker must already name. Per-call audit makes a sweep visible.
+- **Elevation of privilege:** the grantor must own the account (`issuedBy(account.partyId)`), so a
+  projection row naming a stranger's account returns nothing — the same guard the payment-authority
+  path applies, and the reason it exists. Resource type is pinned to `ACCOUNT`, so a
+  `SAVINGS_GOAL` grant cannot be read as account authority. `partyId` is a query parameter and
+  deliberately NOT `X-Customer-Party-Id`: that header is the fleet's ownership guard and would 404
+  the very delegate this endpoint answers about, so the caller must resolve the subject from its own
+  authenticated identity and never from a customer request body.
+- **Tampering:** none. Read-only, no write path, no state.
+- **Repudiation:** the facts carry the grant id and grantor precisely so that a rail's ALLOW can
+  name the grant that permitted the debit. A grant is revocable, so nothing after the fact can
+  reconstruct which one was live when the money moved; the chain's evidence now records it
+  (`grant_id`, `grantor_party_id`).
+- **Denial of service:** read-only and indexed by the existing projection lookup. A rail that cannot
+  reach this endpoint must raise `StepOutcome.Unavailable`, which the chain maps to HOLD for
+  outbound money — never to a refusal, and never to an allow. The shared helper
+  `DelegationAuthorityFacts.outcome` decides the OWNER case before it looks at the lookup at all,
+  so an account-service outage does not hold an owner's own payment.
+
+**Stated gap, not a discovered one.** These facts are grants only. The legacy
+`account_authorizations` arm that `authorizeDelegatedPayment` still ORs in is absent, so a party
+permitted solely by a legacy row would be refused by a rail deciding from these facts. That
+divergence is already measured by the dual-run disagreement counter rather than being found later
+from a refusal, and no rail binds the authority step yet — this endpoint has no production caller
+on the day it ships.
+
+Tests: `DelegationAuthorityFactsTest` (wire mapping, unreadable validity window, unavailable
+never becoming a refusal, owner allowed through a failed lookup),
+`DelegatedDebitAuthorityTest` (the ALLOW names the permitting grant, a refusal names none).
+Rollback: revert the commit; nothing is migrated and nothing calls the route.
+
+## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
+
+The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `ACCOUNT_SERVICE_URL=https://account-service.accounts.svc:8443`. The caller and route are not new. The read is the CRS/FATCA `/active` roster under `service-account-openbank-tax-reporting` (ROLE_API), already admitted and tested in `account_rest_ext.rego`. Before this the client config never bound (it was nested under `kafka:`, #16056), so the edge existed only on paper. Transport is the private-CA mTLS listener: client cert `tax-reporting-internal-tls`, server hostname verified, bearer-only auth permission (#12511), so the certificate is transport auth and never an identity. Residual risk: none new. The ingress allow-list widens by one namespace, and authz still pins the principal id.

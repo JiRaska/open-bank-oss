@@ -5,7 +5,7 @@ kind: Namespace
 metadata:
   name: treasury
   labels:
-    openbank.io/plane: app
+    open-bank.tech/plane: app
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

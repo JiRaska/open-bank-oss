@@ -31,3 +31,22 @@ spec:
   config:
     retention.ms: 1209600000
     cleanup.policy: delete
+---
+# Dead-letter topic for kyb-service's ongoing-monitoring findings consumer (channel
+# `sanctions-monitoring-in`, failure-strategy: dead-letter-queue). A finding that cannot be applied
+# after its retries lands here instead of halting the channel; without the topic the rethrow
+# wedges on the DLQ send (#5745). 14 days, as for the party-events one: a dead-lettered finding is
+# a sanctions or PEP match nobody has reviewed, and it has to outlive a long weekend.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.kyb.sanctions-monitoring-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 1209600000
+    cleanup.policy: delete

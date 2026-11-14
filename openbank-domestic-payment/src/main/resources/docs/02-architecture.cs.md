@@ -141,7 +141,7 @@ sequenceDiagram
 
   S->>DB: INSERT platba + INSERT outbox(status=PENDING) [stejná TX]
   loop @Scheduled á 5s (dávka 25, SKIP soubězné)
-    D->>DB: listProcessable(25)  (PENDING, nejstarší první)
+    D->>DB: claimProcessable(25)  (PENDING, nejstarší první)
     D->>K: publishWithResilience(payload)  (CircuitBreaker+Retry+Timeout+Bulkhead)
     alt publikováno
       D->>DB: markSent(eventId)
@@ -152,6 +152,8 @@ sequenceDiagram
 ```
 
 **Proč outbox:** transakční konzistence mezi zápisem do DB a publikací do Kafky. Doručení at-least-once; konzumenti musí být idempotentní. Volání publish je obalené MicroProfile fault-tolerance (`@CircuitBreaker`, `@Retry`, `@Timeout`, `@Bulkhead`).
+
+Dispečer přebírá řádky atomickou aktualizací v PostgreSQL. Dotaz vrací pouze sloupce mapované aktuální entitou outboxu včetně `synthetic`. Přidání sloupců připouštějících NULL do `domestic_payment_outbox` proto zachovává kompatibilitu dispečeru.
 
 ## Klíčové porty (application/port/out)
 

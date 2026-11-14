@@ -99,7 +99,7 @@ def claim_cnpg_clusters(root: pathlib.Path) -> dict[str, dict]:
     return out
 
 
-STAGED_ANNOTATION = "openbank.io/discovery-state: staged"
+STAGED_ANNOTATION = "open-bank.tech/discovery-state: staged"
 
 
 def claim_staged_component_paths(root: pathlib.Path) -> set[str]:
@@ -240,7 +240,7 @@ def claim_image_pins(root: pathlib.Path) -> dict[str, str]:
 # The same annotation `check-cnpg-backup-declared.py` honours in the gitops tree. Repeated rather
 # than imported because that script lives under openbank-infra/scripts and this one under
 # .github/scripts; the two must agree, and the self-test below pins the string.
-BACKUP_EXEMPT_ANNOTATION = "openbank.io/backup-exempt-reason"
+BACKUP_EXEMPT_ANNOTATION = "open-bank.tech/backup-exempt-reason"
 
 
 def cmp_backup_recoverability(
@@ -833,7 +833,7 @@ def self_test() -> int:
     expect(
         "backup: the annotation key is the one the gitops gate honours",
         BACKUP_EXEMPT_ANNOTATION,
-        "openbank.io/backup-exempt-reason")
+        "open-bank.tech/backup-exempt-reason")
     expect(
         "backup: a live cluster that declares AND has a recovery point stays clean under both loops",
         cmp_backup_recoverability(

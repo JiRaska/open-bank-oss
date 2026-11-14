@@ -13,6 +13,7 @@ import com.openbank.ledger.application.port.`in`.VerifyYearCloseQuery
 import com.openbank.ledger.application.port.`in`.YearCloseUseCase
 import com.openbank.ledger.application.port.out.JournalRepository
 import com.openbank.ledger.application.port.out.YearCloseRepository
+import com.openbank.ledger.application.port.out.YearEndAllocationRepository
 import com.openbank.ledger.domain.event.YearCloseAttestedEvent
 import com.openbank.ledger.domain.model.FiscalYearTrialBalance
 import com.openbank.ledger.domain.model.YearCloseRecord
@@ -45,6 +46,7 @@ class YearCloseService(
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
     private val accountingClock: AccountingClock,
+    private val allocations: YearEndAllocationRepository,
 ) : YearCloseUseCase {
     // Single constructor = the CDI entry point. ADR-0207 D1: the second, @Inject constructor that
     // used to sit here built `Clock.system(Europe/Prague)` while this service's ClockProducer
@@ -78,19 +80,18 @@ class YearCloseService(
         return yearCloseRepository.saveDraft(draft)
     }
 
-    override suspend fun attest(command: AttestYearCloseCommand): YearCloseRecord {
+    // ADR-0096 D3: the whole attestation runs under the same `SELECT … FOR UPDATE` on the year-close
+    // row that the result allocation holds for its whole transaction, and EVERY read below is made
+    // after that lock. Measured by YearEndResultAllocationConcurrencyIT: with only a conditional
+    // UPDATE, Postgres (READ COMMITTED) re-checks just the row's own columns after waiting, not the
+    // NOT EXISTS subqueries, so an attest that waited on an allocation still succeeded over it.
+    override suspend fun attest(command: AttestYearCloseCommand): YearCloseRecord =
+        allocations.inYearCloseLock(command.fiscalYear) { attestLocked(command) }
+
+    private suspend fun attestLocked(command: AttestYearCloseCommand): YearCloseRecord {
         val record = yearCloseRepository.findByFiscalYear(command.fiscalYear)
             ?: throw YearCloseNotFoundException("No year close for fiscal year ${command.fiscalYear}")
-        if (record.status != YearCloseStatus.DRAFT) {
-            throw YearCloseConflictException(
-                "Year close ${command.fiscalYear} is not DRAFT (status=${record.status})",
-            )
-        }
-        if (command.fiscalYear >= accountingClock.today().year) {
-            throw YearCloseConflictException(
-                "Fiscal year ${command.fiscalYear} has not ended yet — cannot attest an open year",
-            )
-        }
+        requireAttestable(record, command, allocationChecks = false)
 
         // Re-verify the anchor against a FRESH computation (fail-closed): if anything was posted
         // into the closed year since the draft, the hash drifts and attestation must stop.
@@ -104,21 +105,8 @@ class YearCloseService(
             )
         }
 
-        // Four-eyes (maker != checker, #869): the attestor must differ from the draft author.
-        // Fail-closed on a null author — a draft created before four-eyes tracking has no recorded
-        // maker, so we CANNOT prove separation of duties and must reject rather than silently pass.
-        if (record.draftedBy == null) {
-            throw YearCloseConflictException(
-                "Year close ${command.fiscalYear} draft predates four-eyes tracking " +
-                    "(no recorded author) — refresh it so a maker is recorded, then attest as a different user",
-            )
-        }
-        if (record.draftedBy == command.attestedBy) {
-            throw YearCloseConflictException(
-                "Four-eyes: the attestor must differ from the draft author ${record.draftedBy} " +
-                    "for year ${command.fiscalYear}",
-            )
-        }
+        requireFourEyes(record, command)
+        requireAttestable(record, command, allocationChecks = true)
 
         val attested = record.attest(attestedBy = command.attestedBy, attestedAt = Instant.now(clock))
         val outbox = OutboxMessage(
@@ -182,6 +170,54 @@ class YearCloseService(
             fiscalYear = fiscalYear,
             lines = journalRepository.trialBalanceForPeriod(from, to),
         )
+    }
+
+    private fun requireFourEyes(record: YearCloseRecord, command: AttestYearCloseCommand) {
+        // Four-eyes (maker != checker, #869): the attestor must differ from the draft author.
+        // Fail-closed on a null author — a draft created before four-eyes tracking has no recorded
+        // maker, so we CANNOT prove separation of duties and must reject rather than silently pass.
+        if (record.draftedBy == null) {
+            throw YearCloseConflictException(
+                "Year close ${command.fiscalYear} draft predates four-eyes tracking " +
+                    "(no recorded author) — refresh it so a maker is recorded, then attest as a different user",
+            )
+        }
+        if (record.draftedBy == command.attestedBy) {
+            throw YearCloseConflictException(
+                "Four-eyes: the attestor must differ from the draft author ${record.draftedBy} " +
+                    "for year ${command.fiscalYear}",
+            )
+        }
+    }
+
+    /**
+     * ADR-0096 D3 four-eyes over the result allocation. Its closing journal is posted by the system
+     * poster, so attribution lives only in `ledger_year_close_allocation`. Fail closed when any `year-end-result:{year}:*` journal has no POSTED attribution, or when the attestor
+     * is ANY of the year's allocators. The repository's conditional flip re-checks the same facts
+     * atomically, so this is the readable refusal and that is the guarantee.
+     */
+    private suspend fun requireAttestable(
+        record: YearCloseRecord,
+        command: AttestYearCloseCommand,
+        allocationChecks: Boolean,
+    ) {
+        val year = command.fiscalYear
+        val problem = if (!allocationChecks) {
+            when {
+                record.status != YearCloseStatus.DRAFT -> "it is not DRAFT (status=${record.status})"
+                year >= accountingClock.today().year -> "fiscal year $year has not ended yet — an open year"
+                else -> null
+            }
+        } else {
+            val unattributed = allocations.unattributedJournalKeys(year)
+            when {
+                unattributed.isNotEmpty() -> "closing journal(s) $unattributed have no allocator attribution"
+                command.attestedBy in allocations.allocators(year) ->
+                    "Four-eyes: the attestor ${command.attestedBy} allocated the result"
+                else -> null
+            }
+        }
+        if (problem != null) throw YearCloseConflictException("Year close $year cannot be attested: $problem")
     }
 
     private fun requireBalanced(trialBalance: FiscalYearTrialBalance) {

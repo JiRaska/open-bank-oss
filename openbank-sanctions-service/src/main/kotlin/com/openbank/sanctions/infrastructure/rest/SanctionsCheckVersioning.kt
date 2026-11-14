@@ -23,9 +23,15 @@ internal fun ScreenEntityCommand.forV1(): ScreenEntityCommand {
     require(requested.orEmpty().none { it == SanctionsListType.CZ_TERRORISTS.name }) {
         "CZ_TERRORISTS requires /api/v3/sanctions/screen"
     }
+    require(profile == null && country == null && bankIdentifier == null) {
+        "profile, country and bankIdentifier require /api/v3/sanctions/screen"
+    }
     val meansAllLists = requested == null || requested.isEmpty() || requested.all { it?.isBlank() == true }
     return if (meansAllLists) copy(listTypes = V1_LIST_TYPES.map { it.name }) else this
 }
 
-internal fun SanctionsCheck.isV1Compatible(): Boolean =
-    checkedLists.all { it in V1_LIST_TYPES } && matches.all { it.listType in V1_LIST_TYPES }
+internal fun SanctionsCheck.isV1Compatible(): Boolean = profile == null &&
+    country == null &&
+    bankIdentifier == null &&
+    checkedLists.all { it in V1_LIST_TYPES } &&
+    matches.all { it.listType in V1_LIST_TYPES }

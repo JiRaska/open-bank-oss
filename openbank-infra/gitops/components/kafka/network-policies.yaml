@@ -31,7 +31,7 @@ metadata:
   namespace: messaging
   labels:
     app.kubernetes.io/part-of: messaging
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -185,7 +185,7 @@ metadata:
   namespace: messaging
   labels:
     app.kubernetes.io/part-of: messaging
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

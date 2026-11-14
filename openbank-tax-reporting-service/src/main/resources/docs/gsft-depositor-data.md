@@ -114,6 +114,11 @@ listed in `GsftBatch.rejected` with the reason, for correction and a follow-up t
 `T_PAYMENT` counts only persons actually rendered. Only batch-level errors (bank code, batch
 number, rate day) fail the render.
 
+Before requesting balances, GSFT excludes deposit accounts whose holder or opening is tainted by
+CEÚ. Each excluded account contributes once to `SYNTHETIC_ACCOUNTS_DROPPED`, and distinct
+synthetic holders continue to contribute to `SYNTHETIC_DEPOSITORS_DROPPED`. Balances for
+remaining deposits still use the strict read at the requested reference date.
+
 ## Data sourcing
 
 `GsftSnapshotPort.snapshot(D)` (adapter `infrastructure/returns/gsft/GsftSnapshotAdapter`) returns
@@ -127,16 +132,13 @@ Sourced:
 
 | Input | Source |
 |---|---|
-| Account roster | account-service `GET /api/v1/accounts/active` (cursor-walked to the end). Only `accountType` CURRENT, SAVINGS and TERM_DEPOSIT are deposits; NOSTRO and GL_* are dropped; any other or missing type fails the snapshot. |
+| Account roster | account-service `GET /api/v1/accounts/reporting/deposits?asOf=D`, walked with date-bound cursors. It reads CURRENT, SAVINGS and TERM_DEPOSIT accounts that existed immediately before midnight after D in Europe/Prague. Frozen and dormant deposits are included. |
 | IBAN, currency, holder party | the same roster row (`accountNumber`, `currencyCode`, `partyId`) |
 | Principal | balance-service `GET /api/v1/balances/{accountId}/{currency}?asOf=D` (booked balance; ANY failure, including 404, fails the snapshot — unlike CRS/FATCA, a missing row is never read as zero) |
 | Synthetic taint (ADR-0252) | this service's own CEÚ register, as known at snapshot time: an account is synthetic when its holder party is classified SYNTHETIC (`syntheticParties`) or its opening event was tainted (`factsUpTo`, `AccountOpened.synthetic`), the same rule as the CEÚ fold. A party whose lifecycle events predate the projection, or carried no classification, reads as real (the fail-to-real direction ADR-0252 accepts). |
 
 Unresolved gaps (each a `GsftDataGap`):
 
-- **ROSTER_ACTIVE_ONLY_CURRENT — unresolved.** The roster is the CURRENT list of ACTIVE accounts.
-  Dormant and frozen accounts hold insured deposits and are missing; an account closed after D is
-  missing, one opened after D is present. Claims are understated.
 - **JOINT_HOLDERS — unresolved.** account-service carries a single `partyId` per account, so every
   account is reported single-holder with no shares; DIL is never produced from sourced data.
 - **ACCRUED_INTEREST — unresolved, understates every claim.** interest-service exposes accrual
@@ -204,16 +206,13 @@ Sourced:
 
 | Input | Source |
 |---|---|
-| Account roster | account-service `GET /api/v1/accounts/active` (cursor-walked to the end). Only `accountType` CURRENT, SAVINGS and TERM_DEPOSIT are deposits; NOSTRO and GL_* are dropped; any other or missing type fails the snapshot. |
+| Account roster | account-service `GET /api/v1/accounts/reporting/deposits?asOf=D`, walked with date-bound cursors. It reads CURRENT, SAVINGS and TERM_DEPOSIT accounts that existed immediately before midnight after D in Europe/Prague. Frozen and dormant deposits are included. |
 | IBAN, currency, holder party | the same roster row (`accountNumber`, `currencyCode`, `partyId`) |
 | Principal | balance-service `GET /api/v1/balances/{accountId}/{currency}?asOf=D` (booked balance; ANY failure, including 404, fails the snapshot — unlike CRS/FATCA, a missing row is never read as zero) |
 | Synthetic taint (ADR-0252) | this service's own CEÚ register, as known at snapshot time: an account is synthetic when its holder party is classified SYNTHETIC (`syntheticParties`) or its opening event was tainted (`factsUpTo`, `AccountOpened.synthetic`), the same rule as the CEÚ fold. A party whose lifecycle events predate the projection, or carried no classification, reads as real (the fail-to-real direction ADR-0252 accepts). |
 
 Unresolved gaps (each a `GsftDataGap`):
 
-- **ROSTER_ACTIVE_ONLY_CURRENT — unresolved.** The roster is the CURRENT list of ACTIVE accounts.
-  Dormant and frozen accounts hold insured deposits and are missing; an account closed after D is
-  missing, one opened after D is present. Claims are understated.
 - **JOINT_HOLDERS — unresolved.** account-service carries a single `partyId` per account, so every
   account is reported single-holder with no shares; DIL is never produced from sourced data.
 - **ACCRUED_INTEREST — unresolved, understates every claim.** interest-service exposes accrual

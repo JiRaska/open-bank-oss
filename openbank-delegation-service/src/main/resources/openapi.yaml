@@ -11,7 +11,9 @@ info:
   # approval-group snapshot fields; N_OF_M is admitted behind openbank.delegation.n-of-m-enabled
   # (default false) for SAVINGS_GOAL + SAVINGS_PROPOSE_WITHDRAW only.
   # 1.25 -> 1.26 (#12693): correct the owner portfolio path parameter name in the document.
-  version: 1.26.0
+  # 1.26 -> 1.27 (#10247): document the sole statutory signing requirement for preview and offer.
+  # 1.27 -> 1.28 (#15716): approval replay binds to the frozen payload; 409 on a reused SCA challenge.
+  version: 1.28.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -281,7 +283,7 @@ paths:
               can prove redaction, watermark and view-count enforcement.
 
             All are refused before the SCA challenge is spent, so the customer keeps their ceremony.
-        '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
+        '403': { description: The authenticated party is not the grantor, or the actor lacks verified sole signing authority }
         '409': { $ref: '#/components/responses/IdempotencyConflict' }
         '422': { description: Eligibility gate, the grantor does not own the resource (ADR-0232 D5, threat model T1) }
         '503': { description: Grantor authority could not be verified; retry is safe because SCA was not consumed }
@@ -310,7 +312,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationPreviewResponse' }
         '400': { description: Unsupported or inconsistent constraints, including non-null exposure (EXPOSURE_UNSUPPORTED) }
-        '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
+        '403': { description: The authenticated party is not the grantor, or the actor lacks verified sole signing authority }
         '422': { description: Eligibility gate, or resource ownership could not be established }
         '503': { description: Grantor authority could not be verified; the draft was not authorized or cached }
   /api/v1/delegations/recertifications/grantor/{partyId}:
@@ -867,7 +869,8 @@ paths:
         `payload` is the exact upstream request body (minus secrets) and is frozen: its canonical
         JSON SHA-256 is `payloadSha256`, which every co-signer's SCA is dynamically linked to. The
         initiator's SCA challenge must already be consumed by customer-edge (payment initiation,
-        linked to amount/currency/creditor) and counts as the first signature. `kind`
+        linked to amount/currency/creditor) and counts as the first signature. Replaying that
+        challenge requires the same entity, initiator, kind and canonical payload. `kind`
         STANDING_ORDER and SDD_MANDATE (#10281) are recurring outflows, held and released exactly
         like a payment: a standing order is banded by its per-execution amount, an SDD mandate by
         its maximum amount or, without one, by the strictest rule; neither takes the trusted-payee
@@ -881,12 +884,13 @@ paths:
             schema: { $ref: '#/components/schemas/CreatePaymentApproval' }
       responses:
         '201':
-          description: Created — PENDING, or APPROVED when one signature suffices
+          description: Created approval or the current status of the original approval on replay
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApprovalRequest' }
         '400': { description: Missing or malformed field }
         '403': { $ref: '#/components/responses/SigningForbidden' }
+        '409': { description: SCA challenge already belongs to a different instruction }
         '422': { $ref: '#/components/responses/SigningUnsatisfiable' }
         '503': { $ref: '#/components/responses/SigningUnavailable' }
     get:

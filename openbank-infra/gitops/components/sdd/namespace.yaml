@@ -5,8 +5,8 @@ metadata:
   name: sdd
   labels:
     app.kubernetes.io/part-of: openbank
-    openbank.io/component: sdd
-    openbank.io/plane: app
+    open-bank.tech/component: sdd
+    open-bank.tech/plane: app
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

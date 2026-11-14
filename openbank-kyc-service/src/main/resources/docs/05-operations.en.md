@@ -40,6 +40,8 @@ Management endpoints are on the dedicated management port **8085** (`quarkus.man
 | `OPA_PATH` | `/v1/data/openbank/rest/allow` | OPA decision path |
 | `AUTHZ_ENFORCE` | `false` | advisory vs enforce authz |
 | `openbank.kyc.auto-approve` | `false` | **sandbox-only** straight-through approval; MUST stay false in prod |
+| `KYC_SCREENING_RETRY_ENABLED` | `true` | retry of the customer screen for cases opened during a `sanctions-service` outage; `false` stops the retries, not the backlog metric |
+| `KYC_SCREENING_RETRY_INTERVAL` / `_MIN_AGE` / `_BATCH_SIZE` | `1m` / `PT2M` / `50` | sweep cadence, wait after the last attempt, cases per run |
 
 Datasource: `postgresql://…/openbank_kyc`. Kafka bootstrap: `localhost:29092` (overridden per environment). Standard security response headers are set in `application.yaml` (HSTS, CSP `default-src 'self'`, X-Frame-Options DENY, etc.).
 
@@ -73,7 +75,16 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 - **Cases not auto-opening** — verify the `party-events-in` consumer is joined to group `kyc-service-party` and that `PARTY_CREATED` is flowing on `openbank.party.events`. `openCaseForParty` is idempotent; safe to replay the topic.
 - **Duplicate-case error on insert** — expected under replay/scale-out; `uq_kyc_cases_active_party` rejects the loser and the code re-reads. No action unless errors persist for distinct parties.
 - **Flyway checksum mismatch on startup** — never rewrite an applied migration; set `QUARKUS_FLYWAY_REPAIR_AT_START=true` in GitOps env, then remove once settled.
+- **Cases left unscreened** — `openbank_kyc_sanctions_unscreened_cases{service="kyc"}` counts in-flight cases whose sanctions check is `PENDING` and was never screened; `openbank_kyc_sanctions_unscreened_oldest_age_seconds` is the age of the oldest (both read NaN until the first measurement after start). A number that does not fall while `sanctions-service` is healthy means the sweep is not running (heartbeat `kyc-unscreened-case-retry`, `WorkflowLivenessStale`), is disabled, or holds no name for those cases — `SELECT case_id FROM kyc_cases WHERE pending_screening_name IS NULL AND status NOT IN ('APPROVED','REJECTED','EXPIRED')` lists candidates for a reviewer. The log line `kyc.unscreened-case.retry attempted=… settled=… failed=…` reports each run; it never contains a name.
 - **Sandbox auto-approve in prod** — if cases approve with reviewer `sandbox-auto-approval` in a non-sandbox environment, `openbank.kyc.auto-approve` is mis-set; flip to `false` immediately (compliance incident, four-eyes bypass).
+
+## Re-screening backlog
+
+Alerts `KycRescreenBacklogOverdue` (critical) and `KycRescreenLoopDisabledWithPending` (warning), issue #15961. Metric definitions and cold-pod values: [07-screening-triggers](07-screening-triggers.en.md#backlog-metrics-and-alerts).
+
+- **`KycRescreenBacklogOverdue`** — a `kyc_screening_triggers` row has been PENDING, OPEN_FAILED or DEFERRED for more than 24 hours, so a customer a sanctions list change could match has no re-screening case. List the backlog: `SELECT state, failed_reason, attempts, next_attempt_at, created_at FROM kyc_screening_triggers WHERE state IN ('PENDING','OPEN_FAILED','DEFERRED') ORDER BY created_at LIMIT 50`. Rows with a `next_attempt_at` are still being retried: check the case coordinator and the `kyc.screening-trigger.retry` heartbeat (`WorkflowLivenessStale`). Rows with `next_attempt_at` NULL and state OPEN_FAILED are parked after the attempt budget; each has a `KYC_COORDINATOR_OPEN_FAILED` event and needs an operator to open the case and reconcile the row (see "Recovery ownership" in 07-screening-triggers).
+- **`KycRescreenLoopDisabledWithPending`** — `KYC_SCREENING_TRIGGERS_ENABLED` is false while undrained rows remain. While the loop is off every list change is still queued (one deferred row per party, counted `openbank_kyc_sanctions_list_change_events_total{outcome="recorded_while_disabled"}`), so this is the full set of customers waiting. Turn the switch on and the retry job drains them, at most `KYC_SCREENING_TRIGGERS_RETRY_BATCH_SIZE` (100) per minute per pod; or reconcile the rows by hand. Do not delete them. `KycRescreenBacklogOverdue` takes over once the switch is on and fires until rows older than 24 hours are opened.
+- **No data / NaN** — the gauges read NaN until the first database sample after start (1 minute). NaN that persists means the sampler is failing; the `kyc-rescreen-backlog-sample` heartbeat goes stale and `WorkflowLivenessStale` fires.
 
 ## Observability
 

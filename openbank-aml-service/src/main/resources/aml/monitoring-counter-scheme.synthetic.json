@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "aml.monitoring-counter-scheme.synthetic",
+  "revision": 1,
+  "purpose": "synthetic",
+  "bucketSeconds": 3600,
+  "bands": [
+    {
+      "code": "SYN_CZK_BELOW_MARK",
+      "currency": "CZK",
+      "lowerInclusive": "900.00",
+      "upperExclusive": "1000.00"
+    },
+    {
+      "code": "SYN_EUR_BELOW_MARK",
+      "currency": "EUR",
+      "lowerInclusive": "90.00",
+      "upperExclusive": "100.00"
+    }
+  ]
+}

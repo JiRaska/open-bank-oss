@@ -7,6 +7,11 @@ package com.openbank.delegation.infrastructure.client
 import com.openbank.libs.testing.oidc.M2mOidcClientIdentityWiringConformance
 
 /**
+ * ADR-0375 D5 adds a third read on the same principal: a document's owner
+ * (`document.verifyOwnership`), pinned by document-service's OPA extension to this exact
+ * service-account and vetoed for every other caller, so selecting the shared client would be
+ * denied upstream rather than merely over-privileged.
+ *
  * #10486 batch 6: delegation-service reads a party (pid `party.read`) and a card (`card.read`) as its
  * OWN principal, `service-account-openbank-delegation` (ROLE_API only), granted by identity upstream.
  * Two artefacts must agree and nothing at runtime says so when they do not: the rest-client must
@@ -24,5 +29,6 @@ class M2mOidcClientIdentityWiringTest : M2mOidcClientIdentityWiringConformance()
         CardIssuanceRestClient::class.java,
         PartyMandateRestClient::class.java,
         PartyAuthorityRestClient::class.java,
+        DocumentOwnershipRestClient::class.java,
     )
 }

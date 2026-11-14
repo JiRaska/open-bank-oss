@@ -55,6 +55,29 @@ quarkus:
       connect-timeout: 2000
       read-timeout: 5000
 
+  # Supervisory submission store. Literal JDBC url (check-flyway-default-datasource.py, #3080);
+  # the deployed values come from QUARKUS_DATASOURCE_* env in the gitops manifest.
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: vertx-reactive:postgresql://localhost:5432/openbank_finrep
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 10
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_finrep
+  hibernate-orm:
+    database:
+      generation: none
+  flyway:
+    # Committing migrations does not run them — this key defaults to FALSE (#3350).
+    migrate-at-start: true
+    baseline-on-migrate: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+
   log:
     level: INFO
 
@@ -72,7 +95,13 @@ quarkus:
     always-include: true
     path: /api/docs
 
+authz:
+  enforce: ${AUTHZ_ENFORCE:false}
+
 openbank:
+  authz:
+    opa-pdp-producer:
+      enabled: true
   finrep:
     risk-engine:
       # Off until finrep's own identity, its risk-engine read grant and the network edge are live

@@ -48,12 +48,16 @@ locals {
   }
   runners_max_pods           = var.arc_max_runners + var.arc_deploy_max_runners + var.arc_batch_max_runners + var.arc_dr_max_runners
   runners_nodepool_cpu_limit = local.runners_max_pods * local.runner_node_vcpu
-  runner_tolerations = [{
-    key      = "openbank.io/runner"
-    operator = "Equal"
-    value    = "true"
-    effect   = "NoSchedule"
-  }]
+  # Node-key migration to open-bank.tech, stage 1: runner pods tolerate both taint keys
+  # so stage 2 can switch the NodePool taint without stranding queued jobs.
+  runner_tolerations = [
+    for k in ["openbank.io/runner", "open-bank.tech/runner"] : {
+      key      = k
+      operator = "Equal"
+      value    = "true"
+      effect   = "NoSchedule"
+    }
+  ]
   # Prefer warm on-demand nodes for idle runners; burst onto spot for overflow.
   runner_affinity = {
     nodeAffinity = {

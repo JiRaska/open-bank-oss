@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openbank.example/contracts/lending/loan-exposure-fact-v1.schema.json",
+  "title": "loan.exposure_fact v1",
+  "x-openbank-event-type": "loan.exposure_fact",
+  "description": "Dated source facts on openbank.lending.events for eventual reporting enrichment. Amounts are native-currency source values.",
+  "type": "object",
+  "required": [
+    "eventType", "eventVersion", "eventId", "aggregateType", "aggregateId", "loanId", "applicationId",
+    "partyId", "loanStatus", "currency", "originalPrincipal", "effectiveAt", "occurredAt", "sourceService",
+    "kind", "sourceReference"
+  ],
+  "properties": {
+    "eventType": { "const": "loan.exposure_fact" },
+    "eventVersion": { "const": 1 },
+    "eventId": { "type": "string", "format": "uuid" },
+    "aggregateType": { "const": "LOAN" },
+    "aggregateId": { "type": "string", "format": "uuid" },
+    "loanId": { "type": "string", "format": "uuid" },
+    "applicationId": { "type": "string", "format": "uuid" },
+    "partyId": { "type": "string", "format": "uuid" },
+    "loanStatus": { "type": "string", "minLength": 1 },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "originalPrincipal": { "type": "number", "minimum": 0 },
+    "effectiveAt": { "type": "string", "format": "date-time" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "sourceService": { "const": "lending" },
+    "kind": { "enum": ["DISBURSED", "REPAID", "RESCHEDULED", "ENDED"] },
+    "sourceReference": { "type": "string", "maxLength": 160 },
+    "cashConfirmedAt": { "type": "string", "format": "date-time" },
+    "installmentId": { "type": "string", "format": "uuid" },
+    "principalRepaid": { "type": "number", "minimum": 0 },
+    "interestRepaid": { "type": "number", "minimum": 0 },
+    "unpaidScheduledPrincipal": { "type": "number", "minimum": 0 },
+    "scheduleVersion": { "type": "integer", "minimum": 0 },
+    "synthetic": { "type": "boolean" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "DISBURSED" } } },
+      "then": { "required": ["cashConfirmedAt"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "REPAID" } } },
+      "then": { "required": ["installmentId", "principalRepaid", "interestRepaid", "unpaidScheduledPrincipal"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "RESCHEDULED" } } },
+      "then": { "required": ["scheduleVersion", "unpaidScheduledPrincipal"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "ENDED" } } },
+      "then": { "properties": { "loanStatus": { "enum": ["CLOSED", "UNWOUND", "WRITTEN_OFF"] } } }
+    }
+  ],
+  "additionalProperties": true
+}

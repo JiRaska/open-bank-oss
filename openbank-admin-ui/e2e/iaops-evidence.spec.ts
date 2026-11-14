@@ -7,7 +7,7 @@
 // flaky-test-hunter-evidence.spec.ts (#12874): together they give the iaops route group
 // coverage of both its surfaces.
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 const GOVERNANCE_URL = '**/api/iaops/governance'

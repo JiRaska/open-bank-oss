@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.12.2...sepa-instant-v0.12.3) (2026-11-12)
+
+
+### Bug Fixes
+
+* **sepa-instant:** preserve synthetic payment origin in outbox events ([#15664](https://github.com/JiRaska/open-bank-oss/issues/15664)) ([a3eda52](https://github.com/JiRaska/open-bank-oss/commit/a3eda52f53b40f50b9b2afea8cdb8e983e8e4097)), closes [#12181](https://github.com/JiRaska/open-bank-oss/issues/12181) [#4348](https://github.com/JiRaska/open-bank-oss/issues/4348)
+
 ## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.12.1...sepa-instant-v0.12.2) (2026-10-26)
 
 

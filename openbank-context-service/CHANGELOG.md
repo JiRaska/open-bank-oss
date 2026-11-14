@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/context-service-v0.4.4...context-service-v0.5.0) (2026-11-14)
+
+
+### Features
+
+* **context:** accept HELD domestic payments and AML case events with no party ([#16038](https://github.com/JiRaska/open-bank-oss/issues/16038)) ([98b0507](https://github.com/JiRaska/open-bank-oss/commit/98b0507386832e12732c1d05bdbac6a68635bd2c)), closes [#15724](https://github.com/JiRaska/open-bank-oss/issues/15724)
+
 ## [0.4.4](https://github.com/JiRaska/open-bank-oss/compare/context-service-v0.4.3...context-service-v0.4.4) (2026-10-26)
 
 

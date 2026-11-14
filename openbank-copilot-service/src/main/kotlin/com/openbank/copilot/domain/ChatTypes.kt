@@ -29,7 +29,18 @@ data class ChatReply(
     val proposal: ActionProposal? = null,
     /** Normalized ThemeSpec JSON produced by the theme-designer tool this turn (ADR-0190), else null. */
     val themeSpec: String? = null,
+    /**
+     * Always `true`: every reply on this surface is machine-generated, including refusals and error
+     * fallbacks (EU AI Act Art. 50(1) — the customer must be told they are dealing with an AI). It is a
+     * constructor default rather than a per-path decision so no reply path can forget it.
+     */
+    val aiGenerated: Boolean = true,
+    /** Short Czech disclosure text the app may render next to the reply. */
+    val disclosure: String = AI_DISCLOSURE,
 )
+
+/** Customer-facing statement that the reply comes from an AI assistant (Art. 50(1)). */
+const val AI_DISCLOSURE: String = "Odpověď vytvořila umělá inteligence."
 
 /** Outcome of handling a turn. */
 sealed interface ChatOutcome {

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.6](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.5...flaky-test-hunter-v0.15.6) (2026-11-11)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** deduplicate proposals across issue labels ([#15605](https://github.com/JiRaska/open-bank-oss/issues/15605)) ([34b6022](https://github.com/JiRaska/open-bank-oss/commit/34b6022c0f3fb1adc45c278472cf529e03eec0b2))
+
 ## [0.15.5](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.4...flaky-test-hunter-v0.15.5) (2026-11-08)
 
 

@@ -17,6 +17,7 @@
 | `collateral` | Zajištění evidované k úvěru (kategorie AnaCredit) | `id`, `loan_id` → `loan`, `type`, `description`, `market_value`+`currency`, `haircut` (`[0,1]`), `valued_at` |
 | `lending_outbox` | Transakční outbox (ADR-0003) | `id` (BIGSERIAL), `event_id` (unikát), `aggregate_id`, `event_type`, `payload`, `status`, `attempt_count`, `sent_at`, `last_error`, `created_at`, `updated_at` |
 | `loan_provisioning` | Historie IFRS 9 stage/ECL, jeden řádek na úvěr a reportovací období (ADR-0028 Fáze 3) | `id`, `loan_id` → `loan`, `period` (`yyyy-MM`), `as_of`, `outstanding_balance`+`currency`, `days_past_due`, `bucket`, `stage`, `expected_credit_loss`, `created_at`; `UNIQUE(loan_id, period)` |
+| `loan_decline_review` | Zákazníkem vyžádané lidské přezkoumání zamítnutí enginem; nejvýše jedno na žádost (V32) | `id`, `application_id` (unikátní) → `loan_application`, `party_id`, `requested_at`, `engine_outcome`/`engine_reasons`/`policy_versions`/`engine_decided_at` (snímek), `status` (`REQUESTED`/`CONFIRMED`/`OVERTURNED`), `reviewed_by`, `reviewed_at`, `review_reason` (povinný po rozhodnutí), `successor_application_id` (jen při přehodnocení). `loan_application.predecessor_application_id` odkazuje z nástupce zpět |
 
 ### PostgreSQL enum typy (V1)
 
@@ -41,6 +42,8 @@ Peněžní částky jsou `NUMERIC(20,2)` se samostatnou `CHAR(3)` ISO-4217 `curr
 | **V3** | `V3__hibernate_sequences.sql` | `CREATE SEQUENCE lending_outbox_seq INCREMENT BY 50` — Panache alokace id potřebuje `<table>_seq`; CREATE TABLE vytvořilo jen `<table>_id_seq` a generování je `none`. Rollback: `DROP SEQUENCE lending_outbox_seq;` |
 | **V4** | `V4__loan_provisioning.sql` | Přidá `loan_provisioning` (historie IFRS 9 stage/ECL) + `idx_loan_provisioning_loan_period` (ADR-0028 Fáze 3). Rollback: `DROP TABLE loan_provisioning;` |
 | **V29** | `V29__lending_outbox_id_sequence_alignment.sql` | Přesměruje default `lending_outbox.id` na `lending_outbox_seq` — nativní inserty (`loan.interest_accrued`) braly id z BIGSERIAL sekvence od 1 a kolidovaly s poolovanými id z Panache entity cesty (23505). Rollback: `ALTER TABLE lending_outbox ALTER COLUMN id SET DEFAULT nextval('lending_outbox_id_seq');` |
+| **V32** | `V32__loan_decline_review.sql` | Přidá `loan_decline_review` (CHECK: rozhodnuto ⇒ posuzovatel + důvod ≥ 10 znaků; nástupce ⇔ `OVERTURNED`). Rollback: `DROP TABLE loan_decline_review;` — jen před prvním zapsaným přezkumem |
+| **V34** | `V34__loan_application_predecessor.sql` | Přidá `loan_application.predecessor_application_id` (zpětný odkaz z nástupce přezkumu). Rollback: `ALTER TABLE loan_application DROP COLUMN predecessor_application_id;` |
 
 **Pravidlo (CLAUDE.md):** nikdy needituj migraci po jejím nasazení do živé DB — přidej novou verzovanou migraci. `validate-on-migrate` je vypnuto; `QUARKUS_FLYWAY_REPAIR_AT_START` použij jen jako dočasné zotavovací opatření.
 

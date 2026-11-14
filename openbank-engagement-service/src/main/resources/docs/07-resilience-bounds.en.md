@@ -16,6 +16,17 @@ services away from its cause.
 |---|---|---|
 | `consent-service` | 2000 | 5000 |
 
+The same `consent-service` client also serves the suppression read below, so these bounds
+apply to it too.
+
+## Promotional contact and the suppression list
+
+Before a promotional impression the contact gate reads the customer's active do-not-contact
+entries live from consent-service (`GET /api/v1/suppressions/party/{partyId}`); a suppressed
+party gets no promotional contact (GDPR Art. 21). The list is never cached. If consent-service
+is unreachable or the read fails, the gate fails closed (`GATE_UNAVAILABLE`) and no promotional
+surface is shown; an outage is never treated as an empty list.
+
 ## Reactive datasource pool self-heal
 
 Quarkus leaves `idle-timeout` / `max-lifetime` / `max-size` off by default, so a

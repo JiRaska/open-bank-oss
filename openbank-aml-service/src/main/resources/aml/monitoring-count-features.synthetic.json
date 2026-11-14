@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "aml.monitoring-count-features.synthetic",
+  "revision": 1,
+  "purpose": "synthetic",
+  "counterScheme": {
+    "id": "aml.monitoring-counter-scheme.synthetic",
+    "revision": 1
+  },
+  "features": [
+    {
+      "id": "syn_czk_out_below_mark_w24h",
+      "revision": 1,
+      "currency": "CZK",
+      "direction": "OUT",
+      "rail": null,
+      "band": "SYN_CZK_BELOW_MARK",
+      "windowSeconds": 86400
+    },
+    {
+      "id": "syn_czk_in_below_mark_w24h",
+      "revision": 1,
+      "currency": "CZK",
+      "direction": "IN",
+      "rail": null,
+      "band": "SYN_CZK_BELOW_MARK",
+      "windowSeconds": 86400
+    },
+    {
+      "id": "syn_eur_out_below_mark_w24h",
+      "revision": 1,
+      "currency": "EUR",
+      "direction": "OUT",
+      "rail": null,
+      "band": "SYN_EUR_BELOW_MARK",
+      "windowSeconds": 86400
+    }
+  ]
+}

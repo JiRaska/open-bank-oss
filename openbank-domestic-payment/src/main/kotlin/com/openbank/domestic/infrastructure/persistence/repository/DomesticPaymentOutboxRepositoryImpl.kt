@@ -139,7 +139,8 @@ class DomesticPaymentOutboxRepositoryImpl(private val clock: Clock) :
                 LIMIT :claimLimit
                 FOR UPDATE SKIP LOCKED
             )
-            RETURNING *
+            RETURNING id, event_id, aggregate_id, event_type, payload, status, attempt_count,
+                      sent_at, last_error, created_at, updated_at, claimed_at, synthetic
         """
     }
 }
