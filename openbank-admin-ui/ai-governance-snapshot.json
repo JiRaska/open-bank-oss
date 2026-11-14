@@ -180,7 +180,7 @@
       "Human agent-PR merge independently verified in the merge store, outbox and separate audit store"
     ],
     "planned": [
-      "First live policy-allowed mechanical repair PR from the deployed bounded writer",
+      "First live policy-allowed mechanical repair PR from the deployed bounded writer, against the seeded qualification/flaky-test-hunter branch (ADR-0031 D9 amendment 2026-11-14; the only eligible repair is gate-blocked on main)",
       "By-actor live query endpoint (audit-service)",
       "Independently attested runtime evidence of KMS-signed anchors",
       "ai_attribution populated in evidence bundle",
@@ -466,7 +466,7 @@
     "provenance": {
       "curated": {
         "source": "openbank-libs/governance/ai-rollout.yaml",
-        "sha256": "bf0b09cf9c5c219a"
+        "sha256": "5d6a55459c5f3b3e"
       },
       "generatedBy": ".github/scripts/gen-ai-governance-snapshot.py"
     }
