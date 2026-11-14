@@ -50,7 +50,7 @@ data class Signer(
     val isInitiator: Boolean,
 )
 
-class CaseTransitionException(message: String) : IllegalStateException(message)
+class CaseTransitionException(message: String, cause: Throwable? = null) : IllegalStateException(message, cause)
 
 /**
  * The multi-party business onboarding aggregate (ADR-0284 D1). Every transition is a pure function

@@ -152,13 +152,13 @@ data class CaseMonitoring(
         requireExitRecordable(relationshipEnded)
         val proposal = exitProposal ?: throw CaseTransitionException("no exit has been proposed for this case")
         require(checker.isNotBlank()) { "the operator confirming the exit must be identified" }
-        if (evidence.trim() != proposal.evidence) {
-            throw CaseTransitionException("the exit proposal changed; read the case again before confirming")
+        refuseUnless(evidence.trim() == proposal.evidence) {
+            "the exit proposal changed; read the case again before confirming"
         }
         try {
             Proposal("exit", proposal.evidence, proposal.proposedBy, proposal.proposedAt).approve(checker, at)
         } catch (e: MakerCheckerViolation) {
-            throw CaseTransitionException(e.message ?: "four-eyes: the confirmer must differ from the proposer")
+            throw CaseTransitionException(e.message ?: "four-eyes: the confirmer must differ from the proposer", e)
         }
         return copy(exitCompleted = ExitCompletion(at, checker, proposal.evidence))
     }
@@ -168,16 +168,19 @@ data class CaseMonitoring(
      * does not answer a finding nobody looked at); and the relationship must have ended.
      */
     private fun requireExitRecordable(relationshipEnded: Boolean) {
-        if (exitOwedSince == null) throw CaseTransitionException("this case owes no exit")
-        if (openFindings.isNotEmpty()) {
-            throw CaseTransitionException("${openFindings.size} monitoring finding(s) are undecided; decide them first")
+        refuseUnless(exitOwedSince != null) { "this case owes no exit" }
+        refuseUnless(openFindings.isEmpty()) {
+            "${openFindings.size} monitoring finding(s) are undecided; decide them first"
         }
-        if (!relationshipEnded) {
-            throw CaseTransitionException(
-                "the relationship has not demonstrably ended: the case must be rejected or abandoned " +
-                    "and the entity party CLOSED in party-service; monitoring continues until then",
-            )
+        refuseUnless(relationshipEnded) {
+            "the relationship has not demonstrably ended: the case must be rejected or abandoned " +
+                "and the entity party CLOSED in party-service; monitoring continues until then"
         }
+    }
+
+    /** A refused transition (409), as opposed to a malformed request (`require`, 400). */
+    private inline fun refuseUnless(condition: Boolean, message: () -> String) {
+        if (!condition) throw CaseTransitionException(message())
     }
 }
 
