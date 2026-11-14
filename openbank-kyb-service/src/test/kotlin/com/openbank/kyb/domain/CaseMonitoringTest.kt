@@ -225,36 +225,118 @@ class CaseMonitoringTest {
         assertThat(case(CaseStatus.SIGNED).abandoned(t1).monitored).isFalse()
     }
 
+    /** An owed exit, every finding decided, on a case kyb no longer treats as approved. */
+    private fun owedOn(status: CaseStatus): BusinessOnboardingCase =
+        case(CaseStatus.SIGNED).monitoringMatched(finding(1)).decide(1, FindingDisposition.CONFIRMED).let {
+            when (status) {
+                CaseStatus.REJECTED -> it.rejected("rejected by an operator", t1)
+                CaseStatus.ABANDONED -> it.abandoned(t1)
+                else -> it
+            }
+        }
+
+    private val evidence = "party closed, mandates revoked, accounts closed: ticket SYN-1"
+
     @Test
-    fun `only a recorded exit ends monitoring of a confirmed match, and it needs every finding decided`() {
-        val owed = case(CaseStatus.ACTIVE).monitoringMatched(finding(1)).decide(1, FindingDisposition.CONFIRMED)
+    fun `an exit is recorded only on a four-eyes confirmation, and monitoring continues until then`() {
+        val owed = owedOn(CaseStatus.REJECTED)
         val late = owed.monitoringMatched(finding(2))
         assertThat(late.monitoring.findings).describedAs("a finding after the exit became owed is recorded").hasSize(2)
 
         // Must-refuse: an undecided finding, too little evidence, nobody named.
-        assertThatThrownBy { late.exitCompleted("operator-2", "accounts closed, mandates revoked", t1) }
+        assertThatThrownBy { late.exitProposed("reviewer-a", evidence, entityPartyClosed = true, at = t1) }
             .isInstanceOf(CaseTransitionException::class.java)
         val decided = late.decide(2, FindingDisposition.CLEARED_FALSE_POSITIVE)
-        assertThatThrownBy { decided.exitCompleted("operator-2", "done", t1) }
+        assertThatThrownBy { decided.exitProposed("reviewer-a", "done", true, t1) }
             .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { decided.exitCompleted(" ", "accounts closed, mandates revoked", t1) }
+        assertThatThrownBy { decided.exitProposed(" ", evidence, true, t1) }
             .isInstanceOf(IllegalArgumentException::class.java)
 
-        val exited = decided.exitCompleted("operator-2", "accounts closed, mandates revoked", t1.plusSeconds(900))
+        val proposed = decided.exitProposed("reviewer-a", evidence, true, t1)
+        assertThat(proposed.monitored).describedAs("a proposal ends nothing").isTrue()
+        assertThat(proposed.monitoring.exitOwedSince).isNotNull()
+        assertThat(proposed.monitoredSubjects).hasSize(2)
 
-        assertThat(exited.status).describedAs("the status is not this service's to change").isEqualTo(CaseStatus.ACTIVE)
+        // Must-refuse: the proposer confirming their own proposal; a confirmation of evidence
+        // other than the proposal's (a proposal replaced after it was read).
+        assertThatThrownBy { proposed.exitConfirmed("reviewer-a", evidence, true, t1) }
+            .isInstanceOf(CaseTransitionException::class.java)
+            .hasMessageContaining("four-eyes")
+        assertThatThrownBy { proposed.exitConfirmed("reviewer-b", "something else entirely", true, t1) }
+            .isInstanceOf(CaseTransitionException::class.java)
+
+        val exited = proposed.exitConfirmed("reviewer-b", evidence, true, t1.plusSeconds(900))
         assertThat(exited.monitoring.exitOwedSince).isNull()
-        assertThat(exited.monitoring.exitCompleted?.completedBy).isEqualTo("operator-2")
+        assertThat(exited.monitoring.exitCompleted?.completedBy).isEqualTo("reviewer-b")
+        assertThat(exited.monitoring.exitProposal?.proposedBy).isEqualTo("reviewer-a")
         assertThat(exited.monitored).isFalse()
         assertThat(exited.monitoredSubjects).isEmpty()
-        // Nothing is monitored any more, so nothing more is recorded; and an exit is completed once.
+        // Nothing is monitored any more, so nothing more is recorded; an exit is completed once.
         assertThatThrownBy { exited.monitoringMatched(finding(3)) }.isInstanceOf(CaseTransitionException::class.java)
-        assertThatThrownBy { exited.exitCompleted("operator-2", "accounts closed, mandates revoked", t1) }
+        assertThatThrownBy { exited.exitConfirmed("reviewer-c", evidence, true, t1) }
             .isInstanceOf(CaseTransitionException::class.java)
-        // Control: a case that owes no exit cannot complete one.
-        assertThatThrownBy {
-            case(CaseStatus.ACTIVE).exitCompleted("operator-2", "accounts closed, mandates revoked", t1)
-        }
+        // Control: a case that owes no exit cannot propose one.
+        assertThatThrownBy { case(CaseStatus.REJECTED).exitProposed("reviewer-a", evidence, true, t1) }
             .isInstanceOf(CaseTransitionException::class.java)
+    }
+
+    @Test
+    fun `an exit cannot be recorded while the relationship is live in kyb or in party-service`() {
+        // An ACTIVE case: refused even with the party closed and two reviewers.
+        val active = case(CaseStatus.ACTIVE).monitoringMatched(finding(1)).decide(1, FindingDisposition.CONFIRMED)
+        assertThatThrownBy { active.exitProposed("reviewer-a", evidence, true, t1) }
+            .isInstanceOf(CaseTransitionException::class.java)
+            .hasMessageContaining("not demonstrably ended")
+        // SIGNED is approved too.
+        assertThatThrownBy { owedOn(CaseStatus.SIGNED).exitProposed("reviewer-a", evidence, true, t1) }
+            .isInstanceOf(CaseTransitionException::class.java)
+        // Rejected in kyb, but the party is still live.
+        val rejected = owedOn(CaseStatus.REJECTED)
+        assertThatThrownBy { rejected.exitProposed("reviewer-a", evidence, entityPartyClosed = false, at = t1) }
+            .isInstanceOf(CaseTransitionException::class.java)
+        // A proposal made while it had ended does not carry a confirmation past a re-opened party.
+        val proposed = rejected.exitProposed("reviewer-a", evidence, true, t1)
+        assertThatThrownBy { proposed.exitConfirmed("reviewer-b", evidence, entityPartyClosed = false, at = t1) }
+            .isInstanceOf(CaseTransitionException::class.java)
+        assertThat(proposed.monitored).isTrue()
+        // Control: abandoned + closed is ended.
+        val abandoned = owedOn(CaseStatus.ABANDONED).exitProposed("reviewer-a", evidence, true, t1)
+        assertThat(abandoned.exitConfirmed("reviewer-b", evidence, true, t1).monitored).isFalse()
+    }
+
+    @Test
+    fun `a monitoring hold keeps party activation pending, and only a clean resolution applies it`() {
+        val signed = case(CaseStatus.SIGNED)
+        // Control: without a finding, party activation activates.
+        assertThat(signed.entityPartyActivated(t1).status).isEqualTo(CaseStatus.ACTIVE)
+
+        val held = signed.monitoringMatched(finding(1)).monitoringMatched(finding(2)).entityPartyActivated(t1)
+        assertThat(held.status).describedAs("an open finding holds the activation").isEqualTo(CaseStatus.SIGNED)
+        assertThat(held.entityPartyActive).describedAs("the activation is recorded as pending").isTrue()
+        assertThat(held.updatedAt).isEqualTo(t1)
+
+        // One finding cleared, one still open: still held.
+        val half = held.decide(1, FindingDisposition.CLEARED_FALSE_POSITIVE)
+        assertThat(half.status).isEqualTo(CaseStatus.SIGNED)
+        // The last one cleared: the pending activation is applied, and the case reads as if it
+        // had never waited — the same updatedAt the activation set.
+        val clean = half.decide(2, FindingDisposition.CLEARED_FALSE_POSITIVE)
+        assertThat(clean.status).isEqualTo(CaseStatus.ACTIVE)
+        assertThat(clean.updatedAt).isEqualTo(t1)
+
+        // A confirmed sanctions match: never activated, not when decided, not after the exit.
+        val confirmed = half.decide(2, FindingDisposition.CONFIRMED)
+        assertThat(confirmed.status).isEqualTo(CaseStatus.SIGNED)
+        assertThat(confirmed.entityPartyActivated(t1.plusSeconds(5)).status).isEqualTo(CaseStatus.SIGNED)
+        val exited = confirmed.rejected("ended by the bank", t1)
+            .exitProposed("reviewer-a", evidence, true, t1)
+            .exitConfirmed("reviewer-b", evidence, true, t1)
+        assertThat(exited.status).isEqualTo(CaseStatus.REJECTED)
+        assertThat(exited.monitoring.blocksActivation).isTrue()
+
+        // A confirmed PEP match is a risk fact, not a hold once decided: activation applies.
+        val pep = signed.monitoringMatched(finding(3, kind = "PEP")).entityPartyActivated(t1)
+        assertThat(pep.status).isEqualTo(CaseStatus.SIGNED)
+        assertThat(pep.decide(3, FindingDisposition.CONFIRMED).status).isEqualTo(CaseStatus.ACTIVE)
     }
 }

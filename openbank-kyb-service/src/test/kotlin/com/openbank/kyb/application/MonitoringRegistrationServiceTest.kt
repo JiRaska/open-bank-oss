@@ -110,11 +110,26 @@ class MonitoringRegistrationServiceTest {
     }
 
     @Test
-    fun `switched off, a run touches neither the store nor the registry`(): Unit = runBlocking {
+    fun `switched off, a run registers nothing and sends only withdrawals the registry already holds`(): Unit =
+        runBlocking {
+            coEvery { store.claimNext(any(), any(), true) } returnsMany listOf(row(MonitoringDesired.WITHDRAWN), null)
+
+            assertThat(service(enabled = false).run()).isEqualTo(MonitoringRunOutcome.DISABLED)
+
+            // Only the narrowed claim: never a registration, no reconciliation, no re-assertion.
+            coVerify(exactly = 0) { store.claimNext(any(), any(), false) }
+            coVerify(exactly = 0) { store.casesToReconcile(any()) }
+            coVerify(exactly = 0) { store.requeueSettledBefore(any(), any(), any()) }
+            coVerify(exactly = 0) { registry.register(any(), any(), any()) }
+            coVerify(exactly = 1) { registry.withdraw(ref) }
+        }
+
+    @Test
+    fun `switched off with nothing the registry holds, a run calls nothing`(): Unit = runBlocking {
+        coEvery { store.claimNext(any(), any(), true) } returns null
+
         assertThat(service(enabled = false).run()).isEqualTo(MonitoringRunOutcome.DISABLED)
 
-        coVerify(exactly = 0) { store.claimNext(any(), any()) }
-        coVerify(exactly = 0) { store.casesToReconcile(any()) }
         coVerify(exactly = 0) { registry.register(any(), any(), any()) }
         coVerify(exactly = 0) { registry.withdraw(any()) }
     }

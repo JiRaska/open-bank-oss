@@ -157,6 +157,13 @@ interface PartyGateway {
      * declare. Null overall when party-service has no such party.
      */
     suspend fun pepProfile(partyId: UUID): PepProfile?
+
+    /**
+     * Whether party-service records [partyId] as CLOSED — the relationship ended on the party side.
+     * False for any other status and for an unknown party: what cannot be shown is not assumed.
+     * Throws when party-service cannot be asked.
+     */
+    suspend fun partyClosed(partyId: UUID): Boolean
 }
 
 data class PepProfile(val pep: Boolean?, val category: String?)

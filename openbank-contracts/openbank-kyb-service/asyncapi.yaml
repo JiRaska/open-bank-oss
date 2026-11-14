@@ -10,7 +10,8 @@ asyncapi: 3.0.0
 info:
   title: OpenBank KYB Service — events
   # 1.0.0 -> 1.1.0: additive — BUSINESS_RELATIONSHIP_EXIT_REQUIRED (ADR-0376, kyb side).
-  version: 1.1.0
+  # 1.1.0 -> 1.1.1: BUSINESS_RELATIONSHIP_EXIT_REQUIRED is no longer published (#16028); shape kept.
+  version: 1.1.1
   description: |
     Lifecycle events of a business onboarding case (ADR-0284): a sole trader or company being
     verified against its public register and signed for by its listed representatives.
@@ -116,11 +117,12 @@ components:
     BusinessRelationshipExitRequired:
       name: BUSINESS_RELATIONSHIP_EXIT_REQUIRED
       summary: >-
-        The relationship with an approved business customer has to end: an operator confirmed a
-        sanctions match that ongoing monitoring found. Published once per case. `status` is the
-        case's status as it was, unchanged by this event; the case stays monitored until an
-        operator records that the exit was carried out. No reason and no finding is carried. It
-        must not reach a customer-facing surface before the bank has acted.
+        NOT PUBLISHED (#16028). Declared in 1.1.0 for a confirmed sanctions match on an approved
+        business customer; never emitted on a live system (monitoring was off), and no longer
+        emitted at all: this topic is read by onboarding-service's customer-facing projection and
+        landed in the analytics warehouse, and a confirmed match must reach neither. The owed exit
+        is kept in kyb-service (operators' queue, alert); the channel an exit workflow reads is
+        #15992's to decide. Kept here so a consumer written against 1.1.0 knows it will not come.
       payload:
         $ref: '#/components/schemas/CaseEnvelope'
     BusinessOnboardingAbandoned:

@@ -4,6 +4,8 @@
 
 package com.openbank.kyb.domain.model
 
+import com.openbank.libs.governance.MakerCheckerViolation
+import com.openbank.libs.governance.Proposal
 import java.time.Instant
 import java.util.UUID
 
@@ -57,7 +59,16 @@ data class MonitoringFinding(
     }
 }
 
-/** An operator recorded that the exit a confirmed sanctions match requires has been carried out. */
+/**
+ * A reviewer proposes that the exit a confirmed sanctions match requires has been carried out.
+ * It ends nothing by itself: a DIFFERENT reviewer has to confirm it (four-eyes, [Proposal]).
+ */
+data class ExitProposal(val proposedAt: Instant, val proposedBy: String, val evidence: String)
+
+/**
+ * The exit a confirmed sanctions match requires has been carried out: proposed by one reviewer
+ * ([CaseMonitoring.exitProposal] keeps who) and confirmed by [completedBy], a different one.
+ */
 data class ExitCompletion(val completedAt: Instant, val completedBy: String, val evidence: String)
 
 /**
@@ -71,6 +82,7 @@ data class ExitCompletion(val completedAt: Instant, val completedBy: String, val
 data class CaseMonitoring(
     val findings: List<MonitoringFinding> = emptyList(),
     val exitCompleted: ExitCompletion? = null,
+    val exitProposal: ExitProposal? = null,
 ) {
     val openFindings: List<MonitoringFinding> get() = findings.filter { it.open }
 
@@ -94,6 +106,12 @@ data class CaseMonitoring(
      */
     val hold: Boolean get() = openFindings.isNotEmpty() || exitOwedSince != null
 
+    /**
+     * Whether the case may NOT become ACTIVE: a hold, or a confirmed sanctions match at all — an
+     * exit that was owed is never followed by an activation, carried out or not (#16028 item 1).
+     */
+    val blocksActivation: Boolean get() = hold || findings.any { it.requiresExit }
+
     /** Records [finding] once; the SAME instance when its id is already here. */
     fun recorded(finding: MonitoringFinding): CaseMonitoring =
         if (findings.any { it.findingId == finding.findingId }) this else copy(findings = findings + finding)
@@ -112,19 +130,54 @@ data class CaseMonitoring(
     }
 
     /**
-     * The exit has been carried out. Only a case that owes one can complete it, and every finding
-     * must be decided first: an exit does not answer a finding nobody looked at.
+     * A reviewer proposes that the exit has been carried out. [relationshipEnded] is the owner's
+     * finding that it demonstrably has (see `BusinessOnboardingCase.exitProposed`). A new proposal
+     * replaces a pending one, and its author becomes the one who may not confirm it.
      */
-    fun exitCompleted(operator: String, evidence: String, at: Instant): CaseMonitoring {
+    fun exitProposed(operator: String, evidence: String, relationshipEnded: Boolean, at: Instant): CaseMonitoring {
+        require(operator.isNotBlank()) { "the operator proposing the exit must be identified" }
+        require(evidence.trim().length >= DispositionRule.MIN_REASON) {
+            "proposing an exit needs evidence of at least ${DispositionRule.MIN_REASON} characters"
+        }
+        requireExitRecordable(relationshipEnded)
+        return copy(exitProposal = ExitProposal(at, operator, evidence.trim()))
+    }
+
+    /**
+     * A second reviewer confirms the pending proposal; monitoring ends with it. [evidence] must be
+     * the evidence of the proposal being confirmed, so a confirmation cannot land on a proposal
+     * that was replaced after the confirmer read it. Four-eyes is the fleet's [Proposal] rule.
+     */
+    fun exitConfirmed(checker: String, evidence: String, relationshipEnded: Boolean, at: Instant): CaseMonitoring {
+        requireExitRecordable(relationshipEnded)
+        val proposal = exitProposal ?: throw CaseTransitionException("no exit has been proposed for this case")
+        require(checker.isNotBlank()) { "the operator confirming the exit must be identified" }
+        if (evidence.trim() != proposal.evidence) {
+            throw CaseTransitionException("the exit proposal changed; read the case again before confirming")
+        }
+        try {
+            Proposal("exit", proposal.evidence, proposal.proposedBy, proposal.proposedAt).approve(checker, at)
+        } catch (e: MakerCheckerViolation) {
+            throw CaseTransitionException(e.message ?: "four-eyes: the confirmer must differ from the proposer")
+        }
+        return copy(exitCompleted = ExitCompletion(at, checker, proposal.evidence))
+    }
+
+    /**
+     * Only a case that owes an exit can record one; every finding must be decided first (an exit
+     * does not answer a finding nobody looked at); and the relationship must have ended.
+     */
+    private fun requireExitRecordable(relationshipEnded: Boolean) {
         if (exitOwedSince == null) throw CaseTransitionException("this case owes no exit")
         if (openFindings.isNotEmpty()) {
             throw CaseTransitionException("${openFindings.size} monitoring finding(s) are undecided; decide them first")
         }
-        require(operator.isNotBlank()) { "the operator completing the exit must be identified" }
-        require(evidence.trim().length >= DispositionRule.MIN_REASON) {
-            "completing an exit needs evidence of at least ${DispositionRule.MIN_REASON} characters"
+        if (!relationshipEnded) {
+            throw CaseTransitionException(
+                "the relationship has not demonstrably ended: the case must be rejected or abandoned " +
+                    "and the entity party CLOSED in party-service; monitoring continues until then",
+            )
         }
-        return copy(exitCompleted = ExitCompletion(at, operator, evidence.trim()))
     }
 }
 

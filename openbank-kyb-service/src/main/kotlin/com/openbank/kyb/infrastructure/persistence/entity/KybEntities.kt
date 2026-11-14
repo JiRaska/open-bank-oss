@@ -93,6 +93,16 @@ class BusinessOnboardingCaseEntity : PanacheEntity() {
     @Column(name = "monitoring_exit_evidence", columnDefinition = "TEXT")
     var monitoringExitEvidence: String? = null
 
+    /** A pending (or, once confirmed, the confirmed) exit proposal: by whom, when, on what evidence (V15). */
+    @Column(name = "monitoring_exit_proposed_at")
+    var monitoringExitProposedAt: Instant? = null
+
+    @Column(name = "monitoring_exit_proposed_by", columnDefinition = "TEXT")
+    var monitoringExitProposedBy: String? = null
+
+    @Column(name = "monitoring_exit_proposal_evidence", columnDefinition = "TEXT")
+    var monitoringExitProposalEvidence: String? = null
+
     /**
      * The [version] this row has once the write that synchronised the monitoring store commits.
      * A release that does not know the store bumps [version] and leaves this behind, which is how

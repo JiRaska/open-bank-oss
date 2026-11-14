@@ -5,7 +5,8 @@ se může změnit i potom. Tato stránka popisuje, jak služba drží schválen�
 služby `openbank-sanctions-service` a co se stane, když je nahlášena shoda (ADR-0376).
 
 Funkce je ve výchozím stavu vypnutá: `openbank.kyb.monitoring.enabled=false`. Je to jeden přepínač.
-Když je vypnutý, služba nic nevolá a neotevírá konzumenta nálezů.
+Když je vypnutý, služba nic neregistruje a neotevírá konzumenta nálezů. Jediné volání, které
+dělá dál, je odhlášení subjektu, který registr už drží z doby, kdy byl přepínač zapnutý.
 
 ## Kdo je monitorován
 
@@ -87,23 +88,34 @@ ani nenahrazuje. Stejný nález doručený dvakrát nic nezmění.
 Případ se nemění: `status` zůstává, `updatedAt` se neposune a nepublikuje se žádná událost
 životního cyklu. Každá cesta, kterou může volat žadatel, odpovídá stejně jako předtím.
 
-Operátoři pracují třemi cestami:
+KYC revizoři (`ROLE_KYC_REVIEWER`) pracují čtyřmi cestami, každá má vlastní akci:
 
-1. `GET /api/v1/kyb/cases?monitoring=open` vypíše případy, které čekají na operátora: nález
-   k rozhodnutí nebo ukončení vztahu k zaznamenání. `status=MANUAL_REVIEW` vrací jen případy ve
-   stavu `MANUAL_REVIEW`.
+1. `GET /api/v1/kyb/monitoring/holds` vypíše případy, které čekají na revizora: nález
+   k rozhodnutí nebo ukončení vztahu k zaznamenání (`kyb.monitoring.queue.list`).
 2. `POST /api/v1/kyb/cases/{id}/monitoring/findings/{findingId}/disposition` rozhodne jeden nález:
-   `CLEARED_FALSE_POSITIVE` nebo `CONFIRMED`, s odůvodněním. Rozhoduje se jednou.
-3. `POST /api/v1/kyb/cases/{id}/monitoring/exit/complete` zaznamená, s důkazem, že vztah byl
-   ukončen. Přijme se, když je ukončení dlužné a žádný nález není nerozhodnutý.
+   `CLEARED_FALSE_POSITIVE` nebo `CONFIRMED`, s odůvodněním. Rozhoduje se jednou
+   (`kyb.monitoring.finding.decide`).
+3. `POST /api/v1/kyb/cases/{id}/monitoring/exit/propose` navrhne, s důkazem, že vztah byl
+   ukončen (`kyb.monitoring.exit.propose`).
+4. `POST /api/v1/kyb/cases/{id}/monitoring/exit/complete` návrh potvrdí. Potvrzující revizor
+   nesmí být navrhovatel a zopakuje důkaz z návrhu (`kyb.monitoring.exit.confirm`).
+
+Návrh i potvrzení se přijmou jen tehdy, když je ukončení dlužné, žádný nález není nerozhodnutý
+a vztah prokazatelně skončil: případ je `REJECTED` nebo `ABANDONED` a party-service hlásí entitní
+stranu jako `CLOSED`. Do té doby zůstává případ monitorován.
+
+Případ s otevřeným nálezem se při aktivaci entitní strany nestane `ACTIVE`. Zůstane `SIGNED`, což
+vypadá stejně jako strana, která ještě čeká na KYC kontrolu. Rozhodnutí, které uvolní poslední
+blokaci, ho převede do `ACTIVE` a publikuje `completed`. Po potvrzené sankční shodě se neaktivuje
+nikdy.
 
 Potvrzená PEP shoda je rizikový fakt. Nevyžaduje ukončení vztahu a nic nepublikuje.
 
 Potvrzená shoda jakéhokoli jiného druhu znamená, že vztah musí skončit. První taková nastaví
-`monitoring.exitOwedSince` a jednou publikuje `BUSINESS_RELATIONSHIP_EXIT_REQUIRED`. Tento stav
-nikdo nenastavuje ručně: čte se z nálezů. Případ si ponechá stav a zůstává monitorován. Na událost
-zatím žádná služba nereaguje, takže se vztah ukončuje ručně. Zaznamenání ukončení ukončí monitoring
-a odhlásí subjekty z registru.
+`monitoring.exitOwedSince`. Tento stav nikdo nenastavuje ručně: čte se z nálezů. Nic se o něm
+nepublikuje: topic životního cyklu čte projekce pro zákazníky i analytický sklad. Případ si
+ponechá stav a zůstává monitorován. Vztah zatím žádná služba neukončuje (#15992), dělá se ručně.
+Zaznamenání ukončení ukončí monitoring a odhlásí subjekty z registru.
 
 Záznam typovaný jako nález bez použitelného `ownerService`, `findingId` nebo `subjectRef` se
 započítá jako `malformed` a pošle se do dead-letter topicu
@@ -162,17 +174,21 @@ Skupina konzumentů a politika offsetu jsou v image, takže není potřeba žád
 3. Nastavte `openbank.kyb.monitoring.enabled=true`.
 
 Vypnutí: nastavte `openbank.kyb.monitoring.enabled=false`. Už zaregistrované subjekty zůstávají
-zaregistrované a nálezy o nich počkají v topicu, dokud přepínač znovu nezapnete.
+zaregistrované a nálezy o nich počkají v topicu, dokud přepínač znovu nezapnete. Subjekty
+případů, které mezitím skončí, se přesto odhlásí.
 
 Rollback na předchozí vydání nevyžaduje žádnou změnu dat. Předchozí vydání nové tabulky a sloupce
-ignoruje. Případy, které zapíše, se uvedou do souladu, až toto vydání znovu poběží.
+ignoruje. Případy, které zapíše, se uvedou do souladu, až toto vydání znovu poběží. Monitoring
+nejdřív vypněte: předchozí vydání aktivuje blokovaný případ a zaznamená ukončení na slovo jednoho
+operátora.
 
 ## Omezení
 
 - Registru se posílá jen jméno a typ entity. Shoda je podle jména.
 - Vyjasnění zaznamenané v sanctions-service k prověrce při onboardingu se na referenci v registru
   nevztahuje (viz výše).
-- Ukončení vztahu není automatizované. Tato služba zaznamená rozhodnutí, publikuje událost a
-  zaznamená, že ukončení proběhlo.
+- Ukončení vztahu není automatizované. Tato služba zaznamená rozhodnutí a, na slovo dvou
+  revizorů, že vztah byl ukončen. Případ `ACTIVE` zde dnes nemůže stav `ACTIVE` opustit, takže
+  jeho ukončení zaznamenat nelze a zůstává monitorován (#15992).
 - Případ schválený při vypnuté prověrce není monitorován.
-- V admin UI zatím není obrazovka pro operátora. Operátorským rozhraním jsou tři cesty výše.
+- V admin UI zatím není obrazovka pro operátora. Rozhraním revizora jsou čtyři cesty výše.
