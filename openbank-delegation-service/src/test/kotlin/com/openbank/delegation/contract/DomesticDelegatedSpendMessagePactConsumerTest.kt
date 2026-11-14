@@ -18,8 +18,9 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 
 /**
- * Consumer-owned message contract for the two domestic outcomes which settle a delegated spend
- * reservation. The provider's always-on folder replay serializes its real domain events, so a
+ * Consumer-owned message contract for the domestic outcomes which settle a delegated spend
+ * reservation (`DomesticPaymentOutcomeConsumer`). The consumer dispatches on the `ce-type` header,
+ * so every interaction pins it as a literal; the body's `eventType` is not what it reads. The provider's always-on folder replay serializes its real domain events, so a
  * renamed correlation field fails before a reservation can become permanently stranded.
  */
 @ExtendWith(PactConsumerTestExt::class)
@@ -34,6 +35,7 @@ class DomesticDelegatedSpendMessagePactConsumerTest {
     fun paymentStatusChanged(builder: MessagePactBuilder): MessagePact = builder
         .given("a delegated domestic payment has changed status")
         .expectsToReceive("a delegated domestic payment status changed event")
+        .withMetadata(mapOf(CE_TYPE to STATUS_CHANGED))
         .withContent(
             newJsonBody { body ->
                 body.stringValue("eventType", "DOMESTIC_PAYMENT_STATUS_CHANGED")
@@ -58,6 +60,7 @@ class DomesticDelegatedSpendMessagePactConsumerTest {
     fun finalizedAbsent(builder: MessagePactBuilder): MessagePact = builder
         .given("a delegated spend reservation is pending without a domestic payment")
         .expectsToReceive("a delegated spend reservation finalized absent event")
+        .withMetadata(mapOf(CE_TYPE to FINALIZED_ABSENT))
         .withContent(
             newJsonBody { body ->
                 body.stringValue("eventType", "DELEGATED_SPEND_FINALIZED_ABSENT")
@@ -90,5 +93,55 @@ class DomesticDelegatedSpendMessagePactConsumerTest {
     @PactTestFor(pactMethod = "finalizedAbsent")
     fun `finalized absence event carries the immutable reservation tuple`(messages: List<Message>) {
         assertThat(String(messages.single().contentsAsBytes())).contains("idempotencyKeyHash", "reservationVersion")
+    }
+
+    @Pact(consumer = "openbank-delegation-service", provider = "openbank-domestic-payment")
+    fun paymentRejected(builder: MessagePactBuilder): MessagePact = terminal(builder, "REJECTED", "VALIDATED")
+
+    @Test
+    @PactTestFor(pactMethod = "paymentRejected")
+    fun `rejected event releases by reservation`(messages: List<Message>) = assertTerminal(messages, "REJECTED")
+
+    @Pact(consumer = "openbank-delegation-service", provider = "openbank-domestic-payment")
+    fun paymentCancelled(builder: MessagePactBuilder): MessagePact = terminal(builder, "CANCELLED", "VALIDATED")
+
+    @Test
+    @PactTestFor(pactMethod = "paymentCancelled")
+    fun `cancelled event releases by reservation`(messages: List<Message>) = assertTerminal(messages, "CANCELLED")
+
+    @Pact(consumer = "openbank-delegation-service", provider = "openbank-domestic-payment")
+    fun paymentReturned(builder: MessagePactBuilder): MessagePact = terminal(builder, "RETURNED", "SENT_TO_CLEARING")
+
+    @Test
+    @PactTestFor(pactMethod = "paymentReturned")
+    fun `returned event releases by reservation`(messages: List<Message>) = assertTerminal(messages, "RETURNED")
+
+    private fun terminal(builder: MessagePactBuilder, status: String, previous: String): MessagePact = builder
+        .given("a delegated domestic payment has become $status")
+        .expectsToReceive("a delegated domestic payment $status event")
+        .withMetadata(mapOf(CE_TYPE to STATUS_CHANGED))
+        .withContent(
+            newJsonBody { body ->
+                body.uuid("paymentId")
+                body.stringType("previousStatus", previous)
+                body.stringValue("newStatus", status)
+                body.uuid("delegationId")
+                body.uuid("reservationId")
+                body.stringValue("sourceService", "domestic-payment")
+                body.stringType("occurredAt", "2026-09-01T08:00:00Z")
+            }.build(),
+        )
+        .toPact()
+
+    private fun assertTerminal(messages: List<Message>, status: String) {
+        val message = messages.single()
+        assertThat(message.metadata[CE_TYPE]).isEqualTo(STATUS_CHANGED)
+        assertThat(String(message.contentsAsBytes())).contains("\"newStatus\":\"$status\"", "reservationId")
+    }
+
+    private companion object {
+        const val CE_TYPE = "ce-type"
+        const val STATUS_CHANGED = "domestic.payment.status-changed"
+        const val FINALIZED_ABSENT = "domestic.delegated-spend.finalized-absent"
     }
 }
