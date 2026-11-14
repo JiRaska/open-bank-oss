@@ -4,6 +4,7 @@
 
 package com.openbank.finrep.domain.mapper
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.finrep.application.port.out.RiskCapitalLookup
 import com.openbank.finrep.application.port.out.RiskCapitalResult
 import com.openbank.finrep.application.port.out.RiskExposureClass
@@ -13,7 +14,7 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
 
-/** ADR-0313 D6: C 02.00 from the risk engine's Pillar 1 result, framework 4.0 CA2 layout. */
+/** ADR-0313 D6: C 02.00 from the risk engine's Pillar 1 result, EBA 4.2 CA2 coordinates. */
 class C0200MapperTest {
 
     private val asOf = LocalDate.parse("2026-09-30")
@@ -43,6 +44,20 @@ class C0200MapperTest {
     )
 
     private fun cells(lookup: RiskCapitalLookup) = C0200Mapper.map(lookup, asOf).cells.associateBy { it.rowRef }
+
+    @Test
+    fun `every preview row uses a verified C 02_00_a TREA coordinate`() {
+        val fixture = "/eba/reporting-framework-4.2-corep-coordinates.json"
+        val expectedRows = requireNotNull(javaClass.getResourceAsStream(fixture)).use {
+            ObjectMapper().readTree(it)["tables"]["c_02.00.a"].fieldNames().asSequence().toList()
+        }
+        val preview = C0200Mapper.map(result(), asOf)
+
+        assertThat(preview.templateId).isEqualTo("C_02.00")
+        assertThat(preview.cells).hasSize(24)
+        assertThat(preview.cells.map { it.colRef }).containsOnly("c0010")
+        assertThat(preview.cells.map { it.rowRef }).containsExactlyInAnyOrderElementsOf(expectedRows)
+    }
 
     @Test
     fun `a tied single-currency result fills the SA rows from the engine's classes`() {

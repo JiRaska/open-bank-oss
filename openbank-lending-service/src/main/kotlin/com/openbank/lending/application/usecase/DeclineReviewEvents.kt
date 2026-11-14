@@ -7,6 +7,8 @@ package com.openbank.lending.application.usecase
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.lending.application.port.out.LendingOutboxMessage
 import com.openbank.lending.domain.model.DeclineReview
+import com.openbank.lending.domain.model.DeclineReviewStatus
+import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.libs.lending.origination.OriginationActorKind
 import java.time.Clock
 
@@ -28,6 +30,14 @@ internal class DeclineReviewEvents(private val clock: Clock) {
             "engineReasonCodes" to r.engineReasons?.split(',')?.filter { it.isNotBlank() },
             "policyVersions" to r.policyVersions,
         ),
+    )
+
+    fun decidedEvent(r: DeclineReview, reviewer: String) = event(
+        if (r.status == DeclineReviewStatus.OVERTURNED) OVERTURNED_EVENT_TYPE else CONFIRMED_EVENT_TYPE,
+        r,
+        actor = reviewer,
+        actorKind = OriginationActorKind.HUMAN,
+        extra = linkedMapOf("successorApplicationId" to r.successorApplicationId?.toString()),
     )
 
     private fun event(
@@ -58,8 +68,36 @@ internal class DeclineReviewEvents(private val clock: Clock) {
         return LendingOutboxMessage(aggregateId = id, eventType = type, payload = payload)
     }
 
+    /** The successor's first lifecycle record, in the `credit.application.transition` envelope, for its own evidence chain. */
+    fun successorEntryEvent(successor: LoanApplication, reviewer: String): LendingOutboxMessage {
+        val id = successor.id.value
+        val payload = JSON.writeValueAsString(
+            linkedMapOf<String, Any?>(
+                "eventType" to TRANSITION_EVENT_TYPE,
+                "aggregateType" to "LOAN_APPLICATION",
+                "aggregateId" to id.toString(),
+                "loanApplicationId" to id.toString(),
+                "partyId" to successor.partyId.toString(),
+                "fromState" to "NONE",
+                "toState" to successor.status.name,
+                "actorId" to reviewer,
+                "actorKind" to OriginationActorKind.HUMAN.name,
+                "reason" to "opened by decline review overturn",
+                "predecessorApplicationId" to successor.predecessorApplicationId.toString(),
+                "packVersion" to successor.packVersion,
+                "occurredAt" to clock.instant().toString(),
+                "correlationId" to id.toString(),
+                "sourceService" to "lending",
+            ),
+        )
+        return LendingOutboxMessage(aggregateId = id, eventType = TRANSITION_EVENT_TYPE, payload = payload)
+    }
+
     companion object {
         const val REQUESTED_EVENT_TYPE = "credit.decline_review.requested"
+        const val CONFIRMED_EVENT_TYPE = "credit.decline_review.confirmed"
+        const val OVERTURNED_EVENT_TYPE = "credit.decline_review.overturned"
+        private const val TRANSITION_EVENT_TYPE = "credit.application.transition"
         private const val SCHEMA_VERSION = 1
         private val JSON = ObjectMapper()
     }

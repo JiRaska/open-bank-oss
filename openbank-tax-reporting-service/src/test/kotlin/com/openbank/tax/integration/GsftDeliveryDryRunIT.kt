@@ -468,7 +468,7 @@ class GsftDeliveryDryRunIT {
         private val EXPECTED_DATAPOINTS: Map<String, BigDecimal> = mapOf(
             "N_CLIENT" to 6, "N_ACCOUNT" to 6, "N_COLLECTIVE" to 2, "N_SPECIAL" to 1, "BATCH_NUMBER" to 1,
             "REJECTED_PERSONS" to 0, "EXCLUDED_DEPOSITORS" to 0, "CAPPED_CLAIMS" to 1,
-            "SYNTHETIC_DEPOSITORS_DROPPED" to 0, "SYNTHETIC_ACCOUNTS_DROPPED" to 0, "OVERDRAWN_ACCOUNTS_DROPPED" to 0,
+            "SYNTHETIC_DEPOSITORS_DROPPED" to 0, "SYNTHETIC_ACCOUNTS_DROPPED" to 2, "OVERDRAWN_ACCOUNTS_DROPPED" to 0,
             "THB_CLAIMS" to 0, "THB_REFUSED_CREDITS" to 0, "FILES" to 5,
         ).mapValues { BigDecimal(it.value) } + mapOf(
             "T_PAYMENT" to BigDecimal("3275000.00"),
@@ -525,6 +525,7 @@ class GsftDeliveryDryRunIT {
                     SpecialRegimeShare(person(beneficiary, "9001010008"), special.accountId, BigDecimal("400000.00")),
                 ),
                 qualifyingCredits = emptyList(),
+                syntheticAccountsDroppedAtSource = 2,
             )
         }
     }

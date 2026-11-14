@@ -14,6 +14,7 @@ import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.sepainstant.infrastructure.client.FraudScoreClient
+import com.openbank.sepainstant.infrastructure.client.FraudScoreClientCounterparty
 import com.openbank.sepainstant.infrastructure.client.FraudScoreClientRequest
 import com.openbank.sepainstant.infrastructure.client.FraudScoreClientResponse
 import io.restassured.RestAssured.given
@@ -48,13 +49,15 @@ class FraudScorePactConsumerTest {
 
     private val objectMapper = jacksonObjectMapper()
 
-    /** Exactly what the adapter builds from a FraudScoreCommand: rail literal, debtor account, no counterparty. */
+    /** Exactly what the adapter builds from a FraudScoreCommand: rail literal, debtor account, creditor IBAN. */
     private val request = FraudScoreClientRequest(
         amount = BigDecimal("250.00"),
         currency = "EUR",
         rail = "SCT_INST",
         accountId = UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3"),
         counterpartyId = null,
+        counterparty = FraudScoreClientCounterparty(scheme = "IBAN", value = "DE89370400440532013000"),
+        initiationMode = "CUSTOMER_PRESENT",
     )
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)

@@ -15,7 +15,10 @@ import com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.web.SyntheticTaintContext
 import io.quarkus.logging.Log
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.PermitAll
@@ -101,6 +104,14 @@ class CustomerEdgeResource(
 
     @Inject
     lateinit var objectMapper: ObjectMapper
+
+    @Inject
+    lateinit var syntheticTransferFixture: SyntheticTransferFixture
+
+    @Inject
+    lateinit var syntheticTransferTaint: SyntheticTaintContext
+
+    private val syntheticTransferCalendar = AccountingClock.bank(clock)
 
     @Inject
     lateinit var keycloakAdmin: KeycloakAdminClient
@@ -334,10 +345,21 @@ class CustomerEdgeResource(
     }
 
     /**
-     * Read one of the caller's OWN accounts. account-service scopes by id only (the X-Customer-Party-Id
-     * header is advisory there), so ownership is enforced HERE — same IDOR guard as the transactions /
-     * statements reads. [fetchAccount] already returns the body, so we serve it rather than re-fetching.
-     * A non-owned (or non-existent) id returns 403, deliberately not 404, to avoid an existence oracle.
+     * Read one of the caller's OWN accounts, or one shared with them by a grant carrying
+     * `ACCOUNT_VIEW_DETAILS`. account-service scopes by id only (the X-Customer-Party-Id header is
+     * advisory there), so ownership is enforced HERE — same IDOR guard as the transactions /
+     * statements reads. [fetchAccount] already returns the body, so we serve it rather than
+     * re-fetching. A non-owned (or non-existent) id returns 403, deliberately not 404, to avoid an
+     * existence oracle.
+     *
+     * ADR-0375 D7: this asked for `ACCOUNT_READ_BALANCES` until 2026-11-12, so the detail record was
+     * reachable with the balances authority and `ACCOUNT_VIEW_DETAILS` was read by nothing. Balances
+     * have their own route; this one serves the account record, so it asks for the capability that
+     * names it. Consequence worth knowing: the `Účetní` and `Pokladník` presets granted
+     * READ_BALANCES WITHOUT VIEW_DETAILS, which is why they could drill in at all — the presets are
+     * corrected forward by a migration, and a grant already minted from the old preset keeps exactly
+     * what it was given (grants are immutable snapshots by design) and loses this drill-down until
+     * the grantor re-shares.
      */
     @GET
     @Path("/accounts/{accountId}")
@@ -348,7 +370,7 @@ class CustomerEdgeResource(
         val accountJson = fetchAccount(accountId, customer.partyId)
             ?: return forbidden("Account does not belong to caller")
         if (extractOwnerPartyId(accountJson) != customer.partyId.toString() &&
-            !hasGrant(customer.partyId, "ACCOUNT", accountId, "ACCOUNT_READ_BALANCES")
+            !hasGrant(customer.partyId, "ACCOUNT", accountId, CAP_ACCOUNT_VIEW_DETAILS)
         ) {
             return forbidden("Account does not belong to caller")
         }
@@ -2885,15 +2907,26 @@ class CustomerEdgeResource(
     @Blocking
     fun listStatements(@PathParam("accountId") accountId: UUID): Response {
         val customer = customer()
-        if (!ownsAccount(accountId, customer.partyId)) {
+        if (!mayReadStatements(accountId, customer.partyId)) {
             return forbidden("Account does not belong to caller")
         }
         return upstream.get("$statementServiceUrl/api/v1/statements/$accountId", customer.partyId.toString())
     }
 
     /**
+     * ADR-0375 D7. Owner, or a delegate holding `ACCOUNT_DOWNLOAD_STATEMENTS`. Both statement routes
+     * go through this one helper on purpose: the list and the render are the same authority, and two
+     * copies of an ownership-or-grant test are two things that drift. Before this, both asked
+     * `ownsAccount` alone — so the capability was grantable, three presets handed it out, and a
+     * delegate who had been given it was refused every time they used it.
+     */
+    private fun mayReadStatements(accountId: UUID, partyId: UUID): Boolean = ownsAccount(accountId, partyId) ||
+        hasGrant(partyId, "ACCOUNT", accountId, CAP_ACCOUNT_DOWNLOAD_STATEMENTS)
+
+    /**
      * Render a single closed statement on demand as a document (camt.053 XML / MT940 / PDF text) for
-     * one of the caller's OWN accounts. statement-service holds only the period-close record and
+     * one of the caller's own accounts, or one shared with them by a grant carrying
+     * `ACCOUNT_DOWNLOAD_STATEMENTS`. statement-service holds only the period-close record and
      * renders the document deterministically on demand (ADR-0035) — nothing is stored. Ownership is
      * enforced HERE (same IDOR guard as the list). The currency and format are validated against
      * fixed allow-lists before building the upstream URL (deny-by-default; no arbitrary passthrough),
@@ -2911,7 +2944,7 @@ class CustomerEdgeResource(
         @QueryParam("format") format: String?,
     ): Response {
         val customer = customer()
-        if (!ownsAccount(accountId, customer.partyId)) {
+        if (!mayReadStatements(accountId, customer.partyId)) {
             return forbidden("Account does not belong to caller")
         }
         val ccy = CurrencyCode.parse(currency)?.value ?: return badRequest("Invalid currency")
@@ -3617,6 +3650,86 @@ class CustomerEdgeResource(
             ),
         )
         return resp
+    }
+
+    @GET
+    @Path("/synthetic/transfers")
+    @Authorize(action = "customer.transfers.initiate")
+    fun syntheticTransferBankDate(): Response {
+        requireSyntheticTransferFixture()
+        return Response.ok(mapOf("runDate" to syntheticTransferCalendar.today().toString()))
+            .header("Cache-Control", "no-store")
+            .build()
+    }
+
+    @POST
+    @Path("/synthetic/transfers")
+    @Authorize(action = "customer.transfers.initiate")
+    @Blocking
+    fun createSyntheticTransfer(request: SyntheticTransferRun?): Response {
+        val fixture = requireSyntheticTransferFixture()
+        requireNotNull(request) { "Synthetic transfer run is required" }
+        require(request.runDate == syntheticTransferCalendar.today()) { "Synthetic transfer run date must be today" }
+        if (!isSyntheticTransferParty(fixture.partyId) ||
+            !isSyntheticTransferAccount(fixture.sourceAccountId, fixture.partyId) ||
+            !isSyntheticTransferAccount(fixture.targetAccountId, fixture.partyId)
+        ) {
+            throw ForbiddenException("Synthetic transfer fixture ownership could not be verified")
+        }
+
+        val party = fixture.partyId.toString()
+        val body = objectMapper.createObjectNode().apply {
+            put("partyId", party)
+            put("sourceAccountId", fixture.sourceAccountId.toString())
+            put("targetAccountId", fixture.targetAccountId.toString())
+            put("runDate", request.runDate.toString())
+            put("direction", request.direction.name)
+        }
+        return upstream.postToService(
+            transactionServiceUrl,
+            "/api/v1/transactions/synthetic-transfer",
+            party,
+            objectMapper.writeValueAsString(body),
+            idempotencyKey = request.direction.idempotencyKey(fixture.partyId, request.runDate),
+        )
+    }
+
+    private fun requireSyntheticTransferFixture(): SyntheticTransferAccounts {
+        val fixture = syntheticTransferFixture.accounts()
+        if (fixture == null || !isSyntheticTransferCaller(fixture.partyId)) {
+            throw ForbiddenException("Synthetic transfer requires its verified fixture identity")
+        }
+        return fixture
+    }
+
+    private fun isSyntheticTransferCaller(partyId: UUID): Boolean {
+        val client = ServiceAccountIdentity.verifiedClientId(jwt)
+        if (!syntheticTransferTaint.tainted || client != "openbank-synthetic-transfer") {
+            return false
+        }
+        return jwt.getClaim<String>("party_id") == partyId.toString() &&
+            requestHeaders.getHeaderString(ACTING_FOR_HEADER) == null
+    }
+
+    private fun isSyntheticTransferAccount(accountId: UUID, partyId: UUID): Boolean {
+        val body = fetchAccount(accountId, partyId) ?: return false
+        return runCatching {
+            val account = objectMapper.readTree(body)
+            val owned = account.path("id").asText() == accountId.toString() &&
+                account.path("partyId").asText() == partyId.toString()
+            owned && account.path("status").asText() == "ACTIVE" && account.path("currencyCode").asText() == "CZK"
+        }.getOrDefault(false)
+    }
+
+    private fun isSyntheticTransferParty(partyId: UUID): Boolean {
+        val response = upstream.get("$partyServiceUrl/api/v1/parties/$partyId", partyId.toString())
+        if (response.status != 200) return false
+        return runCatching {
+            val party = objectMapper.readTree(response.entity.toString())
+            party.path("id").asText() == partyId.toString() &&
+                party.path("classification").asText() == "SYNTHETIC" &&
+                party.path("status").asText() == "ACTIVE"
+        }.getOrDefault(false)
     }
 
     // --- Standing orders (recurring payments / trvalý příkaz) ---
@@ -4457,8 +4570,10 @@ class CustomerEdgeResource(
     /**
      * Freeze (temporarily suspend) a card the caller controls — the reversible self-service lock.
      *
-     * Open to a delegate holding `CARD_MANAGE_LIMITS` (ADR-0249 D2): freezing is one of the controls
-     * a real disponent expects, it is reversible, and it can only ever REDUCE what the card may do.
+     * Open to a delegate holding `CARD_MANAGE_STATUS` (ADR-0249 D2, corrected by ADR-0375 D7):
+     * freezing is one of the controls a real disponent expects, it is reversible, and it can only
+     * ever REDUCE what the card may do. It used to be gated on `CARD_MANAGE_LIMITS`, which is a
+     * different authority — the status capability existed and nothing read it.
      */
     @POST
     @Path("/cards/{id}/freeze")
@@ -4501,7 +4616,7 @@ class CustomerEdgeResource(
     // is the audit subject. Ownership is enforced here (the card must belong to the JWT party).
     private fun cardAction(id: UUID, action: String): Response {
         val customer = customer()
-        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_LIMITS)) {
+        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_STATUS)) {
             return forbidden("Card does not belong to caller")
         }
         return upstream.post(
@@ -4695,7 +4810,7 @@ class CustomerEdgeResource(
                 "contactlessEnabled, onlineEnabled, atmEnabled and abroadEnabled (booleans) are all required",
                 "CARD_CONTROLS_INVALID",
             )
-        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_LIMITS)) {
+        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_CHANNELS)) {
             return forbidden("Card does not belong to caller")
         }
         val resp = upstream.put(
@@ -6023,6 +6138,22 @@ class CustomerEdgeResource(
          */
         internal const val CAP_CARD_VIEW = "CARD_VIEW"
         internal const val CAP_CARD_MANAGE_LIMITS = "CARD_MANAGE_LIMITS"
+
+        // ADR-0375 D7. These two were grantable and read by nothing: freeze/unfreeze/block and the
+        // channel toggles were all gated on CAP_CARD_MANAGE_LIMITS, so a vocabulary that
+        // distinguishes limits from status from channels was collapsed to one capability at the
+        // only place that checks it. Both card role presets grant all five card capabilities, so
+        // correcting the gating takes nothing away from a preset-based delegate; what it does take
+        // away is freeze and channel control from a hand-built grant carrying limits ALONE, which
+        // is the point — a limit is not a status and not a channel.
+        internal const val CAP_CARD_MANAGE_STATUS = "CARD_MANAGE_STATUS"
+        internal const val CAP_CARD_MANAGE_CHANNELS = "CARD_MANAGE_CHANNELS"
+
+        // ADR-0375 D7, account side. Same shape as the card correction: the account DETAIL read
+        // asked for the BALANCES capability, and the statement reads asked for ownership alone, so
+        // two more capabilities the vocabulary offers were grantable and read by nothing.
+        internal const val CAP_ACCOUNT_VIEW_DETAILS = "ACCOUNT_VIEW_DETAILS"
+        internal const val CAP_ACCOUNT_DOWNLOAD_STATEMENTS = "ACCOUNT_DOWNLOAD_STATEMENTS"
 
         /**
          * Last-resort product code when the account's real one cannot be resolved. Historically this

@@ -133,6 +133,77 @@ Delivery order, each a separately approved release: (A) chain types, HELD and re
 domestic and SEPA, with standing; (B) limits; (C) sanctions coverage and inputs;
 (D) remaining rails; (E) AML destination risk; (F) fraud enforcement per rail.
 
+**Delivery note, step A on the domestic rail (2026-11-13).** Points 3 and 13 left five things to
+the first rail that adopts the chain. They are recorded here because the next rail must make the
+same choices, not new ones.
+
+- *The switch.* The chain is off by default per rail (`openbank.<rail>.admission.enabled`). One
+  fact says whether a run goes through admission: the task queue it is started on. Whoever starts
+  a run reads the switch and picks the rail's own queue or its admission queue; workflow code reads
+  the queue from the run's start event and never reads configuration. A run on the rail's own
+  queue writes nothing the implementation from before the chain does not write (compared event for
+  event with a history that implementation recorded, and replayed both ways). Only a build that
+  knows the chain polls the admission queue, so a worker from before it is never handed a task of
+  an admission run; if no such worker is up, admission runs wait. Deployment order is therefore not
+  a rule to follow: the switch can be set on any pod at any time, and an older image can return
+  with admission runs open. They resume when a worker that knows the chain does. A payment already
+  HELD is recovered on the admission queue whatever the switch says.
+- *The case request travels on the rail's own event topic.* `PAYMENT_HELD` is one rail-neutral
+  event type carrying `rail`; aml-service reads the rails' topics on one channel and ignores every
+  other type. No new topic. The case key is `payment-hold:<rail>:<paymentId>`, derived by the
+  consumer, never taken from the event; the alert code is `PAYMENT_HELD`. A rail accepts a decision
+  only from the case with that key, and only while it waits on a requested case.
+- *Terms of a hold.* It expires 48 hours after the payment was first held, the value the domestic
+  fraud hold already used. An unavailable control is asked again every 15 minutes, five times,
+  before the hold becomes a case.
+- *The manual status change* (point 13) refuses a transition out of HELD always, and out of
+  RECEIVED while the chain is on for the rail and something can still act on the payment. A
+  RECEIVED payment whose re-drive attempts are spent and which has no open run is picked up by
+  nothing; refusing it too would leave it with no exit. An operator may end that payment, REJECTED
+  or CANCELLED only, never VALIDATED, and the state is counted and alerted on. With the chain off a
+  RECEIVED payment keeps the exit it had.
+- *A hold lives on the payment's row, not in its run.* The row records when the payment was held,
+  when its case was requested and what the case decided. The run keeps none of it: it asks one
+  activity to look at the row and end the hold if it can be ended, and asks again when nudged or
+  after its check interval. So the order of events does not matter. A decision that arrives before
+  the run, while it starts, or after it died is on the row for whichever run comes; a sweep gives
+  every HELD payment without an open run a new one. Admission activities retry without limit.
+- *Expiry wins.* A hold ends in rejection 48 hours after `held_at`, read from the row. A decision
+  is accepted only before that, and one accepted but not yet applied when the term ends is not
+  applied (point 3: a hold never expires into a release). The run notices within its check
+  interval, 15 minutes.
+- *Release* (point 13, funds). A case decision covers exactly the evidence the case was shown, and
+  nothing else: per control that asked for a human, its reason and a fingerprint of the evidence it
+  returned, recorded with the case request. The same reason on other evidence (another matched
+  list entry, another score or rule version) is a different question, and a control whose evidence
+  does not say what was found is never covered. At release the whole chain is
+  evaluated again, and the payment is sent only if every bound control answers, none refuses, and
+  every "review" among the answers is one the released case was shown. A refusal rejects. A
+  control that still cannot answer leaves the payment HELD. A "review" the case did not cover (a
+  control that was down when the case was opened, a list that changed during the hold) leaves the
+  payment HELD and requests a further review, as a case of its own with the key
+  `payment-hold:<rail>:<paymentId>:<n>`, inside the same hold and the same expiry. A decision is
+  accepted only from the case whose key equals, exactly, the key of the hold's current review.
+  This is what keeps an outage that turned payments into cases from sending them unscreened.
+  Balance is not re-checked at release by this step (see below).
+- *One fraud score per payment.* The rail keeps the first real score on the payment and reuses it
+  on every later evaluation, because the fraud service stores and counts every score it gives and
+  cannot recognise a repeat.
+- *What a rail may leave unbound.* A step whose facts or owner do not exist yet is declared unbound
+  with its reason, which every admission records. On domestic that is authority (decided when the
+  payment is submitted, not again by the chain; ADR-0375 D1), limits (step B), AML destination risk (step E) and payee
+  verification (not required by the scheme). Fraud is bound, and reports itself not applicable
+  while its own per-rail enforcement is off (point 8).
+
+Not delivered by step A on domestic, and a precondition of switching it on in production: the
+four-eyes decision on a hold's case (point 3; the case keeps aml-service's single-analyst
+decision), the balance re-check at release and funds reservation for a held payment (point 13
+asks for standing AND balance; the release re-runs standing only), the release of a delegated
+payment's spend reservation when the chain rejects it or its hold expires, party standing read by
+the rail (point 4; the rail reads account standing, which lags a party's suspension by the
+propagation delay), one test across rail, case service and back, and a run against a real workflow
+server and a broker with access control.
+
 ## Alternatives considered
 
 - **Keep per-rail controls and close the gaps one by one.** Smallest change per PR.

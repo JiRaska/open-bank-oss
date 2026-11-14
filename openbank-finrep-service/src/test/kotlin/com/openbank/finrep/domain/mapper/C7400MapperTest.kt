@@ -63,13 +63,11 @@ class C7400MapperTest {
         assertThat(t.templateId).isEqualTo("C_74.00")
         assertThat(t.at("r0010", "c0010").value).isEqualByComparingTo("880")
         assertThat(t.at("r0010", "c0140").value).isEqualByComparingTo("380")
-        assertThat(t.at("r0030", "c0140").value).isEqualByComparingTo("300")
-        assertThat(t.at("r0160", "c0010").value).isEqualByComparingTo("280")
+        assertThat(t.at("r0160", "c0010").value).isEqualByComparingTo("80")
+        assertThat(t.at("r0110", "c0140").value).isEqualByComparingTo("0")
+        assertThat(t.at("r0110", "c0010").value).isEqualByComparingTo("200")
         assertThat(t.at("r0160", "c0140").value).isEqualByComparingTo("80")
-        assertThat(t.at("r0170", "c0140").value).isEqualByComparingTo("0")
-        assertThat(t.at("r0170", "c0010").value).isEqualByComparingTo("200")
-        assertThat(t.at("r0180", "c0140").value).isEqualByComparingTo("80")
-        listOf("r0010", "r0030", "r0160", "r0170", "r0180").forEach { r ->
+        listOf("r0010", "r0110", "r0160").forEach { r ->
             assertThat(t.at(r, "c0010").isDataGap).isFalse()
             assertThat(t.at(r, "c0140").isDataGap).isFalse()
         }
@@ -80,13 +78,17 @@ class C7400MapperTest {
         val t = C7400Mapper.map(RiskLiquidityLookup.found(result()), asOf)
         assertThat(t.at("r0010", "c0140").value).isEqualByComparingTo("380")
         assertThat(t.cells.map { it.rowRef }.toSet())
-            .containsExactlyInAnyOrder("r0010", "r0030", "r0160", "r0170", "r0180", "r0200", "r0260")
+            .containsExactlyInAnyOrder("r0010", "r0030", "r0110", "r0150", "r0160", "r0263")
     }
 
     @Test
-    fun `an engine that reports no cap still renders the uncapped rows`() {
+    fun `an engine that reports no cap leaves both 75 percent columns as gaps`() {
         val t = C7400Mapper.map(RiskLiquidityLookup.found(result(cap = null, capped = null)), asOf)
-        assertThat(t.at("r0010", "c0140").isDataGap).isFalse()
+        listOf("c0010", "c0140").forEach { col ->
+            assertThat(t.at("r0010", col).isDataGap).isTrue()
+            assertThat(t.at("r0010", col).value).isEqualByComparingTo("0")
+            assertThat(t.at("r0010", col).gapReason).isEqualTo(C7400Mapper.MISSING_CAP_REASON)
+        }
     }
 
     @Test
@@ -118,8 +120,7 @@ class C7400MapperTest {
             assertThat(t.at("r0010", col).gapReason)
                 .contains("engine reports component 'lcr-reverse-repo-inflow' this template does not map yet")
         }
-        assertThat(t.at("r0030", "c0140").isDataGap).isFalse()
-        assertThat(t.at("r0030", "c0140").value).isEqualByComparingTo("300")
+        assertThat(t.at("r0160", "c0140").isDataGap).isFalse()
     }
 
     @Test
@@ -130,29 +131,28 @@ class C7400MapperTest {
     }
 
     @Test
-    fun `a maturing MM placement is a financial-customer inflow in r0180 at 100 percent, and totals tie with it`() {
+    fun `a maturing MM placement is a financial-customer inflow in r0160 at 100 percent, and totals tie with it`() {
         val withPlacement = lines + line(C7400Mapper.FI_PLACEMENT, "50", "1.00")
         val t = C7400Mapper.map(RiskLiquidityLookup.found(result(lines = withPlacement, total = "430")), asOf)
-        assertThat(t.at("r0180", "c0010").value).isEqualByComparingTo("130")
-        assertThat(t.at("r0180", "c0140").value).isEqualByComparingTo("130")
+        assertThat(t.at("r0160", "c0010").value).isEqualByComparingTo("130")
         assertThat(t.at("r0160", "c0140").value).isEqualByComparingTo("130")
         assertThat(t.at("r0010", "c0140").value).isEqualByComparingTo("430")
-        listOf("r0010", "r0160", "r0180").forEach { r ->
+        listOf("r0010", "r0160").forEach { r ->
             assertThat(t.at(r, "c0140").isDataGap).describedAs(r).isFalse()
         }
     }
 
     @Test
-    fun `a placement inflow at a rate other than 100 percent is a gap in r0180 and the totals`() {
+    fun `a placement inflow at a rate other than 100 percent is a gap in r0160 and the totals`() {
         val withPlacement = lines + line(C7400Mapper.FI_PLACEMENT, "50", "0.50")
         val t = C7400Mapper.map(RiskLiquidityLookup.found(result(lines = withPlacement, total = "405")), asOf)
-        assertThat(t.at("r0180", "c0140").isDataGap).isTrue()
-        assertThat(t.at("r0180", "c0140").gapReason).contains(C7400Mapper.FI_PLACEMENT)
+        assertThat(t.at("r0160", "c0140").isDataGap).isTrue()
+        assertThat(t.at("r0160", "c0140").gapReason).contains(C7400Mapper.FI_PLACEMENT)
         assertThat(t.at("r0010", "c0140").isDataGap).isTrue()
     }
 
     @Test
-    fun `a component at a rate other than 2015-61 is a gap in its inflow column and in the totals`() {
+    fun `a loan factor at a rate other than 2015-61 makes the weighted total a gap`() {
         val off = listOf(line(C7400Mapper.NON_FINANCIAL, "600", "0.40"), lines[1], lines[2])
         val t = C7400Mapper.map(
             RiskLiquidityLookup.found(result(lines = off, total = "320", cap = "300", capped = "300")),
@@ -160,16 +160,21 @@ class C7400MapperTest {
         )
         assertThat(t.at("r0030", "c0140").isDataGap).isTrue()
         assertThat(t.at("r0010", "c0140").isDataGap).isTrue()
-        assertThat(t.at("r0030", "c0140").gapReason).contains("0.40", "'eu-2015-61-crr2'").doesNotContain("d238")
-        assertThat(t.at("r0030", "c0010").isDataGap).isFalse()
-        assertThat(t.at("r0180", "c0140").isDataGap).isFalse()
+        assertThat(t.at("r0010", "c0140").gapReason).contains("0.40", "'eu-2015-61-crr2'").doesNotContain("d238")
+        assertThat(t.at("r0010", "c0010").isDataGap).isFalse()
+        assertThat(t.at("r0160", "c0140").isDataGap).isFalse()
     }
 
     @Test
     fun `unmodelled rows are always gaps with their reason`() {
         val t = C7400Mapper.map(RiskLiquidityLookup.found(result()), asOf)
-        assertThat(t.at("r0260", "c0140").gapReason).isEqualTo(C7400Mapper.SECURED_REASON)
-        assertThat(t.at("r0200", "c0010").gapReason).isEqualTo(C7400Mapper.CENTRAL_BANK_REASON)
+        assertThat(t.at("r0263", "c0140").gapReason).isEqualTo(C7400Mapper.SECURED_REASON)
+        assertThat(t.at("r0150", "c0010").gapReason).isEqualTo(C7400Mapper.CENTRAL_BANK_REASON)
+        listOf("c0010", "c0140").forEach { col ->
+            assertThat(t.at("r0030", col).isDataGap).isTrue()
+            assertThat(t.at("r0030", col).value).isEqualByComparingTo("0")
+            assertThat(t.at("r0030", col).gapReason).contains("borrower's sector")
+        }
     }
 
     @Test
@@ -206,10 +211,11 @@ class C7400MapperTest {
     @Test
     fun `a run on a non-EU parameter set blanks every 2015-61 inflow cell and names the set`() {
         val t = C7400Mapper.map(RiskLiquidityLookup.found(result(parameterSet = "bcbs-d238-d295")), asOf)
-        listOf("r0010", "r0030", "r0160", "r0170", "r0180").forEach { row ->
+        listOf("r0010", "r0110", "r0160").forEach { row ->
             assertThat(t.at(row, "c0140").isDataGap).isTrue()
             assertThat(t.at(row, "c0140").gapReason).contains("'bcbs-d238-d295'", "run-7", "eu-2015-61-crr2")
-            assertThat(t.at(row, "c0010").isDataGap).isFalse()
+            assertThat(t.at(row, "c0010").isDataGap).isTrue()
+            assertThat(t.at(row, "c0010").gapReason).contains("'bcbs-d238-d295'")
         }
     }
 
@@ -221,16 +227,6 @@ class C7400MapperTest {
         )
         assertThat(t.cells).allSatisfy { assertThat(it.isDataGap).isTrue() }
         assertThat(t.at("r0010", "c0010").gapReason).contains("empty book").doesNotContain("multi-currency")
-    }
-
-    @Test
-    fun `every unverified row and column says so on the wire, and r0010 does not`() {
-        val t = C7400Mapper.map(RiskLiquidityLookup.found(result()), asOf)
-        t.cells.filter { it.rowRef in C7400Mapper.UNVERIFIED_ROWS }
-            .forEach { assertThat(it.label).contains("[row code UNVERIFIED]") }
-        t.cells.filter { it.colRef in C7400Mapper.UNVERIFIED_COLUMNS }
-            .forEach { assertThat(it.label).contains("[column code UNVERIFIED]") }
-        assertThat(t.at("r0010", "c0010").label).isEqualTo("TOTAL INFLOWS")
     }
 
     @Test

@@ -49,7 +49,7 @@ metadata:
   name: block-deployment-if-rollout-exists-cel
   labels:
     app.kubernetes.io/part-of: kyverno-policies
-    openbank.io/plane: platform
+    open-bank.tech/plane: platform
   annotations:
     policies.kyverno.io/title: Block Deployment if Rollout exists (ADR-0098) — CEL
     policies.kyverno.io/category: Progressive Delivery
@@ -107,7 +107,7 @@ metadata:
   name: deny-nginx-snippet-annotations-cel
   labels:
     app.kubernetes.io/part-of: kyverno-policies
-    openbank.io/plane: platform
+    open-bank.tech/plane: platform
   annotations:
     policies.kyverno.io/title: No ingress-nginx snippet annotations (ADR-0324) — CEL
     policies.kyverno.io/category: Security
@@ -152,7 +152,7 @@ metadata:
   name: require-gated-or-declared-tool-ingress-cel
   labels:
     app.kubernetes.io/part-of: kyverno-policies
-    openbank.io/plane: platform
+    open-bank.tech/plane: platform
   annotations:
     policies.kyverno.io/title: Tool Ingress must be gated or declared (ADR-0234) — CEL
     policies.kyverno.io/category: Access Control
@@ -177,7 +177,7 @@ spec:
   validations:
     - expression: >-
         object.metadata.?annotations[?'nginx.ingress.kubernetes.io/auth-url'].orValue('') != '' ||
-        object.metadata.?annotations[?'openbank.io/ungated-machine-callers'].orValue('') != ''
+        object.metadata.?annotations[?'open-bank.tech/ungated-machine-callers'].orValue('') != ''
       messageExpression: >-
         "Ingress '" + object.metadata.name + "' in namespace 'observability' is neither
         gated nor declared. An internal tool UI must be served behind the identity-aware
@@ -185,7 +185,7 @@ spec:
         'nginx.ingress.kubernetes.io/auth-url' (ADR-0234). If this Ingress exists for
         machine callers that cannot follow a login redirect (SDK ingest by DSN,
         sentry-cli by org token), annotate it
-        'openbank.io/ungated-machine-callers: \"<why, and which paths>\"' and keep its
+        'open-bank.tech/ungated-machine-callers: \"<why, and which paths>\"' and keep its
         path list narrowed to those endpoints."
 ---
 # ADR-0324 Phase 2: the Gateway API twin of the policy above. The Ingress policy STAYS until
@@ -193,7 +193,7 @@ spec:
 # own guard. Same namespace scope, same declaration annotation, same intent: an HTTPRoute in
 # `observability` must either be gated by the identity-aware edge gate (ADR-0234) — an Envoy
 # Gateway SecurityPolicy WITH fail-closed extAuth whose targetRefs name this route — or declare why it
-# is not (`openbank.io/ungated-machine-callers`, as rum-gateway's route does).
+# is not (`open-bank.tech/ungated-machine-callers`, as rum-gateway's route does).
 #
 # The gate is a SEPARATE object, so unlike the Ingress check (an annotation on the object
 # itself) this reads the namespace's SecurityPolicies with resource.List. Consequences:
@@ -225,7 +225,7 @@ metadata:
   name: require-gated-or-declared-tool-httproute-cel
   labels:
     app.kubernetes.io/part-of: kyverno-policies
-    openbank.io/plane: platform
+    open-bank.tech/plane: platform
   annotations:
     policies.kyverno.io/title: Tool HTTPRoute must be gated or declared (ADR-0234, ADR-0324) — CEL
     policies.kyverno.io/category: Access Control
@@ -250,7 +250,7 @@ spec:
   variables:
     - name: declared
       expression: >-
-        object.metadata.?annotations[?'openbank.io/ungated-machine-callers'].orValue('') != ''
+        object.metadata.?annotations[?'open-bank.tech/ungated-machine-callers'].orValue('') != ''
     - name: gated
       expression: >-
         dyn(resource.List('gateway.envoyproxy.io/v1alpha1', 'securitypolicies',
@@ -268,7 +268,7 @@ spec:
         the admin-UI gate whose targetRefs name this HTTPRoute BEFORE the route (see
         observability/httproute-tools-gate.yaml). If this route exists for machine callers
         that cannot follow a login redirect, annotate it
-        'openbank.io/ungated-machine-callers: \"<why, and which paths>\"' and keep its
+        'open-bank.tech/ungated-machine-callers: \"<why, and which paths>\"' and keep its
         path list narrowed to those endpoints."
 ---
 # The other half of the policy above: a SecurityPolicy in `observability` may not be deleted,
@@ -282,7 +282,7 @@ metadata:
   name: protect-tool-httproute-gate-cel
   labels:
     app.kubernetes.io/part-of: kyverno-policies
-    openbank.io/plane: platform
+    open-bank.tech/plane: platform
   annotations:
     policies.kyverno.io/title: Tool HTTPRoute gate cannot be removed under a live route (ADR-0234, ADR-0324) — CEL
     policies.kyverno.io/category: Access Control
@@ -332,7 +332,7 @@ spec:
       expression: >-
         variables.before.filter(n, !(n in variables.after) &&
           variables.routes.exists(r, r.metadata.name == n &&
-            r.metadata.?annotations[?'openbank.io/ungated-machine-callers'].orValue('') == '') &&
+            r.metadata.?annotations[?'open-bank.tech/ungated-machine-callers'].orValue('') == '') &&
           !variables.others.exists(p, p.spec.?targetRefs.orValue([]).exists(t,
             t.kind == 'HTTPRoute' && t.name == n)))
   validations:
@@ -342,7 +342,7 @@ spec:
         HTTPRoute(s) " + variables.stranded.join(', ') + " with extAuth (ADR-0234). Removing
         the gate would leave them served with no identity check. Delete the route first, or
         gate it with another fail-closed extAuth SecurityPolicy, or declare it ungated
-        ('openbank.io/ungated-machine-callers')."
+        ('open-bank.tech/ungated-machine-callers')."
 ---
 # STAGE 2 (#11437): enforcing. Pins the openbank-dr SA (ADR-0277) to the
 # arc-runners namespace. [Deny] + Fail restore v1's Enforce / default failurePolicy.
@@ -363,7 +363,7 @@ metadata:
   name: openbank-dr-sa-pin-cel
   labels:
     app.kubernetes.io/part-of: kyverno-policies
-    openbank.io/plane: platform
+    open-bank.tech/plane: platform
 spec:
   validationActions: [Deny]
   failurePolicy: Fail

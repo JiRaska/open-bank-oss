@@ -31,7 +31,7 @@ metadata:
   namespace: balances
   labels:
     app.kubernetes.io/part-of: balances
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -63,6 +63,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: statements
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tax-reporting
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: admin-ui
@@ -105,7 +108,7 @@ metadata:
   namespace: balances
   labels:
     app.kubernetes.io/part-of: balances
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

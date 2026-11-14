@@ -5,7 +5,7 @@
 package com.openbank.sanctions
 
 import com.openbank.libs.authz.Authorize
-import com.openbank.sanctions.application.port.`in`.ReviewCommand
+import com.openbank.sanctions.infrastructure.rest.ReviewRequest
 import com.openbank.sanctions.infrastructure.rest.SanctionsResource
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -54,9 +54,9 @@ class SanctionsClearResourceScopeTest {
             .single { it.name == "review" }
             .parameters
             .single { it.name == paramName }
-        assertThat(parameter.type.classifier).isEqualTo(ReviewCommand::class)
+        assertThat(parameter.type.classifier).isEqualTo(ReviewRequest::class)
 
-        assertThat(ReviewCommand::class.memberProperties.map { it.name })
+        assertThat(ReviewRequest::class.memberProperties.map { it.name })
             .describedAs("%s.%s must resolve, or the interceptor falls back to no resource", paramName, fieldName)
             .contains(fieldName)
     }

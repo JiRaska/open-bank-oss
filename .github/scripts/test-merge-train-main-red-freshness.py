@@ -49,7 +49,7 @@ class FreshMainTests(unittest.TestCase):
                             strict_fixes=lambda *_a: {14109: [CTX]},
                             strict_reservation=lambda *_a, **_k: (14109, []),
                             regen_inventory_fragments=lambda *_a: [],
-                            partition=lambda *_a: ([], False), train_turn=lambda *_a: None,
+                            partition=lambda *_a: ([], False), train_turn=lambda *_a, **_k: None,
                             live_source_intent=lambda *_a: True,
                             stale_red_refresh=lambda *_a: None):
             summary = TRAIN.mode_settle(gh, git, 'o/r', False)

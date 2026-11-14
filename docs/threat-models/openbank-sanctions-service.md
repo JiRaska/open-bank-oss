@@ -38,6 +38,8 @@ Assets protected, in priority order:
 4. **Import provenance** — which URL was fetched, when, and how many entries were upserted
    (`last_updated_at`, `last_entry_count`) — the audit trail for "was the fleet's sanctions data
    current when a given screening decision was made."
+5. **The monitored-subject registry and its findings** (ADR-0376, section 6b) — personal data of
+   the subjects other services asked this one to keep screening, and the fact that one matched.
 
 ## 2. Data-flow diagram (textual)
 
@@ -160,6 +162,7 @@ six `SanctionsServiceClient` interfaces declare only `/screen`). Externally rout
 | C5 | **Denial of the control itself** — the review path does not work at all | Covered by `SanctionsReviewUpdateIT` against a real Postgres | Was live until this change: `review()` called the insert path on an application-assigned `@Id`, so **every** review died at flush on `sanctions_checks_pkey` (ADR-0126 D3). Nothing alerted — see below |
 | C6 | **Information disclosure via the checker queue** — `GET /api/v1/sanctions/approvals` lists every pending four-eyes request with its `makerId` and age | Role-gated `ROLE_OPERATOR`/`ROLE_ADMIN` + `@Authorize(action = "sanctions.approval.read")`; the payload carries approval metadata only — the action name, the resource id and who asked — never the screened subject, their identifiers or the match detail, all of which stay behind `sanctions.read` | The queue is deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth. `limit` is clamped to 200 — an unbounded query parameter over a Redis scan is a trivially reachable amplification |
 | C7 | **Clearance replay / over-broad whitelist** — a stale `CLEAR`, another subject's review, or an old whitelist permits a newly sanctioned party | Every new idempotency key performs a fresh screen before clearance is considered. `WHITELISTED` lasts 90 days and requires exact equality of `subjectId`, entity type, name, aliases, birth date, nationality and identifiers. It covers only reviewed `(listType, externalId)` identities, falling back to `(listType, matchedName)` only when external id is absent. New uncovered hits and expired or changed-subject clearances stay blocking. Legacy rows without `subjectId` cannot newly become `WHITELISTED`; they require a fresh screen and review | The 90-day validity is a compliance risk decision, not proof that a party remains low risk. Exact attributes mean a legitimate party-data correction requires a new review. Reviews still have the C4 last-write-wins limitation |
+| C8 | **Spoofing / repudiation of the decider** — the caller chooses who is recorded as the reviewer of a sanctions decision by typing `reviewedBy` in the body, so the persisted `reviewed_by`, the `SanctionReviewed` event and the audit trail name whoever the caller says (and the four-eyes maker/checker split is decided on token identities while the record names someone else) | `POST /api/v1/sanctions/review` and `/api/v3/sanctions/review` bind a body DTO (`ReviewRequest`) with no reviewer field; the reviewer is taken from the authenticated principal (`SecurityIdentity.principal.name`, the same string the four-eyes maker/checker comparison uses). A `reviewedBy` still sent by an older caller is ignored. The approval binding fingerprints the DTO's `checkId`, `note`, `newStatus`. Proven over real HTTP by `SanctionsReviewReviewerIdentityIT` (a body-supplied reviewer is not stored) | The recorded reviewer is the token's `preferred_username`; two identities held by one human remain C1's residual. Rows written before this change may carry a client-chosen reviewer and cannot be told apart from honest ones |
 
 **Invariant (must never regress).** The review path performs an **UPDATE**. The insert path
 (`saveWithEvent`) and the update path (`updateWithEvent`) stay separate: `merge` cannot raise a
@@ -174,8 +177,88 @@ repository port, so it asserted a call that in production always threw; no UI ex
 distinguishes from noise. The only signal available anywhere was `listPending()` never shrinking —
 and nothing alerts on a queue that fails to drain (the same class as #3273).
 
+## 6b. Ongoing monitoring of registered subjects (ADR-0376)
+
+Off by default (`openbank.sanctions.monitoring.enabled=false`). This section describes the
+surface that exists once an environment switches it on.
+
+**New asset: the monitored-subject registry.** `sanctions_monitored_subjects` (V23) is the first
+store in this service that holds a standing population of the bank's own customers rather than
+one row per screening request: name, aliases, date of birth, nationality, country and entity
+type per subject, keyed by the owning service and its reference.
+`sanctions_monitored_subject_names` repeats each subject's normalised names, one row per name,
+for the index the delta match reads; it is deleted with the subject. `sanctions_monitoring_findings` links
+a subject to the list entries it matched, which is the more sensitive fact: that a named
+customer is, or resembles, a sanctioned or politically exposed person.
+
+**New inbound operations.** `PUT` and `DELETE /api/v3/sanctions/monitored-subjects/{subjectRef}`
+(`SanctionsMonitoringResource`), for `ROLE_API` with the `sanctions.create` action of
+`POST /api/v3/sanctions/screen`. The owner of a registration is not a request value: it is the
+client the caller's service-account token was issued to (`MonitoringCallerIdentity`). There is no
+read operation.
+
+**New internal flows.** A trigger on `sanctions_change_journal` queues each committed list-entry
+change (only while the registry is non-empty); a scheduled delta matches queued entries against
+the registry; a scheduled sweep re-evaluates whole subjects; a finding and its outbox event are
+written in one transaction and leave on `openbank.sanctions.screening.event` as
+`MONITORED_SUBJECT_MATCHED`.
+
+| # | Threat | Mitigation | Residual risk |
+|---|---|---|---|
+| M1 | **Tipping-off (information disclosure)** — a customer, or a service facing one, learns that the customer matched a list | A finding is never returned over REST: the resource has no read operation, and a registration response carries the registration only. An integration test in this module registers over real HTTP and asserts the exact set of response fields; it is cited in this row only once scheduled evidence on main shows it green. The event names the subject by reference and goes to the internal screening topic, which no customer-facing service consumes | The topic is shared: `audit-service` archives it, so the pair (subject reference, matched entry) is also stored there. Nothing enforces that a future consumer keeps it off a customer surface; ADR-0371 names a gate for that class of event, which does not cover this one yet |
+| M2 | **Personal data at rest** — the registry concentrates customer identity data in a service that did not hold a customer population before | Minimum fields: exactly what the CUSTOMER screening profile reads, no document identifiers, no contact data. Stored under the service's existing `restricted` classification and database encryption | Names and dates of birth are stored in clear in the column, as `sanctions_checks` already does; no field-level encryption (ADR-0189 position) |
+| M3 | **Erasure not honoured** — a subject is offboarded or erased and stays monitored | Deregistration issues a `DELETE`; the subject's indexed names and its findings go with it by `ON DELETE CASCADE`. It is idempotent and is not gated on the feature flag, so erasure works where monitoring is switched off. An integration test in this module deletes a registered subject with the flag off; it is cited in this row only once scheduled evidence on main shows it green | Events already published remain in the outbox until its retention purge and in the audit archive under its own retention. Deregistration is the caller's duty: nothing here learns of an erasure by itself |
+| M4 | **Monitoring evasion by deregistration (tampering)** — a caller withdraws a subject so that a later listing is never matched, or replaces its attributes with ones that match nothing | The owner is resolved server-side from the verified service-account token (`MonitoringCallerIdentity`, on `ServiceAccountIdentity`: a verified JWT whose `azp` is bound to that client's service-account username) and is part of the key of every read, replace and delete, so a caller reaches only the subjects it registered; the same reference under another owner is a different row. A person's token, a principal that is not a verified service-account token, and the fleet's shared client are refused with 403 before anything is read. Integration tests in this module plant another owner's subject under the caller's own reference and assert it survives the caller's delete, and cover each refusal; they are cited in this row only once scheduled evidence on main shows them green | A service can still withdraw or overwrite its OWN subjects: a compromised or defective owner evades monitoring of its own customers. Each deregistration is logged with the owning client (no name), but nothing alerts on deregistration volume. The binding is as strong as the realm's client separation: where two services are issued the same client id they are one owner. A caller that still authenticates through the shared client cannot register at all; kyc-service does today and needs its own client first |
+| M5 | **Names in logs** — the registry's content leaks through log lines | Monitoring code logs the registry row id, the owning service and list-entry references only, never a subject's name or reference | Convention, checked by review; no gate inspects log arguments |
+| M6 | **A missed delta (silent false negative)** — a list change is never matched against the registry | The queue row commits in the transaction of the list change itself. A delta too large to match entry by entry is replaced, in one transaction, by a request to re-sweep every subject. The periodic sweep re-evaluates every subject through the live screen's own evaluation whatever the deltas did | Bounded by the sweep interval (default 30 days) for anything only the sweep can see, which includes jurisdiction reference data: a newly listed country reaches a registered subject at its next sweep, not immediately |
+| M7 | **Duplicate or replayed findings (DoS of the review queue)** | A finding is unique per subject, list entry and version of the entry's names (partial unique index); the version ignores alias order, so a feed that reorders names raises nothing | An entry whose names genuinely change raises a new finding for a subject already found against it |
+| M8 | **A clearance silences a true match** | Monitoring calls the live screen's own clearance rule: same subject reference, same attributes, unexpired, covering the exact entry identity. PEP and jurisdiction matches are never covered. An integration test in this module records a clearance and asserts which later findings it does and does not silence; it is cited in this row only once scheduled evidence on main shows it green | The registry holds no document identifiers, so a clearance recorded on a screen that carried identifiers is not honoured here and the finding is raised: the safe direction |
+| M9 | **Resource exhaustion** — the delta matches every changed entry against the registry and shares the database with payment screening | The match is index-driven: each entry probes the partial trigram indexes of `sanctions_monitored_subject_names` and scores only the candidates (`MonitoringNameIndex`), measured at 0.3 s per entry on one million synthetic subjects against 7.3 s for a full scan. Both paths are bounded per tick (entries per run, subjects per batch), one entry may raise at most a bounded number of findings, and the delta falls back to the sweep above a backlog bound | The cost still grows with the registry and with how common an entry's trigrams are: 5,000 changed entries a day are about 25 minutes of one database core at one million subjects. The figures come from synthetic names; no measurement on production-shaped data exists. A caller can register subjects without a quota, so one owner can grow the registry for every other |
+| M10 | **A disabled feature read as a working one** | Registration is refused with 503 while disabled; a disabled run reports `DISABLED`, counted apart from `completed`; the registry gauges read NaN until a run has observed the registry | None known |
+
 ## 7. Change log
 
+- **2026-11-14** — **Ongoing monitoring switched on in the sandbox deployment
+  (`SANCTIONS_MONITORING_ENABLED=true`).** The surface of section 6b is now live there: the
+  registration operations accept requests instead of answering 503, and the delta and sweep run
+  every 60 seconds. No threat row changes. Measured at the flip: the registry is empty and the
+  only registering caller (kyb-service) still has its own registration switch off, so no subject
+  is monitored and no finding can be raised until that caller is switched on separately; list
+  changes run at roughly 700 to 1,600 changed entries a day, well inside the delta's bound of
+  5 entries per tick (7,200 a day), and the queue trigger writes nothing while the registry is
+  empty (M9). The new `SanctionsMonitoringCronIT` drives the real scheduler rather than calling
+  the runs directly, so a scheduled path that lost its Vert.x context would now fail a test (M6,
+  M10). Rollback: set the variable back to `false`.
+- **2026-11-14** — **FATF jurisdiction statements of 2026-10-30 loaded; a measure that never
+  screens (#15723, ADR-0032 amendment).** V24 loads `FATF_CALL_FOR_ACTION` (KP, IR
+  countermeasures; MM enhanced due diligence; all `HIGH_RISK` → review) and
+  `FATF_INCREASED_MONITORING` (18 countries, new measure `RISK_FACTOR`, which the screen drops
+  before it becomes a match). No existing outcome changes: KP, IR and MM were already `HIGH_RISK`
+  through the EU list. **STRIDE-T / data integrity:** the publisher refuses automated retrieval,
+  so the rows were taken from an official government republication (Japan MOF translations, SHA-256
+  recorded in `source_ref` and the migration header) and cross-checked against FinCEN; the four
+  jurisdictions removed by the plenary (BG, CI, CD, MC) are asserted absent. **Silent false
+  negative (new):** a row mis-labelled `RISK_FACTOR` would screen CLEAR without any error; the
+  measure of every shipped FATF row is pinned by `FatfJurisdictionStatementsIT`, and a grey-only
+  country (KW) is asserted CLEAR while a call-for-action country is asserted `POTENTIAL_HIT` on
+  every profile. **Rollback:** the previous release has no `RISK_FACTOR` and would refuse a screen
+  that selected such a row (`valueOf` throws), so grey-list rows sit under `list_type =
+  COUNTRY_RISK_FACTOR`, which no screen's list set contains; the old read path, copied verbatim
+  into `JurisdictionRollbackSafetyIT`, returns its main-branch result for KP, KE, KW and PT
+  against the migrated data, with no manual step. **Residual:** customer risk scoring
+  does not read the grey-list rows yet, so the grey list informs no automated decision; the next
+  FATF plenary (February 2027) must be loaded by hand before the verification alert fires on
+  2027-04-13.
+- **2026-11-12** — **Ongoing monitoring of registered subjects (ADR-0376), shipped disabled.**
+  New store of personal data (`sanctions_monitored_subjects`, `sanctions_monitoring_findings`,
+  `sanctions_monitored_subject_names`, V23), two new inbound operations (`PUT`/`DELETE
+  /api/v3/sanctions/monitored-subjects/{subjectRef}`, owner taken from the caller's
+  service-account token) and one new outbound event (`MONITORED_SUBJECT_MATCHED`). See section 6b for the threats: tipping-off (M1), the registry
+  as a personal-data store (M2), erasure (M3), evasion by deregistration (M4), missed deltas (M6)
+  and clearances (M8). With the flag off, which is the default, registration answers 503, no run
+  matches anything and the queue trigger writes nothing because the registry is empty.
+
+- **2026-11-12** — **Reviewer identity comes from the token (#15748, C8).** The review endpoints no longer bind a client-supplied `reviewedBy`; it is ignored and the authenticated principal is recorded. This also fixes the admin-ui decision action, whose body never carried the field and was answered 400.
 - **2026-11-11** — **Jurisdiction reference data loaded, its ageing made observable, and a
   review band for customer names (#15723).** V22 loads the EU list of high-risk third countries
   (Commission Delegated Regulation (EU) 2016/1675, Annex, consolidated version of 2026-01-29;
@@ -410,3 +493,15 @@ moving DNS. Roll back all four `api.open-bank.tech` routes together to nginx; it
 and network allowance remain until Phase 5.
 
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-11-12** — **New inbound caller: kyb-service screens entities and related parties over mTLS (#15771, for #15768).** kyb-service now calls this service's private-CA mTLS listener (8443, client authentication required) with its own `kyb-internal-tls` certificate (new cert-manager Certificate in the kyb namespace, issued by `openbank-ca`). The generated sanctions-namespace NetworkPolicy now admits the kyb namespace on the sanctions pod's shared port list (8123 and 8443), so at network level kyb could also reach the plain 8123 listener; that kyb uses only 8443 rests on the `https://...:8443` URL and the `%prod` TLS bucket. The plain listener stays unchanged for existing callers. Spoofing: a caller without a private-CA certificate fails the handshake. Elevation: kyb calls only `POST /api/v3/sanctions/screen`; this PR changes no authorization rule, so what that call is allowed to do is whatever the service's existing policy grants a caller with kyb's identity (not re-verified here). Denial of service: kyb treats an unavailable screen as not screened and holds approval. Rollback: remove `SANCTIONS_SERVICE_URL` from kyb-service and the Certificate; the ingress rule then no longer admits kyb.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

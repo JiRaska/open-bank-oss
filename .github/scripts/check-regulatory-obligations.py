@@ -65,6 +65,7 @@ def load_register(text: str) -> dict:
 
 STATUS_LABEL = {
     "filed-return": "výkaz v katalogu, počítá backend",
+    "computed-preview": "backend počítá náhled, nelze podat (chybí podací dokument a transport)",
     "bff-only": "výkaz v katalogu, počítá jen admin-ui (dluh ADR-0367)",
     "data-only": "data existují, výkaz chybí",
     "missing": "chybí",
@@ -125,7 +126,7 @@ def validate(root: Path, reg: dict) -> list[str]:
         if st not in statuses:
             errs.append(f"{oid}: unknown coverage.status {st}")
         reports = cov.get("reports") or []
-        if st in ("filed-return", "bff-only") and not reports:
+        if st in ("filed-return", "computed-preview", "bff-only") and not reports:
             errs.append(f"{oid}: status {st} needs at least one catalogue report")
         if st in ("missing", "conditional", "external") and reports:
             errs.append(f"{oid}: status {st} cannot claim reports {reports}")
@@ -252,7 +253,7 @@ def run(root: Path, write: bool) -> int:
 def self_test() -> int:
     """Known-positive and known-negative fixtures — the check must reject each defect."""
     base_reg = {
-        "statuses": ["filed-return", "bff-only", "data-only", "missing", "external", "conditional"],
+        "statuses": ["filed-return", "computed-preview", "bff-only", "data-only", "missing", "external", "conditional"],
         "kinds": ["event"], "confidences": ["verified"],
         "authorities": {"cnb": {"cs": "ČNB", "en": "CNB", "url": None}},
         "areas": [{"id": "x", "cs": "X", "en": "X"}],

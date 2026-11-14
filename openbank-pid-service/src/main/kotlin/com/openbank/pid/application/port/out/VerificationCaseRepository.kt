@@ -29,10 +29,25 @@ interface VerificationCaseRepository {
     /**
      * GDPR Art. 17 (#15755): anonymise the applicant snapshot, blind index, dedup key and notes of
      * every not-yet-erased case the party was LINKED to (`first_link_party_id` / `final_link_party_id`)
-     * — those applicant attributes are the erased person's own. Cases where the party was merely a
-     * candidate describe someone else and are untouched. Idempotent.
+     * — those applicant attributes are the erased person's own. Idempotent.
      *
      * @return the number of cases anonymised by this call.
      */
     suspend fun anonymizeLinkedTo(partyId: UUID, erasedAt: Instant): Int
+
+    /**
+     * GDPR Art. 17 (#15755): remove the erased person's RČ blind index from every not-yet-erased case
+     * that carries it (`RN:` cases, in which that person is by construction the sole candidate).
+     * Must run while the index can still be read from the party, i.e. before its external ids are
+     * deleted. Idempotent: a stripped case no longer carries the index.
+     *
+     * The applicant snapshot is KEPT: an unlinked `RN:` case is not positively the erased person (the
+     * attributes diverged, which is why the case exists, and it may be another applicant using that
+     * person's number). A REJECT decision stays effective under [com.openbank.pid.domain.model.ErasedIdentifierKey];
+     * every other case gets the opaque `ERASED:<case id>`. Linked cases are fully anonymised by
+     * [anonymizeLinkedTo].
+     *
+     * @return the number of cases changed by this call.
+     */
+    suspend fun removeErasedIdentifier(blindIndex: String): Int
 }

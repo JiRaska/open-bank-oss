@@ -33,7 +33,7 @@ interface UpdatePartyUseCase {
 }
 
 /** GDPR Art. 17 (#15755, ADR-0118): erase a party's personal data on the party-service erasure event. */
-enum class ErasureOutcome { ERASED, REPEATED, UNKNOWN }
+enum class ErasureOutcome { ERASED, REPEATED, TOMBSTONED }
 
 interface ErasePartyUseCase {
     /** Idempotent; a repeat delivery re-cleans the row. */

@@ -1,0 +1,149 @@
+{
+  "consumer": {
+    "name": "openbank-kyc-service"
+  },
+  "messages": [
+    {
+      "contents": {
+        "changedExternalIds": [
+          "ext-1"
+        ],
+        "chunkCount": 1,
+        "chunkIndex": 0,
+        "deactivatedExternalIds": [
+          "ext-9"
+        ],
+        "listType": "EU_CONSOLIDATED",
+        "publicationId": "5f0c1a52-6d1e-4b7e-9d0a-3c1f2b7a9e10"
+      },
+      "description": "a SANCTIONS_LIST_CHANGED event",
+      "matchingRules": {
+        "body": {
+          "$.changedExternalIds": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type",
+                "min": 1
+              }
+            ]
+          },
+          "$.changedExternalIds[*]": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.chunkCount": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "integer"
+              }
+            ]
+          },
+          "$.chunkIndex": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "integer"
+              }
+            ]
+          },
+          "$.deactivatedExternalIds": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type",
+                "min": 1
+              }
+            ]
+          },
+          "$.deactivatedExternalIds[*]": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.listType": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.publicationId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "ce-type": "SANCTIONS_LIST_CHANGED",
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a sanctions list diff with a changed and a deactivated entry has been published"
+        }
+      ]
+    },
+    {
+      "contents": {
+        "listType": "EU_CONSOLIDATED",
+        "reason": "CHANGE_SHARE"
+      },
+      "description": "a SANCTIONS_LIST_CHANGE_STORM event",
+      "matchingRules": {
+        "body": {
+          "$.listType": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.reason": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "ce-type": "SANCTIONS_LIST_CHANGE_STORM",
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a sanctions list refresh has been withheld by the storm guard"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-sanctions-service"
+  }
+}

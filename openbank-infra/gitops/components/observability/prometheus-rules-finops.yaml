@@ -24,7 +24,7 @@ metadata:
   namespace: observability
   labels:
     app.kubernetes.io/part-of: observability
-    openbank.io/finops-detector: "true"
+    open-bank.tech/finops-detector: "true"
 spec:
   groups:
     - name: openbank.finops.nat-egress

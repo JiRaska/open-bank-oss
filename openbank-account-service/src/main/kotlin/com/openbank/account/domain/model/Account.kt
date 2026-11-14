@@ -61,11 +61,34 @@ data class Account(
      * pin and is not backfilled silently (see the service docs for the backfill plan).
      */
     val productRevisionPin: ProductRevisionPin? = null,
+    /**
+     * Who froze this account (V34); non-null only while [status] is FROZEN. Null on a FROZEN row
+     * means it was frozen before V34 and is treated as [FreezeOrigin.OPERATOR]: it is never lifted
+     * automatically.
+     */
+    val freezeOrigin: FreezeOrigin? = null,
 ) {
     fun canDebit(amount: Money): Boolean {
         require(amount.currency == currency) { "Currency mismatch" }
-        return status == AccountStatus.ACTIVE
+        return standing.mayDebit
     }
+
+    /**
+     * Whether money may leave or enter this account right now (ADR-0374 D4). This is the answer the
+     * payment rails read with the account; [canDebit] and [canCredit] are the same rule.
+     */
+    val standing: AccountStanding
+        get() = AccountStanding(
+            mayDebit = status == AccountStatus.ACTIVE,
+            mayCredit = canCredit(),
+            reason = when (status) {
+                AccountStatus.ACTIVE -> null
+                AccountStatus.PENDING_ACTIVATION -> StandingReason.ACCOUNT_PENDING_ACTIVATION
+                AccountStatus.DORMANT -> StandingReason.ACCOUNT_DORMANT
+                AccountStatus.FROZEN -> StandingReason.ACCOUNT_FROZEN
+                AccountStatus.CLOSED -> StandingReason.ACCOUNT_CLOSED
+            },
+        )
 
     fun canCredit(): Boolean = status == AccountStatus.ACTIVE || status == AccountStatus.DORMANT
 
@@ -78,15 +101,30 @@ data class Account(
         return copy(status = AccountStatus.CLOSED, closedAt = Instant.now(clock))
     }
 
-    fun freeze(): Account {
+    /**
+     * Freeze an ACTIVE account. An operator may also freeze an account that is already frozen
+     * because of its party's standing: the freeze then becomes the operator's, so the party
+     * returning to good standing no longer lifts it.
+     */
+    fun freeze(origin: FreezeOrigin = FreezeOrigin.OPERATOR): Account {
+        if (status == AccountStatus.FROZEN &&
+            freezeOrigin == FreezeOrigin.PARTY_STANDING &&
+            origin == FreezeOrigin.OPERATOR
+        ) {
+            return copy(freezeOrigin = FreezeOrigin.OPERATOR)
+        }
         check(status == AccountStatus.ACTIVE) { "Cannot freeze account in status $status" }
-        return copy(status = AccountStatus.FROZEN)
+        return copy(status = AccountStatus.FROZEN, freezeOrigin = origin)
     }
 
     fun unfreeze(): Account {
         check(status == AccountStatus.FROZEN) { "Cannot unfreeze account in status $status" }
-        return copy(status = AccountStatus.ACTIVE)
+        return copy(status = AccountStatus.ACTIVE, freezeOrigin = null)
     }
+
+    /** True for a freeze that the party's return to good standing may lift. */
+    fun isFrozenByPartyStanding(): Boolean =
+        status == AccountStatus.FROZEN && freezeOrigin == FreezeOrigin.PARTY_STANDING
 
     /** Activate an onboarding account once its party has cleared KYC + AML (ADR-0267). */
     fun activate(): Account {
@@ -108,6 +146,25 @@ enum class AccountType {
     GL_INCOME,
     GL_EXPENSE,
 }
+
+/** Who froze an account, which decides who may lift the freeze. */
+enum class FreezeOrigin {
+    /** A person or a control acting on this account. Lifted only by an explicit unfreeze. */
+    OPERATOR,
+
+    /** The owning party lost its standing (suspended or closed). Lifted when the party is ACTIVE again. */
+    PARTY_STANDING,
+}
+
+/** Why an account may not be debited. The freeze origin is deliberately not part of it. */
+enum class StandingReason {
+    ACCOUNT_PENDING_ACTIVATION,
+    ACCOUNT_DORMANT,
+    ACCOUNT_FROZEN,
+    ACCOUNT_CLOSED,
+}
+
+data class AccountStanding(val mayDebit: Boolean, val mayCredit: Boolean, val reason: StandingReason?)
 
 enum class AccountStatus {
     PENDING_ACTIVATION,

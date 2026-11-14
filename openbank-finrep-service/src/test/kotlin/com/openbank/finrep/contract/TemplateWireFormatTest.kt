@@ -205,6 +205,28 @@ class TemplateWireFormatTest {
     }
 
     @Test
+    fun `COREP LCR wire coordinates match the EBA 4_2 total-currency preview cells`() {
+        val fixture = checkNotNull(javaClass.getResourceAsStream("/eba/reporting-framework-4.2-lcr-preview-cells.tsv"))
+        val coordinates = fixture.bufferedReader().useLines { lines ->
+            lines.filterNot { it.startsWith("#") }.map { it.split('\t') }.groupBy { it.first() }
+        }
+        assertThat(coordinates.keys).containsExactly("C_72.00.a", "C_73.00.a", "C_74.00.a", "C_76.00.a")
+        coordinates.forEach { (variant, rows) ->
+            val templateId = variant.removeSuffix(".a")
+            val json = getJson("/api/v1/corep/templates/$templateId", LocalDate.of(2026, 6, 30))
+            assertThat(json["templateId"]).isEqualTo(templateId)
+            val cells = (json["cells"] as List<*>).map { it as Map<*, *> }
+            assertThat(cells.map { it["rowRef"] to it["colRef"] })
+                .containsExactlyElementsOf(rows.map { (_, row, col) -> row to col })
+            assertThat(cells).allSatisfy {
+                assertThat(it["label"] as String).doesNotContain("UNVERIFIED")
+                assertThat(it["isDataGap"]).isEqualTo(true)
+                assertThat(it["gapReason"] as String).isNotBlank()
+            }
+        }
+    }
+
+    @Test
     fun `the COREP template wire format matches the published openapi schema`() {
         val json = getJson("/api/v1/corep/templates/C_01.00", LocalDate.of(2026, 6, 30))
 

@@ -194,10 +194,19 @@ class AgentPolicyGate {
         runBlocking { auditPublisher.publish(event) }
     }
 
-    private fun parseMode(): EnforcementMode =
-        runCatching { EnforcementMode.valueOf(enforcementMode.trim().uppercase()) }
+    // An UNSET value takes the documented advisory default (config defaultValue). A value that is
+    // SET but unrecognised (a typo such as "blok") must never silently disable enforcement, so it
+    // is treated as BLOCK and logged at ERROR.
+    private fun parseMode(): EnforcementMode {
+        val raw = enforcementMode.trim()
+        if (raw.isEmpty()) return EnforcementMode.ADVISORY
+        return runCatching { EnforcementMode.valueOf(raw.uppercase()) }
             .getOrElse {
-                log.warnf("unknown agent.policy.enforcement=%s, defaulting to ADVISORY", enforcementMode)
-                EnforcementMode.ADVISORY
+                log.errorf(
+                    "unknown agent.policy.enforcement=%s; failing closed to BLOCK (valid: advisory, block)",
+                    raw.sanitizeForLog(),
+                )
+                EnforcementMode.BLOCK
             }
+    }
 }

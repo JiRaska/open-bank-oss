@@ -33,9 +33,14 @@ gradle.projectsEvaluated {
     if (!(task instanceof org.gradle.api.tasks.testing.Test)) {
         throw new GradleException("providerPactTest is not a Gradle Test task; refusing scoped replay.")
     }
-    def pactJars = task.classpath.files.findAll { it.name ==~ /(?:provider|pactbroker)-[0-9].*\.jar/ }
-    if (pactJars*.name.sort() != ["pactbroker-4.7.3.jar", "provider-4.7.3.jar"]) {
-        throw new GradleException("Pact JVM selector support is unverified; refusing scoped replay.")
+    // Resolving the classpath inside projectsEvaluated holds no project lock,
+    // which Gradle 9 rejects (IllegalResolutionException). Check the jars at
+    // execution time instead, before any interaction is verified.
+    task.doFirst {
+        def pactJars = task.classpath.files.findAll { it.name ==~ /(?:provider|pactbroker)-[0-9].*\.jar/ }
+        if (pactJars*.name.sort() != ["pactbroker-4.7.3.jar", "provider-4.7.3.jar"]) {
+            throw new GradleException("Pact JVM selector support is unverified; refusing scoped replay.")
+        }
     }
     task.filter.setIncludePatterns("com.openbank.transaction.contract.TransactionPactProviderVerificationTest")
     def consumer = System.getenv("PACT_CONSUMER")

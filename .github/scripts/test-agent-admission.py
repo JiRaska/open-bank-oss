@@ -114,6 +114,23 @@ class AdmissionTest(unittest.TestCase):
     def test_admission_warns_on_low_core_quota_without_an_extra_api_call(self):
         workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/ci.yml').read_text())
         step = next(s for s in workflow['jobs']['agent-admission']['steps'] if s.get('name') == 'quota-meter start')
+        self._assert_meter_warns(step)
+
+    def test_every_quota_meter_step_warns_on_low_core_quota(self):
+        # Early detection of the installation-quota bursts measured 2026-11-10..12: every meter,
+        # start AND end, in the three lanes that spend the quota, warns at <=20% remaining.
+        seen = 0
+        for name in ('ci.yml', 'services-ci.yml', 'security.yml'):
+            workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows' / name).read_text())
+            for job_id, job in workflow['jobs'].items():
+                for step in job.get('steps', []):
+                    if step.get('name', '').startswith('quota-meter'):
+                        seen += 1
+                        with self.subTest(workflow=name, job=job_id, step=step['name']):
+                            self._assert_meter_warns(step)
+        self.assertGreaterEqual(seen, 9)
+
+    def _assert_meter_warns(self, step):
         probe = '''gh() {
             printf '%s\n' "$1 $2" >> "$METER_CALLS"
             if [ "$METER_FAIL" = true ]; then return 1; fi
@@ -136,7 +153,8 @@ class AdmissionTest(unittest.TestCase):
                 self.assertIn('::notice title=quota-meter::', result.stdout)
                 self.assertEqual('::warning title=GitHub API quota nearing exhaustion::' in result.stdout, warns)
                 if unavailable:
-                    self.assertIn('start unavailable', summary.read_text())
+                    phase = step['name'].split()[-1]
+                    self.assertIn(f'{phase} unavailable', summary.read_text())
 
     def test_services_ci_admission_reads_current_trusted_base(self):
         workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/services-ci.yml').read_text())

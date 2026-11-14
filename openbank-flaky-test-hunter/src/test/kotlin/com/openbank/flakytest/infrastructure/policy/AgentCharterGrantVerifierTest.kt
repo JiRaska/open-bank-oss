@@ -20,14 +20,34 @@ class AgentCharterGrantVerifierTest {
 
     @Test
     fun `the packaged agentsyaml grants flaky-test-hunter the write_proposal github-pr grant`() {
-        assertThat(verifier.checkPrOpenGrant()).isEqualTo(CharterGrant.Granted)
+        assertThat(verifier.checkPrOpenGrant("main")).isEqualTo(CharterGrant.Granted)
+    }
+
+    @Test
+    fun `the packaged grant also covers the qualification ref`() {
+        assertThat(verifier.checkPrOpenGrant("qualification/flaky-test-hunter")).isEqualTo(CharterGrant.Granted)
+    }
+
+    @Test
+    fun `a ref the packaged grant does not list is denied`() {
+        assertThat(verifier.checkPrOpenGrant("release/ledger"))
+            .isEqualTo(CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_DENIED))
+    }
+
+    @Test
+    fun `a grant naming no base_refs denies every ref, mirroring agents rego`() {
+        val charter = """{"agents":[{"id":"flaky-test-hunter","enabled":true,
+            "tools":{"allow":[{"tier":"write_proposal","resources":["github-pr"]}]}}]}"""
+
+        assertThat(verifier.parse(charter, "main"))
+            .isEqualTo(CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_DENIED))
     }
 
     @Test
     fun `a charter whose write_proposal grant was removed denies with charter_denied`() {
         verifier.resourcePath = "governance-fixtures/agents-tampered.yaml"
 
-        assertThat(verifier.checkPrOpenGrant())
+        assertThat(verifier.checkPrOpenGrant("main"))
             .isEqualTo(CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_DENIED))
     }
 
@@ -35,7 +55,7 @@ class AgentCharterGrantVerifierTest {
     fun `a disabled agent denies with charter_denied even though the grant is present`() {
         verifier.resourcePath = "governance-fixtures/agents-disabled.yaml"
 
-        assertThat(verifier.checkPrOpenGrant())
+        assertThat(verifier.checkPrOpenGrant("main"))
             .isEqualTo(CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_DENIED))
     }
 
@@ -47,7 +67,7 @@ class AgentCharterGrantVerifierTest {
             val charter = """{"agents":[{"id":"flaky-test-hunter",$enabled
                 "tools":{"allow":[{"tier":"write_proposal","resources":["github-pr"]}]}}]}"""
 
-            assertThat(verifier.parse(charter))
+            assertThat(verifier.parse(charter, "main"))
                 .describedAs("enabled=%s must not grant PR access", value ?: "missing")
                 .isEqualTo(CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_DENIED))
         }
@@ -57,7 +77,7 @@ class AgentCharterGrantVerifierTest {
     fun `an explicit object-shaped deny entry beats the grant`() {
         verifier.resourcePath = "governance-fixtures/agents-deny-overrides.yaml"
 
-        assertThat(verifier.checkPrOpenGrant())
+        assertThat(verifier.checkPrOpenGrant("main"))
             .isEqualTo(CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_DENIED))
     }
 
@@ -65,7 +85,7 @@ class AgentCharterGrantVerifierTest {
     fun `a missing charter resource denies with charter_unavailable`() {
         verifier.resourcePath = "governance-charters/no-such-charter.yaml"
 
-        assertThat(verifier.checkPrOpenGrant())
+        assertThat(verifier.checkPrOpenGrant("main"))
             .isEqualTo(CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_UNAVAILABLE))
     }
 
@@ -73,7 +93,7 @@ class AgentCharterGrantVerifierTest {
     fun `an unparseable charter document denies with charter_unavailable`() {
         verifier.resourcePath = "governance-fixtures/agents-malformed.yaml"
 
-        assertThat(verifier.checkPrOpenGrant())
+        assertThat(verifier.checkPrOpenGrant("main"))
             .isEqualTo(CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_UNAVAILABLE))
     }
 }

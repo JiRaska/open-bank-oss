@@ -137,6 +137,13 @@ class CopilotChatResource {
      * [Infrastructure.getDefaultWorkerPool] carries the CDI request context (SmallRye Context
      * Propagation), so [SecurityIdentity] and the propagated bearer for tool calls are available
      * inside the `runBlocking` body.
+     *
+     * **AI-generated marker (EU AI Act Art. 50(1)).** Every response of this operation carries the
+     * `X-AI-Generated` / `X-AI-Disclosure` headers (added by [CopilotStreamAiMarkerFilter] at the HTTP
+     * layer, before the first event), so the marker is present on every outcome (disabled, refusal, error
+     * fallback, normal reply, empty stream) without touching the event body. Headers rather than an
+     * inline sentinel or a new SSE event: existing clients concatenate every `data:` line as reply
+     * text, so any in-band element would be shown to the customer, whereas an unread header is ignored.
      */
     @POST
     @Path("/chat/stream")

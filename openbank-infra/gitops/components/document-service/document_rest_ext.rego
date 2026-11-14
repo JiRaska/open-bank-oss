@@ -51,6 +51,33 @@ prohibited if {
     not machine_named(external_disclosure_exporter)
 }
 
+# ADR-0375 D5 — the ownership projection, narrower than `document.read` on purpose.
+#
+# delegation-service must learn the owning party before it mints an OBJECT_READ grant over a
+# document; until this existed it could not ask, so every object grant was refused at the writer
+# and the whole D7 party-recipient path was dead while its reader was already built.
+#
+# Pinned to the delegation service-account's own subject (the NAMED `m2m` OIDC client,
+# `openbank-delegation`, ROLE_API only) — never the shared `openbank-services` one, and never a
+# rules.yaml role_action_matrix line, which would hand the read to every ROLE_* holder including
+# every other service account. Same shape as the disclosure exporter above, one notch wider in
+# what it reveals and far narrower than `document.read`: this answers only who owns the document.
+document_ownership_reader := "service-account-openbank-delegation"
+
+allowed_reasons contains "service-delegation-document-ownership" if {
+	input.principal.type == "HUMAN"
+	machine_named(document_ownership_reader)
+	input.action == "document.verifyOwnership"
+}
+
+# An explicit veto for the same reason the exporter has one: absence of an allow reason is not a
+# denial once some later broad `document.` rule exists, and the edge is already granted that whole
+# family by base rest.rego's edge-service-notification rule.
+prohibited if {
+	input.action == "document.verifyOwnership"
+	not machine_named(document_ownership_reader)
+}
+
 business_agreement_actions := {
 	"document.business-agreement.ensure",
 	"document.business-agreement.read",

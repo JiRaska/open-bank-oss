@@ -203,32 +203,10 @@ class AccountPactFolderProviderVerificationTest {
         // for that principal only, so the class-level pact-verifier identity would answer 403.
         // The GSFT deposit roster (#15356) is the same caller, and its resource additionally
         // requires that verified service-account name.
-        val description = context?.interaction?.description.orEmpty()
-        if (description.contains("CRS FATCA") || description.contains("GSFT deposit roster as of")) {
-            testIdentityAssociation.setTestIdentity(taxReportingIdentity())
+        if (context != null && TaxReportingReplayIdentity.appliesTo(context.interaction.description)) {
+            testIdentityAssociation.setTestIdentity(TaxReportingReplayIdentity.identity())
         }
         context?.verifyInteraction()
-    }
-
-    /**
-     * The replay identity for the CRS/FATCA roster interaction: the verified service-account JWT
-     * the rego rule admits (#12448 — name bound to the service-account username, azp present).
-     */
-    private fun taxReportingIdentity(): io.quarkus.security.runtime.QuarkusSecurityIdentity {
-        val name = "service-account-openbank-tax-reporting"
-        val jwt = object : org.eclipse.microprofile.jwt.JsonWebToken {
-            private val claims = mapOf(
-                "azp" to "openbank-tax-reporting",
-                "preferred_username" to name,
-                "sub" to "tax-reporting-sa-subject",
-            )
-
-            override fun getName(): String = name
-            override fun getClaimNames(): Set<String> = claims.keys
-            override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
-        }
-        return io.quarkus.security.runtime.QuarkusSecurityIdentity.builder().setPrincipal(jwt)
-            .addRole("ROLE_API").build()
     }
 
     /**

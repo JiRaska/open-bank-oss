@@ -28,7 +28,7 @@
 |---|---|
 | Přístup (čl. 15) | `GET /api/v1/parties/{id}` vrátí záznam subjektu (šifrované rodné číslo se nevystavuje) |
 | Oprava (čl. 16) | `PATCH /contact`, `/sync/bankid`, `/sync/rob` — vše audit-logováno přes události |
-| Výmaz (čl. 17) | **Implementováno** — po `PARTY_ERASED` se všechny osobní sloupce a identifikátory (šifrované RČ, slepé indexy, čísla dokladů) anonymizují nebo smažou na místě; anonymizovaný zbytek řádku zůstává s razítkem `erased_at`. Samotný AML záznam drží kyc-service. Viz `04-data` (Výmaz) |
+| Výmaz (čl. 17) | **Částečně** — po `PARTY_ERASED` se osobní sloupce a identifikátory party (šifrované RČ, slepé indexy, čísla dokladů) anonymizují nebo smažou na místě, anonymizovaný zbytek řádku zůstává s razítkem `erased_at`, verifikační případy navázané na party se anonymizují a z nenavázaných případů se odstraní slepý index RČ party (snímky žadatelů zůstávají jako možný důkaz podvodu; blokace REJECT přetrvá pod neprůhledným klíčem, který je stále osobním údajem, viz Ponechaný klíč blokace podvodu níže). Známé mezery: žádné automatické mazání tohoto klíče po uplynutí doby uchování; vlastní nenavázané případy vymazané osoby (DISTINCT_NEW, otevřené, podle jména) si ponechávají snímek žadatele, protože je s party nic nespojuje; žádný backfill výmazů publikovaných před prvním pollem konzumenta; žádná metrika ani alert na výsledek. Samotný AML záznam drží kyc-service. Viz `04-data` (Výmaz) |
 | Omezení (čl. 18) | `PATCH /status` → `SUSPENDED`; vztahy lze ukončit |
 | Přenositelnost (čl. 20) | osobní data jsou strukturované JSON přes read API (dedikovaný export endpoint dnes není — TBD) |
 | Námitka (čl. 21) | N/A (v této službě není marketing/profilování) |
@@ -50,6 +50,19 @@
 | Identita party + KYC/AML | 10 let (AMLD 6 čl. 40, český AML zákon) — kromě `PARTY_ERASED`, kdy se osobní údaje anonymizují ihned a zůstává jen zbytek řádku |
 | Doklady totožnosti | dle retence AML zákona |
 | řádky `pid_outbox` SENT | jen provozní, prunable |
+| Ponechaný klíč blokace podvodu (`RNX:`) a jeho rozhodnutí REJECT | do konce příslušné doby uchování podle AML (viz níže); **automatické mazání zatím neexistuje** |
+
+### Ponechaný klíč blokace podvodu (`RNX:`)
+
+Když je party vymazána, verifikační případ, který čtyři oči rozhodly REJECT proti národnímu identifikátoru této osoby, si ponechá rozhodnutí pod neprůhledným klíčem (`04-data`, Výmaz). Klíč je deterministickým hashem slepého indexu rodného čísla vymazané osoby, takže je **stále osobním údajem**. Tento referenční návrh ho ponechává na následujícím základě a v následujících mezích.
+
+- **Právní základ pro ponechání navzdory čl. 17**:
+  - čl. 17(3)(b): splnění právní povinnosti, konkrétně uchovávání záznamů o identifikaci klienta a o odmítnutém onboardingu podle AML/CFT. Dnes jde o směrnici (EU) 2015/849 čl. 40; od 10. července 2027 o nařízení (EU) 2024/1624 čl. 77. Dobu stanoví vnitrostátní transpozice.
+  - čl. 17(3)(e): určení, výkon nebo obhajoba právních nároků.
+- **Účel**: omezen na zablokování opakování zamítnutého podvodného prokazování totožnosti. Klíč používá jen identity resolution, aby blokace zůstala v platnosti. Jiné použití nemá.
+- **Mez**: klíč i rozhodnutí REJECT, které nese, musí být smazány, jakmile skončí doba uchování podle příslušné AML povinnosti. Minimum EU je 5 let od skončení obchodního vztahu nebo příležitostné transakce; platí doba stanovená příslušným vnitrostátním právem.
+- **Známá mezera**: **automatické mazání zatím neexistuje**. Nic v pid klíč ani rozhodnutí po uplynutí doby nemaže. Jde o navazující úkol uvedený mezi ostatními známými mezerami v `04-data` (Nepokryto).
+- **Kdo rozhoduje**: správce konkrétního nasazení potvrdí základ a dobu pro svou jurisdikci. Tento repozitář dokumentuje referenční návrh; nejde o právní poradenství pro konkrétní nasazení.
 
 ## Mapování DORA (Nař. (EU) 2022/2554)
 

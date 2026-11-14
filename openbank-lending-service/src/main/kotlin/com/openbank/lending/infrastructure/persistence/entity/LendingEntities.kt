@@ -182,6 +182,13 @@ class LoanApplicationEntity : PanacheEntityBase() {
     /** ADR-0211/0214: set once by the explicit sign command (V27); null on unsigned rows. */
     @Column(name = "signature_artefact_hash", length = 64)
     var signatureArtefactHash: String? = null
+
+    @Column(name = "signature_recorded_at")
+    var signatureRecordedAt: OffsetDateTime? = null
+
+    /** V34: the declined application whose review this one succeeds; null on every other row. */
+    @Column(name = "predecessor_application_id", columnDefinition = "uuid")
+    var predecessorApplicationId: UUID? = null
 }
 
 @Entity

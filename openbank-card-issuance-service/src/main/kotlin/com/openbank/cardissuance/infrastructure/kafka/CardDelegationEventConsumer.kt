@@ -8,25 +8,14 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.cardissuance.application.port.`in`.CardUseCase
 import com.openbank.cardissuance.application.port.out.CardDelegationProjectionRepository
 import com.openbank.cardissuance.domain.model.DelegatedCardGrant
+import com.openbank.libs.delegation.DelegationGrantEvent
+import com.openbank.libs.delegation.DelegationGrantEventDecoder
+import com.openbank.libs.delegation.DelegationGrantEvents
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.delay
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
 import java.time.OffsetDateTime
-import java.util.UUID
-
-private data class DelegationEvent(
-    val type: String,
-    val grantId: UUID,
-    val grantorPartyId: UUID,
-    val granteePartyId: UUID,
-    val resourceType: String,
-    val resourceId: UUID?,
-    val capabilities: Set<String>,
-    val validFrom: OffsetDateTime?,
-    val validTo: OffsetDateTime?,
-    val lifecycleRevision: Long?,
-)
 
 /**
  * Maintains the local enforcement projection of CARD-scoped delegation grants
@@ -44,7 +33,7 @@ class CardDelegationEventConsumer(
 
     @Incoming("delegation-events-in")
     suspend fun consume(payload: String) {
-        val event = parseEnvelope(payload)
+        val event = DelegationGrantEventDecoder.decode(objectMapper, payload)
         if (event == null) {
             log.warnf("Dropping unprocessable delegation event (poison pill): %.300s", payload)
             return
@@ -52,35 +41,7 @@ class CardDelegationEventConsumer(
         withBoundedRetry(event) { dispatch(event) }
     }
 
-    private fun parseEnvelope(payload: String): DelegationEvent? {
-        val node = runCatching { objectMapper.readTree(payload) }.getOrNull() ?: return null
-        val grantId = runCatching { UUID.fromString(node.path("aggregateId").asText()) }.getOrNull() ?: return null
-        val grantee = runCatching { UUID.fromString(node.path("granteePartyId").asText()) }.getOrNull() ?: return null
-        // A grant with no readable grantor is a poison pill, not a grant with an unknown issuer:
-        // the guard would otherwise have to decide what an absent issuer means, and every answer
-        // to that is wrong.
-        val grantor = runCatching { UUID.fromString(node.path("grantorPartyId").asText()) }.getOrNull() ?: return null
-        val resourceId = node.path("resourceId").asText(null)
-            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
-        val caps = node.path("capabilities").takeIf { it.isArray }
-            ?.mapNotNull { it.asText(null) }?.toSet() ?: emptySet()
-        return DelegationEvent(
-            type = node.path("eventType").asText(""),
-            grantId = grantId,
-            grantorPartyId = grantor,
-            granteePartyId = grantee,
-            resourceType = node.path("resourceType").asText(""),
-            resourceId = resourceId,
-            capabilities = caps,
-            validFrom = node.path("validFrom").asText(null)?.let {
-                runCatching { OffsetDateTime.parse(it) }.getOrNull()
-            },
-            validTo = node.path("validTo").asText(null)?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() },
-            lifecycleRevision = node.path("lifecycleRevision").takeIf { it.isIntegralNumber }?.longValue(),
-        )
-    }
-
-    private suspend fun dispatch(event: DelegationEvent) {
+    private suspend fun dispatch(event: DelegationGrantEvent) {
         // ADR-0249 D2 runs BEFORE the resourceType filter, and keys on the grant id alone.
         //
         // A "dodatková karta" is authorised by an ACCOUNT-scoped grant (the grantor sharing their
@@ -96,14 +57,14 @@ class CardDelegationEventConsumer(
         }
         if (event.resourceType != RESOURCE_CARD && event.type in LIFECYCLE_TYPES) return
         when (event.type) {
-            "DelegationActivated", "DelegationReinstated" ->
+            in DelegationGrantEvents.ENABLING ->
                 if (event.lifecycleRevision != null) upsert(event) else Unit
             in CLOSING_TYPES -> Unit
             else -> Unit
         }
     }
 
-    private suspend fun upsert(event: DelegationEvent) {
+    private suspend fun upsert(event: DelegationGrantEvent) {
         val cardId = event.resourceId ?: return
         projectionRepository.applyActive(
             DelegatedCardGrant(
@@ -120,7 +81,7 @@ class CardDelegationEventConsumer(
         )
     }
 
-    private suspend fun withBoundedRetry(event: DelegationEvent, block: suspend () -> Unit) {
+    private suspend fun withBoundedRetry(event: DelegationGrantEvent, block: suspend () -> Unit) {
         var attempt = 1
         while (true) {
             try {
@@ -152,12 +113,7 @@ class CardDelegationEventConsumer(
         const val REVOCATION_REASON_PREFIX = "DELEGATION_"
 
         /** Events that close the local projection row — the delegate's borrowed controls stop. */
-        val CLOSING_TYPES = setOf(
-            "DelegationRevoked",
-            "DelegationSuspended",
-            "DelegationRenounced",
-            "DelegationExpired",
-        )
+        val CLOSING_TYPES = DelegationGrantEvents.DISABLING
 
         /**
          * Events that END the authority for good, and therefore end the card it authorised

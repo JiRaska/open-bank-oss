@@ -14,6 +14,11 @@
 -- journal ids are deterministic (hex of g, zero-padded) so the line insert needs no join.
 -- synthetic stays FALSE — these are perf fixtures, not synthetic-journey money.
 
+-- One transaction: the ledger database refuses a POSTED journal that commits without its lines,
+-- and a line that joins a journal posted by an earlier transaction (ADR-0372, V44). psql runs
+-- this file in autocommit, so the block is explicit.
+BEGIN;
+
 -- Fixed detail-probe journal first (PK (id, entry_date) makes a re-load a no-op-ish duplicate
 -- key on the same day; the gate loads fixtures exactly once into a throwaway database).
 INSERT INTO journal_entries (id, transaction_id, entry_date, value_date, description, status, created_by)
@@ -52,3 +57,5 @@ SELECT ('00000000-0000-0000-0000-' || lpad(to_hex(g), 12, '0'))::uuid,
 FROM generate_series(1, 199) AS g
 CROSS JOIN gl_accounts a
 WHERE a.code IN ('1001', '2001');
+
+COMMIT;

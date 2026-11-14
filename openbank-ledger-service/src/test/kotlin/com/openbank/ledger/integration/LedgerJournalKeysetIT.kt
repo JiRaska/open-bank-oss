@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.integration
 
+import com.openbank.ledger.fixtures.journalTransaction
 import com.openbank.ledger.it.PostgresRedpandaTestResource
 import com.openbank.libs.api.pagination.CursorEncoder
 import io.quarkus.test.common.QuarkusTestResource
@@ -14,6 +15,7 @@ import io.restassured.path.json.JsonPath
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.sql.Connection
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -61,14 +63,18 @@ class LedgerJournalKeysetIT {
     }
 
     private fun cleanup(transaction: UUID) {
+        // Posted journals are append-only (ADR-0372): removing the fixture is a declared repair, and
+        // lines and journal rows go in one transaction so no posted journal is left without lines.
         dataSource.connection.use { connection ->
-            listOf(
-                "DELETE FROM journal_lines WHERE journal_id IN (SELECT id FROM journal_entries WHERE transaction_id = ?)",
-                "DELETE FROM journal_entries WHERE transaction_id = ?",
-            ).forEach { sql ->
-                connection.prepareStatement(sql).use { statement ->
-                    statement.setObject(1, transaction)
-                    statement.executeUpdate()
+            connection.journalTransaction(KEYSET_FIXTURE_REPAIR) {
+                listOf(
+                    "DELETE FROM journal_lines WHERE journal_id IN (SELECT id FROM journal_entries WHERE transaction_id = ?)",
+                    "DELETE FROM journal_entries WHERE transaction_id = ?",
+                ).forEach { sql ->
+                    connection.prepareStatement(sql).use { statement ->
+                        statement.setObject(1, transaction)
+                        statement.executeUpdate()
+                    }
                 }
             }
         }
@@ -83,34 +89,51 @@ class LedgerJournalKeysetIT {
         return request.get("/api/v1/journals").then().statusCode(200).extract().jsonPath()
     }
 
+    /**
+     * The journal row and both of its lines commit together: the database refuses a POSTED journal
+     * that commits without a balanced debit and credit line (ADR-0372), which a statement-by-statement
+     * autocommit seed would do on the journal row alone.
+     */
     private fun seed(id: UUID, transaction: UUID, day: LocalDate, timestamp: OffsetDateTime) {
         dataSource.connection.use { connection ->
-            connection.prepareStatement(
-                """
-                INSERT INTO journal_entries(id, transaction_id, entry_date, value_date, status, created_at, created_by)
-                VALUES (?, ?, ?, ?, 'POSTED', ?, ?)
-                """.trimIndent(),
-            ).use { statement ->
-                statement.setObject(1, id)
-                statement.setObject(2, transaction)
-                statement.setObject(3, day)
-                statement.setObject(4, day)
-                statement.setObject(5, timestamp)
-                statement.setObject(6, UUID.randomUUID())
-                statement.executeUpdate()
-            }
-            connection.prepareStatement(
-                """
-                INSERT INTO journal_lines(
-                    journal_id, gl_account_id, side, amount, currency_code, base_amount, base_currency, sequence
-                )
-                SELECT ?, id, CASE code WHEN '1001' THEN 'D' ELSE 'C' END, 10, 'CZK', 10, 'CZK',
-                    CASE code WHEN '1001' THEN 1 ELSE 2 END FROM gl_accounts WHERE code IN ('1001', '2001')
-                """.trimIndent(),
-            ).use { statement ->
-                statement.setObject(1, id)
-                assertThat(statement.executeUpdate()).isEqualTo(2)
-            }
+            connection.journalTransaction { insertBalancedJournal(connection, id, transaction, day, timestamp) }
+        }
+    }
+
+    private fun insertBalancedJournal(
+        connection: Connection,
+        id: UUID,
+        transaction: UUID,
+        day: LocalDate,
+        timestamp: OffsetDateTime,
+    ) {
+        connection.prepareStatement(
+            """
+            INSERT INTO journal_entries(id, transaction_id, entry_date, value_date, status, created_at, created_by)
+            VALUES (?, ?, ?, ?, 'POSTED', ?, ?)
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setObject(1, id)
+            statement.setObject(2, transaction)
+            statement.setObject(3, day)
+            statement.setObject(4, day)
+            statement.setObject(5, timestamp)
+            statement.setObject(6, UUID.randomUUID())
+            statement.executeUpdate()
+        }
+        connection.prepareStatement(
+            """
+            INSERT INTO journal_lines(
+                journal_id, gl_account_id, side, amount, currency_code, base_amount, base_currency, sequence
+            )
+            SELECT ?, id, CASE code WHEN '1001' THEN 'D' ELSE 'C' END, 10, 'CZK', 10, 'CZK',
+                CASE code WHEN '1001' THEN 1 ELSE 2 END FROM gl_accounts WHERE code IN ('1001', '2001')
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setObject(1, id)
+            assertThat(statement.executeUpdate()).isEqualTo(2)
         }
     }
 }
+
+private const val KEYSET_FIXTURE_REPAIR = "LedgerJournalKeysetIT fixture teardown"

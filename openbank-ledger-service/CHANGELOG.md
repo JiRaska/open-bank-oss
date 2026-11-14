@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.46.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.45.1...ledger-service-v1.46.0) (2026-11-13)
+
+
+### Features
+
+* **customer-edge,transaction,ledger:** scope synthetic transfer canary ([#15669](https://github.com/JiRaska/open-bank-oss/issues/15669)) ([96f24f2](https://github.com/JiRaska/open-bank-oss/commit/96f24f28f5ac894be0821ef939a0d7019a19abc4))
+
+## [1.45.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.45.0...ledger-service-v1.45.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **ledger:** give frozen-period and closed-year 409s a machine code ([#15811](https://github.com/JiRaska/open-bank-oss/issues/15811)) ([0f6fe9f](https://github.com/JiRaska/open-bank-oss/commit/0f6fe9facbb1f9484f2d5250875f8826cd3f5d97)), closes [#15760](https://github.com/JiRaska/open-bank-oss/issues/15760)
+
+## [1.45.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.44.1...ledger-service-v1.45.0) (2026-11-12)
+
+
+### Features
+
+* **ledger:** enforce journal balance and append-only in the database (ADR-0372) ([#15733](https://github.com/JiRaska/open-bank-oss/issues/15733)) ([f4e1b6c](https://github.com/JiRaska/open-bank-oss/commit/f4e1b6c39999187b4b64076bab5f3299830de4dd))
+
+## [1.44.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.44.0...ledger-service-v1.44.1) (2026-11-12)
+
+
+### Performance
+
+* **ledger:** page journal history in PostgreSQL ([#15618](https://github.com/JiRaska/open-bank-oss/issues/15618)) ([ffa69d0](https://github.com/JiRaska/open-bank-oss/commit/ffa69d093f4083242e5a19b60a68ada789cc1e11))
+
 ## [1.44.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.43.0...ledger-service-v1.44.0) (2026-11-12)
 
 

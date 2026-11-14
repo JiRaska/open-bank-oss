@@ -24,24 +24,8 @@ class XbrlCsvPreflightService(private val finrepUseCase: FinrepUseCase) : XbrlCs
         val template = finrepUseCase.getTemplate(GetFinrepTemplateQuery(query.templateId, query.asOf))
         val blockers = buildList {
             if (template.hasDataGaps) {
-                add(
-                    XbrlCsvBlocker(
-                        code = "INCOMPLETE_OFFICIAL_MAPPING",
-                        reason = "This preview has unmapped official EBA cells and cannot be rendered as a return.",
-                    ),
-                )
-            }
-            val unverified = template.cells
-                .map { "${template.templateId}/${it.rowRef}/${it.colRef}" }
-                .filter { it in EbaReportingFramework42.UNVERIFIED_DATAPOINT_CELLS }
-            if (unverified.isNotEmpty()) {
-                add(
-                    XbrlCsvBlocker(
-                        code = "UNVERIFIED_DATAPOINT_ID",
-                        reason = "Emitted cells ${unverified.joinToString()} have no verified EBA datapoint id " +
-                            "(#13603) and must not be submitted.",
-                    ),
-                )
+                val reasons = template.dataGaps.map { it.reason }.distinct().joinToString(" ")
+                add(XbrlCsvBlocker(code = "INCOMPLETE_OFFICIAL_MAPPING", reason = reasons))
             }
             if (!template.isBalanced) {
                 add(

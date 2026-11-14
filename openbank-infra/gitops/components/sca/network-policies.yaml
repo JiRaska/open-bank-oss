@@ -31,7 +31,7 @@ metadata:
   namespace: sca
   labels:
     app.kubernetes.io/part-of: sca
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -49,7 +49,7 @@ metadata:
   namespace: sca
   labels:
     app.kubernetes.io/part-of: sca
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

@@ -19,7 +19,7 @@ summary: "Static per-service credentials give way to OpenBao dynamic database cr
 > withdraws the OIDC-secret-rotation objective in favour of workload identity, so the
 > Tier 2 text below is historical and is NOT a live control. Tier 1 (OpenBao dynamic
 > database credentials) is unaffected and still in force. Until ADR-0177 Phase 3, a
-> static OIDC client secret is rotated by hand, against the `openbank.io/rotation-deadline`
+> static OIDC client secret is rotated by hand, against the `open-bank.tech/rotation-deadline`
 > annotation on its ExternalSecret.
 
 **Implementation note (Tier 1 + Tier 2 scripts — shipped 2026-06-30, PR feat/secret-rotation):**

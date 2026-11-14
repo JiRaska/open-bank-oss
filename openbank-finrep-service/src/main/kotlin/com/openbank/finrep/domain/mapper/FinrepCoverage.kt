@@ -8,6 +8,11 @@ import com.openbank.finrep.domain.model.FinrepDataGap
 
 /** Fail-closed coverage boundary for the EBA Reporting Framework 4.2 mappings (#6980). */
 object FinrepCoverage {
+    private const val EMPTY_TRIAL_BALANCE = "EMPTY_TRIAL_BALANCE"
+    private const val REPORTING_CURRENCY_NOT_PROVEN = "REPORTING_CURRENCY_NOT_PROVEN"
+
+    private const val REPORTING_CURRENCY = "CZK"
+
     private val classifiedAccounts = setOf(
         "1000", "1001",
         "1100", "1101", "1102", "1103",
@@ -60,17 +65,36 @@ object FinrepCoverage {
     /** True when [code] has a governed EBA 4.2 mapping (on-balance) or is a declared memo account. */
     fun isGoverned(code: String): Boolean = code in classifiedAccounts || code in offBalanceMemoAccounts
 
-    fun gapsFor(templateId: String, lines: List<TrialBalanceLineDto>): List<FinrepDataGap> {
-        val unknown = lines.map { it.code }.filterNot(::isGoverned).distinct().sorted()
-        return if (unknown.isEmpty()) {
-            emptyList()
-        } else {
-            listOf(
+    fun gapsFor(templateId: String, lines: List<TrialBalanceLineDto>): List<FinrepDataGap> = buildList {
+        val onBalance = onBalanceSheet(lines)
+        val unknown = onBalance.map { it.code }.filterNot(::isGoverned).distinct().sorted()
+        if (unknown.isNotEmpty()) {
+            add(
                 FinrepDataGap(
                     code = "UNCLASSIFIED_GL_ACCOUNT",
                     affectedScope = "$templateId: ${unknown.joinToString()}",
                     reason = "The trial balance contains an active GL account with no governed EBA 4.2 mapping. " +
                         "The return remains blocked until the chart classification is extended.",
+                ),
+            )
+        }
+        if (onBalance.isEmpty()) {
+            add(
+                FinrepDataGap(
+                    code = EMPTY_TRIAL_BALANCE,
+                    affectedScope = templateId,
+                    reason = "The ledger source supplied no balance-sheet or profit and loss rows.",
+                ),
+            )
+        }
+        val currencies = onBalance.filter { it.net.signum() != 0 && it.currency != REPORTING_CURRENCY }
+            .map { it.currency }.distinct().sorted()
+        if (currencies.isNotEmpty()) {
+            add(
+                FinrepDataGap(
+                    code = REPORTING_CURRENCY_NOT_PROVEN,
+                    affectedScope = "$templateId: ${currencies.joinToString()}",
+                    reason = "A CZK report requires verified CZK conversion for every nonzero foreign-currency line.",
                 ),
             )
         }

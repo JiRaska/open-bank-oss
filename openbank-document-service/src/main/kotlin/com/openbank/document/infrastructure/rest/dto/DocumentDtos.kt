@@ -57,6 +57,12 @@ data class RenderDocumentRequest(
     val retainUntil: LocalDate? = null,
 )
 
+/**
+ * ADR-0375 D5. The same two fields as account-service's and card-issuance's owner projections, so
+ * delegation-service's existing `verdictFor` helper resolves every resource type the same way.
+ */
+data class DocumentOwnerResponse(val id: UUID, val partyId: UUID)
+
 data class DocumentResponse(
     val id: UUID,
     val templateCode: String,
