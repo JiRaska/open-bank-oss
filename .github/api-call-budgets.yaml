@@ -13,8 +13,16 @@
 # Basis (2026-11-14): gh-only counts from gh-call-count notices (CI/gates <=12 per shard,
 # Services CI/changes 2, Security scan/codeql 1) and merge-train.py's own statistics for the
 # build job (`api requests sent=180`). Python requests were not counted before this file, so
-# the gh+py budgets carry headroom; tighten them from the first week of notices.
+# the gh+py budgets carry headroom; tighten them from the first week of notices. The six
+# frequent GITHUB_TOKEN jobs below were counted from this change on; their budgets are the
+# static per-run estimate (read from the scripts) with headroom.
+"Admin UI evidence/authorize-source": 60
+"Auto-retry spot-killed CI runs/discover": 30
+"Auto-retry spot-killed CI runs/retry": 30
 "CI/gates": 100
+"Deployed-code-lag watch/watch": 20
+"Merge train stall watch/watch": 60
 "Merge train/build": 300
 "Security scan/codeql": 20
 "Services CI/changes": 40
+"Test evidence reconcile/reconcile": 60

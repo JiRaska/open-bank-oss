@@ -138,8 +138,8 @@ gates:
     rationale: "The repository's GITHUB_TOKEN core quota is shared by every run; when one job's spend grows, CodeQL and other required checks on unrelated PRs fail with 'API rate limit exceeded for installation'. gh-call-counter.sh warns when a counted job exceeds its line in .github/api-call-budgets.yaml, which only works while each counted job has a line. A counted job without one reports budget=undeclared and can never warn; a line whose job was renamed checks nothing."
     review_after: "2027-05-14"
     budget_seconds: 30
-    # Four jobs install the counter today (CI/gates, Merge train/build, Security scan/codeql, Services CI/changes).
-    min_subjects: 4
+    # Ten jobs install the counter today; a parse that finds far fewer has lost the workflows.
+    min_subjects: 10
     selftest: python3 .github/scripts/check-api-call-budgets.py --self-test
     selftest_expect: pass
     run: |
