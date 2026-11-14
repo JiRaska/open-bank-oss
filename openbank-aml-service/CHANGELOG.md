@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.19.0...aml-service-v0.20.0) (2026-11-14)
+
+
+### Features
+
+* **aml:** open a case per held payment behind its off switch ([#16041](https://github.com/JiRaska/open-bank-oss/issues/16041)) ([e521803](https://github.com/JiRaska/open-bank-oss/commit/e521803a345b5841f831ffe01e9e5ee781ec9b9a))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.18.0...aml-service-v0.19.0) (2026-11-13)
 
 
