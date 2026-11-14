@@ -1062,10 +1062,11 @@ reservation.
   `409 RESERVATION_PROJECTION_PENDING` with `retryable: true`, never an unbound payment. While the
   projection consumer is off (`DOMESTIC_DELEGATED_SPEND_CONSUMER_ENABLED=false`, the default) every
   call answers that.
-- **Residual risk.** The admission chain's AUTHORITY step stays unbound on this rail: authority is
-  decided by delegation-service when it takes the reservation, and re-checked here only as the
-  reservation tuple (grantee, grantor, resource). A grant revoked after reservation is not re-read
-  here; the reservation release path is delegation-service's.
+- **Authority at create time.** The route runs the ADR-0375 D1 create-time authority step on the
+  bound path. The grant state and the account owner come from one lookup, before any write. A
+  revoked grant, or one that does not cover the debtor account, is
+  `409 DELEGATION_AUTHORITY_WITHDRAWN`, which writes no payment and leaves the reservation PENDING.
+  A lookup outage is a retryable `503`, never a refusal.
 
 ## 2026-11-11 - Label key domain rename (no reach change)
 

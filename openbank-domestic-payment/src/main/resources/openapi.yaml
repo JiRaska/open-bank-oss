@@ -226,7 +226,8 @@ paths:
           description: >-
             RESERVATION_PROJECTION_PENDING (retryable, with Retry-After: the reservation is not known
             to the rail yet), RESERVATION_NOT_RESERVED, RESERVATION_MISMATCH (neutral; the differing
-            field is not disclosed), or IDEMPOTENCY_KEY_REUSED.
+            field is not disclosed), DELEGATION_AUTHORITY_WITHDRAWN (the grant, re-read at create
+            time, no longer covers this debit), or IDEMPOTENCY_KEY_REUSED.
           content:
             application/problem+json:
               schema:
@@ -855,7 +856,7 @@ components:
         code:
           type: string
           enum: [RESERVATION_PROJECTION_PENDING, RESERVATION_NOT_RESERVED, RESERVATION_MISMATCH,
-                 ACCOUNT_AUTHORITY_UNAVAILABLE, IDEMPOTENCY_KEY_REUSED]
+                 ACCOUNT_AUTHORITY_UNAVAILABLE, DELEGATION_AUTHORITY_WITHDRAWN, IDEMPOTENCY_KEY_REUSED]
         retryable:
           type: boolean
         error:

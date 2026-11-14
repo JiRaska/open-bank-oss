@@ -44,6 +44,7 @@ class DelegatedBoundCreateOpenApiTest {
             "RESERVATION_NOT_RESERVED",
             "RESERVATION_MISMATCH",
             "ACCOUNT_AUTHORITY_UNAVAILABLE",
+            "DELEGATION_AUTHORITY_WITHDRAWN",
             "IDEMPOTENCY_KEY_REUSED",
         )
     }

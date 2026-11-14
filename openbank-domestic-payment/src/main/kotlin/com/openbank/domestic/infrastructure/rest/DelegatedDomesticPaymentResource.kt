@@ -101,6 +101,13 @@ class DelegatedDomesticPaymentResource(private val delegatedPaymentUseCase: Dele
                 delegatedRefusal(HTTP_CONFLICT, RESERVATION_MISMATCH, "The payment does not match the reservation")
             }
 
+            is DelegatedDomesticPaymentResult.DelegationAuthorityWithdrawn -> {
+                // Main's ADR-0375 D1 create-time authority step refused: the grant was read and no
+                // longer covers this debit. Not retryable; the reason code stays in the log.
+                log.infof("Delegated payment refused for reservation %s: authority %s", reservationId, result.reason)
+                delegatedRefusal(HTTP_CONFLICT, AUTHORITY_WITHDRAWN, "The delegation no longer authorizes this payment")
+            }
+
             DelegatedDomesticPaymentResult.AccountAuthorityUnavailable ->
                 delegatedRefusal(
                     HTTP_UNAVAILABLE,
@@ -119,6 +126,7 @@ class DelegatedDomesticPaymentResource(private val delegatedPaymentUseCase: Dele
         const val RESERVATION_NOT_RESERVED = "RESERVATION_NOT_RESERVED"
         const val RESERVATION_MISMATCH = "RESERVATION_MISMATCH"
         const val ACCOUNT_AUTHORITY_UNAVAILABLE = "ACCOUNT_AUTHORITY_UNAVAILABLE"
+        const val AUTHORITY_WITHDRAWN = "DELEGATION_AUTHORITY_WITHDRAWN"
         val log: Logger = Logger.getLogger(DelegatedDomesticPaymentResource::class.java)
     }
 }

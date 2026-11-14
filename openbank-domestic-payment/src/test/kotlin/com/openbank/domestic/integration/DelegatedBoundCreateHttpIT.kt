@@ -152,6 +152,26 @@ class DelegatedBoundCreateHttpIT {
     }
 
     @Test
+    fun `a delegation revoked after the reservation is refused by the create-time authority step`() =
+        assertAuthorityWithdrawn(reserve(grantee = DeterministicDelegationAuthority.REVOKED_GRANTEE))
+
+    @Test
+    fun `a grant that does not cover the debtor account is refused`() =
+        assertAuthorityWithdrawn(reserve(grantee = DeterministicDelegationAuthority.OTHER_ACCOUNT_GRANTEE))
+
+    private fun assertAuthorityWithdrawn(r: DelegatedSpendReservationSnapshot) {
+        val response = post(r)
+        assertThat(response.statusCode).describedAs(response.body.asString()).isEqualTo(HTTP_CONFLICT)
+        assertThat(response.jsonPath().getString("code")).isEqualTo("DELEGATION_AUTHORITY_WITHDRAWN")
+        assertThat(response.jsonPath().getBoolean("retryable")).isFalse()
+        assertThat(response.body.asString()).doesNotContain("AUTHORITY_NO_GRANT")
+        assertThat(paymentsFor(r.reservationId)).isZero()
+        // The reservation is untouched: still PENDING, no payment bound, nothing in the outbox.
+        assertThat(bindingState(r.reservationId)).isEqualTo("PENDING" to null)
+        assertThat(paymentsByKey(KEY_PREFIX + r.reservationId)).isZero()
+    }
+
+    @Test
     fun `a currency the reservation does not hold is refused`() {
         val r = reserve(currency = "EUR")
         val response = post(r)
@@ -235,7 +255,10 @@ class DelegatedBoundCreateHttpIT {
 
     // ---------------------------------------------------------------------------------------------
 
-    private fun snapshot(currency: String = "CZK"): DelegatedSpendReservationSnapshot {
+    private fun snapshot(
+        currency: String = "CZK",
+        grantee: UUID = UUID.randomUUID(),
+    ): DelegatedSpendReservationSnapshot {
         val reservationId = UUID.randomUUID()
         val account = DeterministicAccountLookup.accountOf(DEBTOR_IBAN)
         return DelegatedSpendReservationSnapshot(
@@ -243,7 +266,7 @@ class DelegatedBoundCreateHttpIT {
             reservationId = reservationId,
             delegationId = UUID.randomUUID(),
             grantorPartyId = DeterministicAccountLookup.ownerOf(account),
-            granteePartyId = UUID.randomUUID(),
+            granteePartyId = grantee,
             resourceType = "ACCOUNT",
             resourceId = account,
             amount = AMOUNT,
@@ -261,8 +284,11 @@ class DelegatedBoundCreateHttpIT {
         )
     }
 
-    private fun reserve(currency: String = "CZK"): DelegatedSpendReservationSnapshot =
-        snapshot(currency).also { onVertxContext { bindingRepository.applySnapshot(it) } }
+    private fun reserve(
+        currency: String = "CZK",
+        grantee: UUID = UUID.randomUUID(),
+    ): DelegatedSpendReservationSnapshot =
+        snapshot(currency, grantee).also { onVertxContext { bindingRepository.applySnapshot(it) } }
 
     @Suppress("LongParameterList")
     private fun post(
