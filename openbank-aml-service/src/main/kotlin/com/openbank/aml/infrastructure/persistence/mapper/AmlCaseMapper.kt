@@ -33,6 +33,7 @@ fun AmlCase.toEntity() = AmlCaseEntity().also {
     it.updatedAt = updatedAt
     it.requestHash = requestHash
     it.origin = origin?.name
+    it.sourceService = sourceService
 }
 
 fun AmlCaseEntity.toDomain() = AmlCase(
@@ -58,4 +59,5 @@ fun AmlCaseEntity.toDomain() = AmlCase(
     requestHash = requestHash,
     // A name this build does not know (written by a newer pod) reads as unknown, never as a system origin.
     origin = origin?.let { name -> CaseOrigin.entries.firstOrNull { it.name == name } },
+    sourceService = sourceService,
 )

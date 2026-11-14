@@ -79,6 +79,12 @@ data class AmlCase(
     val requestHash: String? = null,
     /** `null` for rows written before provenance was recorded: unknown, so never treated as a system origin. */
     val origin: CaseOrigin? = null,
+    /**
+     * Service (e.g. `openbank-domestic-payment`) whose verified machine identity opened the case;
+     * [transactionId] is an id in THAT service. `null` for a manual (staff) case and for rows
+     * written before V17, which cannot be backfilled.
+     */
+    val sourceService: String? = null,
 ) {
     /**
      * False while the owning party is not established: no party at all, or (rows from before a
