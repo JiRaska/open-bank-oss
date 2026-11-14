@@ -3385,6 +3385,35 @@ enforcement_reachability:
         exists (#3615); ADR-0375 D1 retires the symbol instead, by moving the check into the
         ADR-0374 admission chain.
 
+# ADR-0375 D6 — exposure is delivered as a sealed artifact, never by decorating a live read.
+#
+# `DelegationGrant.exposure` (redactionRules, maxViews, watermark, allowDownload) is REFUSED on
+# every path that could create or revive authority, and that refusal is the DECLARED END STATE, not
+# a gap waiting to be closed: returning the original object bytes with a redaction or view-count
+# field merely echoed is a confidentiality defect that looks, from the grantor's screen, exactly
+# like an enforced control. A redacted, watermarked, view-counted share is a rendered sealed
+# artifact delivered as an `ExternalDisclosure`, whose view consumption is a locked
+# read-modify-write in one transaction — the atomicity a streaming route can never have.
+#
+# `referenced_in` is checked BOTH ways by check-delegation-exposure-sealed.py: a file that reads
+# grant exposure without an entry is a finding, and an entry whose file stopped referencing it is a
+# finding too. `role: enforcement` is refused outright — that is the one thing D6 forbids.
+delegation_exposure_delivery:
+  mechanism: external_disclosure
+  grant_level_exposure: refused
+  error_code: EXPOSURE_UNSUPPORTED
+  referenced_in:
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/domain/model/DelegationGrant.kt
+      role: model
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/application/usecase/DelegationService.kt
+      role: refusal
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/persistence/entity/DelegationGrantEntity.kt
+      role: historical_audit
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/rest/DelegationResource.kt
+      role: refusal
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/rest/dto/DelegationDtos.kt
+      role: historical_audit
+
 delegation_capability_enforcement:
   principle: >
     DelegationGrant.CAPABILITY_MATRIX says what a grantor may be OFFERED. Until this registry

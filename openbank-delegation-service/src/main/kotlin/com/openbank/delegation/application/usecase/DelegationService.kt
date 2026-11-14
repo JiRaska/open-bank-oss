@@ -79,10 +79,16 @@ class DelegationResourceOwnershipException(message: String) : RuntimeException(m
  *
  * `approvalPolicy` other than SOLO remains refused, unchanged: nothing counts approvals.
  *
- * `exposure` remains persisted for audit of historical grants but is refused on new offers until
- * document delivery can create a transformed artifact and atomically enforce every declared view
- * constraint. Returning the original object bytes with a redaction, watermark or view-count field
- * merely echoed would be a confidentiality defect.
+ * `exposure` remains persisted for audit of historical grants and is refused on new offers — and
+ * ADR-0375 D6 makes that refusal the DECLARED END STATE rather than a gap waiting to be closed.
+ * Returning the original object bytes with a redaction, watermark or view-count field merely
+ * echoed is a confidentiality defect that reads, from the grantor's screen, exactly like an
+ * enforced control, and `maxViews` on a streaming route could never be atomic anyway.
+ *
+ * The mechanism is not missing, it is elsewhere: a redacted, watermarked, view-counted share is a
+ * rendered sealed artifact delivered as an `ExternalDisclosure`, whose view consumption is a
+ * locked read-modify-write inside one transaction. `check-delegation-exposure-sealed.py` keeps
+ * both halves honest — the refusal here, and the absence of any live-read consumer anywhere.
  */
 class DelegationUnsupportedConstraintException(val code: String, message: String) : RuntimeException(message) {
     companion object {
@@ -281,9 +287,10 @@ class DelegationService(
         if (command.exposure != null) {
             throw DelegationUnsupportedConstraintException(
                 code = DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED,
-                message = "exposure is not supported: this platform cannot yet transform the shared object " +
-                    "or atomically enforce redaction, watermark or maxViews. Omit exposure; existing " +
-                    "historical exposure grants remain readable for audit but never authorize access.",
+                message = "exposure is not a grant-level control (ADR-0375 D6): redaction, watermark and " +
+                    "maxViews are enforced by issuing a sealed external disclosure over the document, not by " +
+                    "shaping a live read. Omit exposure; historical exposure grants remain readable for audit " +
+                    "but never authorize access.",
             )
         }
     }
@@ -292,8 +299,9 @@ class DelegationService(
         if (grant.exposure != null) {
             throw DelegationUnsupportedConstraintException(
                 code = DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED,
-                message = "this historical grant carries unsupported exposure metadata and cannot be activated " +
-                    "or reinstated until transformed-artifact enforcement exists",
+                message = "this historical grant carries grant-level exposure metadata, which is never " +
+                    "enforced (ADR-0375 D6), so it cannot be activated or reinstated; re-offer without it and " +
+                    "issue a sealed external disclosure if the share needs view controls",
             )
         }
     }
