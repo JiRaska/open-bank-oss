@@ -218,3 +218,12 @@ test_service_m2m_cannot_decide_hold if {
 	not allow.allow with input as {"principal": service_m2m, "action": "amlCase.holdDecision.propose"}
 	not allow.allow with input as {"principal": service_m2m, "action": "amlCase.holdDecision.confirm"}
 }
+
+test_compliance_withdraws_hold_proposal if {
+	"compliance-aml-hold-decision" in allowed_reasons with input as {"principal": compliance, "action": "amlCase.holdDecision.withdraw"}
+}
+
+test_operator_and_m2m_cannot_withdraw_hold_proposal if {
+	not allow.allow with input as {"principal": operator, "action": "amlCase.holdDecision.withdraw"}
+	not allow.allow with input as {"principal": service_m2m, "action": "amlCase.holdDecision.withdraw"}
+}

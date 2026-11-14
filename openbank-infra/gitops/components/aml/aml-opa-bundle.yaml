@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
   annotations:
-    openbank.tech/policy-checksum: "d8e70967ef230904"
+    openbank.tech/policy-checksum: "30fc4cf2f7aa81b5"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -955,7 +955,7 @@ data:
     	input.principal.type == "HUMAN"
     	not principal_is_machine
     	"ROLE_COMPLIANCE" in input.principal.roles
-    	input.action in {"amlCase.holdDecision.propose", "amlCase.holdDecision.confirm"}
+    	input.action in {"amlCase.holdDecision.propose", "amlCase.holdDecision.confirm", "amlCase.holdDecision.withdraw"}
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0

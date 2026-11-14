@@ -131,5 +131,5 @@ allowed_reasons contains "compliance-aml-hold-decision" if {
 	input.principal.type == "HUMAN"
 	not principal_is_machine
 	"ROLE_COMPLIANCE" in input.principal.roles
-	input.action in {"amlCase.holdDecision.propose", "amlCase.holdDecision.confirm"}
+	input.action in {"amlCase.holdDecision.propose", "amlCase.holdDecision.confirm", "amlCase.holdDecision.withdraw"}
 }
