@@ -83,10 +83,18 @@ class UnresolvedServicesError(VerificationError):
     deployed because anacredit and card-issuance had no source).
     """
 
-    def __init__(self, message: str, resolved: dict, missing: list[str]):
+    def __init__(
+        self,
+        message: str,
+        resolved: dict,
+        missing: list[str],
+        budget_exhausted: bool = False,
+    ):
         super().__init__(message)
         self.resolved = resolved
         self.missing = missing
+        # True when `missing` were not REACHED (time ran out), not searched and found absent.
+        self.budget_exhausted = budget_exhausted
 
 
 def _read_backoff(attempt: int, deadline: float | None) -> None:
@@ -928,6 +936,7 @@ def resolve_reconcile_service_sources(
             f"{exc} before a source was found for {', '.join(sorted(pending))}",
             resolved,
             sorted(pending),
+            budget_exhausted=True,
         ) from exc
     missing = ", ".join(sorted(pending))
     raise UnresolvedServicesError(
@@ -967,7 +976,16 @@ def main() -> int:
             # Exit 3 = a per-service refusal with the proven remainder on stdout. Exit 1 stays
             # reserved for "the evidence could not be read", which must refuse everything.
             print(f"::error::reconcile source refused: {exc}", file=sys.stderr)
-            print(json.dumps({"resolved": exc.resolved, "unresolved": exc.missing}, sort_keys=True))
+            print(
+                json.dumps(
+                    {
+                        "resolved": exc.resolved,
+                        "unresolved": exc.missing,
+                        "budget_exhausted": exc.budget_exhausted,
+                    },
+                    sort_keys=True,
+                )
+            )
             return 3
         except (json.JSONDecodeError, VerificationError) as exc:
             print(f"::error::reconcile source refused: {exc}", file=sys.stderr)

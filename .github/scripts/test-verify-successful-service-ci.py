@@ -614,28 +614,69 @@ class ResolveReconcileSourceTest(unittest.TestCase):
         self.assertEqual(set(caught.exception.resolved), {SERVICE})
         self.assertEqual(caught.exception.missing, sorted(slow))
         self.assertIn("time budget", str(caught.exception))
+        self.assertTrue(caught.exception.budget_exhausted)
 
-    def test_budget_exhaustion_cli_exits_3_with_partition(self):
-        err = MODULE.UnresolvedServicesError("time budget", {SERVICE: {"sha": "a" * 40, "run_id": "1", "attempt": 1}}, ["openbank-x-service"])
+    def test_budget_exhaustion_cli_reports_it_as_the_reason(self):
+        """The CLI tells the gate WHY the remainder is unresolved, so it can say so per service."""
+        err = MODULE.UnresolvedServicesError(
+            "time budget",
+            {SERVICE: {"sha": "a" * 40, "run_id": "1", "attempt": 1}},
+            ["openbank-x-service"],
+            budget_exhausted=True,
+        )
         argv = ["v", "--resolve-reconcile-sources", json.dumps([SERVICE, "openbank-x-service"]), self.TIP]
         out = io.StringIO()
-        with patch.object(MODULE.sys, "argv", argv), patch.object(MODULE, "resolve_reconcile_service_sources", side_effect=err), patch.object(MODULE.sys, "stdout", out), patch.object(MODULE.sys, "stderr", io.StringIO()):
+        with (
+            patch.object(MODULE.sys, "argv", argv),
+            patch.object(MODULE, "resolve_reconcile_service_sources", side_effect=err),
+            patch.object(MODULE.sys, "stdout", out),
+            patch.object(MODULE.sys, "stderr", io.StringIO()),
+        ):
             self.assertEqual(MODULE.main(), 3)
-        self.assertEqual(json.loads(out.getvalue())["unresolved"], ["openbank-x-service"])
+        answer = json.loads(out.getvalue())
+        self.assertEqual(answer["unresolved"], ["openbank-x-service"])
+        self.assertIs(answer["budget_exhausted"], True)
 
-    def test_unreadable_listing_after_partial_progress_still_refuses_all(self):
-        """A read failure is not a budget fact: it stays a whole-set VerificationError."""
+    def test_read_failure_after_partial_progress_still_refuses_all(self):
+        """Only the budget converts to a per-service refusal; a read failure does not.
+
+        One service is fully proven from the newest run before the next run's jobs read
+        answers 403. If the budget handler were widened to every VerificationError, this
+        would come back as a partial answer and deploy the proven half on unread evidence.
+        """
+        newer = self.run_record(40, self.OLDER, "2026-10-17T12:00:00Z")
+        older = self.run_record(39, self.OLDEST, "2026-10-16T12:00:00Z")
+        other = "openbank-anacredit-service"
+        proven = []
+
         def fake_urlopen(request, timeout):
-            del request, timeout
-            raise MODULE.HTTPError("u", 403, "Resource not accessible by integration", {}, None)
+            del timeout
+            path = urlsplit(request.full_url).path
+            if path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse({"workflow_runs": [newer, older]})
+            if path.endswith("/runs/40/attempts/1/jobs"):
+                return FixtureResponse({"jobs": job_fixture()["jobs"][:3]})
+            raise MODULE.HTTPError(
+                request.full_url, 403, "Resource not accessible by integration", {}, None
+            )
+
+        def pact(service, sha, *, deadline=None):
+            del deadline
+            proven.append((service, sha))
+            return True
 
         with (
             patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+            patch.object(MODULE, "_is_ancestor", return_value=True),
+            patch.object(MODULE, "_tree_equivalent", return_value=True),
+            patch.object(MODULE, "_exact_pact_exists", pact),
             self.assertRaises(MODULE.VerificationError) as caught,
         ):
             MODULE.resolve_reconcile_service_sources(
-                [SERVICE], self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
+                [SERVICE, other], self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
             )
+        self.assertEqual(proven, [(SERVICE, self.OLDER)])  # partial progress really happened
         self.assertNotIsInstance(caught.exception, MODULE.UnresolvedServicesError)
 
     def test_api_failure_is_not_downgraded_to_a_per_service_refusal(self):
