@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: domestic-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "e0316ef0f3d269c1"
+    openbank.tech/policy-checksum: "23cfdd800e973bc1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -858,6 +858,20 @@ data:
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
     	role in input.principal.roles
     	startswith(input.action, "domestic-payment.")
+    	not input.action in edge_only_domestic_actions
+    }
+
+    # Creating a payment BOUND to a delegated spend reservation (#16000) is the customer edge's
+    # act alone: the edge has already reserved the delegate's headroom and passes the reservation
+    # reference. No staff role and no other service account may reach it through the broad write
+    # rule above, whatever roles it holds; the edge is identified by the verified machine marker
+    # and client id (machine_named), never by a role. The service checks the same identity again.
+    edge_only_domestic_actions := {"domestic-payment.createDelegated"}
+
+    allowed_reasons contains "service-domestic-payment-delegated-create" if {
+    	input.principal.type == "HUMAN"
+    	machine_named("service-account-openbank-edge")
+    	input.action == "domestic-payment.createDelegated"
     }
 
     # Read-only viewer path: the resource's RBAC (@RolesAllowed) admits ROLE_VIEWER on
