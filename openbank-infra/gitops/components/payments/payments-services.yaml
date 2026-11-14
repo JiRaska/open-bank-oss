@@ -451,7 +451,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-c9c04a42@sha256:6d295de1e632f7674c0a762bb28c330948a6e68d27fc16ee6c75cf64b1741650
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-4c341bdf@sha256:23f33f8df258d818e65bfe822289b9c1e74b31122e9f6b85f901fb4ea20878b9
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -2228,7 +2228,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-e435ad0a@sha256:8bca34753d6daa0313f5ba12fadf2e022ca86d234824f2c39101c927a334ae90
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-4c341bdf@sha256:d6f832663faa4f8142df87cc259627fda2b4596f67a7ce28f4e039e26f146a21
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
