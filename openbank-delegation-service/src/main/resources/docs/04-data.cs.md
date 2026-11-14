@@ -35,3 +35,15 @@ statement-service je adresovaná `accountId` a nemá objekt výpisu s vlastním 
 `STATEMENT` neodkazuje na nic, co by vlastnící služba uměla dohledat. Id platby se neresolvuje v
 žádné jedné službě: platby vlastní šest railů a nic nemapuje id na rail. Ani jeden typ nemá koho se
 zeptat, takže oba zůstávají odmítané, dokud ty páry neodejdou z matice capabilities.
+
+### Opravy katalogu presetů jsou dopředné migrace (ADR-0375 D7)
+
+Katalog rolí se seeduje migrací a preset může být špatně způsobem, kterého si nikdo nevšimne,
+dokud je špatně i vynucování kolem něj. „Účetní" a „Pokladník" udělují `ACCOUNT_READ_BALANCES` bez
+`ACCOUNT_VIEW_DETAILS`; to bylo neviditelné tak dlouho, dokud se čtení detailu účtu na edge ptalo
+na capability pro zůstatky. V33 oběma presetům chybějící capability doplňuje.
+
+Sahá to jen na KATALOG. Už vystavené granty jsou neměnné snímky — grant nese to, s čím poskytovatel
+v té chvíli souhlasil, a jeho dodatečné rozšíření by znamenalo, že tahle služba edituje někomu
+mandát. Stávající držitel těch dvou rolí si nechává zůstatky i transakce a o detail účtu přijde,
+dokud mu poskytovatel nesdílí znovu z opraveného presetu.
