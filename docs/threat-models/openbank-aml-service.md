@@ -56,3 +56,14 @@ Monitoring tables hold party and account identifiers, amounts and decisions. Cla
 - Reduce case events for monitoring cases to identifier and state.
 - Build the `aml-no-customer-surface` gate.
 - Authenticated pack delivery (ADR-0354) instead of files in the image.
+
+## 2026-11-14 - swift-service added as an AML case opener
+
+`service-account-openbank-swift` is now a named `amlCase.create` caller. It is listed in
+`service-aml-case-create-m2m` (aml_rest_ext.rego) and in `AML_CASE_CREATE_MOVEMENT_SERVICES`, and
+maps to the source service `openbank-swift-service`. The new MT103 sanctions gate opens these cases
+on a hit, on a potential hit, or when screening is unavailable. **Spoofing:** it is identity-gated,
+like the four existing rails. ROLE_API alone still admits no other account. **Elevation:** the grant
+is `amlCase.create` only. `AmlCaseCreateCallerGuardTest` and the rego tests pin the set. Rollback:
+revert. swift's cases would then 403, and its verdicts would be unaffected because opening a case
+is best-effort.

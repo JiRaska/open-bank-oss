@@ -85,6 +85,7 @@ aml_case_openers := [
 	"service-account-openbank-sepa-payment",
 	"service-account-openbank-sepa-instant",
 	"service-account-openbank-fx",
+	"service-account-openbank-swift",
 ]
 
 test_named_openers_create_case_with_role_api_only if {
