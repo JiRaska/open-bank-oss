@@ -56,6 +56,8 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Real broker for the domestic payment outcome consumer IT (#16000).
+    testImplementation(libs.testcontainers.redpanda)
     // Standalone Flyway upgrade tests run outside Quarkus bootstrap, which installs this plugin.
     // Keep its version aligned through the existing Quarkus BOM.
     testRuntimeOnly("org.flywaydb:flyway-database-postgresql")

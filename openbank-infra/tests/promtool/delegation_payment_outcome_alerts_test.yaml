@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: Apache-2.0
+# Behavioural tests for openbank-delegation-payment-outcome-alerts (#16000). Each alert has a
+# must-FIRE case, a must-NOT-fire control and a cold-pod case (every series registered at 0).
+rule_files:
+  - prometheus-rules-delegation-payment-outcomes.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "one unrecognised record fires DelegationPaymentOutcomeUnrecognised"
+    input_series:
+      - series: 'openbank_delegation_payment_outcome_events_total{outcome="unrecognised",pod="d1"}'
+        values: "0 0 0 0 0 1 1 1 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: DelegationPaymentOutcomeUnrecognised
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: delegation
+            exp_annotations:
+              subject_period: continuous
+              summary: "delegation-service acked domestic payment events it could not classify"
+              description: "1 record(s) on openbank.domestic.payment.events in the last 15 minutes had an unknown or missing ce-type, or an unreadable outcome body. A spend reservation they were meant to settle stays RESERVED and keeps consuming the grantee's ceiling."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/delegation-alerts.md#delegationpaymentoutcomeunrecognised"
+
+  - interval: 1m
+    name: "other outcomes increasing do NOT fire DelegationPaymentOutcomeUnrecognised"
+    input_series:
+      - series: 'openbank_delegation_payment_outcome_events_total{outcome="unrecognised",pod="d1"}'
+        values: "0+0x30"
+      - series: 'openbank_delegation_payment_outcome_events_total{outcome="ignored",pod="d1"}'
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: DelegationPaymentOutcomeUnrecognised
+        exp_alerts: []
+
+  - interval: 1m
+    name: "cold pod - every series registered at 0 - fires nothing"
+    input_series:
+      - series: 'openbank_delegation_payment_outcome_events_total{outcome="unrecognised",pod="d1"}'
+        values: "0+0x60"
+      - series: 'openbank_delegation_payment_outcome_events_total{outcome="conflict",pod="d1"}'
+        values: "0+0x60"
+      - series: 'openbank_delegation_payment_outcome_events_total{outcome="confirmed",pod="d1"}'
+        values: "0+0x60"
+      - series: 'openbank_delegation_payment_outcome_events_total{outcome="released",pod="d1"}'
+        values: "0+0x60"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: DelegationPaymentOutcomeUnrecognised
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: DelegationPaymentOutcomeConflictRate
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a sustained 20% conflict share fires DelegationPaymentOutcomeConflictRate"
+    input_series:
+      - series: 'openbank_delegation_payment_outcome_events_total{outcome="conflict",pod="d1"}'
+        values: "0+1x60"
+      - series: 'openbank_delegation_payment_outcome_events_total{outcome="confirmed",pod="d1"}'
+        values: "0+4x60"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: DelegationPaymentOutcomeConflictRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: delegation
+            exp_annotations:
+              subject_period: continuous
+              summary: "Domestic payment outcomes contradict delegated spend reservations"
+              description: "20% of settling payment outcomes in the last 30 minutes found their reservation already in the opposite terminal state."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/delegation-alerts.md#delegationpaymentoutcomeconflictrate"
+
+  - interval: 1m
+    name: "a 1% conflict share (out-of-order trickle) does NOT fire DelegationPaymentOutcomeConflictRate"
+    input_series:
+      - series: 'openbank_delegation_payment_outcome_events_total{outcome="conflict",pod="d1"}'
+        values: "0+1x60"
+      - series: 'openbank_delegation_payment_outcome_events_total{outcome="confirmed",pod="d1"}'
+        values: "0+99x60"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: DelegationPaymentOutcomeConflictRate
+        exp_alerts: []
+
+  - interval: 1m
+    name: "two conflicts in a quiet window do NOT fire DelegationPaymentOutcomeConflictRate"
+    input_series:
+      - series: 'openbank_delegation_payment_outcome_events_total{outcome="conflict",pod="d1"}'
+        values: "0x20 1 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2"
+      - series: 'openbank_delegation_payment_outcome_events_total{outcome="confirmed",pod="d1"}'
+        values: "0x20 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: DelegationPaymentOutcomeConflictRate
+        exp_alerts: []

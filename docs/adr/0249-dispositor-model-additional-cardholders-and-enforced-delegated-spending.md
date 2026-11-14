@@ -123,6 +123,38 @@ each rail would enforce a ceiling the customer does not have. The grant is the
 only place that sees all of it. ADR-0232 D3 is amended, not ignored — the
 enforcing service still refuses, it just asks one authority first.
 
+#### D3 amendment (2026-11-14, #16000) — the payment's OUTCOME settles the reservation
+
+"Confirms on a settled outcome" was implemented as "confirms on the rail's 2xx": the edge confirmed
+the moment domestic-payment accepted the request, so a payment that later ended REJECTED or
+CANCELLED kept its reservation CONFIRMED and the grantee's ceiling stayed consumed by money that
+never moved (pinned by #16111). The settlement is moved to the outcome itself:
+
+- delegation-service consumes `openbank.domestic.payment.events` and dispatches on the outbox
+  `ce-type` header only (`domestic.payment.status-changed`, `domestic.delegated-spend.finalized-absent`),
+  never on a body field. Events without a `reservationId` are an owner's payment and are ignored.
+- SETTLED confirms (RESERVED -> CONFIRMED). REJECTED, CANCELLED and finalized-absent release
+  (RESERVED -> RELEASED). Re-delivering an outcome the reservation already carries is a no-op.
+- RETURNED releases, from RESERVED and — the ONE transition out of a terminal state — from
+  CONFIRMED. The rail reaches RETURNED only from SENT_TO_CLEARING, never after SETTLED, so a
+  CONFIRMED reservation meeting RETURNED is one the edge confirmed on 2xx before the edge switch.
+  No money left, so the headroom is given back. The rule lives in the domain
+  (`PaymentOutcomeSettlement.decide`); no other outcome can leave CONFIRMED.
+- A contradicting outcome (SETTLED for a RELEASED reservation, REJECTED for a CONFIRMED one), an
+  unknown reservation and an unclassifiable record are acked and counted, never rethrown: a
+  redelivery cannot change the answer and a rethrow would wedge the partition. Only a failure to
+  WRITE the settlement is retried and then dead-lettered.
+- The reservation state stream keeps exactly one terminal snapshot (v2). A RETURNED release of a
+  CONFIRMED reservation therefore writes no second snapshot; the row and the `SpendReleased`
+  audit event record it. A stream version for a re-opened terminal state is not introduced.
+
+Rollout is three switches, in this order: this consumer
+(`openbank.delegation.payment-outcome-consumer.enabled`), then the rail accepting payments bound
+to their reservation from the edge's verified identity, then the edge creating bound payments and
+no longer confirming on 2xx. Until the last one, a REJECTED/CANCELLED payment of an
+edge-confirmed reservation is a counted conflict, not a release — the #16000 defect remains, now
+visible.
+
 ### D4 — Nothing is granted without SCA, and nothing is silent
 
 Issuing a disponent card and granting spend both require the grantor's SCA, and
