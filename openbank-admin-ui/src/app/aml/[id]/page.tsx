@@ -32,29 +32,20 @@ import {
   type AmlCase, type AmlStatus,
 } from '@/lib/aml/amlCaseContract'
 import { fetchPartySummary, type AmlPartySummary } from '@/lib/aml/usePartyNames'
+import { fetchSourcePayment, type SourcePayment } from '@/lib/aml/sourcePayment'
 import { AmlCaseInvestigation } from '@/components/context/AmlCaseInvestigation'
 import { EntityChip } from '@/components/entities/EntityChip'
 import { AmlFourEyesPanel } from '@/components/aml/AmlFourEyesPanel'
 
 type Tr = (cs: string, en: string) => string
 
-interface TxnSummary {
-  id: string; referenceNumber: string | null; type: string | null; status: string | null
-  amount: string | null; currencyCode: string | null; description: string | null
-  sourceAccountId: string | null; targetAccountId: string | null
-  initiatedAt: string | null; bookingDate: string | null; rail: string | null
-}
-
-function parseTxn(raw: unknown): TxnSummary | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-  const o = raw as Record<string, unknown>
-  const s = (v: unknown) => (typeof v === 'string' && v.trim() ? v : typeof v === 'number' ? String(v) : null)
-  const id = s(o.id)
-  if (!id) return null
-  return {
-    id, referenceNumber: s(o.referenceNumber), type: s(o.type), status: s(o.status), amount: s(o.amount),
-    currencyCode: s(o.currencyCode), description: s(o.description), sourceAccountId: s(o.sourceAccountId),
-    targetAccountId: s(o.targetAccountId), initiatedAt: s(o.initiatedAt), bookingDate: s(o.bookingDate), rail: s(o.rail),
+function railLabel(kind: SourcePayment['kind'], t: Tr): string {
+  switch (kind) {
+    case 'domestic': return t('Tuzemská platba', 'Domestic payment')
+    case 'sepa': return t('SEPA platba', 'SEPA payment')
+    case 'sepa-instant': return t('SEPA Instant', 'SEPA Instant')
+    case 'fx': return t('Směna měny', 'FX conversion')
+    case 'transaction': return t('Transakce', 'Transaction')
   }
 }
 
@@ -135,7 +126,7 @@ export default function AmlCaseDetailPage() {
   const [failure, setFailure] = useState<BffFailure | 'invalid' | null>(null)
   const [loading, setLoading] = useState(true)
   const [party, setParty] = useState<AmlPartySummary | null | undefined>(undefined)
-  const [txn, setTxn] = useState<TxnSummary | null | undefined>(undefined)
+  const [txn, setTxn] = useState<SourcePayment | null | undefined>(undefined)
   const [otherCases, setOtherCases] = useState<AmlCase[] | null>(null)
 
   const [target, setTarget] = useState<AmlStatus | null>(null)
@@ -158,6 +149,7 @@ export default function AmlCaseDetailPage() {
 
   const partyId = amlCase?.partyId
   const transactionId = amlCase?.transactionId
+  const sourceService = amlCase?.sourceService ?? null
   useEffect(() => {
     if (!partyId) return
     const controller = new AbortController()
@@ -174,14 +166,11 @@ export default function AmlCaseDetailPage() {
   useEffect(() => {
     if (!transactionId) return
     const controller = new AbortController()
-    void (async () => {
-      try {
-        const res = await fetch(svcUrl('transaction-service', `/api/v1/transactions/${encodeURIComponent(transactionId)}`), { cache: 'no-store', signal: controller.signal })
-        setTxn(res.ok ? parseTxn(await res.json()) : null)
-      } catch { if (!controller.signal.aborted) setTxn(null) }
-    })()
+    fetchSourcePayment(sourceService, transactionId, controller.signal)
+      .then(found => { if (!controller.signal.aborted) setTxn(found) })
+      .catch(() => { if (!controller.signal.aborted) setTxn(null) })
     return () => controller.abort()
-  }, [transactionId])
+  }, [transactionId, sourceService])
 
   // A four-eyes case may only be taken into review directly; closing goes through the panel below.
   const transitions = amlCase
@@ -276,21 +265,25 @@ export default function AmlCaseDetailPage() {
           </div>
 
           {amlCase.transactionId && <div style={{ marginBottom: 16 }}>
-            <Card title={t('Sledovaná transakce', 'Monitored transaction')} icon={<ArrowRightLeft size={16} />}>
-              {txn === undefined ? <p role="status" style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('Načítám transakci…', 'Loading transaction…')}</p>
-                : txn === null ? <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('Transakci nelze načíst z transaction-service.', 'The transaction could not be loaded from transaction-service.')} <ShortId value={amlCase.transactionId} copyLabel={t('Kopírovat ID transakce', 'Copy transaction ID')} /></p>
+            <Card title={t('Sledovaná platba', 'Monitored payment')} icon={<ArrowRightLeft size={16} />}>
+              {txn === undefined ? <p role="status" style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('Načítám platbu…', 'Loading payment…')}</p>
+                : txn === null ? <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
+                  {amlCase.sourceService
+                    ? t(`Platbu se nepodařilo načíst z ${amlCase.sourceService}.`, `The payment could not be loaded from ${amlCase.sourceService}.`)
+                    : t('Případ nemá zaznamenaný zdroj a platbu nezná žádná z platebních služeb.', 'The case records no source and no payment service knows this id.')}{' '}
+                  <ShortId value={amlCase.transactionId} copyLabel={t('Kopírovat ID platby', 'Copy payment ID')} /></p>
                 : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', columnGap: 24 }}>
                   <div>
-                    <Row label={t('Částka', 'Amount')} value={txn.amount ? `${Number(txn.amount).toLocaleString(locale, { minimumFractionDigits: 2 })} ${txn.currencyCode ?? ''}` : null} />
-                    <Row label={t('Typ / kanál', 'Type / rail')} value={[txn.type, txn.rail].filter(Boolean).join(' · ') || null} />
+                    <Row label={t('Kanál', 'Rail')} value={railLabel(txn.kind, t)} />
+                    <Row label={t('Částka', 'Amount')} value={txn.amount ? `${Number(txn.amount).toLocaleString(locale, { minimumFractionDigits: 2 })} ${txn.currency ?? ''}` : null} />
+                    {txn.counterAmount && <Row label={t('Připsáno', 'Received')} value={`${Number(txn.counterAmount).toLocaleString(locale, { minimumFractionDigits: 2 })} ${txn.counterCurrency ?? ''}`} />}
                     <Row label={t('Stav', 'Status')} value={txn.status ? <StatusBadge status={txn.status} /> : null} />
-                    <Row label={t('Popis', 'Description')} value={txn.description} />
                   </div>
                   <div>
-                    <Row label={t('Z účtu', 'From account')} value={txn.sourceAccountId ? <EntityChip type="account" id={txn.sourceAccountId} /> : null} />
-                    <Row label={t('Na účet', 'To account')} value={txn.targetAccountId ? <EntityChip type="account" id={txn.targetAccountId} /> : null} />
-                    <Row label={t('Zadáno', 'Initiated')} value={fmt(txn.initiatedAt)} />
-                    <Row label={t('Reference', 'Reference')} value={txn.referenceNumber} mono />
+                    <Row label={txn.kind === 'fx' ? t('Kurz', 'Rate') : txn.kind === 'transaction' ? t('Popis', 'Description') : t('Příjemce', 'Beneficiary')} value={txn.counterparty} />
+                    <Row label={t('Reference', 'Reference')} value={txn.reference} mono />
+                    <Row label={t('Čas', 'Time')} value={fmt(txn.at)} />
+                    <Row label={t('ID platby', 'Payment ID')} value={<ShortId value={amlCase.transactionId} copyLabel={t('Kopírovat ID platby', 'Copy payment ID')} />} />
                   </div>
                 </div>}
             </Card>

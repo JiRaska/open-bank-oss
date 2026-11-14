@@ -15,6 +15,11 @@ export interface AmlCase {
    * and the service still refuses it for a pack-monitoring case, so the fallback is safe.
    */
   requiresFourEyesDisposition: boolean
+  /**
+   * The service that opened the case, recorded by aml-service from the authenticated caller
+   * (openapi 1.7.0). Null for staff-created cases and for every case created before the field.
+   */
+  sourceService: string | null
 }
 
 const record = (value: unknown): Record<string, unknown> => {
@@ -60,6 +65,7 @@ export function parseAmlCase(value: unknown): AmlCase {
     screenedAt: instant(item.screenedAt, 'screenedAt'), decidedAt: optionalInstant(item.decidedAt, 'decidedAt'),
     createdAt: instant(item.createdAt, 'createdAt'), updatedAt: instant(item.updatedAt, 'updatedAt'),
     requiresFourEyesDisposition: item.requiresFourEyesDisposition === true,
+    sourceService: optionalString(item.sourceService, 'sourceService'),
   }
 }
 
