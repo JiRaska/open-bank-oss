@@ -16,7 +16,6 @@ import com.openbank.party.domain.model.Party
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
@@ -55,22 +54,15 @@ import javax.sql.DataSource
  * stays ACTIVE. Idempotency: the ending event delivered twice revokes each mandate once.
  */
 @QuarkusTest
-@QuarkusTestResource(KybEndedCaseMandateRevocationIT.FromEarliest::class, restrictToAnnotatedClass = true)
+// The same resource set as PartyKycAmlConcurrencyIT (whose resource also sets this channel to
+// `earliest`): a distinct set forces a Quarkus restart, after which StatutoryRepresentationApiIT
+// lost its reactive pool when it ran next in the full suite.
+@QuarkusTestResource(PartyKycAmlConcurrencyIT.ConsumersFromEarliestResource::class)
 @QuarkusTestResource(
     value = PostgresRedpandaTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_party_it")],
-    restrictToAnnotatedClass = true,
 )
 class KybEndedCaseMandateRevocationIT {
-
-    class FromEarliest : QuarkusTestResourceLifecycleManager {
-        // The topic is auto-created on first publish, after the consumer subscribed.
-        override fun start(): Map<String, String> = mapOf(
-            "openbank.outbox.dispatch-enabled" to "false",
-            "mp.messaging.incoming.kyb-events-in.auto.offset.reset" to "earliest",
-        )
-        override fun stop() = Unit
-    }
 
     @Inject lateinit var repository: PartyRepository
 
