@@ -392,3 +392,7 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
+
+The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `PENSION_SERVICE_URL=https://pension-service.pension.svc:8443`. This is the §4e reporting read model (`pension.reporting.aggregate`), unchanged. It is now actually reachable in the deployed pod, because before #16056 the client config never bound. Transport is the 8443 private-CA mTLS listener with client cert `tax-reporting-internal-tls` (`%prod` TLS bucket `internal-authority`), with the server hostname verified against `pension-service-internal-tls`. Residual risk: none new.
