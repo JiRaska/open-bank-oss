@@ -572,6 +572,72 @@ class ResolveReconcileSourceTest(unittest.TestCase):
         self.assertEqual(caught.exception.resolved[SERVICE]["sha"], self.OLDER)
         self.assertIsInstance(caught.exception, MODULE.VerificationError)
 
+    def test_budget_exhaustion_keeps_the_proven_half_and_names_the_rest(self):
+        """An exhausted time budget is a per-service refusal, never a whole-batch one.
+
+        2026-11-14: a 12-service scheduled reconcile ran out of RECONCILE_RESOLUTION_SECONDS
+        while still searching older runs for some services, and the plain VerificationError
+        refused the whole batch, including a service whose source was already proven.
+        """
+        slow = ["openbank-anacredit-service", "openbank-card-issuance-service"]
+        newer = self.run_record(40, self.OLDER, "2026-10-17T12:00:00Z")
+        older = self.run_record(39, self.OLDEST, "2026-10-16T12:00:00Z")
+        clock = [0.0]
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            path = urlsplit(request.full_url).path
+            if path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse({"workflow_runs": [newer, older]})
+            if path.endswith("/runs/40/attempts/1/jobs"):
+                return FixtureResponse({"jobs": job_fixture()["jobs"][:3]})
+            raise AssertionError(f"unexpected API request: {request.full_url}")
+
+        def ancestor_then_expire(sha, _tip, *, deadline=None):
+            del deadline
+            if sha == self.OLDEST:
+                clock[0] = 10.0**9  # the budget runs out while searching an older run
+            return True
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE.time, "monotonic", lambda: clock[0]),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+            patch.object(MODULE, "_is_ancestor", ancestor_then_expire),
+            patch.object(MODULE, "_tree_equivalent", return_value=True),
+            patch.object(MODULE, "_exact_pact_exists", return_value=True),
+            self.assertRaises(MODULE.UnresolvedServicesError) as caught,
+        ):
+            MODULE.resolve_reconcile_service_sources(
+                [SERVICE, *slow], self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertEqual(set(caught.exception.resolved), {SERVICE})
+        self.assertEqual(caught.exception.missing, sorted(slow))
+        self.assertIn("time budget", str(caught.exception))
+
+    def test_budget_exhaustion_cli_exits_3_with_partition(self):
+        err = MODULE.UnresolvedServicesError("time budget", {SERVICE: {"sha": "a" * 40, "run_id": "1", "attempt": 1}}, ["openbank-x-service"])
+        argv = ["v", "--resolve-reconcile-sources", json.dumps([SERVICE, "openbank-x-service"]), self.TIP]
+        out = io.StringIO()
+        with patch.object(MODULE.sys, "argv", argv), patch.object(MODULE, "resolve_reconcile_service_sources", side_effect=err), patch.object(MODULE.sys, "stdout", out), patch.object(MODULE.sys, "stderr", io.StringIO()):
+            self.assertEqual(MODULE.main(), 3)
+        self.assertEqual(json.loads(out.getvalue())["unresolved"], ["openbank-x-service"])
+
+    def test_unreadable_listing_after_partial_progress_still_refuses_all(self):
+        """A read failure is not a budget fact: it stays a whole-set VerificationError."""
+        def fake_urlopen(request, timeout):
+            del request, timeout
+            raise MODULE.HTTPError("u", 403, "Resource not accessible by integration", {}, None)
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            self.assertRaises(MODULE.VerificationError) as caught,
+        ):
+            MODULE.resolve_reconcile_service_sources(
+                [SERVICE], self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertNotIsInstance(caught.exception, MODULE.UnresolvedServicesError)
+
     def test_api_failure_is_not_downgraded_to_a_per_service_refusal(self):
         def fake_urlopen(request, timeout):
             del request, timeout
