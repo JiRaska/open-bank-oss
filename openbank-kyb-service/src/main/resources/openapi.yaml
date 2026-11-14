@@ -758,8 +758,11 @@ paths:
         First half of a four-eyes record. Accepted when an exit is owed, no finding is undecided,
         and the relationship has demonstrably ended: the case is REJECTED or ABANDONED and
         party-service records the entity party as CLOSED (409 otherwise). Records the
-        authenticated reviewer, the time and the evidence in `monitoring.exitProposal`, replacing
-        a pending proposal. Ends nothing: the case stays monitored. Requires ROLE_KYC_REVIEWER.
+        authenticated reviewer, the time and the evidence in `monitoring.exitProposal`, bound to
+        the reviewer's PERSON (token claim person_id; a token without it is refused, 409) and open
+        for 72 hours (`expiresAt`). A pending proposal is never replaced: 409 until its proposer
+        withdraws it (`exit/withdraw`) or it expires. Ends nothing: the case stays monitored.
+        Requires ROLE_KYC_REVIEWER.
       operationId: proposeMonitoringExit
       parameters:
         - $ref: '#/components/parameters/caseId'
@@ -788,8 +791,10 @@ paths:
       summary: A second reviewer confirms the proposed exit; monitoring ends
       description: >-
         The only way monitoring of a case with a confirmed sanctions match ends. Confirms the
-        pending `monitoring.exitProposal`: the authenticated reviewer must differ from its
-        proposer, `evidence` must repeat the proposal's evidence (so a proposal replaced after it
+        pending, unexpired `monitoring.exitProposal`: the authenticated reviewer must be a different
+        PERSON than its proposer (token claim person_id, so a second account of the proposer is
+        refused) and must carry a second factor (token amr contains otp); a token without
+        person_id is refused. `evidence` must repeat the proposal's evidence (so a proposal replaced after it
         was read is not confirmed), and the conditions of `exit/propose` must still hold. 409
         otherwise, and 409 when already recorded. Records the confirmer and withdraws the case's
         subjects from the monitored-subject registry. The case's `status` does not change. This
@@ -812,6 +817,30 @@ paths:
                 $ref: '#/components/schemas/Case'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/cases/{id}/monitoring/exit/withdraw:
+    post:
+      tags: [KYB]
+      summary: The proposer withdraws their pending exit proposal
+      description: >-
+        The proposer's PERSON (any of their accounts, token claim person_id) withdraws the pending
+        `monitoring.exitProposal`; who and when stay on it until a new proposal is made. Nobody else
+        can withdraw it; another reviewer waits until it expires (`expiresAt`). Nothing ends. 409
+        when the caller is not the proposer's person, there is no pending proposal, or the exit is
+        already confirmed. Requires ROLE_KYC_REVIEWER.
+      operationId: withdrawMonitoringExit
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1555,6 +1584,19 @@ components:
           type: string
         evidence:
           type: string
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: After this instant the proposal cannot be confirmed and may be replaced.
+        withdrawnBy:
+          type: string
+          nullable: true
+          description: Account that withdrew the proposal (always the proposer's person).
+        withdrawnAt:
+          type: string
+          format: date-time
+          nullable: true
     CompleteExitRequest:
       type: object
       required: [evidence]

@@ -97,8 +97,13 @@ KYC revizoři (`ROLE_KYC_REVIEWER`) pracují čtyřmi cestami, každá má vlast
    (`kyb.monitoring.finding.decide`).
 3. `POST /api/v1/kyb/cases/{id}/monitoring/exit/propose` navrhne, s důkazem, že vztah byl
    ukončen (`kyb.monitoring.exit.propose`).
-4. `POST /api/v1/kyb/cases/{id}/monitoring/exit/complete` návrh potvrdí. Potvrzující revizor
-   nesmí být navrhovatel a zopakuje důkaz z návrhu (`kyb.monitoring.exit.confirm`).
+4. `POST /api/v1/kyb/cases/{id}/monitoring/exit/complete` návrh potvrdí. Potvrzující revizor musí
+   být jiná OSOBA než navrhovatel (claim `person_id`, takže druhý účet navrhovatele je odmítnut),
+   musí být přihlášen druhým faktorem (`amr` obsahuje `otp`) a zopakuje důkaz z návrhu
+   (`kyb.monitoring.exit.confirm`).
+5. `POST /api/v1/kyb/cases/{id}/monitoring/exit/withdraw` umožní osobě navrhovatele čekající návrh
+   stáhnout (`kyb.monitoring.exit.withdraw`). Návrh platí 72 hodin; dokud čeká, nelze jej nahradit,
+   jen po stažení nebo vypršení. Token bez `person_id` nemůže navrhnout ani potvrdit.
 
 Návrh i potvrzení se přijmou jen tehdy, když je ukončení dlužné, žádný nález není nerozhodnutý
 a vztah prokazatelně skončil: případ je `REJECTED` nebo `ABANDONED` a party-service hlásí entitní

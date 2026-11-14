@@ -23,6 +23,7 @@ import com.openbank.kyb.it.StubDocumentGateway
 import com.openbank.kyb.it.StubMonitoredSubjectRegistry
 import com.openbank.kyb.it.StubPartyGateway
 import com.openbank.kyb.it.StubRelatedPartyScreening
+import com.openbank.libs.governance.StaffIdentity
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -30,6 +31,9 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.ClaimType
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
@@ -578,6 +582,15 @@ class KybOngoingMonitoringIT {
     }
 
     @Test
+    // A human reviewer's token: the person id four-eyes compares, and a second factor.
+    @TestSecurity(user = "reviewer-c", roles = ["ROLE_API", "ROLE_KYC", "ROLE_KYC_REVIEWER"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "reviewer-c"), Claim(key = "preferred_username", value = "reviewer-c"),
+            Claim(key = "person_id", value = "staff-c"),
+            Claim(key = "amr", value = "[\"pwd\",\"otp\"]", type = ClaimType.JSON_ARRAY),
+        ],
+    )
     fun `only a four-eyes exit over an ended relationship ends monitoring, and it withdraws the subjects`() {
         val caseId = journey.approved("71000216")
         run()
@@ -592,8 +605,16 @@ class KybOngoingMonitoringIT {
             .post("/api/v1/kyb/cases/$caseId/monitoring/exit/propose")
         fun complete(text: String) = journey.operator().body("""{"evidence":"$text"}""")
             .post("/api/v1/kyb/cases/$caseId/monitoring/exit/complete")
-        fun proposeAs(reviewer: String) =
-            onEventLoop { onboarding.proposeExit(ProposeExitCommand(UUID.fromString(caseId), evidence, reviewer)) }
+        fun withdraw() = journey.operator().post("/api/v1/kyb/cases/$caseId/monitoring/exit/withdraw")
+        fun proposeAs(reviewer: String, person: String) = onEventLoop {
+            onboarding.proposeExit(
+                ProposeExitCommand(
+                    UUID.fromString(caseId),
+                    evidence,
+                    StaffIdentity(reviewer, person, strongAuth = true),
+                ),
+            )
+        }
 
         // Must-refuse: a finding nobody decided, evidence that says nothing.
         propose(evidence).then().statusCode(409)
@@ -610,21 +631,31 @@ class KybOngoingMonitoringIT {
             // Must-refuse: confirming with nothing proposed; the proposer confirming themselves.
             complete(evidence).then().statusCode(409)
             propose(evidence).then().statusCode(200)
-                .body("monitoring.exitProposal.proposedBy", equalTo("service-account-openbank-edge"))
+                .body("monitoring.exitProposal.proposedBy", equalTo("reviewer-c"))
+                .body("monitoring.exitProposal.expiresAt", notNullValue())
                 .body("monitoring.exitOwedSince", notNullValue())
             complete(evidence).then().statusCode(409)
             assertThat(journey.stored(caseId).exitOwed).isTrue()
             assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" }
 
-            // Another reviewer's proposal; the test principal is now the second pair of eyes. A
+            // The proposer withdraws; a proposal by the SAME PERSON through a second account cannot
+            // be confirmed by them either (four-eyes compares persons, not accounts).
+            withdraw().then().statusCode(200).body("monitoring.exitProposal.withdrawnBy", equalTo("reviewer-c"))
+            proposeAs("reviewer-c.second", "staff-c")
+            complete(evidence).then().statusCode(409)
+                .body("message", org.hamcrest.Matchers.containsString("same person"))
+            withdraw().then().statusCode(200)
+            assertThat(journey.stored(caseId).exitOwed).isTrue()
+
+            // Another person's proposal; the test principal is now the second pair of eyes. A
             // confirmation of evidence other than the pending proposal's is refused.
-            proposeAs("reviewer-a")
+            proposeAs("reviewer-a", "staff-a")
             complete("evidence the proposal never said").then().statusCode(409)
             complete(evidence).then().statusCode(200)
                 .body("status", equalTo("REJECTED"))
                 .body("monitoring.exitOwedSince", nullValue())
                 .body("monitoring.exitProposal.proposedBy", equalTo("reviewer-a"))
-                .body("monitoring.exitCompleted.completedBy", equalTo("service-account-openbank-edge"))
+                .body("monitoring.exitCompleted.completedBy", equalTo("reviewer-c"))
                 .body("monitoring.exitCompleted.evidence", equalTo(evidence))
         } finally {
             parties.closed -= entityParty

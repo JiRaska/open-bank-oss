@@ -22,6 +22,7 @@ import com.openbank.kyb.application.port.`in`.RejectCaseCommand
 import com.openbank.kyb.application.port.`in`.ResolveReviewCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
+import com.openbank.kyb.application.port.`in`.WithdrawExitCommand
 import com.openbank.kyb.application.port.out.AgreementEntity
 import com.openbank.kyb.application.port.out.AgreementParty
 import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
@@ -402,7 +403,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     override suspend fun proposeExit(cmd: ProposeExitCommand): BusinessOnboardingCase {
         val case = get(cmd.caseId)
         val proposed = case.exitProposed(cmd.operator, cmd.evidence, entityPartyClosed(case), Instant.now(clock))
-        log.infof("kyb case %s: exit proposed by %s", cmd.caseId, cmd.operator)
+        log.infof("kyb case %s: exit proposed by %s", cmd.caseId, cmd.operator.account)
         return cases.update(proposed, null)
     }
 
@@ -410,8 +411,15 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     override suspend fun confirmExit(cmd: ConfirmExitCommand): BusinessOnboardingCase {
         val case = get(cmd.caseId)
         val confirmed = case.exitConfirmed(cmd.operator, cmd.evidence, entityPartyClosed(case), Instant.now(clock))
-        log.infof("kyb case %s: exit confirmed by %s", cmd.caseId, cmd.operator)
+        log.infof("kyb case %s: exit confirmed by %s", cmd.caseId, cmd.operator.account)
         return cases.update(confirmed, null)
+    }
+
+    /** The proposing person withdraws the pending exit proposal; recorded on the case and logged. */
+    override suspend fun withdrawExit(cmd: WithdrawExitCommand): BusinessOnboardingCase {
+        val withdrawn = get(cmd.caseId).exitWithdrawn(cmd.operator, Instant.now(clock))
+        log.infof("kyb case %s: exit proposal withdrawn by %s", cmd.caseId, cmd.operator.account)
+        return cases.update(withdrawn, null)
     }
 
     /** Party-service's word, read at the moment of the decision; no entity party is no evidence. */

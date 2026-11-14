@@ -98,8 +98,13 @@ KYC reviewers (`ROLE_KYC_REVIEWER`) work through four routes, each with its own 
 3. `POST /api/v1/kyb/cases/{id}/monitoring/exit/propose` proposes, with evidence, that the exit has
    been carried out (`kyb.monitoring.exit.propose`).
 4. `POST /api/v1/kyb/cases/{id}/monitoring/exit/complete` confirms that proposal. The confirming
-   reviewer must not be the proposer and repeats the proposal's evidence
-   (`kyb.monitoring.exit.confirm`).
+   reviewer must be a different PERSON than the proposer (token claim `person_id`, so a second
+   account of the proposer is refused), must have signed in with a second factor (`amr` contains
+   `otp`), and repeats the proposal's evidence (`kyb.monitoring.exit.confirm`).
+5. `POST /api/v1/kyb/cases/{id}/monitoring/exit/withdraw` lets the proposer's person withdraw the
+   pending proposal (`kyb.monitoring.exit.withdraw`). A proposal is open for 72 hours; it is never
+   replaced while pending, only after withdrawal or expiry. A token without `person_id` can neither
+   propose nor confirm.
 
 Proposing and confirming are accepted only when an exit is owed, no finding is undecided and the
 relationship has demonstrably ended: the case is `REJECTED` or `ABANDONED`, and party-service

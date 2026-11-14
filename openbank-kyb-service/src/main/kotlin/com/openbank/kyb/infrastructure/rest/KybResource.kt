@@ -26,6 +26,7 @@ import com.openbank.kyb.application.port.`in`.ResolveReviewCommand
 import com.openbank.kyb.application.port.`in`.SearchRegistryCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
+import com.openbank.kyb.application.port.`in`.WithdrawExitCommand
 import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.domain.model.CaseStatus
@@ -58,7 +59,9 @@ import com.openbank.kyb.infrastructure.rest.dto.SignRequest
 import com.openbank.kyb.infrastructure.rest.dto.StartCaseRequest
 import com.openbank.kyb.infrastructure.rest.dto.UboResponse
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.governance.StaffIdentity
 import com.openbank.libs.security.Roles
+import com.openbank.libs.security.StaffIdentities
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -74,6 +77,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.net.URI
@@ -638,7 +642,7 @@ class KybResource {
     suspend fun proposeExit(@PathParam("id") id: UUID, request: CompleteExitRequest?): Response {
         requireMonitoringReviewer()
         val evidence = requireNotNull(request?.evidence) { "evidence is required" }
-        val case = onboarding.proposeExit(ProposeExitCommand(id, evidence, operator()))
+        val case = onboarding.proposeExit(ProposeExitCommand(id, evidence, staff()))
         return Response.ok(CaseResponse.from(case, null, onboarding.monitoringStates(id))).build()
     }
 
@@ -654,8 +658,32 @@ class KybResource {
     suspend fun completeExit(@PathParam("id") id: UUID, request: CompleteExitRequest?): Response {
         requireMonitoringReviewer()
         val evidence = requireNotNull(request?.evidence) { "evidence is required" }
-        val case = onboarding.confirmExit(ConfirmExitCommand(id, evidence, operator()))
+        val case = onboarding.confirmExit(ConfirmExitCommand(id, evidence, staff()))
         return Response.ok(CaseResponse.from(case, null, onboarding.monitoringStates(id))).build()
+    }
+
+    /**
+     * The proposer — the same PERSON, from any of their accounts — withdraws the pending exit
+     * proposal so a corrected one can be made. Nobody else can; another reviewer waits for expiry.
+     */
+    @POST
+    @Path("/cases/{id}/monitoring/exit/withdraw")
+    @RolesAllowed(Roles.KYC_REVIEWER)
+    @Authorize(action = "kyb.monitoring.exit.withdraw", resource = "#id")
+    @Operation(summary = "The proposer withdraws their pending exit proposal")
+    suspend fun withdrawExit(@PathParam("id") id: UUID): Response {
+        requireMonitoringReviewer()
+        val case = onboarding.withdrawExit(WithdrawExitCommand(id, staff()))
+        return Response.ok(CaseResponse.from(case, null, onboarding.monitoringStates(id))).build()
+    }
+
+    /**
+     * The acting reviewer as a PERSON, from the verified token: person id and second factor. Four-eyes
+     * compares the person id; a token without one can neither propose nor confirm.
+     */
+    private fun staff(): StaffIdentity {
+        operator()
+        return StaffIdentities.from(identity.principal as? JsonWebToken)
     }
 
     /** The decider is the authenticated principal. No identity, no decision. */

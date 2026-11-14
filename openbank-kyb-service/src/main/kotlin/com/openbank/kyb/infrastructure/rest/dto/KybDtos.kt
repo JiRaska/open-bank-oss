@@ -411,7 +411,16 @@ data class MonitoringResponse(
                 exitCompleted = m.exitCompleted?.let {
                     ExitCompletionResponse(it.completedAt, it.completedBy, it.evidence)
                 },
-                exitProposal = m.exitProposal?.let { ExitProposalResponse(it.proposedAt, it.proposedBy, it.evidence) },
+                exitProposal = m.exitProposal?.let {
+                    ExitProposalResponse(
+                        it.proposedAt,
+                        it.proposedBy,
+                        it.evidence,
+                        it.expiresAt,
+                        it.withdrawnBy,
+                        it.withdrawnAt,
+                    )
+                },
                 findings = m.findings.map {
                     MonitoringFindingResponse(
                         findingId = it.findingId,
@@ -442,7 +451,14 @@ data class MonitoringResponse(
  */
 data class CompleteExitRequest(val evidence: String?)
 
-data class ExitProposalResponse(val proposedAt: Instant, val proposedBy: String, val evidence: String)
+data class ExitProposalResponse(
+    val proposedAt: Instant,
+    val proposedBy: String,
+    val evidence: String,
+    val expiresAt: Instant? = null,
+    val withdrawnBy: String? = null,
+    val withdrawnAt: Instant? = null,
+)
 
 /** One screened subject of the case, as an operator sees it. */
 data class ScreeningSubjectResponse(

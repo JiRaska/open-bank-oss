@@ -193,6 +193,10 @@ class BusinessOnboardingCaseRepositoryImpl(
         monitoringExitProposedAt = case.monitoring.exitProposal?.proposedAt
         monitoringExitProposedBy = case.monitoring.exitProposal?.proposedBy
         monitoringExitProposalEvidence = case.monitoring.exitProposal?.evidence
+        monitoringExitProposerPersonId = case.monitoring.exitProposal?.proposerPersonId
+        monitoringExitProposalExpiresAt = case.monitoring.exitProposal?.expiresAt
+        monitoringExitProposalWithdrawnBy = case.monitoring.exitProposal?.withdrawnBy
+        monitoringExitProposalWithdrawnAt = case.monitoring.exitProposal?.withdrawnAt
         monitoringSyncedVersion = syncedVersion
         updatedAt = case.updatedAt
     }
@@ -219,7 +223,15 @@ class BusinessOnboardingCaseRepositoryImpl(
                 ExitCompletion(at, monitoringExitCompletedBy.orEmpty(), monitoringExitEvidence.orEmpty())
             },
             monitoringExitProposedAt?.let { at ->
-                ExitProposal(at, monitoringExitProposedBy.orEmpty(), monitoringExitProposalEvidence.orEmpty())
+                ExitProposal(
+                    at,
+                    monitoringExitProposedBy.orEmpty(),
+                    monitoringExitProposalEvidence.orEmpty(),
+                    proposerPersonId = monitoringExitProposerPersonId,
+                    expiresAt = monitoringExitProposalExpiresAt,
+                    withdrawnBy = monitoringExitProposalWithdrawnBy,
+                    withdrawnAt = monitoringExitProposalWithdrawnAt,
+                )
             },
         ),
         version = version,

@@ -6,6 +6,9 @@ package com.openbank.kyb.domain.model
 
 import com.openbank.libs.governance.MakerCheckerViolation
 import com.openbank.libs.governance.Proposal
+import com.openbank.libs.governance.ProposalState
+import com.openbank.libs.governance.StaffIdentity
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -63,7 +66,45 @@ data class MonitoringFinding(
  * A reviewer proposes that the exit a confirmed sanctions match requires has been carried out.
  * It ends nothing by itself: a DIFFERENT reviewer has to confirm it (four-eyes, [Proposal]).
  */
-data class ExitProposal(val proposedAt: Instant, val proposedBy: String, val evidence: String)
+data class ExitProposal(
+    val proposedAt: Instant,
+    val proposedBy: String,
+    val evidence: String,
+    /** The proposer's PERSON; four-eyes compares persons. `null` cannot be confirmed (fails closed). */
+    val proposerPersonId: String? = null,
+    /** After this the proposal cannot be confirmed, and a new one may replace it. */
+    val expiresAt: Instant? = null,
+    /** Set when the proposer withdrew it. */
+    val withdrawnBy: String? = null,
+    val withdrawnAt: Instant? = null,
+) {
+    /**
+     * Whether this is a four-eyes proposal under the person rule at all: it names the proposer's
+     * person AND has an expiry. A row without either (the V15 shape) is inert: never open, so a
+     * fresh proposal may replace it, and never confirmable. Nothing is backfilled.
+     */
+    val isPersonBound: Boolean
+        get() = proposerPersonId != null && expiresAt != null
+
+    /** Pending, person-bound and unexpired. The ONLY test of "a proposal blocks a new one". */
+    fun isOpenAt(now: Instant): Boolean = isPersonBound && asProposal().isOpen(now)
+
+    /** The fleet's four-eyes primitive over this proposal; every rule is enforced there. */
+    fun asProposal(): Proposal<String> = Proposal(
+        id = "exit",
+        action = evidence,
+        proposedBy = proposedBy,
+        proposedAt = proposedAt,
+        state = if (withdrawnAt != null) ProposalState.WITHDRAWN else ProposalState.PROPOSED,
+        proposerPersonId = proposerPersonId,
+        expiresAt = expiresAt,
+    )
+
+    companion object {
+        /** How long an exit proposal stays open for a second reviewer. */
+        val TTL: Duration = Duration.ofHours(72)
+    }
+}
 
 /**
  * The exit a confirmed sanctions match requires has been carried out: proposed by one reviewer
@@ -131,36 +172,66 @@ data class CaseMonitoring(
 
     /**
      * A reviewer proposes that the exit has been carried out. [relationshipEnded] is the owner's
-     * finding that it demonstrably has (see `BusinessOnboardingCase.exitProposed`). A new proposal
-     * replaces a pending one, and its author becomes the one who may not confirm it.
+     * finding that it demonstrably has (see `BusinessOnboardingCase.exitProposed`). The proposal is
+     * bound to [proposer]'s PERSON and open for [ExitProposal.TTL]. It replaces an earlier one only
+     * once that one is no longer open — withdrawn by its proposer, or expired — never while pending.
      */
-    fun exitProposed(operator: String, evidence: String, relationshipEnded: Boolean, at: Instant): CaseMonitoring {
-        require(operator.isNotBlank()) { "the operator proposing the exit must be identified" }
+    fun exitProposed(
+        proposer: StaffIdentity,
+        evidence: String,
+        relationshipEnded: Boolean,
+        at: Instant,
+    ): CaseMonitoring {
+        require(proposer.account.isNotBlank()) { "the operator proposing the exit must be identified" }
         require(evidence.trim().length >= DispositionRule.MIN_REASON) {
             "proposing an exit needs evidence of at least ${DispositionRule.MIN_REASON} characters"
         }
         requireExitRecordable(relationshipEnded)
-        return copy(exitProposal = ExitProposal(at, operator, evidence.trim()))
+        refuseUnless(exitProposal?.isOpenAt(at) != true) {
+            "an exit is already proposed; its proposer withdraws it, or it expires at ${exitProposal?.expiresAt}"
+        }
+        val bound = fourEyes { Proposal.propose("exit", evidence.trim(), proposer, at, ExitProposal.TTL) }
+        return copy(
+            exitProposal = ExitProposal(
+                proposedAt = at,
+                proposedBy = bound.proposedBy,
+                evidence = evidence.trim(),
+                proposerPersonId = bound.proposerPersonId,
+                expiresAt = bound.expiresAt,
+            ),
+        )
+    }
+
+    /** The proposing PERSON (any of their accounts) withdraws the pending exit proposal. */
+    fun exitWithdrawn(by: StaffIdentity, at: Instant): CaseMonitoring {
+        refuseUnless(exitCompleted == null) { "the exit is already confirmed" }
+        val proposal = exitProposal ?: throw CaseTransitionException("no exit has been proposed for this case")
+        val withdrawn = fourEyes { proposal.asProposal().withdrawBy(by, at) }
+        return copy(exitProposal = proposal.copy(withdrawnBy = withdrawn.decidedBy, withdrawnAt = at))
     }
 
     /**
-     * A second reviewer confirms the pending proposal; monitoring ends with it. [evidence] must be
-     * the evidence of the proposal being confirmed, so a confirmation cannot land on a proposal
-     * that was replaced after the confirmer read it. Four-eyes is the fleet's [Proposal] rule.
+     * A second reviewer — a different PERSON, authenticated with a second factor — confirms the
+     * pending, unexpired proposal; monitoring ends with it. [evidence] must be the evidence of the
+     * proposal being confirmed, so a confirmation cannot land on a proposal replaced after the
+     * confirmer read it. Four-eyes is the fleet's [Proposal.approveBy] rule.
      */
-    fun exitConfirmed(checker: String, evidence: String, relationshipEnded: Boolean, at: Instant): CaseMonitoring {
+    fun exitConfirmed(
+        checker: StaffIdentity,
+        evidence: String,
+        relationshipEnded: Boolean,
+        at: Instant,
+    ): CaseMonitoring {
         requireExitRecordable(relationshipEnded)
         val proposal = exitProposal ?: throw CaseTransitionException("no exit has been proposed for this case")
-        require(checker.isNotBlank()) { "the operator confirming the exit must be identified" }
         refuseUnless(evidence.trim() == proposal.evidence) {
             "the exit proposal changed; read the case again before confirming"
         }
-        try {
-            Proposal("exit", proposal.evidence, proposal.proposedBy, proposal.proposedAt).approve(checker, at)
-        } catch (e: MakerCheckerViolation) {
-            throw CaseTransitionException(e.message ?: "four-eyes: the confirmer must differ from the proposer", e)
+        refuseUnless(proposal.isPersonBound) {
+            "the pending exit proposal predates the person rule and cannot be confirmed; propose it again"
         }
-        return copy(exitCompleted = ExitCompletion(at, checker, proposal.evidence))
+        val approved = fourEyes { proposal.asProposal().approveBy(checker, at) }
+        return copy(exitCompleted = ExitCompletion(at, approved.decidedBy!!, proposal.evidence))
     }
 
     /**
@@ -197,4 +268,11 @@ object DispositionRule {
         }
         return reason.trim()
     }
+}
+
+/** The libs four-eyes refusal as a refused transition (409), keeping its cause. */
+private inline fun <R> fourEyes(block: () -> R): R = try {
+    block()
+} catch (e: MakerCheckerViolation) {
+    throw CaseTransitionException(e.message ?: "four-eyes refused", e)
 }

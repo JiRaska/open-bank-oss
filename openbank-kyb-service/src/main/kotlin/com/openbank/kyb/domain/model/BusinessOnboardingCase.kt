@@ -6,6 +6,7 @@ package com.openbank.kyb.domain.model
 
 import com.openbank.kyb.domain.czech.CzechRepresentationRuleParser
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.governance.StaffIdentity
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -167,7 +168,7 @@ data class BusinessOnboardingCase(
      * [entityPartyClosed] is party-service's word that the entity party is CLOSED.
      */
     fun exitProposed(
-        operator: String,
+        operator: StaffIdentity,
         evidence: String,
         entityPartyClosed: Boolean,
         at: Instant,
@@ -176,12 +177,16 @@ data class BusinessOnboardingCase(
 
     /** A DIFFERENT reviewer confirms it; monitoring ends with it. See [CaseMonitoring.exitConfirmed]. */
     fun exitConfirmed(
-        checker: String,
+        checker: StaffIdentity,
         evidence: String,
         entityPartyClosed: Boolean,
         at: Instant,
     ): BusinessOnboardingCase =
         copy(monitoring = monitoring.exitConfirmed(checker, evidence, relationshipEnded(entityPartyClosed), at))
+
+    /** The proposing person withdraws the pending exit proposal. See [CaseMonitoring.exitWithdrawn]. */
+    fun exitWithdrawn(by: StaffIdentity, at: Instant): BusinessOnboardingCase =
+        copy(monitoring = monitoring.exitWithdrawn(by, at))
 
     /**
      * The relationship has demonstrably ended: kyb no longer treats the case as approved (it was
