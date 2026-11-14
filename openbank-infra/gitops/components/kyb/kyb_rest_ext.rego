@@ -43,6 +43,9 @@ allowed_reasons contains "operator-kyb-review" if {
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC"}
 	role in input.principal.roles
 	startswith(input.action, "kyb.")
+	# Ongoing-monitoring decisions and the four-eyes exit are the KYC reviewer's alone
+	# (rules.yaml matrix, #16028); the staff prefix must not reach them.
+	not startswith(input.action, "kyb.monitoring.")
 }
 
 # The customer edge proxying the customer's own business onboarding (ADR-0284 D6). Enumerated,

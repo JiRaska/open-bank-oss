@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.14.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.13.0...admin-ui-v4.14.0) (2026-11-14)
+
+
+### Features
+
+* **admin-ui:** show HELD domestic payments and their reject reason ([#16040](https://github.com/JiRaska/open-bank-oss/issues/16040)) ([f418453](https://github.com/JiRaska/open-bank-oss/commit/f4184537133c18d309b9e1fa11bf016c9b207e19))
+
 ## [4.13.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.12.2...admin-ui-v4.13.0) (2026-11-13)
 
 

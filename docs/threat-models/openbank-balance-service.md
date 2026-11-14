@@ -518,3 +518,7 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
+
+The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `BALANCE_SERVICE_URL=http://balance-service.balances.svc:8103`. The read is the CRS/FATCA statement `asOf` balance under `service-account-openbank-tax-reporting` (ROLE_API), already admitted in `balance_rest_ext.rego`. **Residual risk, accepted and tracked:** balance-service has no private-CA mTLS listener, so this hop carries the bearer token in plaintext inside the cluster, like its five existing callers (customer-edge, agent, mcp, statements, payments). The new line is declared as V9.1 debt in `.github/asvs-l3-baseline.txt`. Retiring it means adding an 8443 client-auth-required, bearer-only listener (#16075). Mitigations in the meantime: the namespace-scoped ingress allow-list, an OPA decision pinned to the principal id, and a short-lived Keycloak token. A replayed token only reaches the reporting read it was issued for.

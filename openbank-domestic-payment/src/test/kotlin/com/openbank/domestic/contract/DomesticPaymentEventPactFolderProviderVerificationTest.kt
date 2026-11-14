@@ -4,6 +4,7 @@
 
 package com.openbank.domestic.contract
 
+import au.com.dius.pact.provider.MessageAndMetadata
 import au.com.dius.pact.provider.PactVerifyProvider
 import au.com.dius.pact.provider.junit5.MessageTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
@@ -12,6 +13,7 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
@@ -37,11 +39,35 @@ class DomesticPaymentEventPactFolderProviderVerificationTest {
     fun delegatedPaymentChangedStatus() = Unit
 
     @PactVerifyProvider(DomesticPaymentStatusPactFixture.INTERACTION)
-    fun produceDelegatedStatusChanged(): String = DomesticPaymentStatusPactFixture.payload()
+    fun produceDelegatedStatusChanged(): MessageAndMetadata =
+        DomesticPaymentStatusPactFixture.message(DomesticPaymentStatus.SENT_TO_CLEARING, DomesticPaymentStatus.SETTLED)
 
     @State(DelegatedSpendFinalizedAbsentPactFixture.PROVIDER_STATE)
     fun pendingReservationWithoutPayment() = Unit
 
     @PactVerifyProvider(DelegatedSpendFinalizedAbsentPactFixture.INTERACTION)
-    fun produceDelegatedSpendFinalizedAbsent(): String = DelegatedSpendFinalizedAbsentPactFixture.payload()
+    fun produceDelegatedSpendFinalizedAbsent(): MessageAndMetadata = DelegatedSpendFinalizedAbsentPactFixture.message()
+
+    // Terminal outcomes the delegation-service consumer settles a reservation from (#16000). Each
+    // is a legal domain transition from the status the rail actually leaves from.
+    @State("a delegated domestic payment has become REJECTED")
+    fun delegatedPaymentRejected() = Unit
+
+    @PactVerifyProvider("a delegated domestic payment REJECTED event")
+    fun produceDelegatedRejected(): MessageAndMetadata =
+        DomesticPaymentStatusPactFixture.message(DomesticPaymentStatus.VALIDATED, DomesticPaymentStatus.REJECTED)
+
+    @State("a delegated domestic payment has become CANCELLED")
+    fun delegatedPaymentCancelled() = Unit
+
+    @PactVerifyProvider("a delegated domestic payment CANCELLED event")
+    fun produceDelegatedCancelled(): MessageAndMetadata =
+        DomesticPaymentStatusPactFixture.message(DomesticPaymentStatus.VALIDATED, DomesticPaymentStatus.CANCELLED)
+
+    @State("a delegated domestic payment has become RETURNED")
+    fun delegatedPaymentReturned() = Unit
+
+    @PactVerifyProvider("a delegated domestic payment RETURNED event")
+    fun produceDelegatedReturned(): MessageAndMetadata =
+        DomesticPaymentStatusPactFixture.message(DomesticPaymentStatus.SENT_TO_CLEARING, DomesticPaymentStatus.RETURNED)
 }
