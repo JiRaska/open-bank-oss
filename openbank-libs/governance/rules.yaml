@@ -4672,6 +4672,40 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*Address*.kt"
       - "src/main/kotlin/**/*Contact*.kt"
     cardholder: []
+  openbank-delegation-service:
+    auth_crypto_payment:
+      - "src/main/kotlin/**/approval/**"
+      - "src/main/kotlin/**/security/**"
+      - "src/main/kotlin/**/filter/**"
+      - "src/main/kotlin/**/authz/**"
+      - "src/main/kotlin/**/*Signer*.kt"
+      - "src/main/kotlin/**/*Signature*.kt"
+      - "src/main/kotlin/**/*Jwt*.kt"
+      - "src/main/kotlin/**/*Mtls*.kt"
+      - "src/main/kotlin/**/*Idempoten*.kt"
+      - "src/main/kotlin/**/*Reservation*.kt"
+      - "src/main/kotlin/**/*Grant*.kt"
+      - "src/main/kotlin/**/*Mandate*.kt"
+      - "src/main/kotlin/com/openbank/delegation/infrastructure/messaging/DomesticPaymentOutcomeConsumer.kt"
+      - "src/main/kotlin/com/openbank/delegation/domain/model/PaymentOutcomeSettlement.kt"
+      - "src/main/kotlin/com/openbank/delegation/application/usecase/ApprovalGroupService.kt"
+      - "src/main/kotlin/com/openbank/delegation/application/usecase/BusinessSigningService.kt"
+      - "src/main/kotlin/com/openbank/delegation/application/usecase/DelegationLifecycleApprovalService.kt"
+      - "src/main/kotlin/com/openbank/delegation/application/usecase/DelegationService.kt"
+      - "src/main/kotlin/com/openbank/delegation/application/usecase/ExternalDisclosureService.kt"
+      - "src/main/kotlin/com/openbank/delegation/domain/model/ExternalDisclosure.kt"
+      - "src/main/kotlin/com/openbank/delegation/infrastructure/client/BusinessSigningClients.kt"
+      - "src/main/kotlin/com/openbank/delegation/infrastructure/client/DocumentDisclosureClient.kt"
+      - "src/main/kotlin/com/openbank/delegation/infrastructure/client/PartyEligibilityClient.kt"
+      - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ResourceOwnershipClient.kt"
+      - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ScaChallengeClient.kt"
+    pii:
+      - "src/main/kotlin/**/*Party*.kt"
+      - "src/main/kotlin/**/*Customer*.kt"
+      - "src/main/kotlin/**/*Kyc*.kt"
+      - "src/main/kotlin/**/*Address*.kt"
+      - "src/main/kotlin/**/*Contact*.kt"
+    cardholder: []
   openbank-domestic-payment:
     auth_crypto_payment:
       - "src/main/kotlin/**/BusinessPaymentBatchDraftResource.kt"
