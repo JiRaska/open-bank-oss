@@ -106,7 +106,7 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
     }.awaitSuspending()
 
     // Two shapes of "party not established", both resolvable from the account. A missing party is
-    // the explicit one (V14). The other is #3413: while `party_id` was NOT NULL the rails satisfied it
+    // the explicit one (V15). The other is #3413: while `party_id` was NOT NULL the rails satisfied it
     // with the debtor ACCOUNT id, so on those rows the two columns are byte-for-byte equal — that
     // equality cannot false-positive, because an account id and a party id are drawn from different
     // tables and a genuine party is never its own account.

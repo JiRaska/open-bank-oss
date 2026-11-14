@@ -2,9 +2,9 @@
 -- customer_reference becomes ERASED-<partyId>, matched_entity and alert_detail are cleared, and
 -- the row itself stays, because AML record-keeping outlives the erasure. That rule is unchanged.
 --
--- What it could not do is reach a case that does not name the party yet. Since V14 a case may be
+-- What it could not do is reach a case that does not name the party yet. Since V15 a case may be
 -- opened with no party (a held payment whose rail could not name the debtor) and be attached to
--- its party later by the resolution sweep; before V14 the same was true of cases carrying the
+-- its party later by the resolution sweep; before V15 the same was true of cases carrying the
 -- account id where the party belongs. A party erased in between was found by nothing: the erasure
 -- matched on party_id and passed the case by, and the sweep then attached the case, personal data
 -- intact, to a party that had been erased.

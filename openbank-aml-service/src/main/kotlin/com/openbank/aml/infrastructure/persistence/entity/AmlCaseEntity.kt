@@ -20,7 +20,7 @@ class AmlCaseEntity : PanacheEntity() {
     @Column(name = "idempotency_key", nullable = false, unique = true)
     lateinit var idempotencyKey: String
 
-    /** Null while the owning party is not established (V14); see `AmlCase.partyId`. */
+    /** Null while the owning party is not established (V15); see `AmlCase.partyId`. */
     @Column(name = "party_id")
     var partyId: UUID? = null
 
@@ -76,7 +76,7 @@ class AmlCaseEntity : PanacheEntity() {
     @Column(name = "request_hash", length = 64)
     var requestHash: String? = null
 
-    /** `CaseOrigin` name; null for rows written before V14 or by a pod that predates it. */
+    /** `CaseOrigin` name; null for rows written before V15 or by a pod that predates it. */
     @Column(name = "origin", length = 32)
     var origin: String? = null
 
