@@ -135,7 +135,7 @@ tests:
               severity: warning
             exp_annotations:
               summary: "a sanctions-monitoring finding on an approved business customer has waited a day for review"
-              description: "The oldest undecided monitoring finding in kyb has waited 1d 1h 0m 0s (`openbank_kyb_monitoring_reviews_open` says how many cases have one). Ongoing monitoring matched the entity or a related party of an approved business case against a sanctions, terrorist or PEP list entry. The case keeps its status and appears in no status queue: list such cases with `GET /api/v1/kyb/cases?monitoring=open` and decide each finding with `POST /api/v1/kyb/cases/{id}/monitoring/findings/{findingId}/disposition`. The customer sees no change in the meantime, so nobody will chase it from that side."
+              description: "The oldest undecided monitoring finding in kyb has waited 1d 1h 0m 0s (`openbank_kyb_monitoring_reviews_open` says how many cases have one). Ongoing monitoring matched the entity or a related party of an approved business case against a sanctions, terrorist or PEP list entry. The case keeps its status and appears in no status queue: list such cases with `GET /api/v1/kyb/monitoring/holds` and decide each finding with `POST /api/v1/kyb/cases/{id}/monitoring/findings/{findingId}/disposition`. The customer sees no change in the meantime, so nobody will chase it from that side."
   # ---- KybMonitoringFindingNotRouted -----------------------------------------------------------
   - name: cold pod and expected traffic - counters at zero, foreign owners and siblings moving
     interval: 1m
