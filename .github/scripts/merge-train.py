@@ -3533,10 +3533,12 @@ def carrier_holds_strict(p: dict, now: float | None = None) -> bool:
 
 
 def fix_preempts_strict_self_test(check) -> None:
-    """ADR-0343 amendment 2026-11-14: on a red main a green fix pre-empts a strict reservation whose CI
-    is still running (#15991 behind #16005/#16009, #16096 behind #15976); a GREEN holder, which merges
-    this tick, is never interrupted. Pure: git is stubbed (ancestry: only heads named cur-* contain main)."""
+    """ADR-0343 amendment 2026-11-14: on a red main a fix pre-empts a strict reservation whose CI is still
+    running (#15991 behind #16005/#16009, #16096 behind #15976); a GREEN holder, which merges this tick,
+    is never interrupted. `fixes` always comes from the real strict_fixes, as live settle computes it.
+    git is stubbed: only heads named cur-* contain main."""
     now = 2_000_000_000.0
+    red = {"Validate manifests": "failure"}
 
     class _R:
         def __init__(self, rc=0, out=""):
@@ -3549,26 +3551,61 @@ def fix_preempts_strict_self_test(check) -> None:
             return _R(0, str(int(now) - 60))
         return _R(0, "")
 
-    strict_pr = {"number": 16005, "head_sha": "cur-strict", "app": {}}
-    fix_pr = {"number": 15991, "head_sha": "old-fix", "app": {}}
-    fixes = {15991: ["Validate manifests"]}
-    holder, _to = strict_reservation(git, "b", [("pending", strict_pr), ("green", fix_pr)], now=now, fixes=fixes)
-    check("main red: a green fix pre-empts a strict reservation still in CI (holder freed for the fix)",
-          holder is None, f"holder={holder}")
-    holder, _to = strict_reservation(git, "b", [("green", strict_pr), ("green", fix_pr)], now=now, fixes=fixes)
-    check("main red: a strict holder already GREEN (merging this tick) is not interrupted by a fix",
-          holder == 16005, f"holder={holder}")
-    holder, _to = strict_reservation(git, "b", [("pending", strict_pr)], now=now, fixes={})
-    check("main green / no fix: a strict PR in CI still holds main", holder == 16005, f"holder={holder}")
-    fix_cur = {**fix_pr, "head_sha": "cur-fix"}
-    holder, _to = strict_reservation(git, "b", [("pending", strict_pr), ("pending", fix_cur)], now=now, fixes=fixes)
-    check("main red: the updated fix, CI running on its combined head, is the holder", holder == 15991, f"holder={holder}")
-    fix_pending = {"number": 15991, "head_sha": "cur-fix", "app": {}, "fix": ["Validate manifests"]}
-    other_fix = {"number": 15987, "head_sha": "old-fix2", "app": {}}
-    holder, _to = strict_reservation(git, "b", [("pending", fix_pending), ("green", other_fix)], now=now,
-                                     fixes={15987: ["Validate manifests"]})
-    check("main red: a fix in CI on its combined head is not pre-empted by another green fix",
-          holder == 15991, f"holder={holder}")
+    def view(n, head, fix=False, notice=None):
+        v = {"number": n, "head_sha": head, "app": {}}
+        if fix:
+            v["fix"] = ["Validate manifests"]
+        if notice:
+            v["app"][NOTICE_CONTEXT] = ("success", notice)
+        return v
+
+    def reserve(strict):
+        return strict_reservation(git, "b", strict, now=now, fixes=strict_fixes(None, git, "b", strict, red))[0]
+
+    strict_cur, strict_green = view(16005, "cur-strict"), view(16005, "cur-strict")
+    fix_behind, fix_cur = view(15991, "old-fix", fix=True), view(15991, "cur-fix", fix=True)
+    h = reserve([("pending", strict_cur), ("green", fix_behind)])
+    check("main red: a green fix pre-empts a strict reservation still in CI", h is None, f"holder={h}")
+    h = reserve([("green", strict_green), ("green", fix_behind)])
+    check("main red: a strict holder already GREEN (merging this tick) is not interrupted", h == 16005, f"holder={h}")
+    h = strict_reservation(git, "b", [("pending", strict_cur)], now=now, fixes=strict_fixes(None, git, "b",
+                           [("pending", strict_cur)], {}))[0]
+    check("main green: a strict PR in CI still holds main", h == 16005, f"holder={h}")
+    # A LONE fix whose combined head is in CI: strict_fixes lists only green PRs, so this is fixes={}.
+    h = reserve([("pending", view(15976, "cur-strict2")), ("pending", fix_cur)])
+    check("main red: a lone fix in CI on its combined head keeps main over an older strict PR in CI",
+          h == 15991, f"holder={h}")
+    h = reserve([("pending", fix_cur), ("green", view(15987, "old-fix2", fix=True))])
+    check("main red: a fix in CI is not pre-empted by a second green fix", h == 15991, f"holder={h}")
+    for told in (f"{CONFLICT_PREFIX}b: strict lane", f"{REFUSED_PREFIX}b (422)"):
+        h = reserve([("pending", strict_cur), ("green", view(15991, "old-fix", fix=True, notice=told))])
+        check(f"main red: a fix that cannot be served ({told.split()[0]}) pre-empts nothing", h == 16005, f"holder={h}")
+
+    # End to end, as settle wires it: the holder comes from strict_reservation, then strict_lane must
+    # update-branch the fix this tick (with a strict holder, every other strict PR is "held").
+    class _Gh:
+        def __init__(self):
+            self.updates = []
+
+        def app_statuses(self, _sha):
+            return {}
+
+        def checks(self, _sha):
+            return dict(red)
+
+        def update_branch(self, n, _head):
+            self.updates.append(n)
+            return True
+
+        def __getattr__(self, _name):
+            return lambda *a, **k: None
+
+    gh, summary = _Gh(), {}
+    strict = [("pending", view(16005, "cur-strict")), ("green", view(15991, "old-fix", fix=True))]
+    h = reserve(strict)
+    strict_lane(gh, git, "b", strict, False, False, summary, red, {}, holder=h, timed_out=[])
+    check("main red: settle's strict lane update-branches the fix while a strict PR's CI runs",
+          gh.updates == [15991], f"holder={h} updates={gh.updates} {summary}")
 
 
 def train_turn_main_red_self_test(check) -> None:
@@ -3887,6 +3924,25 @@ def stack_verdict(gh, git, p: dict, live_main: str) -> tuple[str, str]:
     return "wait", f"holder #{n} has no verdict yet"
 
 
+def preempting_fixes(base: str, strict: list, fixes: dict | None) -> set[int]:
+    """Fixes that pre-empt a non-fix strict reservation on a red main (ADR-0343 amendment 2026-11-14):
+    every green fix (`fixes`, strict_fixes) plus every fix whose COMBINED head is in CI (fix_head_state's
+    `fix` marker: strict_fixes lists only green PRs, so a lone fix would lose main the moment its own CI
+    started). A green fix that cannot be served over THIS main — the App already told it conflicts or
+    that update-branch was refused, on this head over this main — pre-empts nothing: it would only free
+    main for nobody. Read from App statuses already in the view; no git, no API."""
+    out: set[int] = set()
+    for state, view in strict:
+        n = view["number"]
+        if view.get("fix") and state == "pending":
+            out.add(n)
+        elif n in (fixes or {}):
+            told = (view.get("app") or {}).get(NOTICE_CONTEXT, ("", ""))[1]
+            if not told.startswith((f"{CONFLICT_PREFIX}{base[:12]}", f"{REFUSED_PREFIX}{base[:12]}")):
+                out.add(n)
+    return out
+
+
 def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: float | None = None,
                        fixes: dict | None = None, activity=None) -> tuple[int | None, list[int]]:
     """(holder, timed_out). The holder is the oldest strict-lane PR whose head already contains live
@@ -3902,8 +3958,9 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
     now = time.time() if now is None else now
     holder, timed_out = None, []
     fixes = fixes or {}
-    holder_state, holder_is_fix = None, False
-    ordered = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes else 1)
+    holder_state = None
+    pre = preempting_fixes(base, strict, fixes)
+    ordered = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes or sv[1]["number"] in pre else 1)
     for state, view in ordered:
         n, head = view["number"], view["head_sha"]
         if state not in ("pending", "green"):
@@ -3926,16 +3983,15 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
         elif holder is None:
             holder = n
             holder_state = state
-            holder_is_fix = bool(view.get("fix"))  # a fix's combined head in CI (fix_head_state) is a fix too
     # Main-red fix pre-emption (ADR-0343 amendment 2026-11-14): a non-fix reservation whose CI is still
     # RUNNING does not hold main while a green fix waits. Since no train moves on a red main, holding it
     # for a strict PR's 30-60 min CI (re-run each time main moves) left the fix — the one PR that can turn
     # main green — waiting behind a reservation that only exists because main moved (#15991 behind
     # #16005/#16009, #16096 behind #15976). A GREEN holder merges this tick and is never interrupted; the
     # pre-empted PR keeps its CI and regains main once main is green (it is behind then, so re-updated).
-    if holder is not None and fixes and holder not in fixes and not holder_is_fix and holder_state == "pending":
+    if holder is not None and pre and holder not in pre and holder not in fixes and holder_state == "pending":
         log(f"#{holder:>6} strict    reservation pre-empted: main is red and fix "
-            f"{', '.join(f'#{f}' for f in sorted(fixes))} is served first; main returns once green")
+            f"{', '.join(f'#{f}' for f in sorted(pre))} is served first; main returns once green")
         holder = None
     return holder, timed_out
 
@@ -4108,9 +4164,6 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
             main_health_checked = True
             if defer_recovered_main_red(gh, base, main_red, summary):
                 return
-        if current and state == "pending" and fixes and not fix and not view.get("fix"):
-            log(f"#{n:>6} strict    up to date, CI running: pre-empted by main-red fix — holds nothing until main is green")
-            continue
         if current and state == "pending":
             log(f"#{n:>6} strict    up to date, CI running: main reserved for it")
             summary["in_flight"] = True
