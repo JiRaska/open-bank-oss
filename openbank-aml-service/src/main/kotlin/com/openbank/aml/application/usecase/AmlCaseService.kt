@@ -16,9 +16,9 @@ import com.openbank.aml.domain.event.toCreatedEvent
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.CaseOrigin
-import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.micrometer.core.instrument.MeterRegistry
