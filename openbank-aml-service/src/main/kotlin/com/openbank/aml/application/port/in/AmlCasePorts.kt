@@ -35,7 +35,7 @@ data class CreateAmlCaseCommand(
      * The service whose authenticated machine identity opened the case, so a reader knows which
      * service [transactionId] belongs to. `null` for a staff-created case and every non-HTTP opener.
      */
-    val sourceService: String? = null,
+    val movementService: String? = null,
 )
 
 data class ListAmlCasesQuery(

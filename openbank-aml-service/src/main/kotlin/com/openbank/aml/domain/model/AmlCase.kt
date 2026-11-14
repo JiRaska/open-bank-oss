@@ -84,7 +84,7 @@ data class AmlCase(
      * [transactionId] is an id in THAT service. `null` for a manual (staff) case and for rows
      * written before V17, which cannot be backfilled.
      */
-    val sourceService: String? = null,
+    val movementService: String? = null,
 ) {
     /**
      * False while the owning party is not established: no party at all, or (rows from before a

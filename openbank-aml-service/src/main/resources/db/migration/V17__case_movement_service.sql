@@ -1,6 +1,6 @@
 -- #15939: which service opened an AML case. A rail stores ITS OWN id in transaction_id (a
 -- domestic/SEPA payment id, an FX conversion id), so a reader that looks the id up in
--- transaction-service finds nothing. source_service names the owning service, e.g.
+-- transaction-service finds nothing. movement_service names the owning service, e.g.
 -- `openbank-domestic-payment`. It is derived from the authenticated machine caller of
 -- POST /api/v1/aml/cases, never from the request body. NULL means a manual (staff) case, a case
 -- opened by aml-service itself, or a row written before this column existed.
@@ -12,7 +12,7 @@
 -- migration neither writes nor reads the column and is unaffected.
 --
 -- Rollback: roll the code back first (the entity maps the column), then
---   ALTER TABLE aml_cases DROP COLUMN source_service;
+--   ALTER TABLE aml_cases DROP COLUMN movement_service;
 -- and delete this file's row from flyway_schema_history. Data lost: the opener of every case
 -- created since this migration.
-ALTER TABLE aml_cases ADD COLUMN source_service VARCHAR(64);
+ALTER TABLE aml_cases ADD COLUMN movement_service VARCHAR(64);

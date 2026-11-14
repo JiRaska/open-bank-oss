@@ -25,11 +25,11 @@ data class CreateAmlCaseRequest(
     val alertDetail: String?,
     val matchedEntity: String?,
 ) {
-    fun toCommand(idempotencyKey: String, requestHash: String? = null, sourceService: String? = null) =
+    fun toCommand(idempotencyKey: String, requestHash: String? = null, movementService: String? = null) =
         CreateAmlCaseCommand(
             idempotencyKey = idempotencyKey,
             // From the authenticated caller (AmlCaseResource), never from the body.
-            sourceService = sourceService,
+            movementService = movementService,
             // Fixed here, not read from the request: a caller cannot claim another entry point's provenance.
             origin = CaseOrigin.REST,
             requestHash = requestHash,
@@ -101,7 +101,7 @@ data class AmlCaseResponse(
      * an id in that service (a payment or conversion id, not necessarily a ledger transaction).
      * `null` for a case opened by staff, by this service itself, or before this was recorded.
      */
-    val sourceService: String? = null,
+    val movementService: String? = null,
 )
 
 fun AmlCase.toResponse() = AmlCaseResponse(
@@ -126,5 +126,5 @@ fun AmlCase.toResponse() = AmlCaseResponse(
     updatedAt = updatedAt,
     requiresFourEyesDisposition = isPackMonitoringCase,
     partyResolved = partyEstablished,
-    sourceService = sourceService,
+    movementService = movementService,
 )

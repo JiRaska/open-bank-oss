@@ -79,7 +79,7 @@ class AmlCaseResource(
         // libs-runtime maps IllegalArgumentException to 400 (#526, #3624).
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
-        val sourceService = requireNamedMachineCaller(identity)
+        val movementService = requireNamedMachineCaller(identity)
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
         // Key namespaces this service's own jobs and consumers write (ADR-0371 pack evaluation, the
@@ -115,7 +115,7 @@ class AmlCaseResource(
 
         var created = false
         val amlCase = try {
-            amlCaseUseCase.createCase(request.toCommand(idempotencyKey, requestHash, sourceService)).also {
+            amlCaseUseCase.createCase(request.toCommand(idempotencyKey, requestHash, movementService)).also {
                 created =
                     true
             }
@@ -217,14 +217,14 @@ private val AML_CASE_CREATE_STAFF_ROLES = setOf("ROLE_OPERATOR", "ROLE_ADMIN", "
  * Keycloak client (ROLE_API only). Mirrors `service-aml-case-create-m2m` in aml_rest_ext.rego; the
  * two must list the same principals (`AmlCaseCreateCallerGuardTest` pins this set).
  */
-internal val AML_CASE_CREATE_SOURCE_SERVICES = mapOf(
+internal val AML_CASE_CREATE_MOVEMENT_SERVICES = mapOf(
     "service-account-openbank-domestic-payment" to "openbank-domestic-payment",
     "service-account-openbank-sepa-payment" to "openbank-sepa-payment",
     "service-account-openbank-sepa-instant" to "openbank-sepa-instant",
     "service-account-openbank-fx" to "openbank-fx-service",
 )
 
-internal val AML_CASE_CREATE_CALLERS: Set<String> = AML_CASE_CREATE_SOURCE_SERVICES.keys
+internal val AML_CASE_CREATE_CALLERS: Set<String> = AML_CASE_CREATE_MOVEMENT_SERVICES.keys
 
 /**
  * A caller that reached `createCase` through ROLE_API alone must be one of [AML_CASE_CREATE_CALLERS].
@@ -237,7 +237,7 @@ internal val AML_CASE_CREATE_CALLERS: Set<String> = AML_CASE_CREATE_SOURCE_SERVI
 internal fun requireNamedMachineCaller(identity: SecurityIdentity): String? {
     if (AML_CASE_CREATE_STAFF_ROLES.any(identity::hasRole) && ServiceAccountIdentity.isHumanStaff(identity)) return null
     return ServiceAccountIdentity.verifiedPrincipalName(identity)
-        ?.let(AML_CASE_CREATE_SOURCE_SERVICES::get)
+        ?.let(AML_CASE_CREATE_MOVEMENT_SERVICES::get)
         ?: throw ForbiddenException("caller is not a named AML case-open service")
 }
 

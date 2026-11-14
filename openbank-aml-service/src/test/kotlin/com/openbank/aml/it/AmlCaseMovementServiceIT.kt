@@ -28,7 +28,7 @@ import javax.sql.DataSource
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresRedisTestResource::class)
-class AmlCaseSourceServiceIT {
+class AmlCaseMovementServiceIT {
 
     @Inject
     lateinit var dataSource: DataSource
@@ -50,7 +50,7 @@ class AmlCaseSourceServiceIT {
     }
 
     private fun storedSource(caseId: String): String? = dataSource.connection.use { c ->
-        c.prepareStatement("select source_service from aml_cases where case_id = ?").use { ps ->
+        c.prepareStatement("select movement_service from aml_cases where case_id = ?").use { ps ->
             ps.setObject(1, UUID.fromString(caseId))
             ps.executeQuery().use { rs ->
                 check(rs.next()) { "no row for case $caseId" }
@@ -75,7 +75,7 @@ class AmlCaseSourceServiceIT {
             get("/api/v1/aml/cases/$caseId")
         } Then {
             statusCode(200)
-            body("sourceService", equalTo("openbank-domestic-payment"))
+            body("movementService", equalTo("openbank-domestic-payment"))
         }
     }
 
@@ -95,7 +95,7 @@ class AmlCaseSourceServiceIT {
             get("/api/v1/aml/cases/$caseId")
         } Then {
             statusCode(200)
-            body("sourceService", nullValue())
+            body("movementService", nullValue())
         }
     }
 }

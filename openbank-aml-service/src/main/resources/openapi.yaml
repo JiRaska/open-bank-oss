@@ -737,7 +737,7 @@ components:
             False while the owning party of the case is not established, for example a held payment
             whose rail could not name the debtor's party. The service resolves it from `accountId`
             afterwards; until then `partyId` does not identify a party.
-        sourceService:
+        movementService:
           type: string
           nullable: true
           maxLength: 64
