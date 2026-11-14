@@ -358,6 +358,7 @@ the same rule sepa-payment, domestic-payment and fx-service use.
   transaction, and a CRITICAL AML case is opened.
 - **REVIEW** (POTENTIAL_HIT at or below 0.85): the message stays `VALIDATED` (never released) and a
   HIGH case is opened for a human.
+- **Blank debtor or beneficiary name**: held in `VALIDATED` with a MEDIUM `PARTY_UNSCREENABLE` case. A blank free-text name never means "skip that side". Residual: the debtor name is the request's free-text field and is not read from the party record for `orderingCustomerAccountId`. swift has no party client yet, so that is a follow-up.
 - **sanctions-service unreachable** (after retry, timeout and circuit breaker): fails closed. The
   message stays `VALIDATED` and a MEDIUM `SCREENING_UNAVAILABLE` case is opened. An unknown or
   missing status parses as ESCALATED, which blocks.

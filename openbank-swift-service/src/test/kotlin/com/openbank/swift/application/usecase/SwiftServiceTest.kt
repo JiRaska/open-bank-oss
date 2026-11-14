@@ -306,6 +306,20 @@ class SwiftServiceTest {
     }
 
     @Test
+    fun `a blank ordering customer name holds the MT103 instead of skipping the debtor screen`(): Unit = runBlocking {
+        coEvery { repo.findByIdempotencyKey("idem-1") } returns null
+        coEvery { repo.save(match { it.status == SwiftStatus.VALIDATED }) } answers { firstArg() }
+        coEvery { repo.save(any()) } answers { firstArg() }
+
+        val result = serviceWithFlag.send(command(orderingCustomerName = "  "))
+
+        assertThat(result.status).isEqualTo(SwiftStatus.VALIDATED)
+        coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
+        coVerify(exactly = 0) { screeningPort.screen(any(), any(), any()) }
+        coVerify(exactly = 1) { amlCasePort.openCase(match { it.alertCode == "PARTY_UNSCREENABLE" }) }
+    }
+
+    @Test
     fun `sanctions-service unavailable fails closed - the MT103 stays VALIDATED`(): Unit = runBlocking {
         coEvery { repo.findByIdempotencyKey("idem-1") } returns null
         coEvery { repo.save(match { it.status == SwiftStatus.VALIDATED }) } answers { firstArg() }
@@ -503,6 +517,7 @@ class SwiftServiceTest {
         receiverBic: String = "IJKLMNOP",
         messageType: SwiftMessageType = SwiftMessageType.MT103,
         valueDate: String = "20260527",
+        orderingCustomerName: String? = "Alice",
     ) = SendSwiftCommand(
         idempotencyKey = "idem-1",
         messageType = messageType,
@@ -514,7 +529,7 @@ class SwiftServiceTest {
         amount = SwiftMessage.moneyOfMinorUnits(1000, "EUR"),
         orderingCustomerAccount = "DE89370400440532013000",
         orderingCustomerAccountId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-        orderingCustomerName = "Alice",
+        orderingCustomerName = orderingCustomerName,
         beneficiaryAccount = "GB33BUKB20201555555555",
         beneficiaryName = "Bob",
         remittanceInfo = "Invoice 1",

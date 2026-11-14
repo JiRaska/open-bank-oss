@@ -40,6 +40,7 @@ enum class SwiftScreeningVerdict {
  *  - BLOCK  → [SwiftScreeningVerdict.REJECT] + a CRITICAL AML case;
  *  - REVIEW → [SwiftScreeningVerdict.HOLD] + a HIGH AML case;
  *  - sanctions-service unreachable → [SwiftScreeningVerdict.HOLD] + a MEDIUM case (fail closed);
+ *  - a blank debtor or beneficiary name → [SwiftScreeningVerdict.HOLD] (never screened as "nobody");
  *  - CLEAR  → [SwiftScreeningVerdict.RELEASE].
  */
 @ApplicationScoped
@@ -50,10 +51,15 @@ class SwiftSanctionsScreening(
     private val log = Logger.getLogger(SwiftSanctionsScreening::class.java)
 
     suspend fun screen(message: SwiftMessage): SwiftScreeningVerdict {
-        val subjects = buildList {
-            message.orderingCustomerName?.takeIf { it.isNotBlank() }?.let { add(it to ScreeningRole.DEBTOR) }
-            add(message.beneficiaryName to ScreeningRole.CREDITOR)
+        // Fail closed on an unscreenable party: a blank name must never mean "skip that side".
+        val debtor = message.orderingCustomerName?.takeIf { it.isNotBlank() }
+        val creditor = message.beneficiaryName.takeIf { it.isNotBlank() }
+        if (debtor == null || creditor == null) {
+            log.warnf("SWIFT message %s has a blank party name; holding unscreened", message.id)
+            openCaseQuietly(message, AmlCaseSeverity.MEDIUM, ALERT_PARTY_UNSCREENABLE, "blank party name", null)
+            return SwiftScreeningVerdict.HOLD
         }
+        val subjects = listOf(debtor to ScreeningRole.DEBTOR, creditor to ScreeningRole.CREDITOR)
         val results = try {
             subjects.map { (name, role) ->
                 screeningPort.screen(name, role, "swift-${message.id}:${role.name.lowercase()}")
@@ -126,5 +132,6 @@ class SwiftSanctionsScreening(
     companion object {
         const val ALERT_SANCTIONS_HIT = "SANCTIONS_HIT"
         const val ALERT_SCREENING_UNAVAILABLE = "SCREENING_UNAVAILABLE"
+        const val ALERT_PARTY_UNSCREENABLE = "PARTY_UNSCREENABLE"
     }
 }
