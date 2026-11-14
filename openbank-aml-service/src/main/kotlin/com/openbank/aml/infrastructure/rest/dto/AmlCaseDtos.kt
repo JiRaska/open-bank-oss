@@ -9,6 +9,7 @@ import com.openbank.aml.application.port.`in`.UpdateAmlDecisionCommand
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.AmlRiskLevel
+import com.openbank.aml.domain.model.CaseOrigin
 import com.openbank.aml.domain.model.ScreeningType
 import java.time.Instant
 import java.util.UUID
@@ -26,6 +27,8 @@ data class CreateAmlCaseRequest(
 ) {
     fun toCommand(idempotencyKey: String, requestHash: String? = null) = CreateAmlCaseCommand(
         idempotencyKey = idempotencyKey,
+        // Fixed here, not read from the request: a caller cannot claim another entry point's provenance.
+        origin = CaseOrigin.REST,
         requestHash = requestHash,
         partyId = partyId,
         accountId = accountId,
@@ -84,12 +87,18 @@ data class AmlCaseResponse(
      * it, so a client needs to know which flow to offer before the officer has written a rationale.
      */
     val requiresFourEyesDisposition: Boolean = false,
+    /**
+     * False while the owning party is not established. [partyId] is then not a party: it is the nil
+     * UUID, or on a case from before a missing party could be stored the account id. A resolved case
+     * answers `true` and its real party.
+     */
+    val partyResolved: Boolean = true,
 )
 
 fun AmlCase.toResponse() = AmlCaseResponse(
     id = id,
     idempotencyKey = idempotencyKey,
-    partyId = partyId,
+    partyId = partyId ?: AmlCase.UNRESOLVED_PARTY_WIRE_ID,
     accountId = accountId,
     transactionId = transactionId,
     customerReference = customerReference,
@@ -107,4 +116,5 @@ fun AmlCase.toResponse() = AmlCaseResponse(
     createdAt = createdAt,
     updatedAt = updatedAt,
     requiresFourEyesDisposition = isPackMonitoringCase,
+    partyResolved = partyEstablished,
 )

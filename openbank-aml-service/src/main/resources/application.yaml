@@ -172,6 +172,31 @@ mp:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # ADR-0374 D13: a payment rail writes PAYMENT_HELD in the transaction that parks a payment;
+      # this channel opens the hold's one case from it. It reads the rails' own event topics (one
+      # rail today; a rail that adopts the admission chain adds its topic here) and ignores every
+      # other event type on them. OFF by default: it is switched on with the chain of the first
+      # rail, in the same change that grants this service Read on that rail's topic.
+      # `earliest`, NESTED so the connector reads it (#686): a hold raised before this group first
+      # joined must still get its case, and everything older on the topic is ignored by type.
+      payment-held-in:
+        enabled: ${AML_PAYMENT_HELD_CONSUMER_ENABLED:false}
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.aml.payment-held-in
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+        connector: smallrye-kafka
+        topic: openbank.domestic.payment.events
+        group:
+          id: openbank-aml-service
+        auto:
+          offset:
+            reset: earliest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%prod":
   quarkus:
     http:
