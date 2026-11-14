@@ -4,7 +4,10 @@
 
 package com.openbank.delegation.infrastructure.rest
 
+import com.openbank.delegation.application.port.out.ApprovalSubmissionScope
+import com.openbank.delegation.application.port.out.DomesticSubmissionKey
 import com.openbank.delegation.application.usecase.BusinessSigningService
+import com.openbank.delegation.application.usecase.DomesticSubmissionClaimCommand
 import com.openbank.delegation.application.usecase.PaymentApprovalCommand
 import com.openbank.delegation.application.usecase.SigningPayloadCodec
 import com.openbank.delegation.domain.model.ApprovalKind
@@ -12,7 +15,11 @@ import com.openbank.delegation.domain.model.ApprovalStatus
 import com.openbank.delegation.domain.model.SignerGroup
 import com.openbank.delegation.domain.model.SigningAmount
 import com.openbank.delegation.infrastructure.rest.dto.ApprovalRequestResponse
+import com.openbank.delegation.infrastructure.rest.dto.ApprovalSubmissionLookupBody
+import com.openbank.delegation.infrastructure.rest.dto.ApprovalSubmissionLookupResponse
 import com.openbank.delegation.infrastructure.rest.dto.CreatePaymentApprovalRequest
+import com.openbank.delegation.infrastructure.rest.dto.DomesticSubmissionClaimBody
+import com.openbank.delegation.infrastructure.rest.dto.DomesticSubmissionClaimResponse
 import com.openbank.delegation.infrastructure.rest.dto.EvaluateRequest
 import com.openbank.delegation.infrastructure.rest.dto.EvaluationResponse
 import com.openbank.delegation.infrastructure.rest.dto.ListEnvelope
@@ -29,9 +36,12 @@ import com.openbank.delegation.infrastructure.rest.dto.SignerGroupBody
 import com.openbank.delegation.infrastructure.rest.dto.SigningPolicyResponse
 import com.openbank.delegation.infrastructure.rest.dto.TrustedPayeeResponse
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
+import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.PUT
@@ -42,6 +52,9 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
+import org.eclipse.microprofile.openapi.annotations.media.Content
+import org.eclipse.microprofile.openapi.annotations.media.Schema
+import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.time.Duration
 import java.util.UUID
@@ -58,7 +71,12 @@ import java.util.UUID
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed("ROLE_API")
 @Suppress("TooManyFunctions")
-class BusinessSigningResource(private val service: BusinessSigningService, private val codec: SigningPayloadCodec) {
+class BusinessSigningResource(
+    private val service: BusinessSigningService,
+    private val codec: SigningPayloadCodec,
+    private val identity: SecurityIdentity,
+    private val requestJson: BusinessSigningRequestJson,
+) {
 
     @POST
     @Path("/signing/evaluate")
@@ -173,8 +191,21 @@ class BusinessSigningResource(private val service: BusinessSigningService, priva
         summary = "Hold a payment, standing order or SDD mandate for co-signature (the initiator's consumed SCA " +
             "is the first signature)",
     )
-    suspend fun createPayment(@PathParam("entityId") entityId: UUID, body: CreatePaymentApprovalRequest?): Response {
-        requireNotNull(body) { "request body is required" }
+    suspend fun createPayment(
+        @PathParam("entityId") entityId: UUID,
+        @RequestBody(
+            required = true,
+            content = [
+                Content(
+                    mediaType = MediaType.APPLICATION_JSON,
+                    schema = Schema(implementation = CreatePaymentApprovalRequest::class),
+                ),
+            ],
+        )
+        request: String?,
+    ): Response {
+        val body = requestJson.readApproval(request)
+        if (body.submissionCorrelation != null || body.submissionKeyDigest != null) requireVerifiedEdge()
         val kind = heldKind(body.kind)
         val initiator = requireNotNull(body.initiatorSignature) { "initiatorSignature is required" }
         val payload = requireNotNull(body.payload) { "payload is required" }
@@ -183,8 +214,7 @@ class BusinessSigningResource(private val service: BusinessSigningService, priva
         val amount = if (sdd && payload["amount"] == null) {
             null
         } else {
-            MoneyBody(payload["amount"]?.toString()?.toBigDecimalOrNull(), payload["currency"] as? String)
-                .toDomain("payload")
+            paymentAmount(payload, modeBound = body.submissionKeyDigest != null)
         }
         val extras = if (sdd) {
             mapOf(
@@ -221,9 +251,108 @@ class BusinessSigningResource(private val service: BusinessSigningService, priva
                 ttl = body.expiresInSeconds?.let { Duration.ofSeconds(it) },
                 kind = kind,
                 summaryExtras = extras,
+                submissionCorrelation = body.submissionCorrelation,
+                submissionKey = body.submissionKeyDigest?.let { DomesticSubmissionKey(it, debitAccountId(payload)) },
             ),
         )
         return Response.status(Response.Status.CREATED).entity(ApprovalRequestResponse.from(request, codec)).build()
+    }
+
+    @POST
+    @Path("/approval-requests/submissions/claim")
+    @Authorize(action = "delegation.signing.approval.create", resource = "#entityId")
+    @Operation(summary = "Bind the routing mode of a domestic submission before authentication or dispatch")
+    suspend fun claimDomesticSubmission(
+        @PathParam("entityId") entityId: UUID,
+        @RequestBody(
+            required = true,
+            content = [
+                Content(
+                    mediaType = MediaType.APPLICATION_JSON,
+                    schema = Schema(implementation = DomesticSubmissionClaimBody::class),
+                ),
+            ],
+        )
+        request: String?,
+    ): Response {
+        requireVerifiedEdge()
+        val body = requestJson.readClaim(request)
+        val payload = requireNotNull(body.payload) { "payload is required" }
+        require(payload["rail"] == "DOMESTIC") { "payload.rail must be DOMESTIC" }
+        val railRequest = requireNotNull(payload["railRequest"] as? Map<*, *>) {
+            "payload.railRequest must be an object"
+        }
+        val debtor = debitAccountId(payload)
+        val amount = paymentAmount(payload, modeBound = true)
+        require(railRequest["debtorAccountId"] == debtor.toString()) { "rail request debit account must match payload" }
+        require(railRequest["amount"]?.toString()?.toBigDecimalOrNull()?.compareTo(amount.amount) == 0) {
+            "rail request amount must match payload"
+        }
+        val railCurrency = (railRequest["currency"] as? String)?.trim()?.uppercase()
+        require(railCurrency == amount.currency) { "rail request currency must match payload" }
+        val scope = ApprovalSubmissionScope(
+            entityId,
+            requireNotNull(body.initiatorPartyId) { "initiatorPartyId is required" },
+            requireNotNull(body.submissionCorrelation) { "submissionCorrelation is required" },
+            DomesticSubmissionKey(
+                requireNotNull(body.submissionKeyDigest) { "submissionKeyDigest is required" },
+                debtor,
+            ),
+        )
+        val mode = service.claimDomesticSubmission(
+            DomesticSubmissionClaimCommand(
+                scope,
+                amount,
+                requireNotNull(payload["creditorIban"] as? String) { "payload.creditorIban is required" },
+                payload,
+                body.enforceApprovalPolicy ?: true,
+            ),
+        )
+        return Response.ok(DomesticSubmissionClaimResponse(mode.name)).header("Cache-Control", "no-store").build()
+    }
+
+    @POST
+    @Path("/approval-requests/submissions/lookup")
+    @Authorize(action = "delegation.signing.approval.read", resource = "#entityId")
+    @Operation(summary = "Resolve a domestic approval submission receipt for customer edge")
+    suspend fun lookupSubmission(
+        @PathParam("entityId") entityId: UUID,
+        body: ApprovalSubmissionLookupBody?,
+    ): Response {
+        requireVerifiedEdge()
+        requireNotNull(body) { "request body is required" }
+        require((body.submissionKeyDigest == null) == (body.debtorAccountId == null)) {
+            "submissionKeyDigest and debtorAccountId must be supplied together"
+        }
+        val scope = ApprovalSubmissionScope(
+            entityId,
+            requireNotNull(body.initiatorPartyId) { "initiatorPartyId is required" },
+            requireNotNull(body.submissionCorrelation) { "submissionCorrelation is required" },
+            body.submissionKeyDigest?.let { DomesticSubmissionKey(it, checkNotNull(body.debtorAccountId)) },
+        )
+        val state = service.lookupSubmission(scope)
+        val response = if (state == null) {
+            Response.status(Response.Status.NOT_FOUND)
+        } else {
+            Response.ok(ApprovalSubmissionLookupResponse(state.approvalId, state.status.name, state.releaseRef))
+        }
+        return response.header("Cache-Control", "no-store").build()
+    }
+
+    private fun paymentAmount(payload: Map<String, Any?>, modeBound: Boolean): SigningAmount {
+        val currency = payload["currency"] as? String
+        return MoneyBody(
+            payload["amount"]?.toString()?.toBigDecimalOrNull(),
+            if (modeBound) currency?.trim() else currency,
+        ).toDomain("payload")
+    }
+
+    private fun debitAccountId(payload: Map<String, Any?>): UUID = UUID.fromString(
+        requireNotNull(payload["debtorAccountId"] as? String) { "payload.debtorAccountId is required" },
+    )
+
+    private fun requireVerifiedEdge() {
+        if (ServiceAccountIdentity.verifiedClientId(identity) != "openbank-edge") throw ForbiddenException()
     }
 
     @GET
@@ -295,12 +424,29 @@ class BusinessSigningResource(private val service: BusinessSigningService, priva
     @Path("/approval-requests/{approvalId}/release-claim")
     @Authorize(action = "delegation.signing.approval.claim", resource = "#entityId")
     @Operation(summary = "Single-use claim of an APPROVED payment: the token and frozen payload, once; 409 after")
-    suspend fun claim(
+    suspend fun claim(@PathParam("entityId") entityId: UUID, @PathParam("approvalId") approvalId: UUID): Response =
+        claimResponse(entityId, approvalId, domesticRoute = false)
+
+    @POST
+    @Path("/approval-requests/{approvalId}/domestic-release-claim")
+    @Authorize(action = "delegation.signing.approval.claim", resource = "#entityId")
+    @Operation(summary = "Single-use release claim for a domestic payment")
+    suspend fun claimDomestic(
         @PathParam("entityId") entityId: UUID,
         @PathParam("approvalId") approvalId: UUID,
-    ): ReleaseClaimResponse {
-        val claim = service.claimRelease(entityId, approvalId)
-        return ReleaseClaimResponse(claim.claimToken, codec.parseObject(claim.payload))
+    ): Response {
+        requireVerifiedEdge()
+        return claimResponse(entityId, approvalId, domesticRoute = true)
+    }
+
+    private suspend fun claimResponse(entityId: UUID, approvalId: UUID, domesticRoute: Boolean): Response {
+        val claim = service.claimRelease(entityId, approvalId, domesticRoute)
+        val body = ReleaseClaimResponse(
+            claim.claimToken,
+            codec.parseObject(claim.payload),
+            claim.originalSubmissionKeyDigest,
+        )
+        return Response.ok(body).header("Cache-Control", "no-store").build()
     }
 
     @POST

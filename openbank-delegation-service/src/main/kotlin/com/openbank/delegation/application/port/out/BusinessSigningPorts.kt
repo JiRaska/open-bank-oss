@@ -80,6 +80,37 @@ sealed interface AppliedChange {
 
 data class Transition(val next: ApprovalRequest, val events: List<DomainEvent>, val change: AppliedChange? = null)
 
+private val SUBMISSION_DIGEST = Regex("[0-9a-f]{64}")
+
+data class DomesticSubmissionKey(val digest: String, val debitAccountId: UUID) {
+    init {
+        require(SUBMISSION_DIGEST.matches(digest)) { "submissionKeyDigest must be a lowercase SHA-256 digest" }
+    }
+}
+
+data class ApprovalSubmissionScope(
+    val entityPartyId: UUID,
+    val initiatorPartyId: UUID,
+    val correlation: String,
+    val key: DomesticSubmissionKey? = null,
+) {
+    init {
+        require(SUBMISSION_DIGEST.matches(correlation)) { "submissionCorrelation must be a lowercase SHA-256 digest" }
+    }
+}
+
+enum class DomesticSubmissionMode { DIRECT, HELD }
+
+data class DomesticSubmissionBinding(
+    val scope: ApprovalSubmissionScope,
+    val payloadSha256: String,
+    val mode: DomesticSubmissionMode,
+)
+
+data class ApprovalSubmissionState(val approvalId: UUID, val status: ApprovalStatus, val releaseRef: String?)
+
+class ApprovalSignatureChallengeConflict : RuntimeException("The SCA challenge already signed an approval")
+
 @Suppress("TooManyFunctions")
 interface BusinessSigningRepository {
     suspend fun findPolicy(entityPartyId: UUID): SigningPolicy?
@@ -92,6 +123,21 @@ interface BusinessSigningRepository {
 
     /** Inserts the request, its signatures and events in one transaction. */
     suspend fun create(request: ApprovalRequest, events: List<DomainEvent>)
+
+    /** Commits the receipt with the approval, its signature and its events. False when another receipt won. */
+    suspend fun createWithSubmission(
+        request: ApprovalRequest,
+        events: List<DomainEvent>,
+        scope: ApprovalSubmissionScope,
+    ): Boolean
+
+    /** Exact scoped lookup of the retained receipt and current lifecycle fields. */
+    suspend fun findSubmission(scope: ApprovalSubmissionScope): ApprovalSubmissionState?
+
+    suspend fun findSubmissionBinding(key: DomesticSubmissionKey): DomesticSubmissionBinding?
+
+    /** Atomically inserts a binding or returns the committed binding that won the same key. */
+    suspend fun bindSubmission(candidate: DomesticSubmissionBinding): DomesticSubmissionBinding
 
     suspend fun find(entityPartyId: UUID, id: UUID): ApprovalRequest?
 
@@ -117,6 +163,8 @@ interface BusinessSigningRepository {
      * expired`. True for exactly one caller, however many race.
      */
     suspend fun claimRelease(entityPartyId: UUID, id: UUID, claimToken: UUID, now: Instant): Boolean
+
+    suspend fun findDomesticReleaseKeyDigest(entityPartyId: UUID, approvalId: UUID): String?
 
     suspend fun findExpirable(now: Instant, limit: Int): List<ApprovalRequest>
 }
