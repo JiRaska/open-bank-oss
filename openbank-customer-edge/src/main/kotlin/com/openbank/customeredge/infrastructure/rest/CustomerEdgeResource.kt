@@ -242,7 +242,7 @@ class CustomerEdgeResource(
     // payment's outcome in delegation-service, not confirmed here on the rail's 2xx. Default off =
     // the legacy create + confirm-on-2xx, byte for byte. Turn on only after the delegation outcome
     // consumer and the rail's bound route are live (switch-on order in the threat model).
-    @ConfigProperty(name = "openbank.edge.delegated-payment-bound-create.enabled", defaultValue = "false")
+    @field:ConfigProperty(name = "openbank.edge.delegated-payment-bound-create.enabled", defaultValue = "false")
     var delegatedPaymentBoundCreateEnabled: Boolean = false
 
     /** Back-off between bound-create retries; a seam so tests do not sleep. */
