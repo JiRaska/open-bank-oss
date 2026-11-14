@@ -8,7 +8,9 @@ import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.AmlRiskLevel
 import com.openbank.aml.domain.model.CaseOrigin
+import com.openbank.aml.domain.model.HoldDisposition
 import com.openbank.aml.domain.model.ScreeningType
+import com.openbank.libs.governance.StaffIdentity
 import java.util.UUID
 
 data class CreateAmlCaseCommand(
@@ -57,9 +59,32 @@ data class UpdateAmlDecisionCommand(
     val fourEyesProposalId: UUID? = null,
 )
 
+/** One analyst's proposal, or a different analyst's confirmation, of a held payment's case decision. */
+data class HoldDecisionCommand(
+    val caseId: UUID,
+    val outcome: HoldDisposition,
+    val reason: String,
+    /** The authenticated caller (account, person, second factor) from the verified token, never the request. */
+    val analyst: StaffIdentity,
+)
+
+/** The proposer of a held payment's pending decision withdraws it. */
+data class WithdrawHoldDecisionCommand(val caseId: UUID, val analyst: StaffIdentity)
+
 interface AmlCaseUseCase {
     suspend fun createCase(command: CreateAmlCaseCommand): AmlCase
     suspend fun getCase(caseId: UUID): AmlCase
     suspend fun listCases(query: ListAmlCasesQuery): List<AmlCase>
     suspend fun updateDecision(command: UpdateAmlDecisionCommand): AmlCase
+}
+
+interface HoldDecisionUseCase {
+    /** ADR-0374 point 3: proposes a held payment's decision. Changes no status and emits no event. */
+    suspend fun proposeHoldDecision(command: HoldDecisionCommand): AmlCase
+
+    /** Confirms the pending proposal as a different analyst; the only way such a case is decided. */
+    suspend fun confirmHoldDecision(command: HoldDecisionCommand): AmlCase
+
+    /** The proposing person withdraws the pending proposal; emits no event. */
+    suspend fun withdrawHoldDecision(command: WithdrawHoldDecisionCommand): AmlCase
 }

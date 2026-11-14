@@ -241,6 +241,12 @@ server and a broker with access control.
 
 ### Delivery check
 
+Delivered for point 3 in openbank-aml-service (#16003): a case of origin `PAYMENT_HOLD_INTAKE`
+reaches CLEARED or BLOCKED only by a proposal of one analyst and a confirmation by a different
+one restating its outcome (CLEAR or BLOCK) and reason; the status-changed event is written only
+on the confirmation. Proved by `HoldDecisionFourEyesIT` (real HTTP, real Postgres). The OPA
+grants for `amlCase.holdDecision.propose` / `.confirm` are a separate governance change.
+
 Not implemented in this revision:
 
 ```bash

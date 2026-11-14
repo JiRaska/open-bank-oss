@@ -137,6 +137,19 @@ Content-Type: application/json
 - Případ otevřený vyhodnocením balíčku (nikoli případ `TRANSACTION_MONITORING` otevřený platebním kanálem) lze zde pouze převést do `UNDER_REVIEW`; uzavření nebo eskalace vrací 409 a jde přes návrh dispozice (níže). Volajícímu bez `ROLE_COMPLIANCE` takový případ vrací 404 a v seznamu chybí. Každá odpověď případu nese `requiresFourEyesDisposition` (true právě u takového případu), aby klient věděl, jaký postup nabídnout, dřív než officer napíše zdůvodnění.
 - **Vedlejší efekty:** přechod + událost `aml.case.status_changed.v1` se commitují atomicky přes outbox.
 
+### Rozhodnutí o případu pozdržené platby (čtyři oči, ADR-0374 bod 3)
+
+Případ, který otevřel příjem pozdržených plateb (`origin = PAYMENT_HOLD_INTAKE`), svým rozhodnutím pozdrženou platbu uvolní nebo zamítne, proto o něm rozhodují dva analytici. `PUT /decision` u takového případu odmítne `CLEARED` a `BLOCKED` kódem 409 a odkáže na cesty níže; `UNDER_REVIEW` a `ESCALATED` zůstávají jednokrokové.
+
+| Metoda | Cesta | Akce | Výsledek |
+|---|---|---|---|
+| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/proposal` | `amlCase.holdDecision.propose` | 201. Tělo `{"outcome":"CLEAR"\|"BLOCK","reason":"..."}`. Zaznamená, kdo co navrhl, vázáno na osobu navrhovatele (claim `person_id`), platí 24 h; stav se nemění, žádná událost. Nový návrh je odmítnut (409), dokud jiný čeká; může následovat po stažení nebo vypršení. |
+| `GET` | `/api/v1/aml/cases/{caseId}/hold-decision/proposal` | `amlCase.read` | Čekající návrh; 404, pokud žádný není. |
+| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/withdrawal` | `amlCase.holdDecision.withdraw` | 200 s návrhem. Stáhnout jej může jen osoba navrhovatele (z kteréhokoli jejího účtu), jinak 409. Žádná událost. |
+| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/confirmation` | `amlCase.holdDecision.confirm` | 200 s případem. Volající musí být jiná OSOBA než navrhovatel (`person_id`, takže druhý účet navrhovatele je odmítnut), mít druhý faktor (`amr` obsahuje `otp`) a zopakovat čekající, nevypršený výsledek i důvod, jinak 409. Převede případ do `CLEARED` (CLEAR) nebo `BLOCKED` (BLOCK) a zapíše `aml.case.status_changed.v1` s `origin`. |
+
+Oba zápisy vyžadují `ROLE_COMPLIANCE` a token člověka z řad zaměstnanců: servisní účet s touto rolí dostane 403. Navrhovatel i potvrzovatel jsou autentizovaní volající, nikdy pole těla požadavku. Pravidlo je v agregátu `AmlCase`, takže žádná cesta nerozhodne takový případ jedním analytikem. Všechny ostatní případy si zachovávají své cesty, odpovědi i události beze změny.
+
 ## Model chyb
 
 Jednotně přes `openbank-libs` `ApiError` (`{ correlationId, status, code, message }`):

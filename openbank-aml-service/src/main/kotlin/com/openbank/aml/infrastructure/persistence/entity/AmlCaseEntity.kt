@@ -83,4 +83,32 @@ class AmlCaseEntity : PanacheEntity() {
     /** When the resolution sweep last tried and failed to find this case's party; orders the sweep. */
     @Column(name = "party_resolution_attempted_at")
     var partyResolutionAttemptedAt: Instant? = null
+
+    // V17, ADR-0374 point 3: the four-eyes proposal of a held payment's case. Nullable and written
+    // only by the hold-decision routes; a pod without these mappings never reads or writes them.
+    @Column(name = "hold_proposal_outcome", length = 16)
+    var holdProposalOutcome: String? = null
+
+    @Column(name = "hold_proposal_reason")
+    var holdProposalReason: String? = null
+
+    @Column(name = "hold_proposed_by")
+    var holdProposedBy: String? = null
+
+    @Column(name = "hold_proposed_at")
+    var holdProposedAt: Instant? = null
+
+    // V18: the proposer's PERSON (four-eyes compares persons, not accounts), the proposal's expiry,
+    // and its withdrawal by the proposer.
+    @Column(name = "hold_proposer_person_id", length = 64)
+    var holdProposerPersonId: String? = null
+
+    @Column(name = "hold_proposal_expires_at")
+    var holdProposalExpiresAt: Instant? = null
+
+    @Column(name = "hold_proposal_withdrawn_by")
+    var holdProposalWithdrawnBy: String? = null
+
+    @Column(name = "hold_proposal_withdrawn_at")
+    var holdProposalWithdrawnAt: Instant? = null
 }
