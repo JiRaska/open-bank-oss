@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.14.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.14.0...admin-ui-v4.14.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **admin-ui:** override vulnerable nested qs and minimatch ([#16100](https://github.com/JiRaska/open-bank-oss/issues/16100)) ([765cd4c](https://github.com/JiRaska/open-bank-oss/commit/765cd4c20ea08f83831e5107a38a23aebf33b3ac))
+
 ## [4.14.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.13.0...admin-ui-v4.14.0) (2026-11-14)
 
 

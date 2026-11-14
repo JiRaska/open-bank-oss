@@ -15,6 +15,7 @@ import com.openbank.delegation.domain.model.SpendDecision
 import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.delegation.domain.model.SpendReservationOperationType
 import com.openbank.delegation.domain.model.SpendReservationState
+import com.openbank.delegation.domain.model.SpendSettlementTransition
 import com.openbank.delegation.domain.model.SpendWindow
 import com.openbank.delegation.infrastructure.persistence.entity.DelegationGrantEntity
 import com.openbank.delegation.infrastructure.persistence.entity.SpendReservationEntity
@@ -113,10 +114,20 @@ class SpendReservationRepositoryImpl(
      * update bypasses the persistence context, so a `find` in the same session may legitimately
      * answer with the stale snapshot. The two fields the update changes are the two this knows.
      */
-    override suspend fun settle(
+    /**
+     * The compare-and-set, from the state the domain transition names. Only
+     * [SpendSettlementTransition.RELEASE_RETURNED_AFTER_CONFIRM] starts anywhere but RESERVED, and
+     * only `PaymentOutcomeSettlement.decide` produces it (for a RETURNED payment).
+     *
+     * Exactly one UPDATE matches the expected state; the loser counts zero rows. The returned
+     * aggregate is DERIVED from the pre-update row rather than re-read: a bulk JPQL update bypasses
+     * the persistence context, so a `find` in the same session may legitimately answer with the
+     * stale snapshot. The two fields the update changes are the two this knows.
+     */
+    override suspend fun applyTransition(
         grantId: UUID,
         reservationId: UUID,
-        target: SpendReservationState,
+        transition: SpendSettlementTransition,
         settledAt: OffsetDateTime,
         auditEvent: (SpendReservation) -> DomainEvent,
     ): SpendReservation? = Panache.withTransaction {
@@ -133,18 +144,33 @@ class SpendReservationRepositoryImpl(
                             } else {
                                 update(
                                     "state = ?1, settledAt = ?2 where id = ?3 and grantId = ?4 and state = ?5",
-                                    target,
+                                    transition.to,
                                     settledAt,
                                     reservationId,
                                     grantId,
-                                    SpendReservationState.RESERVED,
+                                    transition.from,
                                 ).flatMap { count ->
                                     if (count > 0L) {
-                                        val settled = before.toDomain().copy(state = target, settledAt = settledAt)
+                                        val settled = before.toDomain().copy(
+                                            state = transition.to,
+                                            settledAt = settledAt,
+                                        )
                                         // The CAS won, so the settlement happened: audit it inside
                                         // this transaction. The losing side changed nothing and
                                         // reaches only the null branch below (ADR-0249 D4, #5728).
-                                        appendStateEvent(settled, lockedGrant.toDomain())
+                                        // The state stream carries exactly two snapshots per
+                                        // reservation, RESERVED (v1) and ONE terminal (v2); its
+                                        // consumers refuse a second, different v2 as a projection
+                                        // conflict. RETURNED releasing an already CONFIRMED row
+                                        // (edge-confirmed before the edge switch) therefore writes
+                                        // no snapshot: the row and the SpendReleased audit event
+                                        // record the release (ADR-0249 D3 amendment).
+                                        val snapshot = if (transition.from == SpendReservationState.RESERVED) {
+                                            appendStateEvent(settled, lockedGrant.toDomain())
+                                        } else {
+                                            Uni.createFrom().voidItem()
+                                        }
+                                        snapshot
                                             .flatMap { appendAuditEvent(auditEvent(settled)) }
                                             .replaceWith(settled)
                                     } else {
