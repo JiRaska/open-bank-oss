@@ -21,6 +21,8 @@ class CustomerSafeReasonTest {
         DomesticRejectReason.SANCTIONS_HIT,
         DomesticRejectReason.AML_HOLD,
         DomesticRejectReason.FRAUD_SUSPECTED,
+        // The neutral stand-in for those three on the customer edge reads as neutrally as they do.
+        DomesticRejectReason.DECLINED,
     )
 
     /**
