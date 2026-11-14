@@ -75,3 +75,7 @@ a fleet-wide runtime upgrade. Original histories gate forward replay; new histor
 must not be assumed readable by the old SDK.
 
 `TopicProducers` attributes `openbank.accounts.account.status-changed` and `openbank.accounts.savings-withdrawal.approved` to account-service (#9073); audit-service and analytics-sink subscribe to both before the producer switches.
+
+## Czech domestic account to IBAN
+
+`CzechDomesticIban.fromAccountNumber(accountNumber, bankCode)` in `openbank-libs-domain` (package `account`) converts a Czech account number (`[prefix-]base`) and a four-digit bank code into an ISO 13616 IBAN (`CZkk` + bank code + prefix zero-padded to 6 digits + base padded to 10 digits, mod-97 check digits). Spaces are ignored. Non-numeric input, a prefix over 6 or a base over 10 digits, an empty side of the dash, or more than one dash returns `null`, never an exception. It checks shape and check digits only, not that the account exists or that the bank code is in the CNB register. customer-edge uses it for domestic payments.

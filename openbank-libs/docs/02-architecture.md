@@ -38,3 +38,7 @@ Kořenový build používá Gradle subprojekty. Služby zpravidla deklarují `im
 ## Service-account and interactive caller identity
 
 `ServiceAccountIdentity` in libs-runtime checks a machine token's verified JWT subject, `azp` client id and matching Keycloak `preferred_username`. Service guards compare only the resulting client-bound service-account identity with their endpoint-specific allowlist. Staff-role shortcuts use `isHumanStaff`, which requires a verified user JWT from one of the realm's interactive-only clients and excludes service-account usernames. Neither role nor principal name alone establishes the caller.
+
+## Český domácí účet na IBAN
+
+`CzechDomesticIban.fromAccountNumber(accountNumber, bankCode)` v `openbank-libs-domain` (balíček `account`) převádí české číslo účtu (`[předčíslí-]základ`) a čtyřmístný kód banky na IBAN podle ISO 13616 (`CZkk` + kód banky + předčíslí doplněné nulami na 6 číslic + základ doplněný na 10 číslic, kontrolní číslice mod 97). Mezery se ignorují. Nečíselný vstup, předčíslí delší než 6 nebo základ delší než 10 číslic, prázdná část kolem pomlčky nebo více pomlček vrací `null`, nikdy výjimku. Funkce ověřuje jen tvar a kontrolní číslice, ne existenci účtu ani kód banky v číselníku ČNB. Používá ji customer-edge pro domácí platby.

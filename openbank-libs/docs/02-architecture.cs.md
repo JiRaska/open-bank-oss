@@ -67,3 +67,7 @@ Sdílená tabulka `TopicProducers` v `openbank-libs-domain` přiřazuje topik `o
 `TopicProducers` přiřazuje `openbank.accounts.account.status-changed` a `openbank.accounts.savings-withdrawal.approved` službě account-service (#9073); audit-service a analytics-sink je odebírají dřív, než producent přepne.
 
 `TopicProducers` také přiřazuje topik `openbank.tpp.registry.event` službě tpp-registry-service, takže audit-service může označit změny registru TPP (registrace, zařazení na blacklist), které zapisuje do auditní stopy.
+
+## Český domácí účet na IBAN
+
+`CzechDomesticIban.fromAccountNumber(accountNumber, bankCode)` v `openbank-libs-domain` (balíček `account`) převádí české číslo účtu (`[předčíslí-]základ`) a čtyřmístný kód banky na IBAN podle ISO 13616 (`CZkk` + kód banky + předčíslí doplněné nulami na 6 číslic + základ doplněný na 10 číslic, kontrolní číslice mod 97). Mezery se ignorují. Nečíselný vstup, předčíslí delší než 6 nebo základ delší než 10 číslic, prázdná část kolem pomlčky nebo více pomlček vrací `null`, nikdy výjimku. Funkce ověřuje jen tvar a kontrolní číslice, ne existenci účtu ani kód banky v číselníku ČNB. Používá ji customer-edge pro domácí platby.
