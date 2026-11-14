@@ -247,8 +247,8 @@ def findings(
                 "report a vacuous pass over zero subjects"
             ],
             0,
-            unenforced,
-            shared_notes,
+            [],
+            [],
         )
     # A pair is a subject only if its resource type can still be offered. A type that cannot be
     # offered needs no enforcer: nothing can create a grant that would reach one.
