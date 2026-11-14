@@ -371,6 +371,9 @@ agents:
     - tier: write_proposal
       resources:
       - github-pr
+      base_refs:
+      - main
+      - qualification/flaky-test-hunter
     deny:
     - tier: write
       resources:

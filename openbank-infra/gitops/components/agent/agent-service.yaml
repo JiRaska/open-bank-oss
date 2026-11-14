@@ -43,7 +43,7 @@ spec:
       annotations:
         # Roll the pod when the OPA policy bundle changes (subPath mounts don't hot-reload).
         # Must match agent-opa-bundle's openbank.tech/policy-checksum (CI verifies, no drift).
-        openbank.tech/policy-checksum: "7bca01b25f4f709b"
+        openbank.tech/policy-checksum: "cd34102b76de7ad7"
     spec:
       # ADR-0177 Phase 1: workload identity pilot. The projected SA token
       # (volume below) is what Keycloak's 'kubernetes' IdP exchanges; the

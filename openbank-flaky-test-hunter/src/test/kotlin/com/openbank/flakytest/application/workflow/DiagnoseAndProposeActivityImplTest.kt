@@ -13,6 +13,7 @@ import com.openbank.flakytest.domain.model.FindingStatus
 import com.openbank.flakytest.domain.model.FlakyTestCheckType
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.infrastructure.config.FlakyTestHunterConfig
+import com.openbank.flakytest.infrastructure.config.WriterBaseRef
 import com.openbank.flakytest.infrastructure.policy.PrPathDecision
 import com.openbank.flakytest.infrastructure.policy.PrPathGateVocabulary
 import com.openbank.flakytest.infrastructure.policy.PrPathPolicyGate
@@ -55,6 +56,7 @@ class DiagnoseAndProposeActivityImplTest {
         every { githubToken() } returns Optional.empty()
         every { llmGatewayUrl() } returns "http://litellm.ai-platform:4000"
         every { repoRoot() } returns "."
+        every { writerBaseRef() } returns WriterBaseRef.MAIN
     }
 
     private val activity = object : DiagnoseAndProposeActivityImpl(
@@ -109,6 +111,7 @@ class DiagnoseAndProposeActivityImplTest {
         assertThat(event.payload["tool"]).isEqualTo("gh.pr.open")
         assertThat(event.payload["resource"]).isEqualTo("github-pr")
         assertThat(event.payload["pr_branch"]).isEqualTo("flaky-test-hunter/unit-return-finding-")
+        assertThat(event.payload["pr_base_ref"]).isEqualTo("main")
         assertThat(event.payload["model_id"]).isEqualTo("deepseek-ai/DeepSeek-V3.2")
         assertThat(event.payload["proposal_url"]).isEqualTo("https://github.com/JiRaska/open-bank-oss/pull/9001")
         assertThat(event.payload["pr_url"]).isEqualTo("https://github.com/JiRaska/open-bank-oss/pull/9001")

@@ -119,6 +119,32 @@ def evaluate_manifest(manifest: str, config_source: str) -> list[str]:
     return []
 
 
+AGENTS_YAML = REPO / "openbank-libs" / "governance" / "agents.yaml"
+
+
+def evaluate_charter_refs(agents_doc: dict, config_source: str) -> list[str]:
+    """agents.yaml's gh.pr.open base_refs (what OPA allows) must equal WriterBaseRef (what the code can target)."""
+    enum = BASE_REF_ENUM.search(config_source)
+    code = set(BASE_REF_VALUE.findall(enum.group(1))) if enum else set()
+    charter = next((a for a in (agents_doc.get("agents") or []) if a.get("id") == "flaky-test-hunter"), None)
+    if charter is None:
+        return ["agents.yaml has no flaky-test-hunter charter"]
+    granted: set[str] = set()
+    for entry in ((charter.get("tools") or {}).get("allow") or []):
+        if isinstance(entry, dict) and entry.get("tier") == "write_proposal":
+            granted.update(entry.get("base_refs") or [])
+    if not granted:
+        return ["the flaky-test-hunter write_proposal grant lists no base_refs — OPA would deny every PR"]
+    if granted != code:
+        return [
+            f"agents.yaml base_refs {sorted(granted)} != WriterBaseRef {sorted(code)} — the policy and the "
+            "writer would disagree about where a PR may land"
+        ]
+    if not granted <= ALLOWED_BASE_REFS:
+        return [f"agents.yaml base_refs {sorted(granted)} exceed ALLOWED_BASE_REFS {sorted(ALLOWED_BASE_REFS)}"]
+    return []
+
+
 PREFIX_CONST = re.compile(
     r'\bOWN_TEST_SOURCE_PREFIX\s*(?::\s*String\s*)?=\s*"([^"]*)"'
 )
@@ -327,6 +353,22 @@ def self_test() -> int:
     if evaluate_manifest("", good_enum) == []:
         fails.append("a manifest with neither env var is not flagged")
 
+    def charter(refs):
+        entry = {"tier": "write_proposal", "resources": ["github-pr"]}
+        if refs is not None:
+            entry["base_refs"] = refs
+        return {"agents": [{"id": "flaky-test-hunter", "tools": {"allow": [entry]}}]}
+
+    for label, refs, want in [
+        ("charter refs equal to the enum are clean", ["main", "qualification/flaky-test-hunter"], False),
+        ("a charter ref the enum lacks is FLAGGED", ["main", "qualification/flaky-test-hunter", "x"], True),
+        ("a charter missing an enum ref is FLAGGED", ["main"], True),
+        ("a charter with no base_refs is FLAGGED", None, True),
+    ]:
+        got = evaluate_charter_refs(charter(refs), good_enum)
+        if bool(got) != want:
+            fails.append(f"charter {label}: expected findings={want}, got {got}")
+
     # A fixture-only self-test cannot notice that this script's subjects stopped existing.
     if not ADAPTER.exists():
         fails.append(f"the adapter this gate checks is missing: {ADAPTER}")
@@ -357,7 +399,7 @@ def self_test() -> int:
         return 1
     print(
         f"self-test ok: bounded write surface is falsifiable "
-        f"({20 + len(FORBIDDEN_ENDPOINTS)} cases + a live read of the adapter and rules.yaml)"
+        f"({24 + len(FORBIDDEN_ENDPOINTS)} cases + a live read of the adapter and rules.yaml)"
     )
     return 0
 
@@ -396,6 +438,7 @@ def main() -> int:
             if MANIFEST.exists()
             else [f"{relative(MANIFEST)} not found — the snapshot/writer ref agreement cannot be checked"]
         )
+        + evaluate_charter_refs(yaml.safe_load(AGENTS_YAML.read_text()) or {}, CONFIG.read_text())
     )
     if not findings:
         print(

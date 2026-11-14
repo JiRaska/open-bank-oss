@@ -45,7 +45,8 @@ class AgentCharterGrantVerifier {
     /** Visible for testing: lets a test point the verifier at a fixture or a nonexistent path. */
     internal var resourcePath: String = DEFAULT_RESOURCE_PATH
 
-    fun checkPrOpenGrant(): CharterGrant {
+    /** [baseRef] is the PR's target; the allow grant must list it in `base_refs` (agents.rego). */
+    fun checkPrOpenGrant(baseRef: String): CharterGrant {
         val yaml = runCatching {
             javaClass.classLoader.getResourceAsStream(resourcePath)?.use { it.readBytes() }?.decodeToString()
         }.getOrNull()
@@ -57,11 +58,11 @@ class AgentCharterGrantVerifier {
             )
             return CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_UNAVAILABLE)
         }
-        return parse(yaml)
+        return parse(yaml, baseRef)
     }
 
     @Suppress("TooGenericExceptionCaught")
-    internal fun parse(yaml: String): CharterGrant = try {
+    internal fun parse(yaml: String, baseRef: String): CharterGrant = try {
         val charter = mapper.readTree(yaml).path(AGENTS_NODE).firstOrNull {
             it.path(ID_NODE).asText() == PrPathGateVocabulary.AGENT_ID
         }
@@ -71,7 +72,7 @@ class AgentCharterGrantVerifier {
                 CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_DENIED)
             tierResourceDenied(charter.path(TOOLS_NODE).path(DENY_NODE)) ->
                 CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_DENIED)
-            tierResourceGranted(charter.path(TOOLS_NODE).path(ALLOW_NODE)) -> CharterGrant.Granted
+            tierResourceGranted(charter.path(TOOLS_NODE).path(ALLOW_NODE), baseRef) -> CharterGrant.Granted
             else -> CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_DENIED)
         }
     } catch (ex: Exception) {
@@ -84,7 +85,10 @@ class AgentCharterGrantVerifier {
         CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_UNAVAILABLE)
     }
 
-    private fun tierResourceGranted(entries: JsonNode): Boolean = entries.any(::grantsPrOpen)
+    /** Mirrors agents.rego `pr_base_ref_granted`: the SAME entry must grant github-pr and the ref. */
+    private fun tierResourceGranted(entries: JsonNode, baseRef: String): Boolean = entries.any { entry ->
+        grantsPrOpen(entry) && entry.path(BASE_REFS_NODE).any { it.isTextual && it.asText() == baseRef }
+    }
 
     private fun tierResourceDenied(entries: JsonNode): Boolean = entries.any(::grantsPrOpen)
 
@@ -105,6 +109,7 @@ class AgentCharterGrantVerifier {
         const val DENY_NODE = "deny"
         const val TIER_NODE = "tier"
         const val RESOURCES_NODE = "resources"
+        const val BASE_REFS_NODE = "base_refs"
         const val WILDCARD = "*"
     }
 }

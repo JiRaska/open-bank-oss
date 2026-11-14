@@ -206,6 +206,25 @@ allow if {
 	not charter_denied
 	charter_allowed
 	skill_ok
+	not pr_base_ref_denied
+}
+
+# ADR-0031 D9 amendment 2026-11-14: a pull request's TARGET is part of the write, so the policy
+# decides it — not only the writer's code. `gh.pr.open` is allowed only when `input.base_ref` is
+# listed in the `base_refs` of the charter's tier/resource grant that permits it. A grant naming
+# no base_refs, or a call sending none, is denied: a PR grant that does not say where it may
+# land is not a bounded grant.
+pr_base_ref_denied if {
+	input.tool == "gh.pr.open"
+	not pr_base_ref_granted
+}
+
+pr_base_ref_granted if {
+	is_string(input.base_ref)
+	some entry in tier_resource_allow_entries
+	entry.tier == input.tier
+	tier_resource_resources_granted(entry.resources)
+	input.base_ref in entry.base_refs
 }
 
 # ---------------------------------------------------------------------------------------
@@ -217,6 +236,7 @@ decision := {
 	"agent": input.agent,
 	"tool": input.tool,
 	"resource": input.resource,
+	"base_ref": object.get(input, "base_ref", null),
 	"reason": reason,
 }
 
@@ -229,6 +249,8 @@ else := "denied by charter" if charter_denied
 else := "skill not in agent allowlist" if not skill_ok
 
 else := "no matching allow rule" if not charter_allowed
+
+else := "pr base ref not granted by charter" if pr_base_ref_denied
 
 else := "allowed by charter"
 

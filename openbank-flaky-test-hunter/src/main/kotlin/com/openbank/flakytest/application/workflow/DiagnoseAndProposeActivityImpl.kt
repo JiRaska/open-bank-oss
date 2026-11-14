@@ -156,6 +156,8 @@ open class DiagnoseAndProposeActivityImpl(
                     "tool" to if (fixDiff != null) PrPathGateVocabulary.TOOL_GH_PR_OPEN else null,
                     "resource" to if (fixDiff != null) PrPathGateVocabulary.RESOURCE_GITHUB_PR else null,
                     "pr_branch" to if (fixDiff != null) GitHubProposalPort.prBranchFor(finding.id) else null,
+                    // The target ref both policy layers authorized (ADR-0031 D9 amendment 2026-11-14).
+                    "pr_base_ref" to if (fixDiff != null) config.writerBaseRef().ref else null,
                     "pr_url" to prUrl,
                     "proposal_url" to proposalUrl,
                     "human_approved_by" to null,

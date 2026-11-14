@@ -76,13 +76,14 @@ class OpaAgentDecisionClientTest {
         )
         val client = clientFor(baseUrl)
 
-        val decision = runBlocking { client.queryPrOpenDecision() }
+        val decision = runBlocking { client.queryPrOpenDecision("main") }
 
         assertThat(decision).isEqualTo(OpaAgentDecision.Allowed)
         val input = lastInput!!.path("input")
         assertThat(input.path("agent").asText()).isEqualTo("flaky-test-hunter")
         assertThat(input.path("tool").asText()).isEqualTo("gh.pr.open")
         assertThat(input.path("resource").asText()).isEqualTo("github-pr")
+        assertThat(input.path("base_ref").asText()).isEqualTo("main")
         assertThat(input.path("tier").asText()).isEqualTo("write_proposal")
     }
 
@@ -95,7 +96,7 @@ class OpaAgentDecisionClientTest {
         )
         val client = clientFor(baseUrl)
 
-        val decision = runBlocking { client.queryPrOpenDecision() }
+        val decision = runBlocking { client.queryPrOpenDecision("main") }
 
         assertThat(decision).isEqualTo(OpaAgentDecision.Denied("no matching allow rule"))
     }
@@ -105,7 +106,7 @@ class OpaAgentDecisionClientTest {
         val baseUrl = startOpaStub(500, "{}")
         val client = clientFor(baseUrl)
 
-        assertThatThrownBy { runBlocking { client.queryPrOpenDecision() } }
+        assertThatThrownBy { runBlocking { client.queryPrOpenDecision("main") } }
             .isInstanceOf(OpaGateException::class.java)
             .hasMessageContaining("HTTP 500")
     }
@@ -115,7 +116,7 @@ class OpaAgentDecisionClientTest {
         val baseUrl = startOpaStub(200, "this is not json")
         val client = clientFor(baseUrl)
 
-        assertThatThrownBy { runBlocking { client.queryPrOpenDecision() } }
+        assertThatThrownBy { runBlocking { client.queryPrOpenDecision("main") } }
             .isInstanceOf(OpaGateException::class.java)
     }
 
@@ -124,7 +125,7 @@ class OpaAgentDecisionClientTest {
         val baseUrl = startOpaStub(200, "{}")
         val client = clientFor(baseUrl)
 
-        assertThatThrownBy { runBlocking { client.queryPrOpenDecision() } }
+        assertThatThrownBy { runBlocking { client.queryPrOpenDecision("main") } }
             .isInstanceOf(OpaGateException::class.java)
             .hasMessageContaining("no result object")
     }
@@ -136,7 +137,7 @@ class OpaAgentDecisionClientTest {
             val allow = value?.let { "\"allow\":$it" }.orEmpty()
             val client = clientFor(startOpaStub(200, """{"result":{$allow}}"""))
             try {
-                assertThatThrownBy { runBlocking { client.queryPrOpenDecision() } }
+                assertThatThrownBy { runBlocking { client.queryPrOpenDecision("main") } }
                     .describedAs("allow=%s must not be coerced into a policy decision", value ?: "missing")
                     .isInstanceOf(OpaGateException::class.java)
             } finally {
@@ -149,7 +150,7 @@ class OpaAgentDecisionClientTest {
     fun `a connection-refused sidecar is an OPA gate exception`() {
         val client = clientFor("http://127.0.0.1:1")
 
-        assertThatThrownBy { runBlocking { client.queryPrOpenDecision() } }
+        assertThatThrownBy { runBlocking { client.queryPrOpenDecision("main") } }
             .isInstanceOf(OpaGateException::class.java)
     }
 }

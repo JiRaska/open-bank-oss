@@ -58,12 +58,13 @@ class OpaAgentDecisionClient @Inject constructor(private val config: FlakyTestHu
             .build()
     }
 
-    suspend fun queryPrOpenDecision(): OpaAgentDecision = withContext(Dispatchers.IO) {
+    /** [baseRef] is sent as `input.base_ref`, so the policy decides the PR's target too. */
+    suspend fun queryPrOpenDecision(baseRef: String): OpaAgentDecision = withContext(Dispatchers.IO) {
         val request = HttpRequest.newBuilder()
             .uri(URI.create("${config.policyGate().opaUrl().trimEnd('/')}$DECISION_PATH"))
             .timeout(config.policyGate().timeout())
             .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(decisionInput()))
+            .POST(HttpRequest.BodyPublishers.ofString(decisionInput(baseRef)))
             .build()
 
         @Suppress("TooGenericExceptionCaught")
@@ -78,13 +79,14 @@ class OpaAgentDecisionClient @Inject constructor(private val config: FlakyTestHu
         parse(response.body())
     }
 
-    private fun decisionInput(): String = mapper.writeValueAsString(
+    private fun decisionInput(baseRef: String): String = mapper.writeValueAsString(
         mapOf(
             "input" to mapOf(
                 "agent" to PrPathGateVocabulary.AGENT_ID,
                 "tool" to PrPathGateVocabulary.TOOL_GH_PR_OPEN,
                 "resource" to PrPathGateVocabulary.RESOURCE_GITHUB_PR,
                 "tier" to PrPathGateVocabulary.TIER_WRITE_PROPOSAL,
+                "base_ref" to baseRef,
             ),
         ),
     )

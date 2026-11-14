@@ -387,7 +387,7 @@ tier_charters := {
 			"tools": {
 				"allow": [
 					{"tier": "read", "resources": ["governance"]},
-					{"tier": "write_proposal", "resources": ["github-pr"]},
+					{"tier": "write_proposal", "resources": ["github-pr"], "base_refs": ["main", "qualification/flaky-test-hunter"]},
 				],
 				"deny": [
 					{"tier": "write", "resources": ["*"]},
@@ -406,9 +406,9 @@ tier_charters := {
 # The chartered write_proposal grant allows opening a PR on github-pr.
 test_allow_flaky_test_hunter_pr_open_tier_grant if {
 	agents.allow with data.agents as tier_charters
-		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal"}
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal", "base_ref": "main"}
 	agents.decision.reason == "allowed by charter" with data.agents as tier_charters
-		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal"}
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal", "base_ref": "main"}
 }
 
 # Same charter, but the resource is outside the grant — deny-by-default on the resource axis.
@@ -430,9 +430,9 @@ test_deny_flaky_test_hunter_no_tier_input if {
 # Segregation of duties holds on the object-shaped charter too: merge is hard-denied for everyone.
 test_deny_flaky_test_hunter_pr_merge_hard_tier if {
 	not agents.allow with data.agents as tier_charters
-		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.merge", "resource": "github-pr", "tier": "write_proposal"}
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.merge", "resource": "github-pr", "tier": "write_proposal", "base_ref": "main"}
 	agents.decision.reason == "hard-denied tool tier" with data.agents as tier_charters
-		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.merge", "resource": "github-pr", "tier": "write_proposal"}
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.merge", "resource": "github-pr", "tier": "write_proposal", "base_ref": "main"}
 }
 
 # An explicit object-shaped deny entry beats a grant (tier-level segregation).
@@ -448,7 +448,7 @@ test_deny_flaky_test_hunter_tier_denied if {
 			}],
 			"tool_tiers": {"deny": []},
 		}
-		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal"}
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal", "base_ref": "main"}
 }
 
 # input.tier is caller-declared, so the grant is bound to the tool: a tool outside the declared
@@ -456,9 +456,9 @@ test_deny_flaky_test_hunter_tier_denied if {
 # Each of the following was ALLOWED before the tool -> tier binding.
 test_deny_tier_grant_tool_outside_declared_tier if {
 	not agents.allow with data.agents as tier_charters
-		with input as {"agent": "flaky-test-hunter", "tool": "aws.iam.put-policy", "resource": "github-pr", "tier": "write_proposal"}
+		with input as {"agent": "flaky-test-hunter", "tool": "aws.iam.put-policy", "resource": "github-pr", "tier": "write_proposal", "base_ref": "main"}
 	agents.decision.reason == "no matching allow rule" with data.agents as tier_charters
-		with input as {"agent": "flaky-test-hunter", "tool": "aws.iam.put-policy", "resource": "github-pr", "tier": "write_proposal"}
+		with input as {"agent": "flaky-test-hunter", "tool": "aws.iam.put-policy", "resource": "github-pr", "tier": "write_proposal", "base_ref": "main"}
 }
 
 # A REST write action (the vocabulary rest.rego bridges as input.tool) is no tier's tool either.
@@ -476,7 +476,7 @@ test_deny_tier_grant_write_tool_declared_as_read if {
 # ...nor the other way round: a read tool claimed under the write_proposal grant.
 test_deny_tier_grant_read_tool_declared_as_write_proposal if {
 	not agents.allow with data.agents as tier_charters
-		with input as {"agent": "flaky-test-hunter", "tool": "query.ledger.readonly", "resource": "github-pr", "tier": "write_proposal"}
+		with input as {"agent": "flaky-test-hunter", "tool": "query.ledger.readonly", "resource": "github-pr", "tier": "write_proposal", "base_ref": "main"}
 }
 
 # A tier tool_tiers does not enumerate has no tool set, so it can grant nothing.
@@ -497,10 +497,10 @@ test_allow_tier_grant_read_tool_in_read_tier if {
 # Resources are globs.
 test_allow_tier_grant_resource_glob if {
 	agents.allow with data.agents as {
-		"agents": [{"id": "flaky-test-hunter", "tools": {"allow": [{"tier": "write_proposal", "resources": ["github-*"]}]}}],
+		"agents": [{"id": "flaky-test-hunter", "tools": {"allow": [{"tier": "write_proposal", "resources": ["github-*"], "base_refs": ["main"]}]}}],
 		"tool_tiers": {"write_proposal": ["gh.pr.open"], "deny": []},
 	}
-		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal"}
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal", "base_ref": "main"}
 }
 
 test_deny_tier_grant_resource_glob_mismatch if {
@@ -509,4 +509,37 @@ test_deny_tier_grant_resource_glob_mismatch if {
 		"tool_tiers": {"write_proposal": ["gh.pr.open"], "deny": []},
 	}
 		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "gitlab-pr", "tier": "write_proposal"}
+}
+
+# ADR-0031 D9 amendment 2026-11-14: the PR's target ref is part of the decision.
+test_allow_flaky_test_hunter_pr_open_qualification_ref if {
+	agents.allow with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal", "base_ref": "qualification/flaky-test-hunter"}
+}
+
+test_deny_flaky_test_hunter_pr_open_ungranted_ref if {
+	not agents.allow with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal", "base_ref": "release/ledger"}
+	agents.decision.reason == "pr base ref not granted by charter" with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal", "base_ref": "release/ledger"}
+}
+
+test_deny_flaky_test_hunter_pr_open_without_ref if {
+	not agents.allow with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal"}
+}
+
+# A grant that names no base_refs cannot open a PR anywhere, even with a ref supplied.
+test_deny_pr_open_when_grant_names_no_refs if {
+	not agents.allow with data.agents as {
+		"agents": [{"id": "flaky-test-hunter", "tools": {"allow": [{"tier": "write_proposal", "resources": ["github-pr"]}], "deny": []}}],
+		"tool_tiers": tier_charters.tool_tiers,
+	}
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal", "base_ref": "main"}
+}
+
+# The base-ref rule binds gh.pr.open only; a ticket on the same grant needs no ref.
+test_allow_draft_ticket_without_ref if {
+	agents.allow with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "draft.ticket", "resource": "github-pr", "tier": "write_proposal"}
 }

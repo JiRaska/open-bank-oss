@@ -470,6 +470,13 @@ fails at boot. Scan snapshot and writer must name the same ref. Both bounds, and
 itself, are held by `check-agent-bounded-write-surface.py`, so widening the target refs needs this
 ADR and that gate, not a configuration change.
 
+The target ref is also part of the authorization, not only of the writer's code. Both policy
+layers receive it (`input.base_ref`): `agents.rego` allows `gh.pr.open` only when the ref is listed
+in `base_refs` of the same tier/resource grant, and the in-process charter check mirrors that rule.
+A grant naming no `base_refs` cannot open a PR anywhere, which also applies to any other charter
+that lists `gh.pr.open` today. The audit payload records `pr_base_ref`. The gate holds
+`agents.yaml` `base_refs` equal to `WriterBaseRef`.
+
 What this does not change: the bounded path, the single mechanical repair, the charter and OPA
 pre-flight, fail-closed behaviour, and human disposition. The qualification branch is protected
 like `main` against direct pushes; the agent opens a PR into it and a human merges. Every
