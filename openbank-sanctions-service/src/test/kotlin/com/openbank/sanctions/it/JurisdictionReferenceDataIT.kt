@@ -118,12 +118,17 @@ class JurisdictionReferenceDataIT {
     // ── What shipped, and where it came from ──────────────────────────────────
 
     @Test
-    fun `every shipped row is a cited HIGH_RISK row of one publication, and nothing is an embargo`() {
+    fun `every shipped row is a cited row of a known publication, and nothing is an embargo`() {
         val shipped = query(
             "SELECT source_list, measure, list_type, COUNT(*) AS n FROM sanctions_jurisdictions " +
                 "WHERE active AND source_list <> 'SYNTHETIC_TEST' GROUP BY source_list, measure, list_type",
         ) { "${it.getString(1)}/${it.getString(2)}/${it.getString(3)}=${it.getLong(4)}" }
-        assertThat(shipped).containsExactly("$EU_LIST/HIGH_RISK/FATF_HIGH_RISK=$EU_ROWS")
+        // The FATF rows (V24) are asserted in detail by FatfJurisdictionStatementsIT.
+        assertThat(shipped).containsExactlyInAnyOrder(
+            "$EU_LIST/HIGH_RISK/FATF_HIGH_RISK=$EU_ROWS",
+            "FATF_CALL_FOR_ACTION/HIGH_RISK/FATF_HIGH_RISK=3",
+            "FATF_INCREASED_MONITORING/RISK_FACTOR/FATF_HIGH_RISK=18",
+        )
 
         val uncited = query(
             "SELECT country_code FROM sanctions_jurisdictions WHERE source_list = '$EU_LIST' " +
@@ -158,14 +163,12 @@ class JurisdictionReferenceDataIT {
     }
 
     @Test
-    fun `an expected list that was never loaded reports zero rows and no age`() {
-        for (unloaded in listOf("FATF_CALL_FOR_ACTION", "FATF_INCREASED_MONITORING")) {
-            assertThat(gauge(JurisdictionReferenceDataGauge.ROWS, unloaded))
-                .describedAs("%s is expected and not loaded: 0, not an absent series", unloaded)
-                .isEqualTo(0.0)
-            assertThat(gauge(JurisdictionReferenceDataGauge.VERIFICATION_AGE_SECONDS, unloaded))
-                .describedAs("no date exists for %s, so no age may be invented for it", unloaded)
-                .isNull()
+    fun `every expected list is loaded, so no expected list reports zero rows`() {
+        for (expected in JurisdictionReferenceDataGauge.EXPECTED_SOURCE_LISTS) {
+            assertThat(gauge(JurisdictionReferenceDataGauge.ROWS, expected))
+                .describedAs("%s is expected and shipped by a migration", expected)
+                .isGreaterThan(0.0)
+            assertThat(gauge(JurisdictionReferenceDataGauge.VERIFICATION_AGE_SECONDS, expected)).isNotNull()
         }
     }
 

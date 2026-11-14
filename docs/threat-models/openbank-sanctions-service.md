@@ -218,6 +218,23 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
 
 ## 7. Change log
 
+- **2026-11-14** — **FATF jurisdiction statements of 2026-10-30 loaded; a measure that never
+  screens (#15723, ADR-0032 amendment).** V24 loads `FATF_CALL_FOR_ACTION` (KP, IR
+  countermeasures; MM enhanced due diligence; all `HIGH_RISK` → review) and
+  `FATF_INCREASED_MONITORING` (18 countries, new measure `RISK_FACTOR`, which the screen drops
+  before it becomes a match). No existing outcome changes: KP, IR and MM were already `HIGH_RISK`
+  through the EU list. **STRIDE-T / data integrity:** the publisher refuses automated retrieval,
+  so the rows were taken from an official government republication (Japan MOF translations, SHA-256
+  recorded in `source_ref` and the migration header) and cross-checked against FinCEN; the four
+  jurisdictions removed by the plenary (BG, CI, CD, MC) are asserted absent. **Silent false
+  negative (new):** a row mis-labelled `RISK_FACTOR` would screen CLEAR without any error; the
+  measure of every shipped FATF row is pinned by `FatfJurisdictionStatementsIT`, and a grey-only
+  country (KW) is asserted CLEAR while a call-for-action country is asserted `POTENTIAL_HIT` on
+  every profile. **Rollback hazard:** the previous release cannot parse `RISK_FACTOR`; the V24
+  rollback note requires deleting the rows before deploying it. **Residual:** customer risk scoring
+  does not read the grey-list rows yet, so the grey list informs no automated decision; the next
+  FATF plenary (February 2027) must be loaded by hand before the verification alert fires on
+  2027-04-13.
 - **2026-11-12** — **Ongoing monitoring of registered subjects (ADR-0376), shipped disabled.**
   New store of personal data (`sanctions_monitored_subjects`, `sanctions_monitoring_findings`,
   `sanctions_monitored_subject_names`, V23), two new inbound operations (`PUT`/`DELETE

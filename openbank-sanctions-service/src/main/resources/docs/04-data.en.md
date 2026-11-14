@@ -72,7 +72,7 @@ Flyway, immutable historical scripts, forward-only:
 ## Jurisdiction reference data
 
 `sanctions_jurisdictions` (V21) holds embargoed and high-risk countries: `list_type`,
-`source_list`, `country_code`, `measure` (`EMBARGO` | `HIGH_RISK`), `version`, `source_ref`,
+`source_list`, `country_code`, `measure` (`EMBARGO` | `HIGH_RISK` | `RISK_FACTOR`), `version`, `source_ref`,
 `published_on`, `verified_on`, `active`. `list_type` is the screening-list slot a row is consulted
 under; `source_list` is the publication it was copied from.
 
@@ -87,11 +87,13 @@ that adds them.
 | `source_list` | Loaded | Source |
 |---|---|---|
 | `EU_HIGH_RISK_THIRD_COUNTRIES` | V22 — 26 countries, all `HIGH_RISK` | Commission Delegated Regulation (EU) 2016/1675, Annex, consolidated version of 2026-01-29; compared with EUR-Lex on 2026-11-11 |
-| `FATF_CALL_FOR_ACTION` | not loaded | the publisher's site could not be retrieved; no row is written from memory |
-| `FATF_INCREASED_MONITORING` | not loaded | as above |
+| `FATF_CALL_FOR_ACTION` | V24 — KP, IR (countermeasures), MM (enhanced due diligence), all `HIGH_RISK` | FATF statement of 2026-10-30, read from the Japan MOF official translation (SHA-256 in V24), cross-checked with FinCEN; compared on 2026-11-14 |
+| `FATF_INCREASED_MONITORING` | V24 — 18 countries, all `RISK_FACTOR` | FATF statement of 2026-10-30, same source and check |
 
 No row carries `EMBARGO`: the EU regulation requires enhanced due diligence, not a prohibition,
-and no source loaded so far states a country embargo.
+and neither it nor a FATF statement declares a country embargo. `RISK_FACTOR` rows are never a
+screen finding (ADR-0032, amendment of 2026-11-14): the FATF grey list is a risk factor for
+customer risk scoring, not a review trigger.
 
 **Ageing.** These lists change several times a year and nothing imports them, so each row carries
 the date of its publication (`published_on`) and the date it was last compared with the source

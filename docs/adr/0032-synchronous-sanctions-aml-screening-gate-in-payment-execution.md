@@ -139,6 +139,34 @@ helper and the decision table above are the shared contract they implement.
   runs behind a fault-tolerant adapter with an explicit fail-closed posture and an operational alert
   (the `SCREENING_UNAVAILABLE` AML case) when the dependency degrades.
 
+## Amendment 2026-11-14: what a listed jurisdiction does to a screen
+
+The screen also matches the counterparty's country (and its bank's BIC country) against
+versioned jurisdiction reference data (`sanctions_jurisdictions`, issue #15723). Each row carries
+a `measure`, and the measure, not the publication, decides the outcome:
+
+| Measure | Screen outcome | Used for | Legal basis |
+|---|---|---|---|
+| `EMBARGO` | `HIT` → policy `BLOCK` | none loaded today | only where a binding EU/UN measure prohibits dealing with the country as such |
+| `HIGH_RISK` | `POTENTIAL_HIT` at 0.65 → `REVIEW` | EU list of high-risk third countries; FATF call for action | Directive (EU) 2015/849 Art. 18a — enhanced due diligence on a high-risk third country, which is binding for a Czech/EU obliged entity; the FATF call for action asks for EDD and, for DPRK and Iran, countermeasures |
+| `RISK_FACTOR` | **no finding** | FATF increased monitoring ("grey list") | a risk factor to weigh, not a high-risk designation: the FATF statement itself calls for no EDD and for a risk-based approach rather than de-risking; Czech FIU guidance treats it as a risk factor |
+
+Two decisions follow and are deliberate:
+
+1. **A FATF countermeasure jurisdiction is `HIGH_RISK`, not `EMBARGO`.** `EMBARGO` is a blanket
+   block of every payment. A FATF countermeasure is applied by the obliged entity's own measures on
+   top of enhanced due diligence, and no ADR, EU act or UN row in this table makes it a refusal.
+   Which of "countermeasures" and "enhanced due diligence" a row carries is recorded in its
+   `source_ref`, so the reviewer sees it. If the bank adopts a refuse-all policy for countermeasure
+   jurisdictions, that is a new migration setting `EMBARGO`, made with that policy as its citation.
+2. **A grey-list country raises no screen finding.** Screening it as `HIGH_RISK` would send every
+   payment to, say, Kenya or Vietnam to an analyst whether or not anything else about it is
+   unusual — the de-risking the FATF statement asks institutions not to do. The rows are loaded
+   (so the data is correct and its age is alerted on) and are a customer-risk input; the binding
+   EU list still sends a country it lists to review independently, so a country on both is still
+   reviewed, because of the EU row. Customer risk scoring does not read the rows yet; until it
+   does, the grey list informs no automated decision.
+
 ## References
 
 - `docs/strategy/multicurrency-implementation-plan.md` — Phase 4 item #10 (G5) this implements
