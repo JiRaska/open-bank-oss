@@ -93,6 +93,19 @@ MIN_SHARED = 2
 # Spec-vs-domain drift that exists today, each with the issue that owns it.
 # Format: "<service>:<sorted spec values>" -> reason
 BASELINE: dict[str, str] = {
+    # Both surfaced when the declaration matcher learned primary-constructor enums; neither is drift.
+    # NOT drift — a DELIBERATE SUBSET (#5962 shape). `ApprovalKind` also carries PAYEE_ADD,
+    # PAYEE_REMOVE and POLICY_CHANGE, but those approvals are created by their own endpoints; the
+    # `kind` on SigningEvaluateRequest / CreatePaymentApproval is the payment-family subset only.
+    "openbank-delegation-service:PAYMENT,SDD_MANDATE,STANDING_ORDER":
+        "#5962 — delegation approval `kind`: NOT drift. Payment-family subset of ApprovalKind; payee "
+        "and policy approvals have their own endpoints.",
+    # NOT drift — the wire spelling of an ABSENT value (ADR-0344, the `rateSource` MISSING shape
+    # below). A leg with no stub has a null StubType; it is read and written as NONE
+    # (treasury `LegWireJackson.NO_STUB`), which is not a stub type, so not a StubType value.
+    "openbank-treasury-service:LONG_FINAL,LONG_INITIAL,NONE,SHORT_FINAL,SHORT_INITIAL":
+        "ADR-0344 — leg `stub`: NOT drift. NONE is the wire form of no stub (null StubType), "
+        "treasury LegWireJackson.NO_STUB.",
     # NOT drift — the wire spelling of an ABSENT value (ADR-0344 D4). A stored cash-flow row whose
     # floating rate is not known yet has no rate source: `rateSource` is null in the domain, exactly
     # as libs-finance's own `ProjectedCashFlow.rateSource`, and is published and stored as MISSING
@@ -284,7 +297,7 @@ SPEC_ENUM_INLINE = re.compile(r"enum:\s*\[([^\]]*)\]")
 SPEC_ENUM_BLOCK = re.compile(
     r"enum:[ \t]*\n((?:[ \t]*(?:-[ \t]*\S+|#[^\n]*)[ \t]*\n)+)"
 )
-KOTLIN_ENUM = re.compile(r"enum\s+class\s+(\w+)\s*(?::[^{]*)?\{([^}]*)\}")
+KOTLIN_ENUM = re.compile(r"enum\s+class\s+(\w+)\s*(?:\((?:[^()]|\([^()]*\))*\))?\s*(?::[^{]*)?\{([^}]*)\}")
 BLOCK_ITEM = re.compile(r"^[ \t]*-[ \t]*[\"\']?([A-Za-z0-9_]+)[\"\']?[ \t]*$", re.M)
 # A constant is the leading identifier of a member; the rest of a member may be a constructor
 # call (`ACTIVE("active")`) or an override block, and must not be mined for tokens. A member may
@@ -347,6 +360,12 @@ def spec_enums(text: str) -> set[frozenset[str]]:
         if len(vals) >= 2:
             out.add(vals)
     return out
+
+
+def _first_enum(src: str) -> frozenset[str]:
+    """Values of the first enum declaration KOTLIN_ENUM finds in src (self-test helper)."""
+    m = KOTLIN_ENUM.search(src)
+    return _kotlin_values(m.group(2)) if m else frozenset()
 
 
 def kotlin_enums(root: Path) -> dict[str, frozenset[str]]:
@@ -508,6 +527,21 @@ def self_test() -> int:
          _kotlin_values('OPEN,\n    @Deprecated("Never produced; see OPEN instead")\n    CLOSED,'),
          frozenset({"OPEN", "CLOSED"})),
         ("lowercase tokens are not constants", _kotlin_values("identity, address"), frozenset()),
+        # The DECLARATION matcher, not just the body: an enum with a primary constructor
+        # (`enum class X(val y: T) { A(..), B(..) }`) was invisible to KOTLIN_ENUM, so the gate
+        # paired its spec enum with whatever unrelated enum shared the most values and reported
+        # drift against the wrong type (aml `HoldDisposition` vs `ScreeningDecision`), while real
+        # drift against any constructor enum went unseen.
+        ("an enum with a primary constructor is still extracted",
+         _first_enum("enum class HoldDisposition(val status: AmlCaseStatus) {\n"
+                     "    CLEAR(AmlCaseStatus.CLEARED),\n    BLOCK(AmlCaseStatus.BLOCKED),\n}"),
+         frozenset({"CLEAR", "BLOCK"})),
+        ("a constructor with a nested call in a default value is still extracted",
+         _first_enum("enum class K(val a: Int = max(1, 2), val b: Boolean) { A(1, true), B(2, false) }"),
+         frozenset({"A", "B"})),
+        ("an enum with a constructor AND a supertype is still extracted",
+         _first_enum("enum class K(val a: Int) : Labelled { A(1), B(2) }"),
+         frozenset({"A", "B"})),
         ("an inline spec enum", _spec_values("IDENTITY, ADDRESS"),
          frozenset({"IDENTITY", "ADDRESS"})),
         ("a quoted inline spec enum", _spec_values("'OPEN', \"CLOSED\""),
