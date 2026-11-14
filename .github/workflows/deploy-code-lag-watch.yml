@@ -70,6 +70,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: gh-call-counter install
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh install
       - name: Self-test the report script
         run: |
           bash .github/scripts/test-deploy-code-lag-report.sh
@@ -220,3 +223,7 @@ jobs:
                 ...context.repo, issue_number: issue.number, state: 'closed',
               })
             }
+      - name: gh-call-counter report
+        if: always()
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh report
