@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { describe, expect, it } from 'vitest'
-import { allowedTransitions, caseAgeHours, isOpenAmlStatus, parseAmlCase, partyDisplayName, requiresReason } from '@/lib/aml/amlCaseContract'
+import { allowedTransitions, caseAgeHours, compareWorkQueue, formatCaseAge, isOpenAmlStatus, parseAmlCase, partyDisplayName, requiresReason } from '@/lib/aml/amlCaseContract'
 import { parsePartySummary } from '@/lib/aml/usePartyNames'
 
 const base = {
@@ -44,5 +44,24 @@ describe('AML officer helpers', () => {
   it('measures case age in whole hours and never negative', () => {
     expect(caseAgeHours('2026-11-01T00:00:00Z', new Date('2026-11-02T01:30:00Z'))).toBe(25)
     expect(caseAgeHours('2026-11-03T00:00:00Z', new Date('2026-11-02T00:00:00Z'))).toBe(0)
+  })
+
+  it('orders the work queue by need for a decision, then risk, then age', () => {
+    const c = (id: string, status: string, riskLevel: string, createdAt: string) => parseAmlCase({ ...base, id, status, riskLevel, createdAt })
+    const queue = [
+      c('11111111-1111-4111-8111-000000000001', 'OPEN', 'MEDIUM', '2026-06-01T00:00:00Z'),
+      c('11111111-1111-4111-8111-000000000002', 'UNDER_REVIEW', 'CRITICAL', '2026-06-02T00:00:00Z'),
+      c('11111111-1111-4111-8111-000000000003', 'CLEARED', 'CRITICAL', '2026-05-01T00:00:00Z'),
+      c('11111111-1111-4111-8111-000000000004', 'ESCALATED', 'LOW', '2026-06-03T00:00:00Z'),
+      c('11111111-1111-4111-8111-000000000005', 'OPEN', 'MEDIUM', '2026-05-15T00:00:00Z'),
+    ].sort(compareWorkQueue)
+    expect(queue.map(q => q.id.slice(-1))).toEqual(['4', '2', '5', '1', '3'])
+  })
+
+  it('shows age in hours under two days and in days after', () => {
+    const t = (_cs: string, en: string) => en
+    expect(formatCaseAge(47, t)).toBe('47 h')
+    expect(formatCaseAge(48, t)).toBe('2 days')
+    expect(formatCaseAge(3388, t)).toBe('141 days')
   })
 })
