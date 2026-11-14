@@ -174,6 +174,9 @@ class TransactionEntity : PanacheEntityBase {
     // ── ADR-0108: rail payment that triggered this transaction (null for operator/system postings) ──
     @Column(name = "originating_payment_id")
     var originatingPaymentId: UUID? = null
+
+    @Column(name = "synthetic", nullable = false, updatable = false)
+    var synthetic: Boolean = false
 }
 
 data class TransactionEntityId(val id: UUID = Ids.newId(), val bookingDate: LocalDate = LocalDate.EPOCH) :

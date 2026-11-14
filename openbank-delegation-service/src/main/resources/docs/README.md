@@ -42,6 +42,13 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 
 `GET /api/v1/delegation-portfolios/owner/{ownerPartyId}` names its path parameter `ownerPartyId`, in the OpenAPI document and in the served resource alike. It must equal the authenticated active profile; any other value is rejected with `403`. Generated clients use `ownerPartyId`; the shared `partyId` parameter does not apply to this route.
 
+
+## Business payment approval retries
+
+The original consumed SCA challenge replays only the same entity, initiator, instruction kind
+and canonical frozen payload. A changed instruction with the same challenge receives HTTP 409
+before a new request or outbox event can be written.
+
 ### Joint statutory representation
 
 The statutory issue and acceptance routes collect separate device-backed signatures under an
@@ -60,6 +67,6 @@ certificate and the named `openbank-delegation` bearer. The KYB provider route a
 from #15662 must be present in the verified image before configuring the 8443 listener.
 The sandbox collection switch stays off during this rollout.
 
-The V34 migration adds operations, receipts, and grant provenance. Rollback disables collection and
+The V37 migration adds operations, receipts, and grant provenance. Rollback disables collection and
 retains these rows for audit. Deploy the sole issuer provenance guard and the named Party, KYB, and
 SCA contracts before enabling collection in a test environment.

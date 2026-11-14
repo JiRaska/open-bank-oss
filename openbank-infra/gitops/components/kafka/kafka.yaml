@@ -1,7 +1,7 @@
 # Single-broker KRaft Kafka for the sandbox. Strimzi 0.46+ is KRaft-only and
 # requires KafkaNodePools (both annotations below). One dual-role node
-# (controller+broker) for FinOps; prod should split roles and raise replicas to
-# 3 with matching replication factors. Kafka version and KRaft metadataVersion
+# (controller+broker) `dual`; ADR-0373 step 1 adds a 2-node broker-only pool `brokers`
+# (three brokers, one controller) -- replication factors are raised in later steps, see runbook 0034. Kafka version and KRaft metadataVersion
 # are pinned explicitly on the Kafka CR below (see the comment there). Bootstrap Service for clients:
 # `openbank-cluster-kafka-bootstrap.messaging.svc:9093` (internal mTLS — the only
 # listener; the plaintext :9092 one was removed in #3393).
@@ -41,6 +41,67 @@ spec:
       cpu: 250m
       # 768Mi → 1152Mi (issue #809): measured steady-state ~1Gi — the request
       # must cover it so Karpenter's bin-packing stays honest.
+      memory: 1152Mi
+    limits:
+      cpu: "1"
+      memory: 1536Mi
+---
+# ADR-0373 step 1 (runbook 0034): two broker-only nodes beside the dual-role node, giving three
+# brokers. WHY A SEPARATE POOL, not `replicas: 3` on `dual`: Strimzi uses a STATIC KRaft controller
+# quorum, and its documentation lists "scaling a node pool with the controller role" (and adding or
+# removing the controller role) as unsupported, so `dual` (controller+broker) stays at 1 replica and
+# the extra brokers are a pool without the controller role. Consequence, stated plainly: there is
+# still exactly ONE controller. Three brokers protect partition data once topics are reassigned
+# (steps 3-4); they do not make the metadata quorum highly available. Moving to three controllers
+# is a separate migration, outside ADR-0373 step 1.
+# NOTHING is changed for existing topics here: replication.factor, min.insync.replicas and every
+# KafkaTopic stay as they were, so the new brokers hold no partitions until step 3.
+# Same sizing as `dual` so the resource delta in the runbook is the manifest's own numbers.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: brokers
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  replicas: 2
+  roles:
+    - broker
+  template:
+    persistentVolumeClaim:
+      metadata:
+        annotations:
+          argocd.argoproj.io/sync-options: Prune=false
+    pod:
+      # Never two brokers on one node (hard), spread over zones when capacity allows (soft) --
+      # the same pair the CNPG clusters use. The selector covers every pod of the Kafka cluster
+      # (all of them are brokers), so it counts the `dual` broker too. Set on THIS pool only: adding a pod template to `dual`
+      # would roll the only controller.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              strimzi.io/name: openbank-cluster-kafka
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              strimzi.io/name: openbank-cluster-kafka
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 5Gi
+        class: gp3
+        deleteClaim: false
+  resources:
+    requests:
+      cpu: 250m
       memory: 1152Mi
     limits:
       cpu: "1"

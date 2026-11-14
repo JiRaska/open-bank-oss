@@ -57,6 +57,8 @@ data class Transaction(
      * and so the key a customer's own categorisation hangs off. See [CounterpartyKey].
      */
     val counterpartyName: String? = null,
+    /** Authenticated synthetic origin, retained across worker and reversal boundaries. */
+    val synthetic: Boolean = false,
 ) {
     fun complete(clock: Clock): Transaction {
         check(status == TransactionStatus.PENDING || status == TransactionStatus.PROCESSING) {

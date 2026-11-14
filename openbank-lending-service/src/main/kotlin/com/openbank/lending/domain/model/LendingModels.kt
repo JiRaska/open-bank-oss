@@ -161,6 +161,10 @@ data class LoanApplication(
      */
     val signatureArtefactHash: String? = null,
     val catalogSnapshot: CatalogLoanSnapshot? = null,
+    /** Bank-recorded receipt of the signature artefact from the explicit signing command. */
+    val signatureRecordedAt: OffsetDateTime? = null,
+    /** Set on the successor of an overturned decline review ([DeclineReview]); null on every other row. */
+    val predecessorApplicationId: UUID? = null,
 )
 
 /** A live loan booked from an approved, disbursed application. */

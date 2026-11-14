@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.anacredit.infrastructure.kafka
 
+import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.anacredit.application.port.out.AnaCreditMetricsPort
 import com.openbank.anacredit.application.port.out.LoanStageEventOutcome
@@ -72,13 +73,16 @@ class LoanStageEventConsumer {
     @Inject
     lateinit var metrics: AnaCreditMetricsPort
 
+    @Inject
+    lateinit var exposureFacts: LoanExposureFactConsumer
+
     private val log = Logger.getLogger(LoanStageEventConsumer::class.java)
 
     @Incoming("lending-events-in")
     @Suppress("TooGenericExceptionCaught") // a consumer must never die on a single bad/foreign event
     suspend fun consume(payload: String) {
         val node = try {
-            objectMapper.readTree(payload)
+            objectMapper.reader().with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readTree(payload)
         } catch (e: Exception) {
             log.errorf(e, "[lending-events-in] Failed to parse JSON payload: %.200s", payload)
             metrics.loanStageEvent(LoanStageEventOutcome.PARSE_ERROR)
@@ -86,6 +90,10 @@ class LoanStageEventConsumer {
         }
 
         val eventType = node.path("eventType").asText()
+        if (eventType == LOAN_EXPOSURE_FACT_EVENT) {
+            exposureFacts.consume(node, payload)
+            return
+        }
         if (eventType != "loan.stage_changed") {
             metrics.loanStageEvent(LoanStageEventOutcome.IGNORED)
             return

@@ -36,6 +36,7 @@ class VerificationCaseServiceTest {
 
     private lateinit var repo: VerificationCaseRepository
     private lateinit var events: PartyEventPublisher
+    private lateinit var parties: com.openbank.pid.application.port.out.PartyRepository
     private lateinit var svc: VerificationCaseService
 
     private val candidate: UUID = UUID.randomUUID()
@@ -45,7 +46,8 @@ class VerificationCaseServiceTest {
     fun setUp() {
         repo = mockk(relaxed = false)
         events = mockk(relaxed = true)
-        svc = VerificationCaseService(repo, events, Clock.fixed(now, ZoneOffset.UTC))
+        parties = mockk()
+        svc = VerificationCaseService(repo, parties, events, Clock.fixed(now, ZoneOffset.UTC))
     }
 
     private fun openCmd() = OpenCaseCommand(
@@ -190,5 +192,32 @@ class VerificationCaseServiceTest {
         coEvery { repo.findById(case.id) } returns case
 
         assertThat(svc.get(case.id)).isEqualTo(case)
+    }
+
+    @Test
+    fun `decide refuses to link a case to an erased party`(): Unit = runBlocking {
+        val case = storedCase(VerificationCaseStatus.OPEN)
+        val erased = UUID.randomUUID()
+        coEvery { repo.findById(case.id) } returns case
+        coEvery { parties.findById(erased) } returns
+            io.mockk.mockk<com.openbank.pid.domain.model.Party> {
+                io.mockk.every { erasedAt } returns
+                    java.time.OffsetDateTime.now()
+            }
+
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            runBlocking {
+                svc.decide(
+                    com.openbank.pid.application.port.`in`.DecideCaseCommand(
+                        caseId = case.id,
+                        approver = "op-1",
+                        verdict = com.openbank.pid.domain.model.CaseVerdict.LINK_TO_EXISTING,
+                        linkPartyId = erased,
+                        notes = null,
+                    ),
+                )
+            }
+        }.isInstanceOf(PartyErasedException::class.java)
+        coVerify(exactly = 0) { repo.update(any()) }
     }
 }

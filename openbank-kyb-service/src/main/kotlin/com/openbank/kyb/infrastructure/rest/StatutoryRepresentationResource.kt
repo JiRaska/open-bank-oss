@@ -39,7 +39,10 @@ class StatutoryRepresentationResource(
             throw ForbiddenException("publication requires an authenticated KYB staff member")
         }
         val expected = requireNotNull(request?.attestationId) { "attestationId is required" }
-        val attestationId = service.publish(caseId, expected) ?: throw NotFoundException()
+        // isHumanStaff guarantees principal.name == preferred_username, the same value the
+        // attestation recorded as attestedBy — so the four-eyes check compares like with like.
+        val publishedBy = identity.principal.name
+        val attestationId = service.publish(caseId, expected, publishedBy) ?: throw NotFoundException()
         return Response.ok(mapOf("attestationId" to attestationId)).build()
     }
 

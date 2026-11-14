@@ -41,7 +41,7 @@ Request body (`ConvertRequest`):
 }
 ```
 
-`partyName` is screened synchronously against the sanctions lists (ADR-0032). The conversion is computed at the latest valid **SPOT** rate's `askRate`; a fixed **0.5% fee** is applied (`feeMinorUnits`), `HALF_UP` rounded to whole minor units.
+`partyName` is **deprecated and ignored**. The conversion is screened synchronously against the sanctions lists (ADR-0032) under the names party-service holds for `partyId` (legal name and trading name, with the party's own type); a name sent by the caller is never screened. If the party is unknown or has no name, the conversion is held (`PENDING`) exactly as when screening is unavailable. The conversion is computed at the latest valid **SPOT** rate's `askRate`; a fixed **0.5% fee** is applied (`feeMinorUnits`), `HALF_UP` rounded to whole minor units.
 
 Response — `201 Created`, `Location: /api/v1/fx/conversions/{id}` (`ConversionResponse`):
 

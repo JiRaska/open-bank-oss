@@ -10,6 +10,8 @@ import com.openbank.fraud.domain.rules.FraudThresholdFixtures
 import com.openbank.fraud.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
@@ -43,8 +45,12 @@ import java.sql.DriverManager
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresRedisTestResource::class, restrictToAnnotatedClass = true)
+@TestProfile(FraudThresholdActivationIT.OwnProfile::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class FraudThresholdActivationIT {
+
+    /** Match the privilege suite's application isolation so requests use a live reactive pool. */
+    class OwnProfile : QuarkusTestProfile
 
     @Test
     @Order(1)

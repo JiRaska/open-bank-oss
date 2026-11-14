@@ -94,3 +94,23 @@ scope `catalog:read`), ne jako sdílený klient `openbank-services`. product-cat
 ROLE_API ho záměrně odmítá. Pokud klient v Keycloaku nemá scope `catalog:read`, čtení bude po
 zapnutí vynucování autorizace v product-catalog odmítnuto. Výběr klienta hlídá
 `M2mOidcClientIdentityWiringTest`.
+
+## Projekce vlastnictví (ADR-0375 D5)
+
+`GET /api/v1/documents/{id}/owner` odpovídá na jednu otázku — která strana dokument vlastní — a
+vrací `{id, partyId}` a nic jiného. delegation-service ji volá předtím, než nad dokumentem vystaví
+delegaci `OBJECT_READ`.
+
+Má vlastní autorizační akci `document.verifyOwnership`, místo aby používala `document.read`.
+`document.read` vrací celý metadatový záznam (šablonu, storage key, sha256, odkazy na případ a
+produkt) a je grantovaná jiným subjektům; autorita potřebná k **vystavení** delegace nad dokumentem
+nesmí zároveň umět ten dokument přečíst. OPA rozšíření novou akci připíná na
+`service-account-openbank-delegation` a všem ostatním volajícím ji explicitně vetuje — to veto je
+podstatné, protože základní `rest.rego` dává zákaznickému edgi celou rodinu `document.`.
+
+404 pokrývá jak neznámý dokument, tak dokument bez zaznamenaného `partyRef`. Volající s oběma
+zachází stejně a jejich rozlišení by někomu, kdo zkouší id, prozradilo, které dokumenty existují.
+
+Co to odblokovalo: do té doby delegation-service odpovídal `UNVERIFIABLE` pro každý objektový typ
+zdroje, jeho offer cesta na tom odmítá, a tak se nedal nasdílet žádný dokument — přitom čtecí cesta
+pro nasdílený dokument už byla v customer-edge nasazená.

@@ -4,8 +4,14 @@
 
 package com.openbank.transaction.integration
 
+import com.github.tomakehurst.wiremock.client.WireMock.absent
+import com.github.tomakehurst.wiremock.client.WireMock.equalTo
+import com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath
+import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
+import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.synthetic.SyntheticTaint
 import com.openbank.transaction.application.port.out.TransactionRepository
 import com.openbank.transaction.application.workflow.PaymentActivitiesImpl
 import com.openbank.transaction.application.workflow.PaymentWorkflow
@@ -31,7 +37,8 @@ import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -58,9 +65,7 @@ import java.util.UUID
  * - The reactive Panache repository cannot be driven from a bare @QuarkusTest thread ("No current
  *   Vertx context found"), so every DB touch goes through [onVertxContext] — the same
  *   `VertxContextSupport` bridge `TransactionOutboxClaimIT` and the activities themselves use.
- * - The seeded transaction has **no source account** (an incoming credit), so `placeHold` returns
- *   the sentinel and the only downstream HTTP call is the ledger journal, stubbed by
- *   [LedgerWireMockResource].
+ * - The cover hold and journal HTTP calls are isolated in [LedgerWireMockResource].
  * - Its own [TestWorkflowEnvironment] — not the one `WorkflowClientTestProducer` publishes, which
  *   registers a stub workflow — because the point of this test is the real workflow's own steps.
  */
@@ -99,9 +104,10 @@ class PaymentWorkflowTerminalWriteIT {
         env.close()
     }
 
-    @Test
-    fun `workflow itself commits the terminal status and the completed outbox event`() {
-        val seeded = seedPendingCredit()
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `workflow reconstructs journal and terminal event origin from the persisted transfer`(synthetic: Boolean) {
+        val seeded = seedPendingTransfer(synthetic)
 
         val state = newWorkflow(seeded.id).execute(seeded.id)
 
@@ -115,6 +121,7 @@ class PaymentWorkflowTerminalWriteIT {
             .isEqualTo(TransactionStatus.COMPLETED)
         assertThat(reloaded.completedAt).isNotNull
         assertThat(reloaded.version).isEqualTo(seeded.version + 1)
+        assertThat(reloaded.synthetic).isEqualTo(synthetic)
 
         val completedEvents = onVertxContext {
             Panache.withSession {
@@ -128,6 +135,19 @@ class PaymentWorkflowTerminalWriteIT {
         assertThat(completedEvents)
             .`as`("the completed event is written in the SAME transaction as the status")
             .hasSize(1)
+        assertThat(completedEvents.single().synthetic).isEqualTo(synthetic)
+
+        val ordinary = LedgerWireMockResource.JOURNALS_PATH
+        val tainted = LedgerWireMockResource.SYNTHETIC_JOURNALS_PATH
+        val transactionId = matchingJsonPath("$.transactionId", equalTo(seeded.id.toString()))
+        val expected = postRequestedFor(urlEqualTo(if (synthetic) tainted else ordinary))
+            .withRequestBody(transactionId)
+        val taint = if (synthetic) equalTo(SyntheticTaint.TRUE_VALUE) else absent()
+        LedgerWireMockResource.server.verify(1, expected.withHeader(SyntheticTaint.KAFKA_HEADER, taint))
+        LedgerWireMockResource.server.verify(
+            0,
+            postRequestedFor(urlEqualTo(if (synthetic) ordinary else tainted)).withRequestBody(transactionId),
+        )
     }
 
     private fun newWorkflow(transactionId: UUID): PaymentWorkflow = env.workflowClient.newWorkflowStub(
@@ -139,14 +159,13 @@ class PaymentWorkflowTerminalWriteIT {
             .build(),
     )
 
-    /** An incoming credit (no source account -> no cover hold), saved PENDING with its initiated event. */
-    private fun seedPendingCredit(): Transaction {
+    private fun seedPendingTransfer(synthetic: Boolean): Transaction {
         val today = LocalDate.now()
         val transaction = Transaction(
             id = UUID.randomUUID(),
             referenceNumber = "TXN${System.nanoTime()}",
-            type = TransactionType.CREDIT,
-            sourceAccountId = null,
+            type = TransactionType.TRANSFER,
+            sourceAccountId = UUID.randomUUID(),
             targetAccountId = UUID.randomUUID(),
             amount = Money.of(BigDecimal("700.00"), "CZK"),
             fxRate = null,
@@ -161,6 +180,7 @@ class PaymentWorkflowTerminalWriteIT {
             failureReason = null,
             idempotencyKey = "terminal-write-it-${UUID.randomUUID()}",
             version = 0L,
+            synthetic = synthetic,
         )
         return onVertxContext {
             transactionRepository.save(
@@ -169,6 +189,7 @@ class PaymentWorkflowTerminalWriteIT {
                     aggregateId = transaction.id,
                     eventType = "openbank.transactions.transaction.initiated",
                     payload = """{"transactionId":"${transaction.id}"}""",
+                    synthetic = synthetic,
                 ),
             )
         }

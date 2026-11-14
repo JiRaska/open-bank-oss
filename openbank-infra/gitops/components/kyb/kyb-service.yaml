@@ -11,9 +11,6 @@ kind: Deployment
 metadata:
   name: kyb-service
   namespace: kyb
-  annotations:
-    openbank.io/port-scoped-ingress: "true"
-    openbank.io/workload-scoped-ingress-ports: https
   labels:
     app.kubernetes.io/name: kyb-service
     app.kubernetes.io/part-of: kyb
@@ -44,7 +41,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-kyb-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "c5bce2558d995b15"
+        openbank.tech/policy-checksum: "42082ea464f0e233"
       labels:
         app.kubernetes.io/name: kyb-service
         app.kubernetes.io/part-of: kyb
@@ -60,29 +57,18 @@ spec:
         - name: kyb-service
           # First build lands via auto-deploy on the merge that adds openbank-kyb-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-27e19a17@sha256:76b40789a846fb996f5e6d2c56ee9d31f18e8f6c29e79f62d13d9f6559f5c760
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-8bed063e@sha256:c319586de4dc217deeca0edbe2f14e4f8ba29dcf9d5527c7acca48bca1119a66
           imagePullPolicy: IfNotPresent
           ports:
+            # HTTP 8157 and management 8090 — both read off the service's own
+            # application.yaml (quarkus.http.port / quarkus.management.port). The
+            # management port is NOT the fleet-common 8085 here; probes below target
+            # 8090 deliberately.
             - name: http
               containerPort: 8157
-            - name: https
-              containerPort: 8443
             - name: management
               containerPort: 8090
           env:
-            # The client-auth mode is baked into the KYB image in application.yaml.
-            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
-              value: /mnt/internal-tls/tls.crt
-            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
-              value: /mnt/internal-tls/tls.key
-            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
-              value: /mnt/internal-tls/ca.crt
-            - name: QUARKUS_HTTP_SSL_PORT
-              value: "8443"
-            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
-              value: required
-            - name: QUARKUS_HTTP_SSL_PROTOCOLS
-              value: TLSv1.3
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -142,6 +128,20 @@ spec:
             # documents-namespace ingress edge for kyb.
             - name: DOCUMENT_SERVICE_URL
               value: http://document-service.documents.svc:8143
+            # Sanctions / PEP screening of the entity and its related parties (#15723). A new
+            # east-west edge, so it takes sanctions-service's private-CA mTLS listener (8443,
+            # TLSv1.3, client auth REQUIRED, %prod bucket sanctions-authority, client certificate
+            # kyb-internal-tls mounted at /mnt/sanctions-tls), not :8123. Declared in this env so
+            # that gen-network-policies.py derives the sanctions-namespace ingress edge for kyb.
+            - name: SANCTIONS_SERVICE_URL
+              value: https://sanctions-service.sanctions.svc:8443
+            # The screening gate. On: the entity, every listed representative and every
+            # reportable beneficial owner are screened, and approval is refused while any of them
+            # has no answer. Switched on only after sanctions-service serves the 8443 listener and
+            # the v3 screen in this cluster; with no route every business case would stop at its
+            # last signature. Rollback: remove this entry.
+            - name: OPENBANK_KYB_SCREENING_ENABLED
+              value: "true"
             # Public registers, egress via the NAT gateway. Free, no key (ADR-0284 D1).
             - name: ARES_BASE_URL
               value: https://ares.gov.cz/ekonomicke-subjekty-v-be/rest
@@ -230,9 +230,6 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            - name: internal-tls
-              mountPath: /mnt/internal-tls
-              readOnly: true
             - name: kafka-keystore
               mountPath: /mnt/kafka-keystore
               readOnly: true
@@ -241,6 +238,9 @@ spec:
               readOnly: true
             - name: msg-override
               mountPath: /mnt/msg-override
+              readOnly: true
+            - name: sanctions-tls
+              mountPath: /mnt/sanctions-tls
               readOnly: true
         # OPA policy decision point (ADR-0034). Co-located sidecar the app reaches on
         # localhost:8181 (AuthorizeInterceptor default). Bundle mounted read-only from
@@ -322,10 +322,6 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
-        - name: internal-tls
-          secret:
-            secretName: kyb-service-internal-tls
-            optional: false
         - name: kafka-keystore
           secret:
             secretName: kyb-service-kafka-keystore
@@ -337,6 +333,12 @@ spec:
         - name: msg-override
           configMap:
             name: kyb-service-msg-override
+        # CLIENT certificate for the sanctions-service mTLS edge; one mount and one %prod TLS
+        # bucket per outbound edge.
+        - name: sanctions-tls
+          secret:
+            secretName: kyb-internal-tls
+            optional: false
         - name: opa-tmp
           emptyDir: {}
         - name: opa-bundle
@@ -359,9 +361,6 @@ spec:
     - name: http
       port: 8157
       targetPort: http
-    - name: https
-      port: 8443
-      targetPort: https
     - name: management
       port: 8090
       targetPort: management

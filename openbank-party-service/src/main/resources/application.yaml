@@ -148,6 +148,17 @@ mp:
         client.id: party-outbox-service-${quarkus.uuid}
         topic: openbank.party.events
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      party-pii-audit-out:
+        connector: smallrye-kafka
+        topic: openbank.party.audit
+        waitForWriteCompletion: true
+        acks: all
+        enable:
+          idempotence: true
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
       # KYC + AML activation gate: consume the KYC and AML case-lifecycle
       # topics and flip the party to ACTIVE only when both clear (two-key gate).

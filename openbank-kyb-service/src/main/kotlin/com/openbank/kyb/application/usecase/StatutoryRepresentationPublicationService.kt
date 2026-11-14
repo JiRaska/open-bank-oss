@@ -22,27 +22,39 @@ import com.openbank.libs.audit.decision.InputDigest
 import jakarta.enterprise.context.ApplicationScoped
 import java.util.UUID
 
+/** A publish by the same principal that attested the rule: separation of duties, answered 403. */
+class SeparationOfDutiesException(message: String) : RuntimeException(message)
+
 @ApplicationScoped
 class StatutoryRepresentationPublicationService(
     private val cases: BusinessOnboardingCaseRepository,
     private val attestations: RepresentationAttestationRepository,
     private val publisher: StatutoryRepresentationPublisher,
 ) {
-    suspend fun publish(caseId: UUID, expectedAttestationId: UUID): UUID? {
+    suspend fun publish(caseId: UUID, expectedAttestationId: UUID, publishedBy: String): UUID? {
         val case = cases.findById(caseId) ?: return null
         val entityPartyId = case.entityPartyId ?: return null
-        val evidence = evidenceFor(case) ?: return null
+        val (attestation, evidence) = resolve(case) ?: return null
         if (evidence.attestationId != expectedAttestationId) return null
+        // Four-eyes: the staff member releasing the rule to party-service must not be the one who
+        // attested it. Exact principal comparison, never a display name.
+        if (publishedBy == attestation.attestedBy) {
+            throw SeparationOfDutiesException(
+                "the statutory representation rule must be published by someone other than its attester",
+            )
+        }
         publisher.publishStatutoryRule(entityPartyId, evidence)
         return evidence.attestationId
     }
 
     suspend fun isCurrent(caseId: UUID, entityPartyId: UUID, attestationId: UUID): Boolean {
         val case = cases.findById(caseId) ?: return false
-        return case.entityPartyId == entityPartyId && evidenceFor(case)?.attestationId == attestationId
+        return case.entityPartyId == entityPartyId && resolve(case)?.second?.attestationId == attestationId
     }
 
-    private suspend fun evidenceFor(case: BusinessOnboardingCase): StatutoryRepresentationEvidence? {
+    private suspend fun resolve(
+        case: BusinessOnboardingCase,
+    ): Pair<RepresentationAttestation, StatutoryRepresentationEvidence>? {
         val extract = case.verifiedCompanyExtract() ?: return null
         val ruleText = extract.representationRule.sourceText?.takeIf { it.isNotBlank() } ?: return null
         val attestation = attestations.findLatestFor(case.identifier) ?: return null
@@ -55,7 +67,7 @@ class StatutoryRepresentationPublicationService(
         if (mode == RepresentationMode.JOINT_ALL && !signed.coversAll(extract, attestation)) return null
 
         val slotsByParty = case.statutoryOfficeSlots(signed)
-        return StatutoryRepresentationEvidence(
+        return attestation to StatutoryRepresentationEvidence(
             caseId = case.id,
             attestationId = attestation.id,
             ruleTextHash = attestation.ruleTextHash,

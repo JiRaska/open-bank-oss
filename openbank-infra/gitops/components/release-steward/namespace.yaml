@@ -4,4 +4,4 @@ metadata:
   name: release-steward
   labels:
     app.kubernetes.io/part-of: openbank
-    openbank.io/component: release-steward
+    open-bank.tech/component: release-steward

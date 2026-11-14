@@ -12,7 +12,7 @@ Případ otevírá buď operátor (`POST /api/v1/kyc/cases`), nebo se otevře au
 
 ## Co služba **NEDĚLÁ**
 
-- ❌ Neprovádí samotný screening sankcí / PEP — zaznamenává **výsledek** screeningu; engine je `sanctions-service` / `aml-service`.
+- ❌ Sám neporovnává jména se seznamy — při otevření případu požádá `sanctions-service` o prověření zákazníka a zaznamená **výsledek**; engine je `sanctions-service`.
 - ❌ Nevlastní master data klienta (jméno, rodné číslo, adresa) — to je `party-service`. KYC ukládá pouze `partyId` a compliance zjištění.
 - ❌ Neotevírá bankovní účty — to je `account-service`. KYC clearance je předpoklad konzumovaný onboarding tokem.
 - ❌ Neprovádí cache idempotence na úrovni požadavku — unikátnost je vynucena na úrovni domény (jeden aktivní případ na party).

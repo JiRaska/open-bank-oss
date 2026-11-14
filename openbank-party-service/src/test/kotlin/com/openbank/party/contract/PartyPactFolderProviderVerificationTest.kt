@@ -191,7 +191,10 @@ class PartyPactFolderProviderVerificationTest {
         // (JWT with azp bound to the service-account username, ROLE_API) instead of the class-level
         // pact-verifier identity.
         if (context.interaction.providerStates.any { it.name == TAX_FACTS_STATE }) {
-            testIdentityAssociation.setTestIdentity(taxReportingIdentity())
+            testIdentityAssociation.setTestIdentity(verifiedApiIdentity("openbank-tax-reporting"))
+        } else if (context.interaction.providerStates.any { it.name == DOCUMENT_PARTY_STATE }) {
+            // Match Document's real OIDC client-credentials read for the unmasked legal address.
+            testIdentityAssociation.setTestIdentity(verifiedApiIdentity("openbank-services"))
         }
         if (context.interaction.providerStates.any { it.name == StatutoryRepresentationPactFixture.STATE }) {
             testIdentityAssociation.setTestIdentity(StatutoryRepresentationPactFixture.kybIdentity())
@@ -451,7 +454,7 @@ class PartyPactFolderProviderVerificationTest {
      * insert. A dedicated id: adding an address to [VOP_NAME_PARTY_ID] would leak a new field into
      * vop's replayed response, which its matchers do not forbid but also did not ask for.
      */
-    @State("a party exists with a registered address")
+    @State(DOCUMENT_PARTY_STATE)
     fun partyExistsWithRegisteredAddress() = runOnVertxContext {
         // Idempotent for the same reason as the states above: pact-jvm 4.7.3 invokes each @State
         // setup callback twice per interaction, and this one inserts with a fixed id.
@@ -543,6 +546,7 @@ class PartyPactFolderProviderVerificationTest {
         private const val NEGATIVE_AUTH_STATE = "no valid caller identity is presented"
 
         /** Must match TaxReportingPartyPactConsumerTest.STATE (ADR-0340 B1, the TIN boundary). */
+        private const val DOCUMENT_PARTY_STATE = "a party exists with a registered address"
         private const val TAX_FACTS_STATE = "a reportable party has declared a tax-residency profile with a TIN"
 
         /** Must match TaxReportingPartyPactConsumerTest.PARTY_ID. */
@@ -705,13 +709,13 @@ class PartyPactFolderProviderVerificationTest {
      * The replay identity for the TIN-boundary interaction: the verified service-account JWT the
      * in-code guard admits (#12448 — azp bound to the service-account username, subject present).
      */
-    private fun taxReportingIdentity(): QuarkusSecurityIdentity {
-        val name = "service-account-openbank-tax-reporting"
+    private fun verifiedApiIdentity(clientId: String): QuarkusSecurityIdentity {
+        val name = "service-account-$clientId"
         val jwt = object : JsonWebToken {
             private val claims = mapOf(
-                "azp" to "openbank-tax-reporting",
+                "azp" to clientId,
                 "preferred_username" to name,
-                "sub" to "tax-reporting-sa-subject",
+                "sub" to "pact-$clientId-subject",
             )
 
             override fun getName(): String = name

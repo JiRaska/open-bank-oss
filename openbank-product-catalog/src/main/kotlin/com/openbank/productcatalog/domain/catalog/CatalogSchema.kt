@@ -4,6 +4,7 @@
 
 package com.openbank.productcatalog.domain.catalog
 
+import com.openbank.libs.audit.decision.InputDigest
 import java.time.Instant
 
 /** Immutable, hash-addressed schema document contributed by a trusted industry pack. */
@@ -36,6 +37,8 @@ data class RevisionApprovalPolicy(
     val requireEffectiveFrom: Boolean,
     /** Top-level attribute values the draft must carry before any role may approve it. */
     val requiredAttributes: Map<String, String> = emptyMap(),
+    /** Draft writers and publishers use verified issuer and subject instead of a display name. */
+    val requireStablePrincipal: Boolean = false,
 ) {
     init {
         require(roles.isNotEmpty()) { "an approval policy needs at least one role" }
@@ -46,6 +49,14 @@ data class RevisionApprovalPolicy(
 
     val authorities: Set<String> get() = roles.mapTo(linkedSetOf(), ApprovalRoleSpec::authority)
 }
+
+/** Identifies the same verified human across username changes and separates issuers. */
+internal fun catalogPrincipalKey(issuer: String, subject: String): String =
+    "oidc:${InputDigest.sha256(mapOf("issuer" to issuer, "subject" to subject)).hex}"
+
+internal fun isCatalogPrincipalKey(value: String): Boolean = CATALOG_PRINCIPAL_KEY.matches(value)
+
+private val CATALOG_PRINCIPAL_KEY = Regex("oidc:[a-f0-9]{64}")
 
 data class ApprovalRoleSpec(val code: String, val authority: String) {
     init {

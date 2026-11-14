@@ -4,6 +4,7 @@
 
 package com.openbank.tax.infrastructure.returns.crsfatca
 
+import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.tax.application.port.out.ReturnAssemblyData
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
 import com.openbank.tax.application.usecase.IncomeCreditService
@@ -24,6 +25,9 @@ import java.util.UUID
 interface CrsFatcaReportingSources {
     /** Page of ACTIVE accounts; [cursor] is the opaque value the previous page answered. */
     suspend fun activeAccounts(limit: Int, cursor: String?): AccountPage
+
+    /** GSFT deposit account roster as of the reporting day, including frozen and dormant accounts. */
+    suspend fun depositRoster(day: LocalDate, limit: Int, cursor: String?): CursorPage<DepositRosterAccountDto>
 
     /** Tax facts for one party. Null when the party never declared a profile (not reportable). */
     suspend fun partyTaxFacts(partyId: UUID): PartyTaxFactsDto?
@@ -47,6 +51,12 @@ class RestCrsFatcaReportingSources(
         val page = accounts.active(limit, cursor)
         AccountPage(page.data, page.pagination.nextCursor.takeIf { page.pagination.hasNextPage })
     }
+
+    override suspend fun depositRoster(
+        day: LocalDate,
+        limit: Int,
+        cursor: String?,
+    ): CursorPage<DepositRosterAccountDto> = sourced("account-service") { accounts.depositRoster(day, limit, cursor) }
 
     override suspend fun partyTaxFacts(partyId: UUID): PartyTaxFactsDto? = try {
         parties.taxFacts(partyId)

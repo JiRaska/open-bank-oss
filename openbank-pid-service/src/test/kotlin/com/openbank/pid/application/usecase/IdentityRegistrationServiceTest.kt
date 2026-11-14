@@ -91,6 +91,19 @@ class IdentityRegistrationServiceTest {
     }
 
     @Test
+    fun `re-registering an erased party id is refused and writes nothing`(): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        coEvery { repo.findByExternalId(any(), any()) } returns null
+        coEvery { repo.findById(id) } returns
+            indexParty(id).copy(erasedAt = OffsetDateTime.parse("2026-11-12T10:00:00Z"))
+
+        assertThatThrownBy { runBlocking { service().register(command(id)) } }
+            .isInstanceOf(PartyErasedException::class.java)
+        coVerify(exactly = 0) { repo.update(any()) }
+        coVerify(exactly = 0) { repo.save(any()) }
+    }
+
+    @Test
     fun `re-registering the same party id merges and updates instead of saving`(): Unit = runBlocking {
         val id = UUID.randomUUID()
         coEvery { repo.findByExternalId(any(), any()) } returns null

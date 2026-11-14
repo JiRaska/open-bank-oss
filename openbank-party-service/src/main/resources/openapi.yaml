@@ -19,7 +19,8 @@ info:
   # 1.27.0 -> 1.28.0: additive only — GET /api/v1/reporting/parties/{id}/tax-facts (ADR-0340 B1,
   # the CRS/FATCA TIN boundary: the derived statuses and residencies WITH TINs, readable by
   # service-account-openbank-tax-reporting alone, audit-logged without TINs).
-  version: 1.30.0
+  # 1.30.0 -> 1.31.0: additive — verified statutory representation publication and inspection.
+  version: 1.31.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -57,7 +58,7 @@ paths:
             enum: [PENDING_KYC, ACTIVE, SUSPENDED, CLOSED, MERGED]
       responses:
         '200':
-          description: Party list with optional statusFilter echo
+          description: Party list with optional statusFilter echo and staff contact fields masked
     post:
       tags: [Parties]
       summary: Create a party
@@ -81,9 +82,11 @@ paths:
   /api/v1/parties/search:
     get:
       tags: [Parties]
-      summary: Search parties by business keys, cursor-paginated
+      summary: Search parties by authorized fields, cursor-paginated
       description: >-
-        Case-insensitive substring match over legal name / trading name / email / phone /
+        Human staff with directory search access match legal and trading names only and receive
+        masked contact information. Read-only viewers can browse the masked list instead.
+        Verified service accounts retain case-insensitive substring match over legal name / trading name / email / phone /
         tax id / company registration number (ADR-0055, extended by ADR-0228).
         Blank, '*', or a term shorter than 2 characters returns an empty page (no
         full-table enumeration from this surface — use GET /api/v1/parties to list).
@@ -96,14 +99,15 @@ paths:
         as a substring; a Czech/Slovak birth number also resolves via the RC blind index.
         A date of birth in the term (yyyy-mm-dd, d.m.yyyy, d/m/yyyy; an ambiguous d/m vs m/d
         matches both) narrows the name match; the name part must still be >= 2 characters.
-        Results carry dateOfBirth so namesakes can be told apart.
+        Service-account results carry dateOfBirth so namesakes can be told apart.
       operationId: searchParties
       parameters:
         - name: q
           in: query
           required: true
           description: >-
-            Name/email/phone fragment (>= 2 chars after trim), optionally with a date of
+            Staff supply a legal or trading name fragment (>= 2 chars after trim).
+            Service accounts can also supply an email or phone fragment, a name with a date of
             birth ("Novak 15.6.1985", "Smith 1985-06-15"), or a complete national identifier
             (a birth number such as YYMMDD/NNNN, a US SSN, a UK NINO).
           schema:
@@ -139,7 +143,7 @@ paths:
         - $ref: '#/components/parameters/partyId'
       responses:
         '200':
-          description: Party detail
+          description: Party detail, with contact and other personal fields masked for human staff
           content:
             application/json:
               schema:
@@ -174,6 +178,44 @@ paths:
       responses:
         '204':
           description: Party erased
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/parties/{id}/pii-reveal:
+    post:
+      tags: [Parties]
+      summary: Reveal personal fields for an individual party record
+      description: >-
+        Requires an interactive ROLE_ADMIN or ROLE_KYC identity and a reason.
+        The restricted audit topic must acknowledge the event before unmasked details are returned.
+        The response is marked Cache-Control no-store.
+      operationId: revealPartyPii
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  enum: [KYC_REVIEW, CUSTOMER_SUPPORT, DATA_CORRECTION]
+      responses:
+        '200':
+          description: Unmasked party detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyDetail'
+        '400':
+          description: Missing or invalid reason
+        '401':
+          description: Missing or invalid credentials
+        '403':
+          description: Caller has no interactive staff reveal permission
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -707,7 +749,7 @@ paths:
               $ref: '#/components/schemas/ResolvePartyRequest'
       responses:
         '200':
-          description: Party found — returns the same fields as GET /parties/{id} summary view
+          description: Party found, with staff contact and personal fields masked
         '404':
           description: No party matches the supplied RČ
           content:
@@ -946,7 +988,7 @@ components:
         validTo: {type: [string, 'null'], format: date-time}
     PartyDetail:
       type: object
-      description: A party record. Only the AML-derived facts are enumerated here; other fields are unchanged.
+      description: A party record. Staff reads are masked until a permitted, audited reveal.
       additionalProperties: true
       properties:
         id: { type: string, format: uuid }
@@ -954,6 +996,12 @@ components:
         status: { type: string }
         legalName: { type: string }
         kycStatus: { type: string }
+        piiMasked:
+          type: boolean
+          description: True when the staff projection has masked or withheld fields.
+        piiRevealAllowed:
+          type: boolean
+          description: True when the caller may request an audited reveal.
         pepFlag:
           type: boolean
           nullable: true

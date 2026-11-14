@@ -91,7 +91,10 @@ class BorrowerCreditClient(
         sourceAccountId = null,
         amount = amount,
         description = "Loan disbursement",
-    )
+    ).map { acknowledgement ->
+        // Same-key replays return the persisted transaction, which can still be pending.
+        check(acknowledgement.status == COMPLETED_TRANSACTION_STATUS) { "Borrower credit is not confirmed" }
+    }
 
     @Retry(maxRetries = MAX_RETRIES, delay = RETRY_DELAY_MS, jitter = RETRY_JITTER_MS)
     @Timeout(CALL_TIMEOUT_MS)
@@ -103,7 +106,7 @@ class BorrowerCreditClient(
             sourceAccountId = borrowerAccountId,
             amount = amount,
             description = description,
-        )
+        ).map { }
 
     private fun post(
         reference: String,
@@ -112,7 +115,7 @@ class BorrowerCreditClient(
         targetAccountId: UUID?,
         amount: Money,
         description: String,
-    ): Uni<Unit> = client.initiate(
+    ): Uni<TransactionAck> = client.initiate(
         InitiateTransactionBody(
             idempotencyKey = reference,
             type = type,
@@ -123,9 +126,10 @@ class BorrowerCreditClient(
             description = description,
             valueDate = LocalDate.now(clock).toString(),
         ),
-    ).map { }
+    )
 
     private companion object {
+        const val COMPLETED_TRANSACTION_STATUS = "COMPLETED"
         const val MAX_RETRIES = 3
         const val RETRY_DELAY_MS = 500L
         const val RETRY_JITTER_MS = 100L

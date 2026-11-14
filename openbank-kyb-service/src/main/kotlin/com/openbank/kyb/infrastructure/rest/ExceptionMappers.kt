@@ -4,14 +4,19 @@
 
 package com.openbank.kyb.infrastructure.rest
 
+import com.openbank.kyb.application.port.out.ConcurrentCaseUpdateException
+import com.openbank.kyb.application.port.out.FindingDecisionConflictException
 import com.openbank.kyb.application.port.out.RegistryUnavailableException
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.application.usecase.CaseNotFoundException
 import com.openbank.kyb.application.usecase.InvitationNotFoundException
+import com.openbank.kyb.application.usecase.SeparationOfDutiesException
 import com.openbank.kyb.application.usecase.StaleAttestationException
 import com.openbank.kyb.domain.model.AgreementConflictException
 import com.openbank.kyb.domain.model.CaseTransitionException
 import com.openbank.kyb.domain.model.InitiatorIdentityMismatchException
+import com.openbank.kyb.domain.model.ScreeningFindingException
+import com.openbank.kyb.domain.model.ScreeningPendingException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
@@ -33,6 +38,13 @@ private fun error(status: Int, code: String, message: String?): Response = Respo
 class StaleAttestationMapper : ExceptionMapper<StaleAttestationException> {
     override fun toResponse(e: StaleAttestationException): Response =
         error(CONFLICT, "REPRESENTATION_RULE_CHANGED", e.message)
+}
+
+/** Four-eyes: the attester of a statutory rule may not also publish it. */
+@Provider
+class SeparationOfDutiesMapper : ExceptionMapper<SeparationOfDutiesException> {
+    override fun toResponse(e: SeparationOfDutiesException): Response =
+        error(FORBIDDEN, "SEPARATION_OF_DUTIES", e.message)
 }
 
 @Provider
@@ -80,6 +92,43 @@ class InitiatorIdentityMismatchMapper : ExceptionMapper<InitiatorIdentityMismatc
 class RegistryUnavailableMapper : ExceptionMapper<RegistryUnavailableException> {
     override fun toResponse(e: RegistryUnavailableException): Response =
         error(UNAVAILABLE, "REGISTRY_UNAVAILABLE", e.message)
+}
+
+/**
+ * Approval was asked for before the related-party screening has a complete answer. 503, not 409:
+ * nothing is wrong with the request or the case — a check the bank owes has not finished — and the
+ * same request succeeds once it has. The body is the same for every case, so it says nothing about
+ * what any screen found.
+ */
+@Provider
+class ScreeningPendingMapper : ExceptionMapper<ScreeningPendingException> {
+    override fun toResponse(e: ScreeningPendingException): Response = error(UNAVAILABLE, "SCREENING_PENDING", e.message)
+}
+
+/**
+ * An operator tried to approve past a screening finding that is undecided, or confirmed. 422: the
+ * request is well-formed and the case's own facts forbid it. Raised on operator routes only.
+ */
+@Provider
+class ScreeningFindingMapper : ExceptionMapper<ScreeningFindingException> {
+    override fun toResponse(e: ScreeningFindingException): Response = error(UNPROCESSABLE, e.code, e.message)
+}
+
+/**
+ * The case changed between the caller's read and its write. 409: nothing was written, and the
+ * caller must read the case again — the state it decided on is not the state that is stored.
+ */
+@Provider
+class ConcurrentCaseUpdateMapper : ExceptionMapper<ConcurrentCaseUpdateException> {
+    override fun toResponse(e: ConcurrentCaseUpdateException): Response =
+        error(CONFLICT, "CASE_CONCURRENT_UPDATE", e.message)
+}
+
+/** Two decisions about one finding disagree. 409: nothing was written; read the case again. */
+@Provider
+class FindingDecisionConflictMapper : ExceptionMapper<FindingDecisionConflictException> {
+    override fun toResponse(e: FindingDecisionConflictException): Response =
+        error(CONFLICT, "MONITORING_DECISION_CONFLICT", e.message)
 }
 
 private const val NOT_FOUND = 404

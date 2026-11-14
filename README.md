@@ -37,7 +37,7 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 |---|---|
 | Deployable modules (Quarkus services, agents, BFFs) | **74**, of which 12 governed AI-agent/auditor services |
 | Independently released components (release-please) | **71** — 400+ releases since 2026-09-01 |
-| Money-path services (2 approvals + threat model) | **28** |
+| Money-path services (threat model required; 2-approval goal not enforced, see [GOVERNANCE.md](GOVERNANCE.md)) | **28** |
 | Architecture Decision Records | **345** — 123 shipped, 156 partially delivered, 55 planned, 11 n/a ([digest](docs/adr/DIGEST.md)) |
 | CI gates declared in [`gates.yaml`](.github/gates/gates.yaml) | **320** |
 | Services with Flyway schemas (migrations) · committed Pact contracts · threat models | 65 (694) · 132 · 63 |

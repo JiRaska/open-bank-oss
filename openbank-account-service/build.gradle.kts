@@ -38,6 +38,7 @@ dependencies {
     // `trace` evidence) without exporting trace ids, attribute values or payloads.
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.mockk)
     // Provider-side message Pact verification for the AccountCreated event (ADR-0063 P1).
     testImplementation(libs.pact.provider)

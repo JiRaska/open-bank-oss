@@ -4,12 +4,17 @@
 
 package com.openbank.transaction.integration
 
+import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.synthetic.SyntheticTaint
 import com.openbank.transaction.it.PostgresRedpandaTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured
+import io.restassured.response.Response
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -66,7 +71,10 @@ class TransactionOutboxAtomicityIT {
      * and could hand the application one thing and an assertion another.
      */
     class NoDispatchResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> = mapOf("openbank.outbox.dispatch-enabled" to "false")
+        override fun start(): Map<String, String> = mapOf(
+            "openbank.outbox.dispatch-enabled" to "false",
+            "openbank.synthetic.trusted-principals" to EDGE_PRINCIPAL,
+        )
 
         override fun stop() = Unit
     }
@@ -84,6 +92,8 @@ class TransactionOutboxAtomicityIT {
 
         val completed = writers.getValue(COMPLETED_EVENT)
         assertThat(completed.status).isEqualTo("COMPLETED")
+        assertThat(completed.transactionSynthetic).isFalse()
+        assertThat(completed.outboxSynthetic).isFalse()
         assertThat(completed.outboxXmin)
             .describedAs(
                 "the COMPLETED transactions row version and its '%s' outbox row must carry the SAME " +
@@ -103,6 +113,77 @@ class TransactionOutboxAtomicityIT {
             .isNotEqualTo(completed.transactionXmin)
     }
 
+    @Test
+    @TestSecurity(user = EDGE_PRINCIPAL, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE_PRINCIPAL),
+            Claim(key = "sub", value = "synthetic-transfer-test-edge"),
+        ],
+    )
+    fun `a trusted synthetic transfer keeps its origin through initiation and terminal events`() {
+        val payload = transferPayload(UUID.randomUUID())
+        val created = submitTransfer(payload, tainted = true)
+        assertThat(created.statusCode).isEqualTo(201)
+        val transactionId = UUID.fromString(created.jsonPath().getString("id"))
+
+        val events = awaitCompletionEvent(transactionId)
+        assertThat(events.keys).containsExactlyInAnyOrder(INITIATED_EVENT, COMPLETED_EVENT)
+        assertThat(events.values.all { it.transactionSynthetic && it.outboxSynthetic }).isTrue()
+
+        val replayed = submitTransfer(payload, tainted = true)
+        assertThat(replayed.statusCode).isEqualTo(201)
+        assertThat(replayed.jsonPath().getString("id")).isEqualTo(transactionId.toString())
+        assertThat(submitTransfer(payload, tainted = false).statusCode).isEqualTo(409)
+    }
+
+    @Test
+    @TestSecurity(user = EDGE_PRINCIPAL, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE_PRINCIPAL),
+            Claim(key = "sub", value = "synthetic-transfer-test-edge"),
+        ],
+    )
+    fun `the synthetic-only route derives one tainted posting for a daily direction`() {
+        val party = UUID.randomUUID()
+        val source = UUID.randomUUID()
+        val target = UUID.randomUUID()
+        val date = LocalDate.now(AccountingClock.BANK_ZONE)
+        val body = """
+            {"partyId":"$party","sourceAccountId":"$source","targetAccountId":"$target",
+             "runDate":"$date","direction":"RETURN"}
+        """.trimIndent()
+
+        val key = "synthetic-transfer:$party:$date:RETURN"
+        assertThat(submitCanaryTransfer(body, tainted = false, key = key).statusCode).isEqualTo(403)
+        assertThat(submitCanaryTransfer(body, tainted = true, key = null).statusCode).isEqualTo(400)
+        val otherLegKey = "synthetic-transfer:$party:$date:OUTBOUND"
+        assertThat(submitCanaryTransfer(body, tainted = true, key = otherLegKey).statusCode).isEqualTo(400)
+        val accepted = submitCanaryTransfer(body, tainted = true, key = key)
+        assertThat(accepted.statusCode).isEqualTo(201)
+        val id = UUID.fromString(accepted.jsonPath().getString("id"))
+        assertThat(accepted.jsonPath().getString("amount")).isEqualTo("0.01")
+        assertThat(accepted.jsonPath().getString("currencyCode")).isEqualTo("CZK")
+        assertThat(accepted.jsonPath().getString("sourceAccountId")).isEqualTo(target.toString())
+        assertThat(accepted.jsonPath().getString("targetAccountId")).isEqualTo(source.toString())
+        val replay = submitCanaryTransfer(body, tainted = true, key = key)
+        assertThat(replay.statusCode).isEqualTo(201)
+        assertThat(replay.jsonPath().getString("id")).isEqualTo(id.toString())
+        assertThat(awaitCompletionEvent(id).values).allMatch { it.transactionSynthetic && it.outboxSynthetic }
+    }
+
+    private fun submitCanaryTransfer(payload: String, tainted: Boolean, key: String?): Response = RestAssured.given()
+        .contentType("application/json")
+        .body(payload)
+        .apply {
+            if (tainted) header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE)
+            if (key != null) header("Idempotency-Key", key)
+        }
+        .post("/api/v1/transactions/synthetic-transfer")
+
     /**
      * Guards the assertions above against reading their success out of a query that never returns
      * anything: an id that was never written must produce no pair at all.
@@ -113,29 +194,34 @@ class TransactionOutboxAtomicityIT {
     }
 
     private fun initiateTransaction(): UUID {
-        val response = RestAssured.given()
-            .contentType("application/json")
-            .body(
-                """
-                {
-                  "idempotencyKey": "${UUID.randomUUID()}",
-                  "type": "TRANSFER",
-                  "sourceAccountId": "${UUID.randomUUID()}",
-                  "targetAccountId": "${UUID.randomUUID()}",
-                  "amount": "1234.56",
-                  "currencyCode": "CZK",
-                  "baseAmount": "1234.56",
-                  "baseCurrencyCode": "CZK",
-                  "description": "Outbox atomicity IT",
-                  "valueDate": "${LocalDate.now()}",
-                  "bookingDate": "${LocalDate.now()}"
-                }
-                """.trimIndent(),
-            )
-            .post("/api/v1/transactions")
+        val response = submitTransfer(transferPayload(UUID.randomUUID()), tainted = true)
         assertThat(response.statusCode).isEqualTo(201)
         return UUID.fromString(response.jsonPath().getString("id"))
     }
+
+    private fun transferPayload(key: UUID): String = """
+        {
+          "idempotencyKey": "$key",
+          "type": "TRANSFER",
+          "sourceAccountId": "${UUID.randomUUID()}",
+          "targetAccountId": "${UUID.randomUUID()}",
+          "amount": "1234.56",
+          "currencyCode": "CZK",
+          "baseAmount": "1234.56",
+          "baseCurrencyCode": "CZK",
+          "initiatedByPartyId": "${UUID.randomUUID()}",
+          "scaExemption": "PSD2_RTS_ART15_OWN_ACCOUNT",
+          "description": "Outbox atomicity IT",
+          "valueDate": "${LocalDate.now()}",
+          "bookingDate": "${LocalDate.now()}"
+        }
+    """.trimIndent()
+
+    private fun submitTransfer(payload: String, tainted: Boolean): Response = RestAssured.given()
+        .contentType("application/json")
+        .body(payload)
+        .apply { if (tainted) header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE) }
+        .post("/api/v1/transactions")
 
     /** The terminal write is performed asynchronously by the Temporal activity, so poll for it. */
     private fun awaitCompletionEvent(transactionId: UUID): Map<String, WriterPair> {
@@ -150,13 +236,20 @@ class TransactionOutboxAtomicityIT {
         )
     }
 
-    private data class WriterPair(val transactionXmin: String, val outboxXmin: String, val status: String)
+    private data class WriterPair(
+        val transactionXmin: String,
+        val outboxXmin: String,
+        val status: String,
+        val transactionSynthetic: Boolean,
+        val outboxSynthetic: Boolean,
+    )
 
     /** Per event type: the transaction ids (`xmin`) that wrote the aggregate row and that outbox row. */
     private fun writersOf(transactionId: UUID): Map<String, WriterPair> = dataSource.connection.use { connection ->
         connection.prepareStatement(
             """
-            SELECT o.event_type, t.xmin::text AS transaction_xmin, o.xmin::text AS outbox_xmin, t.status
+            SELECT o.event_type, t.xmin::text AS transaction_xmin, o.xmin::text AS outbox_xmin,
+                   t.status, t.synthetic, o.synthetic
             FROM transactions t
             JOIN transaction_outbox o ON o.aggregate_id = t.id
             WHERE t.id = ?
@@ -165,7 +258,15 @@ class TransactionOutboxAtomicityIT {
             statement.setObject(1, transactionId)
             statement.executeQuery().use { rows ->
                 generateSequence { if (rows.next()) rows else null }
-                    .map { it.getString(1) to WriterPair(it.getString(2), it.getString(3), it.getString(4)) }
+                    .map {
+                        it.getString(1) to WriterPair(
+                            it.getString(2),
+                            it.getString(3),
+                            it.getString(4),
+                            it.getBoolean(5),
+                            it.getBoolean(6),
+                        )
+                    }
                     .toMap()
             }
         }
@@ -173,6 +274,7 @@ class TransactionOutboxAtomicityIT {
 
     private companion object {
         const val ACTOR_ID = "00000000-0000-0000-0000-000000008353"
+        const val EDGE_PRINCIPAL = "service-account-openbank-edge"
         const val INITIATED_EVENT = "openbank.transactions.transaction.initiated"
         const val COMPLETED_EVENT = "openbank.transactions.transaction.completed"
         const val POLL_ATTEMPTS = 60

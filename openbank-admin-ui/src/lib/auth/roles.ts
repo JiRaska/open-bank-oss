@@ -185,7 +185,9 @@ export const PERMISSIONS = {
   // Single-party DETAIL read only (GET /api/v1/parties/{id}, PartyResource.getParty): that endpoint
   // additionally admits ROLE_RISK so a risk officer can see an obligor's name. Search and list stay
   // on `parties:view`; never use this for a directory link.
-  "parties:view-detail":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.KYC, ROLES.RISK],
+  "parties:view-detail":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.KYC, ROLES.RISK, ROLES.COMPLIANCE],
+  "parties:search":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
+  "parties:reveal-pii":   [ROLES.ADMIN, ROLES.KYC],
   // Mirrors party-service POST /api/v1/parties: a viewer may inspect parties but
   // must never be offered a customer-creation workflow.
   "parties:create":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
@@ -247,6 +249,13 @@ export const PERMISSIONS = {
   "sanctions:review":     [ROLES.ADMIN, ROLES.OPERATOR],
   "regulatory:view":          [ROLES.ADMIN, ROLES.COMPLIANCE],
   "regulatory:submit":        [ROLES.ADMIN, ROLES.COMPLIANCE],
+  // ADR-0336 statutory returns (tax-reporting-service StatutoryReturnResource). Reads mirror its
+  // @RolesAllowed (AUDITOR, VIEWER, OPERATOR, ADMIN; API is machine-only) intersected with the
+  // rego `staff-statutory-return-inspect` rule. Every lifecycle write (assemble, approve, submit,
+  // acknowledge, GSFT delivery) is @RolesAllowed(OPERATOR) plus `operator-statutory-return-lifecycle`
+  // — ADMIN is deliberately absent, the backend would refuse it.
+  "statutory-returns:view":    [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR, ROLES.VIEWER],
+  "statutory-returns:operate": [ROLES.OPERATOR],
   // Technical accounts
   "technical-accounts:view":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR],
   "technical-accounts:edit":  [ROLES.ADMIN],
@@ -375,6 +384,9 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
   ['delegations:view', ['/delegations']],
   ['feedback:view', ['/feedback']],
   ['regulatory:view', ['/regulatory']],
+  // Longest prefix wins: the statutory-returns workbench is the operator's (ADR-0336), and the
+  // bare '/regulatory' guard (ADMIN, COMPLIANCE) would wall out the only role allowed to act.
+  ['statutory-returns:view', ['/regulatory/statutory-returns']],
   ['audit:view', ['/audit']],
   ['kyc:view', ['/kyc']],
   ['onboarding:view', ['/onboarding']],

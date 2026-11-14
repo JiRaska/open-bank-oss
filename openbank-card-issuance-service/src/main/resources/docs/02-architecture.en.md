@@ -138,3 +138,15 @@ The product-configuration lookup (`ProductCatalogClient.getByCode`, `GET /api/v1
 shared client on ROLE_API alone. If the Keycloak client lacks the `catalog:read` scope, the read is
 denied once product-catalog enforces authorization. `M2mOidcClientIdentityWiringTest` pins the
 client selection.
+
+## Delegation grant projection (ADR-0232 D3, ADR-0375 D2)
+
+`CardDelegationEventConsumer` keeps this service's own compacted projection of the
+`delegation-events` stream, so a card operation decides a delegated caller's authority locally
+without calling delegation-service on the request path.
+
+The envelope is decoded by `com.openbank.libs.delegation.DelegationGrantEventDecoder`, and the
+enabling/disabling split comes from `DelegationGrantEvents`; this service's own `CLOSING_TYPES` now
+points at that shared set rather than restating it. What stays local is the projection itself — the
+card capabilities this service recognises and what it does with a record the decoder rejects (a
+`null` decode is a poison pill, not an empty grant).

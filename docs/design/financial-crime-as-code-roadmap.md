@@ -178,14 +178,23 @@ contract, including AML/fraud effect separation. Executed schema-agreement fixtu
 both domains and structural negatives. Compilation remains authoritative for semantic
 checks (exact vocabulary pins/codes, validity, Long range, rule identity and feature
 consistency), source size and duplicate-key rejection. JSON Schema alone is not a trust
-check. At that stage vocabulary authoring remained typed; the next section records its
-JSON boundary. No registry was introduced.
+check. At that stage vocabulary authoring remained typed. The vocabulary source section
+records its JSON boundary. No registry was introduced.
 
-Still required under #13775: authentic source/snapshot adapters, CLI/HTTP/MCP integration,
+At this source-boundary milestone, #13775 still required authentic source/snapshot adapters, CLI/HTTP/MCP integration,
 DecisionRecord integration, evidence-bound independent approval/signature, SHADOW epochs,
 replica consistency, real HTTP/DB/outbox/concurrency tests and the full enforced
 fincrime-pack-conformance gate. No approval, signature, activation, production caller,
 threshold writer or payment enforcement is enabled by decoding a source.
+
+## K0 offline CLI proof
+
+`obp fincrime proof` replays the checked-in synthetic AML and fraud vectors through
+`FincrimeVocabularyJson`, `CountPackJson` and `CountPackReplay`. It checks the change at a
+fixed count boundary, preserves the incomplete result for a missing input, and emits the
+pack and input hashes plus actual evaluated rule counts in canonical JSON. The command
+accepts no input files. The runtime and activation conformance requirements remain tracked
+in #13775.
 
 ## K0 vocabulary source boundary
 
@@ -210,11 +219,40 @@ compilation additionally enforces text/Unicode, exact numeric, validity and uniq
 invariants. Schema lengths count code points, while typed text bounds count UTF-16 units.
 Authored provenance is not authenticated evidence, and a digest does not confer authority.
 
-This closes only vocabulary JSON authoring in #13775. Authentic source/snapshot adapters,
+This milestone covers vocabulary JSON authoring in #13775. Authentic source/snapshot adapters,
 CLI/HTTP/MCP parity, generated catalogues, independent evidence-bound approvals/signatures,
 DecisionRecord integration, SHADOW epochs/rollback/replica consistency, real HTTP/DB/outbox
 and concurrency proof, and the full fincrime-pack-conformance gate remain open. No production
 caller, registry, activation path, threshold writer or payment enforcement is added.
+
+## K0 signed shadow evidence
+
+The synthetic AML and fraud count packs now use the same interpreter to produce a canonical
+replay digest. It binds the baseline and candidate revisions, both evaluation results and the
+input digest for every replay case. An incomplete case contributes evidence without counting as
+an evaluated pair.
+
+A publisher signature binds the exact replay, the independent review and the SHADOW epoch.
+The verifier takes a trusted public key and a current domain reviewer check from its caller. It
+rejects stale replay, altered epoch fields, unauthorized reviewers and zero evaluated pairs.
+The resulting immutable pin carries its epoch and pack identity on every evaluation, including
+when a feature is missing. The tests use ephemeral Ed25519 keys and exercise both vocabularies.
+
+The library slice leaves durable approval, publisher custody, epoch compare-and-set, replica
+routing, DecisionRecord persistence and the deployment conformance gate open under #13775.
+
+The existing DecisionRecord codec has a versioned shadow outcome. It records evaluated and
+incomplete results with the exact artifact hash, epoch, approved evidence hash and result hash.
+
+The next local slice stores fraud SHADOW publisher envelopes in an append-only PostgreSQL
+table whose keys enforce the chain: one writer per epoch, no gap, no proposal reuse, no
+lock. It preserves previous rows and replays identical publication requests. AML uses the
+same table shape. A rollback is another signed epoch. The same ledger contract accepts
+AML and fraud snapshots in the synthetic proof. The service-backed AML ledger, durable
+approval source and decision audit ingress are separate delivery work.
+The count-pack pin encodes this outcome through the shared codec with a canonical input digest.
+The transport rollout must teach the audit reader the new outcome before publishing it from a
+service outbox. Existing decision classes retain their wire shape.
 
 ## Evidence required before claiming completion
 

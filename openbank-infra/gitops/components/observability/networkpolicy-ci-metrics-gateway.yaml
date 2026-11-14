@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Ingress/egress lockdown for the CI metrics gateway (threat model E1/E2).
+# Public-internet-facing pod in `observability`: explicit default-deny with a tight
+# allow-list. Ingress only from the shared Envoy Gateway proxies (envoy-gateway-system, ADR-0324)
+# plus the in-namespace Prometheus scrape of the collector's own metrics; egress only to DNS and
+# the Prometheus remote-write receiver (the in-cluster sink, TB-3). Hand-authored: the generated
+# network-policies.yaml targets Deployments declared in this directory, not chart pods. No other egress, so a
+# compromised collector cannot reach other services or the internet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ci-metrics-gateway
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: ci-metrics-gateway
+      app.kubernetes.io/name: opentelemetry-collector
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only the shared Gateway's Envoy proxy may reach the OTLP-HTTP receiver.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+      ports:
+        - protocol: TCP
+          port: 4318
+    # Collector self-metrics are private to the in-namespace Prometheus.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+              app.kubernetes.io/instance: kube-prometheus-stack-prometheus
+      ports:
+        - protocol: TCP
+          port: 8888
+  egress:
+    # DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Prometheus remote-write receiver (kube-prometheus-stack-prometheus service -> prometheus pod).
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+              app.kubernetes.io/instance: kube-prometheus-stack-prometheus
+      ports:
+        - protocol: TCP
+          port: 9090

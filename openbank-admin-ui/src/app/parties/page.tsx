@@ -12,6 +12,7 @@ import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
+import { useAuth } from '@/lib/auth/useAuth'
 import { parsePartyListPage, type PartyListItem, type PartyListPage } from '@/lib/party/partyListContract'
 
 const PAGE_SIZE = 25
@@ -27,6 +28,7 @@ interface Pagination {
 
 export default function PartiesPage() {
   const { t, language } = useLanguage()
+  const canSearch = useAuth().hasPermission('parties:search')
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
   // ── list mode (no search term) ──────────────────────────────────────────────
@@ -68,7 +70,7 @@ export default function PartiesPage() {
   }, [])
 
   // ── derived ─────────────────────────────────────────────────────────────────
-  const inSearchMode  = debouncedQ.length >= 2
+  const inSearchMode  = canSearch && debouncedQ.length >= 2
   const showHint      = search.length > 0 && search.length < 2
   const displayRows   = inSearchMode ? searchRows  : parties
   const displayLoad   = inSearchMode ? searching   : loading
@@ -174,14 +176,14 @@ export default function PartiesPage() {
   // ── fire search when debounced query changes ────────────────────────────────
   useEffect(() => {
     void Promise.resolve().then(() => {
-      if (debouncedQ.length >= 2) {
+      if (canSearch && debouncedQ.length >= 2) {
         void runSearch(debouncedQ)
       } else {
         searchGeneration.current += 1
         setSearchRows([]); setSearchPagi(null); setSearchUnavail(null)
       }
     })
-  }, [debouncedQ, runSearch])
+  }, [canSearch, debouncedQ, runSearch])
 
   // ── initial list load ───────────────────────────────────────────────────────
   useEffect(() => { void Promise.resolve().then(() => load()) }, [load])
@@ -209,7 +211,7 @@ export default function PartiesPage() {
 
       {/* Search toolbar */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center' }}>
-        <div style={{ position: 'relative', flex: 1, maxWidth: '360px' }}>
+        {canSearch && <div style={{ position: 'relative', flex: 1, maxWidth: '360px' }}>
           <Search size={14} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
             id="party-search"
@@ -220,8 +222,8 @@ export default function PartiesPage() {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
-        </div>
-        {showHint && (
+        </div>}
+        {canSearch && showHint && (
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
             {t('Zadejte alespoň 2 znaky', 'Enter at least 2 characters')}
           </span>

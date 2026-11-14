@@ -8,6 +8,7 @@ import com.openbank.finrep.application.port.inbound.FinrepUseCase
 import com.openbank.finrep.application.port.inbound.GetFinrepTemplateQuery
 import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.domain.model.FinrepTemplate
+import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
@@ -43,6 +44,7 @@ import java.time.LocalDate
 class FinrepResource(private val finrepUseCase: FinrepUseCase, private val clock: Clock) {
 
     @GET
+    @Authorize(action = "finrep.template.inspect")
     @Path("/templates/{templateId}")
     suspend fun getTemplate(
         @PathParam("templateId") templateId: String,
@@ -50,13 +52,14 @@ class FinrepResource(private val finrepUseCase: FinrepUseCase, private val clock
         @QueryParam("evidence") @DefaultValue("FROZEN") evidence: String = "FROZEN",
     ): Response {
         val date = if (asOf.isBlank()) LocalDate.now(clock) else LocalDate.parse(asOf)
+        val sourceEvidence = TrialBalanceEvidence.valueOf(evidence.uppercase())
         val template: FinrepTemplate = finrepUseCase.getTemplate(
             GetFinrepTemplateQuery(
                 templateId = templateId,
                 asOf = date,
-                evidence = TrialBalanceEvidence.valueOf(evidence.uppercase()),
+                evidence = sourceEvidence,
             ),
         )
-        return Response.ok(template).build()
+        return Response.ok(template.copy(sourceEvidence = sourceEvidence.name)).build()
     }
 }

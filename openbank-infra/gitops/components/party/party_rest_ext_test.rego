@@ -173,3 +173,14 @@ test_statutory_representation_separates_publisher_and_reader if {
         not allow.allow with input as {"principal": principal, "action": "party.statutory-representation.inspect"}
     }
 }
+
+test_party_pii_reveal_requires_kyc_or_admin_human if {
+	allow.allow with input as {"principal": kyc_analyst, "action": "party.pii.reveal"}
+	admin := object.union(kyc_analyst, {"roles": ["ROLE_ADMIN"]})
+	allow.allow with input as {"principal": admin, "action": "party.pii.reveal"}
+	operator := object.union(kyc_analyst, {"roles": ["ROLE_OPERATOR"]})
+	not allow.allow with input as {"principal": operator, "action": "party.pii.reveal"}
+	not allow.allow with input as {"principal": viewer, "action": "party.pii.reveal"}
+	machine_admin := object.union(admin, {"service_account": true})
+	not allow.allow with input as {"principal": machine_admin, "action": "party.pii.reveal"}
+}

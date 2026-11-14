@@ -3,6 +3,7 @@
 
 package com.openbank.document.infrastructure.rest
 
+import com.openbank.document.application.port.`in`.DocumentOwnershipUseCase
 import com.openbank.document.application.port.`in`.DocumentQueryUseCase
 import com.openbank.document.application.port.`in`.DocumentRenderUseCase
 import com.openbank.document.application.port.`in`.DocumentTemplateUseCase
@@ -30,6 +31,7 @@ class ExternalDisclosureExportResourceTest {
         queryUseCase = mockk<DocumentQueryUseCase>(),
         onboardingUseCase = mockk<OnboardingDocumentUseCase>(),
         externalDisclosureExportUseCase = exporter,
+        ownershipUseCase = mockk<DocumentOwnershipUseCase>(),
     )
 
     @Test

@@ -21,6 +21,7 @@ mandates. Delegation-service must establish both sources before using a rule.
 | A mandate from another case or actor is substituted | Party compares each active mandate's evidence digest to the value supplied for that actor. The snapshot retains the exact mandate IDs. |
 | A withdrawn mandate or superseded attestation is used | Party rechecks current mandates on every read. KYB returns unavailable when the pinned attestation is superseded, including before a replacement is published. The caller must obtain both current proofs. |
 | A shared role or selected profile is treated as evidence | OPA checks the named client and the service verifies the authenticated identity in code. Employee approval groups remain separate. |
+| One staff member both attests and publishes a statutory rule (2026-11-14) | Separation of duties: KYB refuses the publication with 403 `SEPARATION_OF_DUTIES` when the publishing principal equals the attestation's `attestedBy`. Both are the authenticated principal name, compared exactly, never a display name. |
 | A retry rewrites a published revision | Party inserts once per attestation and compares an existing snapshot against the retried evidence. |
 
 The snapshot contains identifiers, office slots, and evidence digests. Raw register text and
