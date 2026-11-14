@@ -41,6 +41,8 @@ class VopRateLimitFilterTest {
 
     private fun allowed(value: Boolean): Uni<Boolean> = Uni.createFrom().item(value)
 
+    private fun unreachable(): Uni<Boolean> = Uni.createFrom().failure(RuntimeException("valkey unreachable"))
+
     private fun context(path: String = "api/v1/vop/verify"): ContainerRequestContext {
         val uriInfo = mockk<UriInfo> { every { this@mockk.path } returns path }
         return mockk(relaxed = true) { every { this@mockk.uriInfo } returns uriInfo }
@@ -83,7 +85,7 @@ class VopRateLimitFilterTest {
         // payment-availability gain. If someone "fixes" this to fail open for consistency with
         // the service's own fail-open rule, this test is what should stop them.
         principal("someone")
-        every { limiter.isAllowed(any(), any()) } returns Uni.createFrom().failure(RuntimeException("valkey unreachable"))
+        every { limiter.isAllowed(any(), any()) } returns unreachable()
 
         assertThat(filter().run(context())?.status).isEqualTo(429)
     }
@@ -130,8 +132,7 @@ class VopRateLimitFilterTest {
         // because Valkey is down. Collapsing them into one counter would hide a fleet-wide outage
         // inside what looks like healthy enumeration defence.
         principal("enumerator")
-        every { limiter.isAllowed("enumerator", 60) } returns allowed(true) andThen allowed(false) andThen
-            Uni.createFrom().failure(RuntimeException("valkey unreachable"))
+        every { limiter.isAllowed("enumerator", 60) } returns allowed(true) andThen allowed(false) andThen unreachable()
         val f = filter()
 
         f.run(context())
