@@ -218,6 +218,17 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
 
 ## 7. Change log
 
+- **2026-11-14** — **Ongoing monitoring switched on in the sandbox deployment
+  (`SANCTIONS_MONITORING_ENABLED=true`).** The surface of section 6b is now live there: the
+  registration operations accept requests instead of answering 503, and the delta and sweep run
+  every 60 seconds. No threat row changes. Measured at the flip: the registry is empty and the
+  only registering caller (kyb-service) still has its own registration switch off, so no subject
+  is monitored and no finding can be raised until that caller is switched on separately; list
+  changes run at roughly 700 to 1,600 changed entries a day, well inside the delta's bound of
+  5 entries per tick (7,200 a day), and the queue trigger writes nothing while the registry is
+  empty (M9). The new `SanctionsMonitoringCronIT` drives the real scheduler rather than calling
+  the runs directly, so a scheduled path that lost its Vert.x context would now fail a test (M6,
+  M10). Rollback: set the variable back to `false`.
 - **2026-11-14** — **FATF jurisdiction statements of 2026-10-30 loaded; a measure that never
   screens (#15723, ADR-0032 amendment).** V24 loads `FATF_CALL_FOR_ACTION` (KP, IR
   countermeasures; MM enhanced due diligence; all `HIGH_RISK` → review) and
