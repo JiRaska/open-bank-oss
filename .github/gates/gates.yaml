@@ -6840,6 +6840,20 @@ gates:
       # the first run of these probes reported "rejected" on a YAML error in the fixture itself,
       # which is why the output is read and not the exit code.
       python3 .github/scripts/check-delegation-capability-enforcement.py --enforce
+  - id: value-movement-admission-coverage
+    name: "every value-moving module is classified, and an instructed one binds the admission chain with a real FRAUD check (ADR-0377 D2, enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 12   # 1.3s warm / 2.7s cold on a laptop, 3043 .kt files read (2026-11-13)
+    rationale: "A module that books value without binding the payment admission chain is a path around authority, limits, sanctions and fraud, and nothing listed such paths: ADR-0377 D2 found one that posts straight to the transactions API outside every rail. The scope is derived from value-sink call sites in src/main (TransactionsApi booking calls, @POST clients on journal/balance/clearing paths, hand-built sink URLs), never listed; the registry only classifies it and is checked both ways, and its pending states are shrink-only so a module that binds the chain cannot keep its exemption."
+    review_after: "2027-03-31"
+    verified: "2026-11-13 -- real tree: PASS, 16 modules derived from 3043 .kt files (9 instructed, all pending-chain because no service binds the chain yet; 7 bank-own). Falsified six ways against the real tree, each restored afterwards: a registry line deleted -> exit 1, 1 UNCLASSIFIED finding; a line for a non-existent module -> exit 1, 1 STALE finding; pending-chain removed from an instructed line -> exit 1, 1 'declared fully bound' finding; a new file posting to a transactions URL added to a module outside the set -> exit 1, 1 UNCLASSIFIED finding naming file:line; a chain Builder added to a pending-chain module -> exit 1, 1 STALE pending-chain finding; --root at an empty directory -> exit 2 with SUBJECTS=UNRESOLVED. Self-test: 30 named checks."
+    min_subjects: 12   # 16 value-moving modules derived today (2026-11-13)
+    selftest: python3 .github/scripts/check-value-movement-admission.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-value-movement-admission.py"]
+    run: |
+      python3 .github/scripts/check-value-movement-admission.py
   - id: enforcement-reachability
     name: "a declared enforcement function has a production caller (ADR-0232, issue #3615)"
     group: kotlin

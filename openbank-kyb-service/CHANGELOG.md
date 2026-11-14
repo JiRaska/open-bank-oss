@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.9.0...kyb-service-v0.10.0) (2026-11-13)
+
+
+### Features
+
+* **kyb:** keep approved business cases under ongoing sanctions monitoring ([#15989](https://github.com/JiRaska/open-bank-oss/issues/15989)) ([daa6829](https://github.com/JiRaska/open-bank-oss/commit/daa6829c02fc75f2bcec673b3a2a8e1bce6605a9))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.8.5...kyb-service-v0.9.0) (2026-11-13)
 
 

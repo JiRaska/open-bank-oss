@@ -14,7 +14,11 @@ import java.util.UUID
 data class AmlCaseCreatedEvent(
     val caseId: UUID,
     val idempotencyKey: String,
-    val partyId: UUID,
+    /**
+     * The party exactly as the case stores it. `null` only for a case stored with no party, which
+     * only the held-payment intake writes; every other case publishes what it always did.
+     */
+    val partyId: UUID?,
     val accountId: UUID?,
     val transactionId: UUID?,
     val customerReference: String,
@@ -28,7 +32,8 @@ data class AmlCaseCreatedEvent(
 
 data class AmlCaseStatusChangedEvent(
     val caseId: UUID,
-    val partyId: UUID,
+    /** As on [AmlCaseCreatedEvent]: the stored party, `null` only when none is stored. */
+    val partyId: UUID?,
     val previousStatus: AmlCaseStatus,
     val newStatus: AmlCaseStatus,
     val decisionReason: String?,
@@ -42,6 +47,9 @@ data class AmlCaseStatusChangedEvent(
     // Additive (#4403): binds a decision to the case a rail opened, since alertCode and
     // transactionId are free text any case creator may set.
     val idempotencyKey: String? = null,
+    // Additive (ADR-0374): set only for a case the held-payment intake opened, and left off the
+    // wire otherwise, so every other case's event is unchanged.
+    val origin: String? = null,
 )
 
 fun AmlCase.toCreatedEvent(now: Instant) = AmlCaseCreatedEvent(

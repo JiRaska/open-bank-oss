@@ -5,6 +5,7 @@
 package com.openbank.kyb.infrastructure.rest
 
 import com.openbank.kyb.application.port.out.ConcurrentCaseUpdateException
+import com.openbank.kyb.application.port.out.FindingDecisionConflictException
 import com.openbank.kyb.application.port.out.RegistryUnavailableException
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.application.usecase.CaseNotFoundException
@@ -113,6 +114,13 @@ class ScreeningFindingMapper : ExceptionMapper<ScreeningFindingException> {
 class ConcurrentCaseUpdateMapper : ExceptionMapper<ConcurrentCaseUpdateException> {
     override fun toResponse(e: ConcurrentCaseUpdateException): Response =
         error(CONFLICT, "CASE_CONCURRENT_UPDATE", e.message)
+}
+
+/** Two decisions about one finding disagree. 409: nothing was written; read the case again. */
+@Provider
+class FindingDecisionConflictMapper : ExceptionMapper<FindingDecisionConflictException> {
+    override fun toResponse(e: FindingDecisionConflictException): Response =
+        error(CONFLICT, "MONITORING_DECISION_CONFLICT", e.message)
 }
 
 private const val NOT_FOUND = 404

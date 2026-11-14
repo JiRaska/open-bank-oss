@@ -9,7 +9,14 @@ info:
   # 1.7.0 -> 1.8.0: additive — related-party sanctions / PEP screening: `Case.screening` (operator
   # view only), the operator disposition route for a finding, the 503 SCREENING_PENDING refusal on
   # `sign` and `review/resolve`, and the 422 SCREENING_FINDING_* refusal on `review/resolve`.
-  version: 1.8.0
+  # 1.8.0 -> 1.9.0: additive — ongoing monitoring of approved cases (ADR-0376). Operator-only
+  # response fields `Case.monitoring` (the findings reported after approval, each with its own
+  # decision, and the exit state read off them) and `ScreeningSubject.monitoringState`; two
+  # operator routes, `monitoring/findings/{findingId}/disposition` and `monitoring/exit/complete`;
+  # and the `monitoring=open` filter on `GET /cases`. Nothing existing changes: a case's `status`,
+  # `updatedAt` and every existing route answer the same whatever monitoring found, and
+  # `status=MANUAL_REVIEW` still returns MANUAL_REVIEW cases only.
+  version: 1.9.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -168,6 +175,16 @@ paths:
           in: query
           schema:
             $ref: '#/components/schemas/CaseStatus'
+        - name: monitoring
+          in: query
+          description: >-
+            Operator only. `open` lists the cases ongoing monitoring holds for an operator — a
+            finding awaiting a decision, or a confirmed sanctions match whose exit is not yet
+            recorded as carried out — oldest first. Such a case keeps the status it was approved
+            in, so this is its own queue and cannot be combined with `status` (400).
+          schema:
+            type: string
+            enum: [open]
         - name: page
           in: query
           schema:
@@ -643,6 +660,79 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/DisposeFindingRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/cases/{id}/monitoring/findings/{findingId}/disposition:
+    post:
+      tags: [KYB]
+      summary: Operator decides one finding of ongoing monitoring on an approved case
+      description: >-
+        Sets the disposition of one OPEN monitoring finding to CLEARED_FALSE_POSITIVE or CONFIRMED,
+        recording the authenticated operator, the reason and the time. Each finding is decided by
+        itself and once (409 after that): a later finding about the same subject never reopens or
+        replaces an earlier decision. The case's `status` and `updatedAt` do not change. The first
+        CONFIRMED finding that is not a PEP match makes an exit owed
+        (`monitoring.exitOwedSince`) and publishes BUSINESS_RELATIONSHIP_EXIT_REQUIRED once; a
+        confirmed PEP match is a risk fact and publishes nothing. The case stays monitored.
+      operationId: decideMonitoringFinding
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - name: findingId
+          in: path
+          required: true
+          description: '`findingId` of the finding in `Case.monitoring.findings`.'
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisposeFindingRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/cases/{id}/monitoring/exit/complete:
+    post:
+      tags: [KYB]
+      summary: Operator records that the exit a confirmed sanctions match requires has been carried out
+      description: >-
+        The only way monitoring of a case with a confirmed sanctions match ends. Accepted when an
+        exit is owed and no finding is still undecided (409 otherwise, and 409 when already
+        recorded). Records the authenticated operator, the time and the evidence, and withdraws
+        the case's subjects from the monitored-subject registry. The case's `status` does not
+        change. This service does not carry the exit out; it records that it was.
+      operationId: completeMonitoringExit
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteExitRequest'
       responses:
         '200':
           description: Case
@@ -1251,6 +1341,14 @@ components:
           oneOf:
             - $ref: '#/components/schemas/CaseScreening'
             - type: 'null'
+        monitoring:
+          description: >-
+            What ongoing monitoring reported after approval and what was decided. Null when
+            nothing was reported. Operator view only — always null on a response a customer can
+            read. The case's `status` and `updatedAt` are the same whatever is here.
+          oneOf:
+            - $ref: '#/components/schemas/CaseMonitoring'
+            - type: 'null'
         createdAt:
           type: string
           format: date-time
@@ -1329,6 +1427,98 @@ components:
         matchedName:
           type: [string, 'null']
         screenedAt:
+          type: [string, 'null']
+          format: date-time
+        monitoringState:
+          type: [string, 'null']
+          description: >-
+            Where the subject stands with the monitored-subject registry: PENDING (owed), SYNCED
+            (accepted) or REFUSED (the registry's validation rejects it as it is — the subject is
+            approved and NOT monitored). Null when the subject is not to be registered, and on
+            list responses.
+    CaseMonitoring:
+      type: object
+      required: [findings]
+      properties:
+        reviewSince:
+          type: [string, 'null']
+          format: date-time
+          description: Since when a finding has been waiting for a decision; null when none is.
+        exitOwedSince:
+          type: [string, 'null']
+          format: date-time
+          description: >-
+            Since when a confirmed sanctions match requires an exit that is not yet recorded as
+            carried out. Read off the findings; nobody sets it.
+        exitCompleted:
+          oneOf:
+            - $ref: '#/components/schemas/ExitCompletion'
+            - type: 'null'
+        findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonitoringFinding'
+    ExitCompletion:
+      type: object
+      required: [completedAt, completedBy, evidence]
+      properties:
+        completedAt:
+          type: string
+          format: date-time
+        completedBy:
+          type: string
+        evidence:
+          type: string
+    CompleteExitRequest:
+      type: object
+      required: [evidence]
+      properties:
+        evidence:
+          type: string
+          minLength: 10
+          description: What was done and where the record of it is. Who records it is the authenticated operator.
+    MonitoringFinding:
+      type: object
+      description: >-
+        One finding of sanctions-service's ongoing monitoring, as received on
+        MONITORED_SUBJECT_MATCHED, and its decision. It names a list entry and a subject key,
+        never a person. `matchKind`, `listType`, `matchStatus` and `detection` are the producer's
+        values kept verbatim as text, so a value added there is shown here rather than rejected.
+      required: [findingId, subjectKey, matchKind, listType, listEntryRef, listEntryVersion, matchScore, matchStatus, detection, receivedAt, disposition]
+      properties:
+        findingId:
+          type: string
+          format: uuid
+        subjectKey:
+          type: string
+          description: '`key` of the subject in `Case.screening.subjects`.'
+        matchKind:
+          type: string
+          description: SANCTIONS, TERRORIST, PEP or JURISDICTION today. A confirmed PEP match is a risk fact; every other confirmed value requires an exit.
+        listType:
+          type: string
+        listEntryRef:
+          type: string
+        listEntryVersion:
+          type: string
+        matchScore:
+          type: number
+        matchStatus:
+          type: string
+        detection:
+          type: string
+          description: LIST_DELTA, BASELINE_SWEEP or PERIODIC_SWEEP today.
+        receivedAt:
+          type: string
+          format: date-time
+        disposition:
+          type: string
+          enum: [OPEN, CLEARED_FALSE_POSITIVE, CONFIRMED]
+        decidedBy:
+          type: [string, 'null']
+        decisionReason:
+          type: [string, 'null']
+        decidedAt:
           type: [string, 'null']
           format: date-time
     Questionnaire:

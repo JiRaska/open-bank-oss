@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.7.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.6.2...domestic-payment-v1.7.0) (2026-11-14)
+
+
+### Features
+
+* **domestic-payment:** run the payment admission chain before a domestic payment is sent (ADR-0374 A3) ([#15976](https://github.com/JiRaska/open-bank-oss/issues/15976)) ([243f130](https://github.com/JiRaska/open-bank-oss/commit/243f130f2d1f097f54c136e8990e377051dd27be))
+
+## [1.6.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.6.1...domestic-payment-v1.6.2) (2026-11-13)
+
+
+### Bug Fixes
+
+* **domestic-payment:** fence original keys across direct and approved release ([#15731](https://github.com/JiRaska/open-bank-oss/issues/15731)) ([1dffe5e](https://github.com/JiRaska/open-bank-oss/commit/1dffe5e0059cd3408012002fd6c2cba07ad0b68e))
+
 ## [1.6.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.6.0...domestic-payment-v1.6.1) (2026-11-13)
 
 

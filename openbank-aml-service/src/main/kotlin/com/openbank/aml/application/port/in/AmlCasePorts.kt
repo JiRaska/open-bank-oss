@@ -7,12 +7,16 @@ package com.openbank.aml.application.port.`in`
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.AmlRiskLevel
+import com.openbank.aml.domain.model.CaseOrigin
 import com.openbank.aml.domain.model.ScreeningType
 import java.util.UUID
 
 data class CreateAmlCaseCommand(
     val idempotencyKey: String,
-    val partyId: UUID,
+    /** No default on purpose: every entry point states what it is, and none can inherit another's. */
+    val origin: CaseOrigin,
+    /** `null` when the opener does not know the party yet; the resolution sweep fills it in. */
+    val partyId: UUID?,
     val accountId: UUID?,
     val transactionId: UUID?,
     val customerReference: String,
@@ -32,6 +36,8 @@ data class CreateAmlCaseCommand(
 data class ListAmlCasesQuery(
     val status: AmlCaseStatus? = null,
     val partyId: UUID? = null,
+    /** `true`/`false` narrows to cases whose owning party is / is not established; `null` does not filter. */
+    val partyResolved: Boolean? = null,
     val screeningType: ScreeningType? = null,
     val limit: Int = 50,
     val offset: Int = 0,

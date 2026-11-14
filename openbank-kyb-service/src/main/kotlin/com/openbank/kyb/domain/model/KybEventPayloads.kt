@@ -229,6 +229,37 @@ data class BusinessOnboardingCompleted(
     }
 }
 
+/**
+ * An operator confirmed a sanctions match that ongoing monitoring found on an approved business
+ * customer, so the relationship has to end (ADR-0376 D8). Published once per case. The case
+ * keeps its status and stays monitored; this event is what tells the services
+ * that hold the party, the mandates and the accounts that an exit is owed. It carries no reason
+ * and no finding: why is in the case, which only operators read, and it must never reach a
+ * customer-facing surface before the bank has acted.
+ */
+data class BusinessRelationshipExitRequired(
+    override val eventType: String,
+    override val caseId: UUID,
+    override val status: CaseStatus,
+    override val identifierScheme: IdentifierScheme,
+    override val identifier: String,
+    override val country: String?,
+    override val legalName: String?,
+    override val legalFormClass: LegalFormClass?,
+    override val initiatorPartyId: UUID,
+    override val entityPartyId: UUID?,
+    override val requiredSignatures: Int?,
+    override val signedCount: Int,
+    override val occurredAt: Instant,
+    override val actorId: String,
+    override val actorType: String,
+    override val sourceService: String,
+) : KybEventPayload {
+    companion object {
+        const val EVENT_TYPE = "BUSINESS_RELATIONSHIP_EXIT_REQUIRED"
+    }
+}
+
 /** An operator rejected the case. */
 data class BusinessOnboardingRejected(
     override val eventType: String,

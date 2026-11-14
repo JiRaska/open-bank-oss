@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 'use client'
 
-import { useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AUTHORITY_UUID } from '@/lib/context/authorityHistory'
 import { amlReferences, parseAmlCaseNetwork, sharedAmlReferences, type AmlCaseEvidenceHistory } from '@/lib/context/amlCaseEvidence'
 
-export function AmlCaseInvestigation({ initialCaseId = '' }: { initialCaseId?: string }) {
+/**
+ * `initialCaseId` LOADS, it does not merely prefill. The register's "Explore graph" button used to
+ * set it and remount this component, which wrote the UUID into an input far up the page and then
+ * waited for a second click nobody knew to make — so the button looked dead (owner report
+ * 2026-11-13). `fixedCase` hides the free-text input where the case is already known (case detail).
+ */
+export function AmlCaseInvestigation({ initialCaseId = '', fixedCase = false }: { initialCaseId?: string; fixedCase?: boolean }) {
   const { t } = useLanguage()
   const [caseId, setCaseId] = useState(initialCaseId)
   const [history, setHistory] = useState<AmlCaseEvidenceHistory | null>(null)
@@ -15,12 +21,12 @@ export function AmlCaseInvestigation({ initialCaseId = '' }: { initialCaseId?: s
   const [state, setState] = useState<'idle' | 'loading' | 'denied' | 'error'>('idle')
   const generation = useRef(0)
 
-  async function load(event: FormEvent) {
-    event.preventDefault()
+  async function load(event?: FormEvent, explicitId?: string) {
+    event?.preventDefault()
     const version = ++generation.current
     setHistory(null); setRelated([]); setSelected(0); setState('loading')
     try {
-      const id = caseId.trim().toLowerCase()
+      const id = (explicitId ?? caseId).trim().toLowerCase()
       if (!AUTHORITY_UUID.test(id)) throw new Error('Invalid case ID')
       const response = await fetch(`/api/context/aml-cases/${encodeURIComponent(id)}?view=network`, { cache: 'no-store' })
       if (version !== generation.current) return
@@ -33,6 +39,19 @@ export function AmlCaseInvestigation({ initialCaseId = '' }: { initialCaseId?: s
     } catch { if (version === generation.current) setState('error') }
   }
 
+  const sectionRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!AUTHORITY_UUID.test(initialCaseId.trim().toLowerCase())) return
+    // Deferred one task so the fetch's state updates land outside the effect body.
+    const handle = setTimeout(() => {
+      void load(undefined, initialCaseId)
+      if (!fixedCase) sectionRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    }, 0)
+    return () => clearTimeout(handle)
+    // Mount-only by design: the parent re-keys this component per case.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const observation = history?.observations[selected]
   const refs = history ? [...new Set([
     ...related.flatMap(item => sharedAmlReferences(history, item).slice(0, 1)),
@@ -44,13 +63,13 @@ export function AmlCaseInvestigation({ initialCaseId = '' }: { initialCaseId?: s
   const relatedX = (index: number) => graphWidth * (index + 1) / (related.length + 1) - 88
   const refLabel = (ref: string) => ref.startsWith('party:') ? t('Klient', 'Party') : ref.startsWith('account:') ? t('Účet', 'Account') : t('Transakce', 'Transaction')
 
-  return <section className="card" style={{ padding: 20, marginBottom: 20, minWidth: 0, overflowWrap: 'anywhere' }} aria-label={t('Investigace AML případu', 'AML case investigation')}>
+  return <section ref={sectionRef} className="card" style={{ padding: 20, marginBottom: 20, minWidth: 0, overflowWrap: 'anywhere' }} aria-label={t('Investigace AML případu', 'AML case investigation')}>
     <h2 style={{ marginTop: 0 }}>{t('Context Graph · AML evidence', 'Context Graph · AML evidence')}</h2>
     <p style={{ color: 'var(--text-secondary)' }}>{t('Vazby pocházejí z událostí AML případu. Ukazují pozorovanou souvislost, nikoli prokázaný podvod ani aktuální vlastnictví.', 'Links come from AML case events. They show observed context, not proven fraud or current ownership.')}</p>
-    <form onSubmit={load} style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+    {!fixedCase && <form onSubmit={event => { void load(event) }} style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
       <input className="input" style={{ flex: '1 1 290px' }} required maxLength={36} value={caseId} onChange={event => { generation.current++; setCaseId(event.target.value); setHistory(null); setRelated([]); setState('idle') }} placeholder="Case UUID" aria-label={t('ID AML případu', 'AML case ID')} />
       <button className="btn btn-primary" disabled={state === 'loading'}>{t('Prozkoumat vazby', 'Explore connections')}</button>
-    </form>
+    </form>}
     {state === 'loading' && <p role="status">{t('Načítám evidenci…', 'Loading evidence…')}</p>}
     {state === 'denied' && <p role="alert">{t('Přístup k tomuto AML případu nebyl povolen.', 'Access to this AML case was not permitted.')}</p>}
     {state === 'error' && <p role="alert">{t('Evidenci případu nelze bezpečně ověřit.', 'Case evidence could not be verified safely.')}</p>}

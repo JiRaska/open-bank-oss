@@ -121,3 +121,12 @@ by the follow-up #12500 and require rollout verification before company-books re
   malformed header reads as real, so leakage is bounded by canary activity, never suppression of
   real accounts); (2) **dead-lettered register events** — a parked AccountCreated is an account
   missing from the next overview until replayed, the same shape as a parked remittance above.
+
+## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
+
+Outbound edges are now set in the deployed manifest, after `quarkus.rest-client` started binding (#16056):
+- pension-fund-service, party-service and account-service are called over 8443 private-CA mTLS. The client identity is `tax-reporting-internal-tls`, through the `%prod` TLS bucket `internal-authority`, with server hostnames verified.
+- pension-service is called on 8443 with server TLS, verified against openbank-ca; pension-service does not yet require a client certificate.
+- balance-service is called over plaintext 8103, because no mTLS listener exists there yet. This is declared V9.1 debt, tracked in #16075.
+
+Every call carries this service's own client token (`openbank-tax-reporting`, ROLE_API), never the shared services client. Each upstream's rego admits that principal id for the reporting reads only. Regenerated network policies admit this namespace on the five upstreams and nothing else. Residual risk: the bearer token crosses the balance hop in plaintext until #16075 lands.

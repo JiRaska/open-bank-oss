@@ -6,6 +6,7 @@ package com.openbank.kyb.infrastructure.rest.dto
 
 import com.openbank.kyb.application.port.`in`.DeclaredEntity
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
+import com.openbank.kyb.domain.model.CaseMonitoring
 import com.openbank.kyb.domain.model.CaseScreening
 import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.IdentifierScheme
@@ -327,35 +328,112 @@ data class CaseResponse(
      * a customer can read, because naming who matched a list to the customer is tipping off.
      */
     val screening: ScreeningResponse?,
+    /**
+     * What ongoing monitoring reported after approval and what was decided. OPERATOR view only,
+     * for the same reason as [screening]; null when there is nothing.
+     */
+    val monitoring: MonitoringResponse?,
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
     companion object {
-        fun from(c: BusinessOnboardingCase, viewerPartyId: UUID?) = CaseResponse(
-            id = c.id,
-            status = c.status.name,
-            scheme = c.identifier.scheme.name,
-            identifier = c.identifier.value,
-            country = c.identifier.country ?: c.extract?.registeredAddress?.countryCode,
-            initiatorPartyId = c.initiatorPartyId,
-            entityPartyId = c.entityPartyId,
-            requiredSignatures = c.requiredSignatures,
-            requiredSignerRoles = c.requiredSignerRoles,
-            signedCount = c.signedCount,
-            extract = c.extract?.let { ExtractResponse.from(it) },
-            signers = c.signers.map { SignerResponse.from(it, revealToken = viewerPartyId == c.initiatorPartyId) },
-            // The operator reads the flags; the applicant reads wording that cannot tell why.
-            reviewReason = if (viewerPartyId == null) c.reviewReason else c.applicantReviewReason,
-            questionnaire = c.questionnaire,
-            declarations = c.declarations?.let { DeclarationsResponse.from(it) },
-            agreement = c.agreement?.let { AgreementSummary.from(it) },
-            // viewerPartyId is null only on the operator routes (each calls requireOperator first).
-            screening = c.screening?.takeIf { viewerPartyId == null }?.let { ScreeningResponse.from(it) },
-            createdAt = c.createdAt,
-            updatedAt = c.updatedAt,
-        )
+        fun from(c: BusinessOnboardingCase, viewerPartyId: UUID?, registry: Map<String, String> = emptyMap()) =
+            CaseResponse(
+                id = c.id,
+                status = c.status.name,
+                scheme = c.identifier.scheme.name,
+                identifier = c.identifier.value,
+                country = c.identifier.country ?: c.extract?.registeredAddress?.countryCode,
+                initiatorPartyId = c.initiatorPartyId,
+                entityPartyId = c.entityPartyId,
+                requiredSignatures = c.requiredSignatures,
+                requiredSignerRoles = c.requiredSignerRoles,
+                signedCount = c.signedCount,
+                extract = c.extract?.let { ExtractResponse.from(it) },
+                signers = c.signers.map { SignerResponse.from(it, revealToken = viewerPartyId == c.initiatorPartyId) },
+                // The operator reads the flags; the applicant reads wording that cannot tell why.
+                reviewReason = if (viewerPartyId == null) c.reviewReason else c.applicantReviewReason,
+                questionnaire = c.questionnaire,
+                declarations = c.declarations?.let { DeclarationsResponse.from(it) },
+                agreement = c.agreement?.let { AgreementSummary.from(it) },
+                // viewerPartyId is null only on the operator routes (each calls requireOperator first).
+                screening = c.screening?.takeIf { viewerPartyId == null }?.let { ScreeningResponse.from(it, registry) },
+                monitoring = MonitoringResponse.from(c.monitoring).takeIf { viewerPartyId == null },
+                createdAt = c.createdAt,
+                updatedAt = c.updatedAt,
+            )
     }
 }
+
+/** One finding of ongoing monitoring and its decision. It names a list entry and a subject key, never a person. */
+data class MonitoringFindingResponse(
+    val findingId: UUID,
+    /** The subject it is about: `ScreeningSubjectResponse.key`. */
+    val subjectKey: String,
+    val matchKind: String,
+    val listType: String,
+    val listEntryRef: String,
+    val listEntryVersion: String,
+    val matchScore: Double,
+    val matchStatus: String,
+    val detection: String,
+    val receivedAt: Instant,
+    /** OPEN | CLEARED_FALSE_POSITIVE | CONFIRMED. Each finding is decided by itself. */
+    val disposition: String,
+    val decidedBy: String?,
+    val decisionReason: String?,
+    val decidedAt: Instant?,
+)
+
+/** Recorded by an operator once the exit a confirmed sanctions match requires has been carried out. */
+data class ExitCompletionResponse(val completedAt: Instant, val completedBy: String, val evidence: String)
+
+/**
+ * The monitoring state of an approved case. The case's `status` is the same whatever is here.
+ * `reviewSince` and `exitOwedSince` are read off the findings, not set by anyone.
+ */
+data class MonitoringResponse(
+    /** Since when a finding has been waiting for a decision; null when none is. */
+    val reviewSince: Instant?,
+    /** Since when a confirmed sanctions match requires an exit that is not yet recorded as carried out. */
+    val exitOwedSince: Instant?,
+    val exitCompleted: ExitCompletionResponse?,
+    val findings: List<MonitoringFindingResponse>,
+) {
+    companion object {
+        fun from(m: CaseMonitoring): MonitoringResponse? {
+            if (m.findings.isEmpty() && m.exitCompleted == null) return null
+            return MonitoringResponse(
+                reviewSince = m.reviewSince,
+                exitOwedSince = m.exitOwedSince,
+                exitCompleted = m.exitCompleted?.let {
+                    ExitCompletionResponse(it.completedAt, it.completedBy, it.evidence)
+                },
+                findings = m.findings.map {
+                    MonitoringFindingResponse(
+                        findingId = it.findingId,
+                        subjectKey = it.subjectKey,
+                        matchKind = it.matchKind,
+                        listType = it.listType,
+                        listEntryRef = it.listEntryRef,
+                        listEntryVersion = it.listEntryVersion,
+                        matchScore = it.matchScore,
+                        matchStatus = it.matchStatus,
+                        detection = it.detection,
+                        receivedAt = it.receivedAt,
+                        disposition = it.disposition.name,
+                        decidedBy = it.decidedBy,
+                        decisionReason = it.decisionReason,
+                        decidedAt = it.decidedAt,
+                    )
+                },
+            )
+        }
+    }
+}
+
+/** An operator's record that an exit has been carried out. Who is the authenticated principal. */
+data class CompleteExitRequest(val evidence: String?)
 
 /** One screened subject of the case, as an operator sees it. */
 data class ScreeningSubjectResponse(
@@ -376,6 +454,12 @@ data class ScreeningSubjectResponse(
     val disposedBy: String?,
     val dispositionReason: String?,
     val disposedAt: Instant?,
+    /**
+     * Where the subject stands with the monitored-subject registry: PENDING | SYNCED | REFUSED, null
+     * when it is not to be registered or on a list response. REFUSED is an approved subject that is
+     * NOT monitored: the registry will not take it as it is.
+     */
+    val monitoringState: String?,
 )
 
 /** An operator's decision about one finding. Who decides is the authenticated principal, not a field here. */
@@ -390,7 +474,7 @@ data class ScreeningResponse(
     val subjects: List<ScreeningSubjectResponse>,
 ) {
     companion object {
-        fun from(s: CaseScreening) = ScreeningResponse(
+        fun from(s: CaseScreening, registry: Map<String, String> = emptyMap()) = ScreeningResponse(
             complete = s.complete,
             openFindings = s.openFindings.size,
             ownerSource = s.ownerSource?.name,
@@ -409,6 +493,7 @@ data class ScreeningResponse(
                     disposedBy = it.disposedBy,
                     dispositionReason = it.dispositionReason,
                     disposedAt = it.disposedAt,
+                    monitoringState = registry[it.key].takeIf { _ -> it.current },
                 )
             },
         )

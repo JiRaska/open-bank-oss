@@ -28,10 +28,37 @@ enum class ScreeningType {
  */
 typealias AmlRiskLevel = com.openbank.libs.fincrime.AmlCaseSeverity
 
+/**
+ * Which entry point opened a case. Set by the code of that entry point and by nothing a caller
+ * sends: the create endpoint always records [REST], whatever the request says.
+ *
+ * It exists because a key proves nothing about who wrote the row under it. A held payment's case
+ * key is what a rail accepts a release decision from, so "the case under that key" has to mean
+ * "the case the hold intake opened", and only this field can say so.
+ */
+enum class CaseOrigin {
+    /** `POST /api/v1/aml/cases`: a member of staff or a named machine caller. */
+    REST,
+
+    /** The `PAYMENT_HELD` consumer: the one case of a held payment. */
+    PAYMENT_HOLD_INTAKE,
+
+    /** The post-booking pack evaluation (ADR-0371). */
+    PACK_EVALUATION,
+
+    /** Onboarding screening of a new party, from its event or from the reconciler. */
+    ONBOARDING_SCREENING,
+}
+
 data class AmlCase(
     val id: UUID,
     val idempotencyKey: String,
-    val partyId: UUID,
+    /**
+     * The party the case is about; `null` while it is not known. Only the held-payment intake stores
+     * `null`: a hold whose rail could not name the debtor's party is recorded that way and resolved
+     * from [accountId] afterwards. Events publish this value exactly as stored, `null` included.
+     */
+    val partyId: UUID?,
     val accountId: UUID?,
     val transactionId: UUID?,
     val customerReference: String,
@@ -50,7 +77,34 @@ data class AmlCase(
     val updatedAt: Instant,
     /** Request fingerprint the case was created under (#10916); `null` for legacy rows and non-HTTP creates. */
     val requestHash: String? = null,
+    /** `null` for rows written before provenance was recorded: unknown, so never treated as a system origin. */
+    val origin: CaseOrigin? = null,
 ) {
+    /**
+     * False while the owning party is not established: no party at all, or (rows from before a
+     * missing party could be stored) the account id standing in for it (#3413).
+     */
+    val partyEstablished: Boolean
+        get() = partyId != null && partyId != accountId
+
+    /**
+     * Whether this case may be attached to [candidate]: only while no party is established, and
+     * never to its own account id, which would leave it exactly as unestablished as before.
+     */
+    fun resolvableTo(candidate: UUID): Boolean = !partyEstablished && candidate != accountId
+
+    /**
+     * A case that sits under a held-payment key without having been opened by the hold intake.
+     *
+     * A rail releases a held payment on a status-changed event that carries the hold key, and the
+     * key alone says nothing about who wrote the row: the create endpoint refuses the namespace
+     * now, but a pod from before that refusal accepted it, and such a row can outlive the pod. This
+     * is the one guard that closes that path: [AmlCaseService.updateDecision] refuses to decide such
+     * a case, so no event can leave under a hold key from a case the intake did not open.
+     */
+    val isForeignClaimOnHoldKey: Boolean
+        get() = idempotencyKey.startsWith(PAYMENT_HOLD_KEY_PREFIX) && origin != CaseOrigin.PAYMENT_HOLD_INTAKE
+
     /**
      * A case opened by the post-booking pack evaluation (ADR-0371), as opposed to a
      * `TRANSACTION_MONITORING` case a payment rail opened when a screening gate referred a transfer.
@@ -119,5 +173,20 @@ data class AmlCase(
     companion object {
         /** Reserved idempotency-key prefix of cases the pack evaluation opens. */
         const val PACK_MONITORING_KEY_PREFIX = "tm:"
+
+        /** Reserved idempotency-key prefix of the one case a held payment opens. */
+        const val PAYMENT_HOLD_KEY_PREFIX = "payment-hold:"
+
+        /** Key namespaces only this service's own jobs and consumers write; the create endpoint refuses them. */
+        val RESERVED_KEY_PREFIXES = listOf(PACK_MONITORING_KEY_PREFIX, PAYMENT_HOLD_KEY_PREFIX)
+
+        /**
+         * What the REST response carries in its REQUIRED `partyId` when NO party is stored: the nil UUID.
+         * That contract cannot express a missing party without a breaking change, so the absence is
+         * stated by `partyResolved = false` next to it and this value only fills the slot. A stored
+         * party is always answered as stored. Events are not bound by the REST contract and publish
+         * `null`. The nil UUID is never stored and never accepted as a party.
+         */
+        val UNRESOLVED_PARTY_WIRE_ID: UUID = UUID(0L, 0L)
     }
 }

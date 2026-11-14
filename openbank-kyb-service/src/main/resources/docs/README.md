@@ -28,6 +28,10 @@ When `openbank.kyb.screening.enabled` is true, the service screens the entity, e
 
 The switch is off by default. With the switch on, the deployment must supply `SANCTIONS_SERVICE_URL` and a network path to sanctions-service; without them every business case stops at its last signature. While the switch is off the service logs a warning at start and stores no screening, so a case that was not screened never reads as screened.
 
+## Ongoing monitoring of approved cases
+
+When `openbank.kyb.monitoring.enabled` is true, the service registers the entity and every screened related party of an approved case with the monitored-subject registry of `openbank-sanctions-service`, withdraws them when the case ends, and records each match the registry reports as a finding for an operator to decide. A finding does not change the status of the case. Each subject is registered under a random reference that the database generates. The switch is off by default. See `08-ongoing-monitoring` in this documentation index for delivery, repair, metrics, alerts and how to switch it on.
+
 ## Concurrent writes to a case
 
 `kyb_cases.version` is an optimistic lock. Every write of a case states the version it was read at. If the stored row has moved on, nothing is written and the request answers `409 CASE_CONCURRENT_UPDATE`. This holds for every case transition, because they share one repository write. The party-activation event handler reads the case again and re-applies on a conflict, up to three attempts, because nobody retries an event.

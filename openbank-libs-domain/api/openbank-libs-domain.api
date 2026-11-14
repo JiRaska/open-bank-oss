@@ -594,6 +594,7 @@ public final class com/openbank/libs/audit/decision/DecisionClass : java/lang/En
 	public static final field AUTHZ Lcom/openbank/libs/audit/decision/DecisionClass;
 	public static final field CREDIT Lcom/openbank/libs/audit/decision/DecisionClass;
 	public static final field FRAUD Lcom/openbank/libs/audit/decision/DecisionClass;
+	public static final field SHADOW Lcom/openbank/libs/audit/decision/DecisionClass;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/audit/decision/DecisionClass;
 	public static fun values ()[Lcom/openbank/libs/audit/decision/DecisionClass;
@@ -690,6 +691,34 @@ public final class com/openbank/libs/audit/decision/DecisionOutcome$Fraud : java
 	public fun getKind ()Ljava/lang/String;
 	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/audit/decision/DecisionOutcome$Fraud;
 	public static fun values ()[Lcom/openbank/libs/audit/decision/DecisionOutcome$Fraud;
+}
+
+public final class com/openbank/libs/audit/decision/DecisionOutcome$Shadow : com/openbank/libs/audit/decision/DecisionOutcome {
+	public fun <init> (Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;JLcom/openbank/libs/audit/decision/InputDigest;Lcom/openbank/libs/audit/decision/InputDigest;Lcom/openbank/libs/audit/decision/InputDigest;)V
+	public final fun component1 ()Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;
+	public final fun component2 ()J
+	public final fun component3 ()Lcom/openbank/libs/audit/decision/InputDigest;
+	public final fun component4 ()Lcom/openbank/libs/audit/decision/InputDigest;
+	public final fun component5 ()Lcom/openbank/libs/audit/decision/InputDigest;
+	public final fun copy (Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;JLcom/openbank/libs/audit/decision/InputDigest;Lcom/openbank/libs/audit/decision/InputDigest;Lcom/openbank/libs/audit/decision/InputDigest;)Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow;
+	public static synthetic fun copy$default (Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow;Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;JLcom/openbank/libs/audit/decision/InputDigest;Lcom/openbank/libs/audit/decision/InputDigest;Lcom/openbank/libs/audit/decision/InputDigest;ILjava/lang/Object;)Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getApprovedEvidenceHash ()Lcom/openbank/libs/audit/decision/InputDigest;
+	public final fun getArtifactHash ()Lcom/openbank/libs/audit/decision/InputDigest;
+	public final fun getEpoch ()J
+	public fun getKind ()Ljava/lang/String;
+	public final fun getOutputHash ()Lcom/openbank/libs/audit/decision/InputDigest;
+	public final fun getResult ()Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result : java/lang/Enum {
+	public static final field EVALUATED Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;
+	public static final field INCOMPLETE Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;
+	public static fun values ()[Lcom/openbank/libs/audit/decision/DecisionOutcome$Shadow$Result;
 }
 
 public final class com/openbank/libs/audit/decision/DecisionReason {
@@ -2664,11 +2693,17 @@ public final class com/openbank/libs/governance/MakerCheckerViolation : java/lan
 }
 
 public final class com/openbank/libs/governance/Proposal {
-	public fun <init> (Ljava/lang/String;Ljava/lang/Object;Ljava/lang/String;Ljava/time/Instant;Lcom/openbank/libs/governance/ProposalState;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/time/Instant;)V
-	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Object;Ljava/lang/String;Ljava/time/Instant;Lcom/openbank/libs/governance/ProposalState;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/time/Instant;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public static final field Companion Lcom/openbank/libs/governance/Proposal$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/Object;Ljava/lang/String;Ljava/time/Instant;Lcom/openbank/libs/governance/ProposalState;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/lang/String;Ljava/time/Instant;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Object;Ljava/lang/String;Ljava/time/Instant;Lcom/openbank/libs/governance/ProposalState;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/lang/String;Ljava/time/Instant;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun approve (Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;)Lcom/openbank/libs/governance/Proposal;
 	public static synthetic fun approve$default (Lcom/openbank/libs/governance/Proposal;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/governance/Proposal;
+	public final fun approveBy (Lcom/openbank/libs/governance/StaffIdentity;Ljava/time/Instant;Ljava/lang/String;Ljava/util/Set;)Lcom/openbank/libs/governance/Proposal;
+	public static synthetic fun approveBy$default (Lcom/openbank/libs/governance/Proposal;Lcom/openbank/libs/governance/StaffIdentity;Ljava/time/Instant;Ljava/lang/String;Ljava/util/Set;ILjava/lang/Object;)Lcom/openbank/libs/governance/Proposal;
 	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/lang/String;
+	public final fun component11 ()Ljava/lang/String;
+	public final fun component12 ()Ljava/time/Instant;
 	public final fun component2 ()Ljava/lang/Object;
 	public final fun component3 ()Ljava/lang/String;
 	public final fun component4 ()Ljava/time/Instant;
@@ -2677,25 +2712,41 @@ public final class com/openbank/libs/governance/Proposal {
 	public final fun component7 ()Ljava/time/Instant;
 	public final fun component8 ()Ljava/lang/String;
 	public final fun component9 ()Ljava/time/Instant;
-	public final fun copy (Ljava/lang/String;Ljava/lang/Object;Ljava/lang/String;Ljava/time/Instant;Lcom/openbank/libs/governance/ProposalState;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/time/Instant;)Lcom/openbank/libs/governance/Proposal;
-	public static synthetic fun copy$default (Lcom/openbank/libs/governance/Proposal;Ljava/lang/String;Ljava/lang/Object;Ljava/lang/String;Ljava/time/Instant;Lcom/openbank/libs/governance/ProposalState;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/time/Instant;ILjava/lang/Object;)Lcom/openbank/libs/governance/Proposal;
+	public final fun copy (Ljava/lang/String;Ljava/lang/Object;Ljava/lang/String;Ljava/time/Instant;Lcom/openbank/libs/governance/ProposalState;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/lang/String;Ljava/time/Instant;)Lcom/openbank/libs/governance/Proposal;
+	public static synthetic fun copy$default (Lcom/openbank/libs/governance/Proposal;Ljava/lang/String;Ljava/lang/Object;Ljava/lang/String;Ljava/time/Instant;Lcom/openbank/libs/governance/ProposalState;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/lang/String;Ljava/time/Instant;ILjava/lang/Object;)Lcom/openbank/libs/governance/Proposal;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAction ()Ljava/lang/Object;
 	public final fun getDecidedAt ()Ljava/time/Instant;
 	public final fun getDecidedBy ()Ljava/lang/String;
+	public final fun getDecidedByPersonId ()Ljava/lang/String;
 	public final fun getDecisionReason ()Ljava/lang/String;
 	public final fun getExecutedAt ()Ljava/time/Instant;
+	public final fun getExpiresAt ()Ljava/time/Instant;
 	public final fun getId ()Ljava/lang/String;
 	public final fun getProposedAt ()Ljava/time/Instant;
 	public final fun getProposedBy ()Ljava/lang/String;
+	public final fun getProposerPersonId ()Ljava/lang/String;
 	public final fun getState ()Lcom/openbank/libs/governance/ProposalState;
 	public fun hashCode ()I
+	public final fun isExpired (Ljava/time/Instant;)Z
+	public final fun isOpen (Ljava/time/Instant;)Z
+	public final fun isPersonBound ()Z
+	public final fun isSupersedable (Ljava/time/Instant;)Z
 	public final fun isTerminal ()Z
 	public final fun markExecuted (Ljava/time/Instant;)Lcom/openbank/libs/governance/Proposal;
 	public final fun reject (Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;)Lcom/openbank/libs/governance/Proposal;
 	public static synthetic fun reject$default (Lcom/openbank/libs/governance/Proposal;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/governance/Proposal;
+	public final fun rejectBy (Lcom/openbank/libs/governance/StaffIdentity;Ljava/time/Instant;Ljava/lang/String;Ljava/util/Set;)Lcom/openbank/libs/governance/Proposal;
+	public static synthetic fun rejectBy$default (Lcom/openbank/libs/governance/Proposal;Lcom/openbank/libs/governance/StaffIdentity;Ljava/time/Instant;Ljava/lang/String;Ljava/util/Set;ILjava/lang/Object;)Lcom/openbank/libs/governance/Proposal;
 	public fun toString ()Ljava/lang/String;
 	public final fun withdraw (Ljava/lang/String;Ljava/time/Instant;)Lcom/openbank/libs/governance/Proposal;
+	public final fun withdrawBy (Lcom/openbank/libs/governance/StaffIdentity;Ljava/time/Instant;Ljava/lang/String;)Lcom/openbank/libs/governance/Proposal;
+	public static synthetic fun withdrawBy$default (Lcom/openbank/libs/governance/Proposal;Lcom/openbank/libs/governance/StaffIdentity;Ljava/time/Instant;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/governance/Proposal;
+}
+
+public final class com/openbank/libs/governance/Proposal$Companion {
+	public final fun getMAX_TTL ()Ljava/time/Duration;
+	public final fun propose (Ljava/lang/String;Ljava/lang/Object;Lcom/openbank/libs/governance/StaffIdentity;Ljava/time/Instant;Ljava/time/Duration;)Lcom/openbank/libs/governance/Proposal;
 }
 
 public final class com/openbank/libs/governance/ProposalState : java/lang/Enum {
@@ -2707,6 +2758,22 @@ public final class com/openbank/libs/governance/ProposalState : java/lang/Enum {
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/governance/ProposalState;
 	public static fun values ()[Lcom/openbank/libs/governance/ProposalState;
+}
+
+public final class com/openbank/libs/governance/StaffIdentity {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Z)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Z
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Z)Lcom/openbank/libs/governance/StaffIdentity;
+	public static synthetic fun copy$default (Lcom/openbank/libs/governance/StaffIdentity;Ljava/lang/String;Ljava/lang/String;ZILjava/lang/Object;)Lcom/openbank/libs/governance/StaffIdentity;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccount ()Ljava/lang/String;
+	public final fun getPerson ()Ljava/lang/String;
+	public final fun getPersonId ()Ljava/lang/String;
+	public final fun getStrongAuth ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class com/openbank/libs/idempotency/IdempotencyKeyReusedException : java/lang/RuntimeException {
@@ -4960,6 +5027,15 @@ public final class com/openbank/libs/synthetic/SyntheticTaint {
 	public final fun headerValue ()Ljava/lang/String;
 	public final fun isTainted (Ljava/lang/String;)Z
 	public final fun isTainted (Ljava/util/Map;)Z
+}
+
+public final class com/openbank/libs/synthetic/SyntheticTransferDirection : java/lang/Enum {
+	public static final field OUTBOUND Lcom/openbank/libs/synthetic/SyntheticTransferDirection;
+	public static final field RETURN Lcom/openbank/libs/synthetic/SyntheticTransferDirection;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun idempotencyKey (Ljava/util/UUID;Ljava/time/LocalDate;)Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/synthetic/SyntheticTransferDirection;
+	public static fun values ()[Lcom/openbank/libs/synthetic/SyntheticTransferDirection;
 }
 
 public final class com/openbank/libs/util/BuildInfo {
