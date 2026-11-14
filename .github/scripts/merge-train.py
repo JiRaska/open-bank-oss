@@ -780,9 +780,10 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
     for f in pr.get("files") or []:
         if unsafe_path(f):
             return False, "a path contains a control character — manual lane, never a train"
-        if untrainable(f):
+        if untrainable(f) and not (f == GATES_YAML and pr.get("gates_append") is True):
             return False, f"touches {f} (workflows, gates, generators, inventory) — manual lane, never a train"
-    if pr.get("special_paths") and any(gate_code(f) for f in pr.get("files") or []):
+    if pr.get("special_paths") and any(gate_code(f) or (f == GATES_YAML and pr.get("gates_append") is True)
+                                       for f in pr.get("files") or []):
         # The strict lane refuses a symlink/gitlink outright; on the train publish would halve the
         # whole carrier for it. Gate code next to one never rides (review of #13750).
         return False, "gate code next to a symlink or gitlink — never a train"
@@ -833,7 +834,7 @@ def strict_lane_state(pr: dict, required: list[str], checks: dict[str, str | Non
     if any(m in SPECIAL_MODES for m in modes):
         return None, "adds a symlink or gitlink — never the strict lane"
     untrainable = untrainable or FAIL_CLOSED_UNTRAINABLE
-    if not any(untrainable(f) for f in files):
+    if not any(untrainable(f) and not (f == GATES_YAML and pr.get("gates_append") is True) for f in files):
         return None, "not manual-lane"
     ok, why = qualifies(pr, required, checks, app, untrainable=lambda _f: False, extra=extra)
     if ok:
@@ -1084,6 +1085,78 @@ def assert_train_branch(name: str) -> None:
         raise ValueError(f"refusing ref {name!r}: not of the form train/<run_id>-<attempt> or train/strict-<run_id>-<attempt>")
 
 
+# gates.yaml APPEND (ADR-0343 amendment 2026-11-14): a member whose only change to gates.yaml is new,
+# whole `- id:` entries rides a train like gate code. #13837 kept every gates.yaml edit strict because one
+# edit can retire or weaken a PRIVILEGED gate without touching its script, and settle runs with no YAML
+# parser. An append cannot: every existing entry must survive BYTE-FOR-BYTE and in order, the header
+# before the first entry is unchanged, a new id collides with no id on main, and a new entry can neither
+# start a top-level key (every line indented under it) nor define a YAML anchor (which would redefine an
+# alias a LATER entry already uses). Anything else returns a reason and the member stays strict.
+GATE_ENTRY_RE = re.compile(r"^  - id:\s*([^\s#]+)\s*(#.*)?$")
+YAML_ANCHOR_RE = re.compile(r"(?:^|[\s:\[{,-])&[A-Za-z0-9_.-]")
+
+
+def gate_blocks(text: str) -> tuple[str, list[str]]:
+    """(header before the first `  - id:` line, one text block per entry up to the next one)."""
+    head: list[str] = []
+    blocks: list[list[str]] = []
+    for ln in text.splitlines(keepends=True):
+        if GATE_ENTRY_RE.match(ln.rstrip("\r\n")):
+            blocks.append([ln])
+        elif blocks:
+            blocks[-1].append(ln)
+        else:
+            head.append(ln)
+    return "".join(head), ["".join(b) for b in blocks]
+
+
+def gates_append_problem(old: str | None, new: str | None, main_ids: set[str] | frozenset = frozenset()) -> str | None:
+    """None when `new` is `old` plus whole new gate entries only (see GATE_ENTRY_RE above), else why not."""
+    if old is None or new is None:
+        return "gates.yaml is missing on one side"
+    if old == new:
+        return "gates.yaml is unchanged"
+    old_head, old_blocks = gate_blocks(old)
+    new_head, new_blocks = gate_blocks(new)
+    if not old_blocks:
+        return "gates.yaml has no `- id:` entries to append to"
+    if new_head != old_head:
+        return "the text before the first gate entry changed"
+    added: list[str] = []
+    j = 0
+    for b in new_blocks:
+        if j < len(old_blocks) and b == old_blocks[j]:
+            j += 1
+        else:
+            added.append(b)
+    if j != len(old_blocks):
+        return "an existing gate entry was changed, moved or removed"
+    taken = {GATE_ENTRY_RE.match(b.splitlines()[0]).group(1) for b in old_blocks} | set(main_ids)
+    for b in added:
+        lines = b.splitlines()
+        gid = GATE_ENTRY_RE.match(lines[0]).group(1)
+        if gid in taken:
+            return f"new gate id {gid!r} already exists"
+        taken.add(gid)
+        for ln in lines:
+            if YAML_ANCHOR_RE.search(ln):
+                return f"new gate {gid!r} defines a YAML anchor"
+        for ln in lines[1:]:
+            if ln.strip() and not ln.startswith("    ") and not ln.lstrip().startswith("#"):
+                return f"new gate {gid!r} has a line not indented under its entry"
+    return None
+
+
+def gates_append_at(git, old_rev: str, new_rev: str, main_rev: str | None = None) -> str | None:
+    """gates_append_problem over two revisions read execution-free with `git show`; `main_rev`'s ids
+    are taken too (main may have added the same id since the member branched)."""
+    def text(rev: str) -> str | None:
+        r = git("show", f"{rev}:{GATES_YAML}", check=False)
+        return r.stdout if r.returncode == 0 else None
+    main_ids = gate_ids(text(main_rev) or "") if main_rev else set()
+    return gates_append_problem(text(old_rev), text(new_rev), main_ids)
+
+
 def gate_ids(text: str) -> set[str]:
     """The `- id:` set of a gates.yaml, by line scan (no YAML parse under `python3 -I -S`)."""
     return {m.group(1) for ln in text.splitlines() for m in [GATE_ID_RE.match(ln)] if m}
@@ -1316,7 +1389,13 @@ class TrainBuilder:
         for m in members:
             r = self.git("merge", "--squash", "--no-commit", m.ref, check=False)
             staged = changed_paths(self.git, cached=True) if r.returncode == 0 else []
-            if r.returncode != 0 or not staged or any(unsafe_path(f) or self.untrainable(f) for f in staged):
+            # gates.yaml rides only as a pure append over what this train has built so far (HEAD).
+            appended = (GATES_YAML in staged and r.returncode == 0 and gates_append_problem(
+                self.git("show", f"HEAD:{GATES_YAML}", check=False).stdout or None,
+                self.git("show", f":{GATES_YAML}", check=False).stdout or None,
+                gate_ids(self.git("show", f"{base}:{GATES_YAML}", check=False).stdout)) is None)
+            if r.returncode != 0 or not staged or any(
+                    unsafe_path(f) or (self.untrainable(f) and not (f == GATES_YAML and appended)) for f in staged):
                 self.git("merge", "--abort", check=False)
                 self.git("reset", "-q", "--hard", "HEAD")
                 self.attempted.append(m.number)
@@ -1332,8 +1411,8 @@ class TrainBuilder:
             self.attempted.append(m.number)
             self.git("commit", "-q", "-m", squash_message(m))
             applied.append(m.number)
-            if any(gate_code(f) for f in staged):
-                gate.append(m.number)
+            if any(gate_code(f) for f in staged) or GATES_YAML in staged:
+                gate.append(m.number)   # an appended gate is judged like gate code: never with a regen commit
         regen = False
         if applied:
             try:
@@ -1482,7 +1561,10 @@ def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: 
             raise Reject(f"bundle has no commit for #{m.number}", member_fault=False)
         if git.tree(chain[idx]) != tree:
             raise Reject(f"bundle commit for #{m.number} differs from the merge-tree rebuild", member_fault=False)
-        if any(gate_code(f) for f in changed_paths(git, own_tree, tree)):
+        moved = changed_paths(git, own_tree, tree)
+        if GATES_YAML in moved and gates_append_at(git, own_tree, tree) is not None:
+            raise Reject(f"#{m.number} changes gates.yaml beyond a pure append", member_fault=True)
+        if any(gate_code(f) for f in moved) or GATES_YAML in moved:
             gate.append(m.number)
         own = git("commit-tree", tree, "-p", own, "-m", own_member_message(m.number, m.head_sha)).stdout.strip()
         own_tree = tree
@@ -2445,6 +2527,12 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         files = changed_paths(git, f"{base}...{fetched}")
         view = pr_view(repo, p, files)
         view["special_paths"] = [x for c in entries if c.new_mode in SPECIAL_MODES for x in c.paths]
+        if GATES_YAML in files:
+            fork = git("merge-base", base, fetched, check=False).stdout.strip()
+            why_not = gates_append_at(git, fork, fetched, base) if fork else "no merge base"
+            view["gates_append"] = why_not is None
+            if why_not:
+                log(f"#{p['number']:>6} gates.yaml not a pure append ({why_not}) — strict lane")
         app = gh.app_statuses(fetched)
         if any(p["head"]["ref"].startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES):
             chain = remember_approval_chain(gh, git, base, fetched)
@@ -5120,7 +5208,9 @@ def _synthetic_origin(root: str) -> None:
     pr("pJ1", {".github/scripts/merge-train.py": f"open({os.path.join(os.path.dirname(root), 'strict-member-ran')!r}, 'w').write('ran')\n"})
     pr("pJ2", {".github/workflows/merge-train.yml": "name: train\n"})
     pr("pGY", {GATES_YAML: "gates:\n  - id: g-one\n    run: true\n"})                  # retires g-two
-    pr("pGA", {GATES_YAML: SYN_GATES_YAML + "  - id: g-three\n    run: true\n"})      # adds g-three
+    # adds g-three AND edits g-one, so it is not a pure append and still takes the strict lane
+    pr("pGA", {GATES_YAML: SYN_GATES_YAML.replace("run: true", "run: 'true'", 1) + "  - id: g-three\n    run: true\n"})
+    pr("pGP", {GATES_YAML: SYN_GATES_YAML + "  - id: g-four\n    run: true\n"})      # a pure append
     # Non-judge strict members (plain scripts under .github/scripts): batched together.
     pr("pP1", {".github/scripts/p1.py": "print(1)\n"})
     pr("pP2", {".github/scripts/p2.py": "print(2)\n"})
@@ -5613,6 +5703,36 @@ def self_test() -> int:
               not ok and "manual lane" in why and U(f) and not gate_code(f), why)
         check(f"strict lane: gates.yaml ({shape}) IS in the strict lane",
               strict_lane_state({**base_pr, "files": [f]}, req, green, None, U, [], None, None)[0] == "green")
+    # ADR-0343 amendment 2026-11-14: a pure APPEND of whole new gate entries rides a train; every other
+    # gates.yaml shape keeps the strict lane. Each refused shape below is one the append rule must catch.
+    base_g = "# header\ngates:\n  - id: g-one\n    run: |\n      true\n  - id: g-two\n    run: true\n"
+    add = "  - id: g-new\n    mode: enforced\n    run: python3 x.py\n"
+    check("gates append: a new entry at the end is a pure append", gates_append_problem(base_g, base_g + add) is None)
+    mid = base_g.replace("  - id: g-two", add + "  - id: g-two")
+    check("gates append: a new entry between two entries is a pure append", gates_append_problem(base_g, mid) is None)
+    refused = {
+        "an existing entry edited": base_g.replace("run: true", "run: 'true # weakened'") + add,
+        "an existing entry removed": base_g.replace("  - id: g-two\n    run: true\n", "") + add,
+        "entries reordered": "# header\ngates:\n  - id: g-two\n    run: true\n  - id: g-one\n    run: |\n      true\n" + add,
+        "the header changed": base_g.replace("# header", "# header\nother: 1") + add,
+        "a new id that already exists": base_g + "  - id: g-two\n    run: false\n",
+        "a new id taken on main": base_g + "  - id: g-main\n    run: true\n",
+        "a new entry defining an anchor": base_g + "  - id: g-a\n    run: &r true\n",
+        "a new entry starting a top-level key": base_g + "  - id: g-b\n    run: true\nother: 1\n",
+        "a line appended into an existing block scalar": base_g.replace("      true\n", "      true\n      exit 0\n"),
+        "no change at all": base_g,
+    }
+    for shape, new in refused.items():
+        why = gates_append_problem(base_g, new, {"g-main"})
+        check(f"gates append: {shape} is refused", why is not None, f"{why!r}")
+    check("gates append: a missing file on either side is refused",
+          gates_append_problem(None, base_g + add) is not None and gates_append_problem(base_g, None) is not None)
+    ok, why = qualifies({**base_pr, "files": [GATES_YAML], "gates_append": True}, req, green, None, U)
+    check("qualifies: a pure gates.yaml append is a train CANDIDATE", ok, why)
+    check("strict lane: a pure gates.yaml append is NOT in the strict lane",
+          strict_lane_state({**base_pr, "files": [GATES_YAML], "gates_append": True}, req, green, None, U, [], None, None)[0] is None)
+    ok, why = qualifies({**base_pr, "files": [GATES_YAML], "gates_append": False}, req, green, None, U)
+    check("qualifies: a gates.yaml change that is not a pure append stays manual lane", not ok and "manual lane" in why, why)
     # ...while an unrelated (non-privileged) gate's CODE change still rides a train.
     ok, why = qualifies({**base_pr, "files": [".github/scripts/check-unrelated.py"]}, req, green, None, U)
     check("qualifies: an unrelated gate's check script still rides a train (#13837 control)", ok, why)
@@ -6159,7 +6279,7 @@ def self_test() -> int:
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
                        "pX": 33, "pF": 34, "pW2": 36, "pS": 37, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62, "pK": 38, "pM": 39,
                        "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pPc": 85, "pPR": 86, "pPx": 87, "pP1": 88, "pPbad": 89, "pP2": 90, "pRG": 91, "pFoo": 92,
-                       "pE1": 93, "pE2": 94, "pE3": 95}
+                       "pE1": 93, "pE2": 94, "pE3": 95, "pGP": 96}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -7928,6 +8048,18 @@ def self_test() -> int:
             check("green carrier first: the pre-empted strict PR, now behind, is update-branched next tick",
                   gh.merged == [1] and gh.updates == [35], f"{s} merged={gh.merged} updates={gh.updates}")
             gh.updates.clear()
+            reset()
+
+            # GATES.YAML APPEND (ADR-0343 amendment 2026-11-14): a member that only appends a gate entry rides a
+            # train carrier and merges; before the amendment it took the strict lane (update-branch, no carrier).
+            open_only("pGP")
+            s, st = tick()
+            oc = [c for c in gh.carriers.values() if c["state"] == "open"]
+            check("gates append (e2e): a pure gates.yaml append is published on a train carrier, no update-branch",
+                  st == "published" and len(oc) == 1 and carrier_members(oc[0]) == [96] and gh.updates == [],
+                  f"{s} st={st} carriers={[carrier_members(c) for c in oc]} updates={gh.updates}")
+            s, st = tick()
+            check("gates append (e2e): the carrier verifies and the append merges", 96 in gh.merged, f"{s} merged={gh.merged}")
             reset()
 
             # EXPEDITE LANE (ADR-0343 amendment 2026-11-13): an ordinary carrier for p1 is running; p2 carries
