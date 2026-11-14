@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.11.0...customer-edge-v1.11.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **customer-edge:** gate account detail and statement reads on their own capability (ADR-0375 D7) ([#15879](https://github.com/JiRaska/open-bank-oss/issues/15879)) ([747573d](https://github.com/JiRaska/open-bank-oss/commit/747573dc3c8e3b90ca14fa3645bec80b48c846c9))
+
 ## [1.11.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.10.0...customer-edge-v1.11.0) (2026-11-13)
 
 
