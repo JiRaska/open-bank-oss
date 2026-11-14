@@ -6,113 +6,27 @@ package com.openbank.domestic.infrastructure.persistence.repository
 
 import com.openbank.domestic.application.port.out.DomesticPaymentOutboxRepository
 import com.openbank.domestic.infrastructure.persistence.entity.DomesticPaymentOutboxEntity
-import com.openbank.libs.persistence.outbox.OutboxEntry
-import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
+import com.openbank.libs.persistence.outbox.AbstractClaimFencedOutboxRepository
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.libs.persistence.outbox.OutboxTableShape
-import com.openbank.libs.persistence.outbox.PanacheOutboxRetention
-import com.openbank.libs.persistence.outbox.SentOutboxRetention
-import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
-import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
-import java.time.Duration
-import java.time.Instant
-import java.util.UUID
 
 @ApplicationScoped
-class DomesticPaymentOutboxRepositoryImpl(private val clock: Clock) :
+class DomesticPaymentOutboxRepositoryImpl(clock: Clock) :
+    AbstractClaimFencedOutboxRepository<DomesticPaymentOutboxEntity>(
+        OutboxTableShape("domestic_payment_outbox"),
+        DomesticPaymentOutboxEntity::class.java,
+        clock,
+    ),
     DomesticPaymentOutboxRepository,
-    SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape("domestic_payment_outbox")),
     PanacheRepository<DomesticPaymentOutboxEntity> {
 
     fun persistWithinCurrentTransaction(message: OutboxMessage): Uni<DomesticPaymentOutboxEntity> =
         persist(message.toEntity())
-
-    override suspend fun listProcessable(limit: Int): List<OutboxEntry> = Panache.withSession {
-        find(
-            "status in (?1, ?2) order by createdAt asc",
-            OutboxStatus.PENDING.name,
-            OutboxStatus.FAILED.name,
-        ).range(0, limit.coerceAtLeast(1) - 1).list()
-    }.awaitSuspending().map { it.toEntry() }
-
-    /**
-     * Reference implementation for the [OutboxRepository.claimProcessable] atomic-claim
-     * override (#1201). One statement: the inner `SELECT ... FOR UPDATE SKIP LOCKED` locks and
-     * skips-past whatever a concurrently running claim has already locked, and the outer `UPDATE`
-     * flips exactly those rows to DISPATCHING and returns them — so two dispatcher instances
-     * racing this at the same instant can never both claim the same row. Also reclaims rows still
-     * DISPATCHING past [staleAfter] (a pod that claimed a row and then crashed or was evicted
-     * before `markSent`/`markFailed`), so a claim can never strand a row forever.
-     *
-     * Plain native SQL rather than a Panache/HQL lock hint: `FOR UPDATE SKIP LOCKED` has no
-     * `jakarta.persistence.LockModeType` equivalent, and the lock only has to be held for the
-     * lifetime of this one statement/transaction — it must not span the network publish call that
-     * follows.
-     */
-    override suspend fun claimProcessable(limit: Int, staleAfter: Duration): List<OutboxEntry> {
-        val now = Instant.now(clock)
-        val staleThreshold = now.minus(staleAfter)
-        return Panache.withTransaction {
-            Panache.getSession().chain { session ->
-                session.createNativeQuery(CLAIM_SQL, DomesticPaymentOutboxEntity::class.java)
-                    .setParameter("pending", OutboxStatus.PENDING.name)
-                    .setParameter("failed", OutboxStatus.FAILED.name)
-                    .setParameter("dispatching", OutboxStatus.DISPATCHING.name)
-                    .setParameter("staleThreshold", staleThreshold)
-                    .setParameter("claimLimit", limit.coerceAtLeast(1))
-                    .setParameter("now", now)
-                    .resultList
-            }
-        }.map { entities -> entities.map { it.toEntry() } }.awaitSuspending()
-    }
-
-    override suspend fun countProcessable(): Long = Panache.withSession {
-        count(
-            "status in (?1, ?2)",
-            OutboxStatus.PENDING.name,
-            OutboxStatus.FAILED.name,
-        )
-    }.awaitSuspending()
-
-    override suspend fun markSent(eventId: UUID, sentAt: Instant) {
-        Panache.withTransaction {
-            find("eventId", eventId).firstResult()
-                .invoke { entity ->
-                    if (entity != null) {
-                        entity.status = OutboxStatus.SENT.name
-                        entity.attemptCount += 1
-                        entity.sentAt = sentAt
-                        entity.lastError = null
-                        entity.updatedAt = sentAt
-                    }
-                }
-                .replaceWith(Unit)
-        }.awaitSuspending()
-    }
-
-    override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus =
-        Panache.withTransaction {
-            find("eventId", eventId).firstResult()
-                .map { entity ->
-                    if (entity != null) {
-                        entity.attemptCount += 1
-                        entity.status = OutboxFailurePolicy.statusAfterFailure(entity.attemptCount).name
-                        entity.lastError = error.take(OutboxFailurePolicy.MAX_ERROR_LEN)
-                        entity.updatedAt = failedAt
-                        OutboxStatus.valueOf(entity.status)
-                    } else {
-                        // Row not found -- unreachable in practice (the dispatcher only calls
-                        // markFailed on a row it just claimed), but degrade gracefully rather than
-                        // throw out of a batch that is otherwise mid-flight (#5128 finding 3).
-                        OutboxStatus.FAILED
-                    }
-                }
-        }.awaitSuspending()
 
     private fun OutboxMessage.toEntity() = DomesticPaymentOutboxEntity().also {
         it.eventId = eventId
@@ -124,23 +38,5 @@ class DomesticPaymentOutboxRepositoryImpl(private val clock: Clock) :
         it.attemptCount = 0
         it.createdAt = createdAt
         it.updatedAt = createdAt
-    }
-
-    companion object {
-        @Suppress("MaxLineLength")
-        private const val CLAIM_SQL = """
-            UPDATE domestic_payment_outbox
-            SET status = :dispatching, claimed_at = :now, updated_at = :now
-            WHERE id IN (
-                SELECT id FROM domestic_payment_outbox
-                WHERE (status IN (:pending, :failed))
-                   OR (status = :dispatching AND claimed_at < :staleThreshold)
-                ORDER BY created_at ASC
-                LIMIT :claimLimit
-                FOR UPDATE SKIP LOCKED
-            )
-            RETURNING id, event_id, aggregate_id, event_type, payload, status, attempt_count,
-                      sent_at, last_error, created_at, updated_at, claimed_at, synthetic
-        """
     }
 }

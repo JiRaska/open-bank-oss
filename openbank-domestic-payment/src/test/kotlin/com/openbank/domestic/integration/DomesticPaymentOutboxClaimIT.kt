@@ -5,6 +5,7 @@ package com.openbank.domestic.integration
 
 import com.openbank.domestic.infrastructure.persistence.repository.DomesticPaymentOutboxRepositoryImpl
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
@@ -25,18 +26,11 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.ValueSource
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 
-/**
- * Regression coverage for #1201: two dispatcher instances racing
- * [DomesticPaymentOutboxRepositoryImpl]'s `claimProcessable` at the same instant (an Argo
- * Rollouts canary window running old + new pod) must never both claim the same row, and a claim
- * that never reaches `markSent`/`markFailed` (the claiming pod crashed or was evicted) must not
- * strand the row forever.
- */
+/** PostgreSQL coverage for concurrent claims, aggregate ordering and stale acknowledgements. */
 @QuarkusTest
 @TestProfile(DomesticPaymentOutboxClaimIT.NoDispatchProfile::class)
 @QuarkusTestResource(
@@ -66,14 +60,13 @@ class DomesticPaymentOutboxClaimIT {
     // DomesticPaymentOutboxRepositoryImpl has no generic persistInTransaction override -- its
     // seed hook is the bespoke, non-interface persistWithinCurrentTransaction(OutboxMessage),
     // which returns the persisted entity (Uni<DomesticPaymentOutboxEntity>), not Uni<Void>.
-    private fun seedPending(count: Int, synthetic: Boolean = false): List<OutboxMessage> {
+    private fun seedPending(count: Int, aggregateId: UUID? = null): List<OutboxMessage> {
         val messages = (1..count).map {
             OutboxMessage(
-                aggregateId = Ids.newId(),
+                aggregateId = aggregateId ?: Ids.newId(),
                 eventType = "test.event.claim",
                 payload = """{"seq":$it}""",
                 createdAt = Instant.now(),
-                synthetic = synthetic,
             )
         }
         messages.forEach { msg ->
@@ -84,59 +77,6 @@ class DomesticPaymentOutboxClaimIT {
         return messages
     }
 
-    @ParameterizedTest(name = "expanded schema: {0}")
-    @ValueSource(booleans = [false, true])
-    fun `v1 claims and acknowledges rows before and after an additive schema change`(expanded: Boolean) {
-        clearOutbox()
-        if (expanded) {
-            changeTestSchema("ADD COLUMN next_attempt_at TIMESTAMPTZ, ADD COLUMN claim_token UUID")
-        }
-        try {
-            val (sent, failed) = seedPending(2, synthetic = true)
-            val claims = onEventLoop { repository.claimProcessable(2) }
-
-            assertThat(claims.map { it.eventId }).containsExactlyInAnyOrder(sent.eventId, failed.eventId)
-            assertThat(claims).allSatisfy { claim ->
-                val source = if (claim.eventId == sent.eventId) sent else failed
-                assertThat(claim.aggregateId).isEqualTo(source.aggregateId)
-                assertThat(claim.eventType).isEqualTo(source.eventType)
-                assertThat(claim.payload).isEqualTo(source.payload)
-                assertThat(claim.status).isEqualTo(OutboxStatus.DISPATCHING)
-                assertThat(claim.synthetic).isTrue()
-            }
-            onEventLoop { repository.markSent(sent.eventId) }
-            assertThat(onEventLoop { repository.markFailed(failed.eventId, "synthetic failure") })
-                .isEqualTo(OutboxStatus.FAILED)
-
-            val sentRow = requireNotNull(
-                onEventLoop {
-                    Panache.withSession { repository.find("eventId", sent.eventId).firstResult() }.awaitSuspending()
-                },
-            )
-            assertThat(sentRow.status).isEqualTo(OutboxStatus.SENT.name)
-            assertThat(sentRow.attemptCount).isOne()
-            assertThat(sentRow.sentAt).isNotNull
-            val retry = onEventLoop { repository.claimProcessable(2) }.single()
-            assertThat(retry.eventId).isEqualTo(failed.eventId)
-            assertThat(retry.attemptCount).isOne()
-            assertThat(retry.lastError).isEqualTo("synthetic failure")
-        } finally {
-            if (expanded) {
-                changeTestSchema("DROP COLUMN next_attempt_at, DROP COLUMN claim_token")
-            }
-        }
-    }
-
-    private fun changeTestSchema(clauses: String) {
-        onEventLoop {
-            Panache.withTransaction {
-                Panache.getSession().chain { session ->
-                    session.createNativeQuery<Int>("ALTER TABLE domestic_payment_outbox $clauses").executeUpdate()
-                }
-            }.awaitSuspending()
-        }
-    }
-
     @Test
     fun `two concurrent claims never return the same row`() {
         clearOutbox()
@@ -144,13 +84,13 @@ class DomesticPaymentOutboxClaimIT {
         val seededIds = seeded.map { it.eventId }.toSet()
 
         val (first, second) = runBlocking {
-            val a = async(Dispatchers.IO) { onEventLoop { repository.claimProcessable(30) } }
-            val b = async(Dispatchers.IO) { onEventLoop { repository.claimProcessable(30) } }
+            val a = async(Dispatchers.IO) { onEventLoop { repository.claimWithTokens(30) } }
+            val b = async(Dispatchers.IO) { onEventLoop { repository.claimWithTokens(30) } }
             awaitAll(a, b)
         }
 
-        val firstIds = first.map { it.eventId }.toSet()
-        val secondIds = second.map { it.eventId }.toSet()
+        val firstIds = first.map { it.entry.eventId }.toSet()
+        val secondIds = second.map { it.entry.eventId }.toSet()
 
         assertThat(firstIds intersect secondIds)
             .describedAs("no row may be claimed by both concurrent calls")
@@ -158,7 +98,7 @@ class DomesticPaymentOutboxClaimIT {
         assertThat(firstIds + secondIds)
             .describedAs("every claimed row came from this test's own seed")
             .isSubsetOf(seededIds)
-        assertThat((first + second)).allSatisfy { assertThat(it.status).isEqualTo(OutboxStatus.DISPATCHING) }
+        assertThat((first + second)).allSatisfy { assertThat(it.entry.status).isEqualTo(OutboxStatus.DISPATCHING) }
     }
 
     @Test
@@ -166,18 +106,69 @@ class DomesticPaymentOutboxClaimIT {
         clearOutbox()
         val seeded = seedPending(1).single()
 
-        val firstClaim = onEventLoop { repository.claimProcessable(10, Duration.ofMinutes(5)) }
-        assertThat(firstClaim.map { it.eventId }).containsExactly(seeded.eventId)
+        val first = onEventLoop { repository.claimWithTokens(10, Duration.ofMinutes(5)) }.single()
+        assertThat(first.entry.eventId).isEqualTo(seeded.eventId)
 
+        // Simulate the claiming pod crashing before acknowledgement: back-date claimed_at
+        // far enough that any staleAfter window has already elapsed.
         onEventLoop {
             Panache.withTransaction {
                 repository.update("claimedAt = ?1 where eventId = ?2", Instant.EPOCH, seeded.eventId)
             }.awaitSuspending()
         }
 
-        val reclaim = onEventLoop { repository.claimProcessable(10, Duration.ofSeconds(1)) }
-        assertThat(reclaim.map { it.eventId })
-            .describedAs("stale DISPATCHING row must be reclaimable, not stranded")
-            .containsExactly(seeded.eventId)
+        val replacement = onEventLoop { repository.claimWithTokens(10, Duration.ofSeconds(1)) }.single()
+        assertThat(replacement.entry.eventId).isEqualTo(seeded.eventId)
+        assertThat(replacement.token).isNotEqualTo(first.token)
+        assertThat(onEventLoop { repository.markClaimsSent(listOf(first)) }).isEmpty()
+        assertThat(onEventLoop { repository.markClaimFailed(first, "late failure") }).isNull()
+        assertThat(onEventLoop { repository.markClaimsSent(listOf(replacement)) }).containsExactly(seeded.eventId)
+        assertThat(onEventLoop { repository.markClaimFailed(first, "late failure after send") }).isNull()
+    }
+
+    @Test
+    fun `an aggregate tail is claimable only after its head is acknowledged`() {
+        clearOutbox()
+        val (head, tail) = seedPending(2, Ids.newId())
+        val claim = onEventLoop { repository.claimWithTokens(2) }.single()
+        assertThat(claim.entry.eventId).isEqualTo(head.eventId)
+        assertThat(onEventLoop { repository.claimWithTokens(2) }).isEmpty()
+
+        assertThat(onEventLoop { repository.markClaimsSent(listOf(claim)) }).containsExactly(head.eventId)
+        assertThat(onEventLoop { repository.claimWithTokens(2) }.map { it.entry.eventId }).containsExactly(tail.eventId)
+    }
+
+    @Test
+    fun `a failed head backs off and its tail becomes eligible after the head is dead`() {
+        clearOutbox()
+        val (head, tail) = seedPending(2, Ids.newId())
+        val claim = onEventLoop { repository.claimWithTokens(2) }.single()
+        assertThat(claim.entry.eventId).isEqualTo(head.eventId)
+        val failedAt = Instant.now().plusSeconds(30)
+
+        assertThat(onEventLoop { repository.markClaimFailed(claim, "synthetic failure", failedAt) })
+            .isEqualTo(OutboxStatus.FAILED)
+        val delayed = onEventLoop {
+            Panache.withSession { repository.find("eventId", head.eventId).singleResult() }.awaitSuspending()
+        }
+        assertThat(delayed.attemptCount).isOne()
+        assertThat(delayed.nextAttemptAt).isAfter(failedAt)
+        assertThat(delayed.claimToken).isNull()
+        assertThat(onEventLoop { repository.claimWithTokens(2) }).isEmpty()
+
+        onEventLoop {
+            Panache.withTransaction {
+                repository.update(
+                    "attemptCount = ?1, nextAttemptAt = ?2 where eventId = ?3",
+                    OutboxFailurePolicy.DEFAULT_MAX_ATTEMPTS - 1,
+                    Instant.EPOCH,
+                    head.eventId,
+                )
+            }.awaitSuspending()
+        }
+        val retry = onEventLoop { repository.claimWithTokens(2) }.single()
+        assertThat(retry.entry.eventId).isEqualTo(head.eventId)
+        assertThat(onEventLoop { repository.markClaimFailed(retry, "synthetic failure") }).isEqualTo(OutboxStatus.DEAD)
+        assertThat(onEventLoop { repository.claimWithTokens(2) }.map { it.entry.eventId }).containsExactly(tail.eventId)
     }
 }
