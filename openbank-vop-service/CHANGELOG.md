@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.4](https://github.com/JiRaska/open-bank-oss/compare/vop-service-v0.5.3...vop-service-v0.5.4) (2026-11-14)
+
+
+### Bug Fixes
+
+* **vop:** check the rate limit without blocking the event loop ([#16080](https://github.com/JiRaska/open-bank-oss/issues/16080)) ([f5acbef](https://github.com/JiRaska/open-bank-oss/commit/f5acbef2fa31114997ce7079213a9178eb6d41e7))
+
 ## [0.5.3](https://github.com/JiRaska/open-bank-oss/compare/vop-service-v0.5.2...vop-service-v0.5.3) (2026-10-14)
 
 
