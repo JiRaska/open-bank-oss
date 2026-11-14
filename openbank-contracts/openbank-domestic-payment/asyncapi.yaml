@@ -5,7 +5,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Domestic Payment Service — events
-  version: 1.3.0
+  version: 1.4.0
   description: >-
     Events produced by the Czech domestic-payment lifecycle. A delegated payment carries one
     indivisible delegationId/reservationId pair from creation through every status transition;
@@ -42,6 +42,8 @@ channels:
         $ref: '#/components/messages/DOMESTIC_PAYMENT_STATUS_CHANGED'
       DELEGATED_SPEND_FINALIZED_ABSENT:
         $ref: '#/components/messages/DELEGATED_SPEND_FINALIZED_ABSENT'
+      PAYMENT_HELD:
+        $ref: '#/components/messages/PAYMENT_HELD'
   notificationRequests:
     address: openbank.notification.requests
     description: >-
@@ -57,6 +59,7 @@ operations:
       - $ref: '#/channels/domesticPaymentEvents/messages/DOMESTIC_PAYMENT_CREATED'
       - $ref: '#/channels/domesticPaymentEvents/messages/DOMESTIC_PAYMENT_STATUS_CHANGED'
       - $ref: '#/channels/domesticPaymentEvents/messages/DELEGATED_SPEND_FINALIZED_ABSENT'
+      - $ref: '#/channels/domesticPaymentEvents/messages/PAYMENT_HELD'
 
 components:
   messageTraits:
@@ -72,7 +75,10 @@ components:
   schemas:
     paymentStatus:
       type: string
-      enum: [RECEIVED, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
+      description: >-
+        HELD (1.4.0, ADR-0374) is emitted only while the payment admission chain is switched on for
+        this rail. A consumer that projects statuses must accept it as a non-terminal stage.
+      enum: [RECEIVED, HELD, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
 
     delegationContext:
       type: object
@@ -125,6 +131,82 @@ components:
             Idempotency-Key. The raw caller-controlled key is never retained in compacted state.
 
   messages:
+    PAYMENT_HELD:
+      name: PAYMENT_HELD
+      title: Payment held by the admission chain and waiting for a case decision
+      description: >-
+        ADR-0374 D13. Written in the transaction that moves the payment to HELD (or, for a hold
+        caused by an unavailable control, when its automatic re-evaluation is exhausted), so a hold
+        that needs a human always has this event. aml-service opens the hold's one case from it,
+        idempotent on caseKey, and the rail accepts a release or a reject only from the case of the
+        hold's current review. The
+        eventType is rail-neutral; rail names the producer. Carries no name: evidence holds list
+        entries, statuses and scores, never the screened names. May be delivered more than once.
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        type: object
+        required:
+          - paymentId
+          - rail
+          - caseKey
+          - debtorAccountId
+          - customerReference
+          - reasons
+          - steps
+          - heldAt
+          - expiresAt
+          - occurredAt
+          - aggregateRevision
+          - eventType
+          - sourceService
+        properties:
+          paymentId: {type: string, format: uuid}
+          rail: {type: string, const: DOMESTIC}
+          caseKey:
+            type: string
+            description: >-
+              payment-hold:domestic:<paymentId> for the first review of the hold, and
+              payment-hold:domestic:<paymentId>:<review> for a later one. A consumer derives it from
+              rail, paymentId and review and refuses any other value.
+          review:
+            type: integer
+            minimum: 1
+            description: >-
+              Which review of the hold this requests; absent means 1. A hold has one review unless,
+              at release, a control reports something the decided case was not asked about. Then a
+              further review is requested, as a case of its own, within the same hold and expiry.
+          debtorAccountId: {type: string, format: uuid}
+          debtorPartyId:
+            type: [string, 'null']
+            format: uuid
+            description: >-
+              Absent when account standing could not be read. The case is opened without a party
+              and the case service establishes it afterwards.
+          customerReference: {type: string, maxLength: 128}
+          reasons:
+            type: array
+            items: {type: string}
+          steps:
+            type: array
+            items:
+              type: object
+              required: [step, outcome, evidence]
+              properties:
+                step: {type: string}
+                outcome: {type: string, enum: [DECIDED, UNAVAILABLE, NOT_APPLICABLE, NOT_REACHED]}
+                decision: {type: [string, 'null'], enum: [ALLOW, CHALLENGE, HOLD, REJECT, null]}
+                reason: {type: [string, 'null']}
+                evidence:
+                  type: object
+                  additionalProperties: {type: string}
+          heldAt: {type: string, format: date-time}
+          expiresAt: {type: string, format: date-time}
+          occurredAt: {type: string, format: date-time}
+          aggregateRevision: {type: integer, minimum: 1}
+          eventType: {type: string, const: PAYMENT_HELD}
+          sourceService: {type: string, const: domestic-payment}
+
     DOMESTIC_PAYMENT_CREATED:
       name: DOMESTIC_PAYMENT_CREATED
       title: Domestic payment created

@@ -99,8 +99,13 @@ permissions:
 # is never killed, which is the only property that actually mattered. The exact wrong
 # assumption to avoid re-making: "superseding is free" is only true when the thing being
 # superseded was making progress.
+#
+# provider_version and consumer are part of the key: a run scoped to one consumer, or one
+# replaying a different provider version, is not a superset of another, so only identical
+# dispatches may collapse. Without them, three scoped replays dispatched together kept one
+# pending slot and the middle one was cancelled before creating a job.
 concurrency:
-  group: verify-provider-${{ inputs.service }}-${{ inputs.ref }}
+  group: verify-provider-${{ inputs.service }}-${{ inputs.ref }}-${{ inputs.provider_version }}-${{ inputs.consumer }}
   cancel-in-progress: false
 
 jobs:
