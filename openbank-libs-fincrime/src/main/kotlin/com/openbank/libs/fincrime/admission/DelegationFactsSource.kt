@@ -25,6 +25,26 @@ data class DelegationAuthorityGrantWire(
 )
 
 /**
+ * One grant exactly as it arrives off the wire, before anything has been validated.
+ *
+ * Every field is nullable and a string, because that is what a deserializer can actually produce:
+ * a missing key, a null, or an unparseable value. Keeping the nullable form in the SHARED module is
+ * the point — the alternative is each rail writing its own "is this grant usable?" check, and that
+ * check has exactly one dangerous mistake available (drop the unusable grant, which turns a payload
+ * we cannot read into a confident refusal). It is made once, here, in [DelegationAuthorityFacts].
+ *
+ * Nothing here imports a serialization framework: a rail's REST-client interface may deserialize
+ * straight into it, so the pure module stays pure (ADR-0375 D2).
+ */
+data class DelegationAuthorityGrantPayload(
+    val grantId: String? = null,
+    val grantorPartyId: String? = null,
+    val capabilities: List<String> = emptyList(),
+    val validFrom: String? = null,
+    val validTo: String? = null,
+)
+
+/**
  * What a rail got back when it asked for the facts.
  *
  * The whole point of this type is that it has two cases and not three. [Available] with an empty
@@ -36,7 +56,15 @@ data class DelegationAuthorityGrantWire(
  */
 sealed interface DelegationFactsLookup {
 
-    data class Available(val grants: List<DelegationFact>) : DelegationFactsLookup
+    /**
+     * [ownerPartyId] is read in the SAME answer as [grants] and is null only when the account is
+     * unknown. It is part of this type rather than a parameter of [DelegationAuthorityFacts.outcome]
+     * on purpose: the authority decision compares the actor with the owner before it consults any
+     * grant, so a caller able to supply its own owner could decide the OWNER case against one read
+     * and have its write-time proof compare another. Making it unpassable removes that window by
+     * construction instead of by review.
+     */
+    data class Available(val grants: List<DelegationFact>, val ownerPartyId: UUID?) : DelegationFactsLookup
 
     data class Unavailable(val cause: UnavailableCause, val detail: String) : DelegationFactsLookup
 }
@@ -83,11 +111,54 @@ object DelegationAuthorityFacts {
         )
     }
 
-    /** All of them, or [DelegationFactsLookup.Unavailable] if any single one cannot be read. */
-    fun lookupOf(wire: List<DelegationAuthorityGrantWire>, accountId: UUID, partyId: UUID): DelegationFactsLookup {
-        val grants = wire.map { grantOf(it, accountId, partyId) ?: return malformed(it.grantId) }
-        return DelegationFactsLookup.Available(grants)
+    /**
+     * The whole response as it arrives off the wire, validated and mapped in one step.
+     *
+     * This is what a rail adapter should call: it owns the transport and nothing else. A grant
+     * missing or mangling any identifying field makes the WHOLE lookup unavailable — never a grant
+     * quietly absent from an otherwise-successful answer, which would read downstream as a
+     * definitive "this party holds nothing here".
+     */
+    fun lookupOfPayload(
+        payload: List<DelegationAuthorityGrantPayload>,
+        accountId: UUID,
+        partyId: UUID,
+        ownerPartyId: String?,
+    ): DelegationFactsLookup {
+        val owner = ownerPartyId?.let { uuidOrNull(it) ?: return unreadable("ownerPartyId is not a party id") }
+        val wire = payload.map { wireOf(it) ?: return unreadable("a grant was missing an identifying field") }
+        return lookupOf(wire, accountId, partyId, owner)
     }
+
+    private fun wireOf(payload: DelegationAuthorityGrantPayload): DelegationAuthorityGrantWire? {
+        val grantId = payload.grantId?.let { uuidOrNull(it) } ?: return null
+        val grantor = payload.grantorPartyId?.let { uuidOrNull(it) } ?: return null
+        val validFrom = payload.validFrom ?: return null
+        return DelegationAuthorityGrantWire(grantId, grantor, payload.capabilities, validFrom, payload.validTo)
+    }
+
+    private fun uuidOrNull(value: String): UUID? = runCatching { UUID.fromString(value) }.getOrNull()
+
+    /** All of them, or [DelegationFactsLookup.Unavailable] if any single one cannot be read. */
+    fun lookupOf(
+        wire: List<DelegationAuthorityGrantWire>,
+        accountId: UUID,
+        partyId: UUID,
+        ownerPartyId: UUID?,
+    ): DelegationFactsLookup {
+        val grants = wire.map { grantOf(it, accountId, partyId) ?: return malformed(it.grantId) }
+        return DelegationFactsLookup.Available(grants, ownerPartyId)
+    }
+
+    /**
+     * A transport failure a rail could not answer at all. Exposed so every adapter raises the SAME
+     * shape instead of inventing one, and so none of them can reach for an empty list.
+     */
+    fun dependencyDown(detail: String): DelegationFactsLookup.Unavailable =
+        DelegationFactsLookup.Unavailable(UnavailableCause.DEPENDENCY_DOWN, detail)
+
+    private fun unreadable(detail: String): DelegationFactsLookup.Unavailable =
+        DelegationFactsLookup.Unavailable(UnavailableCause.MISSING_DATA, detail)
 
     private fun malformed(grantId: UUID): DelegationFactsLookup.Unavailable = DelegationFactsLookup.Unavailable(
         // MISSING_DATA, not CHECK_FAILED: nothing threw. The rail HAS an answer from the endpoint
@@ -105,17 +176,17 @@ object DelegationAuthorityFacts {
     fun outcome(
         lookup: DelegationFactsLookup,
         accountId: UUID,
-        ownerPartyId: UUID,
         actorPartyId: UUID,
         requiredCapability: String,
         now: OffsetDateTime,
     ): StepOutcome {
+        val ownerPartyId = (lookup as? DelegationFactsLookup.Available)?.ownerPartyId
         // The owner is decided before the lookup is even looked at. An owner moving their OWN
         // money must not be held because a DELEGATION lookup failed — their authority does not
         // come from a grant, so a failure to read grants is not a failure to establish it. Asking
         // the lookup first would make every account-service blip a hold on ordinary payments,
         // which is the kind of fail-closed overreach that gets a control switched off.
-        if (actorPartyId == ownerPartyId) {
+        if (ownerPartyId != null && actorPartyId == ownerPartyId) {
             return DelegatedDebitAuthority.evaluate(
                 DebitAuthorityFacts(accountId, ownerPartyId, actorPartyId, requiredCapability, emptyList(), now),
             )
@@ -125,16 +196,27 @@ object DelegationAuthorityFacts {
                 lookup.cause,
                 AdmissionEvidence.of("capability" to requiredCapability, "detail" to lookup.detail),
             )
-            is DelegationFactsLookup.Available -> DelegatedDebitAuthority.evaluate(
-                DebitAuthorityFacts(
-                    accountId = accountId,
-                    ownerPartyId = ownerPartyId,
-                    actorPartyId = actorPartyId,
-                    requiredCapability = requiredCapability,
-                    grants = lookup.grants,
-                    now = now,
-                ),
-            )
+            // An answered lookup with no owner is an account the holder of the grants does not
+            // know about. That is not "no grant" — it is an unanswerable question, so it HOLDS.
+            // Treating it as a refusal would turn an unknown account into a definitive verdict
+            // about somebody's authority over it.
+            is DelegationFactsLookup.Available -> if (ownerPartyId == null) {
+                StepOutcome.Unavailable(
+                    UnavailableCause.MISSING_DATA,
+                    AdmissionEvidence.of("capability" to requiredCapability, "detail" to "owner unknown"),
+                )
+            } else {
+                DelegatedDebitAuthority.evaluate(
+                    DebitAuthorityFacts(
+                        accountId = accountId,
+                        ownerPartyId = ownerPartyId,
+                        actorPartyId = actorPartyId,
+                        requiredCapability = requiredCapability,
+                        grants = lookup.grants,
+                        now = now,
+                    ),
+                )
+            }
         }
     }
 }
