@@ -66,7 +66,8 @@ class ScreeningProfileEvaluator(private val jurisdictionRepo: SanctionsJurisdict
      * jurisdiction reference data. A listed country matches whatever the name is: an embargo is a
      * HIT, a high-risk listing a POTENTIAL_HIT scored at the review floor so the shared
      * `ScreeningPolicy` routes it to review instead of blocking it. An analyst's clearance never
-     * covers such a match — see `SanctionsService.screen`.
+     * covers such a match — see `SanctionsService.screen`. A risk-factor listing (the FATF
+     * increased-monitoring list) is no match at all: it is weighed by customer risk scoring.
      */
     suspend fun screenJurisdictions(
         country: String?,
@@ -75,13 +76,15 @@ class ScreeningProfileEvaluator(private val jurisdictionRepo: SanctionsJurisdict
     ): List<SanctionsMatch> {
         val bankCountry = bankIdentifier?.substring(BIC_COUNTRY_START, BIC_COUNTRY_END)
         val countries = setOfNotNull(country, bankCountry)
-        return jurisdictionRepo.findActive(countries, targetLists).map { row ->
+        // A RISK_FACTOR row (FATF grey list) is never a screen finding: see JurisdictionMeasure.
+        return jurisdictionRepo.findActive(countries, targetLists).filter { it.measure.screens }.map { row ->
             SanctionsMatch(
                 listType = row.listType,
                 matchType = MatchType.EXACT,
                 matchScore = when (row.measure) {
                     JurisdictionMeasure.EMBARGO -> 1.0
                     JurisdictionMeasure.HIGH_RISK -> POTENTIAL_HIT_THRESHOLD
+                    JurisdictionMeasure.RISK_FACTOR -> error("RISK_FACTOR rows are filtered out above")
                 },
                 matchedName = row.countryCode,
                 // The whole identity of the row, so stored evidence says which publication,

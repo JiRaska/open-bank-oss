@@ -70,8 +70,21 @@ enum class ScreeningProfile(val lists: List<SanctionsListType>) {
     CUSTOMER(PAYMENT.lists + SanctionsListType.PEP_GLOBAL),
 }
 
-/** How a listed jurisdiction is treated: an embargo blocks, a high-risk listing goes to review. */
-enum class JurisdictionMeasure { EMBARGO, HIGH_RISK }
+/**
+ * How a listed jurisdiction is treated: an embargo blocks, a high-risk listing goes to review,
+ * and a risk factor raises NO screen finding at all.
+ *
+ * [RISK_FACTOR] exists for the FATF increased-monitoring ("grey") list, which the FATF itself
+ * says calls for a risk-based weighing, not enhanced due diligence. Screening such a country as
+ * a review would send every payment to it to an analyst; the row is held so the data and its age
+ * are correct, and it is a customer-risk input, never a screening outcome (ADR-0032, amendment of
+ * 2026-11-14). [screens] is what the screen consults.
+ */
+enum class JurisdictionMeasure(val screens: Boolean) {
+    EMBARGO(screens = true),
+    HIGH_RISK(screens = true),
+    RISK_FACTOR(screens = false),
+}
 
 /**
  * One active row of jurisdiction reference data. There is no machine-readable feed for these
