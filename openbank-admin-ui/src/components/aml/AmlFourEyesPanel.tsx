@@ -13,6 +13,7 @@
 // the authenticated principal; this panel only offers the next legal step and shows who did what.
 
 import { useCallback, useEffect, useState } from 'react'
+import { useSession } from 'next-auth/react'
 import { Users, FileWarning, Check, X } from 'lucide-react'
 import { svcUrl } from '@/lib/services/bff'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -42,6 +43,10 @@ export function AmlFourEyesPanel({ amlCase, onCaseChanged }: { amlCase: AmlCase;
   const [vocabulary, setVocabulary] = useState<OutcomeEntry[] | null>(null)
   const outcomeLabel = (code: string | null) => labelFor(vocabulary?.find(v => v.code === code), code, language)
 
+  const { data: session, status: sessionStatus } = useSession()
+  // aml-service admits ROLE_COMPLIANCE only to dispositions and reports. Asking without it is a
+  // guaranteed 403 that used to render as an error; say what the role is for instead.
+  const isCompliance = (session?.user?.roles ?? []).includes('ROLE_COMPLIANCE')
   const fourEyes = amlCase.requiresFourEyesDisposition
   const monitoring = amlCase.screeningType === 'TRANSACTION_MONITORING'
   const open = ['OPEN', 'UNDER_REVIEW', 'ESCALATED'].includes(amlCase.status)
@@ -87,12 +92,25 @@ export function AmlFourEyesPanel({ amlCase, onCaseChanged }: { amlCase: AmlCase;
   }, [fourEyes, monitoring, amlCase.id, t])
 
   useEffect(() => {
-    if (!fourEyes && !monitoring) return
+    if ((!fourEyes && !monitoring) || !isCompliance) return
     const handle = setTimeout(() => { void load() }, 0)
     return () => clearTimeout(handle)
-  }, [load, fourEyes, monitoring])
+  }, [load, fourEyes, monitoring, isCompliance])
 
   if (!fourEyes && !monitoring) return null
+  if (sessionStatus === 'loading') return null
+  if (!isCompliance) {
+    return (
+      <section className="card" style={{ padding: 20, marginBottom: 16 }} aria-label={t('Čtyři oči a hlášení FAÚ', 'Four eyes and FAU report')}>
+        <h2 style={{ margin: '0 0 6px', fontSize: 15 }}>{t('Čtyři oči a hlášení FAÚ', 'Four eyes and FAU report')}</h2>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
+          {fourEyes
+            ? t('Tento případ z monitoringu transakcí se uzavírá návrhem jednoho compliance officera a schválením druhého. Návrh, schválení i oznámení FAÚ jsou vyhrazeny roli compliance (ROLE_COMPLIANCE), kterou váš účet nemá.', 'This transaction-monitoring case is closed by one compliance officer proposing and another approving. Proposals, approvals and FAU reports are reserved to the compliance role (ROLE_COMPLIANCE), which your account does not hold.')
+            : t('Oznámení podezřelého obchodu FAÚ připravuje a schvaluje role compliance (ROLE_COMPLIANCE), kterou váš účet nemá.', 'Suspicious-transaction reports to the FAU are drafted and approved by the compliance role (ROLE_COMPLIANCE), which your account does not hold.')}
+        </p>
+      </section>
+    )
+  }
 
   async function act(path: string, body: unknown, success: string, caseMoves = false) {
     setBusy(true); setError(null); setOk(null)

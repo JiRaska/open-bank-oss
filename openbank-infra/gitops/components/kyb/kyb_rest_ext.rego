@@ -43,6 +43,7 @@ allowed_reasons contains "operator-kyb-review" if {
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC"}
 	role in input.principal.roles
 	startswith(input.action, "kyb.")
+	not startswith(input.action, "kyb.statutory-representation.")
 	# Ongoing-monitoring decisions and the four-eyes exit are the KYC reviewer's alone
 	# (rules.yaml matrix, #16028); the staff prefix must not reach them.
 	not startswith(input.action, "kyb.monitoring.")
@@ -68,4 +69,19 @@ allowed_reasons contains "edge-service-kyb" if {
 		"kyb.case.sign",
 		"kyb.case.abandon",
 	}
+}
+
+allowed_reasons contains "kyb-staff-publishes-statutory-representation" if {
+    input.principal.type == "HUMAN"
+    not principal_is_machine
+    some role in {"ROLE_ADMIN", "ROLE_KYC"}
+    role in input.principal.roles
+    input.action == "kyb.statutory-representation.publish"
+}
+
+allowed_reasons contains "delegation-inspects-statutory-attestation" if {
+    input.principal.type == "HUMAN"
+    input.principal.service_account == true
+    machine_named("service-account-openbank-delegation")
+    input.action == "kyb.statutory-representation.inspect"
 }

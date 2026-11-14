@@ -201,8 +201,13 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
       # each of them as a member (the same per-member path as an absent Pacticipant) and let
       # every proven peer continue under the unchanged proof below. A failure to READ the
       # evidence (any other non-zero exit) still refuses the whole set.
+      unresolved_reason="no successful main Services CI build+contract with an exact Pact version at a tree-equivalent source"
+      if jq -e '.budget_exhausted == true' >/dev/null <<< "$historical_source_map"; then
+        # Not searched-and-absent: the search ran out of time before reaching these services.
+        unresolved_reason="not reached before the source-resolution time budget ran out; reconcile it alone via reconcile_services"
+      fi
       for svc in $(jq -r '.unresolved[]' <<< "$historical_source_map"); do
-        refuse_reconcile_source "$svc" "no successful main Services CI build+contract with an exact Pact version at a tree-equivalent source"
+        refuse_reconcile_source "$svc" "$unresolved_reason"
       done
       historical_services="$(jq -c --argjson gone "$(jq -c '.unresolved' <<< "$historical_source_map")" \
         '[.[] | select(. as $s | $gone | index($s) | not)]' <<< "$historical_services")"
