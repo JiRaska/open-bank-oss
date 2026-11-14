@@ -2550,7 +2550,8 @@ def admission_refusal(git, base: str, view: dict, runner=None) -> str | None:
 
 def live_candidates(gh, git, repo: str, required: list[str], base: str, untrainable,
                     limit: int = 64, strict: list | None = None,
-                    red: list | None = None, main_red: dict[str, str] | None = None) -> tuple[list[Member], dict[int, dict]]:
+                    red: list | None = None, main_red: dict[str, str] | None = None,
+                    cache: dict | None = None) -> tuple[list[Member], dict[int, dict]]:
     """Open PRs that qualify RIGHT NOW. Each head is fetched and must equal the API's head sha, and
     the file list is changed_paths(<base>...<verified head>) — the PR files API stops at
     3000 entries, so a long PR could hide a path there; git has no such cap."""
@@ -2645,7 +2646,7 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         if not ok and strict is not None:
             modes = [m for c in changed_entries(git, f"{base}...{fetched}") for m in (c.old_mode, c.new_mode)]
             state, fixed, swhy = fix_head_state(gh, git, base, view, member_required, checks, app, modes, main_red,
-                                                extra=extra)
+                                                cache=cache, extra=extra)
             if state:
                 view["fix"] = fixed
             else:
@@ -3507,6 +3508,8 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     # below must already see it.
     strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out,
                 yield_why)
+    if main_cache.get(NOT_FIX_KEY):
+        summary["not_fix"] = dict(sorted(main_cache[NOT_FIX_KEY].items()))
     if summary.get("main_health_deferred"):
         return summary
     stack_head = next((v["head_sha"] for st, v in strict if v["number"] == holder and st == "pending"), None)
@@ -3636,7 +3639,7 @@ def _settle_view(gh, git, repo: str, required: list[str]):
         log(f"::notice::main {base[:12]} is red on {', '.join(sorted(main_red))}: no update-branch except onto a fix")
     cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text, referenced_tests(git, base)),
                                   strict=strict, red=red,
-                                  main_red=main_red)
+                                  main_red=main_red, cache=main_cache)
     cands = promote_fixes(gh, git, repo, base, cands, strict, main_red, main_cache)
     return base, regen_text, strict, red, cands, apps, main_red, main_cache
 
@@ -4134,6 +4137,10 @@ def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict
 
 
 FIX_JOB_OK = frozenset({"success", "skipped", "neutral"})
+# A job that never finished on main (cancelled, timed out) proves nothing either way about the breakage,
+# exactly as main_ci_result reads a cancelled verdict: it is neither a failure the head must clear nor a pass.
+FIX_JOB_INCONCLUSIVE = frozenset({"cancelled", "timed_out", "stale"})
+NOT_FIX_KEY = ("not_fix",)   # cache slot: PR number -> why a green strict PR is not a main-red fix
 
 
 def fix_job_evidence(main_jobs: dict[str, str | None] | None, head_jobs: dict[str, str | None] | None) -> str | None:
@@ -4146,13 +4153,22 @@ def fix_job_evidence(main_jobs: dict[str, str | None] | None, head_jobs: dict[st
     no evidence. A job red on main for ANOTHER context also has to pass — over-strict, never loose."""
     if not main_jobs:
         return "no job record for main's red run"
-    failed = sorted(n for n, c in main_jobs.items() if c is not None and c not in FIX_JOB_OK)
+    failed = sorted(n for n, c in main_jobs.items()
+                    if c is not None and c not in FIX_JOB_OK and c not in FIX_JOB_INCONCLUSIVE)
     if not failed:
-        return "main's red run names no failed job"
+        return "main's red run names no conclusively failed job"
     if not head_jobs:
         return "no job record on the head"
     missing = [f"{n} ({head_jobs.get(n) or 'absent'})" for n in failed if head_jobs.get(n) not in OK_STATES]
     return f"did not run green on the head: {', '.join(missing)}" if missing else None
+
+
+def note_not_fix(cache: dict | None, view: dict, why: str) -> None:
+    """Record why a green strict PR was refused as a main-red fix: settle copies the slot into
+    summary["not_fix"], so a real fix refused (a renamed or restructured job) is visible to a human."""
+    log(f"#{view.get('number', 0):>6} not a fix: {why}")
+    if cache is not None and view.get("number") is not None:
+        cache.setdefault(NOT_FIX_KEY, {})[view["number"]] = why
 
 
 def cached_ctx_jobs(gh, sha: str, ctx: str, cache: dict | None) -> dict[str, str | None] | None:
@@ -4165,11 +4181,14 @@ def cached_ctx_jobs(gh, sha: str, ctx: str, cache: dict | None) -> dict[str, str
     return out
 
 
-def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache: dict | None = None) -> list[str]:
+def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache: dict | None = None,
+                 head_checks: dict[str, str | None] | None = None) -> list[str]:
     """The main-red contexts this green PR demonstrably fixes: red in main's CI at the PR's own
     merge-base (or nearest ancestor with a verdict), and every job that failed in that red run ran
     green on the PR head (fix_job_evidence). A PR that went green over a base that was still green
-    proves nothing about the breakage and is NOT a fix; nor is one whose CI skipped the failing job."""
+    proves nothing about the breakage and is NOT a fix; nor is one whose CI skipped the failing job.
+    `head_checks`, when given, are the head's verdicts: a context not green there is dropped before any
+    job list is read (the job evidence costs two API reads per head and context)."""
     mb = git("merge-base", view["head_sha"], base, check=False).stdout.strip()
     if not mb:
         return []
@@ -4178,12 +4197,14 @@ def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache
     for ctx in sorted(main_red):
         if ctx in extra and gh.extra_checks(view["head_sha"], {ctx: extra[ctx]}).get(ctx) not in OK_STATES:
             continue   # an extra gate is not required: only its own pinned GREEN on the head proves a fix
+        if head_checks is not None and head_checks.get(ctx) not in OK_STATES:
+            continue
         at_base = main_ci_result(gh, git, ctx, mb, cache)
         if not at_base or at_base[1] != "failure":
             continue
         why = fix_job_evidence(cached_ctx_jobs(gh, at_base[0], ctx, cache), cached_ctx_jobs(gh, view["head_sha"], ctx, cache))
         if why:
-            log(f"#{view.get('number', 0):>6} not a fix for {ctx}: {why}")
+            note_not_fix(cache, view, f"{ctx} {why}")
             continue
         out.append(ctx)
     return out
@@ -4212,8 +4233,7 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
             return None, [], "up to date, and not the update of a fix behind main"
         claim_from = parents[1]
     claim_checks = checks if claim_from == head else (pinned_checks(gh, claim_from, extra) if extra else gh.checks(claim_from))
-    claimed = [c for c in fix_contexts(gh, git, base, {**view, "head_sha": claim_from}, main_red, cache)
-               if claim_checks.get(c) in OK_STATES]
+    claimed = fix_contexts(gh, git, base, {**view, "head_sha": claim_from}, main_red, cache, head_checks=claim_checks)
     if not claimed:
         return None, [], "claims no main-red context"
     masked = {c: ("success" if c in main_red and c not in claimed and v == "failure" else v) for c, v in checks.items()}
@@ -4226,6 +4246,7 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
             why = (fix_job_evidence(cached_ctx_jobs(gh, at_base[0], c, cache), cached_ctx_jobs(gh, head, c, cache))
                    if at_base else "no main verdict at the claim's base")
             if why:
+                note_not_fix(cache, view, f"combined head: {c} {why}")
                 return None, [], f"combined head: {c} {why}"
     if ok:
         return "green", claimed, f"fix for {', '.join(claimed)} red on main {base[:12]}"
@@ -9346,6 +9367,8 @@ def self_test() -> int:
             check("main red on a leaf job: a PR that SKIPPED the failing job is not a fix (no update, no merge)",
                   gh.updates == [] and gh.merged == [] and not s1["in_flight"] and s2 is None,
                   f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            check("main red on a leaf job: the refused fix and its reason reach the settle summary",
+                  "Admin UI (skipped)" in (s1.get("not_fix") or {}).get(36, ""), str(s1.get("not_fix")))
             main_red_done()
             s1, s2 = fix_behind({}, tamper=leaf_red("success"))
             check("main red on a leaf job: a PR that RAN the failing job green is the fix (updated, merged)",
@@ -9357,6 +9380,19 @@ def self_test() -> int:
                   and fix_job_evidence({MR: "failure"}, None) is not None
                   and fix_job_evidence({MR: "success"}, {MR: "success"}) is not None
                   and fix_job_evidence({"A": "failure", MR: "failure"}, {"A": "success", MR: "success"}) is None)
+            # A main job that never finished (cancelled / timed out) is inconclusive, as in main_ci_result:
+            # the head need not clear it, but every conclusively failed job still must.
+            check("fix evidence: a cancelled or timed-out main job is not a failure the head must clear",
+                  fix_job_evidence({"A": "cancelled", "B": "timed_out", MR: "failure"}, {"A": "skipped", MR: "success"}) is None
+                  and fix_job_evidence({"A": "cancelled", "C": "failure", MR: "failure"},
+                                       {"A": "success", "C": "skipped", MR: "success"}) is not None
+                  and fix_job_evidence({"A": "cancelled"}, {"A": "success"}) is not None)
+            s1, s2 = fix_behind({}, tamper=lambda _p: (gh.jobs.update({base0: {"Admin UI": "cancelled"}}),
+                                                       gh.head_jobs.update({"Admin UI": "skipped"})))
+            check("main red with only a CANCELLED leaf beside the red context: the fix is judged on the context itself",
+                  gh.updates == [36] and gh.merged == [36] and not s1.get("not_fix"),
+                  f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            main_red_done()
 
             # The fix path takes manual-lane paths exactly as the strict lane does (pW2 touches
             # .github/scripts — the merge above), and refuses everything strict_lane_state refuses.
