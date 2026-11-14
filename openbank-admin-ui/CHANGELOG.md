@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.15.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.14.1...admin-ui-v4.15.0) (2026-11-14)
+
+
+### Features
+
+* **admin-ui:** show statutory-return catalogues and operate their lifecycle ([#16154](https://github.com/JiRaska/open-bank-oss/issues/16154)) ([90412dc](https://github.com/JiRaska/open-bank-oss/commit/90412dc9f6b5b80268ba5feaa71a7a13b0b858c4))
+* **kyb:** publish verified statutory representation rules ([#15662](https://github.com/JiRaska/open-bank-oss/issues/15662)) ([3e1956f](https://github.com/JiRaska/open-bank-oss/commit/3e1956fab5bc3cc9c83adffcc5351ddf1172289e))
+
+
+### Bug Fixes
+
+* **admin-ui:** what the AML screens got wrong with live data ([#16167](https://github.com/JiRaska/open-bank-oss/issues/16167)) ([e8816d3](https://github.com/JiRaska/open-bank-oss/commit/e8816d3d6753e7d97084856af8fdadd58edd084a))
+
 ## [4.14.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.14.0...admin-ui-v4.14.1) (2026-11-14)
 
 

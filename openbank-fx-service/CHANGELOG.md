@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.20.2...fx-service-v0.21.0) (2026-11-14)
+
+
+### Features
+
+* **sepa-payment,sepa-instant,fx:** send the payee to fraud scoring through the typed risk context (ADR-0377 D3) ([#16034](https://github.com/JiRaska/open-bank-oss/issues/16034)) ([d889ed6](https://github.com/JiRaska/open-bank-oss/commit/d889ed6b793c20480902cf0951df792c68267e98))
+
 ## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.20.1...fx-service-v0.20.2) (2026-11-13)
 
 
