@@ -272,7 +272,7 @@ class DomesticPaymentResource(
  * ([com.openbank.domestic.domain.model.CustomerFacingRejectReason]). Every other caller reads
  * the real status, reason and detail.
  */
-private fun DomesticPayment.forCaller(identity: SecurityIdentity): DomesticPaymentResponse {
+internal fun DomesticPayment.forCaller(identity: SecurityIdentity): DomesticPaymentResponse {
     val response = toResponse()
     return if (ServiceAccountIdentity.isPrincipal(identity, CUSTOMER_EDGE_PRINCIPAL)) {
         val shown = rejectReason?.customerFacing
@@ -288,4 +288,4 @@ private fun DomesticPayment.forCaller(identity: SecurityIdentity): DomesticPayme
 }
 
 /** The customer edge's service account, the one caller shown the customer view of a payment. */
-private const val CUSTOMER_EDGE_PRINCIPAL = "service-account-openbank-edge"
+internal const val CUSTOMER_EDGE_PRINCIPAL = "service-account-openbank-edge"

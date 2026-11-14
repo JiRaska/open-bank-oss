@@ -1036,6 +1036,37 @@ perform remediation or enable fraud enforcement. Hold timeout remains fail close
   different rail key, and a pre-persistence refusal has no durable receipt. Lookup leaves both
   outcomes unresolved for the original key.
 
+### Reservation-bound delegated create (#16000 part 3)
+
+`POST /api/v1/domestic-payments/delegated` creates a delegated payment bound to its delegation-service
+spend reservation, so the payment's terminal outcome (not customer-edge's HTTP 2xx) settles the
+reservation.
+
+- **Spoofing.** Only the verified customer-edge service account may call it: `azp` must name the
+  client and `preferred_username` must be that client's own service account. A forged username on
+  another client, a customer token and every other service account are refused 403 before any
+  projection read. No header or body field contributes to identity. The new action
+  `domestic-payment.createDelegated` is ALSO admitted by today's `operator-domestic-payment-write`
+  prefix rule to any ROLE_OPERATOR human, so the code check, not the policy, is the control until
+  the policy change lands (exclusion from that rule plus a grant naming the edge).
+- **Tampering and elevation.** The body names a reservation and states the delegation and acting
+  party the edge believes in. The rail reads the tuple from its own projection and refuses unless the
+  reservation is PENDING/RESERVED and delegation, grantee, debtor account (re-resolved through
+  account-service), grantor ownership, amount, currency and Idempotency-Key hash all match, the last
+  four under the binding row lock. A refusal is a neutral `409 RESERVATION_MISMATCH`; the differing
+  field is logged, not returned.
+- **Repudiation and integrity.** One payment per reservation is a schema fact
+  (`uq_domestic_payments_reservation_id` plus the deferred composite binding FK), and the payment
+  carries `delegationId`/`reservationId` on its created and every status-changed event.
+- **Availability and eventual consistency.** A reservation the projection has not consumed yet is
+  `409 RESERVATION_PROJECTION_PENDING` with `retryable: true`, never an unbound payment. While the
+  projection consumer is off (`DOMESTIC_DELEGATED_SPEND_CONSUMER_ENABLED=false`, the default) every
+  call answers that.
+- **Residual risk.** The admission chain's AUTHORITY step stays unbound on this rail: authority is
+  decided by delegation-service when it takes the reservation, and re-checked here only as the
+  reservation tuple (grantee, grantor, resource). A grant revoked after reservation is not re-read
+  here; the reservation release path is delegation-service's.
+
 ## 2026-11-11 - Label key domain rename (no reach change)
 
 The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys

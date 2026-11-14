@@ -17,7 +17,9 @@ info:
   # hold as RECEIVED, here and on the submission lookup, whose published enum is unchanged); the
   # status transition documents its 409, now also the answer for a payment that payment admission
   # owns. No request shape changes.
-  version: 1.17.0
+  # 1.17.0 -> 1.18.0 (#16000 part 3): additive route POST /api/v1/domestic-payments/delegated, a
+  # delegated payment bound to its spend reservation, for the verified customer-edge identity only.
+  version: 1.18.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -178,6 +180,63 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/IdempotencyConflictResponse'
+
+  /api/v1/domestic-payments/delegated:
+    post:
+      tags: [Domestic Payments]
+      summary: Create a delegated domestic payment bound to its spend reservation
+      description: >-
+        Customer-edge only (its verified service account; any other caller is 403). The rail reads
+        the reservation from its own projection of delegation-service's reservation stream and
+        refuses the payment unless the reservation is RESERVED and the delegation, acting party,
+        debtor account, amount, currency and Idempotency-Key all match it. The payment carries the
+        delegation and reservation ids on every event, so its terminal outcome settles the
+        reservation. At most one payment exists per reservation.
+      operationId: createDelegatedDomesticPayment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: The key the reservation was taken under; a retry with it replays the one payment.
+          schema: {type: string, minLength: 1, maxLength: 128}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDelegatedDomesticPaymentRequest'
+      responses:
+        '201':
+          description: Payment created and bound, or the replay of the payment already bound under this key
+          headers:
+            X-Idempotency-Replayed:
+              description: Present and true only when this response replays an existing payment.
+              schema: {type: string, enum: ['true']}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomesticPaymentResponse'
+        '400':
+          description: Missing Idempotency-Key, a missing required field, or an invalid domestic instruction
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: >-
+            RESERVATION_PROJECTION_PENDING (retryable, with Retry-After: the reservation is not known
+            to the rail yet), RESERVATION_NOT_RESERVED, RESERVATION_MISMATCH (neutral; the differing
+            field is not disclosed), or IDEMPOTENCY_KEY_REUSED.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/DelegatedPaymentRefusal'
+        '503':
+          description: Debit-account ownership could not be verified (ACCOUNT_AUTHORITY_UNAVAILABLE, retryable)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/DelegatedPaymentRefusal'
 
   /api/v1/domestic-payments/submissions/lookup:
     post:
@@ -721,6 +780,85 @@ components:
         statementLabel:
           type: string
         endToEndId:
+          type: string
+
+    CreateDelegatedDomesticPaymentRequest:
+      type: object
+      # Mirrors CreateDelegatedDomesticPaymentRequest in DomesticPaymentDtos.kt.
+      required: [reservationId, delegationId, actingPartyId, debtorAccountId, debtorAccountNumber,
+                 debtorBankCode, debtorName, creditorAccountNumber, creditorBankCode, creditorName,
+                 amount, currency]
+      properties:
+        reservationId:
+          type: string
+          format: uuid
+          description: The delegation-service spend reservation this payment consumes.
+        delegationId:
+          type: string
+          format: uuid
+          description: Checked against the reservation, never trusted in its place.
+        actingPartyId:
+          type: string
+          format: uuid
+          description: The delegate the edge acts for; must be the reservation's grantee.
+        debtorAccountId:
+          type: string
+          format: uuid
+        debtorAccountNumber:
+          type: string
+        debtorBankCode:
+          type: string
+          example: "0800"
+        debtorName:
+          type: string
+        creditorAccountNumber:
+          type: string
+        creditorBankCode:
+          type: string
+          example: "0100"
+        creditorName:
+          type: string
+        amount:
+          type: number
+          description: Must equal the reserved amount exactly.
+        currency:
+          type: string
+          example: CZK
+        variableSymbol:
+          type: string
+        specificSymbol:
+          type: string
+        constantSymbol:
+          type: string
+        messageForPayee:
+          type: string
+        priority:
+          type: string
+          description: Defaults to STANDARD.
+        statementLabel:
+          type: string
+        endToEndId:
+          type: string
+
+    DelegatedPaymentRefusal:
+      type: object
+      required: [code, status, detail]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        code:
+          type: string
+          enum: [RESERVATION_PROJECTION_PENDING, RESERVATION_NOT_RESERVED, RESERVATION_MISMATCH,
+                 ACCOUNT_AUTHORITY_UNAVAILABLE, IDEMPOTENCY_KEY_REUSED]
+        retryable:
+          type: boolean
+        error:
           type: string
 
     TransitionStatusRequest:
