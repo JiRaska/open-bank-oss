@@ -47,6 +47,9 @@ spec:
               kubernetes.io/metadata.name: pension
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: tax-reporting
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP
