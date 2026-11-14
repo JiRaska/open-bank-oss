@@ -57,3 +57,25 @@ It touches the CATALOG only. Grants already minted are immutable snapshots — a
 the grantor agreed to at the time, and widening one afterwards would be this service editing
 somebody's mandate. An existing grantee of those two roles keeps balances and transactions and
 loses the account-detail drill-down until the grantor re-shares from the corrected preset.
+
+## Spend reservations settled by the payment outcome (ADR-0249 D3 amendment, #16000)
+
+A domestic-payment spend reservation is settled by what happened to the payment, not by the rail
+having accepted it. `DomesticPaymentOutcomeConsumer` reads `openbank.domestic.payment.events`
+(group `delegation-service-domestic-payment-outcomes`) and dispatches on the `ce-type` header:
+
+| Event | Reservation |
+|---|---|
+| `domestic.payment.status-changed`, `newStatus` SETTLED | RESERVED → CONFIRMED |
+| … REJECTED, CANCELLED; `domestic.delegated-spend.finalized-absent` | RESERVED → RELEASED |
+| … RETURNED | RESERVED or CONFIRMED → RELEASED (the only way out of CONFIRMED) |
+| no `reservationId`, a non-terminal status, `created`, `held` | unchanged (`ignored`) |
+| any other or missing `ce-type`, unreadable body | unchanged (`unrecognised`, alerted) |
+
+A redelivered outcome is a no-op; a contradicting one is acked and counted as `conflict`. Every
+record is counted in `openbank_delegation_payment_outcome_events_total{outcome}`. Only a failed
+write is dead-lettered, to `openbank.dlq.delegation.domestic-payment-events-in`.
+
+The consumer is off until `OPENBANK_DELEGATION_PAYMENT_OUTCOME_CONSUMER_ENABLED=true`; while off,
+the channel does not exist. Switch-on order: this consumer, then the rail's reservation binding,
+then the edge stops confirming on the rail's 2xx.

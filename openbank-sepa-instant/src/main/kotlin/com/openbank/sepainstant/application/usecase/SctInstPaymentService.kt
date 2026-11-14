@@ -5,7 +5,9 @@
 package com.openbank.sepainstant.application.usecase
 
 import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.CounterpartyRef
 import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.InitiationMode
 import com.openbank.libs.fincrime.ScreeningDecision
 import com.openbank.libs.fincrime.ScreeningMatchStatus
 import com.openbank.libs.fincrime.ScreeningPolicy
@@ -121,6 +123,8 @@ class SctInstPaymentService(
             rail = "SCT_INST",
             accountId = payment.debtorAccountId,
             counterpartyId = null,
+            counterparty = CounterpartyRef.fromIban(payment.creditorIban),
+            initiationMode = InitiationMode.CUSTOMER_PRESENT,
         ),
     )
         .invoke { outcome ->

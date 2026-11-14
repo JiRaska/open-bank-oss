@@ -45,7 +45,7 @@ UNEXPANDED_METADATA_JOB = re.compile(
 
 def _require_time_remaining(deadline: float | None) -> None:
     if deadline is not None and time.monotonic() >= deadline:
-        raise VerificationError("reconcile source resolution exceeded its time budget")
+        raise ResolutionBudgetExceeded()
 
 
 def _bounded_timeout(deadline: float | None, maximum: float) -> float:
@@ -57,6 +57,18 @@ def _bounded_timeout(deadline: float | None, maximum: float) -> float:
 
 class VerificationError(Exception):
     pass
+
+
+class ResolutionBudgetExceeded(VerificationError):
+    """RECONCILE_RESOLUTION_SECONDS ran out. The evidence read so far is still valid.
+
+    The batch resolver converts this into an UnresolvedServicesError carrying what it had
+    already proven, so a long older-source search refuses only the services it had not reached
+    (2026-11-14: every scheduled reconcile tick refused all 12 services this way).
+    """
+
+    def __init__(self) -> None:
+        super().__init__("reconcile source resolution exceeded its time budget")
 
 
 class UnresolvedServicesError(VerificationError):
@@ -71,16 +83,24 @@ class UnresolvedServicesError(VerificationError):
     deployed because anacredit and card-issuance had no source).
     """
 
-    def __init__(self, message: str, resolved: dict, missing: list[str]):
+    def __init__(
+        self,
+        message: str,
+        resolved: dict,
+        missing: list[str],
+        budget_exhausted: bool = False,
+    ):
         super().__init__(message)
         self.resolved = resolved
         self.missing = missing
+        # True when `missing` were not REACHED (time ran out), not searched and found absent.
+        self.budget_exhausted = budget_exhausted
 
 
 def _read_backoff(attempt: int, deadline: float | None) -> None:
     delay = 2 ** attempt
     if deadline is not None and time.monotonic() + delay >= deadline:
-        raise VerificationError("reconcile source resolution exceeded its time budget")
+        raise ResolutionBudgetExceeded()
     time.sleep(delay)
 
 
@@ -90,9 +110,7 @@ def _read_json_page(request: Request, deadline: float | None) -> tuple[dict, str
         try:
             timeout = 20 if deadline is None else min(20, deadline - time.monotonic())
             if timeout <= 0:
-                raise VerificationError(
-                    "reconcile source resolution exceeded its time budget"
-                )
+                raise ResolutionBudgetExceeded()
             with urlopen(request, timeout=timeout) as response:
                 body = json.loads(response.read())
                 link_header = response.headers.get("Link", "")
@@ -856,60 +874,70 @@ def resolve_reconcile_service_sources(
     ancestor_cache: dict[str, bool] = {}
     gradle_cache: dict[str, bool] = {}
     newest_seen: str | None = None
-    for page in _iter_json_pages(runs_url, token, deadline=deadline):
-        for run in page:
-            _require_time_remaining(deadline)
-            created_at = run.get("created_at")
-            if not isinstance(created_at, str):
-                raise VerificationError(
-                    "Services CI run is missing its creation timestamp"
-                )
-            if newest_seen is not None and created_at > newest_seen:
-                raise VerificationError(
-                    "Services CI run pagination is not newest-first"
-                )
-            newest_seen = created_at
-            sha = run.get("head_sha")
-            if (
-                run.get("head_branch") != "main"
-                or run.get("event") not in {"push", "workflow_dispatch"}
-                or run.get("status") != "completed"
-                or not isinstance(sha, str)
-                or not re.fullmatch(r"[0-9a-f]{40}", sha)
-            ):
-                continue
-            if sha not in ancestor_cache:
-                ancestor_cache[sha] = _is_ancestor(sha, tip_sha, deadline=deadline)
-            if not ancestor_cache[sha]:
-                continue
-            _require_time_remaining(deadline)
-            candidates = _candidate_services(
-                sorted(pending),
-                sha,
-                tip_sha,
-                run.get("event") == "push",
-                deadline,
-                skip_gradle=_global_build_inputs_differ(sha, tip_sha, deadline=deadline),
-                gradle_cache=gradle_cache,
-            )
-            if not candidates:
-                continue
-            successful = _jobs_prove_services(
-                run, candidates, repository, token, api_url, deadline=deadline
-            )
-            for service in candidates & successful:
+    try:
+        for page in _iter_json_pages(runs_url, token, deadline=deadline):
+            for run in page:
                 _require_time_remaining(deadline)
-                if not _exact_pact_exists(service, sha, deadline=deadline):
+                created_at = run.get("created_at")
+                if not isinstance(created_at, str):
+                    raise VerificationError(
+                        "Services CI run is missing its creation timestamp"
+                    )
+                if newest_seen is not None and created_at > newest_seen:
+                    raise VerificationError(
+                        "Services CI run pagination is not newest-first"
+                    )
+                newest_seen = created_at
+                sha = run.get("head_sha")
+                if (
+                    run.get("head_branch") != "main"
+                    or run.get("event") not in {"push", "workflow_dispatch"}
+                    or run.get("status") != "completed"
+                    or not isinstance(sha, str)
+                    or not re.fullmatch(r"[0-9a-f]{40}", sha)
+                ):
+                    continue
+                if sha not in ancestor_cache:
+                    ancestor_cache[sha] = _is_ancestor(sha, tip_sha, deadline=deadline)
+                if not ancestor_cache[sha]:
                     continue
                 _require_time_remaining(deadline)
-                resolved[service] = {
-                    "sha": sha,
-                    "run_id": str(run["id"]),
-                    "attempt": run["run_attempt"],
-                }
-                pending.remove(service)
-            if not pending:
-                return resolved
+                candidates = _candidate_services(
+                    sorted(pending),
+                    sha,
+                    tip_sha,
+                    run.get("event") == "push",
+                    deadline,
+                    skip_gradle=_global_build_inputs_differ(sha, tip_sha, deadline=deadline),
+                    gradle_cache=gradle_cache,
+                )
+                if not candidates:
+                    continue
+                successful = _jobs_prove_services(
+                    run, candidates, repository, token, api_url, deadline=deadline
+                )
+                for service in candidates & successful:
+                    _require_time_remaining(deadline)
+                    if not _exact_pact_exists(service, sha, deadline=deadline):
+                        continue
+                    _require_time_remaining(deadline)
+                    resolved[service] = {
+                        "sha": sha,
+                        "run_id": str(run["id"]),
+                        "attempt": run["run_attempt"],
+                    }
+                    pending.remove(service)
+                if not pending:
+                    return resolved
+    except ResolutionBudgetExceeded as exc:
+        # Only the budget is a per-service fact; every other VerificationError (an API or
+        # pagination failure) still means the evidence was not read and refuses the batch.
+        raise UnresolvedServicesError(
+            f"{exc} before a source was found for {', '.join(sorted(pending))}",
+            resolved,
+            sorted(pending),
+            budget_exhausted=True,
+        ) from exc
     missing = ", ".join(sorted(pending))
     raise UnresolvedServicesError(
         f"no successful main Services CI build+contract with exact Pact versions and "
@@ -948,7 +976,16 @@ def main() -> int:
             # Exit 3 = a per-service refusal with the proven remainder on stdout. Exit 1 stays
             # reserved for "the evidence could not be read", which must refuse everything.
             print(f"::error::reconcile source refused: {exc}", file=sys.stderr)
-            print(json.dumps({"resolved": exc.resolved, "unresolved": exc.missing}, sort_keys=True))
+            print(
+                json.dumps(
+                    {
+                        "resolved": exc.resolved,
+                        "unresolved": exc.missing,
+                        "budget_exhausted": exc.budget_exhausted,
+                    },
+                    sort_keys=True,
+                )
+            )
             return 3
         except (json.JSONDecodeError, VerificationError) as exc:
             print(f"::error::reconcile source refused: {exc}", file=sys.stderr)

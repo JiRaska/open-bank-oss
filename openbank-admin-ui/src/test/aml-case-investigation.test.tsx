@@ -59,7 +59,7 @@ describe('AML case investigation', () => {
     render(<LanguageProvider initialLanguage="en"><AmlCaseInvestigation /></LanguageProvider>)
     fireEvent.change(screen.getByRole('textbox', { name: 'AML case ID' }), { target: { value: caseId } })
     fireEvent.click(screen.getByRole('button', { name: 'Explore connections' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('not permitted')
+    expect(await screen.findByText(/need-to-know/)).toBeInTheDocument()
     expect(screen.queryByRole('img', { name: 'Observed AML relationship graph' })).not.toBeInTheDocument()
   })
 
@@ -79,5 +79,13 @@ describe('AML case investigation', () => {
     render(<LanguageProvider initialLanguage="en"><AmlCaseInvestigation /></LanguageProvider>)
     await new Promise(r => setTimeout(r, 10))
     expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('explains need-to-know instead of reporting a fault when context-service refuses an unassigned case', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 403 })))
+    render(<LanguageProvider initialLanguage="en"><AmlCaseInvestigation initialCaseId={caseId} fixedCase /></LanguageProvider>)
+    expect(await screen.findByText(/active assignment to this case \(need-to-know\)/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Investigation assignments/ })).toHaveAttribute('href', '/audit')
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })
