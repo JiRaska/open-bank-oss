@@ -18,6 +18,7 @@ import com.openbank.aml.domain.model.CaseOrigin
 import com.openbank.aml.domain.model.HoldDecisionFourEyesException
 import com.openbank.aml.domain.model.HoldDisposition
 import com.openbank.aml.domain.model.ScreeningType
+import com.openbank.libs.governance.StaffIdentity
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
@@ -268,14 +269,24 @@ class AmlCaseServiceTest {
         }
 
         val proposed = holdService.proposeHoldDecision(
-            HoldDecisionCommand(own.id, HoldDisposition.CLEAR, "false positive", "alice"),
+            HoldDecisionCommand(
+                own.id,
+                HoldDisposition.CLEAR,
+                "false positive",
+                StaffIdentity("alice", "staff-alice", strongAuth = true),
+            ),
         )
         assertThat(proposed.status).isEqualTo(AmlCaseStatus.UNDER_REVIEW)
         assertThat(events).containsExactly(null)
 
         coEvery { amlCaseRepository.findById(own.id) } returns proposed
         val decided = holdService.confirmHoldDecision(
-            HoldDecisionCommand(own.id, HoldDisposition.CLEAR, "false positive", "bob"),
+            HoldDecisionCommand(
+                own.id,
+                HoldDisposition.CLEAR,
+                "false positive",
+                StaffIdentity("bob", "staff-bob", strongAuth = true),
+            ),
         )
 
         assertThat(decided.status).isEqualTo(AmlCaseStatus.CLEARED)
@@ -293,12 +304,22 @@ class AmlCaseServiceTest {
     fun `the proposer cannot confirm, and nothing is written`() {
         val proposed = amlCase(AmlCaseStatus.UNDER_REVIEW)
             .copy(idempotencyKey = holdKey, origin = CaseOrigin.PAYMENT_HOLD_INTAKE)
-            .proposeHoldDecision(HoldDisposition.BLOCK, "listed", "alice", Instant.now(clock))
+            .proposeHoldDecision(
+                HoldDisposition.BLOCK,
+                "listed",
+                StaffIdentity("alice", "staff-alice", strongAuth = true),
+                Instant.now(clock),
+            )
         coEvery { amlCaseRepository.findById(proposed.id) } returns proposed
         assertThatThrownBy {
             runBlocking {
                 holdService.confirmHoldDecision(
-                    HoldDecisionCommand(proposed.id, HoldDisposition.BLOCK, "listed", "alice"),
+                    HoldDecisionCommand(
+                        proposed.id,
+                        HoldDisposition.BLOCK,
+                        "listed",
+                        StaffIdentity("alice", "staff-alice", strongAuth = true),
+                    ),
                 )
             }
         }.isInstanceOf(HoldDecisionFourEyesException::class.java).hasMessageContaining("four-eyes")

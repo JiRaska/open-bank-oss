@@ -8,6 +8,7 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.ClaimType
 import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
@@ -64,6 +65,9 @@ class HoldDecisionFourEyesIT : MonitoringDecisionITSupport() {
         .body(mapOf("outcome" to outcome, "reason" to reason))
         .post("/api/v1/aml/cases/$caseId/hold-decision/confirmation")
 
+    private fun withdraw(caseId: UUID): Response = given().contentType(ContentType.JSON)
+        .post("/api/v1/aml/cases/$caseId/hold-decision/withdrawal")
+
     private fun put(caseId: UUID, status: String): Response = given().contentType(ContentType.JSON)
         .body(mapOf("targetStatus" to status, "decisionReason" to "looks fine"))
         .put("/api/v1/aml/cases/$caseId/decision")
@@ -117,19 +121,20 @@ class HoldDecisionFourEyesIT : MonitoringDecisionITSupport() {
     @TestSecurity(user = "alice", roles = ["ROLE_COMPLIANCE"])
     @OidcSecurity(
         claims = [
-            Claim(
-                key = "azp",
-                value = HUMAN_CLIENT,
-            ), Claim(key = "sub", value = "alice"), Claim(key = "preferred_username", value = "alice"),
+            Claim(key = "azp", value = HUMAN_CLIENT), Claim(key = "sub", value = "alice"),
+            Claim(key = "preferred_username", value = "alice"), Claim(key = "person_id", value = "staff-a"),
+            Claim(key = "amr", value = OTP_AMR, type = ClaimType.JSON_ARRAY),
         ],
     )
     fun `(2) alice proposes, nothing is decided and nothing is emitted, and she cannot confirm herself`() {
         propose(HOLD_CASE, "CLEAR", "false positive").then().statusCode(201)
-            .body(
-                "proposedBy",
-                equalTo("alice"),
-            ).body("outcome", equalTo("CLEAR")).body("status", equalTo("UNDER_REVIEW"))
+            .body("proposedBy", equalTo("alice")).body("outcome", equalTo("CLEAR"))
+            .body("status", equalTo("UNDER_REVIEW")).body("expiresAt", org.hamcrest.Matchers.notNullValue())
         assertThat(case(HOLD_CASE).getString("status")).isEqualTo("UNDER_REVIEW")
+        assertThat(
+            rows("SELECT hold_proposer_person_id FROM aml_cases WHERE case_id = $1", HOLD_CASE).single().getString(0),
+        )
+            .isEqualTo("staff-a")
         assertThat(anyEvents(HOLD_CASE)).isEmpty()
         confirm(HOLD_CASE, "CLEAR", "false positive").then().statusCode(409)
         assertThat(case(HOLD_CASE).getString("status")).isEqualTo("UNDER_REVIEW")
@@ -141,6 +146,24 @@ class HoldDecisionFourEyesIT : MonitoringDecisionITSupport() {
 
     @Test
     @Order(3)
+    @TestSecurity(user = "alice.second", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = HUMAN_CLIENT), Claim(key = "sub", value = "alice.second"),
+            Claim(key = "preferred_username", value = "alice.second"), Claim(key = "person_id", value = "staff-a"),
+            Claim(key = "amr", value = OTP_AMR, type = ClaimType.JSON_ARRAY),
+        ],
+    )
+    fun `(3) alice through her second account cannot confirm, but withdraws her own proposal`() {
+        confirm(HOLD_CASE, "CLEAR", "false positive").then().statusCode(409)
+            .body("message", org.hamcrest.Matchers.containsString("same person"))
+        assertThat(anyEvents(HOLD_CASE)).isEmpty()
+        withdraw(REPLACED_CASE).then().statusCode(200).body("withdrawnBy", equalTo("alice.second"))
+        assertThat(anyEvents(REPLACED_CASE)).isEmpty()
+    }
+
+    @Test
+    @Order(4)
     @TestSecurity(user = "svc", roles = ["ROLE_COMPLIANCE", "ROLE_OPERATOR", "ROLE_API"])
     @OidcSecurity(
         claims = [
@@ -149,41 +172,75 @@ class HoldDecisionFourEyesIT : MonitoringDecisionITSupport() {
             Claim(key = "preferred_username", value = "service-account-openbank-services"),
         ],
     )
-    fun `(3) a service account holding the analyst role is refused`() {
+    fun `(4) a service account holding the analyst role is refused`() {
         confirm(HOLD_CASE, "CLEAR", "false positive").then().statusCode(403)
         propose(HOLD_CASE, "BLOCK", "x").then().statusCode(403)
-    }
-
-    @Test
-    @Order(4)
-    @TestSecurity(user = "carol", roles = ["ROLE_COMPLIANCE"])
-    @OidcSecurity(
-        claims = [
-            Claim(
-                key = "azp",
-                value = HUMAN_CLIENT,
-            ), Claim(key = "sub", value = "carol"), Claim(key = "preferred_username", value = "carol"),
-        ],
-    )
-    fun `(4) carol replaces the pending proposal of the second case`() {
-        propose(REPLACED_CASE, "BLOCK", "second look").then().statusCode(201).body("proposedBy", equalTo("carol"))
+        withdraw(HOLD_CASE).then().statusCode(403)
     }
 
     @Test
     @Order(5)
+    @TestSecurity(user = "dave", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = HUMAN_CLIENT), Claim(key = "sub", value = "dave"),
+            Claim(key = "preferred_username", value = "dave"),
+            Claim(key = "amr", value = OTP_AMR, type = ClaimType.JSON_ARRAY),
+        ],
+    )
+    fun `(5) a staff token without a person id can neither confirm nor propose`() {
+        confirm(HOLD_CASE, "CLEAR", "false positive").then().statusCode(409)
+            .body("message", org.hamcrest.Matchers.containsString("person id"))
+        propose(REPLACED_CASE, "BLOCK", "second look").then().statusCode(409)
+        assertThat(anyEvents(HOLD_CASE)).isEmpty()
+    }
+
+    @Test
+    @Order(6)
+    @TestSecurity(user = "carol", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = HUMAN_CLIENT), Claim(key = "sub", value = "carol"),
+            Claim(key = "preferred_username", value = "carol"), Claim(key = "person_id", value = "staff-c"),
+            Claim(key = "amr", value = OTP_AMR, type = ClaimType.JSON_ARRAY),
+        ],
+    )
+    fun `(6) carol proposes on the withdrawn case, but cannot replace or withdraw alice's pending one`() {
+        propose(HOLD_CASE, "BLOCK", "replace it").then().statusCode(409)
+        withdraw(HOLD_CASE).then().statusCode(409)
+        propose(REPLACED_CASE, "BLOCK", "second look").then().statusCode(201).body("proposedBy", equalTo("carol"))
+    }
+
+    @Test
+    @Order(7)
     @TestSecurity(user = "bob", roles = ["ROLE_COMPLIANCE"])
     @OidcSecurity(
         claims = [
-            Claim(
-                key = "azp",
-                value = HUMAN_CLIENT,
-            ), Claim(key = "sub", value = "bob"), Claim(key = "preferred_username", value = "bob"),
+            Claim(key = "azp", value = HUMAN_CLIENT), Claim(key = "sub", value = "bob"),
+            Claim(key = "preferred_username", value = "bob"), Claim(key = "person_id", value = "staff-b"),
+            Claim(key = "amr", value = PWD_AMR, type = ClaimType.JSON_ARRAY),
         ],
     )
-    fun `(5) bob confirms only what was proposed, and exactly one event leaves, with origin`() {
+    fun `(7) bob without a second factor cannot confirm`() {
+        confirm(HOLD_CASE, "CLEAR", "false positive").then().statusCode(409)
+            .body("message", org.hamcrest.Matchers.containsString("second factor"))
+        assertThat(anyEvents(HOLD_CASE)).isEmpty()
+    }
+
+    @Test
+    @Order(8)
+    @TestSecurity(user = "bob", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = HUMAN_CLIENT), Claim(key = "sub", value = "bob"),
+            Claim(key = "preferred_username", value = "bob"), Claim(key = "person_id", value = "staff-b"),
+            Claim(key = "amr", value = OTP_AMR, type = ClaimType.JSON_ARRAY),
+        ],
+    )
+    fun `(8) bob confirms only what was proposed, and exactly one event leaves, with origin`() {
         confirm(HOLD_CASE, "BLOCK", "false positive").then().statusCode(409)
         confirm(HOLD_CASE, "CLEAR", "a different reason").then().statusCode(409)
-        // What bob read before carol replaced it: refused, so no decision lands on a proposal he never saw.
+        // What alice proposed and then withdrew: refused, so no decision lands on a proposal that is gone.
         confirm(REPLACED_CASE, "CLEAR", "first look").then().statusCode(409)
         assertThat(anyEvents(HOLD_CASE)).isEmpty()
         assertThat(anyEvents(REPLACED_CASE)).isEmpty()
@@ -204,7 +261,7 @@ class HoldDecisionFourEyesIT : MonitoringDecisionITSupport() {
         // Decided once: a second confirmation is refused and writes nothing.
         confirm(HOLD_CASE, "CLEAR", "false positive").then().statusCode(409)
         assertThat(statusEvents(HOLD_CASE)).hasSize(1)
-        // The replaced proposal is confirmed as it now stands.
+        // Carol's proposal, made after alice withdrew hers, is confirmed as it now stands.
         confirm(REPLACED_CASE, "BLOCK", "second look").then().statusCode(200).body("status", equalTo("BLOCKED"))
         assertThat(statusEvents(REPLACED_CASE)).singleElement().satisfies({
             assertThat(it).contains("\"origin\":\"PAYMENT_HOLD_INTAKE\"")
@@ -213,6 +270,8 @@ class HoldDecisionFourEyesIT : MonitoringDecisionITSupport() {
 
     private companion object {
         const val HUMAN_CLIENT = "openbank-admin-ui"
+        const val OTP_AMR = "[\"pwd\",\"otp\"]"
+        const val PWD_AMR = "[\"pwd\"]"
         val PARTY: UUID = UUID.fromString("00000000-0000-4000-8000-00000000e001")
         val ACCOUNT: UUID = UUID.fromString("00000000-0000-4000-8000-00000000e002")
         val HOLD_CASE: UUID = UUID.fromString("00000000-0000-4000-8000-00000000e003")

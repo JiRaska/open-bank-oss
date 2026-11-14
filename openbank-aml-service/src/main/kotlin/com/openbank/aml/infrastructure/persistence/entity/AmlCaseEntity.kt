@@ -97,4 +97,18 @@ class AmlCaseEntity : PanacheEntity() {
 
     @Column(name = "hold_proposed_at")
     var holdProposedAt: Instant? = null
+
+    // V18: the proposer's PERSON (four-eyes compares persons, not accounts), the proposal's expiry,
+    // and its withdrawal by the proposer.
+    @Column(name = "hold_proposer_person_id", length = 64)
+    var holdProposerPersonId: String? = null
+
+    @Column(name = "hold_proposal_expires_at")
+    var holdProposalExpiresAt: Instant? = null
+
+    @Column(name = "hold_proposal_withdrawn_by")
+    var holdProposalWithdrawnBy: String? = null
+
+    @Column(name = "hold_proposal_withdrawn_at")
+    var holdProposalWithdrawnAt: Instant? = null
 }

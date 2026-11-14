@@ -13,6 +13,7 @@ import com.openbank.aml.domain.model.AmlRiskLevel
 import com.openbank.aml.domain.model.CaseOrigin
 import com.openbank.aml.domain.model.HoldDisposition
 import com.openbank.aml.domain.model.ScreeningType
+import com.openbank.libs.governance.StaffIdentity
 import java.time.Instant
 import java.util.UUID
 
@@ -65,7 +66,7 @@ data class UpdateAmlDecisionRequest(
 
 /** Body of a hold-decision proposal and of its confirmation, which restates the proposal (ADR-0374 point 3). */
 data class HoldDecisionRequest(val outcome: String?, val reason: String?) {
-    fun toCommand(caseId: UUID, authenticatedCaller: String): HoldDecisionCommand {
+    fun toCommand(caseId: UUID, authenticatedCaller: StaffIdentity): HoldDecisionCommand {
         val outcomeName = requireNotNull(outcome) { "outcome is required" }
         val parsed = HoldDisposition.entries.firstOrNull { it.name == outcomeName }
         require(parsed != null) { "outcome must be one of ${HoldDisposition.entries.joinToString()}" }
@@ -83,10 +84,18 @@ data class HoldDecisionProposalResponse(
     val reason: String,
     val proposedBy: String,
     val proposedAt: Instant,
+    /** After this instant the proposal can no longer be confirmed. */
+    val expiresAt: Instant?,
+    /** Set when the proposer withdrew the proposal. */
+    val withdrawnBy: String?,
+    val withdrawnAt: Instant?,
 )
 
 fun AmlCase.toHoldProposalResponse(): HoldDecisionProposalResponse? = holdProposal?.let {
-    HoldDecisionProposalResponse(id, status.name, it.outcome.name, it.reason, it.proposedBy, it.proposedAt)
+    HoldDecisionProposalResponse(
+        id, status.name, it.outcome.name, it.reason, it.proposedBy, it.proposedAt,
+        it.expiresAt, it.withdrawnBy, it.withdrawnAt,
+    )
 }
 
 data class AmlCaseResponse(

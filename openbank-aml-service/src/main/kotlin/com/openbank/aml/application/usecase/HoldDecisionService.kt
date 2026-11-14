@@ -7,6 +7,7 @@ package com.openbank.aml.application.usecase
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.aml.application.port.`in`.HoldDecisionCommand
 import com.openbank.aml.application.port.`in`.HoldDecisionUseCase
+import com.openbank.aml.application.port.`in`.WithdrawHoldDecisionCommand
 import com.openbank.aml.application.port.out.AmlCaseRepository
 import com.openbank.aml.application.port.out.HoldDecisionRepository
 import com.openbank.aml.domain.model.AmlCase
@@ -35,5 +36,11 @@ class HoldDecisionService(
         val amlCase = amlCaseRepository.findById(command.caseId) ?: throw AmlCaseNotFoundException(command.caseId)
         val decided = amlCase.confirmHoldDecision(command.outcome, command.reason, command.analyst, Instant.now(clock))
         return holdDecisions.writeHoldDecision(amlCase, decided, objectMapper.statusChangedEvent(amlCase, decided))
+    }
+
+    override suspend fun withdrawHoldDecision(command: WithdrawHoldDecisionCommand): AmlCase {
+        val amlCase = amlCaseRepository.findById(command.caseId) ?: throw AmlCaseNotFoundException(command.caseId)
+        val withdrawn = amlCase.withdrawHoldDecision(command.analyst, Instant.now(clock))
+        return holdDecisions.writeHoldDecision(amlCase, withdrawn, event = null)
     }
 }

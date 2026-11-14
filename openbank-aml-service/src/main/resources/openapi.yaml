@@ -189,8 +189,10 @@ paths:
       tags: [AML Cases]
       summary: Propose the decision on a held payment's case (four-eyes, first analyst)
       description: >-
-        ADR-0374 point 3. Only a case the held-payment intake opened. Records the proposal; changes no
-        status and emits no event. A later proposal replaces a pending one. Human compliance staff only.
+        ADR-0374 point 3. Only a case the held-payment intake opened. Records the proposal, bound to the
+        proposer's PERSON (token claim person_id) and open for 24 hours; changes no status and emits no
+        event. A new proposal replaces an earlier one only after its proposer withdrew it or it expired
+        (409 while it is pending). Human compliance staff only; a token without person_id is refused (409).
       operationId: proposeHoldDecision
       parameters:
         - $ref: '#/components/parameters/caseId'
@@ -242,10 +244,12 @@ paths:
       tags: [AML Cases]
       summary: Confirm the proposed decision on a held payment's case (four-eyes, second analyst)
       description: >-
-        A different analyst than the proposer restates the pending proposal's outcome and reason. Only
-        this moves the case to CLEARED or BLOCKED and emits aml.case.status_changed.v1. 409 when the
-        caller proposed it, when the restated outcome or reason differ from the pending proposal, or
-        when there is none.
+        A different PERSON than the proposer (compared by token claim person_id, so a second account of
+        the proposer is refused), authenticated with a second factor (token amr contains otp), restates
+        the pending proposal's outcome and reason. Only this moves the case to CLEARED or BLOCKED and
+        emits aml.case.status_changed.v1. 409 when the caller is the proposer's person, carries no
+        person_id or no second factor, when the restated outcome or reason differ from the pending
+        proposal, or when there is none, it was withdrawn or it expired.
       operationId: confirmHoldDecision
       parameters:
         - $ref: '#/components/parameters/caseId'
@@ -264,6 +268,34 @@ paths:
                 $ref: '#/components/schemas/AmlCaseResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/aml/cases/{caseId}/hold-decision/withdrawal:
+    post:
+      tags: [AML Cases]
+      summary: Withdraw your own pending decision proposal on a held payment's case
+      description: >-
+        The proposer's PERSON (any of their accounts) withdraws the pending proposal; the withdrawal is
+        kept on the case until a new proposal is made. Nobody else can withdraw it; another analyst
+        waits for it to expire. Emits no event. 409 when the caller is not the proposer's person, there
+        is no pending proposal, or the case is decided.
+      operationId: withdrawHoldDecision
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      responses:
+        '200':
+          description: Proposal withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HoldDecisionProposalResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -753,6 +785,19 @@ components:
         proposedAt:
           type: string
           format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: After this instant the proposal can no longer be confirmed.
+        withdrawnBy:
+          type: string
+          nullable: true
+          description: Account that withdrew the proposal (always the proposer's person).
+        withdrawnAt:
+          type: string
+          format: date-time
+          nullable: true
     OutcomeCatalogueResponse:
       type: object
       required: [vocabularyId, vocabularyRevision, vocabularyHash, entries]

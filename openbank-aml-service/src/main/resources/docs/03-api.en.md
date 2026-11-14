@@ -143,9 +143,10 @@ A case the held-payment intake opened (`origin = PAYMENT_HOLD_INTAKE`) releases 
 
 | Method | Path | Action | Result |
 |---|---|---|---|
-| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/proposal` | `amlCase.holdDecision.propose` | 201. Body `{"outcome":"CLEAR"\|"BLOCK","reason":"..."}`. Records who proposed what; no status change, no event. A later proposal replaces a pending one. |
+| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/proposal` | `amlCase.holdDecision.propose` | 201. Body `{"outcome":"CLEAR"\|"BLOCK","reason":"..."}`. Records who proposed what, bound to the proposer's person (`person_id` claim), open 24 h; no status change, no event. A new proposal is refused (409) while one is pending; it may follow a withdrawal or expiry. |
 | `GET` | `/api/v1/aml/cases/{caseId}/hold-decision/proposal` | `amlCase.read` | The pending proposal; 404 if none. |
-| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/confirmation` | `amlCase.holdDecision.confirm` | 200 with the case. The caller must not be the proposer and must restate the pending outcome and reason; otherwise 409. Moves the case to `CLEARED` (CLEAR) or `BLOCKED` (BLOCK) and writes `aml.case.status_changed.v1` with `origin`. |
+| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/withdrawal` | `amlCase.holdDecision.withdraw` | 200 with the proposal. Only the proposer's person (any of their accounts) withdraws; otherwise 409. No event. |
+| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/confirmation` | `amlCase.holdDecision.confirm` | 200 with the case. The caller must be a different PERSON than the proposer (`person_id`, so a second account of the proposer is refused), carry a second factor (`amr` contains `otp`), and restate the pending, unexpired outcome and reason; otherwise 409. Moves the case to `CLEARED` (CLEAR) or `BLOCKED` (BLOCK) and writes `aml.case.status_changed.v1` with `origin`. |
 
 Both writes need `ROLE_COMPLIANCE` and a human staff token: a service account holding the role is refused with 403. The proposer and the confirmer are the authenticated callers, never fields of the body. The rule lives in the `AmlCase` aggregate, so no route can decide such a case with one analyst. Every other case keeps its existing routes, responses and events unchanged.
 

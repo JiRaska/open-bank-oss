@@ -10,6 +10,7 @@ import com.openbank.aml.domain.model.AmlRiskLevel
 import com.openbank.aml.domain.model.CaseOrigin
 import com.openbank.aml.domain.model.HoldDisposition
 import com.openbank.aml.domain.model.ScreeningType
+import com.openbank.libs.governance.StaffIdentity
 import java.util.UUID
 
 data class CreateAmlCaseCommand(
@@ -63,9 +64,12 @@ data class HoldDecisionCommand(
     val caseId: UUID,
     val outcome: HoldDisposition,
     val reason: String,
-    /** The authenticated caller, never a field of the request. */
-    val analyst: String,
+    /** The authenticated caller (account, person, second factor) from the verified token, never the request. */
+    val analyst: StaffIdentity,
 )
+
+/** The proposer of a held payment's pending decision withdraws it. */
+data class WithdrawHoldDecisionCommand(val caseId: UUID, val analyst: StaffIdentity)
 
 interface AmlCaseUseCase {
     suspend fun createCase(command: CreateAmlCaseCommand): AmlCase
@@ -80,4 +84,7 @@ interface HoldDecisionUseCase {
 
     /** Confirms the pending proposal as a different analyst; the only way such a case is decided. */
     suspend fun confirmHoldDecision(command: HoldDecisionCommand): AmlCase
+
+    /** The proposing person withdraws the pending proposal; emits no event. */
+    suspend fun withdrawHoldDecision(command: WithdrawHoldDecisionCommand): AmlCase
 }

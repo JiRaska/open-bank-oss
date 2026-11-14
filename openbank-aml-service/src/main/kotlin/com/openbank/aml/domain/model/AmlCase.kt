@@ -7,6 +7,9 @@ package com.openbank.aml.domain.model
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.governance.MakerCheckerViolation
 import com.openbank.libs.governance.Proposal
+import com.openbank.libs.governance.ProposalState
+import com.openbank.libs.governance.StaffIdentity
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -62,13 +65,33 @@ enum class HoldDisposition(val status: AmlCaseStatus) {
     BLOCK(AmlCaseStatus.BLOCKED),
 }
 
-/** One analyst's proposed decision on a held payment's case, waiting for a second analyst. */
+/**
+ * One analyst's proposed decision on a held payment's case, waiting for a second PERSON. Bound to
+ * the proposer's person id ([proposerPersonId]) and open until [expiresAt]; [withdrawnAt] is set when
+ * the proposer withdrew it. A proposal without a person id (none is ever written now) cannot be
+ * confirmed: the libs four-eyes rule refuses it.
+ */
 data class HoldDecisionProposal(
     val outcome: HoldDisposition,
     val reason: String,
     val proposedBy: String,
     val proposedAt: Instant,
-)
+    val proposerPersonId: String? = null,
+    val expiresAt: Instant? = null,
+    val withdrawnBy: String? = null,
+    val withdrawnAt: Instant? = null,
+) {
+    /** The fleet's four-eyes primitive over this proposal; every rule is enforced there. */
+    fun asProposal(caseId: UUID): Proposal<HoldDisposition> = Proposal(
+        id = caseId.toString(),
+        action = outcome,
+        proposedBy = proposedBy,
+        proposedAt = proposedAt,
+        state = if (withdrawnAt != null) ProposalState.WITHDRAWN else ProposalState.PROPOSED,
+        proposerPersonId = proposerPersonId,
+        expiresAt = expiresAt,
+    )
+}
 
 /**
  * A decision on a held payment's case was refused by the four-eyes rule: it was made by one analyst
@@ -80,6 +103,13 @@ class HoldDecisionFourEyesException(message: String, cause: Throwable? = null) :
 
 private fun refuseHold(refused: Boolean, message: () -> String) {
     if (refused) throw HoldDecisionFourEyesException(message())
+}
+
+/** The libs four-eyes refusal as this aggregate's conflict (409), keeping its cause. */
+private inline fun <R> fourEyes(block: () -> R): R = try {
+    block()
+} catch (e: MakerCheckerViolation) {
+    throw HoldDecisionFourEyesException(e.message ?: "four-eyes refused", e)
 }
 
 data class AmlCase(
@@ -185,29 +215,59 @@ data class AmlCase(
     }
 
     /**
-     * First half of a held payment's decision: [proposedBy] proposes [outcome] for [reason]. Changes
-     * no status and emits nothing a rail acts on. A later proposal replaces a pending one; a
-     * confirmation restates what it confirms, so it cannot land on the replacement.
+     * First half of a held payment's decision: [proposer] proposes [outcome] for [reason]. Changes no
+     * status and emits nothing a rail acts on. A new proposal replaces an earlier one only once that
+     * one is no longer open — withdrawn by its proposer or expired ([HOLD_PROPOSAL_TTL]); never while
+     * it is pending, so nobody can silently swap the decision another analyst is about to confirm.
      */
-    fun proposeHoldDecision(outcome: HoldDisposition, reason: String, proposedBy: String, now: Instant): AmlCase {
+    fun proposeHoldDecision(outcome: HoldDisposition, reason: String, proposer: StaffIdentity, now: Instant): AmlCase {
         refuseHold(!requiresFourEyesHoldDecision) {
             "Only a held payment's case is decided through a hold-decision proposal"
         }
         refuseHold(status in TERMINAL_STATUSES) { "The case is already decided: $status" }
         require(reason.isNotBlank()) { "reason is required" }
-        require(proposedBy.isNotBlank()) { "proposedBy is required" }
+        refuseHold(holdProposal?.asProposal(id)?.isOpen(now) == true) {
+            "A decision is already proposed for this case; its proposer withdraws it, or it expires at " +
+                "${holdProposal?.expiresAt}, before another can be made"
+        }
+        val proposal = fourEyes { Proposal.propose(id.toString(), outcome, proposer, now, HOLD_PROPOSAL_TTL) }
         return copy(
-            holdProposal = HoldDecisionProposal(outcome, reason.trim(), proposedBy.trim(), now),
+            holdProposal = HoldDecisionProposal(
+                outcome = outcome,
+                reason = reason.trim(),
+                proposedBy = proposal.proposedBy,
+                proposedAt = now,
+                proposerPersonId = proposal.proposerPersonId,
+                expiresAt = proposal.expiresAt,
+            ),
             updatedAt = now,
         )
     }
 
     /**
-     * Second half: a DIFFERENT analyst, [confirmedBy], confirms the pending proposal, restating its
-     * [outcome] and [reason]. Only here does the case reach CLEARED or BLOCKED. The four-eyes rule is
-     * the fleet's [Proposal.approve].
+     * The proposer — the same PERSON, from any of their accounts — withdraws the pending proposal.
+     * The withdrawal stays on the case (who, when) until a new proposal is made.
      */
-    fun confirmHoldDecision(outcome: HoldDisposition, reason: String, confirmedBy: String, now: Instant): AmlCase {
+    fun withdrawHoldDecision(by: StaffIdentity, now: Instant): AmlCase {
+        refuseHold(!requiresFourEyesHoldDecision) {
+            "Only a held payment's case is decided through a hold-decision proposal"
+        }
+        refuseHold(status in TERMINAL_STATUSES) { "The case is already decided: $status" }
+        val proposal = holdProposal
+        refuseHold(proposal == null) { "No decision has been proposed for this case" }
+        val withdrawn = fourEyes { proposal!!.asProposal(id).withdrawBy(by, now) }
+        return copy(
+            holdProposal = proposal!!.copy(withdrawnBy = withdrawn.decidedBy, withdrawnAt = now),
+            updatedAt = now,
+        )
+    }
+
+    /**
+     * Second half: a DIFFERENT PERSON, [confirmer], authenticated with a second factor, confirms the
+     * pending, unexpired proposal, restating its [outcome] and [reason]. Only here does the case reach
+     * CLEARED or BLOCKED. The four-eyes rule is the fleet's [Proposal.approveBy].
+     */
+    fun confirmHoldDecision(outcome: HoldDisposition, reason: String, confirmer: StaffIdentity, now: Instant): AmlCase {
         refuseHold(!requiresFourEyesHoldDecision) {
             "Only a held payment's case is decided through a hold-decision proposal"
         }
@@ -218,20 +278,8 @@ data class AmlCase(
         refuseHold(outcome != proposal.outcome || reason.trim() != proposal.reason) {
             "The pending proposal is not the one confirmed; read it again before confirming"
         }
-        try {
-            Proposal(
-                id.toString(),
-                proposal.outcome,
-                proposal.proposedBy,
-                proposal.proposedAt,
-            ).approve(confirmedBy.trim(), now)
-        } catch (e: MakerCheckerViolation) {
-            throw HoldDecisionFourEyesException(
-                e.message ?: "four-eyes: the confirmer must differ from the proposer",
-                e,
-            )
-        }
-        return decide(proposal.outcome.status, proposal.reason, assignedAnalyst, confirmedBy, now)
+        val approved = fourEyes { proposal.asProposal(id).approveBy(confirmer, now) }
+        return decide(proposal.outcome.status, proposal.reason, assignedAnalyst, approved.decidedBy!!, now)
     }
 
     private fun decide(
@@ -290,6 +338,9 @@ data class AmlCase(
         const val PAYMENT_HOLD_KEY_PREFIX = "payment-hold:"
 
         /** Key namespaces only this service's own jobs and consumers write; the create endpoint refuses them. */
+        /** How long a hold-decision proposal stays open for a second analyst. */
+        val HOLD_PROPOSAL_TTL: Duration = Duration.ofHours(24)
+
         /** The statuses a rail acts on; on a held payment's case only a confirmation reaches them. */
         val TERMINAL_STATUSES = setOf(AmlCaseStatus.CLEARED, AmlCaseStatus.BLOCKED)
 

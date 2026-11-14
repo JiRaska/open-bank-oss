@@ -43,6 +43,10 @@ fun AmlCaseEntity.writeHoldProposal(proposal: HoldDecisionProposal?) {
     holdProposalReason = proposal?.reason
     holdProposedBy = proposal?.proposedBy
     holdProposedAt = proposal?.proposedAt
+    holdProposerPersonId = proposal?.proposerPersonId
+    holdProposalExpiresAt = proposal?.expiresAt
+    holdProposalWithdrawnBy = proposal?.withdrawnBy
+    holdProposalWithdrawnAt = proposal?.withdrawnAt
 }
 
 /** The stored proposal; `null` unless all four columns are set and the outcome is one this build knows. */
@@ -52,7 +56,16 @@ fun AmlCaseEntity.readHoldProposal(): HoldDecisionProposal? {
     val reason = holdProposalReason ?: return null
     val by = holdProposedBy ?: return null
     val at = holdProposedAt ?: return null
-    return HoldDecisionProposal(outcome, reason, by, at)
+    return HoldDecisionProposal(
+        outcome,
+        reason,
+        by,
+        at,
+        proposerPersonId = holdProposerPersonId,
+        expiresAt = holdProposalExpiresAt,
+        withdrawnBy = holdProposalWithdrawnBy,
+        withdrawnAt = holdProposalWithdrawnAt,
+    )
 }
 
 fun AmlCaseEntity.toDomain() = AmlCase(

@@ -143,9 +143,10 @@ Případ, který otevřel příjem pozdržených plateb (`origin = PAYMENT_HOLD_
 
 | Metoda | Cesta | Akce | Výsledek |
 |---|---|---|---|
-| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/proposal` | `amlCase.holdDecision.propose` | 201. Tělo `{"outcome":"CLEAR"\|"BLOCK","reason":"..."}`. Zaznamená, kdo co navrhl; stav se nemění, žádná událost. Pozdější návrh nahradí čekající. |
+| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/proposal` | `amlCase.holdDecision.propose` | 201. Tělo `{"outcome":"CLEAR"\|"BLOCK","reason":"..."}`. Zaznamená, kdo co navrhl, vázáno na osobu navrhovatele (claim `person_id`), platí 24 h; stav se nemění, žádná událost. Nový návrh je odmítnut (409), dokud jiný čeká; může následovat po stažení nebo vypršení. |
 | `GET` | `/api/v1/aml/cases/{caseId}/hold-decision/proposal` | `amlCase.read` | Čekající návrh; 404, pokud žádný není. |
-| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/confirmation` | `amlCase.holdDecision.confirm` | 200 s případem. Volající nesmí být navrhovatel a musí zopakovat čekající výsledek i důvod, jinak 409. Převede případ do `CLEARED` (CLEAR) nebo `BLOCKED` (BLOCK) a zapíše `aml.case.status_changed.v1` s `origin`. |
+| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/withdrawal` | `amlCase.holdDecision.withdraw` | 200 s návrhem. Stáhnout jej může jen osoba navrhovatele (z kteréhokoli jejího účtu), jinak 409. Žádná událost. |
+| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/confirmation` | `amlCase.holdDecision.confirm` | 200 s případem. Volající musí být jiná OSOBA než navrhovatel (`person_id`, takže druhý účet navrhovatele je odmítnut), mít druhý faktor (`amr` obsahuje `otp`) a zopakovat čekající, nevypršený výsledek i důvod, jinak 409. Převede případ do `CLEARED` (CLEAR) nebo `BLOCKED` (BLOCK) a zapíše `aml.case.status_changed.v1` s `origin`. |
 
 Oba zápisy vyžadují `ROLE_COMPLIANCE` a token člověka z řad zaměstnanců: servisní účet s touto rolí dostane 403. Navrhovatel i potvrzovatel jsou autentizovaní volající, nikdy pole těla požadavku. Pravidlo je v agregátu `AmlCase`, takže žádná cesta nerozhodne takový případ jedním analytikem. Všechny ostatní případy si zachovávají své cesty, odpovědi i události beze změny.
 

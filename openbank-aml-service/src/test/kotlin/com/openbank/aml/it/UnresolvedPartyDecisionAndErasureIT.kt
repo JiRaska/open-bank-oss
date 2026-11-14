@@ -11,6 +11,7 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.ClaimType
 import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.module.kotlin.extensions.Given
@@ -97,7 +98,8 @@ class UnresolvedPartyDecisionAndErasureIT {
         pool.preparedQuery(
             """
             UPDATE aml_cases SET hold_proposal_outcome = $2, hold_proposal_reason = $3, hold_proposed_by = $4,
-                   hold_proposed_at = now() WHERE case_id = $1
+                   hold_proposed_at = now(), hold_proposer_person_id = $4 || '-person',
+                   hold_proposal_expires_at = now() + interval '1 hour' WHERE case_id = $1
             """.trimIndent(),
         ).execute(Tuple.of(caseId, outcome, reason, analyst)).awaitSuspending()
     }
@@ -187,6 +189,8 @@ class UnresolvedPartyDecisionAndErasureIT {
             Claim(key = "azp", value = "openbank-admin-ui"),
             Claim(key = "sub", value = "u-operator"),
             Claim(key = "preferred_username", value = "u-operator"),
+            Claim(key = "person_id", value = "u-operator-person"),
+            Claim(key = "amr", value = "[\"pwd\",\"otp\"]", type = ClaimType.JSON_ARRAY),
         ],
     )
     fun `a block and an erasure that precede the party's resolution both reach the party when it is resolved`() {

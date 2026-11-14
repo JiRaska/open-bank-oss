@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.port.`in`.HoldDecisionUseCase
 import com.openbank.aml.application.port.`in`.ListAmlCasesQuery
+import com.openbank.aml.application.port.`in`.WithdrawHoldDecisionCommand
 import com.openbank.aml.application.usecase.AmlCaseNotFoundException
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
@@ -19,12 +20,14 @@ import com.openbank.aml.infrastructure.rest.dto.toHoldProposalResponse
 import com.openbank.aml.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
+import com.openbank.libs.governance.StaffIdentity
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.IdempotencyScope
 import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.libs.idempotency.RequestFingerprints
 import com.openbank.libs.idempotency.ReserveResult
+import com.openbank.libs.security.StaffIdentities
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -44,6 +47,7 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import org.jboss.logging.Logger
@@ -211,7 +215,7 @@ class AmlCaseResource(
     @Operation(summary = "Propose the decision on a held payment's case (four-eyes, first analyst)")
     suspend fun proposeHoldDecision(@PathParam("caseId") caseId: UUID, request: HoldDecisionRequest?): Response {
         requireHumanAnalyst(identity)
-        val command = requireNotNull(request) { "request body is required" }.toCommand(caseId, identity.principal.name)
+        val command = requireNotNull(request) { "request body is required" }.toCommand(caseId, staff(identity))
         val proposed = holdDecisionUseCase.proposeHoldDecision(command)
         return Response.status(Response.Status.CREATED).entity(proposed.toHoldProposalResponse()).build()
     }
@@ -240,8 +244,23 @@ class AmlCaseResource(
     @Operation(summary = "Confirm the proposed decision on a held payment's case (four-eyes, second analyst)")
     suspend fun confirmHoldDecision(@PathParam("caseId") caseId: UUID, request: HoldDecisionRequest?): Response {
         requireHumanAnalyst(identity)
-        val command = requireNotNull(request) { "request body is required" }.toCommand(caseId, identity.principal.name)
+        val command = requireNotNull(request) { "request body is required" }.toCommand(caseId, staff(identity))
         return Response.ok(holdDecisionUseCase.confirmHoldDecision(command).toResponse()).build()
+    }
+
+    /**
+     * The proposer (the same person, from any of their accounts) withdraws the pending proposal, so a
+     * corrected one can be made. Nobody else can withdraw it; another analyst waits for it to expire.
+     */
+    @POST
+    @Path("/{caseId}/hold-decision/withdrawal")
+    @RolesAllowed(HOLD_DECISION_ROLE)
+    @Authorize(action = "amlCase.holdDecision.withdraw", resource = "#caseId")
+    @Operation(summary = "Withdraw your own pending decision proposal on a held payment's case")
+    suspend fun withdrawHoldDecision(@PathParam("caseId") caseId: UUID): Response {
+        requireHumanAnalyst(identity)
+        val withdrawn = holdDecisionUseCase.withdrawHoldDecision(WithdrawHoldDecisionCommand(caseId, staff(identity)))
+        return Response.ok(withdrawn.toHoldProposalResponse()).build()
     }
 
     /**
@@ -295,6 +314,10 @@ internal fun requireHumanAnalyst(identity: SecurityIdentity) {
         throw ForbiddenException("a held payment's case is decided by human analysts only")
     }
 }
+
+/** The acting staff person, read from the verified token (person id and second factor included). */
+internal fun staff(identity: SecurityIdentity): StaffIdentity =
+    StaffIdentities.from(identity.principal as? JsonWebToken)
 
 /** A key in a namespace this service writes itself is never accepted from a caller, whoever it is. */
 internal fun requireUnreservedKey(idempotencyKey: String) {
