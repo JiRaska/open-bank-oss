@@ -24,6 +24,12 @@ import java.time.Instant
  * a coordinator outage would convert every list-change trigger into a parked row the moment the
  * consumer's retries exhausted; with it the loop closes as soon as the coordinator recovers.
  *
+ * Gated on the ONE master switch `openbank.kyc.screening-triggers.enabled`, the same one the
+ * consumer reads: with it off this job claims nothing, so rows queued while off (DEFERRED,
+ * attempts 0) and rows left from an earlier on-period wait instead of opening cases behind the
+ * rollout gate. With it on, each tick claims at most `retry-batch-size` due rows (default 100
+ * per 1m tick per pod), which is what bounds the drain after a long off period.
+ *
  * Terminal (exhausted) rows are never re-claimed: their KYC_COORDINATOR_OPEN_FAILED outbox row
  * is the operator hand-off, per the ADR-0256 contract.
  *
@@ -34,8 +40,8 @@ import java.time.Instant
 class ScreeningTriggerRetryJob(
     private val service: ScreeningTriggerService,
     private val clock: Clock,
-    @ConfigProperty(name = "openbank.kyc.screening-triggers.retry-enabled", defaultValue = "true")
-    private val retryEnabled: Boolean,
+    @ConfigProperty(name = "openbank.kyc.screening-triggers.enabled", defaultValue = "false")
+    private val enabled: Boolean,
     @ConfigProperty(name = "openbank.kyc.screening-triggers.retry-batch-size", defaultValue = "100")
     private val batchSize: Int,
     private val domainMetrics: DomainMetrics,
@@ -47,9 +53,12 @@ class ScreeningTriggerRetryJob(
     /**
      * Boot-seeded ADR-0237 heartbeat: "nothing to retry" is both the healthy quiet state and what
      * a schedule that stopped firing looks like from outside, so the job publishes last-success
-     * age. A disabled job records nothing — it has not proved anything ran.
+     * age. A disabled job registers no heartbeat at all — it has not proved anything ran, and a
+     * heartbeat that can never succeed would page WorkflowLivenessStale for a switch that is off
+     * on purpose; the backlog gauge's disabled_with_pending reports that state instead.
      */
     fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        if (!enabled) return
         liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
     }
 
@@ -62,7 +71,7 @@ class ScreeningTriggerRetryJob(
         concurrentExecution = SKIP,
     )
     suspend fun retryFailedTriggers() {
-        if (!retryEnabled) return
+        if (!enabled) return
         try {
             val opened = service.retryFailedTriggers(Instant.now(clock), batchSize)
             liveness?.recordSuccess()

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.49.0...lending-service-v0.49.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **lending:** require completed borrower credit for cash evidence ([#15730](https://github.com/JiRaska/open-bank-oss/issues/15730)) ([5bc2f06](https://github.com/JiRaska/open-bank-oss/commit/5bc2f06d4a62063199de0654551e5aaf55d62836))
+
 ## [0.49.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.48.0...lending-service-v0.49.0) (2026-11-13)
 
 

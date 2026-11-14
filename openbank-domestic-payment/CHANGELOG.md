@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.6.1...domestic-payment-v1.6.2) (2026-11-13)
+
+
+### Bug Fixes
+
+* **domestic-payment:** fence original keys across direct and approved release ([#15731](https://github.com/JiRaska/open-bank-oss/issues/15731)) ([1dffe5e](https://github.com/JiRaska/open-bank-oss/commit/1dffe5e0059cd3408012002fd6c2cba07ad0b68e))
+
 ## [1.6.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.6.0...domestic-payment-v1.6.1) (2026-11-13)
 
 

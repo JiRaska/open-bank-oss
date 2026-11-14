@@ -83,6 +83,8 @@ data class BusinessOnboardingCase(
     val agreement: AgreementRecord? = null,
     /** Sanctions / PEP screening of the entity and its related parties; null until first attempted. */
     val screening: CaseScreening? = null,
+    /** What ongoing monitoring reported about this case after approval, and what was decided. */
+    val monitoring: CaseMonitoring = CaseMonitoring(),
     /**
      * The row version this copy was read at. The repository refuses to write a copy whose version
      * is no longer the stored one, so a decision made in between is never overwritten.
@@ -98,6 +100,67 @@ data class BusinessOnboardingCase(
     val signedCount: Int get() = signers.count { it.status == SignerStatus.SIGNED }
 
     private val signedSigners: List<Signer> get() = signers.filter { it.status == SignerStatus.SIGNED }
+
+    /**
+     * Whether the entity and its related parties must be registered for ongoing monitoring. This
+     * is the ONE definition; nothing sets or clears monitoring anywhere else.
+     *
+     *  - an approved case (SIGNED, ACTIVE) is monitored;
+     *  - a case with a monitoring [CaseMonitoring.hold] stays monitored WHATEVER its status
+     *    becomes — an applicant who abandons it, an idle timer and an operator's rejection all
+     *    change the status as they always did, and none of them ends monitoring while a finding
+     *    is undecided or a confirmed match has not been exited;
+     *  - a completed exit ends it, and is the only thing that does for a case that owed one.
+     */
+    val monitored: Boolean
+        get() = monitoring.exitCompleted == null &&
+            (status == CaseStatus.SIGNED || status == CaseStatus.ACTIVE || monitoring.hold)
+
+    /**
+     * Whether this case can have registrations at all: only one that is or was approved. The
+     * repository skips the registration store for every other write.
+     */
+    val everApproved: Boolean
+        get() = status == CaseStatus.SIGNED ||
+            status == CaseStatus.ACTIVE ||
+            status == CaseStatus.REJECTED ||
+            status == CaseStatus.ABANDONED
+
+    /**
+     * Who must be registered right now: every current screened subject of a [monitored] case, and
+     * nobody for any other case. The registration store is brought to this set in the
+     * transaction of every write of the case, so it defines both "register" and "withdraw".
+     */
+    val monitoredSubjects: List<ScreeningSubject>
+        get() = if (monitored) screening?.subjects.orEmpty().filter { it.current } else emptyList()
+
+    /**
+     * Ongoing monitoring reports a match on the subject [MonitoringFinding.subjectKey]. It is
+     * recorded for an operator and changes nothing an applicant can read: not the status, not
+     * `updatedAt`. Returns the SAME instance for a finding already recorded. Refused for a case
+     * that is not [monitored] and for a subject the case does not currently carry.
+     */
+    fun monitoringMatched(finding: MonitoringFinding): BusinessOnboardingCase {
+        if (!monitored) throw CaseTransitionException("case is not under ongoing monitoring (status $status)")
+        if (monitoredSubjects.none { it.key == finding.subjectKey }) {
+            throw CaseTransitionException("no current subject of this case has that key")
+        }
+        val next = monitoring.recorded(finding)
+        return if (next === monitoring) this else copy(monitoring = next)
+    }
+
+    /** An operator decides ONE monitoring finding. See [MonitoringFinding.decided]. */
+    fun monitoringFindingDecided(
+        findingId: UUID,
+        disposition: FindingDisposition,
+        operator: String,
+        reason: String,
+        at: Instant,
+    ): BusinessOnboardingCase = copy(monitoring = monitoring.decided(findingId, disposition, operator, reason, at))
+
+    /** The exit a confirmed sanctions match requires has been carried out; monitoring ends with it. */
+    fun exitCompleted(operator: String, evidence: String, at: Instant): BusinessOnboardingCase =
+        copy(monitoring = monitoring.exitCompleted(operator, evidence, at))
 
     /**
      * The register record has been fetched. Decides between the automatic path and manual review.

@@ -27,14 +27,14 @@ import java.util.concurrent.atomic.AtomicReference
  * become an opened case — read from the DATABASE, so every pod reports the same truth and a
  * restart loses nothing (issue #15961).
  *
- *  - `openbank_kyc_rescreen_backlog_pending{service="kyc"}` — rows in PENDING or OPEN_FAILED
+ *  - `openbank_kyc_rescreen_backlog_pending{service="kyc"}` — rows in PENDING, OPEN_FAILED or DEFERRED
  *    (first attempt in flight, retrying, or parked after the attempt budget).
  *  - `openbank_kyc_rescreen_backlog_oldest_age_seconds{service="kyc"}` — `now() - created_at` of
  *    the oldest such row, measured by the database clock from ENQUEUE time. `0` only when the
  *    backlog is empty. Never derived from `next_attempt_at`: every retry pushes that forward, so a
  *    row failing forever would look permanently young.
  *  - `openbank_kyc_rescreen_loop_disabled_with_pending{service="kyc"}` — `1` when the loop is
- *    switched off (`screening-triggers.enabled` or `screening-triggers.retry-enabled` false) AND
+ *    switched off (`screening-triggers.enabled` false — the one switch for every open path) AND
  *    the backlog is non-empty, else `0`. A separate series on purpose: an empty queue and a queue
  *    nobody will drain must not be told apart by reading one gauge's value against config.
  *
@@ -74,13 +74,11 @@ class RescreenBacklogGauge(
         domainMetrics: DomainMetrics,
         @ConfigProperty(name = "openbank.kyc.screening-triggers.enabled", defaultValue = "false")
         triggersEnabled: Boolean,
-        @ConfigProperty(name = "openbank.kyc.screening-triggers.retry-enabled", defaultValue = "true")
-        retryEnabled: Boolean,
     ) : this(
         repository,
         if (registryInstance.isResolvable) registryInstance.get() else null,
         domainMetrics,
-        triggersEnabled && retryEnabled,
+        triggersEnabled,
     )
 
     private val log = Logger.getLogger(RescreenBacklogGauge::class.java)

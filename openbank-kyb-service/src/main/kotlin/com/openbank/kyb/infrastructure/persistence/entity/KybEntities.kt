@@ -75,6 +75,35 @@ class BusinessOnboardingCaseEntity : PanacheEntity() {
     @Column(name = "screening_json", columnDefinition = "TEXT")
     var screeningJson: String? = null
 
+    /** How many monitoring findings the case has; 0 means there is nothing to load. */
+    @Column(name = "monitoring_finding_count", nullable = false)
+    var monitoringFindingCount: Int = 0
+
+    /** Since when a monitoring finding has been waiting for an operator; for queries and alerts. */
+    @Column(name = "monitoring_review_since")
+    var monitoringReviewSince: Instant? = null
+
+    /** Since when a confirmed sanctions match has required an exit that has not been carried out. */
+    @Column(name = "monitoring_exit_owed_since")
+    var monitoringExitOwedSince: Instant? = null
+
+    @Column(name = "monitoring_exit_completed_at")
+    var monitoringExitCompletedAt: Instant? = null
+
+    @Column(name = "monitoring_exit_completed_by", columnDefinition = "TEXT")
+    var monitoringExitCompletedBy: String? = null
+
+    @Column(name = "monitoring_exit_evidence", columnDefinition = "TEXT")
+    var monitoringExitEvidence: String? = null
+
+    /**
+     * The [version] this row has once the write that synchronised the monitoring store commits.
+     * A release that does not know the store bumps [version] and leaves this behind, which is how
+     * its writes are found and repaired.
+     */
+    @Column(name = "monitoring_synced_version")
+    var monitoringSyncedVersion: Long? = null
+
     /** Optimistic lock: bumped by Hibernate on every write of the row. */
     @Version
     @Column(name = "version", nullable = false)
