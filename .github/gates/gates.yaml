@@ -6854,6 +6854,20 @@ gates:
     selftest_inputs: [".github/scripts/check-value-movement-admission.py"]
     run: |
       python3 .github/scripts/check-value-movement-admission.py
+  - id: delegation-exposure-sealed
+    name: "grant-level exposure stays refused and is never enforced by decorating a live read (ADR-0375 D6, enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 10   # 0.4s warm on a laptop, 196 .kt files read (2026-11-14)
+    rationale: "A redacted, watermarked or view-counted share returned as the ORIGINAL object bytes with the control merely echoed is a confidentiality defect that reads, from the grantor's screen, exactly like an enforced one. D6 makes the existing refusal the declared end state and names the sealed ExternalDisclosure as the mechanism; the obvious way to 'implement exposure' is one line in a read path, and that line is indistinguishable from progress in review. The subject set is derived by scanning delegation-service src/main, never listed, and the registry is checked both ways."
+    review_after: "2027-03-31"
+    verified: "2026-11-14 -- real tree: PASS, 5 referencing files all classified. Found the defect it was written for: ExternalDisclosureService.issue required grant.exposure, which the lifecycle can never produce on an ACTIVE grant, so the sealed mechanism D6 names was unreachable for every real grant behind a green unit test. Falsified seven ways, each restored: a new exposure reader -> UNCLASSIFIED; a declared file that stopped referencing it -> STALE; role `enforcement` -> refused outright; the two refusal functions deleted -> caught; the sealed path's row lock removed -> caught; customer-edge reading an exposure field -> caught; an undeclared rules.yaml block -> caught. Two must-NOT-fire controls: a comment-only mention in customer-edge and in delegation-service are not findings. Self-test: 9 named checks."
+    min_subjects: 4   # 5 referencing files derived today (2026-11-14)
+    selftest: python3 .github/scripts/check-delegation-exposure-sealed.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-delegation-exposure-sealed.py"]
+    run: |
+      python3 .github/scripts/check-delegation-exposure-sealed.py
   - id: enforcement-reachability
     name: "a declared enforcement function has a production caller (ADR-0232, issue #3615)"
     group: kotlin

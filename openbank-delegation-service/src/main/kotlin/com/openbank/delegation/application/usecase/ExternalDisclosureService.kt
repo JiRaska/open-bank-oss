@@ -55,10 +55,19 @@ class ExternalDisclosureService(
         require(grant.hasCapability(DelegationCapability.OBJECT_READ)) {
             "external disclosure requires OBJECT_READ"
         }
-        val exposure = requireNotNull(grant.exposure) { "external disclosure requires explicit exposure controls" }
-        require(command.maxViews <= (exposure.maxViews ?: command.maxViews)) {
-            "external disclosure view limit exceeds delegation exposure"
-        }
+        // ADR-0375 D6. This used to require `grant.exposure` and clamp the view limit to it, and
+        // that made the whole sealed-disclosure path UNREACHABLE: `DelegationService` refuses
+        // exposure on every new offer, and `accept` and `reinstate` refuse a historical grant that
+        // carries it — so no grant can be ACTIVE and carry exposure at the same time, and this
+        // `requireNotNull` threw for every possible input. The unit test did not see it because it
+        // hand-builds an ACTIVE grant WITH exposure, a combination the lifecycle cannot produce.
+        //
+        // The dependency also pointed the wrong way. D6's whole point is that grant-level exposure
+        // is never the enforcement mechanism: the sealed artifact is, and its own `maxViews` is
+        // consumed under a row lock in one transaction (`ExternalDisclosureRepositoryImpl.mutateById`).
+        // So the disclosure carries its own limit, and nothing is clamped against metadata the
+        // platform refuses to accept. No live behaviour is widened — there was none to widen — and
+        // the grantor issuing the disclosure is the party choosing the limit.
         require(command.expiresAt.isAfter(now) && !command.expiresAt.isAfter(now.plusDays(MAX_VALIDITY_DAYS))) {
             "external disclosure must expire within $MAX_VALIDITY_DAYS days"
         }
