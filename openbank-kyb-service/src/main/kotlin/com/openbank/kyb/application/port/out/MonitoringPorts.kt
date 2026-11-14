@@ -90,8 +90,10 @@ interface MonitoringRegistrationStore {
      * Hands out ONE due row to this caller alone, leased until [leaseUntil]; null when none is
      * due. While the lease holds no other relay delivers the row, so two deliveries of one row
      * never overlap and a withdrawal can only be sent after the registration before it finished.
+     * [withdrawalsOnly] narrows it to withdrawals of subjects the registry has held (a row that
+     * was once delivered) — what is still sent while registration is switched off.
      */
-    suspend fun claimNext(now: Instant, leaseUntil: Instant): MonitoringRegistration?
+    suspend fun claimNext(now: Instant, leaseUntil: Instant, withdrawalsOnly: Boolean = false): MonitoringRegistration?
 
     /** Records the delivery [registration] was claimed for. False when the row changed meanwhile; the claim is released either way. */
     suspend fun markSynced(registration: MonitoringRegistration, now: Instant): Boolean
@@ -108,7 +110,12 @@ interface MonitoringRegistrationStore {
     /** The row registered under [subjectRef], if any. A reference belongs to exactly one subject of one case. */
     suspend fun findBySubjectRef(subjectRef: String): MonitoringRegistration?
 
-    /** Makes registered rows that were last confirmed, or refused, before [before] due again. Returns how many. */
+    /**
+     * Makes settled rows — registered AND withdrawn — that were last confirmed, or refused, before
+     * [before] due again. A withdrawn row is re-sent too: a PUT that reached the registry after the
+     * DELETE that followed it would otherwise leave it monitoring a withdrawn subject for good.
+     * Returns how many.
+     */
     suspend fun requeueSettledBefore(before: Instant, now: Instant, limit: Int): Int
 
     /**
