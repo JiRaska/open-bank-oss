@@ -1868,7 +1868,8 @@ def api(method: str, path: str, body: dict | None = None, token: str | None = No
         API_STATS["sent"] += 1
         try:
             status, raw, _h = _http_open(req, 30)
-            _note_ratelimit(_h)
+            if path != "/graphql":     # the GraphQL bucket's headers must not stand in for core's
+                _note_ratelimit(_h)
             if memo and status == 200:
                 _GET_MEMO[path] = raw or b"null"
             return status, json.loads(raw or b"null")
@@ -2157,7 +2158,11 @@ class GitHub:
         re-read live under deciding() (`unverified`), so a seeded payload can at worst mis-PLAN a tick,
         never decide a merge. A head is seeded only when GraphQL saw ALL of it (no further page, fewer
         than 100 runs, at most 30 statuses — what the REST pages hold); anything else falls back to REST."""
-        shas = sorted({s for s in shas if re.fullmatch(r"[0-9a-f]{40}", s or "")})
+        # open_prs() is called from many places in one tick; a head already seeded in this planning
+        # scope is not read again (the memo is cleared on exit and by every write, so this never
+        # outlives the data it describes).
+        shas = sorted({s for s in shas if re.fullmatch(r"[0-9a-f]{40}", s or "")
+                       and f"/repos/{self.repo}/commits/{s}/status" not in _GET_MEMO})
         owner, name = self.repo.split("/", 1)
         seeded = 0
         for i in range(0, len(shas), PREFETCH_BATCH):
@@ -5861,6 +5866,7 @@ def prefetch_self_test(check) -> None:
         path = req.full_url[len(API):]
         seen.append(f"{req.get_method()} {path.split('?')[0]}")
         if path == "/graphql":
+            gql.setdefault("queried", []).append(sorted(x for x in (a, b) if x in (req.data or b"").decode()))
             if gql["mode"] == "error":
                 return 200, json.dumps({"errors": [{"message": "boom"}]}).encode(), {}
             if gql["mode"] == "partial":
@@ -5891,6 +5897,14 @@ def prefetch_self_test(check) -> None:
               got_a == want and rest_a == [], f"{got_a} {rest_a}")
         check("prefetch: a head with a further page falls back to REST and reads the same verdicts",
               got_b == want and any("/commits/" + b in x for x in seen), f"{got_b} {seen}")
+        with planning_reads():
+            gh.open_prs()
+            gql["queried"] = []
+            gh.open_prs()
+            gh.open_prs()
+            again = list(gql["queried"])
+        check("prefetch: repeated open_prs() in one scope re-reads only the heads not yet seeded",
+              again == [[b], [b]], str(again))
         payload = prefetch_payloads(commit(a), a)
         check("prefetch: payload carries what latest_ci_activity and extra_checks read",
               payload is not None and payload[0][0]["started_at"] == "2026-11-14T10:00:00Z"
