@@ -5702,7 +5702,9 @@ def retry_planner_self_test(check) -> None:
 # measured locally on 2026-11-13; ceiling 21,400 (~1.2 %).
 # Main-red fix job evidence (#16013): two fix_behind cases: spawns=21,402 at 761 cases, measured by the train
 # over main on 2026-11-14; ceiling 21,800 (~1.9 %).
-SELF_TEST_SPAWN_CEILING = 21800
+# Its refinements (refusal in the summary, timed-out main jobs): spawns=21,445 at 764 cases, measured on the
+# merged tree on 2026-11-14; ceiling 21,900 (~2.1 %).
+SELF_TEST_SPAWN_CEILING = 21900
 
 # A green carrier and a green, up-to-date strict holder cannot both keep their verification: whichever
 # merges first moves main under the other. Strict first voids the carrier (rebuild ~50 min, measured
