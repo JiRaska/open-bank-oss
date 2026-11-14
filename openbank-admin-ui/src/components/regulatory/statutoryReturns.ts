@@ -138,10 +138,10 @@ export const GSFT_CATALOGUE = 'cz-gsft'
  * as what it is, never as a generic failure.
  */
 export type ActionResult =
-  | { ok: true; data: StatutoryReturn }
+  | { ok: true; data: StatutoryReturn; package?: { fileName: string; encryptedPackage: string } }
   | { ok: false; status: number; message: string | null }
 
-const deliverySchema = z.object({ statutoryReturn: returnSchema, fileName: z.string() })
+const deliverySchema = z.object({ statutoryReturn: returnSchema, fileName: z.string(), encryptedPackage: z.string() })
 
 export type ReturnAction =
   | { kind: 'assemble'; body: { catalogueId: string; returnCode: string; entityId: string; period: string } }
@@ -173,9 +173,14 @@ export async function runReturnAction(action: ReturnAction): Promise<ActionResul
     })
     if (!res.ok) return { ok: false, status: res.status, message: await errorText(res) }
     const json = await res.json().catch(() => null)
-    const parsed = action.kind === 'gsft-delivery'
-      ? deliverySchema.safeParse(json).data?.statutoryReturn
-      : returnSchema.safeParse(json).data
+    if (action.kind === 'gsft-delivery') {
+      // The encrypted archive is the artefact the operator hands to GSFT; keep it, never drop it.
+      const delivery = deliverySchema.safeParse(json).data
+      return delivery
+        ? { ok: true, data: delivery.statutoryReturn, package: { fileName: delivery.fileName, encryptedPackage: delivery.encryptedPackage } }
+        : { ok: false, status: res.status, message: null }
+    }
+    const parsed = returnSchema.safeParse(json).data
     return parsed ? { ok: true, data: parsed } : { ok: false, status: res.status, message: null }
   } catch {
     return { ok: false, status: 0, message: null }

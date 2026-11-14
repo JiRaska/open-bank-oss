@@ -7,6 +7,7 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { Can } from '@/components/auth/AuthGuard'
+import { useSession } from 'next-auth/react'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -89,8 +90,8 @@ function CeuSection({ returns }: { returns: StatutoryReturn[] }) {
       <h2 id="ceu-heading">{t('CEÚ – denní přehled změn (ČNB)', 'CEÚ – daily change overview (ČNB)')}</h2>
       <p>{t('Každý pracovní den do 12:00 přehled změn účtů za období od předchozího pracovního dne. Syntetičtí zákazníci jsou vždy vyloučeni a jejich počet je uveden.',
         'Every working day by 12:00, the account changes since the previous working day. Synthetic customers are always excluded and their count is shown.')}</p>
-      {filings.length === 0 ? <p>{t('API zatím nevrátilo žádný přehled CEÚ. Vykazování CEÚ začíná 15. 11. 2026 (OPENBANK_CEU_REPORTING_START); prázdný seznam před tímto dnem je očekávaný.',
-        'The API has not returned any CEÚ overview yet. CEÚ reporting starts on 2026-11-15 (OPENBANK_CEU_REPORTING_START); an empty list before that date is expected.')}</p> :
+      {filings.length === 0 ? <p>{t('API zatím nevrátilo žádný přehled CEÚ. Vykazování CEÚ začíná od nastaveného data začátku vykazování (OPENBANK_CEU_REPORTING_START); prázdný seznam před tímto dnem je očekávaný.',
+        'The API has not returned any CEÚ overview yet. CEÚ reporting starts at the configured reporting start (OPENBANK_CEU_REPORTING_START); an empty list before that date is expected.')}</p> :
         <table className="table">
           <thead>
             <tr>
@@ -169,6 +170,7 @@ function CatalogueSection({ catalogues, returns, onChanged }: { catalogues: Retu
 function useAction(onChanged: () => void) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ActionResult | null>(null)
+
   const run = async (action: ReturnAction) => {
     setBusy(true)
     const outcome = await runReturnAction(action)
@@ -183,7 +185,9 @@ function useAction(onChanged: () => void) {
 function ActionOutcome({ result }: { result: ActionResult | null }) {
   const { t } = useLanguage()
   if (!result) return null
-  if (result.ok) return <p role="status">{t('Hotovo', 'Done')}: {result.data.returnCode} · {result.data.period} · {result.data.status}</p>
+  if (result.ok) return <p role="status">{t('Hotovo', 'Done')}: {result.data.returnCode} · {result.data.period} · {result.data.status}
+    {result.package && <> · <a href={`data:application/pgp-encrypted;base64,${result.package.encryptedPackage}`} download={result.package.fileName}>
+      {t('Stáhnout zašifrovaný balík', 'Download encrypted package')} ({result.package.fileName})</a></>}</p>
   const label = result.status === 503 ? t('Služba to nyní nemůže provést (není nakonfigurováno)', 'The service cannot do this now (not configured)')
     : result.status === 409 ? t('Odmítnuto stavem nebo pravidlem čtyř očí', 'Refused by state or the four-eyes rule')
     : result.status === 422 || result.status === 400 ? t('Neplatný požadavek', 'Invalid request')
@@ -239,28 +243,39 @@ function periodHint(periodicity: string) {
 function RevisionActions({ item, onChanged }: { item: StatutoryReturn; onChanged: () => void }) {
   const { t } = useLanguage()
   const [text, setText] = useState('')
+  const [ack, setAck] = useState('')
   const { busy, result, run } = useAction(onChanged)
+  const { data: session } = useSession()
   const gsft = item.catalogueId === GSFT_CATALOGUE
+  // Four eyes (StatutoryReturn.approve): the backend records the JWT `sub` as assembledBy, and
+  // the session's user.id is that same `sub`, so the assembler is never offered Approve.
+  const isAssembler = Boolean(item.assembledBy && session?.user?.id && item.assembledBy === session.user.id)
+  const ackControls = <>
+    <input aria-label={t('Reference potvrzení nebo důvod zamítnutí', 'Acknowledgement reference or rejection reason')} value={ack} onChange={e => setAck(e.target.value)} />
+    <button type="button" className="btn btn-secondary" disabled={busy || !ack.trim()}
+      onClick={() => void run({ kind: 'acknowledgement', id: item.id, accepted: true, text: ack.trim() })}>{t('Potvrzeno', 'Acknowledged')}</button>
+    <button type="button" className="btn btn-secondary" disabled={busy || !ack.trim()}
+      onClick={() => void run({ kind: 'acknowledgement', id: item.id, accepted: false, text: ack.trim() })}>{t('Zamítnuto', 'Rejected')}</button>
+  </>
   let controls: React.ReactNode = null
   if (item.status === 'ASSEMBLED') {
-    controls = <button type="button" className="btn btn-secondary" disabled={busy}
-      onClick={() => void run({ kind: 'approve', id: item.id })}>{t('Schválit', 'Approve')}</button>
-  } else if (item.status === 'APPROVED') {
+    controls = isAssembler
+      ? <p>{t('Tuto revizi jste sestavili, schválit ji musí jiný operátor (čtyři oči).', 'You assembled this revision; another operator must approve it (four eyes).')}</p>
+      : <button type="button" className="btn btn-secondary" disabled={busy}
+        onClick={() => void run({ kind: 'approve', id: item.id })}>{t('Schválit', 'Approve')}</button>
+  } else if (item.status === 'APPROVED' || (gsft && item.status === 'SUBMITTED' && item.submissionReference)) {
+    const again = item.status === 'SUBMITTED'
     controls = <>
-      <input aria-label={t('Reference odeslání', 'Submission reference')} value={text} onChange={e => setText(e.target.value)} />
-      <button type="button" className="btn btn-secondary" disabled={busy || !text.trim()}
-        onClick={() => void run({ kind: gsft ? 'gsft-delivery' : 'submitted', id: item.id, reference: text.trim() })}>
-        {gsft ? t('Zašifrovat a odeslat GSFT', 'Encrypt and deliver to GSFT') : t('Zaznamenat odeslání', 'Record submission')}
+      {!again && <input aria-label={t('Reference odeslání', 'Submission reference')} value={text} onChange={e => setText(e.target.value)} />}
+      <button type="button" className="btn btn-secondary" disabled={busy || (!again && !text.trim())}
+        onClick={() => void run({ kind: gsft ? 'gsft-delivery' : 'submitted', id: item.id, reference: again ? item.submissionReference! : text.trim() })}>
+        {again ? t('Znovu získat zašifrovaný balík GSFT', 'Fetch the encrypted GSFT package again')
+          : gsft ? t('Zašifrovat a odeslat GSFT', 'Encrypt and deliver to GSFT') : t('Zaznamenat odeslání', 'Record submission')}
       </button>
     </>
-  } else if (item.status === 'SUBMITTED') {
-    controls = <>
-      <input aria-label={t('Reference potvrzení nebo důvod zamítnutí', 'Acknowledgement reference or rejection reason')} value={text} onChange={e => setText(e.target.value)} />
-      <button type="button" className="btn btn-secondary" disabled={busy || !text.trim()}
-        onClick={() => void run({ kind: 'acknowledgement', id: item.id, accepted: true, text: text.trim() })}>{t('Potvrzeno', 'Acknowledged')}</button>
-      <button type="button" className="btn btn-secondary" disabled={busy || !text.trim()}
-        onClick={() => void run({ kind: 'acknowledgement', id: item.id, accepted: false, text: text.trim() })}>{t('Zamítnuto', 'Rejected')}</button>
-    </>
+  }
+  if (item.status === 'SUBMITTED') {
+    controls = <>{controls}{ackControls}</>
   }
   if (!controls) return null
   return <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>{controls}<ActionOutcome result={result} /></div>

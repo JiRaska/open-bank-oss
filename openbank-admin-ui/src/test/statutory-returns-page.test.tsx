@@ -8,9 +8,9 @@ import StatutoryReturnsPage from '@/app/regulatory/statutory-returns/page'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { fireEvent, waitFor, within } from '@testing-library/react'
 
-const session = vi.hoisted(() => ({ roles: ['ROLE_VIEWER'] as string[] }))
+const session = vi.hoisted(() => ({ roles: ['ROLE_VIEWER'] as string[], id: 'checker-sub' }))
 vi.mock('next-auth/react', () => ({
-  useSession: () => ({ data: { user: { roles: session.roles } }, status: 'authenticated' }),
+  useSession: () => ({ data: { user: { id: session.id, roles: session.roles } }, status: 'authenticated' }),
   signIn: vi.fn(),
 }))
 
@@ -19,7 +19,7 @@ const response = (value: unknown, status = 200) => new Response(JSON.stringify(v
   headers: { 'content-type': 'application/json' },
 })
 
-afterEach(() => { vi.unstubAllGlobals(); session.roles = ['ROLE_VIEWER'] })
+afterEach(() => { vi.unstubAllGlobals(); session.roles = ['ROLE_VIEWER']; session.id = 'checker-sub' })
 
 describe('statutory returns read-only view', () => {
   it('shows real capability, breaches and revisions without exposing mutation actions', async () => {
@@ -112,7 +112,7 @@ describe('statutory returns read-only view', () => {
 
     expect(await screen.findByText(/Deadline status cannot be evaluated.*Service reason: fund roster is not configured/)).toBeInTheDocument()
     expect(screen.queryByText('The API reports no missed deadline.')).not.toBeInTheDocument()
-    expect(screen.getByText(/CEÚ reporting starts on 2026-11-15/)).toBeInTheDocument()
+    expect(screen.getByText(/CEÚ reporting starts at the configured reporting start/)).toBeInTheDocument()
   })
 })
 
@@ -207,6 +207,9 @@ describe('statutory returns catalogue and operator lifecycle', () => {
     fireEvent.change(await screen.findByLabelText('Submission reference'), { target: { value: 'B-1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Encrypt and deliver to GSFT' }))
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Done: GSFT-DIW-LIVE · 2026-11-14 · SUBMITTED'))
+    const download = screen.getByRole('link', { name: /Download encrypted package/ })
+    expect(download).toHaveAttribute('download', 'x.zip.pgp')
+    expect(download.getAttribute('href')).toBe('data:application/pgp-encrypted;base64,AA==')
     const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')
     expect(posts).toHaveLength(1)
     expect(posts[0][0]).toBe('/api/svc/tax-reporting-service/api/v1/statutory-returns/0bb2d245-c3b8-4bbb-9ea6-70f24f3732e7/gsft-delivery')
@@ -225,5 +228,34 @@ describe('statutory returns catalogue and operator lifecycle', () => {
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')!
     expect(post[0]).toMatch(/\/acknowledgement$/)
     expect(JSON.parse(String(post[1]!.body))).toEqual({ accepted: false, reason: 'XSD error' })
+  })
+
+  it('never offers Approve to the operator who assembled the revision (four eyes)', async () => {
+    session.roles = ['ROLE_OPERATOR']
+    session.id = 'maker-sub'
+    stub([revision('ASSEMBLED')], () => response({}, 500))
+    render(<LanguageProvider initialLanguage="en"><StatutoryReturnsPage /></LanguageProvider>)
+    expect(await screen.findByText(/another operator must approve it/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+  })
+
+  it('offers Approve to a different operator', async () => {
+    session.roles = ['ROLE_OPERATOR']
+    session.id = 'checker-sub'
+    stub([revision('ASSEMBLED')], () => response({}, 500))
+    render(<LanguageProvider initialLanguage="en"><StatutoryReturnsPage /></LanguageProvider>)
+    expect(await screen.findByRole('button', { name: 'Approve' })).toBeInTheDocument()
+  })
+
+  it('keeps the encrypted GSFT package reachable for a submitted batch by re-calling with its reference', async () => {
+    session.roles = ['ROLE_OPERATOR']
+    const fetchMock = stub([revision('SUBMITTED', { submissionReference: 'B-1' })], () =>
+      response({ statutoryReturn: revision('SUBMITTED', { submissionReference: 'B-1' }), fileName: 'x.zip.pgp', encryptedPackage: 'AA==' }))
+    render(<LanguageProvider initialLanguage="en"><StatutoryReturnsPage /></LanguageProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Fetch the encrypted GSFT package again' }))
+    expect(await screen.findByRole('link', { name: /Download encrypted package/ })).toHaveAttribute('download', 'x.zip.pgp')
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')!
+    expect(post[0]).toMatch(/\/gsft-delivery$/)
+    expect(JSON.parse(String(post[1]!.body))).toEqual({ reference: 'B-1' })
   })
 })
