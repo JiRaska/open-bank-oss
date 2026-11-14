@@ -14,6 +14,8 @@ import com.openbank.kyb.application.port.out.CeremonyStatus
 import com.openbank.kyb.application.port.out.DocumentGateway
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.MandateRequest
+import com.openbank.kyb.application.port.out.MonitoredSubjectRegistryException
+import com.openbank.kyb.application.port.out.MonitoredSubjectRegistryPort
 import com.openbank.kyb.application.port.out.PartyGateway
 import com.openbank.kyb.application.port.out.PepProfile
 import com.openbank.kyb.application.port.out.RegistryAdapter
@@ -104,6 +106,14 @@ class StubAresAdapter : RegistryAdapter {
                 RepresentationRule.SOLE,
                 listOf("Olga Souběžná"),
             )
+            // Reserved for the ongoing-monitoring ITs, one entity and one representative per test,
+            // for the same reason as the screening ones above.
+            in MONITORING_ENTITIES -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf(MONITORING_ENTITIES.getValue(identifier.value)),
+            )
             // 26185610 — a sole trader.
             "26185610" -> extract(identifier, LegalFormClass.SOLE_TRADER, RepresentationRule.SOLE, listOf("Jan Novák"))
             else -> null
@@ -134,6 +144,39 @@ class StubAresAdapter : RegistryAdapter {
         val hits =
             query.city?.let { c -> all.filter { it.registeredAddress?.contains(c, ignoreCase = true) == true } } ?: all
         return RegistrySearchResult(hits = hits, totalMatches = hits.size)
+    }
+
+    companion object {
+        /** IČO -> the single jednatel of that company. Every name is invented. */
+        val MONITORING_ENTITIES = mapOf(
+            "71000054" to "Marek Sledovaný",
+            "71000062" to "Ivana Nedělitelná",
+            "71000071" to "Oskar Opakovaný",
+            "71000089" to "Zdena Odhlášená",
+            "71000097" to "Viktor Doplněný",
+            "71000101" to "Libor Nalezený",
+            "71000119" to "Dana Drátová",
+            "71000127" to "Emil Plánovaný",
+            "71000135" to "Nora Neviditelná",
+            "71000143" to "Alois Aktivní",
+            "71000151" to "Ctibor Odcházející",
+            "71000160" to "Bohdana Kontrolovaná",
+            "71000178" to "Hynek Ukončený",
+            "71000186" to "Radka Souběžná",
+            "71000194" to "Jitka Odmítnutá",
+            "71000208" to "Kamil Sdílený",
+            "71000216" to "Lada Druhá",
+            "71000224" to "Matyáš Starý",
+            "71000232" to "Nina Dvojitá",
+            "71000241" to "Otto Držený",
+            "71000259" to "Pavla Vypnutá",
+            "71000267" to "Roman Opuštěný",
+            "71000275" to "Sára Sdílená",
+            "71000283" to "Tomáš Souběžný",
+            "71000291" to "Ursula Nesouhlasná",
+            "71000305" to "Václav Odůvodněný",
+            "71000313" to "Wanda Souběžná",
+        )
     }
 
     private fun extract(id: LegalEntityIdentifier, form: LegalFormClass, rule: RepresentationRule, reps: List<String>) =
@@ -267,5 +310,50 @@ class StubDocumentGateway : DocumentGateway {
             AgreementDisclosure("VOP_CS", "1.1.0", "Všeobecné obchodní podmínky", "b".repeat(64), null),
             AgreementDisclosure("SAZEBNIK_PO_CS", "1.0.0", "Sazebník", "c".repeat(64), null),
         )
+    }
+}
+
+/**
+ * Monitored-subject registry double. It accepts everything unless a test sets [failWith], which
+ * makes every call fail the way the adapter reports a failure: by throwing, with a reason and a
+ * kind. Calls are recorded per reference and in order, so a test asserts on its own subjects only.
+ *
+ * [holdRegistration] keeps the registration of one reference open until the test releases it, so
+ * a test can put a case write or a second relay BETWEEN a call and its recording; [entered] says
+ * the call began. [slowBy] makes every call take that long, so two relays really overlap.
+ */
+@Alternative
+@Priority(1)
+@ApplicationScoped
+class StubMonitoredSubjectRegistry : MonitoredSubjectRegistryPort {
+    data class Registration(val subjectRef: String, val organisation: Boolean, val name: String)
+
+    val registered = CopyOnWriteArrayList<Registration>()
+    val withdrawn = CopyOnWriteArrayList<String>()
+
+    /** Every call in arrival order: `PUT <ref>` / `DELETE <ref>`. */
+    val calls = CopyOnWriteArrayList<String>()
+
+    @Volatile var failWith: MonitoredSubjectRegistryException? = null
+
+    @Volatile var slowBy: Long = 0
+
+    val holdRegistration = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+    val entered = ConcurrentHashMap<String, CountDownLatch>()
+
+    override suspend fun register(subjectRef: String, organisation: Boolean, name: String) {
+        failWith?.let { throw it }
+        entered[subjectRef]?.countDown()
+        holdRegistration[subjectRef]?.await()
+        if (slowBy > 0) kotlinx.coroutines.delay(slowBy)
+        calls += "PUT $subjectRef"
+        registered += Registration(subjectRef, organisation, name)
+    }
+
+    override suspend fun withdraw(subjectRef: String) {
+        failWith?.let { throw it }
+        if (slowBy > 0) kotlinx.coroutines.delay(slowBy)
+        calls += "DELETE $subjectRef"
+        withdrawn += subjectRef
     }
 }
