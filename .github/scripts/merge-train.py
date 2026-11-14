@@ -2140,7 +2140,10 @@ class GitHub:
     def open_prs(self) -> list[dict]:
         prs = paginate(f"/repos/{self.repo}/pulls?state=open&base={self.branch}")
         if _MEMO_SCOPE[0] > 0 and not _DECIDING[0]:
-            self.prefetch_checks([((p.get("head") or {}).get("sha") or "") for p in prs])
+            try:
+                self.prefetch_checks([((p.get("head") or {}).get("sha") or "") for p in prs])
+            except Exception as exc:  # noqa: BLE001 - an optimisation: any failure means "read via REST"
+                log(f"::notice::check prefetch failed ({type(exc).__name__}); planning reads fall back to REST")
         return prs
 
     def prefetch_checks(self, shas: list[str]) -> int:
@@ -10111,7 +10114,8 @@ def self_test() -> int:
                 return fx, real
 
             def writes(fx):
-                return [c for c in fx.calls if c[0] != "GET"]
+                # POST /graphql here is only the read-only check prefetch (api(..., graphql_read=True)).
+                return [c for c in fx.calls if c[0] != "GET" and not (c[0] == "POST" and c[1] == "/graphql")]
 
             def check_runs_get(method, path):
                 return method == "GET" and "/check-runs" in path
