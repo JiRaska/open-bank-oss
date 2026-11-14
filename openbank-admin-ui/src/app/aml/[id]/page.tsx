@@ -149,7 +149,7 @@ export default function AmlCaseDetailPage() {
 
   const partyId = amlCase?.partyId
   const transactionId = amlCase?.transactionId
-  const sourceService = amlCase?.sourceService ?? null
+  const movementService = amlCase?.movementService ?? null
   useEffect(() => {
     if (!partyId) return
     const controller = new AbortController()
@@ -166,11 +166,11 @@ export default function AmlCaseDetailPage() {
   useEffect(() => {
     if (!transactionId) return
     const controller = new AbortController()
-    fetchSourcePayment(sourceService, transactionId, controller.signal)
+    fetchSourcePayment(movementService, transactionId, controller.signal)
       .then(found => { if (!controller.signal.aborted) setTxn(found) })
       .catch(() => { if (!controller.signal.aborted) setTxn(null) })
     return () => controller.abort()
-  }, [transactionId, sourceService])
+  }, [transactionId, movementService])
 
   // A four-eyes case may only be taken into review directly; closing goes through the panel below.
   const transitions = amlCase
@@ -268,8 +268,8 @@ export default function AmlCaseDetailPage() {
             <Card title={t('Sledovaná platba', 'Monitored payment')} icon={<ArrowRightLeft size={16} />}>
               {txn === undefined ? <p role="status" style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('Načítám platbu…', 'Loading payment…')}</p>
                 : txn === null ? <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
-                  {amlCase.sourceService
-                    ? t(`Platbu se nepodařilo načíst z ${amlCase.sourceService}.`, `The payment could not be loaded from ${amlCase.sourceService}.`)
+                  {amlCase.movementService
+                    ? t(`Platbu se nepodařilo načíst z ${amlCase.movementService}.`, `The payment could not be loaded from ${amlCase.movementService}.`)
                     : t('Případ nemá zaznamenaný zdroj a platbu nezná žádná z platebních služeb.', 'The case records no source and no payment service knows this id.')}{' '}
                   <ShortId value={amlCase.transactionId} copyLabel={t('Kopírovat ID platby', 'Copy payment ID')} /></p>
                 : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', columnGap: 24 }}>
