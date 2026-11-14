@@ -689,6 +689,23 @@ Observed twice on 2026-11-13/14: main went red on `Validate manifests`, a green 
 
 Decision: while main is red and at least one green strict-lane PR is a fix (`strict_fixes`, the same test that ranks fixes first), a reservation whose holder is not a fix and whose CI is still PENDING does not hold main (`strict_reservation`). The pre-empting set is every green fix plus every fix whose combined head is in CI (`fix_head_state` marks it; `strict_fixes` lists only green PRs, so without this a lone fix would hand main back the moment its own CI started), and that set also ranks first for the reservation. A green fix the App has already told conflicts with, or was refused update-branch over, THIS main pre-empts nothing, since it would free main for nobody. The fix is then update-branched and becomes the holder on its combined head, as before. Precedence on a red main is therefore: a GREEN holder (it merges this tick, never interrupted) > a fix > a non-fix reservation still in CI. The pre-empted PR is not released and gets no `strict-released` marker: its CI keeps running, it simply holds nothing while the fix is served, and once main is green it competes for main as any strict PR does (behind main after the fix merges, so update-branched again). What qualifies as a fix is unchanged here; narrowing that test (a fix must have run the failing job on its head, #16013 / #16006) applies to pre-emption automatically, because pre-emption reads the same `strict_fixes` set. A strict carrier already open is unaffected.
 
+### Amendment (2026-11-14) — a pure gates.yaml append rides a train
+
+#13837 put every `gates.yaml` change in the strict lane. Its reason was that one edit can retire or weaken a privileged gate without touching that gate's script, and settle cannot tell such an edit apart because it has no YAML parser. That reason does not apply to an append. Measured on 40 merged non-bot PRs from 2026-11-10..13: 15 took the strict lane, where the wait from arm to merge was p50 5.3 h against 1.4 h on the train. 8 of those 15 changed `gates.yaml`, nearly all to add a gate next to its new `check-*.py`, which is gate code that already rides.
+
+A member qualifies when its `gates.yaml` (merge-base against verified head) is the old file plus whole new entries only. This is decided by text, with `gates_append_problem`:
+- every existing `  - id:` block is byte-identical and in the same order;
+- the text before the first entry is unchanged;
+- every new id is unused, both on main and in the file;
+- every line of a new entry is indented under it, so no top-level key can be added;
+- no new line defines a YAML anchor, which could redefine an alias that a later entry already reads.
+- the new entry uses only keys the file already uses, never `env:`, never a second `id:`, and a plain, unquoted id;
+- its only executable fields, `run:` and `selftest:`, contain nothing but one plain call per line, `python3 <script>.py` or `bash <script>.sh`, with plain arguments. Each script is a canonical path under `.github/scripts/` that is trainable gate or test code, never privileged gate code. A free shell line would run inside the judging shard beside the existing gates and could rewrite a privileged gate's script on the shared tree before that gate runs. That finding came from the review of #16109.
+
+Anything else returns a reason, and the member stays in the strict lane as before.
+
+The rule is checked three times: in settle on the member's own diff, at build over the train built so far (so two appends in one train stack), and again at publish, where anything beyond a pure append is a member fault. An appended member counts as gate code, so it never shares a train with a regeneration commit. `.github/` stays protected from the fast lane.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The

@@ -48,7 +48,8 @@ class DomesticSubmissionKeyUpgradeIT {
     )
     fun `a V20 direct payment still fences its original key after V21 without changing the old outbox`() {
         dataSource.connection.use { connection ->
-            assertThat(installedVersion(connection)).isEqualTo("21")
+            // The newest migration is the hold facts (V22); V21, the fence under test, ran before it.
+            assertThat(installedVersion(connection)).isEqualTo("22")
             assertHistoricalWrite(connection)
         }
 

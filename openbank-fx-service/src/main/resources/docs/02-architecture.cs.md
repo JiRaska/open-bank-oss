@@ -155,3 +155,7 @@ Dispatcher obaluje Kafka publish přes MicroProfile Fault Tolerance: `@Bulkhead(
 ## Měnověpolitické sazby ČNB a fakta pro povinné minimální rezervy
 
 `CnbPolicyRateIngestionScheduler` načítá historii dvoutýdenní repo sazby, diskontní a lombardní sazby i tabulku povinných minimálních rezerv. Výchozí denní spuštění je ve 14:45 Europe/Prague; druhé spuštění následuje po startu a poté každých 24 hodin. Každý zdroj se zkouší samostatně, celá historie se idempotentně aktualizuje a úspěch workflow se zaznamená pouze při úspěchu všech zdrojů. Při selhání jednoho zdroje sledujte jeho výsledek načtení a metriku aktuálnosti; úspěch jiného zdroje chybu neskrývá. Nová a opravená fakta se publikují do kompaktovaného topicu `openbank.fx.cnb-policy-rate.published` pro výpočty podle data účinnosti. Tato cesta je oddělená od výše popsaného denního devizového fixingu.
+
+## Volání fraud scoringu (ADR-0377 D3)
+
+Volání fraud scoringu do fraud-service při konverzi (`FraudScoringPort`) nově používá sdílený typovaný rizikový kontext. Konverze FX přesouvá peníze mezi vlastními měnovými kapsami držitele, proto neposílá žádného příjemce: protistrana je `Unknown(NOT_APPLICABLE_OWN_ACCOUNT)` a způsob iniciace `CUSTOMER_PRESENT`. Tímto voláním neopouští službu žádný identifikátor účtu třetí strany.

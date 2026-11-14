@@ -69,6 +69,7 @@ import io
 import json
 import os
 import pathlib
+import posixpath
 import re
 import shlex
 import subprocess
@@ -780,9 +781,10 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
     for f in pr.get("files") or []:
         if unsafe_path(f):
             return False, "a path contains a control character — manual lane, never a train"
-        if untrainable(f):
+        if untrainable(f) and not (f == GATES_YAML and pr.get("gates_append") is True):
             return False, f"touches {f} (workflows, gates, generators, inventory) — manual lane, never a train"
-    if pr.get("special_paths") and any(gate_code(f) for f in pr.get("files") or []):
+    if pr.get("special_paths") and any(gate_code(f) or (f == GATES_YAML and pr.get("gates_append") is True)
+                                       for f in pr.get("files") or []):
         # The strict lane refuses a symlink/gitlink outright; on the train publish would halve the
         # whole carrier for it. Gate code next to one never rides (review of #13750).
         return False, "gate code next to a symlink or gitlink — never a train"
@@ -833,7 +835,7 @@ def strict_lane_state(pr: dict, required: list[str], checks: dict[str, str | Non
     if any(m in SPECIAL_MODES for m in modes):
         return None, "adds a symlink or gitlink — never the strict lane"
     untrainable = untrainable or FAIL_CLOSED_UNTRAINABLE
-    if not any(untrainable(f) for f in files):
+    if not any(untrainable(f) and not (f == GATES_YAML and pr.get("gates_append") is True) for f in files):
         return None, "not manual-lane"
     ok, why = qualifies(pr, required, checks, app, untrainable=lambda _f: False, extra=extra)
     if ok:
@@ -1084,6 +1086,142 @@ def assert_train_branch(name: str) -> None:
         raise ValueError(f"refusing ref {name!r}: not of the form train/<run_id>-<attempt> or train/strict-<run_id>-<attempt>")
 
 
+# gates.yaml APPEND (ADR-0343 amendment 2026-11-14): a member whose only change to gates.yaml is new,
+# whole `- id:` entries rides a train like gate code. #13837 kept every gates.yaml edit strict because one
+# edit can retire or weaken a PRIVILEGED gate without touching its script, and settle runs with no YAML
+# parser. An append cannot: every existing entry must survive BYTE-FOR-BYTE and in order, the header
+# before the first entry is unchanged, a new id collides with no id on main, and a new entry can neither
+# start a top-level key (every line indented under it) nor define a YAML anchor (which would redefine an
+# alias a LATER entry already uses). Anything else returns a reason and the member stays strict.
+GATE_ENTRY_RE = re.compile(r"^  - id:\s*([^\s#]+)\s*(#.*)?$")
+YAML_ANCHOR_RE = re.compile(r"(?:^|[\s:\[{,-])&[A-Za-z0-9_.-]")
+# A new entry's own shape (review of #16109): its id is a plain token (a quoted id is a YAML duplicate the
+# line scan would not see); its keys come from the set gates.yaml already uses, never `env:` (PATH or
+# PYTHONPATH would redirect every later command) and never a second `id:`; and the only EXECUTABLE fields,
+# `run:` and `selftest:`, may do nothing but invoke one trainable gate or test script per line with plain
+# arguments. A free shell line would run inside the judging shard beside the existing gates and could
+# rewrite a privileged gate's script on the shared tree before that gate runs.
+GATE_PLAIN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+APPENDED_GATE_KEYS = frozenset({"name", "group", "mode", "run", "selftest", "selftest_inputs", "selftest_expect",
+                                "selftest_exempt", "min_subjects", "rationale", "review_after", "budget_seconds",
+                                "verified", "needs_base", "when"})
+APPENDED_GATE_EXEC_KEYS = ("run", "selftest")
+GATE_KEY_RE = re.compile(r"^    ([A-Za-z_][A-Za-z0-9_]*):(.*)$")
+GATE_CMD_RE = re.compile(r"(python3|bash) (\.github/scripts/[A-Za-z0-9_./-]+\.(?:py|sh))((?: [A-Za-z0-9_./=:,@+-]+)*)")
+
+
+def appended_gate_script_ok(interpreter: str, path: str) -> bool:
+    """A script an appended gate may invoke: a canonical path (no `.`/`..` segment, no `//`, so a glob
+    like check-*.py cannot be walked out of .github/scripts/), the interpreter matching the extension,
+    and trainable gate or test code (never PRIVILEGED_GATE_CODE)."""
+
+    if posixpath.normpath(path) != path or any(seg in ("", ".", "..") for seg in path.split("/")):
+        return False
+    if not path.startswith(".github/scripts/"):
+        return False
+    if (interpreter == "python3") != path.endswith(".py"):
+        return False
+    return gate_code(path)
+
+
+def appended_gate_problem(gid: str, lines: list[str]) -> str | None:
+    """Why one new gate entry (its lines after `  - id:`) may not ride a train, or None."""
+    if not GATE_PLAIN_ID_RE.fullmatch(gid):
+        return f"new gate id {gid!r} is not a plain token"
+    key, exec_lines, seen = None, {}, set()
+    for ln in lines:
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            continue
+        m = GATE_KEY_RE.match(ln)
+        if m:
+            key, value = m.group(1), m.group(2).strip()
+            if key not in APPENDED_GATE_KEYS or key in seen:
+                return f"new gate {gid!r} sets {key!r}, which an appended gate may not"
+            seen.add(key)
+            if key in APPENDED_GATE_EXEC_KEYS:
+                exec_lines[key] = [] if value.split("#")[0].strip() in ("|", "|-", "|+", ">", ">-", ">+") else [value]
+            continue
+        if not ln.startswith("      "):
+            return f"new gate {gid!r} has a line outside any of its keys"
+        if key in exec_lines:
+            exec_lines[key].append(ln.strip())
+    if "run" not in exec_lines:
+        return f"new gate {gid!r} has no run"
+    for k, cmds in exec_lines.items():
+        cmds = [c for c in cmds if c and not c.startswith("#")]
+        if not cmds:
+            return f"new gate {gid!r}: {k} is empty"
+        for c in cmds:
+            m = GATE_CMD_RE.fullmatch(c)
+            if not m or not appended_gate_script_ok(m.group(1), m.group(2)):
+                return f"new gate {gid!r}: {k} line {c[:60]!r} is not a plain call of a trainable gate script"
+    return None
+
+
+def gate_blocks(text: str) -> tuple[str, list[str]]:
+    """(header before the first `  - id:` line, one text block per entry up to the next one)."""
+    head: list[str] = []
+    blocks: list[list[str]] = []
+    for ln in text.splitlines(keepends=True):
+        if GATE_ENTRY_RE.match(ln.rstrip("\r\n")):
+            blocks.append([ln])
+        elif blocks:
+            blocks[-1].append(ln)
+        else:
+            head.append(ln)
+    return "".join(head), ["".join(b) for b in blocks]
+
+
+def gates_append_problem(old: str | None, new: str | None, main_ids: set[str] | frozenset = frozenset()) -> str | None:
+    """None when `new` is `old` plus whole new gate entries only (see GATE_ENTRY_RE above), else why not."""
+    if old is None or new is None:
+        return "gates.yaml is missing on one side"
+    if old == new:
+        return "gates.yaml is unchanged"
+    old_head, old_blocks = gate_blocks(old)
+    new_head, new_blocks = gate_blocks(new)
+    if not old_blocks:
+        return "gates.yaml has no `- id:` entries to append to"
+    if new_head != old_head:
+        return "the text before the first gate entry changed"
+    added: list[str] = []
+    j = 0
+    for b in new_blocks:
+        if j < len(old_blocks) and b == old_blocks[j]:
+            j += 1
+        else:
+            added.append(b)
+    if j != len(old_blocks):
+        return "an existing gate entry was changed, moved or removed"
+    taken = {GATE_ENTRY_RE.match(b.splitlines()[0]).group(1).strip("'\"") for b in old_blocks} | set(main_ids)
+    for b in added:
+        lines = b.splitlines()
+        gid = GATE_ENTRY_RE.match(lines[0]).group(1)
+        if gid.strip("'\"") in taken:
+            return f"new gate id {gid!r} already exists"
+        taken.add(gid)
+        for ln in lines:
+            if YAML_ANCHOR_RE.search(ln) or "\t" in ln:
+                return f"new gate {gid!r} defines a YAML anchor or uses a tab"
+        for ln in lines[1:]:
+            if ln.strip() and not ln.startswith("    ") and not ln.lstrip().startswith("#"):
+                return f"new gate {gid!r} has a line not indented under its entry"
+        why = appended_gate_problem(gid, lines[1:])
+        if why:
+            return why
+    return None
+
+
+def gates_append_at(git, old_rev: str, new_rev: str, main_rev: str | None = None) -> str | None:
+    """gates_append_problem over two revisions read execution-free with `git show`; `main_rev`'s ids
+    are taken too (main may have added the same id since the member branched)."""
+    def text(rev: str) -> str | None:
+        r = git("show", f"{rev}:{GATES_YAML}", check=False)
+        return r.stdout if r.returncode == 0 else None
+    main_ids = gate_ids(text(main_rev) or "") if main_rev else set()
+    return gates_append_problem(text(old_rev), text(new_rev), main_ids)
+
+
 def gate_ids(text: str) -> set[str]:
     """The `- id:` set of a gates.yaml, by line scan (no YAML parse under `python3 -I -S`)."""
     return {m.group(1) for ln in text.splitlines() for m in [GATE_ID_RE.match(ln)] if m}
@@ -1316,7 +1454,13 @@ class TrainBuilder:
         for m in members:
             r = self.git("merge", "--squash", "--no-commit", m.ref, check=False)
             staged = changed_paths(self.git, cached=True) if r.returncode == 0 else []
-            if r.returncode != 0 or not staged or any(unsafe_path(f) or self.untrainable(f) for f in staged):
+            # gates.yaml rides only as a pure append over what this train has built so far (HEAD).
+            appended = (GATES_YAML in staged and r.returncode == 0 and gates_append_problem(
+                self.git("show", f"HEAD:{GATES_YAML}", check=False).stdout or None,
+                self.git("show", f":{GATES_YAML}", check=False).stdout or None,
+                gate_ids(self.git("show", f"{base}:{GATES_YAML}", check=False).stdout)) is None)
+            if r.returncode != 0 or not staged or any(
+                    unsafe_path(f) or (self.untrainable(f) and not (f == GATES_YAML and appended)) for f in staged):
                 self.git("merge", "--abort", check=False)
                 self.git("reset", "-q", "--hard", "HEAD")
                 self.attempted.append(m.number)
@@ -1332,8 +1476,8 @@ class TrainBuilder:
             self.attempted.append(m.number)
             self.git("commit", "-q", "-m", squash_message(m))
             applied.append(m.number)
-            if any(gate_code(f) for f in staged):
-                gate.append(m.number)
+            if any(gate_code(f) for f in staged) or GATES_YAML in staged:
+                gate.append(m.number)   # an appended gate is judged like gate code: never with a regen commit
         regen = False
         if applied:
             try:
@@ -1482,7 +1626,10 @@ def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: 
             raise Reject(f"bundle has no commit for #{m.number}", member_fault=False)
         if git.tree(chain[idx]) != tree:
             raise Reject(f"bundle commit for #{m.number} differs from the merge-tree rebuild", member_fault=False)
-        if any(gate_code(f) for f in changed_paths(git, own_tree, tree)):
+        moved = changed_paths(git, own_tree, tree)
+        if GATES_YAML in moved and gates_append_at(git, own_tree, tree) is not None:
+            raise Reject(f"#{m.number} changes gates.yaml beyond a pure append", member_fault=True)
+        if any(gate_code(f) for f in moved) or GATES_YAML in moved:
             gate.append(m.number)
         own = git("commit-tree", tree, "-p", own, "-m", own_member_message(m.number, m.head_sha)).stdout.strip()
         own_tree = tree
@@ -2111,6 +2258,28 @@ class GitHub:
         # no failed-only/full-run fallback is permitted after a refused receiver request either.
         return all(api("POST", path, {})[0] == 201 for path in plans)
 
+    def ctx_jobs(self, sha: str, ctx: str) -> dict[str, str | None] | None:
+        """Latest-attempt jobs of the workflow run whose check run is `ctx` on `sha`: job name ->
+        conclusion (None while running). None when `ctx` is no Actions check run on `sha` (a commit
+        status, another app) or the job list is unreadable: no job evidence, never an empty pass."""
+        latest = None
+        for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
+            if check.get("name") == ctx and (latest is None or check["id"] > latest["id"]):
+                latest = check
+        if latest is None:
+            return None
+        m = re.search(r"/actions/runs/([0-9]+)/job", latest.get("details_url") or latest.get("html_url") or "")
+        if not m:
+            return None
+        out: dict[str, str | None] = {}
+        for j in paginate(f"/repos/{self.repo}/actions/runs/{m.group(1)}/jobs?filter=latest", "jobs"):
+            name = j.get("name") if isinstance(j, dict) else None
+            if not isinstance(name, str):
+                return None
+            v = j.get("conclusion") if j.get("status") == "completed" else None
+            out[name] = v if out.get(name, v) == v else None   # two jobs, one name, disagreeing: not green
+        return out or None
+
     def failures_inconclusive(self, sha: str, failing: list[str]) -> tuple[bool, str]:
         """Whether the carrier's failing contexts failed ONLY for inconclusive gate kinds (budget overrun,
         NOT EVALUATED), from the gate runner's own --json artifacts — never from the log. Any read that
@@ -2381,7 +2550,8 @@ def admission_refusal(git, base: str, view: dict, runner=None) -> str | None:
 
 def live_candidates(gh, git, repo: str, required: list[str], base: str, untrainable,
                     limit: int = 64, strict: list | None = None,
-                    red: list | None = None, main_red: dict[str, str] | None = None) -> tuple[list[Member], dict[int, dict]]:
+                    red: list | None = None, main_red: dict[str, str] | None = None,
+                    cache: dict | None = None) -> tuple[list[Member], dict[int, dict]]:
     """Open PRs that qualify RIGHT NOW. Each head is fetched and must equal the API's head sha, and
     the file list is changed_paths(<base>...<verified head>) — the PR files API stops at
     3000 entries, so a long PR could hide a path there; git has no such cap."""
@@ -2445,6 +2615,12 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         files = changed_paths(git, f"{base}...{fetched}")
         view = pr_view(repo, p, files)
         view["special_paths"] = [x for c in entries if c.new_mode in SPECIAL_MODES for x in c.paths]
+        if GATES_YAML in files:
+            fork = git("merge-base", base, fetched, check=False).stdout.strip()
+            why_not = gates_append_at(git, fork, fetched, base) if fork else "no merge base"
+            view["gates_append"] = why_not is None
+            if why_not:
+                log(f"#{p['number']:>6} gates.yaml not a pure append ({why_not}) — strict lane")
         app = gh.app_statuses(fetched)
         if any(p["head"]["ref"].startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES):
             chain = remember_approval_chain(gh, git, base, fetched)
@@ -2470,7 +2646,7 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         if not ok and strict is not None:
             modes = [m for c in changed_entries(git, f"{base}...{fetched}") for m in (c.old_mode, c.new_mode)]
             state, fixed, swhy = fix_head_state(gh, git, base, view, member_required, checks, app, modes, main_red,
-                                                extra=extra)
+                                                cache=cache, extra=extra)
             if state:
                 view["fix"] = fixed
             else:
@@ -2959,6 +3135,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     # fast lane, or main moves under the reserved head's CI and it is re-updated forever (#13456).
     stuck: list = []
     base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required, stuck)
+    not_fix: dict[int, str] = {}   # summary["not_fix"]: refusals from EVERY settle view this tick, not just the last
     if defer_recovered_main_red(gh, base, main_red, summary):
         return summary
     holder, timed_out = strict_reservation(git, base, strict, shadow,
@@ -3273,6 +3450,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         if TRAIN_BRANCH_RE.fullmatch(branch):
             Pusher(git, branch, gh.remote).delete()
     if acted:  # a carrier was judged: main or member statuses may have changed — read everything again
+        not_fix.update(main_cache.get(NOT_FIX_KEY, {}))
         base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required, stuck)
         holder, timed_out = strict_reservation(git, base, strict, shadow,
                                                fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
@@ -3332,6 +3510,9 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     # below must already see it.
     strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out,
                 yield_why)
+    not_fix.update(main_cache.get(NOT_FIX_KEY, {}))
+    if not_fix:
+        summary["not_fix"] = dict(sorted(not_fix.items()))
     if summary.get("main_health_deferred"):
         return summary
     stack_head = next((v["head_sha"] for st, v in strict if v["number"] == holder and st == "pending"), None)
@@ -3461,7 +3642,7 @@ def _settle_view(gh, git, repo: str, required: list[str]):
         log(f"::notice::main {base[:12]} is red on {', '.join(sorted(main_red))}: no update-branch except onto a fix")
     cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text, referenced_tests(git, base)),
                                   strict=strict, red=red,
-                                  main_red=main_red)
+                                  main_red=main_red, cache=main_cache)
     cands = promote_fixes(gh, git, repo, base, cands, strict, main_red, main_cache)
     return base, regen_text, strict, red, cands, apps, main_red, main_cache
 
@@ -3480,7 +3661,7 @@ def promote_fixes(gh, git, repo: str, base: str, cands: list, strict: list, main
         if view["head_sha"] != m.head_sha:
             keep.append(m)
             continue
-        fixed = fix_contexts(gh, git, base, view, main_red, cache)
+        fixed = fix_contexts(gh, git, base, view, main_red, cache, record=False)
         if not fixed:
             keep.append(m)
             continue
@@ -4066,10 +4247,59 @@ def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict
             summary["refreshed"].append(n)
 
 
-def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache: dict | None = None) -> list[str]:
+FIX_JOB_OK = frozenset({"success", "skipped", "neutral"})
+NOT_FIX_KEY = ("not_fix",)   # cache slot: PR number -> why a green strict PR is not a main-red fix
+
+
+def fix_job_evidence(main_jobs: dict[str, str | None] | None, head_jobs: dict[str, str | None] | None) -> str | None:
+    """Why a PR head does NOT prove it fixes a main-red context, or None when it does. `main_jobs` is
+    main's red run for that context, `head_jobs` the PR head's run for it (GitHub.ctx_jobs). Every job
+    that failed on main must have RUN and succeeded on the head: path-scoped CI skips jobs, and a
+    skipped job leaves an aggregate context (Validate manifests) green without testing the breakage
+    (2026-11-13: #16005 touched only merge-train files, skipped Admin UI, and took the fix slot from
+    the real fix). Fails closed: no job record on either side, or a main run with no failed job, is
+    no evidence. A job red on main for ANOTHER context also has to pass — over-strict, never loose.
+    A cancelled or timed-out job counts as failed too: a leaf that hung on main still fails the
+    aggregate, and exempting it would let a head that SKIPPED the leaf read as the fix — the very hole
+    this closes. Never treat a non-OK main job as inconclusive here."""
+    if not main_jobs:
+        return "no job record for main's red run"
+    failed = sorted(n for n, c in main_jobs.items() if c is not None and c not in FIX_JOB_OK)
+    if not failed:
+        return "main's red run names no failed job"
+    if not head_jobs:
+        return "no job record on the head"
+    missing = [f"{n} ({head_jobs.get(n) or 'absent'})" for n in failed if head_jobs.get(n) not in OK_STATES]
+    return f"did not run green on the head: {', '.join(missing)}" if missing else None
+
+
+def note_not_fix(cache: dict | None, view: dict, why: str) -> None:
+    """Record why a green strict PR was refused as a main-red fix: settle copies the slot into
+    summary["not_fix"], so a real fix refused (a renamed or restructured job) is visible to a human."""
+    log(f"#{view.get('number', 0):>6} not a fix: {why}")
+    if cache is not None and view.get("number") is not None:
+        cache.setdefault(NOT_FIX_KEY, {})[view["number"]] = why
+
+
+def cached_ctx_jobs(gh, sha: str, ctx: str, cache: dict | None) -> dict[str, str | None] | None:
+    key = ("ctx_jobs", sha, ctx)
+    if cache is not None and key in cache:
+        return cache[key]
+    out = gh.ctx_jobs(sha, ctx)
+    if cache is not None:
+        cache[key] = out
+    return out
+
+
+def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache: dict | None = None,
+                 head_checks: dict[str, str | None] | None = None, record: bool = True) -> list[str]:
     """The main-red contexts this green PR demonstrably fixes: red in main's CI at the PR's own
-    merge-base (or nearest ancestor with a verdict), green on the PR head. A PR that went green over a
-    base that was still green proves nothing about the breakage and is NOT a fix."""
+    merge-base (or nearest ancestor with a verdict), and every job that failed in that red run ran
+    green on the PR head (fix_job_evidence). A PR that went green over a base that was still green
+    proves nothing about the breakage and is NOT a fix; nor is one whose CI skipped the failing job.
+    `head_checks`, when given, are the head's verdicts: a context not green there is dropped before any
+    job list is read (the job evidence costs two API reads per head and context). `record` False keeps a
+    refusal out of summary["not_fix"] (a train candidate that is not a fix just stays a candidate)."""
     mb = git("merge-base", view["head_sha"], base, check=False).stdout.strip()
     if not mb:
         return []
@@ -4078,9 +4308,16 @@ def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache
     for ctx in sorted(main_red):
         if ctx in extra and gh.extra_checks(view["head_sha"], {ctx: extra[ctx]}).get(ctx) not in OK_STATES:
             continue   # an extra gate is not required: only its own pinned GREEN on the head proves a fix
+        if head_checks is not None and head_checks.get(ctx) not in OK_STATES:
+            continue
         at_base = main_ci_result(gh, git, ctx, mb, cache)
-        if at_base and at_base[1] == "failure":
-            out.append(ctx)
+        if not at_base or at_base[1] != "failure":
+            continue
+        why = fix_job_evidence(cached_ctx_jobs(gh, at_base[0], ctx, cache), cached_ctx_jobs(gh, view["head_sha"], ctx, cache))
+        if why:
+            note_not_fix(cache if record else None, view, f"{ctx} {why}")
+            continue
+        out.append(ctx)
     return out
 
 
@@ -4107,12 +4344,21 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
             return None, [], "up to date, and not the update of a fix behind main"
         claim_from = parents[1]
     claim_checks = checks if claim_from == head else (pinned_checks(gh, claim_from, extra) if extra else gh.checks(claim_from))
-    claimed = [c for c in fix_contexts(gh, git, base, {**view, "head_sha": claim_from}, main_red, cache)
-               if claim_checks.get(c) in OK_STATES]
+    claimed = fix_contexts(gh, git, base, {**view, "head_sha": claim_from}, main_red, cache, head_checks=claim_checks)
     if not claimed:
         return None, [], "claims no main-red context"
     masked = {c: ("success" if c in main_red and c not in claimed and v == "failure" else v) for c, v in checks.items()}
     ok, why = qualifies(view, member, masked, app, untrainable=lambda _f: False, extra=extra)
+    if ok and claim_from != head:
+        # The combined head is what merges: it must have run the failing jobs too, not only the claim.
+        mb = git("merge-base", claim_from, base, check=False).stdout.strip()
+        for c in claimed:
+            at_base = main_ci_result(gh, git, c, mb, cache) if mb else None
+            why = (fix_job_evidence(cached_ctx_jobs(gh, at_base[0], c, cache), cached_ctx_jobs(gh, head, c, cache))
+                   if at_base else "no main verdict at the claim's base")
+            if why:
+                note_not_fix(cache, view, f"combined head: {c} {why}")
+                return None, [], f"combined head: {c} {why}"
     if ok:
         return "green", claimed, f"fix for {', '.join(claimed)} red on main {base[:12]}"
     if why.startswith(("required context pending", "required context never reported", "extra gate pending")) and not any(
@@ -4833,6 +5079,8 @@ class FakeGitHub:
         self.foreign_after_merge: str | None = None
         self.refuse_merge: set[int] = set()
         self.head_checks: dict[str, dict] = {}   # PR head sha -> check overrides (red, pending, guard)
+        self.jobs: dict[str, dict] = {}          # sha -> job overrides for ctx_jobs (job name -> conclusion)
+        self.head_jobs: dict = {}                # job overrides on EVERY PR head (claim and combined)
         self.pending_shas: set[str] = set()      # carrier heads whose CI is still running
         self.updates: list[int] = []             # update-branch calls, in order
         self.update_refuse = False               # True: update-branch answers as GitHub does on a refusal
@@ -4907,6 +5155,16 @@ class FakeGitHub:
 
     def ci_activity(self, sha):
         return self.activity.get(sha)
+
+    def ctx_jobs(self, sha, ctx):
+        """The context is its own (only) job unless a fixture names the jobs of its run."""
+        v = self.checks(sha).get(ctx, "absent")
+        if v == "absent":
+            v = self.extra_checks(sha, {ctx: ""}).get(ctx)
+        out = {ctx: v}
+        if any(p["head"]["sha"] == sha for p in self.prs.values()):
+            out.update(self.head_jobs)
+        return {**out, **self.jobs.get(sha, {})}
 
     def extra_checks(self, sha, gates):
         """Pinned runs: `self.pinned[sha]` = {name: [states]} from the declared workflow; with none set, a
@@ -5228,7 +5486,9 @@ def _synthetic_origin(root: str) -> None:
     pr("pJ1", {".github/scripts/merge-train.py": f"open({os.path.join(os.path.dirname(root), 'strict-member-ran')!r}, 'w').write('ran')\n"})
     pr("pJ2", {".github/workflows/merge-train.yml": "name: train\n"})
     pr("pGY", {GATES_YAML: "gates:\n  - id: g-one\n    run: true\n"})                  # retires g-two
-    pr("pGA", {GATES_YAML: SYN_GATES_YAML + "  - id: g-three\n    run: true\n"})      # adds g-three
+    # adds g-three AND edits g-one, so it is not a pure append and still takes the strict lane
+    pr("pGA", {GATES_YAML: SYN_GATES_YAML.replace("run: true", "run: 'true'", 1) + "  - id: g-three\n    run: true\n"})
+    pr("pGP", {GATES_YAML: SYN_GATES_YAML + "  - id: g-four\n    run: python3 .github/scripts/check-g-four.py\n"})      # a pure append
     # Non-judge strict members (plain scripts under .github/scripts): batched together.
     pr("pP1", {".github/scripts/p1.py": "print(1)\n"})
     pr("pP2", {".github/scripts/p2.py": "print(2)\n"})
@@ -5551,7 +5811,11 @@ def retry_planner_self_test(check) -> None:
 # ~6 more ticks: spawns=19,929 at 708 cases, measured locally on 2026-11-12; ceiling 20,400 (~2.4 %).
 # Expedite lane (ADR-0343 amendment 2026-11-13): eleven cases E1-E11, ~17 more ticks: spawns=21,143 at 720 cases,
 # measured locally on 2026-11-13; ceiling 21,400 (~1.2 %).
-SELF_TEST_SPAWN_CEILING = 21400
+# Main-red fix job evidence (#16013): two fix_behind cases: spawns=21,402 at 761 cases, measured by the train
+# over main on 2026-11-14; ceiling 21,800 (~1.9 %).
+# Its refinements (refusal in the summary, timed-out main jobs): spawns=21,445 at 764 cases, measured on the
+# merged tree on 2026-11-14; ceiling 21,900 (~2.1 %).
+SELF_TEST_SPAWN_CEILING = 21900
 
 # A green carrier and a green, up-to-date strict holder cannot both keep their verification: whichever
 # merges first moves main under the other. Strict first voids the carrier (rebuild ~50 min, measured
@@ -5722,6 +5986,56 @@ def self_test() -> int:
               not ok and "manual lane" in why and U(f) and not gate_code(f), why)
         check(f"strict lane: gates.yaml ({shape}) IS in the strict lane",
               strict_lane_state({**base_pr, "files": [f]}, req, green, None, U, [], None, None)[0] == "green")
+    # ADR-0343 amendment 2026-11-14: a pure APPEND of whole new gate entries rides a train; every other
+    # gates.yaml shape keeps the strict lane. Each refused shape below is one the append rule must catch.
+    base_g = "# header\ngates:\n  - id: g-one\n    run: |\n      true\n  - id: g-two\n    run: true\n"
+    add = "  - id: g-new\n    mode: enforced\n    run: |\n      python3 .github/scripts/check-new.py --root .\n"
+    check("gates append: a new entry at the end is a pure append", gates_append_problem(base_g, base_g + add) is None)
+    mid = base_g.replace("  - id: g-two", add + "  - id: g-two")
+    full = base_g + ("  - id: g-full\n    name: full\n    group: lint\n    mode: enforced\n    budget_seconds: 30\n"
+                     "    selftest_inputs:\n      - .github/scripts/check-full.py\n    rationale: >-\n      why it exists\n"
+                     "    run: |\n      # comment\n      python3 .github/scripts/check-full.py --root .\n"
+                     "    selftest: python3 .github/scripts/test-check-full.py\n")
+    check("gates append: a realistic new gate (block run, selftest, inputs, rationale) is a pure append",
+          gates_append_problem(base_g, full) is None, f"{gates_append_problem(base_g, full)!r}")
+    check("gates append: a new entry between two entries is a pure append", gates_append_problem(base_g, mid) is None)
+    refused = {
+        "an existing entry edited": base_g.replace("run: true", "run: 'true # weakened'") + add,
+        "an existing entry removed": base_g.replace("  - id: g-two\n    run: true\n", "") + add,
+        "entries reordered": "# header\ngates:\n  - id: g-two\n    run: true\n  - id: g-one\n    run: |\n      true\n" + add,
+        "the header changed": base_g.replace("# header", "# header\nother: 1") + add,
+        "a new id that already exists": base_g + "  - id: g-two\n    run: false\n",
+        "a new id taken on main": base_g + "  - id: g-main\n    run: true\n",
+        "a new entry defining an anchor": base_g + "  - id: g-a\n    run: &r true\n",
+        "a new entry starting a top-level key": base_g + "  - id: g-b\n    run: true\nother: 1\n",
+        "a line appended into an existing block scalar": base_g.replace("      true\n", "      true\n      exit 0\n"),
+        "no change at all": base_g,
+        "a quoted id duplicating an existing one": base_g + '  - id: "g-one"\n    run: python3 .github/scripts/check-a.py\n',
+        "a second id key inside the new entry": base_g + "  - id: g-c\n    id: g-one\n    run: python3 .github/scripts/check-a.py\n",
+        "a free shell line in run": base_g + "  - id: g-d\n    run: |\n      printf x > .github/scripts/check-adr-registry.sh\n",
+        "a chained command in run": base_g + "  - id: g-e\n    run: python3 .github/scripts/check-a.py; rm -rf .\n",
+        "a redirect argument": base_g + "  - id: g-f\n    run: python3 .github/scripts/check-a.py >out\n",
+        "python3 -c": base_g + "  - id: g-g\n    run: python3 -c 'print(1)'\n",
+        "a non-gate script": base_g + "  - id: g-h\n    run: python3 .github/scripts/regen-helper.py\n",
+        "a selftest with free shell": base_g + "  - id: g-i\n    run: python3 .github/scripts/check-a.py\n    selftest: echo ok\n",
+        "an env key": base_g + "  - id: g-j\n    env: {PYTHONPATH: x}\n    run: python3 .github/scripts/check-a.py\n",
+        "an unknown key": base_g + "  - id: g-k\n    requires: [g-one]\n    run: python3 .github/scripts/check-a.py\n",
+        "no run at all": base_g + "  - id: g-l\n    mode: enforced\n",
+        "a path walking out of .github/scripts": base_g + "  - id: g-m\n    run: python3 .github/scripts/check-x/../../workflows/x.py\n",
+        "a ./ segment": base_g + "  - id: g-n\n    run: python3 .github/scripts/./check-a.py\n",
+        "bash on a .py": base_g + "  - id: g-o\n    run: bash .github/scripts/check-a.py\n",
+    }
+    for shape, new in refused.items():
+        why = gates_append_problem(base_g, new, {"g-main"})
+        check(f"gates append: {shape} is refused", why is not None, f"{why!r}")
+    check("gates append: a missing file on either side is refused",
+          gates_append_problem(None, base_g + add) is not None and gates_append_problem(base_g, None) is not None)
+    ok, why = qualifies({**base_pr, "files": [GATES_YAML], "gates_append": True}, req, green, None, U)
+    check("qualifies: a pure gates.yaml append is a train CANDIDATE", ok, why)
+    check("strict lane: a pure gates.yaml append is NOT in the strict lane",
+          strict_lane_state({**base_pr, "files": [GATES_YAML], "gates_append": True}, req, green, None, U, [], None, None)[0] is None)
+    ok, why = qualifies({**base_pr, "files": [GATES_YAML], "gates_append": False}, req, green, None, U)
+    check("qualifies: a gates.yaml change that is not a pure append stays manual lane", not ok and "manual lane" in why, why)
     # ...while an unrelated (non-privileged) gate's CODE change still rides a train.
     ok, why = qualifies({**base_pr, "files": [".github/scripts/check-unrelated.py"]}, req, green, None, U)
     check("qualifies: an unrelated gate's check script still rides a train (#13837 control)", ok, why)
@@ -6268,7 +6582,7 @@ def self_test() -> int:
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
                        "pX": 33, "pF": 34, "pW2": 36, "pS": 37, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62, "pK": 38, "pM": 39,
                        "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pPc": 85, "pPR": 86, "pPx": 87, "pP1": 88, "pPbad": 89, "pP2": 90, "pRG": 91, "pFoo": 92,
-                       "pE1": 93, "pE2": 94, "pE3": 95}
+                       "pE1": 93, "pE2": 94, "pE3": 95, "pGP": 96}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -8039,6 +8353,18 @@ def self_test() -> int:
             gh.updates.clear()
             reset()
 
+            # GATES.YAML APPEND (ADR-0343 amendment 2026-11-14): a member that only appends a gate entry rides a
+            # train carrier and merges; before the amendment it took the strict lane (update-branch, no carrier).
+            open_only("pGP")
+            s, st = tick()
+            oc = [c for c in gh.carriers.values() if c["state"] == "open"]
+            check("gates append (e2e): a pure gates.yaml append is published on a train carrier, no update-branch",
+                  st == "published" and len(oc) == 1 and carrier_members(oc[0]) == [96] and gh.updates == [],
+                  f"{s} st={st} carriers={[carrier_members(c) for c in oc]} updates={gh.updates}")
+            s, st = tick()
+            check("gates append (e2e): the carrier verifies and the append merges", 96 in gh.merged, f"{s} merged={gh.merged}")
+            reset()
+
             # EXPEDITE LANE (ADR-0343 amendment 2026-11-13): an ordinary carrier for p1 is running; p2 carries
             # merge-priority:expedite. With the lane on, p2 rides its own one-member carrier over main, merges
             # first, and p1's carrier is rejected as "main moved" with nobody blamed.
@@ -9079,6 +9405,8 @@ def self_test() -> int:
 
             def main_red_done():
                 gh.head_checks.clear()
+                gh.jobs.clear()
+                gh.head_jobs.clear()
                 gh.updates.clear()
                 reset()
 
@@ -9140,6 +9468,43 @@ def self_test() -> int:
             s1, s2 = fix_behind({})
             check("main red: a combined fix head green everywhere merges",
                   gh.merged == [36] and s1.get("waiting", []) == [35], f"merged={gh.merged} {s1} {s2}")
+            main_red_done()
+
+            # 2026-11-13: main red on MR because a LEAF job (Admin UI) failed. A PR whose path-scoped CI
+            # SKIPPED that job reads MR green but tested nothing: not a fix, so no update and no slot.
+            def leaf_red(head_ui):
+                def tamper(_p):
+                    gh.jobs[base0] = {"Admin UI": "failure"}
+                    gh.head_jobs["Admin UI"] = head_ui
+                return tamper
+            s1, s2 = fix_behind({}, tamper=leaf_red("skipped"))
+            check("main red on a leaf job: a PR that SKIPPED the failing job is not a fix (no update, no merge)",
+                  gh.updates == [] and gh.merged == [] and not s1["in_flight"] and s2 is None,
+                  f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            check("main red on a leaf job: the refused fix and its reason reach the settle summary",
+                  "Admin UI (skipped)" in (s1.get("not_fix") or {}).get(36, ""), str(s1.get("not_fix")))
+            main_red_done()
+            s1, s2 = fix_behind({}, tamper=leaf_red("success"))
+            check("main red on a leaf job: a PR that RAN the failing job green is the fix (updated, merged)",
+                  gh.updates == [36] and gh.merged == [36], f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            main_red_done()
+            check("fix evidence: a job skipped on the head, or no job record, is never evidence",
+                  fix_job_evidence({"A": "failure", MR: "failure"}, {"A": "skipped", MR: "success"}) is not None
+                  and fix_job_evidence(None, {MR: "success"}) is not None
+                  and fix_job_evidence({MR: "failure"}, None) is not None
+                  and fix_job_evidence({MR: "success"}, {MR: "success"}) is not None
+                  and fix_job_evidence({"A": "failure", MR: "failure"}, {"A": "success", MR: "success"}) is None)
+            # A leaf that TIMED OUT (or was cancelled) on main still failed the aggregate: a head that skipped
+            # it is no fix, exactly like a leaf that failed outright (#16005's hole through another door).
+            check("fix evidence: a cancelled or timed-out main job is a failure the head must clear",
+                  fix_job_evidence({"A": "timed_out", MR: "failure"}, {"A": "skipped", MR: "success"}) is not None
+                  and fix_job_evidence({"A": "cancelled", MR: "failure"}, {"A": "skipped", MR: "success"}) is not None
+                  and fix_job_evidence({"A": "timed_out", MR: "failure"}, {"A": "success", MR: "success"}) is None)
+            s1, s2 = fix_behind({}, tamper=lambda _p: (gh.jobs.update({base0: {"Admin UI": "timed_out"}}),
+                                                       gh.head_jobs.update({"Admin UI": "skipped"})))
+            check("main red with a TIMED-OUT leaf beside the failed aggregate: a head that skipped it is REFUSED",
+                  gh.updates == [] and gh.merged == [] and "Admin UI (skipped)" in (s1.get("not_fix") or {}).get(36, ""),
+                  f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
             main_red_done()
 
             # The fix path takes manual-lane paths exactly as the strict lane does (pW2 touches

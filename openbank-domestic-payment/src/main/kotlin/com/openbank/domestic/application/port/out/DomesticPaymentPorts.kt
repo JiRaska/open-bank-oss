@@ -4,6 +4,7 @@
 
 package com.openbank.domestic.application.port.out
 
+import com.openbank.domestic.domain.event.PaymentHeldEvent
 import com.openbank.domestic.domain.model.DelegatedSpendBinding
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
@@ -102,8 +103,40 @@ interface DomesticPaymentRepository {
      */
     suspend fun findRedrivable(maxAttempts: Int, minAge: Instant, limit: Int): List<UUID>
 
-    /** Count one re-drive against [paymentId], before it is attempted. */
+    /**
+     * [findRedrivable] for the admission chain: the same rows, least recently offered a run first
+     * ([markRunChecked]). Only the chain-on sweep reads it; with the chain off the sweep is main's.
+     */
+    suspend fun findRedrivableLeastRecentlyChecked(maxAttempts: Int, minAge: Instant, limit: Int): List<UUID> =
+        findRedrivable(maxAttempts, minAge, limit)
+
+    /**
+     * Count one re-drive against [paymentId]. With the chain off it is counted before the attempt,
+     * as on main; with it on, only for a run that was actually started.
+     */
     suspend fun recordRedriveAttempt(paymentId: UUID)
+
+    /**
+     * HELD payments to check for a live workflow run (ADR-0374): held before [heldBefore], the
+     * least recently checked first ([markRunChecked]), so every held payment gets its turn however
+     * many are held.
+     */
+    suspend fun findHeldToReconcile(heldBefore: Instant, limit: Int): List<HeldPaymentRef> = emptyList()
+
+    /**
+     * Note that the sweep offered [paymentId] a run at [at]. Ordering only; it spends nothing.
+     * Written before the offer, so a payment whose offer fails goes to the back of the queue.
+     */
+    suspend fun markRunChecked(paymentId: UUID, at: Instant) = Unit
+
+    /** How many re-drives of [paymentId] actually started a run; 0 for an unknown payment. */
+    suspend fun redriveAttempts(paymentId: UUID): Int = 0
+
+    /** RECEIVED payments whose re-drive budget of [maxAttempts] is spent: nothing automatic moves them. */
+    suspend fun countRedriveExhausted(maxAttempts: Int): Long = 0
+
+    /** When the longest-held payment still HELD was held, or null when none is. */
+    suspend fun oldestHeldAt(): Instant? = null
 
     /** How many payments currently sit in [status]. */
     suspend fun countByStatus(status: DomesticPaymentStatus): Long
@@ -121,6 +154,9 @@ interface DomesticPaymentRepository {
 /** Outbound port for draining the transactional outbox (read pending, mark sent/failed). */
 interface DomesticPaymentOutboxRepository : OutboxRepository
 
+/** A HELD payment and the moment its hold began. */
+data class HeldPaymentRef(val paymentId: UUID, val heldAt: Instant)
+
 /**
  * Outbound port for domestic-payment domain events. The `*Payload` methods serialize the event body
  * that is stored in the outbox at write time; transport (publish) is handled by the Kafka publisher
@@ -133,6 +169,13 @@ interface DomesticPaymentEventPublisher {
     fun statusChangedPayload(previous: DomesticPayment, current: DomesticPayment): String
 
     fun delegatedSpendFinalizedAbsentPayload(binding: DelegatedSpendBinding): String
+
+    /**
+     * Body of the `PAYMENT_HELD` event (ADR-0374 D13). Defaulted so the hand-written publishers in
+     * tests that never hold a payment need not change; the one production publisher overrides it.
+     */
+    fun paymentHeldPayload(event: PaymentHeldEvent): String =
+        throw UnsupportedOperationException("This publisher does not serialise PAYMENT_HELD")
 }
 
 sealed interface DelegatedPaymentSaveOutcome {
