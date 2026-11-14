@@ -4,6 +4,36 @@
   },
   "interactions": [
     {
+      "description": "POST fraud score for SEPA payment with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          "amount": 250.00,
+          "counterparty": {
+            "scheme": "IBAN",
+            "value": "DE89370400440532013000"
+          },
+          "counterpartyId": null,
+          "currency": "EUR",
+          "initiationMode": "CUSTOMER_PRESENT",
+          "rail": "SEPA"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/fraud/score"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
       "description": "POST fraud score for SEPA payment",
       "providerStates": [
         {
@@ -14,8 +44,13 @@
         "body": {
           "accountId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
           "amount": 250.00,
+          "counterparty": {
+            "scheme": "IBAN",
+            "value": "DE89370400440532013000"
+          },
           "counterpartyId": null,
           "currency": "EUR",
+          "initiationMode": "CUSTOMER_PRESENT",
           "rail": "SEPA"
         },
         "headers": {

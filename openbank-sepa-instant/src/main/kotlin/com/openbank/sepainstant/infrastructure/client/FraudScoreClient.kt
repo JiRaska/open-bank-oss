@@ -37,7 +37,16 @@ data class FraudScoreClientRequest(
     val rail: String,
     val accountId: UUID?,
     val counterpartyId: UUID?,
+    // ADR-0377 D3 (fraud-service openapi 1.4.0), additive: the payee account and initiation mode.
+    // fraud-service keys the account on arrival; this rail never hashes or stores it.
+    val counterparty: FraudScoreClientCounterparty? = null,
+    val initiationMode: String? = null,
 )
+
+/** Mirror of fraud-service `counterparty`. Personal data: `toString()` is redacted. */
+data class FraudScoreClientCounterparty(val scheme: String, val value: String) {
+    override fun toString(): String = "FraudScoreClientCounterparty(scheme=$scheme, value=<redacted>)"
+}
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class FraudScoreClientResponse(

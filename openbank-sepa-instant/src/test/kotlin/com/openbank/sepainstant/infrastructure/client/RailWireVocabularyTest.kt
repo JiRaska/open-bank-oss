@@ -4,7 +4,9 @@
 
 package com.openbank.sepainstant.infrastructure.client
 
+import com.openbank.libs.fincrime.CounterpartyRef
 import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.InitiationMode
 import com.openbank.libs.fincrime.ScreeningMatchStatus
 import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.sepainstant.application.port.out.FraudScoreCommand
@@ -45,6 +47,8 @@ class RailWireVocabularyTest {
             rail = "SYNTHETIC",
             accountId = null,
             counterpartyId = null,
+            counterparty = CounterpartyRef.fromIban("DE89370400440532013000"),
+            initiationMode = InitiationMode.CUSTOMER_PRESENT,
         )
         val valid = FraudVerdict.entries.flatMap { listOf(it.name to it, it.name.lowercase() to it) }
         val padded = FraudVerdict.entries.flatMap {

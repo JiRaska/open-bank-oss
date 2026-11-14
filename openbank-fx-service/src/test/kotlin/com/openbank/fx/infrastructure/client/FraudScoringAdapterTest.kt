@@ -6,7 +6,10 @@ package com.openbank.fx.infrastructure.client
 
 import com.openbank.fx.application.port.out.FraudScoreCommand
 import com.openbank.fx.infrastructure.observability.FraudScoringMetrics
+import com.openbank.libs.fincrime.CounterpartyRef
 import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.InitiationMode
+import com.openbank.libs.fincrime.UnknownCounterpartyReason
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
@@ -38,6 +41,8 @@ class FraudScoringAdapterTest {
         rail = "FX",
         accountId = UUID.randomUUID(),
         counterpartyId = null,
+        counterparty = CounterpartyRef.fromIban("DE89370400440532013000"),
+        initiationMode = InitiationMode.CUSTOMER_PRESENT,
     )
 
     @Test
@@ -151,5 +156,27 @@ class FraudScoringAdapterTest {
         val outcome = runBlocking { adapter.score(command()) }
 
         assertThat(outcome.verdict).isEqualTo(FraudVerdict.REVIEW)
+    }
+
+    @Test
+    fun `ADR-0377 D3 - the typed counterparty and initiation mode are mapped to the wire`() {
+        val sent = io.mockk.slot<FraudScoreClientRequest>()
+        every { client.score(capture(sent)) } returns
+            Uni.createFrom().item(FraudScoreClientResponse(verdict = "ALLOW", score = 0))
+
+        runBlocking { adapter.score(command()) }
+        assertThat(sent.captured.counterparty)
+            .isEqualTo(FraudScoreClientCounterparty(scheme = "IBAN", value = "DE89370400440532013000"))
+        assertThat(sent.captured.counterparty.toString()).doesNotContain("0532013000")
+        assertThat(sent.captured.initiationMode).isEqualTo("CUSTOMER_PRESENT")
+
+        runBlocking {
+            adapter.score(
+                command().copy(
+                    counterparty = CounterpartyRef.Unknown(UnknownCounterpartyReason.NOT_APPLICABLE_OWN_ACCOUNT),
+                ),
+            )
+        }
+        assertThat(sent.captured.counterparty).isNull()
     }
 }
