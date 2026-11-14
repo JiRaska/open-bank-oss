@@ -5679,7 +5679,9 @@ def retry_planner_self_test(check) -> None:
 # ~6 more ticks: spawns=19,929 at 708 cases, measured locally on 2026-11-12; ceiling 20,400 (~2.4 %).
 # Expedite lane (ADR-0343 amendment 2026-11-13): eleven cases E1-E11, ~17 more ticks: spawns=21,143 at 720 cases,
 # measured locally on 2026-11-13; ceiling 21,400 (~1.2 %).
-SELF_TEST_SPAWN_CEILING = 21400
+# Main-red fix job evidence (#16013): two fix_behind cases: spawns=21,402 at 761 cases, measured by the train
+# over main on 2026-11-14; ceiling 21,800 (~1.9 %).
+SELF_TEST_SPAWN_CEILING = 21800
 
 # A green carrier and a green, up-to-date strict holder cannot both keep their verification: whichever
 # merges first moves main under the other. Strict first voids the carrier (rebuild ~50 min, measured
