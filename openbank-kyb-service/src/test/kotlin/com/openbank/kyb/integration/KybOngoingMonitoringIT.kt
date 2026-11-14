@@ -1072,6 +1072,36 @@ class KybOngoingMonitoringIT {
         assertThat(journey.rows(never)).allMatch { it.desired == "WITHDRAWN" && it.syncState == "PENDING" }
     }
 
+    /**
+     * The scope of the switched-off exception, by what reaches the registry: with the switch off
+     * a run re-asserts nothing, reconciles nothing and registers nothing, even with all three due,
+     * and a case that only ever existed while it was off causes no call at all.
+     */
+    @Test
+    fun `switched off, a re-assertion, a reconciliation or a registration that is due calls nothing`() {
+        val held = journey.approved("71000399")
+        run()
+        assertThat(registeredFor(held)).hasSize(2)
+        val heldId = UUID.fromString(held)
+        // Due a re-assertion and a reconciliation, were the switch on.
+        journey.execute(
+            "update kyb_monitored_subjects set updated_at = now() - interval '8 days' where case_id = ?",
+            heldId,
+        )
+        journey.execute("update kyb_cases set monitoring_synced_version = null where case_id = ?", heldId)
+        switch(enabled = false)
+        val never = journey.approved("71000402")
+        journey.customer().post("/api/v1/kyb/cases/$never/abandon").then().statusCode(200)
+        val callsBefore = registry.calls.size
+
+        assertThat(run()).isEqualTo(MonitoringRunOutcome.DISABLED)
+
+        assertThat(registry.calls.drop(callsBefore)).describedAs("no call of any kind").isEmpty()
+        assertThat(journey.rows(held)).allMatch { it.desired == "REGISTERED" && it.syncState == "SYNCED" }
+        assertThat(journey.stored(held).syncedVersion).describedAs("not reconciled").isNull()
+        assertThat(journey.rows(never)).isNotEmpty().allMatch { it.syncState == "PENDING" }
+    }
+
     @Test
     fun `a re-assertion does not overwrite a withdrawal that commits while it runs`() {
         val caseId = journey.approved("71000208")

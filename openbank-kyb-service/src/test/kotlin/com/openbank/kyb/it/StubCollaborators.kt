@@ -182,6 +182,8 @@ class StubAresAdapter : RegistryAdapter {
             "71000364" to "Adéla Odvolaná",
             "71000372" to "Bořek Vypínaný",
             "71000381" to "Cyril Neodeslaný",
+            "71000399" to "Dalibor Odpojený",
+            "71000402" to "Edita Nikdy",
         )
     }
 
