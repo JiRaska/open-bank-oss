@@ -187,4 +187,22 @@ class AmlCaseHoldDecisionTest {
         assertThat(proposed.proposeHoldDecision(HoldDisposition.BLOCK, "no", carol, late).holdProposal!!.proposedBy)
             .isEqualTo("carol")
     }
+
+    @Test
+    fun `a proposal of the V17 shape is inert - replaceable by anyone, never confirmable`() {
+        for (legacy in listOf(
+            HoldDecisionProposal(HoldDisposition.CLEAR, "fine", "alice", t0),
+            HoldDecisionProposal(HoldDisposition.CLEAR, "fine", "alice", t0, proposerPersonId = "staff-a"),
+            HoldDecisionProposal(HoldDisposition.CLEAR, "fine", "alice", t0, expiresAt = t0.plusSeconds(3600)),
+        )) {
+            val stuck = case().copy(holdProposal = legacy)
+            assertThat(legacy.isOpenAt(stuck.id, t1)).isFalse()
+            assertThatThrownBy { stuck.confirmHoldDecision(HoldDisposition.CLEAR, "fine", bob, t1) }
+                .isInstanceOf(HoldDecisionFourEyesException::class.java)
+            val fresh = stuck.proposeHoldDecision(HoldDisposition.BLOCK, "listed", carol, t1)
+            assertThat(fresh.holdProposal!!.proposedBy).isEqualTo("carol")
+            assertThat(fresh.confirmHoldDecision(HoldDisposition.BLOCK, "listed", bob, t1).status)
+                .isEqualTo(AmlCaseStatus.BLOCKED)
+        }
+    }
 }

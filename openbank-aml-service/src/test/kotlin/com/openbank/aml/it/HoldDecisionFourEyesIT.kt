@@ -209,6 +209,15 @@ class HoldDecisionFourEyesIT : MonitoringDecisionITSupport() {
         propose(HOLD_CASE, "BLOCK", "replace it").then().statusCode(409)
         withdraw(HOLD_CASE).then().statusCode(409)
         propose(REPLACED_CASE, "BLOCK", "second look").then().statusCode(201).body("proposedBy", equalTo("carol"))
+        // A proposal of the V17 shape (no person id, no expiry) neither blocks nor can be confirmed.
+        seedHoldCase(900_000_004L, V17_CASE, "00000000-0000-4000-8000-00000000e013")
+        rows(
+            "UPDATE aml_cases SET hold_proposal_outcome = 'CLEAR', hold_proposal_reason = 'old', " +
+                "hold_proposed_by = 'legacy', hold_proposed_at = now() WHERE case_id = $1",
+            V17_CASE,
+        )
+        confirm(V17_CASE, "CLEAR", "old").then().statusCode(409)
+        propose(V17_CASE, "BLOCK", "fresh look").then().statusCode(201).body("proposedBy", equalTo("carol"))
     }
 
     @Test
@@ -276,6 +285,7 @@ class HoldDecisionFourEyesIT : MonitoringDecisionITSupport() {
         val ACCOUNT: UUID = UUID.fromString("00000000-0000-4000-8000-00000000e002")
         val HOLD_CASE: UUID = UUID.fromString("00000000-0000-4000-8000-00000000e003")
         val REPLACED_CASE: UUID = UUID.fromString("00000000-0000-4000-8000-00000000e004")
+        val V17_CASE: UUID = UUID.fromString("00000000-0000-4000-8000-00000000e006")
         val LEGACY_CASE: UUID = UUID.fromString("00000000-0000-4000-8000-00000000e005")
     }
 }

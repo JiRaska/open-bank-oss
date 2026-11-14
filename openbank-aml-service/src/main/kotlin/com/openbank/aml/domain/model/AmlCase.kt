@@ -81,6 +81,18 @@ data class HoldDecisionProposal(
     val withdrawnBy: String? = null,
     val withdrawnAt: Instant? = null,
 ) {
+    /**
+     * Whether this is a four-eyes proposal under the person rule at all: it names the proposer's
+     * person AND has an expiry. A row without either (the V17 shape, written before persons were
+     * compared) is inert: it is never open, so a fresh proposal may replace it, and it can never be
+     * confirmed ([Proposal.approveBy] refuses a proposal with no person). Nothing is backfilled.
+     */
+    val isPersonBound: Boolean
+        get() = proposerPersonId != null && expiresAt != null
+
+    /** Pending, person-bound and unexpired. The ONLY test of "a proposal blocks a new one". */
+    fun isOpenAt(caseId: UUID, now: Instant): Boolean = isPersonBound && asProposal(caseId).isOpen(now)
+
     /** The fleet's four-eyes primitive over this proposal; every rule is enforced there. */
     fun asProposal(caseId: UUID): Proposal<HoldDisposition> = Proposal(
         id = caseId.toString(),
@@ -226,7 +238,7 @@ data class AmlCase(
         }
         refuseHold(status in TERMINAL_STATUSES) { "The case is already decided: $status" }
         require(reason.isNotBlank()) { "reason is required" }
-        refuseHold(holdProposal?.asProposal(id)?.isOpen(now) == true) {
+        refuseHold(holdProposal?.isOpenAt(id, now) == true) {
             "A decision is already proposed for this case; its proposer withdraws it, or it expires at " +
                 "${holdProposal?.expiresAt}, before another can be made"
         }
@@ -277,6 +289,9 @@ data class AmlCase(
         refuseHold(status in TERMINAL_STATUSES) { "The case is already decided: $status" }
         refuseHold(outcome != proposal.outcome || reason.trim() != proposal.reason) {
             "The pending proposal is not the one confirmed; read it again before confirming"
+        }
+        refuseHold(!proposal.isPersonBound) {
+            "The pending proposal predates the person rule and cannot be confirmed; propose the decision again"
         }
         val approved = fourEyes { proposal.asProposal(id).approveBy(confirmer, now) }
         return decide(proposal.outcome.status, proposal.reason, assignedAnalyst, approved.decidedBy!!, now)
