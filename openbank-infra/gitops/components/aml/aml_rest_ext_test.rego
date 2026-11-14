@@ -196,3 +196,25 @@ test_anonymous_is_denied_monitoring_and_reports if {
 test_a_read_verb_would_have_leaked_to_operators if {
 	count(allowed_reasons) > 0 with input as {"principal": operator, "action": "amlReport.read"}
 }
+
+test_compliance_proposes_hold_decision if {
+	"compliance-aml-hold-decision" in allowed_reasons with input as {"principal": compliance, "action": "amlCase.holdDecision.propose"}
+}
+
+test_compliance_confirms_hold_decision if {
+	"compliance-aml-hold-decision" in allowed_reasons with input as {"principal": compliance, "action": "amlCase.holdDecision.confirm"}
+}
+
+test_operator_cannot_decide_hold if {
+	not allow.allow with input as {"principal": operator, "action": "amlCase.holdDecision.confirm"}
+	not allow.allow with input as {"principal": operator, "action": "amlCase.holdDecision.propose"}
+}
+
+test_admin_cannot_decide_hold if {
+	not allow.allow with input as {"principal": admin, "action": "amlCase.holdDecision.confirm"}
+}
+
+test_service_m2m_cannot_decide_hold if {
+	not allow.allow with input as {"principal": service_m2m, "action": "amlCase.holdDecision.propose"}
+	not allow.allow with input as {"principal": service_m2m, "action": "amlCase.holdDecision.confirm"}
+}
