@@ -68,4 +68,3 @@ tests:
             exp_annotations:
               summary: "CronJob iam/plain has not succeeded for 2d 6h 59m 59s"
               description: "Its declared budget (annotation openbank.tech/max-success-age-seconds) is exceeded. The latest run may have failed, hung, been skipped or never been scheduled. A CronJob with spec.suspend=true is exempt, so this one is not suspended. If it is a control (a drift scanner, verifier or probe), nothing it guards has been checked for that long. Start with kubectl -n iam get cronjob plain -o wide and kubectl -n iam get jobs --sort-by=.status.startTime"
-

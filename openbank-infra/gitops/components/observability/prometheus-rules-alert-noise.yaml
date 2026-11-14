@@ -52,4 +52,5 @@ spec:
               floor, longer for:, keep_firing_for over scrape gaps), demote to a recording rule
               plus dashboard, or fix the subject.
             runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-infra/scripts/alert-backtest.py"
+            subject_period: continuous  # ALERTS is written on every rule evaluation
             for_zero_reason: "the expression is already a 7-day count; a for: would only delay a weekly-scale signal"

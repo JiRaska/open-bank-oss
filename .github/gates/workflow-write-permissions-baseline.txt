@@ -7,6 +7,7 @@ admin-ui-deploy.yml|job:build-push|pull-requests
 # Dataset-only OIDC publisher; IAM limits writes to Gate Health snapshots and its CAS selector.
 admin-ui-evidence.yml|job:publish|id-token
 agent-review.yml|job:review|pull-requests
+alert-noise-weekly.yml|job:report|issues
 alert-rca-weekly.yml|job:publish|contents
 alert-rca-weekly.yml|job:publish|issues
 alert-rca-weekly.yml|job:publish|pull-requests
