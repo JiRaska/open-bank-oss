@@ -289,4 +289,70 @@ class AuthorizeDelegatedPaymentTest {
         val d = service.authorizeDelegatedPayment(accountId, delegate, null)
         assertThat(d.outcome).isEqualTo(DelegatedPaymentOutcome.DELEGATED)
     }
+
+    // ── the facts projection (ADR-0375 D1) ────────────────────────────────────────────────
+
+    @Test
+    fun `the facts carry the grant identity the chain needs to name the authority`(): Unit = runBlocking {
+        val g = grant()
+        coEvery {
+            projectionRepository.findActiveByAccountPartyAndType(
+                accountId,
+                delegate,
+                DelegatedAccessGrant.RESOURCE_TYPE_ACCOUNT,
+            )
+        } returns listOf(g)
+
+        val facts = service.delegationFacts(accountId, delegate)
+
+        assertThat(facts.grants).hasSize(1)
+        assertThat(facts.grants[0].grantId).isEqualTo(g.id)
+        assertThat(facts.grants[0].grantorPartyId).isEqualTo(owner)
+        assertThat(facts.grants[0].capabilities).containsExactly(DelegatedAccessGrant.CAP_INITIATE_PAYMENT)
+        // The owner comes from the same read as the grants — that is the whole point of the shape.
+        assertThat(facts.ownerPartyId).isEqualTo(owner)
+    }
+
+    @Test
+    fun `a grant issued by someone who does not own the account is not a fact about it`(): Unit = runBlocking {
+        // The defect this filter exists for: a projection row keyed on (accountId, granteePartyId)
+        // alone is authority in itself, so a grant naming a stranger's account would produce real
+        // enforced access to it. The caller cannot apply this — it does not know the owner.
+        coEvery {
+            projectionRepository.findActiveByAccountPartyAndType(
+                accountId,
+                delegate,
+                DelegatedAccessGrant.RESOURCE_TYPE_ACCOUNT,
+            )
+        } returns listOf(grant(grantorPartyId = stranger))
+
+        assertThat(service.delegationFacts(accountId, delegate).grants).isEmpty()
+    }
+
+    @Test
+    fun `an out-of-window grant is not a fact`(): Unit = runBlocking {
+        coEvery {
+            projectionRepository.findActiveByAccountPartyAndType(
+                accountId,
+                delegate,
+                DelegatedAccessGrant.RESOURCE_TYPE_ACCOUNT,
+            )
+        } returns listOf(grant(validFrom = now.plusDays(1), validTo = now.plusDays(2)))
+
+        assertThat(service.delegationFacts(accountId, delegate).grants).isEmpty()
+    }
+
+    @Test
+    fun `an unknown account answers empty rather than throwing`(): Unit = runBlocking {
+        val unknown = UUID.randomUUID()
+        coEvery { accountRepository.findById(unknown) } returns null
+
+        // Not an exception and not a distinguishable not-found: the endpoint above must not become
+        // an existence oracle, and it can only be one if this layer hands it something to leak.
+        val facts = service.delegationFacts(unknown, delegate)
+        assertThat(facts.grants).isEmpty()
+        // Null owner AND empty grants: the pair must stay indistinguishable from an existing
+        // account with no grant, or the endpoint becomes an existence oracle.
+        assertThat(facts.ownerPartyId).isNull()
+    }
 }

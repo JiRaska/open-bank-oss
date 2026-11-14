@@ -1157,3 +1157,56 @@ placed a freeze: `OPERATOR` or `PARTY_STANDING`. A party that is `ACTIVE` again 
   the merge flow, not by this consumer.
 - Rolling the binary back after V34: drop `chk_accounts_freeze_origin` first, or an old binary's
   unfreeze of a party-frozen account is refused by the constraint.
+
+## 2026-11-13 — Delegation authority facts for the admission chain (ADR-0375 D1)
+
+New read-only endpoint `GET /api/v1/accounts/{accountId}/delegation/authority-facts`, under the
+EXISTING action `account.read` and the same role set as
+`delegation/payment-authorization` — no new OPA action, so no `rest.rego` change and no bundle
+restamp rides along with it. It returns every ACTIVE, in-window, ACCOUNT-scoped grant held by
+`partyId` whose grantor owns the account: grant id, grantor, capabilities and validity window.
+
+**Why a facts endpoint when a verdict endpoint already exists.** `delegation/payment-authorization`
+hard-codes `PAYMENT_ONLY`. The admission chain's authority step is a pure function whose capability
+is an argument, and a caller handed a verdict cannot ask about the capability its own action names
+— the defect ADR-0375 D7 was opened for. The alternative, six rails each keeping a projection of
+`delegation-events`, is the shape where two copies of a rule drift and the money-path copy is the
+stale one.
+
+- **Information disclosure:** the response names only grants held by the `partyId` the caller
+  already asked about, over the one account it already named. An unknown account answers `200` with
+  an empty list, never `404`, so the endpoint is not an existence oracle; an account that exists but
+  has no grant for that party is indistinguishable from one that does not exist. No balance, holder
+  name, product or IBAN is returned. A party's grants over OTHER accounts are unreachable: the
+  account is a path parameter and ownership of the grant is re-checked against that account's owner.
+  A stolen service credential yields, per call, the grant set for one (account, party) pair the
+  attacker must already name. Per-call audit makes a sweep visible.
+- **Elevation of privilege:** the grantor must own the account (`issuedBy(account.partyId)`), so a
+  projection row naming a stranger's account returns nothing — the same guard the payment-authority
+  path applies, and the reason it exists. Resource type is pinned to `ACCOUNT`, so a
+  `SAVINGS_GOAL` grant cannot be read as account authority. `partyId` is a query parameter and
+  deliberately NOT `X-Customer-Party-Id`: that header is the fleet's ownership guard and would 404
+  the very delegate this endpoint answers about, so the caller must resolve the subject from its own
+  authenticated identity and never from a customer request body.
+- **Tampering:** none. Read-only, no write path, no state.
+- **Repudiation:** the facts carry the grant id and grantor precisely so that a rail's ALLOW can
+  name the grant that permitted the debit. A grant is revocable, so nothing after the fact can
+  reconstruct which one was live when the money moved; the chain's evidence now records it
+  (`grant_id`, `grantor_party_id`).
+- **Denial of service:** read-only and indexed by the existing projection lookup. A rail that cannot
+  reach this endpoint must raise `StepOutcome.Unavailable`, which the chain maps to HOLD for
+  outbound money — never to a refusal, and never to an allow. The shared helper
+  `DelegationAuthorityFacts.outcome` decides the OWNER case before it looks at the lookup at all,
+  so an account-service outage does not hold an owner's own payment.
+
+**Stated gap, not a discovered one.** These facts are grants only. The legacy
+`account_authorizations` arm that `authorizeDelegatedPayment` still ORs in is absent, so a party
+permitted solely by a legacy row would be refused by a rail deciding from these facts. That
+divergence is already measured by the dual-run disagreement counter rather than being found later
+from a refusal, and no rail binds the authority step yet — this endpoint has no production caller
+on the day it ships.
+
+Tests: `DelegationAuthorityFactsTest` (wire mapping, unreadable validity window, unavailable
+never becoming a refusal, owner allowed through a failed lookup),
+`DelegatedDebitAuthorityTest` (the ALLOW names the permitting grant, a refusal names none).
+Rollback: revert the commit; nothing is migrated and nothing calls the route.

@@ -162,7 +162,12 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
         val known = subjects.associateBy { it.key }
         val freshKeys = fresh.map { it.key }.toSet()
         val now = fresh.map { known[it.key]?.copy(kind = it.kind, name = it.name, current = true) ?: it }
-        val leftWithFinding = subjects.filter { it.key !in freshKeys && it.finding }.map { it.copy(current = false) }
+        val absent = subjects.filter { it.key !in freshKeys }
+        // The ownership lookup could not be made, so a subject's absence from [fresh] proves
+        // nothing: NOBODY is treated as having left. An outage may add subjects, never remove one
+        // — a removal would also withdraw that person from ongoing monitoring.
+        if (ownerSource == UboSource.UNAVAILABLE) return CaseScreening(now + absent, ownerSource)
+        val leftWithFinding = absent.filter { it.finding }.map { it.copy(current = false) }
         return CaseScreening(now + leftWithFinding, ownerSource)
     }
 
@@ -177,11 +182,7 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
         reason: String,
         at: Instant,
     ): CaseScreening {
-        require(disposition != FindingDisposition.OPEN) { "a disposition must be CLEARED_FALSE_POSITIVE or CONFIRMED" }
-        require(operator.isNotBlank()) { "the deciding operator must be identified" }
-        require(reason.trim().length >= MIN_REASON) {
-            "a disposition needs a reason of at least $MIN_REASON characters"
-        }
+        val checked = DispositionRule.checked(disposition, operator, reason)
         val subject = subjects.firstOrNull { it.key == subjectKey }
             ?: throw IllegalArgumentException("no screened subject '$subjectKey' on this case")
         if (!subject.findingOpen) throw CaseTransitionException("subject '$subjectKey' has no open finding")
@@ -193,7 +194,7 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
                     it.copy(
                         disposition = disposition,
                         disposedBy = operator,
-                        dispositionReason = reason.trim(),
+                        dispositionReason = checked,
                         disposedAt = at,
                     )
                 }
@@ -203,7 +204,7 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
 
     companion object {
         private const val KEY_HEX_CHARS = 24
-        const val MIN_REASON = 10
+        const val MIN_REASON = DispositionRule.MIN_REASON
 
         /**
          * The people and the entity to screen. A beneficial owner that is itself a company is

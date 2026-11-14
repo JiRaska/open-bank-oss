@@ -28,12 +28,24 @@ The consumer group id, offset reset and dead-letter topic for fraud-service chan
 
 Under the `%test` profile the `fraud-outbox-out` outgoing channel is disabled next to the already-disabled `transaction-signal` consumer and `dispatch-enabled=false`, so integration tests boot without a broker. Production and dev configuration are unchanged: the dispatcher and channel stay enabled there.
 
+### Count-pack SHADOW epoch evidence
+
+The SHADOW ledger stores the signed envelope, proposal ID, artifact lineage and effective
+time in immutable rows. The epoch primary key admits one writer per epoch and the
+predecessor key forbids a gap, so competing proposals cannot both land, and repeating the
+exact signed envelope replays its original record.
+A rollback appends a new independently signed epoch referencing the earlier artifact.
+
+Readers choose the epoch effective at the evaluation time and reverify its signed envelope
+before obtaining a request pin. The ledger is separate from the live threshold-set table.
+The V12 rollback leaves evidence rows in place and stops the shadow reader.
+
 ## Payee history: keyed counterparty pseudonym (ADR-0377 D3)
 
 `POST /api/v1/fraud/score` accepts an optional `counterparty` object (`scheme` is `IBAN` or `DOMESTIC_ACCOUNT`, plus `value`; API contract 1.4.0). The service never stores the raw value: it keys it with HMAC-SHA-256 under `openbank.fraud.counterparty-hmac.key` and writes `cp2:<keyId>:<hex>` (key id from `openbank.fraud.counterparty-hmac.key-id`) into `payee_history.payee_identifier`, then drops the raw identifier.
 
 - **Classification.** A `cp2:` value is a keyed pseudonym. Whoever holds the key can re-identify it, so it is still personal data under GDPR and is handled as such.
-- **Schema.** `V12__payee_history_counterparty_ref_width.sql` widens `payee_identifier` from `VARCHAR(64)` to `VARCHAR(128)` so the pseudonym fits. The change is metadata-only; the existing primary key `(account_id, payee_identifier)` still serves the lookup. Older UUID-keyed rows are untouched.
+- **Schema.** `V13__payee_history_counterparty_ref_width.sql` widens `payee_identifier` from `VARCHAR(64)` to `VARCHAR(128)` so the pseudonym fits. The change is metadata-only; the existing primary key `(account_id, payee_identifier)` still serves the lookup. Older UUID-keyed rows are untouched.
 - **When a payee becomes established.** A payee is recorded only when the verdict is `ALLOW`; a challenged, reviewed or declined payment does not make the payee count as known.
 - **Missing key.** Without a key the payee signal is unavailable: there is no unkeyed fallback, the service logs one warning at startup and counts each affected request in `openbank.fraud.counterparty.key.missing`.
 - **Retention.** Unchanged by this feature: pseudonym rows follow the same retention as the rest of `payee_history`.

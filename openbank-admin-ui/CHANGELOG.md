@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.13.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.12.2...admin-ui-v4.13.0) (2026-11-13)
+
+
+### Features
+
+* **admin-ui:** AML case detail, four-eyes dispositions and FAU report for officers ([#15940](https://github.com/JiRaska/open-bank-oss/issues/15940)) ([d540b8d](https://github.com/JiRaska/open-bank-oss/commit/d540b8d18e963221222d0a0558ca024c11c1ee8a))
+
+
+### Bug Fixes
+
+* **admin-ui:** admit ROLE_COMPLIANCE to the party detail permission ([#15991](https://github.com/JiRaska/open-bank-oss/issues/15991)) ([e67a677](https://github.com/JiRaska/open-bank-oss/commit/e67a677cef2de241ef4ff20240189448c474715d)), closes [#15939](https://github.com/JiRaska/open-bank-oss/issues/15939)
+
 ## [4.12.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.12.1...admin-ui-v4.12.2) (2026-11-13)
 
 

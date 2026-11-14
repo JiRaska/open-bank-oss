@@ -194,8 +194,9 @@ Observed due-job obligations are now retained separately from actual run receipt
 Lending publishes version 1 of `loan.exposure_fact` on the existing lending events topic. The
 lending outbox records paid installments, schedule replacement and final closure, write-off or
 unwind in the local transaction that writes the corresponding source change. Disbursement facts
-carry the original booking time and a separate cash confirmation time. Lending emits them after
-both ledger credits succeed, in the same outbox transaction as the legacy disbursement event.
+carry the original booking time and a separate cash confirmation time. Lending emits them in the
+same outbox transaction as the legacy disbursement event, once the loan journal is posted and the
+borrower credit returns `COMPLETED`. The same completion check applies to an idempotent replay.
 A paid installment reports scheduled principal and interest applied and the remaining scheduled
 principal. Early settlement notices and acceleration can precede final closure.
 
