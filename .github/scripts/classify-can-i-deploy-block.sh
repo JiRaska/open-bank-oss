@@ -202,7 +202,7 @@ fi
 # blocked for 40 hours on run 32599859753.
 if [ "$CP_STATE" = "provider-live" ]; then
   cp_svc="${CP_DETAIL%%@*}"; cp_ref="${CP_DETAIL##*@}"; cp_ref="${cp_ref%%,*}"
-  emit PROVIDER_UNVERIFIED "the counterpart version deployed in the environment has published no verification result for this pact — ${CP_DETAIL:-see the verdict}. That version is NOT contentless: it carries verification results for other consumers, so it is a live provider version and this is not the #3223 shape. It is still not self-clearing — the reconciler (pact-verification-reconcile.yml) asks about the provider's LATEST main version, not the version deployed in the environment. Remedy: gh workflow run verify-provider.yml -f service=${cp_svc} -f ref=${cp_ref}"
+  emit PROVIDER_UNVERIFIED "the counterpart version deployed in the environment has published no verification result for this pact — ${CP_DETAIL:-see the verdict}. That version is NOT contentless: it carries verification results for other consumers, so it is a live provider version and this is not the #3223 shape. It is still not self-clearing — the reconciler (pact-verification-reconcile.yml) asks about the provider's LATEST main version, not the version deployed in the environment. Remedy: gh workflow run verify-provider.yml -f service=${cp_svc} -f provider_version=${cp_ref} -f consumer=${SVC} (replays P with main's test harness, scoped to this consumer; only if that run refuses the overlay, fall back to -f service=${cp_svc} -f ref=${cp_ref} -f consumer=${SVC}, which runs P's own tests and can publish a harness-caused FAILURE)"
   exit 0
 fi
 
