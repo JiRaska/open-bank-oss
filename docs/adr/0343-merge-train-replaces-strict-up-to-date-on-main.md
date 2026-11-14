@@ -503,6 +503,11 @@ Rule 2 now reads main's first-parent chain, newest first, up to `TRAIN_TURN_DEPT
 - a train merge (`verified on train`) ends the walk: the train had its turn, so none is owed;
 - a strict-lane merge (`strict lane:`) opens the turn, bounded by `TRAIN_TURN_S` from that merge's committer time;
 - any other merge is stepped over.
+- the walk stops, with no API read, at the first commit older than `TRAIN_TURN_S`, because no turn can still be open from it;
+- a PR or status read that fails (non-200) counts as "other" and is stepped over, not a tick abort. A quota abort still ends the tick as everywhere else;
+- each merged commit's lane is memoised by sha, because it never changes.
+
+If the walk exceeds `TRAIN_TURN_DEPTH` without finding a strict or train merge, no turn is owed. This is the old behaviour, and the strict lane proceeds.
 
 **Bound.** With main green and train candidates waiting, the strict lane starts no reservation and no strict carrier for `TRAIN_TURN_S` (30 min) after each strict merge, unless a train merges first. Fast-lane and bot merges no longer shorten that window. So between two strict starts the train has a full window to publish. Once a carrier is open, rule 1 holds the strict lane for at most `CARRIER_PRIORITY_S`.
 

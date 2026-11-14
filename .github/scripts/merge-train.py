@@ -3758,7 +3758,8 @@ def train_turn_fairness_self_test(check) -> None:
         def git(*args, **_k):
             out = ""
             if args[0] == "rev-list":
-                out = "\n".join(history)
+                cap = next((int(a.split("=")[1]) for a in args if a.startswith("--max-count=")), len(history))
+                out = "\n".join(history[:cap])
             elif args[0] == "show" and args[-1] in times:
                 fmt = args[2]
                 out = times[args[-1]][0] if fmt == "--format=%s" else str(times[args[-1]][1])
@@ -3770,6 +3771,7 @@ def train_turn_fairness_self_test(check) -> None:
              "m4": ("chore(d): deploy (#4)", 1950)}
     lanes = {"m3": (3, fast), "m2": (2, strict), "m1": (1, train), "m4": (4, "")}
     waiting = [object()]
+    _MERGE_LANE.clear()
     # Strict merge, then a fast merge and a bot merge on top: the train still owns the turn.
     after_fast = train_turn(FakeGh(lanes), fake_git(["m4", "m3", "m2", "m1"], times), "m4", waiting, False, now=1100)
     check("lane fairness: fast/bot merges after a strict merge do not end the train's turn (steady strict queue)",
@@ -3787,6 +3789,39 @@ def train_turn_fairness_self_test(check) -> None:
     # Unchanged: main's head is the strict merge itself.
     direct = train_turn(FakeGh(lanes), fake_git(["m2", "m1"], times), "m2", waiting, False, now=1100)
     check("lane fairness: main's head a strict merge, candidates waiting -> the train's turn", bool(direct), f"{direct!r}")
+    # Depth exceeded: the strict merge lies beyond TRAIN_TURN_DEPTH -> old behaviour (no turn).
+    deep = [f"o{i}" for i in range(TRAIN_TURN_DEPTH)] + ["m2"]
+    dtimes = {**times, **{f"o{i}": (f"chore(x): bot (#{50 + i})", 1050) for i in range(TRAIN_TURN_DEPTH)}}
+    dlanes = {**lanes, **{f"o{i}": (50 + i, "") for i in range(TRAIN_TURN_DEPTH)}}
+    _MERGE_LANE.clear()
+    beyond = train_turn(FakeGh(dlanes), fake_git(deep, dtimes), "o0", waiting, False, now=1100)
+    check("lane fairness: strict merge beyond TRAIN_TURN_DEPTH -> no turn (old behaviour)", beyond is None, f"{beyond!r}")
+
+    class FailingGh(FakeGh):   # a non-200 PR read: get() raises SystemExit
+        def pr(self, n):
+            if n == 3:
+                raise SystemExit("::error::GET /pulls/3 -> 502")
+            return super().pr(n)
+    _MERGE_LANE.clear()
+    try:
+        failed = train_turn(FailingGh(lanes), fake_git(["m3", "m2", "m1"], times), "m3", waiting, False, now=1100)
+    except SystemExit as e:
+        failed = f"aborted: {e}"
+    check("lane fairness: a failed PR read is stepped over, never a tick abort", bool(failed) and "train's turn" in failed,
+          f"{failed!r}")
+    check("lane fairness: a failed read is not memoised", "m3" not in _MERGE_LANE, str(_MERGE_LANE))
+    reads: list = []
+
+    class CountingGh(FakeGh):
+        def pr(self, n):
+            reads.append(n)
+            return super().pr(n)
+    _MERGE_LANE.clear()
+    g = fake_git(["m3", "m2", "m1"], times)
+    train_turn(CountingGh(lanes), g, "m3", waiting, False, now=1100)
+    train_turn(CountingGh(lanes), g, "m3", waiting, False, now=1100)
+    check("lane fairness: a merged commit's lane is read once (memoised by sha)", reads == [3, 2], str(reads))
+    _MERGE_LANE.clear()
 
 
 def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now: float | None = None,
@@ -3805,41 +3840,56 @@ def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now:
         return None
     if not train_waiting:
         return None
-    ct = strict_merge_since_train(gh, git, base)
     now = time.time() if now is None else now
+    ct = strict_merge_since_train(gh, git, base, now=now)
     if ct is None or now - ct > TRAIN_TURN_S:
         return None
     return f"train's turn after a strict-lane merge ({len(train_waiting)} train candidate(s) waiting)"
 
 
+_MERGE_LANE: dict[str, str] = {}   # sha -> lane; a merged commit's lane never changes (failed reads not kept)
+
+
 def merge_lane(gh, git, sha: str) -> str:
     """Which lane put `sha` on main: "strict" (the App's `strict lane:` status on the PR head), "train"
-    (`verified on train`), or "other" (a fast-lane, bot or native auto-merge squash). Unreadable = other."""
+    (`verified on train`), or "other" (a fast-lane, bot or native auto-merge squash). Unreadable = other.
+    A non-200 PR or status read is "other" too (stepped over), never a tick abort; a quota/transient
+    ApiAbort still propagates exactly as for every other read in the tick."""
+    if sha in _MERGE_LANE:
+        return _MERGE_LANE[sha]
     m = SQUASH_PR_RE.search(git("show", "-s", "--format=%s", sha, check=False).stdout.strip())
     if not m:
+        _MERGE_LANE[sha] = "other"
         return "other"
     try:
         head = gh.pr(int(m.group(1)))["head"]["sha"]
-    except (KeyError, TypeError, ValueError):
+        desc = gh.app_statuses(head).get(STATUS_CONTEXT, ("", ""))[1]
+    except (KeyError, TypeError, ValueError, SystemExit):
         return "other"
-    desc = gh.app_statuses(head).get(STATUS_CONTEXT, ("", ""))[1]
-    return "strict" if desc.startswith("strict lane:") else "train" if desc.startswith("verified on train") else "other"
+    lane = "strict" if desc.startswith("strict lane:") else "train" if desc.startswith("verified on train") else "other"
+    _MERGE_LANE[sha] = lane
+    return lane
 
 
-def strict_merge_since_train(gh, git, base: str, depth: int = TRAIN_TURN_DEPTH) -> int | None:
+def strict_merge_since_train(gh, git, base: str, depth: int | None = None, now: float | None = None) -> int | None:
     """Committer time of the newest strict-lane merge on main's first-parent chain with no train merge
     after it, or None. Fast-lane and bot merges are stepped over: they move main but are not the train's
     turn, so they must not end it (2026-11-14: fast #16034 landed after strict #16173, main's head was no
     longer a strict merge, and the next tick built strict carrier #16176 over four waiting candidates).
-    `depth` bounds the walk (one PR read per commit); nothing strict within it = no turn owed."""
+    The walk stops, with no API read, at the first commit older than TRAIN_TURN_S (no turn could be open
+    from it) and after `depth` commits (TRAIN_TURN_DEPTH); nothing strict within that = no turn owed."""
+    depth = TRAIN_TURN_DEPTH if depth is None else depth
+    now = time.time() if now is None else now
     shas = git("rev-list", "--first-parent", f"--max-count={depth}", base, check=False).stdout.split()
     for sha in shas:
+        ct = git("show", "-s", "--format=%ct", sha, check=False).stdout.strip()
+        if not ct.isdigit() or now - int(ct) > TRAIN_TURN_S:
+            return None
         lane = merge_lane(gh, git, sha)
         if lane == "train":
             return None
         if lane == "strict":
-            ct = git("show", "-s", "--format=%ct", sha, check=False).stdout.strip()
-            return int(ct) if ct.isdigit() else None
+            return int(ct)
     return None
 
 
