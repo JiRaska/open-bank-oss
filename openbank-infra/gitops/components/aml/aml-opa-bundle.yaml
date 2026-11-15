@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
   annotations:
-    openbank.tech/policy-checksum: "72e56ee7de9c99f7"
+    openbank.tech/policy-checksum: "9f7e6b00f726708d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -895,7 +895,7 @@ data:
 
     # amlCase.create by the payment/FX services' OWN machine principals (ROLE_API only), which open a
     # case when a screening gate refers a transfer (AmlServiceClient in domestic-payment, sepa-payment,
-    # sepa-instant, fx-service and swift-service). Identity-gated, never a role: ROLE_API is held by every service
+    # sepa-instant, fx-service and sdd-service). Identity-gated, never a role: ROLE_API is held by every service
     # account. The shared `service-account-openbank-services` is deliberately absent. Keep this set
     # equal to AML_CASE_CREATE_CALLERS in AmlCaseResource.kt (AmlCaseCreateCallerGuardTest pins it):
     # while AUTHZ_ENFORCE=false that Kotlin check is the enforcing half and this rule is the one the
@@ -907,7 +907,7 @@ data:
     		"service-account-openbank-sepa-payment",
     		"service-account-openbank-sepa-instant",
     		"service-account-openbank-fx",
-    		"service-account-openbank-swift",
+    		"service-account-openbank-sdd",
     	}
     	machine_named(named_client)
     	input.action == "amlCase.create"
@@ -2281,6 +2281,7 @@ data:
             - kyb.monitoring.queue.list        # #16028: ongoing-monitoring holds queue
             - kyb.monitoring.exit.propose      # #16028: four-eyes exit, maker
             - kyb.monitoring.exit.confirm      # #16028: four-eyes exit, checker (code refuses checker == maker)
+            - kyb.monitoring.exit.withdraw     # #16028: the proposing person withdraws their own pending exit proposal
         ROLE_AUDITOR:
           grant:
             - audit.trail.inspect

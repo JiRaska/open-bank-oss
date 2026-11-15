@@ -67,6 +67,16 @@ quarkus:
       connect-timeout: 2000
       read-timeout: 5000
       scope: jakarta.inject.Singleton
+    # ADR-0032: sanctions screening of debtor + creditor before a collection is released.
+    sanctions-service:
+      url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
+      connect-timeout: 2000
+      read-timeout: 5000
+    # AML case on a BLOCK / REVIEW / unavailable screening (amlCase.create, service-account-openbank-sdd).
+    aml-service:
+      url: ${AML_SERVICE_URL:http://localhost:8117}
+      connect-timeout: 2000
+      read-timeout: 5000
   shutdown:
     timeout: 30S
   log:
@@ -233,6 +243,20 @@ mp:
           pem:
             certs: /mnt/account-tls/ca.crt
         protocols: TLSv1.3
+      # aml-service's private-CA mTLS listener (8443): same client certificate, its own bucket.
+      aml-authority:
+        reload-period: 1h
+        key-store:
+          pem:
+            client:
+              cert: /mnt/aml-tls/tls.crt
+              key: /mnt/aml-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/aml-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       account-service:
         tls-configuration-name: account-authority
+      aml-service:
+        tls-configuration-name: aml-authority

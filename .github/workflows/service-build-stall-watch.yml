@@ -116,6 +116,7 @@ jobs:
           set -euo pipefail
           python3 .github/scripts/check-stall-watch-handoff.py \
             --queued superseded-pr-runs.json --stalled stalled.json
+          bash .github/scripts/cancel-workflow-run.sh --selftest
       - name: Cancel only still-superseded queued PR runs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -149,7 +150,7 @@ jobs:
               echo "would request cancellation of superseded queued run ${run_id} for PR #${pr_number} (${stale_sha})"
               continue
             fi
-            if ! cancel_error=$(gh api --method POST "repos/${REPO}/actions/runs/${run_id}/cancel" 2>&1); then
+            if ! cancel_error=$(bash .github/scripts/cancel-workflow-run.sh "$REPO" "$run_id" 2>&1); then
               # A queued run may finish after the snapshots. That is already the desired
               # terminal state; every other mutation failure remains fatal and visible.
               live_run_status=$(gh api "repos/${REPO}/actions/runs/${run_id}" --jq '.status')
@@ -160,6 +161,9 @@ jobs:
               echo "$cancel_error" >&2
               exit 1
             fi
+            # A benign HTTP 409 (run not yet queued / already completed) is a notice from
+            # the helper, not a failure; 403, 404, 5xx and any other 409 stay fatal.
+            echo "$cancel_error"
             # HTTP 202 acknowledges the request; it does not prove terminal cancellation.
             echo "requested cancellation of superseded queued run ${run_id} for PR #${pr_number} (${stale_sha})"
           done
@@ -206,6 +210,6 @@ jobs:
               echo "::warning title=CI stalled-build dry run::${title}"
               continue
             fi
-            gh api --method POST "repos/${REPO}/actions/runs/${run_id}/cancel" >/dev/null
+            bash .github/scripts/cancel-workflow-run.sh "$REPO" "$run_id"
             gh issue create --repo "$REPO" --title "$title" --body "$body" --label fleet-health
           done
