@@ -8210,6 +8210,26 @@ gates:
     run: |
       python3 .github/scripts/check-enum-reference-data.py --root .
 
+  - id: rail-screening-port
+    name: "outgoing rail sanctions screening port (rules.yaml outgoing_payment_rails_screening, enforced)"
+    group: data
+    mode: enforced
+    budget_seconds: 15   # <1s measured locally 2026-11-14
+    rationale: >-
+      Every outgoing payment rail must screen debtor and creditor against the sanctions lists
+      before release, through a *Screening*Port and the shared libs-fincrime ScreeningPolicy.
+      Measured 2026-11-14: swift-service and sdd-service had no screening at all while swift's
+      docs said screening was done upstream, and the upstream did none. Both are baselined while
+      their fix PRs land; a covered baselined rail fails, so the baseline only shrinks.
+    review_after: '2027-05-14'
+    verified: "2026-11-14 — origin/main ecbfaaa97b: 6 rails, 4 covered, swift+sdd baselined; copy of the tree with sepa-payment's ScreeningPorts.kt removed exits 1 naming openbank-sepa-payment; self-test covers missing port, missing policy, stale baseline, unknown module, empty list"
+    min_subjects: 3   # 6 rails measured 2026-11-14; half
+    selftest: python3 .github/scripts/check-rail-screening-port.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-rail-screening-port.py", ".github/scripts/rail-screening-port-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-rail-screening-port.py --root .
+
   # Real cache mutations run for build-logic changes and all main pushes. The
   # structural guard stays cheap for unrelated PRs (standard selftest_inputs policy).
   # Keep the Gradle self-test in supplychain, whose runner provisions/caches the

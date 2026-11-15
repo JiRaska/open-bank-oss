@@ -74,7 +74,7 @@ class BypassVerdictTest(unittest.TestCase):
                             guard.require_live_strict(root, None, "fixture/bank")
                     read.assert_called_once_with(
                         ["gh", "api", "repos/fixture/bank/rules/branches/main"],
-                        capture_output=True, text=True, timeout=30, check=False)
+                        capture_output=True, text=True, timeout=guard.PROTECTION_TIMEOUT, check=False)
 
     def test_checker_runner_and_json_agree(self):
         gate = next(g for g in yaml.safe_load((ROOT / ".github/gates/gates.yaml").read_text())["gates"]
