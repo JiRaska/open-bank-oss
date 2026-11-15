@@ -117,17 +117,22 @@ async function errorText(res: Response): Promise<string | null> {
   return null
 }
 
-/** The latest revision per (catalogue, return code), across every entity and period. */
-export function latestByCode(returns: StatutoryReturn[]): Map<string, StatutoryReturn> {
+/** Latest revision for each entity, grouped by catalogue and return code. */
+export function latestByCode(returns: StatutoryReturn[]): Map<string, StatutoryReturn[]> {
   const latest = new Map<string, StatutoryReturn>()
   for (const item of returns) {
-    const key = `${item.catalogueId}/${item.returnCode}`
+    const key = JSON.stringify([item.catalogueId, item.returnCode, item.entityId])
     const seen = latest.get(key)
     if (!seen || item.period > seen.period || (item.period === seen.period && item.revision > seen.revision)) {
       latest.set(key, item)
     }
   }
-  return latest
+  const grouped = new Map<string, StatutoryReturn[]>()
+  for (const item of latest.values()) {
+    const key = `${item.catalogueId}/${item.returnCode}`
+    grouped.set(key, [...(grouped.get(key) ?? []), item])
+  }
+  return grouped
 }
 
 export const GSFT_CATALOGUE = 'cz-gsft'
@@ -192,6 +197,7 @@ export const CEU_RETURN_CODE = 'CEUSIFE10'
 
 export type CeuFiling = {
   id: string
+  entityId: string
   window: string
   revision: number
   status: string
@@ -204,22 +210,24 @@ export type CeuFiling = {
 }
 
 /**
- * The CEÚ filings, newest window first, latest revision per window. Figures come from the
+ * The CEÚ filings, newest window first, latest revision per entity and window. Figures come from the
  * backend's datapoints verbatim — never re-derived here (ADR-0367 D2: no regulatory arithmetic
  * in the BFF or the browser). A missing datapoint stays null rather than becoming a zero.
  */
 export function ceuFilings(returns: StatutoryReturn[]): CeuFiling[] {
   const latest = new Map<string, StatutoryReturn>()
   for (const item of returns) {
-    if (item.returnCode !== CEU_RETURN_CODE) continue
-    const seen = latest.get(item.period)
-    if (!seen || item.revision > seen.revision) latest.set(item.period, item)
+    if (item.catalogueId !== 'cz-ceu' || item.returnCode !== CEU_RETURN_CODE) continue
+    const key = JSON.stringify([item.entityId, item.period])
+    const seen = latest.get(key)
+    if (!seen || item.revision > seen.revision) latest.set(key, item)
   }
   const figure = (item: StatutoryReturn, key: string) => item.datapoints?.[key] ?? null
   return [...latest.values()]
     .sort((a, b) => b.period.localeCompare(a.period))
     .map(item => ({
       id: item.id,
+      entityId: item.entityId,
       window: item.period,
       revision: item.revision,
       status: item.status,
