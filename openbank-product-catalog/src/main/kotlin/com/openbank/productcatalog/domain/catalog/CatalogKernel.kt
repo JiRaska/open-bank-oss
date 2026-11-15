@@ -6,6 +6,7 @@ package com.openbank.productcatalog.domain.catalog
 
 import com.openbank.libs.domain.identifiers.Ids
 import java.math.BigDecimal
+import com.openbank.libs.market.OfferingMarkets
 import java.time.Instant
 import java.util.Locale
 import java.util.UUID
@@ -83,7 +84,7 @@ data class MarketContext(
     val locales: Set<String> = emptySet(),
 ) {
     init {
-        require(countries.all { it.matches(Regex("^[A-Z]{2}$")) }) { "countries must be ISO alpha-2 codes" }
+        OfferingMarkets(countries)
         require(locales.all(String::isValidLanguageTag)) { "market locales must be valid BCP 47 tags" }
     }
 }

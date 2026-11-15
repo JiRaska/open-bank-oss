@@ -23,6 +23,8 @@ import com.openbank.account.application.port.out.BalanceView
 import com.openbank.account.application.port.out.CurrencyPocketRepository
 import com.openbank.account.application.port.out.NotificationRequestPort
 import com.openbank.account.application.port.out.ProductCatalogPort
+import com.openbank.account.application.port.out.PublishedRevision
+import com.openbank.account.application.port.out.RevisionResolution
 import com.openbank.account.domain.event.AccountClosedEvent
 import com.openbank.account.domain.event.AccountStatusChangedEvent
 import com.openbank.account.domain.model.Account
@@ -32,8 +34,10 @@ import com.openbank.account.domain.model.CurrencyPocket
 import com.openbank.account.domain.model.MissingPocketPolicy
 import com.openbank.account.domain.model.PocketResolution
 import com.openbank.account.domain.model.PocketStatus
+import com.openbank.account.domain.model.ProductRevisionPin
 import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.market.OfferingMarkets
 import com.openbank.libs.observability.DomainMetrics
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -94,6 +98,24 @@ class AccountServiceLifecycleTest {
                 Clock.fixed(fixedInstant, ZoneOffset.UTC),
                 notificationRequestPort,
             )
+    }
+
+    @Test
+    fun `activation refuses a pinned offering now restricted to another market`() {
+        val revisionId = UUID.randomUUID()
+        val offeringId = UUID.randomUUID()
+        val pin = ProductRevisionPin(offeringId, "TEST", revisionId, 1, null, null, null, fixedInstant)
+        val pending = account(status = AccountStatus.PENDING_ACTIVATION).copy(productRevisionPin = pin)
+        coEvery { accountRepository.findById(pending.id) } returns pending
+        coEvery { productCatalog.resolvePublishedRevision(pending.productId, fixedInstant) } returns
+            RevisionResolution.Published(
+                PublishedRevision(revisionId, offeringId, 1, null, null, null, OfferingMarkets(setOf("AT"))),
+            )
+
+        assertThatThrownBy { runBlocking { service.activateAccount(pending.id) } }
+            .isInstanceOf(ProductNotEligibleException::class.java)
+        coVerify(exactly = 0) { accountRepository.update(any()) }
+        coVerify(exactly = 0) { eventPublisher.publish(any(), any(), any()) }
     }
 
     // ── Activation (ADR-0267) ─────────────────────────────────────────────────

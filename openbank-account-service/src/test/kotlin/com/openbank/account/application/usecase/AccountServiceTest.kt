@@ -29,6 +29,7 @@ import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.market.OfferingMarkets
 import com.openbank.libs.observability.DomainMetrics
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -409,6 +410,20 @@ class AccountServiceTest {
 
         assertThat(savedSlot.captured.sanctionsStatus).isEqualTo("CLEAR")
         assertThat(savedSlot.captured.sanctionsScreenedAt).isNotNull()
+    }
+
+    @Test
+    fun `opening refuses an offering restricted to another market`() {
+        val command = openAccountCommand()
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { productCatalog.resolvePublishedRevision(command.productId, any()) } returns
+            RevisionResolution.Published(PUBLISHED_REVISION.copy(marketCountries = OfferingMarkets(setOf("SK"))))
+
+        assertThatThrownBy { runBlocking { service.openAccount(command) } }
+            .isInstanceOf(ProductNotEligibleException::class.java)
+            .hasMessageContaining("outside the Czech domestic route")
+        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any(), any(), any()) }
     }
 
     // --- Product validation at account-open (issue #668) --------------------------------------
