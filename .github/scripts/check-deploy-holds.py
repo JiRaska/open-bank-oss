@@ -387,7 +387,6 @@ PROTECTION_DEADLINE = 40
 TRANSIENT = re.compile(r"HTTP 5\d\d|rate limit|timed? ?out|timeout|connection (?:reset|refused)|"
                        r"EOF|TLS handshake|temporarily unavailable", re.IGNORECASE)
 PERMANENT = re.compile(r"HTTP 40[134]\b|Not Found|Bad credentials|Resource not accessible", re.IGNORECASE)
-_PROTECTION_CACHE = {}
 
 
 def _sanitise(stderr):
@@ -397,9 +396,7 @@ def _sanitise(stderr):
 
 
 def read_live_protection(repo):
-    """Return the successful `gh api` result for main's rules; memoised per run, fail closed."""
-    if repo in _PROTECTION_CACHE:
-        return _PROTECTION_CACHE[repo]
+    """Return the successful `gh api` result for main's rules; fail closed."""
     started = time.monotonic()
     attempts = len(PROTECTION_BACKOFF) + 1
     for attempt in range(1, attempts + 1):
@@ -412,7 +409,6 @@ def read_live_protection(repo):
             reason, transient = f"timed out after {PROTECTION_TIMEOUT}s", True
         else:
             if not result.returncode:
-                _PROTECTION_CACHE[repo] = result
                 return result
             reason = f"gh api exited {result.returncode}: {_sanitise(result.stderr)}"
             transient = bool(TRANSIENT.search(result.stderr or "")) and not PERMANENT.search(result.stderr or "")
@@ -595,7 +591,6 @@ def self_test():
         pinned_rule = rs(False, [{"context": "merge-train", "integration_id": 4242}])
         with patch.dict(os.environ, {"GITOPS_APP_ID": "4242"}), patch(
                 "subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout=json.dumps(pinned_rule), stderr="")):
-            _PROTECTION_CACHE.clear()
             require_live_strict(root, None, "example/repo")
         try:
             strict_required_checks([])
@@ -606,14 +601,12 @@ def self_test():
         from unittest.mock import patch
         good = subprocess.CompletedProcess([], 0, stdout=json.dumps([strict_rule]), stderr="")
         with patch("subprocess.run", return_value=good):
-            _PROTECTION_CACHE.clear()
             require_live_strict(root, None, "example/repo")
         bad_rule = {**strict_rule, "parameters": {
             **strict_rule["parameters"], "strict_required_status_checks_policy": False}}
         bad = subprocess.CompletedProcess([], 0, stdout=json.dumps([bad_rule]), stderr="")
         with patch("subprocess.run", return_value=bad):
             try:
-                _PROTECTION_CACHE.clear()
                 require_live_strict(root, None, "example/repo")
             except InvalidHold:
                 pass
@@ -625,7 +618,6 @@ def self_test():
         sleeps = []
         with patch("subprocess.run", side_effect=[fail("gh: HTTP 502: Bad Gateway"), good]), \
                 patch("time.sleep", sleeps.append):
-            _PROTECTION_CACHE.clear()
             require_live_strict(root, None, "example/repo")
         assert len(sleeps) == 1, f"transient failure retried {len(sleeps)} times, expected 1"
         calls = []
@@ -634,7 +626,6 @@ def self_test():
             return fail("gh: Resource not accessible by integration (HTTP 403)")
         with patch("subprocess.run", side_effect=forbidden), patch("time.sleep", sleeps.append):
             try:
-                _PROTECTION_CACHE.clear()
                 require_live_strict(root, None, "example/repo")
             except InvalidHold as error:
                 assert "HTTP 403" in str(error), f"403 stderr not surfaced: {error}"
@@ -647,21 +638,14 @@ def self_test():
             return fail("gh: HTTP 503: Service Unavailable")
         with patch("subprocess.run", side_effect=outage), patch("time.sleep", lambda _s: None):
             try:
-                _PROTECTION_CACHE.clear()
                 require_live_strict(root, None, "example/repo")
             except InvalidHold as error:
                 assert "HTTP 503" in str(error), f"503 stderr not surfaced: {error}"
             else:
                 raise AssertionError("exhausted retries passed")
         assert len(calls) == 4, f"expected 4 attempts, got {len(calls)}"
-        _PROTECTION_CACHE.clear()
-        with patch("subprocess.run", side_effect=[good]):
-            read_live_protection("example/repo")
-            read_live_protection("example/repo")  # a second live read would exhaust side_effect
-        _PROTECTION_CACHE.clear()
         rule.write_text("deploy_holds:\n  services: {}\n")
         with patch("subprocess.run", side_effect=AssertionError("empty hold queried GitHub")):
-            _PROTECTION_CACHE.clear()
             require_live_strict(root, None, "example/repo")
         approved_selftest(root, rule, manifest, original, base)
     print("deploy hold self-test passed")
