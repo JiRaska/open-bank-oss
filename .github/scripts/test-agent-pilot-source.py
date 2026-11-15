@@ -59,7 +59,8 @@ class PilotSourceTest(unittest.TestCase):
                                'sys.exit(subprocess.run(sys.argv[2:],timeout=120).returncode)\n')
             timeout.chmod(0o700)
             result = subprocess.run(['bash', '-ec', script], capture_output=True, text=True, timeout=20,
-                                    env={**os.environ, 'PATH':str(commands)+os.pathsep+os.environ['PATH']})
+                                    env={**os.environ, **{e['name']: e['value'] for e in INIT.get('env', [])},
+                                         'PATH':str(commands)+os.pathsep+os.environ['PATH']})
             present = sorted(str(p.relative_to(destination)) for p in destination.rglob('*')
                              if p.is_file() and '.git' not in p.relative_to(destination).parts)
             revision = git('rev-parse', 'HEAD').stdout.strip()
@@ -87,7 +88,13 @@ class PilotSourceTest(unittest.TestCase):
         mount = next(m for m in APP['volumeMounts'] if m['name']=='test-sources')
         self.assertIs(mount['readOnly'], True)
         self.assertEqual(mount['mountPath'], '/source')
-        self.assertEqual(INIT.get('env', []), [])
+        # The fetcher's only input is the literal snapshot ref (ADR-0031 D9 amendment 2026-11-14):
+        # no secret, no valueFrom, and it must name the ref the writer targets.
+        self.assertEqual([e['name'] for e in INIT.get('env', [])], ['SNAPSHOT_REF'])
+        self.assertTrue(all(set(e) == {'name', 'value'} for e in INIT['env']))
+        writer_ref = {e['name']: e.get('value') for e in APP['env']}['FLAKY_TEST_HUNTER_WRITER_BASE_REF']
+        expected = {'main': 'main', 'qualification': 'qualification/flaky-test-hunter'}[writer_ref]
+        self.assertEqual(INIT['env'][0]['value'], expected)
         self.assertEqual(INIT.get('envFrom', []), [])
         self.assertIs(POD['automountServiceAccountToken'], False)
         self.assertEqual([m['name'] for m in INIT['volumeMounts']], ['test-sources'])

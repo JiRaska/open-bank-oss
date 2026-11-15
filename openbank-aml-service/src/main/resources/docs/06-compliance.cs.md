@@ -92,6 +92,8 @@ V **produkci** je decision endpoint jedinou cestou do terminálního `CLEARED`/`
 
 > ⚠️ **Dnes to nejsou čtyři oči.** Tento odstavec dříve tvrdil „odpovědnost ve čtyřech očích přes `decidedBy`/`assignedAnalyst“. Neplatí to: `decidedBy` přichází v **těle requestu**, ne z autentizovaného security kontextu, a kontroluje se jen na neprázdnost — jeden operátor tedy může případ uzavřít a atribuci si sám vyplnit. Neexistuje ani oddělení maker-checker (`OPEN → CLEARED` je povolený přechod), `openbank-aml-service` není v `rules.yaml: money_path_services`, takže OPA nikdy neodvodí scope `aml` pro `four_eyes_required`, a `AUTHZ_ENFORCE` je zde `false`, takže `@Authorize` je pouze poradní. ADR-0268 §4 to zaznamenává a §5 vyjmenovává, co je třeba doplnit před jiným než sandbox prostředím. Srovnej ADR-0116 §3, která pro KYC dvojče vyžaduje identitu revizora ze security kontextu.
 
+> **Případ pozdržené platby: čtyři oči.** Případ s `origin = PAYMENT_HOLD_INTAKE` přejde do `CLEARED` nebo `BLOCKED` jen návrhem jednoho analytika a potvrzením jiného, oba převzaté z autentizovaného volajícího (ADR-0374 bod 3; viz 03-api). Ostatní případy jsou popsány výše.
+
 ## Audit trail
 
 Každé založení a přechod případu emituje verzovanou doménovou událost → `audit-service` ji perzistuje jako compliance evidenci. Outbox garantuje at-least-once doručení s pořadím v rámci případu (partition key = aggregate id) a dedup na straně konzumenta (hlavičky `ce-id`/`idempotency-key`).

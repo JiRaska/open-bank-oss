@@ -5,18 +5,23 @@
 package com.openbank.kyb.integration
 
 import com.openbank.libs.testing.containers.PostgresTestResource
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasSize
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
+import java.util.UUID
 
 /**
  * Representation attestation over real HTTP against a real Postgres (#9711).
@@ -32,6 +37,9 @@ class RepresentationAttestationApiIT {
 
     @org.eclipse.microprofile.config.inject.ConfigProperty(name = "quarkus.datasource.jdbc.url")
     lateinit var jdbcUrl: String
+
+    @Inject
+    lateinit var testIdentity: TestIdentityAssociation
 
     /** Reserved for this IT: the module's ITs share one database (see StubAresAdapter). */
     // One reserved entity per test that WRITES. The module's ITs share a database, so a test
@@ -59,6 +67,16 @@ class RepresentationAttestationApiIT {
         }
 
         assertThat(hash).hasSize(64)
+
+        useJwt("operator-anna", "openbank-admin-ui", "ROLE_OPERATOR")
+        Given {
+            contentType("application/json")
+            body("""{"confirmedSigners":2,"confirmedMode":"UNKNOWN","ruleTextHash":"$hash"}""")
+        } When {
+            post("/api/v1/kyb/representation/CZ_ICO/$fresh")
+        } Then {
+            statusCode(400)
+        }
     }
 
     @Test
@@ -187,6 +205,75 @@ class RepresentationAttestationApiIT {
         } Then {
             statusCode(400)
         }
+    }
+
+    @Test
+    @TestSecurity(user = "fixture-kyc-staff", roles = ["ROLE_KYC"])
+    fun `statutory publication requires the exact confirmation and interactive staff identity`() {
+        val route = "/api/v1/kyb/cases/${UUID.randomUUID()}/statutory-representation"
+        Given {
+            contentType("application/json")
+            body("{}")
+        } When {
+            post(route)
+        } Then {
+            statusCode(403)
+        }
+
+        useJwt("fixture-kyc-staff", "openbank-admin-ui", "ROLE_KYC")
+        Given {
+            contentType("application/json")
+            body("{}")
+        } When {
+            post(route)
+        } Then {
+            statusCode(400)
+        }
+        Given {
+            contentType("application/json")
+            body("""{"attestationId":"${UUID.randomUUID()}"}""")
+        } When {
+            post(route)
+        } Then {
+            statusCode(404)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "fixture-statutory-reader", roles = ["ROLE_API"])
+    fun `only the verified delegation client may query current statutory evidence`() {
+        val route = "/api/v1/kyb/cases/${UUID.randomUUID()}/statutory-representation/${UUID.randomUUID()}/current"
+        useJwt("service-account-openbank-services", "openbank-services", "ROLE_API")
+        Given {
+            queryParam("entityPartyId", UUID.randomUUID())
+        } When {
+            get(route)
+        } Then {
+            statusCode(403)
+        }
+
+        useJwt("service-account-openbank-delegation", "openbank-delegation", "ROLE_API")
+        Given {
+            queryParam("entityPartyId", UUID.randomUUID())
+        } When {
+            get(route)
+        } Then {
+            statusCode(404)
+            header("Cache-Control", "no-store")
+        }
+    }
+
+    private fun useJwt(username: String, clientId: String, role: String) {
+        val jwt = object : JsonWebToken {
+            private val claims = mapOf("sub" to "fixture-subject", "preferred_username" to username, "azp" to clientId)
+
+            override fun getName(): String = username
+            override fun getClaimNames(): Set<String> = claims.keys
+
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
+        }
+        testIdentity.setTestIdentity(QuarkusSecurityIdentity.builder().setPrincipal(jwt).addRole(role).build())
     }
 
     private fun currentHash(ico: String): String = Given {
