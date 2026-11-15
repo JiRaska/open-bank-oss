@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.17.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.16.0...admin-ui-v4.17.0) (2026-11-15)
+
+
+### Features
+
+* **admin-ui:** Keys & Certificates section with a tool-free AI custodian ([#16312](https://github.com/JiRaska/open-bank-oss/issues/16312)) ([b246048](https://github.com/JiRaska/open-bank-oss/commit/b2460489f552e123739d7a5b4f3e45e63144f807))
+
+
+### Bug Fixes
+
+* **admin-ui:** show statutory returns (GSFT, CEU) in navigation and the regulatory catalogue ([#16259](https://github.com/JiRaska/open-bank-oss/issues/16259)) ([aa277de](https://github.com/JiRaska/open-bank-oss/commit/aa277de8cb6b41e64fb7b045d20378e1ae74052b))
+* **simulation:** project fx/card/pension scenarios in Test Intelligence; drop duplicate dependency ([#16314](https://github.com/JiRaska/open-bank-oss/issues/16314)) ([b777e9d](https://github.com/JiRaska/open-bank-oss/commit/b777e9d9d639800aa26f4b391d68c34ac5e90392)), closes [#14366](https://github.com/JiRaska/open-bank-oss/issues/14366)
+
 ## [4.16.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.15.0...admin-ui-v4.16.0) (2026-11-15)
 
 
