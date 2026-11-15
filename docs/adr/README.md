@@ -383,7 +383,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0376](0376-ongoing-screening-by-delta-a-monitored-subject-registry-in-sanctions-service.md) | Ongoing screening by delta: a monitored-subject registry in sanctions-service | Proposed | Partial | aml-sanctions,kyc,privacy-gdpr,kafka | — |
 | [0377](0377-fraud-decisioning-covers-every-value-moving-operation-code-derived-scope-a-typed-risk-context-and-account-control-events.md) | Fraud decisioning covers every value-moving operation: code-derived scope, a typed risk context and account-control events | Proposed | Partial | fraud,payments,cards,ci | — |
 | [0378](0378-fraud-decision-hot-path-a-measured-throughput-budget-sender-slot-online-state-keyed-payee-pseudonyms-and-gated-learning-signals.md) | Fraud decision hot path: a measured throughput budget, sender-slot online state, keyed payee pseudonyms and gated learning signals | Proposed | Planned | fraud,ml,capacity,privacy-gdpr | — |
-| [0379](0379-compliance-posture-derived-trace.md) | Compliance posture is derived from one obligation-to-control-to-evidence trace; AI explains it, never decides it | Proposed | Planned | compliance,admin-ui,audit,regulatory-reporting | — |
+| [0379](0379-compliance-posture-derived-trace.md) | Compliance posture is derived from one obligation-to-control-to-evidence trace; AI explains it, never decides it | Proposed | Partial | compliance,admin-ui,audit,regulatory-reporting | — |
 | [0380](0380-eu-passporting-common-foundation-and-country-packs.md) | EU passporting through a common foundation and country packs | Accepted | Planned | architecture,compliance,regulatory-reporting,libs | — |
 
 ## By tag
