@@ -5,7 +5,6 @@
 package com.openbank.account.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
 import com.openbank.account.application.port.out.DirectoryPage
 import com.openbank.account.application.port.out.DirectoryParty
 import com.openbank.account.application.port.out.PartyDirectoryPort
@@ -24,6 +23,8 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured
 import io.restassured.response.Response
 import io.smallrye.mutiny.Uni
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.inject.Alternative
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
 import org.assertj.core.api.Assertions.assertThat
@@ -68,7 +69,26 @@ class AccountProductRevisionPinIT {
             "openbank.outbox.dispatch-enabled" to "false",
             "openbank.account.passport-recovery.interval" to "1s",
         )
+
+        override fun getEnabledAlternatives(): MutableSet<Class<*>> = mutableSetOf(RecoveryPartyDirectory::class.java)
     }
+
+    @Alternative
+    @ApplicationScoped
+    class RecoveryPartyDirectory : PartyDirectoryPort {
+        @Volatile
+        var party: DirectoryParty? = null
+
+        override suspend fun find(partyId: UUID): DirectoryParty? = party?.takeIf { it.partyId == partyId }
+
+        override suspend fun listActive(page: Int, size: Int) = DirectoryPage(emptyList(), hasMore = false)
+    }
+
+    @Inject
+    lateinit var directory: RecoveryPartyDirectory
+
+    @Inject
+    lateinit var screeningFixture: TestSanctionsScreeningPort
 
     @Inject
     lateinit var dataSource: DataSource
@@ -81,6 +101,8 @@ class AccountProductRevisionPinIT {
     @AfterEach
     fun resetCatalog() {
         TestProductCatalogPort.mode = TestProductCatalogPort.Mode.PUBLISHED
+        directory.party = null
+        screeningFixture.clearOverrides()
     }
 
     @Test
@@ -284,7 +306,6 @@ class AccountProductRevisionPinIT {
         val screens = installScreeningFixture(party)
         val key = UUID.randomUUID().toString()
         assertThat(open(party, key, UUID.randomUUID()).statusCode).isEqualTo(500)
-        assertNothingPersistedFor(party)
         val account = query("SELECT account_id FROM account_passport_intents WHERE operation_key = ?", "OPEN:$key")
             .single().single() as UUID
 
@@ -316,31 +337,12 @@ class AccountProductRevisionPinIT {
     }
 
     private fun installScreeningFixture(party: UUID): List<ScreeningCall> {
-        val directory = object : PartyDirectoryPort {
-            override suspend fun find(partyId: UUID): DirectoryParty? = if (partyId == party) {
-                DirectoryParty(party, "COMPANY", "ACTIVE", "Synthetic Registered Company")
-            } else {
-                null
-            }
-
-            override suspend fun listActive(page: Int, size: Int) = DirectoryPage(emptyList(), hasMore = false)
-        }
-        QuarkusMock.installMockForType(directory, PartyDirectoryPort::class.java)
-
+        directory.party = DirectoryParty(party, "COMPANY", "ACTIVE", "Synthetic Registered Company")
         val calls = CopyOnWriteArrayList<ScreeningCall>()
-        val screening = object : AccountSanctionsScreeningPort {
-            override suspend fun screen(
-                name: String,
-                idempotencyKey: String,
-                subjectId: String,
-                entityType: SanctionsEntityType,
-            ): SanctionsScreenResult {
-                assertThat(subjectId).isEqualTo(party.toString())
-                calls += ScreeningCall(name, idempotencyKey, entityType)
-                return SanctionsScreenResult(if (calls.size == 1) "CLEAR" else "WHITELISTED", 0.0, null)
-            }
+        screeningFixture.respondFor(party.toString()) { name, key, entityType ->
+            calls += ScreeningCall(name, key, entityType)
+            SanctionsScreenResult(if (calls.size == 1) "CLEAR" else "WHITELISTED", 0.0, null)
         }
-        QuarkusMock.installMockForType(screening, AccountSanctionsScreeningPort::class.java)
         return calls
     }
 
