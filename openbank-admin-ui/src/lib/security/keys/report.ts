@@ -12,7 +12,8 @@ export interface ExpertCert {
   namespace: string
   name: string
   issuer: string
-  daysLeft: number
+  /** null when the Certificate has no valid certificate at all. */
+  daysLeft: number | null
   status: KeyStatus
 }
 
@@ -33,7 +34,8 @@ export function buildKeysReport(m: Measurement, nowSeconds: number, expert: bool
   if (expert) {
     report.expert = m.certs
       .map((c) => {
-        const days = Math.floor((c.notAfter - nowSeconds) / 86400)
+        const missing = c.notAfter === 0
+        const days = missing ? Number.NaN : Math.floor((c.notAfter - nowSeconds) / 86400)
         const entry = KEY_CATALOG.find((e) => matches(e.expiry, c))
         return {
           entryId: entry?.id ?? null,
@@ -41,11 +43,11 @@ export function buildKeysReport(m: Measurement, nowSeconds: number, expert: bool
           namespace: c.namespace,
           name: c.name,
           issuer: c.issuer,
-          daysLeft: days,
-          status: statusForDays((c.notAfter - nowSeconds) / 86400),
+          daysLeft: missing ? null : days,
+          status: missing ? 'expired' as const : statusForDays((c.notAfter - nowSeconds) / 86400),
         }
       })
-      .sort((a, b) => a.daysLeft - b.daysLeft)
+      .sort((a, b) => (a.daysLeft ?? -Infinity) - (b.daysLeft ?? -Infinity))
   }
   return report
 }
