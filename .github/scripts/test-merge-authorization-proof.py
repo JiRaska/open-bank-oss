@@ -441,7 +441,7 @@ class EvidenceErrorDiagnosticsTests(unittest.TestCase):
         def refuse(request, timeout):
             raise urllib.error.HTTPError(request.full_url, 403, "Forbidden", {}, io.BytesIO(b"secret body"))
 
-        with patch.dict("os.environ", {"GH_TOKEN": "t"}), \
+        with patch.dict("os.environ", {"GH_TOKEN": "ghp_CANARY_TOKEN_16187"}), \
                 patch.object(urllib.request.OpenerDirector, "open", lambda self, request, timeout: refuse(request, timeout)):
             with self.assertRaises(ValueError) as caught:
                 proof.GitHub().get(f"/repos/{REPO}/pulls/7?per_page=1")
@@ -450,6 +450,8 @@ class EvidenceErrorDiagnosticsTests(unittest.TestCase):
         self.assertIn(f"/repos/{REPO}/pulls/7", message)
         self.assertNotIn("per_page", message)
         self.assertNotIn("secret body", message)
+        self.assertNotIn("ghp_CANARY_TOKEN_16187", message)
+        self.assertNotIn("Bearer", message)
 
 
 class BackendCredentialIsolationTests(unittest.TestCase):
