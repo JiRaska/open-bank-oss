@@ -402,6 +402,9 @@ JUDGE_PATHS = JUDGE_CODE + (".github/gates/gates.yaml", "openbank-libs/governanc
 # build and lint configuration a gate reads. A member touching one rides a strict carrier ALONE: paired
 # with an older member B, a relaxing J would turn B green where oldest-first serial processing judges B
 # under main's configuration, and a tightening J would make a carrier red that neither half is alone.
+# Only PRODUCTION sources share: since the security review of #16357 a test-shaped file (anything under
+# src/ that is not src/main/, so src/test, integrationTest, testFixtures, ... alike) rides alone, so no
+# denylist of ways a test can read another module is a safety boundary for what a member CHANGES.
 # Disjoint batching is for the remaining judge members only, and that set is an ALLOW-LIST (security
 # reviews of #16290): a judge path is configuration UNLESS it is Kotlin/Java source or a test under
 # src/main or src/test of a LEAF module (shareable_modules: an `openbank-*` module no Gradle build file
@@ -416,7 +419,7 @@ JUDGE_PATHS = JUDGE_CODE + (".github/gates/gates.yaml", "openbank-libs/governanc
 # `../openbank-<m>` and `"openbank-<m>/` references under */src/test/): such tests judge another module's
 # code — HasActiveConsentScopeProducerPinTest in campaign-service reads consent-service's source — so
 # both ends of a cross-module read ride alone.
-SHAREABLE_JUDGE_RE = re.compile(r"^(?!(?:.*/)?\.)openbank-[a-z0-9-]+/(?:[A-Za-z0-9_.-]+/)*src/(?:main|test)/(?:kotlin|java)/(?:[A-Za-z0-9_.-]+/)*"
+SHAREABLE_JUDGE_RE = re.compile(r"^(?!(?:.*/)?\.)openbank-[a-z0-9-]+/(?:[A-Za-z0-9_.-]+/)*src/main/(?:kotlin|java)/(?:[A-Za-z0-9_.-]+/)*"
                                 r"[A-Za-z0-9_-]+\.(?:kt|java)$")
 TRAIN_CODE_RE = re.compile(r"^\.github/(scripts|workflows)/(test-)?merge[-_]train[-_.A-Za-z0-9]*$")
 # Files that SUPPRESS security findings (scanner allowlists and rule sets). They were trainable as
@@ -4903,28 +4906,37 @@ def shareable_modules(git, base: str) -> frozenset[str]:
                    ":(exclude)settings.gradle.kts", check=False)
         # ANY `openbank-<m>` token in a test that names another EXISTING top-level module counts as a read
         # (security review: not only the `../openbank-<m>` and `"openbank-<m>/` shapes).
-        reads = git("grep", "-o", "-I", "-E", r'openbank-[a-z0-9-]+', base, "--", TEST_SOURCE_PATHSPEC, check=False)
+        reads = git("grep", "-z", "-o", "-E", r'openbank-[a-z0-9-]+', base, "--", TEST_SOURCE_PATHSPEC, check=False)
         # Fail closed on any OTHER way a test can leave its module (#16290 follow-up review): walking up
         # with parentFile (AuditResourceSecurityTest, InitiatorScopesTest), a ".." path segment, the
         # Gradle root or user.dir. The target cannot be read off such a line, so the READER is excluded:
         # it then rides alone, and a reader riding alone is never batched with what it reads.
-        climbs = git("grep", "-l", "-I", "-E", TEST_LEAVE_RE, base, "--", TEST_SOURCE_PATHSPEC, check=False)
+        climbs = git("grep", "-z", "-l", "-i", "-E", TEST_LEAVE_RE, base, "--", TEST_SOURCE_PATHSPEC, check=False)
         if (tops.returncode != 0 or deps.returncode not in (0, 1) or reads.returncode not in (0, 1)
                 or climbs.returncode not in (0, 1)):
             _SHAREABLE_MODULES[base] = frozenset()
         else:
             used = {ln.rsplit(":", 1)[-1] for ln in deps.stdout.splitlines()}
             top_set = set(tops.stdout.splitlines())
-            unparsed = False
-            for ln in reads.stdout.splitlines():      # <base>:<path>:<match>
-                parts = ln.split(":", 2)
-                if len(parts) != 3:
-                    unparsed = True                    # fail closed: an unreadable line shares nothing
+            # -z: `<base>:<path>NUL<match>` per line, so a path containing ':' cannot shift the fields. Anything
+            # that does not parse to exactly that, with a match that IS a module token, shares nothing.
+            unparsed, prefix = False, f"{base}:"
+            for ln in reads.stdout.splitlines():
+                left, sep, match = ln.partition("\0")
+                if not sep or not left.startswith(prefix) or not re.fullmatch(r"openbank-[a-z0-9-]+", match):
+                    unparsed = True
                     break
-                reader, target = parts[1].split("/", 1)[0], parts[2]
-                if target in top_set and reader != target:
-                    used |= {reader, target}
-            used |= {ln.split(":", 1)[-1].split("/", 1)[0] for ln in climbs.stdout.splitlines()}
+                reader = left[len(prefix):].split("/", 1)[0]
+                if match in top_set and reader != match:
+                    used |= {reader, match}
+            for rec in climbs.stdout.split("\0"):
+                rec = rec.strip("\n")
+                if not rec:
+                    continue
+                if not rec.startswith(prefix):
+                    unparsed = True
+                    break
+                used.add(rec[len(prefix):].split("/", 1)[0])
             if unparsed:
                 used |= set(top_set)
             _SHAREABLE_MODULES[base] = frozenset(
@@ -5950,6 +5962,9 @@ def _synthetic_origin(root: str) -> None:
     w("openbank-mwalk/src/test/kotlin/WalkTest.kt",
       'val root = generateSequence(File("").absoluteFile) { it.parentFile }.first { File(it, "openbank-mwt").isDirectory }\n')
     w("openbank-mwt/src/main/kotlin/W.kt", "// read by openbank-mwalk's test, which climbs to the root to find it\n")
+    # A test whose FILE NAME contains ':' reads another module: a ':'-split parser shifts the fields and misses it.
+    w("openbank-mcolr/src/test/kotlin/Pin:Test.kt", 'val f = File("../openbank-mcolt/src/main/kotlin/C.kt")\n')
+    w("openbank-mcolt/src/main/kotlin/C.kt", "// read by a test whose name contains a colon\n")
     w("openbank-libs-detekt-rules/README.md", "custom detekt rules: checkers written in Kotlin\n")
     w("openbank-svc/build.gradle.kts", 'dependencies { detektPlugins(project(":openbank-libs-detekt-rules")) }\n')
     w("ci.py", "import os,sys\nfail=[]\n"
@@ -8716,6 +8731,8 @@ def self_test() -> int:
             check("shareable_modules: the synthetic leaf module shares", "openbank-svc" in syn_mods, str(sorted(syn_mods)))
             check("shareable_modules: both ends of a cross-module test read are NOT shareable",
                   not ({"openbank-mread", "openbank-mtarget"} & syn_mods), str(sorted(syn_mods)))
+            check("shareable_modules: a read from a test whose path contains ':' still excludes both ends (NUL-separated parse)",
+                  not ({"openbank-mcolr", "openbank-mcolt"} & syn_mods), str(sorted(syn_mods)))
             check("shareable_modules: a module whose test climbs out with parentFile is NOT shareable (target unknown: "
                   "the reader rides alone)", "openbank-mwalk" not in syn_mods, str(sorted(syn_mods)))
             for f in ("build-logic/src/main/kotlin/X.kt", "openbank-libs-detekt-rules/src/main/kotlin/X.kt",
@@ -8741,11 +8758,13 @@ def self_test() -> int:
                       ".gitleaksignore", ".semgrep.yml", ".semgrep/rules/x.yml", ".trivyignore", ".editorconfig",
                       "svc/src/main/resources/application.yaml", "svc/src/test/resources/x.json", "svc/x.txt",
                       "openbank-x/src/main/kotlin/../x.kt", "a/.hidden/src/main/kotlin/X.kt", "docs/adr/x.yaml", "Makefile",
-                      "docs/x.md", "docs/threat-models/svc.md", "docs/adr/0001-x.md", "buildSrc/src/main/kotlin/X.kt",
+                      "docs/x.md", "docs/threat-models/svc.md", "openbank-svc/src/test/kotlin/XTest.kt",
+                      "openbank-svc/src/integrationTest/kotlin/XIT.kt", "openbank-svc/src/testFixtures/kotlin/F.kt",
+                      "openbank-svc/src/e2e/kotlin/E.kt", "openbank-svc/src/main/resources/x.kt", "docs/adr/0001-x.md", "buildSrc/src/main/kotlin/X.kt",
                       "build-logic/src/test/kotlin/XTest.kt", "openbank-libs/src/test/kotlin/ArchTest.kt"):
                 check(f"config_judge_path: {f} configures a verdict — rides alone", config_judge_path(f, syn_refs, syn_mods))
             for f in ("openbank-mco/src/main/kotlin/co.kt", "openbank-svc/src/main/kotlin/com/x/X.kt",
-                      "openbank-svc/src/test/kotlin/XTest.kt", ".github/scripts/two.py"):
+                      ".github/scripts/two.py"):
                 check(f"config_judge_path: {f} is not verdict configuration", not config_judge_path(f, syn_refs, syn_mods))
             own_syn = train_code_paths(Git(origin), syn_main)
             check("train_code_paths: the name rule matches the train's files and nothing else; no checker is train code",
