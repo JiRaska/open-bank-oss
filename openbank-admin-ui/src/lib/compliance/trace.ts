@@ -172,10 +172,12 @@ export function evidenceLevel(refs: TraceEvidence[]): EvidenceLevel {
 
 const DAY_MS = 24 * 60 * 60 * 1000
 /**
- * A gate-health snapshot older than this says nothing about whether a gate is red today, so it is
- * treated as absent: every age-bound claim becomes `evidence-age-unknown` and no gate status is shown.
+ * A gate-health snapshot older than this says nothing about whether a gate is red now, so it is
+ * treated as absent: every age-bound claim becomes `evidence-age-unknown` and no gate status is
+ * shown. It equals the published-evidence reader's own data-age bound (publishedSnapshot.ts); the
+ * collector publishes every 30 minutes, so a healthy pipeline is always inside it.
  */
-export const GATE_HEALTH_MAX_AGE_MS = DAY_MS
+export const GATE_HEALTH_MAX_AGE_MS = 2 * 60 * 60 * 1000
 
 const FAILED = new Set(['failed', 'unfalsified'])
 

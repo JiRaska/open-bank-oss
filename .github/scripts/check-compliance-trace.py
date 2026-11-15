@@ -196,7 +196,7 @@ def self_test() -> int:
         "path escapes repo": (CONTROLS, "ref: docs/adr", "ref: ../etc"),
         "test is main code": (CONTROLS, "ref: svc/src/test/TTest.kt", "ref: svc/src/main/M.kt"),
         "test tree non-test file": (CONTROLS, "ref: svc/src/test/TTest.kt", "ref: svc/src/test/Helper.kt"),
-        "absolute test path": (CONTROLS, "ref: svc/src/test/TTest.kt", "ref: /etc/src/test/XTest.kt"),
+        "absolute test path": (CONTROLS, "ref: svc/src/test/TTest.kt", "ref: {ABS_TEST}"),
         "absolute path ref": (CONTROLS, "ref: docs/adr", "ref: /etc"),
         "missing test": (CONTROLS, "ref: svc/src/test/TTest.kt", "ref: svc/src/test/GoneTest.kt"),
         "age not positive": (CONTROLS, "max_evidence_age_days: 7", "max_evidence_age_days: 0"),
@@ -219,7 +219,11 @@ def self_test() -> int:
         for name, (rel, old, new) in negatives.items():
             root = pathlib.Path(tmp) / name.replace(" ", "-")
             _fixture(root)
-            mutate(root, rel, old, new)
+            # An absolute ref must point at a file that EXISTS, or the case passes without the guard.
+            outside = pathlib.Path(tmp) / "outside" / "src" / "test"
+            outside.mkdir(parents=True, exist_ok=True)
+            (outside / "XTest.kt").write_text("class XTest\n")
+            mutate(root, rel, old, new.replace("{ABS_TEST}", str(outside / "XTest.kt")))
             errs, _ = check(root)
             if not errs:
                 print(f"SELF-TEST FAIL: {name} was not detected")

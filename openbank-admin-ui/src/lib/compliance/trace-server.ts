@@ -35,7 +35,7 @@ const gateHealthReader = createGateHealthSnapshotReader()
 
 /**
  * The published runtime snapshot when it is `ready`, else the copy baked into the image. Either one
- * is still discarded by `currentGateHealth` once it is older than a day. A snapshot that fails validation is treated as absent, which makes every
+ * is still discarded by `currentGateHealth` once it is older than two hours. A snapshot that fails validation is treated as absent, which makes every
  * age-bound claim `evidence-age-unknown` rather than trusting an unreadable file.
  */
 async function loadGateHealth(): Promise<TraceInputs['gateHealth']> {

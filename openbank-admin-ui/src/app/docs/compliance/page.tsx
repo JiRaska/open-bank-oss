@@ -191,7 +191,7 @@ export default function CompliancePage() {
           {t('Snímek k commitu', 'Snapshot as of commit')}: <code>{trace.asOf.commit ?? t('neznámý', 'unknown')}</code>
           {trace.asOf.postureCollectedAt ? <> · {t('signály manifestů', 'manifest signals')} {trace.asOf.postureCollectedAt}</> : null}
           {' · '}{t('běhy gatů', 'gate runs')} {trace.asOf.gateHealthCollectedAt ?? t('nedostupné', 'unavailable')}
-          {trace.asOf.gateHealthCollectedAt && !trace.asOf.gateHealthCurrent ? <span style={{ color: 'var(--warning-text)' }}> ({t('starší než den, nepoužito', 'older than a day, not used')})</span> : null}
+          {trace.asOf.gateHealthCollectedAt && !trace.asOf.gateHealthCurrent ? <span style={{ color: 'var(--warning-text)' }}> ({t('starší než 2 h, nepoužito', 'older than 2 h, not used')})</span> : null}
         </p>
 
         <Tabs<View>
