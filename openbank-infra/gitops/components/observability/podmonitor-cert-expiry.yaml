@@ -1,0 +1,63 @@
+# Scrape the two operators that know when the platform's PRIVATE certificates
+# expire, so expiry is observable instead of inferred (Keys & Certificates
+# inventory, PR 1 of 4).
+#
+# Today only the blackbox-probed public URLs carry an expiry signal
+# (probe_ssl_earliest_cert_expiry, prometheus-rules-synthetic.yaml). The internal
+# openbank-ca leaves, the root CA itself, the OpenBao listener cert and the two
+# Strimzi CAs have none. Both operators already expose the figure; nothing
+# scraped it.
+#
+# These monitors read operator metrics only: expiry timestamps and object names.
+# They never touch a Secret, so no key material reaches Prometheus.
+#
+# Lives in observability (synced by observability-components) and selects
+# cross-namespace, like podmonitor-keycloak.yaml. Neither target namespace has a
+# NetworkPolicy selecting these pods, so no ingress rule is needed.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: cert-manager-controller
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: cert-manager
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - cert-manager
+  # The chart's controller pod; webhook and cainjector carry other components.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cert-manager
+      app.kubernetes.io/component: controller
+  podMetricsEndpoints:
+    # Chart default: containerPort 9402 named http-metrics, always on.
+    # Emits certmanager_certificate_expiration_timestamp_seconds and
+    # certmanager_certificate_renewal_timestamp_seconds per Certificate.
+    - port: http-metrics
+      path: /metrics
+      interval: 60s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: strimzi-cluster-operator
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: strimzi-cluster-operator
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - messaging
+  selector:
+    matchLabels:
+      name: strimzi-cluster-operator
+  podMetricsEndpoints:
+    # The operator serves /metrics on its `http` port (8080). The cluster CA and
+    # clients CA (kafka.yaml: validityDays 365, renewalDays 30) report their
+    # expiry there.
+    - port: http
+      path: /metrics
+      interval: 60s

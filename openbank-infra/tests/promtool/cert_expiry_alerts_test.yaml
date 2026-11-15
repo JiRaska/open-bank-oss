@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: Apache-2.0
+# Behavioural tests for openbank-cert-expiry-alerts (Keys & Certificates inventory, PR 1).
+# Every must-fire case has a must-NOT-fire control: the 80-day leaf proves the leaf rule is
+# not unconditional, the absent cert-manager alert stays silent while its metric is present,
+# and the critical rule stays silent at 5 days. Falsified by widening the leaf selector to
+# name!~".*" (the renewal-failing case goes red). promtool's clock starts at the unix epoch,
+# so an expiry timestamp of N seconds means "expires N seconds after the test starts".
+evaluation_interval: 1m
+rule_files:
+- prometheus-rules-cert-expiry.yaml
+tests:
+- input_series:
+  - series: certmanager_certificate_expiration_timestamp_seconds{namespace="accounts",name="account-service-internal-tls"}
+    values: 432000x120
+  - series: certmanager_certificate_expiration_timestamp_seconds{namespace="cert-manager",name="openbank-sandbox-ca"}
+    values: 2592000x120
+  - series: certmanager_certificate_expiration_timestamp_seconds{namespace="ledger",name="ledger-internal-tls"}
+    values: 6912000x120
+  interval: 1m
+  promql_expr_test:
+  - eval_time: 90m
+    exp_samples:
+    - labels: ALERTS{alertname="InternalCertRenewalFailing",alertstate="firing",name="account-service-internal-tls",namespace="accounts",severity="warning"}
+      value: 1
+    expr: ALERTS{alertname="InternalCertRenewalFailing",alertstate="firing"}
+  - eval_time: 90m
+    exp_samples:
+    - labels: ALERTS{alertname="CertificateAuthorityExpiring",alertstate="firing",name="openbank-sandbox-ca",namespace="cert-manager",severity="warning"}
+      value: 1
+    expr: ALERTS{alertname="CertificateAuthorityExpiring",alertstate="firing"}
+  - eval_time: 90m
+    exp_samples: []
+    expr: ALERTS{alertname="InternalCertExpiringCritical"}
+  - eval_time: 90m
+    exp_samples: []
+    expr: ALERTS{alertname="CertManagerExpiryMetricsAbsent"}
+  - eval_time: 90m
+    exp_samples:
+    - labels: ALERTS{alertname="KafkaCaExpiryMetricsAbsent",alertstate="firing",severity="warning"}
+      value: 1
+    expr: ALERTS{alertname="KafkaCaExpiryMetricsAbsent",alertstate="firing"}
+  name: leaf at 5d fires renewal-failing, CA at 30d fires CA alert, healthy 80d leaf
+    and critical stay silent, missing Strimzi metric fires absent
