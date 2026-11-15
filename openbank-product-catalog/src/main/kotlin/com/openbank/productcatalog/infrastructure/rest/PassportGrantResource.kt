@@ -98,7 +98,6 @@ class PassportGrantResource(
                 channel, customer_segment, pack_set_digest, evidence_ref, proposed_by, effective_from, effective_until)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         """.trimIndent()
-
     }
 }
 

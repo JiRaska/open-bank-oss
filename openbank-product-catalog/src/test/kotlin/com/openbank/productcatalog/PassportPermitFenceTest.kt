@@ -103,7 +103,10 @@ class PassportPermitFenceTest {
         val request = seed("OPEN", issue = false, approved = false)
         dataSource.connection.use { db ->
             assertNull(db.issue(request))
-            assertEquals(false, db.scalar("SELECT approve_passport_grant(?, ?, 'synthetic')", request.grant, request.maker))
+            assertEquals(
+                false,
+                db.scalar("SELECT approve_passport_grant(?, ?, 'synthetic')", request.grant, request.maker),
+            )
             val checker = UUID.randomUUID()
             assertEquals(true, db.scalar("SELECT approve_passport_grant(?, ?, 'synthetic')", request.grant, checker))
             assertEquals(request.permit, db.issue(request))
