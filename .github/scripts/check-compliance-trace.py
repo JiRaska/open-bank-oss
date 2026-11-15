@@ -52,7 +52,9 @@ OBLIGATIONS = "openbank-libs/governance/regulatory-obligations.yaml"
 GATES = ".github/gates/gates.yaml"
 PAGE = "openbank-admin-ui/src/app/docs/compliance/page.tsx"
 KINDS = ("gate", "workflow", "test", "adr", "path")
-TEST_DIRS = ("/src/test/", "/e2e/", "/src/androidTest/")
+TEST_DIRS = ("/src/test/", "/src/androidTest/")
+# A test ref is CI-level evidence, so it must name a test, not just any file in a test tree.
+TEST_FILE = re.compile(r"(Test|IT|Spec)\.kt$|\.(test|spec)\.(ts|tsx|mjs)$")
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
@@ -83,12 +85,14 @@ def _resolves(repo: pathlib.Path, kind: str, ref: str, gate_ids: set[str]) -> bo
     if kind == "workflow":
         return "/" not in ref and (repo / ".github" / "workflows" / ref).is_file()
     if kind == "test":
-        return ".." not in pathlib.PurePosixPath(ref).parts and any(d in f"/{ref}" for d in TEST_DIRS) and (repo / ref).is_file()
+        parts = pathlib.PurePosixPath(ref).parts
+        in_test_tree = any(d in f"/{ref}" for d in TEST_DIRS) or (len(parts) > 2 and parts[1] == "e2e")
+        return (not ref.startswith("/") and ".." not in parts and in_test_tree
+                and bool(TEST_FILE.search(ref)) and (repo / ref).is_file())
     if kind == "adr":
         return bool(re.fullmatch(r"\d{4}", ref)) and any((repo / "docs" / "adr").glob(f"{ref}-*.md"))
     if kind == "path":
-        target = (repo / ref).resolve()
-        return ".." not in pathlib.PurePosixPath(ref).parts and target.exists()
+        return not ref.startswith("/") and ".." not in pathlib.PurePosixPath(ref).parts and (repo / ref).exists()
     return False
 
 
@@ -160,7 +164,8 @@ def _fixture(root: pathlib.Path) -> None:
     (root / ".github/workflows/w.yml").write_text("on: push\n")
     (root / "docs/adr/0001-x.md").write_text("# x\n")
     (root / "svc/src/test").mkdir(parents=True)
-    (root / "svc/src/test/T.kt").write_text("class T\n")
+    (root / "svc/src/test/TTest.kt").write_text("class TTest\n")
+    (root / "svc/src/test/Helper.kt").write_text("class Helper\n")
     (root / "svc/src/main").mkdir(parents=True)
     (root / "svc/src/main/M.kt").write_text("class M\n")
     (root / CONTROLS).write_text(
@@ -171,7 +176,7 @@ def _fixture(root: pathlib.Path) -> None:
         "      - { kind: workflow, ref: w.yml }\n"
         "      - { kind: adr, ref: '0001' }\n"
         "      - { kind: path, ref: docs/adr }\n"
-        "      - { kind: test, ref: svc/src/test/T.kt }\n"
+        "      - { kind: test, ref: svc/src/test/TTest.kt }\n"
         "    max_evidence_age_days: 7\n")
     (root / OBLIGATIONS).write_text("obligations:\n  - id: o1\n    controls: [c1]\n  - id: o2\n")
     (root / PAGE).write_text("export default function Page() { return null }\n")
@@ -189,8 +194,11 @@ def self_test() -> int:
         "missing workflow": (CONTROLS, "ref: w.yml", "ref: gone.yml"),
         "missing adr": (CONTROLS, "ref: '0001'", "ref: '0999'"),
         "path escapes repo": (CONTROLS, "ref: docs/adr", "ref: ../etc"),
-        "test is main code": (CONTROLS, "ref: svc/src/test/T.kt", "ref: svc/src/main/M.kt"),
-        "missing test": (CONTROLS, "ref: svc/src/test/T.kt", "ref: svc/src/test/Gone.kt"),
+        "test is main code": (CONTROLS, "ref: svc/src/test/TTest.kt", "ref: svc/src/main/M.kt"),
+        "test tree non-test file": (CONTROLS, "ref: svc/src/test/TTest.kt", "ref: svc/src/test/Helper.kt"),
+        "absolute test path": (CONTROLS, "ref: svc/src/test/TTest.kt", "ref: /etc/src/test/XTest.kt"),
+        "absolute path ref": (CONTROLS, "ref: docs/adr", "ref: /etc"),
+        "missing test": (CONTROLS, "ref: svc/src/test/TTest.kt", "ref: svc/src/test/GoneTest.kt"),
         "age not positive": (CONTROLS, "max_evidence_age_days: 7", "max_evidence_age_days: 0"),
         "age without gate": (CONTROLS, "      - { kind: gate, ref: g1 }\n", ""),
         "bad kind": (CONTROLS, "kind: path", "kind: vibes"),

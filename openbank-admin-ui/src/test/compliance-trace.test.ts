@@ -101,7 +101,21 @@ describe('compliance trace evidence age (ADR-0379 phase 2)', () => {
 
   it('does not let a recent pass vouch for a gate whose latest run failed', () => {
     const c = buildComplianceTrace(inputs({ controls: [aged], gateHealth: health('failed', '2026-11-14T00:00:00.000Z') })).controls[0]
-    expect(c).toMatchObject({ verdict: 'unverified', freshness: 'unknown', downgradeReason: 'evidence-age-unknown' })
+    expect(c).toMatchObject({ verdict: 'unverified', freshness: 'unknown', downgradeReason: 'failing-gate' })
+  })
+
+  it('downgrades a control when one of several cited gates is red, age bound or not', () => {
+    const two: TraceInputControl = { ...aged, maxEvidenceAgeDays: undefined, evidenceRefs: [{ kind: 'gate', ref: 'g-enforced' }, { kind: 'gate', ref: 'g-advisory' }] }
+    const gateHealth = { collectedAt: '2026-11-15T11:00:00.000Z', gates: { 'g-enforced': { status: 'ok', lastOkAt: '2026-11-15T10:00:00.000Z' }, 'g-advisory': { status: 'failed', lastOkAt: '2026-11-01T00:00:00.000Z' } } }
+    expect(buildComplianceTrace(inputs({ controls: [two], gateHealth })).controls[0]).toMatchObject({ verdict: 'unverified', downgradeReason: 'failing-gate' })
+  })
+
+  it('ignores a gate-health snapshot older than a day, so a gate red since then cannot read green', () => {
+    const old = { collectedAt: '2026-11-12T00:00:00.000Z', gates: { 'g-enforced': { status: 'ok', lastOkAt: '2026-11-11T23:00:00.000Z' } } }
+    const t = buildComplianceTrace(inputs({ controls: [aged], gateHealth: old }))
+    expect(t.controls[0]).toMatchObject({ verdict: 'unverified', downgradeReason: 'evidence-age-unknown' })
+    expect(t.controls[0].evidenceRefs[0].gateStatus).toBeNull()
+    expect(t.asOf).toMatchObject({ gateHealthCollectedAt: '2026-11-12T00:00:00.000Z', gateHealthCurrent: false })
   })
 
   it('treats a missing gate-run snapshot as an unknown age, never as fresh', () => {

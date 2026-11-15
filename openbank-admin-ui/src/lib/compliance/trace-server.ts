@@ -34,15 +34,17 @@ function loadGateCatalog(): { gates: TraceInputGate[]; ref: string | null } | nu
 const gateHealthReader = createGateHealthSnapshotReader()
 
 /**
- * Same order as /api/devops/gate-health: the published runtime snapshot first, then the copy
- * baked into the image. A snapshot that fails validation is treated as absent, which makes every
+ * The published runtime snapshot when it is `ready`, else the copy baked into the image. Either one
+ * is still discarded by `currentGateHealth` once it is older than a day. A snapshot that fails validation is treated as absent, which makes every
  * age-bound claim `evidence-age-unknown` rather than trusting an unreadable file.
  */
 async function loadGateHealth(): Promise<TraceInputs['gateHealth']> {
   let data: GateHealthSnapshotData | null = null
   try {
     const runtime = await gateHealthReader.read()
-    if (runtime.snapshot) data = runtime.snapshot
+    // Only a `ready` snapshot. A `stale` one (expired pointer, old data or a failed refresh) would
+    // let a gate that turned red since look green.
+    if (runtime.status === 'ready' && runtime.snapshot) data = runtime.snapshot
   } catch { /* fall through to the bundled copy */ }
   if (!data) {
     try {
