@@ -86,7 +86,6 @@ import pathlib
 import re
 import subprocess
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -110,8 +109,9 @@ RUN_NAME_PREFIX = "pact-verify:"
 HISTORY_START = "2026-09-25T00:00:00Z"
 HISTORY_PAGE_SIZE = 100
 HISTORY_MAX_PAGES = 20
-HISTORY_SCAN_ATTEMPTS = 3
-HISTORY_RETRY_SECONDS = 10
+# GitHub serves at most 1000 results per filtered list query: page 11 answers
+# `total_count: 0` with no runs. Windows are bisected by time to stay under it.
+HISTORY_QUERY_CAP = 1000
 RUN_NAME = re.compile(r"^pact-verify:(openbank-[a-z0-9-]+):([0-9a-f]{64}|manual):(auto|manual)$")
 
 
@@ -359,58 +359,32 @@ def _history_url(repo: str, workflow: str, created: str, page: int) -> str:
     return f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs?{query}"
 
 
-class HistoryUnstable(ValueError):
-    """Two reads of the SAME pinned window disagreed. Retryable; never a pass."""
-
-
 class BranchPactAbsent(ValueError):
     """The broker holds no pact for this consumer on the branch — nothing to verify."""
 
 
-def complete_run_history(repo: str, workflow: str, token: str, fetch=None, now=None,
-                         sleep=None, attempts=None) -> list[dict]:
-    """Retry `_scan_run_history` while GitHub's own answers disagree, then fail closed.
-
-    Measured 2026-11-14/15: 6 consecutive runs aborted on "run count changed during
-    pagination" while NO verify-provider run had been created since 06:19Z — the
-    window is pinned, nothing was dispatched, and still `total_count` differed
-    between pages. That is the Actions list endpoint answering inconsistently across
-    reads, not a run arriving mid-scan. A fresh full scan is the cure; every retry is
-    announced as a warning, and when all attempts disagree the run fails exactly as
-    before. No attempt is ever accepted unless it passes every completeness check.
-    """
-    sleep = sleep or time.sleep
-    attempts = attempts or HISTORY_SCAN_ATTEMPTS
-    for attempt in range(1, attempts + 1):
-        try:
-            return _scan_run_history(repo, workflow, token, fetch, now)
-        except HistoryUnstable as e:
-            if attempt == attempts:
-                raise HistoryUnstable(f"{e} (on all {attempts} scans)") from e
-            sys.stderr.write(f"::warning::Actions run history inconsistent on scan "
-                             f"{attempt}/{attempts}: {e} — rescanning\n")
-            sleep(HISTORY_RETRY_SECONDS * attempt)
-    raise AssertionError("unreachable")
+def complete_run_history(repo: str, workflow: str, token: str, fetch=None, now=None) -> list[dict]:
+    return _scan_run_history(repo, workflow, token, fetch, now)
 
 
-def _scan_run_history(repo: str, workflow: str, token: str, fetch=None, now=None) -> list[dict]:
-    """Fetch every run in the migration window, or refuse to decide.
+def _ts(moment: datetime.datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    The hard page cap limits API work during a storm. Exceeding it pauses automated
-    dispatch and leaves the broker debt visible; it must not silently forget a failure.
 
-    The paged scan is pinned to `created <= cutoff`. Unpinned, any run dispatched
-    while ~10 pages were read shifted page 1 and aborted the scan: 5 of 8 scheduled
-    runs on 2026-10-31 dispatched nothing for exactly that reason. Runs created after
-    the cutoff are read afterwards as one bounded tail page, so none is missed.
-    """
-    fetch = fetch or github_json
-    cutoff = (now or datetime.datetime.now(datetime.timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    window = f"{HISTORY_START}..{cutoff}"
+def _parse_ts(text: str) -> datetime.datetime:
+    return datetime.datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+
+
+class _SliceTooLarge(Exception):
+    """One `created` range holds more runs than GitHub will page through."""
+
+
+def _scan_slice(repo, workflow, token, fetch, window) -> list[dict]:
+    """Every run in one `created` range, which must hold <= HISTORY_QUERY_CAP runs."""
     runs = []
     first_count = None
     first_ids = None
-    for page in range(1, HISTORY_MAX_PAGES + 1):
+    for page in range(1, HISTORY_QUERY_CAP // HISTORY_PAGE_SIZE + 1):
         url = _history_url(repo, workflow, window, page)
         doc = fetch(url, token)
         count, batch = doc.get("total_count"), doc.get("workflow_runs")
@@ -420,26 +394,69 @@ def _scan_run_history(repo: str, workflow: str, token: str, fetch=None, now=None
         if len(ids) != len(batch) or any(not isinstance(i, int) for i in ids):
             raise TypeError("Actions run history has missing run IDs")
         if first_count is None:
+            if count > HISTORY_QUERY_CAP:
+                raise _SliceTooLarge(count)
             first_count, first_ids = count, ids
         elif count != first_count:
-            raise HistoryUnstable("Actions run count changed during pagination")
-        if count > HISTORY_PAGE_SIZE * HISTORY_MAX_PAGES:
-            raise ValueError(f"Actions run history exceeds {HISTORY_MAX_PAGES} pages")
+            raise ValueError("Actions run count changed during pagination")
         runs.extend(batch)
         if len(runs) >= count:
             if len(runs) != count or len({r["id"] for r in runs}) != count:
-                raise HistoryUnstable("Actions run-history pages overlap or omit runs")
+                raise ValueError("Actions run-history pages overlap or omit runs")
             if page > 1:
                 fresh = fetch(_history_url(repo, workflow, window, 1), token)
                 fresh_runs = fresh.get("workflow_runs")
                 if (fresh.get("total_count") != first_count or not isinstance(fresh_runs, list)
                         or [r.get("id") for r in fresh_runs] != first_ids):
-                    raise HistoryUnstable("Actions first page changed during pagination")
-            break
+                    raise ValueError("Actions first page changed during pagination")
+            return runs
         if not batch:
             raise ValueError("Actions run-history pagination ended early")
-    else:
-        raise ValueError("Actions run-history page cap reached")
+    raise ValueError("Actions run-history pagination ended early")
+
+
+def _scan_run_history(repo: str, workflow: str, token: str, fetch=None, now=None) -> list[dict]:
+    """Fetch every run in the migration window, or refuse to decide.
+
+    The hard cap (HISTORY_MAX_PAGES pages of runs in total) limits API work during a
+    storm. Exceeding it pauses automated dispatch and leaves the broker debt visible;
+    it must not silently forget a failure.
+
+    The paged scan is pinned to `created <= cutoff`. Unpinned, any run dispatched
+    while ~10 pages were read shifted page 1 and aborted the scan: 5 of 8 scheduled
+    runs on 2026-10-31 dispatched nothing for exactly that reason. Runs created after
+    the cutoff are read afterwards as one bounded tail page, so none is missed.
+
+    GitHub answers at most HISTORY_QUERY_CAP results per filtered query; past that,
+    page 11 says `total_count: 0` with no runs. So the window is bisected by `created`
+    until every slice fits. Measured 2026-11-14: the window reached 1002 runs at
+    06:19Z and every reconcile after it failed "run count changed during pagination"
+    with nothing created at all; that message was the cap, not a concurrent run.
+    """
+    fetch = fetch or github_json
+    cutoff_at = (now or datetime.datetime.now(datetime.timezone.utc)).replace(microsecond=0)
+    cutoff = _ts(cutoff_at)
+    second = datetime.timedelta(seconds=1)
+    pending = [(_parse_ts(HISTORY_START), cutoff_at)]
+    runs = []
+    while pending:
+        start, end = pending.pop()
+        try:
+            runs.extend(_scan_slice(repo, workflow, token, fetch, f"{_ts(start)}..{_ts(end)}"))
+        except _SliceTooLarge as e:
+            if e.args[0] > HISTORY_PAGE_SIZE * HISTORY_MAX_PAGES:
+                raise ValueError(f"Actions run history exceeds {HISTORY_MAX_PAGES} pages") from None
+            if end <= start:
+                raise ValueError(f"{e} Actions runs created within one second") from None
+            # `a..b` is inclusive at both ends, so the halves must not share a second.
+            mid = (start + (end - start) / 2).replace(microsecond=0)
+            pending += [(start, mid), (mid + second, end)]
+            continue
+        if len(runs) > HISTORY_PAGE_SIZE * HISTORY_MAX_PAGES:
+            raise ValueError(f"Actions run history exceeds {HISTORY_MAX_PAGES} pages")
+    if len({r["id"] for r in runs}) != len(runs):
+        raise ValueError("Actions run-history slices overlap")
+    runs.sort(key=lambda r: r["id"], reverse=True)
     tail = fetch(_history_url(repo, workflow, f">{cutoff}", 1), token)
     tail_count, tail_runs = tail.get("total_count"), tail.get("workflow_runs")
     if not isinstance(tail_count, int) or not isinstance(tail_runs, list):
@@ -886,8 +903,7 @@ def self_test() -> int:
         return urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["created"][0]
     def history(fetch, tail_runs=()):
         # The pinned window answers from `fetch`; the post-cutoff tail from `tail_runs`.
-        return complete_run_history("org/repo", "verify-provider.yml", "x", sleep=lambda _s: None,
-                                    fetch=lambda url, token: (
+        return complete_run_history("org/repo", "verify-provider.yml", "x", fetch=lambda url, token: (
             {"total_count": len(tail_runs), "workflow_runs": list(tail_runs)}
             if created_of(url).startswith(">") else fetch(url, token)))
     one_page = history( fetch=lambda *_: {
@@ -972,37 +988,35 @@ def self_test() -> int:
             history_checks.append((why, True))
         else:
             history_checks.append((why, False))
-    # 2026-11-14/15: `total_count` flapped between pages with no run created at all.
-    # One inconsistent scan followed by a consistent one must be ACCEPTED (rescanned) —
-    # and the persistent cases above must still fail after every attempt.
-    scans = {"n": 0}
-    def flaky_once(url, token):
+    # 2026-11-14: the window passed 1000 runs and GitHub stops paging there — page 11
+    # answers `total_count: 0`. A faithful model of that endpoint: real filtering by
+    # `created`, real counts, and nothing beyond the 1000th result. One run per second,
+    # so every bisection boundary lands ON a run and an inclusive-overlap bug shows.
+    base = datetime.datetime(2026, 10, 1, tzinfo=datetime.timezone.utc)
+    big = [run(f"{RUN_NAME_PREFIX}{provider}:{key_a}:auto",
+               when=_ts(base + datetime.timedelta(seconds=i))) | {"id": 10_000 + i}
+           for i in range(1002)]
+    def github_like(url, _token):
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
-        if query["page"] == ["1"] and scans["n"] < 2:
-            scans["n"] += 1
-        return history_fixture(url, token, second_count=102 if scans["n"] == 1 else 101)
+        lo, hi = query["created"][0].split("..")
+        hits = sorted((r for r in big if lo <= r["created_at"] <= hi), key=lambda r: -r["id"])
+        page = int(query["page"][0])
+        if page * HISTORY_PAGE_SIZE > 1000:  # GitHub's limit, not our constant
+            return {"total_count": 0, "workflow_runs": []}
+        return {"total_count": len(hits),
+                "workflow_runs": hits[(page - 1) * HISTORY_PAGE_SIZE: page * HISTORY_PAGE_SIZE]}
     try:
-        healed = history(flaky_once)
+        past_cap = history(github_like)
     except ValueError:
-        healed = []
-    history_checks.append(("one inconsistent scan then a consistent one is rescanned and accepted",
-                           len(healed) == 101 and scans["n"] == 2))
+        past_cap = []
+    history_checks.append(("history past GitHub's 1000-result cap is read completely",
+                           sorted(r["id"] for r in past_cap) == sorted(r["id"] for r in big)))
     try:
         history(lambda url, token: history_fixture(url, token, second_count=102))
-    except HistoryUnstable as e:
-        history_checks.append(("persistent inconsistency fails after every attempt",
-                               f"all {HISTORY_SCAN_ATTEMPTS} scans" in str(e)))
-    else:
-        history_checks.append(("persistent inconsistency fails after every attempt", False))
-    try:
-        history(lambda url, _t: {"total_count": 2, "workflow_runs":
-                [auto_a] if urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["page"] == ["1"] else []})
-    except HistoryUnstable:
-        history_checks.append(("a short history is NOT retried as instability", False))
     except ValueError:
-        history_checks.append(("a short history is NOT retried as instability", True))
+        history_checks.append(("a count that really changes mid-slice still fails closed", True))
     else:
-        history_checks.append(("a short history is NOT retried as instability", False))
+        history_checks.append(("a count that really changes mid-slice still fails closed", False))
     for why, okay in history_checks:
         print(f"  {'ok ' if okay else 'BAD'} {why}")
         if not okay:
