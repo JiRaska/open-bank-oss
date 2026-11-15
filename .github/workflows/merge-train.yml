@@ -87,6 +87,11 @@ env:
   # carrier seen (#15695, #15769), the carrier went red, and its members were bisected for a fault that
   # was the carrier's shape. Turn back on only together with a carrier resolver that knows the holder base.
   MERGE_TRAIN_SPECULATIVE_STACK: "false"
+  # Expedite lane (ADR-0343 amendment 2026-11-13): one extra carrier holding ONE `merge-priority:expedite`
+  # PR may run beside one ordinary carrier and merges first; the overtaken carrier is rebuilt with no
+  # verdict. "false" is the rollback: the label only reorders, as before. The cap bounds the CI it costs.
+  MERGE_TRAIN_EXPEDITE_LANE: "true"
+  MERGE_TRAIN_EXPEDITE_DAILY_CAP: "6"
 
 jobs:
   settle:
@@ -110,6 +115,8 @@ jobs:
       # Speculative-stacking window (holder PR, holder head): data only, re-validated live by publish.
       stack_pr: ${{ steps.settle.outputs.stack_pr }}
       stack_head: ${{ steps.settle.outputs.stack_head }}
+      # Expedite window: one PR number, data only, re-validated live by build and publish.
+      expedite_pr: ${{ steps.settle.outputs.expedite_pr }}
     steps:
       - name: Mint the GitHub App installation token
         id: app_token
@@ -150,6 +157,8 @@ jobs:
           # own commits to train/strict-<run_id>-<attempt>; the cap is the rollback switch (1 = off).
           STRICT_BATCH_CAP: ${{ env.MERGE_TRAIN_STRICT_BATCH_CAP }}
           SPECULATIVE_STACK: ${{ env.MERGE_TRAIN_SPECULATIVE_STACK }}
+          EXPEDITE_LANE: ${{ env.MERGE_TRAIN_EXPEDITE_LANE }}
+          EXPEDITE_DAILY_CAP: ${{ env.MERGE_TRAIN_EXPEDITE_DAILY_CAP }}
           # Isolated git config for THIS step only. At job level it also reached actions/checkout,
           # whose safe.directory write then failed: "could not lock config file /dev/null".
           GIT_CONFIG_NOSYSTEM: "1"
@@ -225,6 +234,7 @@ jobs:
           # Read-only. The script strips it — and everything not on its allowlist — from the
           # environment the generators run in.
           GH_TOKEN: ${{ github.token }}
+          EXPEDITE_PR: ${{ needs.settle.outputs.expedite_pr }}
           TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 16 }}
         run: |
           set -euo pipefail
@@ -285,6 +295,8 @@ jobs:
           # Settle's stacking window; publish re-validates both values from live data before using them.
           STACK_PR: ${{ needs.settle.outputs.stack_pr }}
           STACK_HEAD: ${{ needs.settle.outputs.stack_head }}
+          EXPEDITE_PR: ${{ needs.settle.outputs.expedite_pr }}
+          EXPEDITE_DAILY_CAP: ${{ env.MERGE_TRAIN_EXPEDITE_DAILY_CAP }}
           # Isolated git config for THIS step only (see settle).
           GIT_CONFIG_NOSYSTEM: "1"
           GIT_CONFIG_GLOBAL: /dev/null

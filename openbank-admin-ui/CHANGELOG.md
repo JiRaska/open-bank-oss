@@ -1,5 +1,57 @@
 # Changelog
 
+## [4.16.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.15.0...admin-ui-v4.16.0) (2026-11-15)
+
+
+### Features
+
+* **admin-ui:** explain the mobile app and admin portal test stacks under Test Intelligence ([#16189](https://github.com/JiRaska/open-bank-oss/issues/16189)) ([b29b058](https://github.com/JiRaska/open-bank-oss/commit/b29b058d43bd2d2144ee8ace89a30220efa0343f))
+
+
+### Bug Fixes
+
+* **admin-ui:** read the AML case movement owner as movementService ([#16188](https://github.com/JiRaska/open-bank-oss/issues/16188)) ([43eab06](https://github.com/JiRaska/open-bank-oss/commit/43eab06fb7188deac71b367151eef56fd87dee55)), closes [#15939](https://github.com/JiRaska/open-bank-oss/issues/15939)
+
+## [4.15.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.14.1...admin-ui-v4.15.0) (2026-11-14)
+
+
+### Features
+
+* **admin-ui:** show statutory-return catalogues and operate their lifecycle ([#16154](https://github.com/JiRaska/open-bank-oss/issues/16154)) ([90412dc](https://github.com/JiRaska/open-bank-oss/commit/90412dc9f6b5b80268ba5feaa71a7a13b0b858c4))
+* **flaky-test-hunter:** target a seeded qualification branch for the phase-3 write proof ([#16131](https://github.com/JiRaska/open-bank-oss/issues/16131)) ([819a4a9](https://github.com/JiRaska/open-bank-oss/commit/819a4a91439a570435b52c47dbd28ed26d7174f5))
+* **kyb:** publish verified statutory representation rules ([#15662](https://github.com/JiRaska/open-bank-oss/issues/15662)) ([3e1956f](https://github.com/JiRaska/open-bank-oss/commit/3e1956fab5bc3cc9c83adffcc5351ddf1172289e))
+
+
+### Bug Fixes
+
+* **admin-ui:** what the AML screens got wrong with live data ([#16167](https://github.com/JiRaska/open-bank-oss/issues/16167)) ([e8816d3](https://github.com/JiRaska/open-bank-oss/commit/e8816d3d6753e7d97084856af8fdadd58edd084a))
+
+## [4.14.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.14.0...admin-ui-v4.14.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **admin-ui:** override vulnerable nested qs and minimatch ([#16100](https://github.com/JiRaska/open-bank-oss/issues/16100)) ([765cd4c](https://github.com/JiRaska/open-bank-oss/commit/765cd4c20ea08f83831e5107a38a23aebf33b3ac))
+
+## [4.14.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.13.0...admin-ui-v4.14.0) (2026-11-14)
+
+
+### Features
+
+* **admin-ui:** show HELD domestic payments and their reject reason ([#16040](https://github.com/JiRaska/open-bank-oss/issues/16040)) ([f418453](https://github.com/JiRaska/open-bank-oss/commit/f4184537133c18d309b9e1fa11bf016c9b207e19))
+
+## [4.13.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.12.2...admin-ui-v4.13.0) (2026-11-13)
+
+
+### Features
+
+* **admin-ui:** AML case detail, four-eyes dispositions and FAU report for officers ([#15940](https://github.com/JiRaska/open-bank-oss/issues/15940)) ([d540b8d](https://github.com/JiRaska/open-bank-oss/commit/d540b8d18e963221222d0a0558ca024c11c1ee8a))
+
+
+### Bug Fixes
+
+* **admin-ui:** admit ROLE_COMPLIANCE to the party detail permission ([#15991](https://github.com/JiRaska/open-bank-oss/issues/15991)) ([e67a677](https://github.com/JiRaska/open-bank-oss/commit/e67a677cef2de241ef4ff20240189448c474715d)), closes [#15939](https://github.com/JiRaska/open-bank-oss/issues/15939)
+
 ## [4.12.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.12.1...admin-ui-v4.12.2) (2026-11-13)
 
 

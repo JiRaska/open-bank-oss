@@ -404,6 +404,31 @@ def complete_run_history(repo: str, workflow: str, token: str, fetch=None, now=N
     return tail_runs + runs
 
 
+# A shifting index is a READ failure, not a finding: GitHub's filtered run index can add a
+# run inside an already-pinned window between two page reads (runs become visible late).
+# Measured 2026-11-09..14: every red tick of this reconciler that got past the broker step
+# was this message, so the reconciler stayed red while having nothing to report. Re-scan a
+# bounded number of times; only a history that is still moving after that is refused.
+HISTORY_SCAN_ATTEMPTS = 3
+HISTORY_RESCAN_SECONDS = 20
+
+
+def stable_run_history(repo: str, workflow: str, token: str, fetch=None, now=None,
+                       sleep=None, attempts: int = HISTORY_SCAN_ATTEMPTS) -> list[dict]:
+    """complete_run_history, re-scanned when the index moved mid-read; otherwise unchanged."""
+    import time
+    sleep = sleep or time.sleep
+    for attempt in range(1, attempts + 1):
+        try:
+            return complete_run_history(repo, workflow, token, fetch=fetch, now=now)
+        except ValueError as e:
+            if "changed during pagination" not in str(e) or attempt == attempts:
+                raise
+            sys.stderr.write(f"::notice::run history moved during scan ({e}); re-scan {attempt + 1}/{attempts}\n")
+            sleep(HISTORY_RESCAN_SECONDS)
+    raise AssertionError("unreachable")
+
+
 def admit_provider(provider: str, key: str, runs: list[dict]) -> tuple[bool, str]:
     """Admit one new run only when complete history proves no same-input attempt exists."""
     named_dates = [r.get("created_at") for r in runs if RUN_NAME.fullmatch(str(r.get("display_title", "")))]
@@ -592,7 +617,7 @@ def main() -> int:
             p: verification_key(root, p, owed[p], args.broker, user, password, args.branch)
             for p in providers
         }
-        runs = complete_run_history(args.repo, args.workflow, token)
+        runs = stable_run_history(args.repo, args.workflow, token)
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
             OSError, subprocess.CalledProcessError, TypeError, ValueError) as e:
         sys.stderr.write(f"::error::verification admission evidence incomplete: {e} — no dispatch\n")
@@ -830,6 +855,29 @@ def self_test() -> int:
             history_checks.append((why, True))
         else:
             history_checks.append((why, False))
+    # Index moved once, then settled: the re-scan answers instead of refusing (2026-11-14).
+    scans = {"n": 0}
+    def settles(url, token):
+        if urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["page"] == ["1"]:
+            scans["n"] += 1
+        return history_fixture(url, token, second_count=102 if scans["n"] == 1 else 101)
+    try:
+        settled = stable_run_history("org/repo", "verify-provider.yml", "x", sleep=lambda _s: None,
+            fetch=lambda url, token: ({"total_count": 0, "workflow_runs": []}
+                                      if created_of(url).startswith(">") else settles(url, token)))
+        history_checks.append(("index that moves once is re-scanned and accepted",
+                               len(settled) == 101 and scans["n"] == 3))  # scan1 p1, scan2 p1 + fresh p1
+    except ValueError:
+        history_checks.append(("index that moves once is re-scanned and accepted", False))
+    try:
+        stable_run_history("org/repo", "verify-provider.yml", "x", sleep=lambda _s: None,
+            fetch=lambda url, token: ({"total_count": 0, "workflow_runs": []}
+                                      if created_of(url).startswith(">")
+                                      else history_fixture(url, token, second_count=102)))
+    except ValueError:
+        history_checks.append(("index still moving after every re-scan fails closed", True))
+    else:
+        history_checks.append(("index still moving after every re-scan fails closed", False))
     first_page_reads = 0
     def shifted_first_page(url, token):
         nonlocal first_page_reads

@@ -14,13 +14,16 @@ lineage:
     - serviceName: party-service
       relationType: topic
       description: consumes openbank.party.events to learn when an entity party is activated
+    - serviceName: sanctions-service
+      relationType: topic
+      description: consumes openbank.sanctions.screening.event for the ongoing-monitoring findings (MONITORED_SUBJECT_MATCHED) about the subjects it registered
   downstream:
     - serviceName: party-service
       relationType: api
       description: creates the entity party and its representation mandates via PartyServiceClient
     - serviceName: sanctions-service
       relationType: api
-      description: screens the entity, its representatives and its beneficial owners (CUSTOMER profile) when related-party screening is enabled
+      description: screens the entity, its representatives and its beneficial owners (CUSTOMER profile) when related-party screening is enabled, and registers them for ongoing monitoring once the case is approved
 databaseLineage:
   ownedDatabases:
     - openbank_kyb

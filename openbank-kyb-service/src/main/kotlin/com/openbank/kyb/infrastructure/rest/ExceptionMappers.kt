@@ -5,10 +5,12 @@
 package com.openbank.kyb.infrastructure.rest
 
 import com.openbank.kyb.application.port.out.ConcurrentCaseUpdateException
+import com.openbank.kyb.application.port.out.FindingDecisionConflictException
 import com.openbank.kyb.application.port.out.RegistryUnavailableException
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.application.usecase.CaseNotFoundException
 import com.openbank.kyb.application.usecase.InvitationNotFoundException
+import com.openbank.kyb.application.usecase.SeparationOfDutiesException
 import com.openbank.kyb.application.usecase.StaleAttestationException
 import com.openbank.kyb.domain.model.AgreementConflictException
 import com.openbank.kyb.domain.model.CaseTransitionException
@@ -36,6 +38,13 @@ private fun error(status: Int, code: String, message: String?): Response = Respo
 class StaleAttestationMapper : ExceptionMapper<StaleAttestationException> {
     override fun toResponse(e: StaleAttestationException): Response =
         error(CONFLICT, "REPRESENTATION_RULE_CHANGED", e.message)
+}
+
+/** Four-eyes: the attester of a statutory rule may not also publish it. */
+@Provider
+class SeparationOfDutiesMapper : ExceptionMapper<SeparationOfDutiesException> {
+    override fun toResponse(e: SeparationOfDutiesException): Response =
+        error(FORBIDDEN, "SEPARATION_OF_DUTIES", e.message)
 }
 
 @Provider
@@ -113,6 +122,13 @@ class ScreeningFindingMapper : ExceptionMapper<ScreeningFindingException> {
 class ConcurrentCaseUpdateMapper : ExceptionMapper<ConcurrentCaseUpdateException> {
     override fun toResponse(e: ConcurrentCaseUpdateException): Response =
         error(CONFLICT, "CASE_CONCURRENT_UPDATE", e.message)
+}
+
+/** Two decisions about one finding disagree. 409: nothing was written; read the case again. */
+@Provider
+class FindingDecisionConflictMapper : ExceptionMapper<FindingDecisionConflictException> {
+    override fun toResponse(e: FindingDecisionConflictException): Response =
+        error(CONFLICT, "MONITORING_DECISION_CONFLICT", e.message)
 }
 
 private const val NOT_FOUND = 404

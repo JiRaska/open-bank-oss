@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.0...kyb-service-v0.11.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **kyb:** screen related parties with registration country, birth date and nationality ([#16215](https://github.com/JiRaska/open-bank-oss/issues/16215)) ([dfba096](https://github.com/JiRaska/open-bank-oss/commit/dfba0963ba2070d605dfb2757015a4859eae3f36))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.10.0...kyb-service-v0.11.0) (2026-11-14)
+
+
+### Features
+
+* **kyb:** publish verified statutory representation rules ([#15662](https://github.com/JiRaska/open-bank-oss/issues/15662)) ([3e1956f](https://github.com/JiRaska/open-bank-oss/commit/3e1956fab5bc3cc9c83adffcc5351ddf1172289e))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.9.0...kyb-service-v0.10.0) (2026-11-13)
+
+
+### Features
+
+* **kyb:** keep approved business cases under ongoing sanctions monitoring ([#15989](https://github.com/JiRaska/open-bank-oss/issues/15989)) ([daa6829](https://github.com/JiRaska/open-bank-oss/commit/daa6829c02fc75f2bcec673b3a2a8e1bce6605a9))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.8.5...kyb-service-v0.9.0) (2026-11-13)
 
 

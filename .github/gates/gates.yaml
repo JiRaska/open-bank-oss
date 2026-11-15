@@ -124,11 +124,26 @@ gates:
     rationale: "The counting gh shim sits first on PATH in CI gates, Services CI changes, CodeQL and the merge-train build. A shim that altered arguments, output or exit code, or that died on an unwritable log, would break every job it measures; one that logged field values would publish them in step summaries. Its self-test proves each of those is caught."
     review_after: "2027-05-10"
     budget_seconds: 30
-    # One subject per assertion the harness makes (passthrough, exit code, stderr, log line, no values, report, unwritable log, missing counter).
-    min_subjects: 8
+    # One subject per assertion the harness makes (passthrough, exit code, stderr, log line, no values, report, unwritable log, missing counter,
+    # Python request logged / query not logged / no env no log, budget over-enforce / over-warn / within / warn-only default / undeclared).
+    min_subjects: 16
     selftest_exempt: "is-a-test-suite - the run: IS the shim's own --self-test, which fails when the passthrough is sabotaged"
     run: |
       bash .github/scripts/gh-call-counter.sh --self-test
+
+  - id: api-call-budget-coverage
+    name: "Every job that counts GitHub API calls declares a per-run budget, and every budget names such a job"
+    group: lint
+    mode: enforced
+    rationale: "The repository's GITHUB_TOKEN core quota is shared by every run; when one job's spend grows, CodeQL and other required checks on unrelated PRs fail with 'API rate limit exceeded for installation'. gh-call-counter.sh warns when a counted job exceeds its line in .github/api-call-budgets.yaml, which only works while each counted job has a line. A counted job without one reports budget=undeclared and can never warn; a line whose job was renamed checks nothing."
+    review_after: "2027-05-14"
+    budget_seconds: 30
+    # Ten jobs install the counter today; a parse that finds far fewer has lost the workflows.
+    min_subjects: 10
+    selftest: python3 .github/scripts/check-api-call-budgets.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-api-call-budgets.py --root .
 
   - id: verification-metadata-additive-check
     name: "Dependabot metadata refresh accepts only additive verification metadata (#15355)"
@@ -918,6 +933,24 @@ gates:
       # alpine + three unmarked ARC helm values), 0 / exit 0 after. 8 self-test cases.
       python3 .github/scripts/check-tofu-image-pull-through.py --enforce
 
+  # A consumer merged against an input nobody provisioned fails days later, elsewhere, as an
+  # outage of the consumer: 2026-11-14 had five at once (ci-metrics-gateway 0 replicas ~70h,
+  # card-processing issuer-oidc ~44h, three workflows red every run). The inventory makes the
+  # reference and its provisioning one change; `--live` (operator machine) checks the claim.
+  - id: config-inventory
+    name: "every workflow secret/var and OpenBao ExternalSecret key is declared in .github/config-inventory.yaml (enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 15
+    min_subjects: 200   # 445 workflow + ExternalSecret references on 2026-11-14
+    rationale: "An absent secret is an empty string and an absent OpenBao key is a valid ExternalSecret, so nothing fails at merge; the inventory forces the author to state, per name, provisioned or unprovisioned-with-issue-and-expiry, and fails on stale entries both ways (#16205, #16206)."
+    review_after: "2027-05-14"
+    selftest: python3 .github/scripts/check-config-inventory.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-config-inventory.py"]
+    run: |
+      python3 .github/scripts/check-config-inventory.py
+
   - id: eso-crd-api-version
     name: "an external-secrets.io v1beta1/v1alpha1 manifest cannot coexist with an ESO chart >= 0.17.0"
     group: gitops
@@ -1500,6 +1533,31 @@ gates:
       python3 .github/scripts/check-alert-window-vs-subject-period.py --self-test
     run: |
       python3 .github/scripts/check-alert-window-vs-subject-period.py --enforce
+
+  # Alert-rule hygiene ratchet (2026-11-14). The week's top flappers were the rules whose noise
+  # cannot be judged by reading them -- statistical bands and linear projections -- and none
+  # had been replayed against history before it shipped. New alerts need `for:` >= 1m (or a
+  # stated for_zero_reason), a runbook_url, and, for a stddev/predict_linear rule, a
+  # `backtest:` annotation from openbank-infra/scripts/alert-backtest.py. Existing gaps are
+  # baselined both ways, so the list only shrinks. ENFORCED.
+  - id: alert-rule-hygiene
+    name: "new alert rules carry for:, runbook and (statistical) a backtest (enforced)"
+    group: gitops
+    budget_seconds: 20
+    mode: enforced
+    rationale: >-
+      TrafficDropAnomaly, SpanLatencyTrendAnomaly and NodeDiskWillFillIn4h fired 16, 18 and 66
+      separate times in seven days with no outage, while a critical sat unacted for 70h amid
+      the noise. A 3-sigma band on near-flat synthetic traffic is narrower than sampling
+      jitter, which no reviewer can see in the YAML; only a replay against recorded history
+      can, so the rule must say it was replayed.
+    review_after: "2027-02-14"
+    min_subjects: 250   # 306 alert rules in gitops PrometheusRules on 2026-11-14
+    selftest_inputs: [".github/scripts/check-alert-rule-hygiene.py"]
+    selftest: |
+      python3 .github/scripts/check-alert-rule-hygiene.py --self-test
+    run: |
+      python3 .github/scripts/check-alert-rule-hygiene.py --enforce
 
   # A route prefix moves Alertmanager's WHOLE HTTP surface, /api/v2/alerts included, so a
   # hand-configured client pointed at the bare service URL posts every notification into a 404
@@ -3355,6 +3413,39 @@ gates:
     run: |
       python3 .github/scripts/merge-train-stall-watch.py --check-declaration
 
+  - id: watch-outcome-declared
+    name: "every scheduled watch names its outcome CLEAN/FOUND/SKIPPED/UNREADABLE (ratchet, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 10   # offline; reads workflow files and the scripts they invoke
+    review_after: "2027-05-14"
+    rationale: >-
+      2026-11-09..14 three watches were red for days on READ failures (a short page, a 409,
+      a moving index) while one subject they watched was genuinely red; one boolean carried
+      three answers, so the reds were ignored. A red watch must mean only "this watch is blind".
+      Re-examine when BASELINE is empty.
+    min_subjects: 5
+    selftest: |
+      python3 .github/scripts/check-watch-outcome.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-watch-outcome.py
+
+  - id: standing-red-sentinel-selftest
+    name: "standing-red sentinel: streak, dedupe, escalation and close logic falsified (enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 10   # offline fixtures plus a scan of the workflow tree
+    review_after: "2027-05-14"
+    rationale: >-
+      A scheduled workflow has no PR and no author, so its red reaches nobody. The sentinel is
+      the only reader of that lane for ~60 workflows; its state machine (open/refresh/reopen/
+      escalate/close, never close on an unreadable tick) must stay falsified.
+    min_subjects: 10
+    selftest_exempt: "is-a-test-suite - the run: IS the sentinel's --self-test; three sabotages (streak, open, cancelled filter) each make it fail"
+    run: |
+      python3 .github/scripts/standing-red-sentinel.py --self-test
+
   - id: auto-deploy-red-watch-declaration
     name: "auto-deploy red watch reads the scheduled lane only, via a falsified script (issue #9130, enforced)"
     group: registry
@@ -3370,7 +3461,7 @@ gates:
     selftest: |
       python3 .github/scripts/detect-auto-deploy-stuck.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/detect-auto-deploy-stuck.py", ".github/workflows/auto-deploy-red-watch.yml"]
+    selftest_inputs: [".github/scripts/detect-auto-deploy-stuck.py", ".github/workflows/auto-deploy-red-watch.yml", ".github/scripts/watch_outcome.py"]
     run: |
       python3 .github/scripts/detect-auto-deploy-stuck.py --check-declaration
 
@@ -6499,6 +6590,26 @@ gates:
     run: |
       python3 .github/scripts/check-authz-enforce-money-path.py . --enforce
 
+  # Four-eyes ENFORCED in the deployed manifest (#15748, ADR-0155). The policy flags an action
+  # four_eyes_required, but AuthorizeInterceptor acts on it only with authz.four-eyes.enforce=true
+  # (code default false), and on 2026-11-11 no manifest set it — every dual-control action ran on
+  # one operator. Subjects are derived from @Authorize sites with rest.rego's own scope/verb/action
+  # rule; an exception lives in rules.yaml four_eyes_enforcement.allowlist and FAILS the gate once
+  # expired, once stale (service already enforces), or when dated more than 120 days out.
+  - id: four-eyes-enforce-deployed
+    rationale: "A service that owns a four-eyes action but leaves AUTHZ_FOUR_EYES_ENFORCE unset executes every flagged money-path call on a single operator while the policy, approval store and inbox all read as a working control (#15748)."
+    review_after: "2027-02-15"
+    budget_seconds: 60   # ~6 s CPU locally (one gitops parse + a src/main walk); I/O-bound on a busy runner
+    min_subjects: 20   # 26 modules own a four-eyes @Authorize action today (2026-11-11)
+    name: "services owning a four-eyes action enforce it in the deployed manifest (enforced, #15748)"
+    group: security
+    mode: enforced
+    selftest: python3 .github/scripts/check-four-eyes-enforce.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-four-eyes-enforce.py"]
+    run: |
+      python3 .github/scripts/check-four-eyes-enforce.py
+
   # @RolesAllowed ⇒ realm parity (issue #2404). The JWT-role half of the check above: a role
   # name that exists in no realm never matches, so the endpoint answers 403 to every caller,
   # silently and forever. finrep's FINREP/COREP shipped that way (#2403), and 39 sites across
@@ -6840,6 +6951,20 @@ gates:
       # the first run of these probes reported "rejected" on a YAML error in the fixture itself,
       # which is why the output is read and not the exit code.
       python3 .github/scripts/check-delegation-capability-enforcement.py --enforce
+  - id: value-movement-admission-coverage
+    name: "every value-moving module is classified, and an instructed one binds the admission chain with a real FRAUD check (ADR-0377 D2, enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 12   # 1.3s warm / 2.7s cold on a laptop, 3043 .kt files read (2026-11-13)
+    rationale: "A module that books value without binding the payment admission chain is a path around authority, limits, sanctions and fraud, and nothing listed such paths: ADR-0377 D2 found one that posts straight to the transactions API outside every rail. The scope is derived from value-sink call sites in src/main (TransactionsApi booking calls, @POST clients on journal/balance/clearing paths, hand-built sink URLs), never listed; the registry only classifies it and is checked both ways, and its pending states are shrink-only so a module that binds the chain cannot keep its exemption."
+    review_after: "2027-03-31"
+    verified: "2026-11-13 -- real tree: PASS, 16 modules derived from 3043 .kt files (9 instructed, all pending-chain because no service binds the chain yet; 7 bank-own). Falsified six ways against the real tree, each restored afterwards: a registry line deleted -> exit 1, 1 UNCLASSIFIED finding; a line for a non-existent module -> exit 1, 1 STALE finding; pending-chain removed from an instructed line -> exit 1, 1 'declared fully bound' finding; a new file posting to a transactions URL added to a module outside the set -> exit 1, 1 UNCLASSIFIED finding naming file:line; a chain Builder added to a pending-chain module -> exit 1, 1 STALE pending-chain finding; --root at an empty directory -> exit 2 with SUBJECTS=UNRESOLVED. Self-test: 30 named checks."
+    min_subjects: 12   # 16 value-moving modules derived today (2026-11-13)
+    selftest: python3 .github/scripts/check-value-movement-admission.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-value-movement-admission.py"]
+    run: |
+      python3 .github/scripts/check-value-movement-admission.py
   - id: enforcement-reachability
     name: "a declared enforcement function has a production caller (ADR-0232, issue #3615)"
     group: kotlin
@@ -8127,6 +8252,26 @@ gates:
     selftest_inputs: [".github/scripts/check-enum-reference-data.py", ".github/scripts/enum-reference-data-baseline.txt"]
     run: |
       python3 .github/scripts/check-enum-reference-data.py --root .
+
+  - id: rail-screening-port
+    name: "outgoing rail sanctions screening port (rules.yaml outgoing_payment_rails_screening, enforced)"
+    group: data
+    mode: enforced
+    budget_seconds: 15   # <1s measured locally 2026-11-14
+    rationale: >-
+      Every outgoing payment rail must screen debtor and creditor against the sanctions lists
+      before release, through a *Screening*Port and the shared libs-fincrime ScreeningPolicy.
+      Measured 2026-11-14: swift-service and sdd-service had no screening at all while swift's
+      docs said screening was done upstream, and the upstream did none. Both are baselined while
+      their fix PRs land; a covered baselined rail fails, so the baseline only shrinks.
+    review_after: '2027-05-14'
+    verified: "2026-11-14 — origin/main ecbfaaa97b: 6 rails, 4 covered, swift+sdd baselined; copy of the tree with sepa-payment's ScreeningPorts.kt removed exits 1 naming openbank-sepa-payment; self-test covers missing port, missing policy, stale baseline, unknown module, empty list"
+    min_subjects: 3   # 6 rails measured 2026-11-14; half
+    selftest: python3 .github/scripts/check-rail-screening-port.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-rail-screening-port.py", ".github/scripts/rail-screening-port-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-rail-screening-port.py --root .
 
   # Real cache mutations run for build-logic changes and all main pushes. The
   # structural guard stays cheap for unrelated PRs (standard selftest_inputs policy).

@@ -26,6 +26,15 @@ interface DomesticPaymentWorkflow {
      */
     @SignalMethod
     fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?)
+
+    /**
+     * ADR-0374 D3: something about this payment's hold changed, look at it now. It carries nothing:
+     * the decision of the hold's case is recorded on the payment's row before this is sent, and the
+     * run reads it from there. A signal that is lost, duplicated, early or forged therefore changes
+     * no outcome; the run looks again on its own interval anyway.
+     */
+    @SignalMethod
+    fun holdChanged()
 }
 
 /**

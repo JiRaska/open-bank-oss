@@ -218,6 +218,37 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
 
 ## 7. Change log
 
+- **2026-11-14** — **Ongoing monitoring switched on in the sandbox deployment
+  (`SANCTIONS_MONITORING_ENABLED=true`).** The surface of section 6b is now live there: the
+  registration operations accept requests instead of answering 503, and the delta and sweep run
+  every 60 seconds. No threat row changes. Measured at the flip: the registry is empty and the
+  only registering caller (kyb-service) still has its own registration switch off, so no subject
+  is monitored and no finding can be raised until that caller is switched on separately; list
+  changes run at roughly 700 to 1,600 changed entries a day, well inside the delta's bound of
+  5 entries per tick (7,200 a day), and the queue trigger writes nothing while the registry is
+  empty (M9). The new `SanctionsMonitoringCronIT` drives the real scheduler rather than calling
+  the runs directly, so a scheduled path that lost its Vert.x context would now fail a test (M6,
+  M10). Rollback: set the variable back to `false`.
+- **2026-11-14** — **FATF jurisdiction statements of 2026-10-30 loaded; a measure that never
+  screens (#15723, ADR-0032 amendment).** V24 loads `FATF_CALL_FOR_ACTION` (KP, IR
+  countermeasures; MM enhanced due diligence; all `HIGH_RISK` → review) and
+  `FATF_INCREASED_MONITORING` (18 countries, new measure `RISK_FACTOR`, which the screen drops
+  before it becomes a match). No existing outcome changes: KP, IR and MM were already `HIGH_RISK`
+  through the EU list. **STRIDE-T / data integrity:** the publisher refuses automated retrieval,
+  so the rows were taken from an official government republication (Japan MOF translations, SHA-256
+  recorded in `source_ref` and the migration header) and cross-checked against FinCEN; the four
+  jurisdictions removed by the plenary (BG, CI, CD, MC) are asserted absent. **Silent false
+  negative (new):** a row mis-labelled `RISK_FACTOR` would screen CLEAR without any error; the
+  measure of every shipped FATF row is pinned by `FatfJurisdictionStatementsIT`, and a grey-only
+  country (KW) is asserted CLEAR while a call-for-action country is asserted `POTENTIAL_HIT` on
+  every profile. **Rollback:** the previous release has no `RISK_FACTOR` and would refuse a screen
+  that selected such a row (`valueOf` throws), so grey-list rows sit under `list_type =
+  COUNTRY_RISK_FACTOR`, which no screen's list set contains; the old read path, copied verbatim
+  into `JurisdictionRollbackSafetyIT`, returns its main-branch result for KP, KE, KW and PT
+  against the migrated data, with no manual step. **Residual:** customer risk scoring
+  does not read the grey-list rows yet, so the grey list informs no automated decision; the next
+  FATF plenary (February 2027) must be loaded by hand before the verification alert fires on
+  2027-04-13.
 - **2026-11-12** — **Ongoing monitoring of registered subjects (ADR-0376), shipped disabled.**
   New store of personal data (`sanctions_monitored_subjects`, `sanctions_monitoring_findings`,
   `sanctions_monitored_subject_names`, V23), two new inbound operations (`PUT`/`DELETE
@@ -228,6 +259,27 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
   matches anything and the queue trigger writes nothing because the registry is empty.
 
 - **2026-11-12** — **Reviewer identity comes from the token (#15748, C8).** The review endpoints no longer bind a client-supplied `reviewedBy`; it is ignored and the authenticated principal is recorded. This also fixes the admin-ui decision action, whose body never carried the field and was answered 400.
+- **2026-11-11** — **Four-eyes ENFORCED on `sanctions.clear` (`AUTHZ_FOUR_EYES_ENFORCE=true`, #15748).**
+  Until now OPA flagged every hit disposition `four_eyes_required` and the interceptor recorded
+  `required_not_enforced` and executed it on one operator, so section 6's maker-checker control
+  existed in code and in the UI but never stopped anything. The manifest now sets the flag: the
+  maker's `POST /review` answers 202 with an `approvalId`, a DIFFERENT operator decides it from the
+  admin-ui checker queue (`GET/PATCH /api/v1/sanctions/approvals`), and the maker's retry carries
+  `X-Approval-Id`, consumed once (completing the second approval through the admin-ui review form is not verified end to end; tracked separately).
+  **STRIDE-E/R:** a lone operator can no longer clear a true positive; the self-approval guard in
+  the Redis store refuses maker == checker. **No machine path is paused:** `sanctions.clear` has no
+  `ROLE_API`, no service rule grants it to a `service-account-*`, and the screening callers use
+  `sanctions.create`. The residual noted 2026-10-08 (a service account holding `ROLE_OPERATOR`)
+  is narrowed, not closed: the sanctions rule `operator-sanctions-write` has no machine exclusion,
+  so a service account holding `ROLE_OPERATOR` (one per realm today) still passes OPA for
+  `sanctions.clear`, but no service code calls `POST /review`, and with enforcement on such a call
+  parks at 202 and needs a different checker. Excluding machines from that rule is a follow-up. **Availability
+  dependency:** the approval queue now depends on `redis.sanctions.svc`; if it is down an
+  operator's clear fails instead of proceeding — correct for this control. Residual: approvals
+  are Redis records with the interceptor TTL, not durable audit; the disposition audit trail is
+  unchanged. No real-HTTP maker/checker IT exists for this service yet (follow-up on #15748).
+  Rollback: set the env to `"false"` and add a dated `rules.yaml: four_eyes_enforcement.allowlist`
+  entry, or the `four-eyes-enforce-deployed` gate fails.
 - **2026-11-11** — **Jurisdiction reference data loaded, its ageing made observable, and a
   review band for customer names (#15723).** V22 loads the EU list of high-risk third countries
   (Commission Delegated Regulation (EU) 2016/1675, Annex, consolidated version of 2026-01-29;

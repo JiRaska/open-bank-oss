@@ -165,6 +165,7 @@ export function readAppPageRoutes(): string[] {
  */
 export const DYNAMIC_ROUTE_CLASSIFICATIONS: Record<string, string> = {
   '/accounts/[id]': 'entity id; requires an account fixture for populated detail',
+  '/aml/[id]': 'AML case id; requires an AML case fixture (aml-case-detail.spec.ts)',
   '/approvals/delegation/[id]': 'approval id; requires a delegation fixture',
   '/approvals/sca/[id]': 'approval id; requires an SCA fixture',
   '/approvals/settlement/[id]': 'approval id; requires a settlement fixture',

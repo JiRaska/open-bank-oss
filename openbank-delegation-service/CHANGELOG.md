@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.24.1...delegation-service-v0.25.0) (2026-11-14)
+
+
+### Features
+
+* **delegation:** settle domestic spend reservations from the payment outcome ([#16124](https://github.com/JiRaska/open-bank-oss/issues/16124)) ([62dd38c](https://github.com/JiRaska/open-bank-oss/commit/62dd38c25fb6a71f8df15e530a63c879871b6d39))
+
+## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.24.0...delegation-service-v0.24.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **customer-edge:** gate account detail and statement reads on their own capability (ADR-0375 D7) ([#15879](https://github.com/JiRaska/open-bank-oss/issues/15879)) ([747573d](https://github.com/JiRaska/open-bank-oss/commit/747573dc3c8e3b90ca14fa3645bec80b48c846c9))
+
 ## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.7...delegation-service-v0.24.0) (2026-11-12)
 
 

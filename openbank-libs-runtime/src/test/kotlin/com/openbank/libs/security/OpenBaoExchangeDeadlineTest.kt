@@ -26,6 +26,8 @@ import java.io.IOException
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketException
+import java.net.SocketTimeoutException
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -220,6 +222,7 @@ class OpenBaoExchangeDeadlineTest {
         private val listener = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))
         private val active = AtomicReference<Socket?>()
         private val closed = CountDownLatch(1)
+        private val cleaningUp = AtomicBoolean()
         val headersSent = CountDownLatch(1)
         val uri: URI = URI.create("http://127.0.0.1:${listener.localPort}/")
         private val worker = Thread.ofVirtual().start {
@@ -245,11 +248,28 @@ class OpenBaoExchangeDeadlineTest {
                         flush()
                     }
                     headersSent.countDown()
-                    if (input.read() == -1) closed.countDown()
+                    if (clientAborted(input)) closed.countDown()
                 }
             } catch (_: IOException) {
                 // Timeout or cleanup must not be mistaken for a peer-observed EOF.
             }
+        }
+
+        /**
+         * A client abort reaches the peer as EITHER of two TCP signals, and which one is a race in the
+         * client, not something the test can order: a FIN (`read()` returns -1) when the client had already
+         * consumed the response head, or a RST (`Connection reset`) when it closes with that head still
+         * unread in its receive buffer — the kernel must reset a connection closed over unread data.
+         * Measured on Temurin 25 under CPU load: ~12% of immediate cancels arrive as a RST, which a
+         * FIN-only check reported as "never closed" (#5285). A read timeout, or this peer's own cleanup
+         * closing the socket, is neither and still does not count.
+         */
+        private fun clientAborted(input: java.io.InputStream): Boolean = try {
+            input.read() == -1
+        } catch (_: SocketTimeoutException) {
+            false
+        } catch (_: SocketException) {
+            !cleaningUp.get()
         }
 
         fun assertClosedBeforeCleanup() {
@@ -258,6 +278,7 @@ class OpenBaoExchangeDeadlineTest {
         }
 
         override fun close() {
+            cleaningUp.set(true)
             active.get()?.close()
             listener.close()
             worker.join(2000)

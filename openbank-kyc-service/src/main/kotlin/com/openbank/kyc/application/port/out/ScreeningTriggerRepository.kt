@@ -28,6 +28,14 @@ interface ScreeningTriggerRepository {
      */
     suspend fun insertIfAbsent(trigger: ScreeningTrigger): Boolean
 
+    /**
+     * Records a DEFERRED trigger — the master switch is off, so no open is attempted: state
+     * DEFERRED (invisible to pre-#15961 code), attempts 0, due at once. Coalesced to one per party (V14 partial unique index) and
+     * still deduplicated on (publication, party); returns true when the row was inserted. The
+     * retry job claims it once the switch is on.
+     */
+    suspend fun recordDeferred(trigger: ScreeningTrigger): Boolean
+
     /** Marks [trigger] OPENED with the coordinator's case id (201, or 409 already-exists). */
     suspend fun recordOpened(trigger: ScreeningTrigger, coordinatorCaseId: String?, at: Instant)
 
@@ -50,6 +58,21 @@ interface ScreeningTriggerRepository {
     /** Atomically claims a due row, returning false when another worker already owns it. */
     suspend fun claim(trigger: ScreeningTrigger, now: Instant, leaseUntil: Instant): Boolean
 
+    /**
+     * The re-screening backlog as the table holds it right now: rows still PENDING,
+     * OPEN_FAILED (retrying or parked) or DEFERRED (recorded while the loop was off), i.e. list changes that have not yet reached the customer
+     * as an opened case. One bounded aggregate; the age is computed by the DATABASE clock from
+     * `created_at` (the moment the trigger was enqueued), never from `next_attempt_at`, which a
+     * retry pushes forward and would make a perpetually failing row look young.
+     */
+    suspend fun backlog(): ScreeningTriggerBacklog
+
     /** The trigger row, whatever its state — test and replay read-back. */
     suspend fun findByTriggerId(triggerId: UUID): ScreeningTrigger?
 }
+
+/**
+ * [pending] undrained triggers; [oldestAgeSeconds] is `now() - min(created_at)` over them, and
+ * `0` only when [pending] is `0` — there is no sentinel for "no rows".
+ */
+data class ScreeningTriggerBacklog(val pending: Long, val oldestAgeSeconds: Long)

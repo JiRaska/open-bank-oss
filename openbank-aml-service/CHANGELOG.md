@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.20.0...aml-service-v0.21.0) (2026-11-14)
+
+
+### Features
+
+* **aml:** record which service owns a case's movement, from the authenticated caller ([#16168](https://github.com/JiRaska/open-bank-oss/issues/16168)) ([6bdd3c8](https://github.com/JiRaska/open-bank-oss/commit/6bdd3c83dd0c78a9a0f1eea07c9a0e7b7432c989))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.19.0...aml-service-v0.20.0) (2026-11-14)
+
+
+### Features
+
+* **aml:** open a case per held payment behind its off switch ([#16041](https://github.com/JiRaska/open-bank-oss/issues/16041)) ([e521803](https://github.com/JiRaska/open-bank-oss/commit/e521803a345b5841f831ffe01e9e5ee781ec9b9a))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.18.0...aml-service-v0.19.0) (2026-11-13)
+
+
+### Features
+
+* **aml:** persist immutable shadow pack epochs ([#15684](https://github.com/JiRaska/open-bank-oss/issues/15684)) ([791cbf1](https://github.com/JiRaska/open-bank-oss/commit/791cbf15681415671b6f01ac8c6c2fa7659c2320))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.17.0...aml-service-v0.18.0) (2026-11-13)
 
 
