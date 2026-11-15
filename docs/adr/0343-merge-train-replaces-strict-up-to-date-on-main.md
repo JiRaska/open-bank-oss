@@ -732,27 +732,48 @@ Anything else returns a reason, and the member stays in the strict lane as befor
 
 The rule is checked three times: in settle on the member's own diff, at build over the train built so far (so two appends in one train stack), and again at publish, where anything beyond a pure append is a member fault. An appended member counts as gate code, so it never shares a train with a regeneration commit. `.github/` stays protected from the fast lane.
 
-### Amendment (2026-11-15) — disjoint judge members share a strict carrier
+### Amendment (2026-11-15) — disjoint judge members share a strict carrier; verdict configuration still rides alone
 
-Observed 2026-11-14/15 overnight: six strict-lane PRs were queued at once, and the train log showed each strict carrier holding a single member (for example `strict carrier #16251: CI running — it holds the strict reservation` while `#16186 strict behind main, not updated: a strict carrier is open over main`). The strict carrier from the 2026-11-05 amendment batches only *non-judge* members. Under the inverse rule of `judge_path`, that means a member whose every path is under `.github/scripts/` and that no workflow, action or gates.yaml names. Every queued strict PR was a judge member, so every carrier was a carrier of one. At ~30-40 min of CI per carrier, with fast-lane trains held behind each one, the whole queue drained at about one PR per 30 min.
+Observed 2026-11-14/15 overnight: six strict-lane PRs were queued at once, and the train log showed each strict carrier holding a single member (for example `strict carrier #16251: CI running — it holds the strict reservation` while `#16186 strict behind main, not updated: a strict carrier is open over main`). The strict carrier from the 2026-11-05 amendment batches only *non-judge* members. Under the inverse rule of `judge_path`, any path outside an unreferenced `.github/scripts/` file makes a PR a judge member, so a PR that also touches service code or docs rode alone, one PR per ~30-40 min carrier with fast-lane trains held behind it.
 
-Decision: a judge member no longer rides alone by default. It may share a strict carrier when **every member's changed path set is pairwise disjoint** from every other member's. A changed path set is read from the trees: merge-base with main to the verified head, with no rename detection, so a rename reports both names. A path set git cannot read shares nothing. A carrier holding a judge member carries at most `MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP` members (default 4). Non-judge carriers keep the existing cap of 8 and their existing rules. Three things are unchanged:
-- **The train's own code still rides alone.** That is `merge-train.py`, `merge_train_carrier.py` and `merge-train.yml`, because it decides how the next ticks settle, bisect and blame.
-- **A workflow member still cannot ride a carrier at all**, because the App may not push `.github/workflows/`. It takes the update-branch lane, and when it is first in line no carrier overtakes it.
-- **Every other existing refusal still applies to every member:** a regeneration input or output, a conflict, a symlink or gitlink, the gates.yaml id-union check, the bisect cap and the no-overtaking rule.
+Judge members are now split in two.
 
-**Why disjoint file sets are sufficient.** The judge rule existed so that a member changing what *judges* the carrier (a workflow, a gate declaration, a rule, privileged code) could never turn a co-member green. Two observations show that a disjoint batch gives that threat nothing it does not already get from serial processing:
+- **A configuration judge rides alone, exactly as before.** This is a member whose change can alter what a gate *decides* (`config_judge_path`):
+  - a judge path under `.github/`: a workflow, an action, a checker script that a workflow or gates.yaml names, gates.yaml, CODEOWNERS;
+  - the governance rules under `openbank-libs/governance/`;
+  - build and lint configuration a gate reads: `build-logic/`, `gradle/`, `config/`, Gradle and npm manifests, detekt, test and lint configs, and any `*baseline*` file. The list is fail-closed.
+- **The train's own code also rides alone.** That set is derived by `train_code_paths`, never hand-listed: every `.github/scripts` or `.github/workflows` file named `merge-train*` / `merge_train*`, plus every `.github/scripts` module that `merge-train.py` imports, read from main's tree.
+- **Every other judge member may share a carrier.** That means a member that is judge only because it also changes service code, docs or other paths no gate reads as configuration. Two conditions apply:
+  - every member's changed path set must be pairwise disjoint from every other member's. The set is read from the trees: merge-base to verified head, `--no-renames`. A set git cannot read shares nothing.
+  - the carrier holds at most `MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP` members (default 4). `1` restores "every judge member rides alone".
+- **Workflow members** still take update-branch, because the App cannot push `.github/workflows/`. Every existing refusal still applies to every member.
 
-1. *A carrier's verdict is the verdict of main's final state.* The carrier is one tree, main + every member, verified under that tree's own configuration. After the last member merges, main holds exactly that tree (the post-merge tree-equality check from the 2026-11-05 amendment already enforces this). Serial processing in *any* order reaches the same tree, and judges its last step under the same configuration. If member J weakens check C, then under serial processing every member merged after J is judged with C weakened too. A batch shifts **no** verdict to a configuration that main would not hold anyway. The weakening itself sits in J's own reviewed diff and was green on J's own head. What a batch does give up is the verification of intermediate trees (main + J alone). That is the same trade the fast-lane train and the non-judge strict carrier already make, and the main-red rules (#16020, #16105) still watch the commit that results.
-2. *Disjointness is what keeps the final tree equal to the union of reviewed diffs.* With no shared path, every file in the carrier is either main's file or exactly one member's version of it, merged over main. No file mixes two members' hunks, which `git merge-tree` would otherwise resolve without asking. No gates.yaml or rules.yaml entry, and no workflow, can be edited by two members at once, because any two such edits share that file. And bisection stays exact: a red carrier halves into sub-batches whose members still share nothing, so culprit isolation names a member's own diff, never a merge artefact of two.
+**Why configuration judges must ride alone.** Batching them is *not* equivalent to serial processing. The strict lane serves oldest first, so an older member B is judged under main's configuration before a newer J lands.
+- *Relaxing:* if J relaxes the checker that fails B, then a carrier [B, J] is green, both merge, and nothing bisects a green carrier. B's defect is masked. Serially, B would have been named first.
+- *Tightening:* if J tightens a check that B passes alone, then [B, J] is red while each half is green alone.
 
-A finer rule, such as "no shared gate entry" in place of "no shared file", would need a YAML-aware diff that settle deliberately does not have (it parses nothing under `python3 -I -S`). Disjoint files are decidable from `git diff-tree` alone, and they are conservative: overlapping members still merge, one carrier each.
+Both cases are self-tests: (20) relaxing and (21) tightening. Both fail against the builder of #16290's first revision, and the new builder refuses to batch either pair. File disjointness cannot prevent either case, because J changes a *different* file from the one the verdict concerns.
 
-**Failure handling** is the existing strict-carrier machinery, unchanged. A red carrier of N > 1 halves, a lone red member is re-run once and then named the culprit, the innocents are rebatched, and a pending carrier past its ceiling closes with no verdict. One bad member therefore costs about log₂(4) = 2 extra carrier rounds, never a permanent block. Lane fairness (#16180), the main-red fix pre-emption (#16105) and the no-batch-loss and no-race invariants of #15882 are untouched: they decide *whether* a strict carrier may be built in a tick, and this amendment changes only *which members* it holds.
+**Why disjoint files are sufficient for the rest.** A member in the shared class changes nothing that configures a verdict. So every member in such a carrier is judged under the same configuration it would meet serially: main's own configuration, plus nothing any co-member changes. The one thing that differs from serial processing is that co-members' *code* is present together. Disjoint path sets guarantee three things about that:
+- the combined tree is exactly the union of the reviewed diffs, and no file mixes two members' hunks;
+- the carrier's verdict is the verdict of main's final state after its last merge, which the post-merge tree-equality check already enforces;
+- a red carrier bisects into sub-batches that still share nothing.
 
-Rollback: `MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP=1` restores "a judge member rides alone" exactly. That is self-test case (2) at judge cap 1.
+A carrier red only in combination (each half green alone) is resolved by the existing machinery: the first half merges, then the second half is rebuilt over the new main, which now holds the first, and re-verified there. Red again, its member is named. Nothing red reaches main; self-test (18b). As with fast trains and non-judge strict carriers, the intermediate trees between members' merges are not verified individually.
 
-Self-test cases: (16) three disjoint judge members form one carrier and all merge; this fails against the pre-amendment builder, which yields `[91]`. (16b) the cap of 4 holds. (17) two judge members sharing one path are never batched, even though merge-tree merges them cleanly; (17b) a judge member that shares a path with a non-judge member ahead of it waits. (18) a red judge carrier isolates the red member and the rest merge. (19) the fast lane is served once the judge carrier has merged.
+Unchanged: the #15882 invariants (no member-move batch loss, no fast-path race against a carrier), the main-red rules (#16020, #16105) and the #16180 lane-fairness turn. They decide *whether* a strict carrier is built in a tick, and this amendment changes only *which members* it holds.
+
+Self-tests:
+- (2): referenced checkers ride alone at the default cap.
+- (16): three disjoint shared-class judges form one carrier and all merge. This fails on the pre-amendment builder.
+- (16b): the cap of 4 holds.
+- (17): judge members that share a path are never batched.
+- (17b): a judge member sharing a path with a non-judge member ahead of it waits, and the carrier of the non-judge members is asserted to exist.
+- (18): a red member is isolated and the others merge.
+- (18b): red only in combination.
+- (19): the fast lane is served once the carrier has merged.
+- (20) and (21): the relaxing and tightening pairs.
+- `config_judge_path` and `train_code_paths` are pinned against both the synthetic tree and the real one.
 
 ## Rollout
 
