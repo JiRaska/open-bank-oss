@@ -73,5 +73,5 @@ export async function POST(request: Request) {
   if (!selection.ok) {
     return NextResponse.json({ error: selection.extraText ? 'not_tokens_only' : 'no_rows', unknown: selection.unknown }, { status: 422 })
   }
-  return NextResponse.json({ rows: selectedRows(trace, selection.selected), asOf: trace.asOf })
+  return NextResponse.json({ rows: selectedRows(trace, selection.selected), truncated: selection.truncated, asOf: trace.asOf })
 }

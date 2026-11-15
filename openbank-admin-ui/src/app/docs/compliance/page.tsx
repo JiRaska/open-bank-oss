@@ -115,7 +115,7 @@ function AskTrace() {
   const labels = useLabels()
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<{ rows: SelectedRow[] } | { error: string } | null>(null)
+  const [result, setResult] = useState<{ rows: SelectedRow[]; truncated: number } | { error: string } | null>(null)
 
   const submit = async () => {
     setBusy(true)
@@ -124,8 +124,8 @@ function AskTrace() {
       const response = await fetch('/api/compliance/ask', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }), cache: 'no-store',
       })
-      const body = await response.json() as { rows?: SelectedRow[]; error?: string }
-      setResult(response.ok && body.rows ? { rows: body.rows } : { error: body.error ?? 'error' })
+      const body = await response.json() as { rows?: SelectedRow[]; truncated?: number; error?: string }
+      setResult(response.ok && body.rows ? { rows: body.rows, truncated: body.truncated ?? 0 } : { error: body.error ?? 'error' })
     } catch {
       setResult({ error: 'agent_unreachable' })
     } finally {
@@ -159,6 +159,7 @@ function AskTrace() {
               {row.legalBasis ? <div style={{ color: 'var(--text-tertiary)' }}>{row.legalBasis}</div> : null}
             </li>
           ))}
+          {result.truncated > 0 ? <li style={{ color: 'var(--text-tertiary)' }}>{t(`a ${result.truncated} dalších řádků nad limit zobrazení`, `and ${result.truncated} more rows beyond the display limit`)}</li> : null}
         </ul>
       ) : null}
       {result && 'error' in result ? (

@@ -66,7 +66,7 @@ describe('compliance MCP tools (ADR-0379 phase 3)', () => {
 describe('row selection contract', () => {
   it('accepts a reply made only of resolving tokens, in order, deduplicated', () => {
     expect(parseSelection('[[control:audit-trail]]\n[[obligation:dora-major-ict-incident]], [[control:audit-trail]]', trace))
-      .toEqual({ ok: true, selected: ['control:audit-trail', 'obligation:dora-major-ict-incident'], unknown: [], extraText: false })
+      .toEqual({ ok: true, selected: ['control:audit-trail', 'obligation:dora-major-ict-incident'], unknown: [], extraText: false, truncated: 0 })
   })
   it('voids any reply that carries text, so no claim can reach the reader', () => {
     for (const reply of [

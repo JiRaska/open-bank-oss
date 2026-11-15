@@ -158,6 +158,8 @@ export interface Selection {
   unknown: string[]
   /** True when the reply carried anything other than tokens and whitespace. */
   extraText: boolean
+  /** How many valid rows were dropped by the cap, so the page can say so. */
+  truncated: number
 }
 
 /** A reply is usable only when it is nothing but tokens, at least one, and every token resolves. */
@@ -172,13 +174,19 @@ export function parseSelection(reply: string, trace: ComplianceTrace): Selection
   // Separators allowed between tokens: ASCII whitespace and commas only. Anything else, including
   // invisible format characters, counts as text the model was told not to write.
   const extraText = /[^ \t\r\n,]/.test(reply.replace(TOKEN, ''))
-  return { ok: selected.length > 0 && unknown.length === 0 && !extraText, selected: selected.slice(0, MAX_SELECTED_ROWS), unknown, extraText }
+  return {
+    ok: selected.length > 0 && unknown.length === 0 && !extraText,
+    selected: selected.slice(0, MAX_SELECTED_ROWS), unknown, extraText,
+    truncated: Math.max(0, selected.length - MAX_SELECTED_ROWS),
+  }
 }
 
 /** What the page shows for each selected row: computed facts and authored YAML text only. */
 export function selectedRows(trace: ComplianceTrace, selected: string[]) {
   return selected.map(ref => {
-    const [kind, id] = ref.split(':')
+    const cut = ref.indexOf(':')
+    const kind = ref.slice(0, cut)
+    const id = ref.slice(cut + 1)
     if (kind === 'control') {
       const c = trace.controls.find(x => x.id === id)!
       return {
