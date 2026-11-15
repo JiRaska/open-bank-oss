@@ -32,15 +32,21 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.postgresql.ds.PGSimpleDataSource
+import org.testcontainers.postgresql.PostgreSQLContainer
 import java.math.BigDecimal
+import java.sql.Connection
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.YearMonth
 import java.util.UUID
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Executes the real domain policies with synthetic, already verified court and protection facts.
- * The fixture amounts are arbitrary; this suite does not exercise intake, persistence or a rail.
+ * The fixture amounts are arbitrary. The PostgreSQL test exercises fixture locking, not a payment rail.
  */
 class LegalDebitScenarioTest {
     private val subject = PartyId(id(1))
@@ -128,6 +134,104 @@ class LegalDebitScenarioTest {
         val pending = scenario.balance.copy(notYetEffectiveCredit = BigDecimal("95"))
         assertFalse(scenario.copy(balance = pending).accepts(guardian, "6"))
         assertTrue(scenario.copy(balance = pending).accepts(guardian, "5"))
+    }
+
+    @Test
+    fun `postgres serializes competing reservations and observes revoked mandate in CZ SK and DE`() {
+        PostgreSQLContainer("postgres:18.6-alpine").use { postgres ->
+            postgres.start()
+            val database = PGSimpleDataSource().apply {
+                setURL(postgres.jdbcUrl)
+                user = postgres.username
+                password = postgres.password
+            }
+            database.connection.use { connection ->
+                connection.createStatement().use {
+                    it.execute(
+                        """
+                        CREATE TABLE legal_debit_fixture (
+                            regime TEXT PRIMARY KEY,
+                            reserved NUMERIC NOT NULL DEFAULT 0,
+                            revoked BOOLEAN NOT NULL DEFAULT FALSE
+                        )
+                        """.trimIndent(),
+                    )
+                }
+            }
+            listOf(
+                scenario(LegalProtectionRegime.CZ_LINKED_ACCOUNT, "CZK", AccountId(id(4))),
+                scenario(LegalProtectionRegime.SK_EXEMPTION, "EUR"),
+                scenario(LegalProtectionRegime.DE_P_KONTO, "EUR"),
+            ).forEach { fixture -> verifyDatabaseRace(database, fixture) }
+        }
+    }
+
+    private fun verifyDatabaseRace(database: PGSimpleDataSource, fixture: Scenario) {
+        val regime = fixture.protection.regime.name
+        updateFixture(database, regime, "INSERT INTO legal_debit_fixture (regime) VALUES (?)")
+        assertFalse(tryReserve(database, fixture, subject, "1"), regime)
+        val start = CyclicBarrier(2)
+        val results = Executors.newFixedThreadPool(2).use { pool ->
+            List(2) {
+                pool.submit<Boolean> {
+                    start.await(10, TimeUnit.SECONDS)
+                    tryReserve(database, fixture, guardian, "40")
+                }
+            }.map { it.get(15, TimeUnit.SECONDS) }
+        }
+        assertEquals(1, results.count { it }, regime)
+        val revoke = "UPDATE legal_debit_fixture SET revoked = TRUE WHERE regime = ? AND reserved = 40"
+        updateFixture(database, regime, revoke)
+        assertFalse(tryReserve(database, fixture, guardian, "1"), regime)
+    }
+
+    private fun updateFixture(database: PGSimpleDataSource, regime: String, sql: String) {
+        database.connection.use { connection ->
+            connection.prepareStatement(sql).use {
+                it.setString(1, regime)
+                assertEquals(1, it.executeUpdate())
+            }
+        }
+    }
+
+    /** Fixture transaction using the domain checks, synthetic projections and a PostgreSQL row lock. */
+    private fun tryReserve(database: PGSimpleDataSource, fixture: Scenario, actor: PartyId, amount: String): Boolean =
+        database.connection.use { connection ->
+            connection.autoCommit = false
+            val regime = fixture.protection.regime.name
+            val allowed = lockedSnapshot(connection, fixture).accepts(actor, amount)
+            if (allowed) {
+                val sql = "UPDATE legal_debit_fixture SET reserved = reserved + ? WHERE regime = ?"
+                connection.prepareStatement(sql).use {
+                    it.setBigDecimal(1, amount.toBigDecimal())
+                    it.setString(2, regime)
+                    assertEquals(1, it.executeUpdate())
+                }
+            }
+            connection.commit()
+            allowed
+        }
+
+    private fun lockedSnapshot(connection: Connection, fixture: Scenario): Scenario = connection.prepareStatement(
+        "SELECT reserved, revoked FROM legal_debit_fixture WHERE regime = ? FOR UPDATE",
+    ).use {
+        it.setString(1, fixture.protection.regime.name)
+        it.executeQuery().use { row ->
+            check(row.next())
+            val reserved = row.getBigDecimal("reserved")
+            val mandates = if (row.getBoolean("revoked")) emptyList() else listOf(mandate())
+            fixture.copy(
+                balance = fixture.balance.copy(
+                    availableAmount = fixture.balance.availableAmount - reserved,
+                    reservedAmount = reserved,
+                ),
+                authority = LegalDebitAuthority(subject, listOf(constraint()), mandates),
+                verifiedProtection = Money.of(
+                    fixture.verifiedProtection.amount - reserved,
+                    fixture.debit.currency.code,
+                ),
+            )
+        }
     }
 
     private fun scenario(regime: LegalProtectionRegime, currency: String, sourceId: AccountId = debitId): Scenario {

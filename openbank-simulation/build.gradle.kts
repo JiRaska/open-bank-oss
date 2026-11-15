@@ -182,6 +182,9 @@ dependencies {
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
+    testImplementation(platform(libs.quarkus.bom))
+    testImplementation(libs.quarkus.jdbc.postgresql)
+    testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.assertj)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

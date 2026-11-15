@@ -4,9 +4,13 @@
 
 package com.openbank.legalprocess
 
+import com.openbank.legalprocess.isds.IsdsImport
+import com.openbank.legalprocess.isds.IsdsSoapDownloads
 import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -29,9 +33,14 @@ class PostgresLegalDeliveryInboxTest {
         dataSource.setURL(postgres.jdbcUrl)
         dataSource.user = postgres.username
         dataSource.password = postgres.password
-        val migration = checkNotNull(javaClass.getResource("/db/migration/V1__legal_delivery_inbox.sql")).readText()
+        val migrations = listOf("V1__legal_delivery_inbox.sql", "V2__isds_signed_evidence.sql")
         dataSource.connection.use { connection ->
-            connection.createStatement().use { it.execute(migration) }
+            connection.createStatement().use { statement ->
+                migrations.forEach { name ->
+                    val sql = checkNotNull(javaClass.getResource("/db/migration/$name")).readText()
+                    statement.execute(sql)
+                }
+            }
         }
     }
 
@@ -75,6 +84,66 @@ class PostgresLegalDeliveryInboxTest {
             inbox.record(first.copy(sourceNamespace = "second-mailbox")),
         )
     }
+
+    @Test
+    fun `signed ISDS message and delivery evidence commit in the same transaction`() {
+        val client = IsdsSoapDownloads.usingTransport { endpoint, request ->
+            check(request.contains("<v:dmID>42</v:dmID>"))
+            when (endpoint) {
+                "dz" -> soap("SignedMessageDownload", "AQI=")
+                "dx" -> soap("GetSignedDeliveryInfo", "AwQ=")
+                else -> error("Unexpected endpoint")
+            }
+        }
+        val importer = IsdsImport("test-mailbox", client, inbox)
+        val received = assertInstanceOf(LegalDeliveryOutcome.Received::class.java, importer.importMessage("42"))
+        assertEquals(LegalDeliveryOutcome.Duplicate(received.receiptId), importer.importMessage("42"))
+        val sql = """
+            SELECT e.signed_message, e.signed_delivery_info
+            FROM legal_delivery_inbox i JOIN legal_isds_evidence e USING (evidence_id)
+            WHERE i.receipt_id = ?
+        """
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(sql).use { statement ->
+                statement.setObject(1, received.receiptId)
+                statement.executeQuery().use { row ->
+                    check(row.next())
+                    assertArrayEquals(byteArrayOf(1, 2), row.getBytes(1))
+                    assertArrayEquals(byteArrayOf(3, 4), row.getBytes(2))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `failed signed delivery download cannot leave an inbox receipt`() {
+        val bad = IsdsSoapDownloads.usingTransport { endpoint, _ ->
+            when (endpoint) {
+                "dz" -> soap("SignedMessageDownload", "AQI=")
+                else -> soap("GetSignedDeliveryInfo", "", "1222")
+            }
+        }
+        val importer = IsdsImport("failed-download", bad, inbox)
+        assertThrows(IllegalStateException::class.java) { importer.importMessage("43") }
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("SELECT COUNT(*) FROM legal_delivery_inbox WHERE source_namespace = ?").use {
+                it.setString(1, "isds:failed-download")
+                it.executeQuery().use { row ->
+                    check(row.next())
+                    assertEquals(0, row.getInt(1))
+                }
+            }
+        }
+    }
+
+    private fun soap(operation: String, content: String, status: String = "0000"): ByteArray = """
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:v="http://isds.czechpoint.cz/v20">
+          <s:Body><v:${operation}Response>
+            <v:dmSignature>$content</v:dmSignature>
+            <v:dmStatus><v:dmStatusCode>$status</v:dmStatusCode></v:dmStatus>
+          </v:${operation}Response></s:Body>
+        </s:Envelope>
+    """.trimIndent().toByteArray()
 
     private fun race(first: ObservedLegalDelivery, second: ObservedLegalDelivery): List<LegalDeliveryOutcome> {
         val barrier = CyclicBarrier(2)

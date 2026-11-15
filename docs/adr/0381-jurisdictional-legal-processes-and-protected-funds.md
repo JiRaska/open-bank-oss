@@ -326,7 +326,18 @@ or production payment enforcement. Delivery is partial and tracked in issue #163
 The first Legal Process persistence adapter records a pending review receipt for an
 observed delivery. On conflict it compares the existing route, evidence reference and
 digest within the transaction. PostgreSQL integration tests race duplicate and
-conflicting deliveries for each country. The adapter has no transport caller yet.
+conflicting deliveries for each country. A CZ ISDS importer accepts a known ordinary
+message ID, requests the signed message and signed delivery information, then stores
+both originals and the receipt atomically. Local transport contract tests replay SOAP
+responses into PostgreSQL. The connector still requires public ISDS test conformance,
+credential binding, scheduled mailbox reconciliation and operations ownership.
+
+For CZ, SK and DE, the simulation also exercises the three domain checks while
+serializing two competing reservations on an actual PostgreSQL row and after revoking
+a mandate. This fixture uses no real orders and omits the production payment rail.
+Before activating the live guard, bind the trusted actor and instrument-scoped
+identity evidence to the payment and check the current permit when posting it.
+A reservation-time decision alone cannot catch a revocation before the journal write.
 
 Identity context belongs to Party/PID and follows ADR-0380's FOS foundation. The legal process needs an unambiguous verified
 PartyId and an opaque evidence reference. Name variants, scripts, citizenship and
