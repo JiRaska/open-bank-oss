@@ -68,7 +68,7 @@ sequenceDiagram
   participant AML as aml-service
   participant GW as SWIFT brána / protistrana
 
-  Note over Ops,Swift: Plátce + příjemce prověřeni (sanctions-service) před uvolněním; zásah = REJECTED + AML případ
+  Note over Ops,Swift: Plátce + příjemce prověřeni (sanctions-service) před uvolněním#59; zásah = REJECTED + AML případ
   Ops->>Swift: POST /api/v1/swift (validace → VALIDATED)
   Swift->>AML: událost (screens) přes Kafka
   Swift-->>GW: dispatch (SENT)

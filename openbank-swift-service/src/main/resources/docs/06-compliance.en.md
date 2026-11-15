@@ -68,7 +68,7 @@ sequenceDiagram
   participant AML as aml-service
   participant GW as SWIFT gateway / counterparty
 
-  Note over Ops,Swift: Debtor + beneficiary screened (sanctions-service) before release; hit = REJECTED + AML case
+  Note over Ops,Swift: Debtor + beneficiary screened (sanctions-service) before release#59; hit = REJECTED + AML case
   Ops->>Swift: POST /api/v1/swift (validate → VALIDATED)
   Swift->>AML: event (screens) via Kafka
   Swift-->>GW: dispatch (SENT)

@@ -550,3 +550,18 @@ holds, now encrypted in transit. Denial of service: sdd treats an unavailable sc
 and holds the collection (fail-closed), so an outage here stops collections rather than releasing
 them unscreened. Rollback: point `SANCTIONS_SERVICE_URL` away from this service and drop the sdd
 namespace from the ingress rule.
+
+## 2026-11-15 - New inbound caller: swift-service screens MT103s before release (ADR-0032)
+
+swift-service now calls `POST /api/v1/sanctions/screen` for the debtor and the beneficiary of each
+MT103 before it is released. It calls the plain 8123 listener from the payments namespace, which
+the ingress rule already admits for the other payment rails, so no NetworkPolicy changes for this
+caller. Spoofing: the edge is plaintext in-cluster like the other payments callers still on 8123
+(S3: the plain port stays open until each caller is migrated to 8443), so caller identity rests on
+the NetworkPolicy and swift's own service-account bearer. Elevation: no authorization rule
+changes; the call is `sanctions.create`, already granted to every `service-account-*` by
+`m2m-sanctions-screening`. Information disclosure: the request carries party names the caller
+already holds, in plaintext on the cluster network, the same exposure as the other 8123 callers.
+Denial of service: swift treats an unavailable screen as not screened and holds the MT103
+(fail-closed). Rollback: revert the swift change; unsetting `SANCTIONS_SERVICE_URL` alone would
+fail closed and hold every MT103, not release them unscreened.

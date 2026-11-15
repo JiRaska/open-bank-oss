@@ -12,11 +12,11 @@ import com.openbank.swift.application.port.out.ScreeningUnavailableException
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
-import kotlin.coroutines.cancellation.CancellationException
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.inject.RestClient
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Resilient, fail-closed adapter over [SanctionsServiceClient] (ADR-0032 §C/§D). Transport faults are
