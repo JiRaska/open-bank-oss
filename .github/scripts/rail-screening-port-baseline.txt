@@ -1,0 +1,5 @@
+# Outgoing rails with no sanctions screening port yet (rules.yaml: outgoing_payment_rails_screening).
+# One module per line. Remove a line in the PR that adds the port; the gate fails while a covered
+# module is still listed.
+openbank-swift-service
+openbank-sdd-service
