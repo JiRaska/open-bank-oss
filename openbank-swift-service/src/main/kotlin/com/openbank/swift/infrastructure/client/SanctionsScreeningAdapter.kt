@@ -12,6 +12,7 @@ import com.openbank.swift.application.port.out.ScreeningUnavailableException
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import kotlin.coroutines.cancellation.CancellationException
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
@@ -33,6 +34,8 @@ class SanctionsScreeningAdapter(@RestClient private val client: SanctionsService
     @Suppress("TooGenericExceptionCaught")
     override suspend fun screen(name: String, role: ScreeningRole, idempotencyKey: String): ScreeningResult = try {
         self.screenWithResilience(name, role, idempotencyKey)
+    } catch (ex: CancellationException) {
+        throw ex
     } catch (ex: Exception) {
         throw ScreeningUnavailableException(ex)
     }
