@@ -44,6 +44,7 @@ import com.openbank.account.domain.model.PocketResolution
 import com.openbank.account.domain.model.PocketRouter
 import com.openbank.account.domain.model.PocketStatus
 import com.openbank.account.domain.model.ProductRevisionPin
+import com.openbank.libs.audit.AuditChain
 import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
@@ -58,10 +59,8 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.PersistenceException
 import org.jboss.logging.Logger
 import java.math.BigDecimal
-import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
-import java.util.HexFormat
 import java.util.UUID
 
 @ApplicationScoped
@@ -332,10 +331,7 @@ class AccountService(
 
     private suspend fun admitPassportActivation(account: Account, opening: PassportIntent) {
         val pin = checkNotNull(account.productRevisionPin) { "passport account requires a product revision" }
-        val activationBinding = HexFormat.of().formatHex(
-            MessageDigest.getInstance("SHA-256")
-                .digest("${account.id}:${account.version}:${pin.revisionId}".toByteArray(Charsets.UTF_8)),
-        )
+        val activationBinding = AuditChain.sha256Hex("${account.id}:${account.version}:${pin.revisionId}")
         val intent = passport.prepare(
             PassportIntent(
                 "ACTIVATE:${account.id}",

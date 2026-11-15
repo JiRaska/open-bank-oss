@@ -137,7 +137,6 @@ class AccountResource(
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.create")
     @Operation(summary = "Open a new account")
-    @Suppress("LongMethod") // Keep the reservation, execution and response replay together.
     suspend fun openAccount(
         request: OpenAccountRequest,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
@@ -171,22 +170,7 @@ class AccountResource(
 
         var opened = false
         val account = try {
-            accountUseCase.openAccount(
-                OpenAccountCommand(
-                    idempotencyKey = idempotencyKey,
-                    requestHash = requestHash,
-                    partyId = request.partyId,
-                    productId = request.productId,
-                    accountType = request.accountType,
-                    currency = CurrencyCode.of(request.currencyCode),
-                    requestedBy = operatorId(),
-                    legalName = request.legalName,
-                    termsVersion = request.termsVersion,
-                    termsUrl = request.termsUrl,
-                    termsEffectiveFrom = request.termsEffectiveFrom,
-                    passportGrantId = request.passportGrantId,
-                ),
-            ).also { opened = true }
+            accountUseCase.openAccount(request.toCommand(idempotencyKey, requestHash, operatorId())).also { opened = true }
         } finally {
             // Any failure (the exception propagates unchanged) frees the in-flight marker so a
             // retry of the same request can run instead of answering IN_PROGRESS for 5 minutes.
@@ -622,3 +606,18 @@ private fun com.openbank.account.domain.model.PocketResolution.toResponse(): Poc
     is com.openbank.account.domain.model.PocketResolution.Rejected ->
         PocketResolutionResponse(outcome = "REJECTED", reason = reason)
 }
+
+private fun OpenAccountRequest.toCommand(key: String, requestHash: String, operatorId: UUID) = OpenAccountCommand(
+    idempotencyKey = key,
+    requestHash = requestHash,
+    partyId = partyId,
+    productId = productId,
+    accountType = accountType,
+    currency = CurrencyCode.of(currencyCode),
+    requestedBy = operatorId,
+    legalName = legalName,
+    termsVersion = termsVersion,
+    termsUrl = termsUrl,
+    termsEffectiveFrom = termsEffectiveFrom,
+    passportGrantId = passportGrantId,
+)
