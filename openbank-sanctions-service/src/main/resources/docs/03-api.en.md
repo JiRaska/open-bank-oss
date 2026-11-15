@@ -159,6 +159,8 @@ profile. Only the `CUSTOMER` profile also returns names scoring 0.65–0.85, as 
 spelling to. `PAYMENT` and profile-less screens do not search below 0.85, so such a name screens
 `CLEAR` there — a payment has no held state to wait for a review in yet (#15724).
 
+Below 0.85 a per-part name comparison also prunes candidates that share only one name part (for example a common given name with a different surname). It never lowers a whole-name score of 0.85 or more: such a candidate stays a `HIT` on every profile, including `CUSTOMER` and the monitoring delta (#16284).
+
 `/api/v1` is frozen: it rejects all three inputs with 400, and a check created with them is not
 readable through `/api/v1`.
 

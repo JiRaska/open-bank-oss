@@ -58,12 +58,15 @@ object NameTokenScore {
      *  - structure between [reviewFloor] and [searchFloor]: neither confirmed nor refuted, the
      *    trigram score stands — a PAYMENT screen (floor 0.85) never turns a HIT into a
      *    POTENTIAL_HIT its policy would treat as REVIEW, or as CLEAR for an internal transfer;
-     *  - structure below [reviewFloor] but trigram at or above [hitFloor]: the whole-string
-     *    evidence is strong and this scorer is known to under-score some real variants, so the
-     *    candidate is never removed — it is held at the caller's search floor (a HIT for PAYMENT,
-     *    a POTENTIAL_HIT for review on CUSTOMER);
      *  - otherwise (weak trigram, parts clearly different, e.g. a shared given name with a
      *    different surname): removed.
+     *
+     * Over all of that: a trigram score at or above [hitFloor] is never removed and never lowered
+     * below [hitFloor], whatever the profile. The structure score exists to prune the weak
+     * shared-given-name candidates, which sit well under the HIT threshold; above it the
+     * whole-string evidence wins, because this scorer under-scores real variants whose short
+     * part misses the part floor (`Choe Ryong He`/`Choe Ryong Hae`: trigram 0.857, structure
+     * 0.67). Demoting those on CUSTOMER turned a HIT into a review item.
      */
     fun decide(
         trigramScore: Double,
@@ -74,12 +77,12 @@ object NameTokenScore {
         hitFloor: Double,
     ): Double? {
         val structure = best(queryNames, entryNames)
-        return when {
+        val decided = when {
             structure >= searchFloor -> min(trigramScore, structure)
             structure >= reviewFloor -> trigramScore
-            trigramScore >= hitFloor -> min(trigramScore, max(searchFloor, reviewFloor))
             else -> null
         }
+        return if (trigramScore >= hitFloor) max(decided ?: hitFloor, hitFloor) else decided
     }
 
     /**
