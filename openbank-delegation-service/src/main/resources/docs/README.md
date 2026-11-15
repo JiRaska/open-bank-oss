@@ -48,3 +48,29 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 The original consumed SCA challenge replays only the same entity, initiator, instruction kind
 and canonical frozen payload. A changed instruction with the same challenge receives HTTP 409
 before a new request or outbox event can be written.
+
+## Exposure is delivered sealed, never by shaping a live read (ADR-0375 D6)
+
+`DelegationGrant.exposure` — `redactionRules`, `maxViews`, `watermark`, `allowDownload` — is
+refused on every path that could create or revive authority: a new offer, `accept`, and
+`reinstate`. That refusal is the **declared end state**, not a gap. Returning the original object
+bytes with a redaction or view-count field merely echoed is a confidentiality defect that reads,
+from the grantor's screen, exactly like an enforced control, and `maxViews` on a streaming route
+could never be atomic.
+
+The mechanism is `ExternalDisclosure`: a rendered sealed artifact over the document, with its own
+expiry, OTP, link secret and view limit, whose consumption is a locked read-modify-write inside one
+transaction (`ExternalDisclosureRepositoryImpl.mutateById`).
+
+**The defect this uncovered.** `issue` used to require `grant.exposure` to be non-null and clamp
+the disclosure's view limit to it. No grant can be ACTIVE *and* carry exposure — the offer refuses
+it and `accept`/`reinstate` refuse it — so that requirement threw for every input a real caller
+could present, and the sealed mechanism was unreachable. Its unit test did not see it because the
+fixture hand-built an ACTIVE grant *with* exposure, a combination the lifecycle cannot produce. The
+dependency also pointed the wrong way: the disclosure carries its own limit, which is the thing
+that is actually enforced.
+
+`check-delegation-exposure-sealed.py` (gate `delegation-exposure-sealed`) keeps both halves honest:
+the refusal must stay, the sealed path's row lock must stay, every file referencing grant exposure
+must be classified in `rules.yaml: delegation_exposure_delivery.referenced_in`, and `role:
+enforcement` is refused outright.
