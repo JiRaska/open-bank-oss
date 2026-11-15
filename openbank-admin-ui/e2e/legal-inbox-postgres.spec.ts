@@ -30,4 +30,10 @@ test('opens a stored ISDS original and assigns its extracted draft through the l
   await page.getByRole('button', { name: deliveryId, exact: true }).click()
   await expect(page.getByRole('combobox', { name: /Přidělit týmu|Assign to team/ })).toHaveValue('LEGAL_REVIEW_CZ')
   await expect(page.getByText('Synthetic inbox subject', { exact: true })).toBeVisible()
+
+  await page.goto('/legal-process/connectors')
+  const run = page.getByRole('row').filter({ hasText: 'browser-fixture' })
+  await expect(run).toContainText(/Zprávy čekají na import|Messages pending import/)
+  await expect(run).toContainText(/Seznam uložen|Discovery saved/)
+  await expect(page.getByText('another-fixture', { exact: true })).toHaveCount(0)
 })

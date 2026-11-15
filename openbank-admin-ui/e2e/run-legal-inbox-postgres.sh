@@ -76,6 +76,13 @@ VALUES ('10000000-0000-4000-8000-000000000001', decode(:'original', 'hex'), deco
 INSERT INTO legal_delivery_inbox (receipt_id, source_namespace, delivery_id, route_country, evidence_id, content_sha256)
 VALUES ('10000000-0000-4000-8000-000000000002', 'isds:browser-fixture', '910231', 'CZ',
         '10000000-0000-4000-8000-000000000001', repeat('a', 64));
+INSERT INTO legal_isds_poll_run
+    (id, mailbox, window_from, window_through, discovered_at, finished_at, status, discovered_count, imported_count, pending_count)
+VALUES
+    ('10000000-0000-4000-8000-000000000003', 'browser-fixture', now() - interval '5 minutes', now(),
+       now(), now(), 'INCOMPLETE', 2, 1, 1),
+    ('10000000-0000-4000-8000-000000000004', 'another-fixture', now() - interval '5 minutes', now(),
+       now(), now(), 'COMPLETE', 0, 0, 0);
 COMMIT;
 SQL
 

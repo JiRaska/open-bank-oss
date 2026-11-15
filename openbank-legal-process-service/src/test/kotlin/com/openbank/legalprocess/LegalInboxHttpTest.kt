@@ -4,7 +4,9 @@
 package com.openbank.legalprocess
 
 import com.openbank.legalprocess.isds.IsdsImport
+import com.openbank.legalprocess.isds.IsdsMailboxPoll
 import com.openbank.legalprocess.isds.IsdsSoapDownloads
+import com.openbank.legalprocess.isds.PostgresIsdsPoll
 import com.openbank.legalprocess.review.INBOX_ASSIGN
 import com.openbank.legalprocess.review.INBOX_EVIDENCE
 import com.openbank.legalprocess.review.INBOX_VIEW
@@ -137,6 +139,109 @@ class LegalInboxHttpTest {
         assertTrue(request("/$id").body().decodeToString().contains("MANUAL_REVIEW"))
         assertEquals(listOf("EXTRACT", "READ_DRAFT"), audit(id))
     }
+
+    @Test
+    @TestSecurity(user = "operator-subject", roles = [INBOX_VIEW, ACCESSIBLE])
+    fun `mailbox poll retains failures advances discovery and shows scoped history over HTTP`() {
+        val start = Instant.parse("2026-06-01T12:00:00Z")
+        val downloads = mutableListOf<String>()
+        var allowRetry = false
+        val connector = IsdsSoapDownloads.usingTransport { endpoint, request ->
+            when {
+                request.contains("GetListOfReceivedMessages") -> {
+                    assertEquals("dx", endpoint)
+                    assertTrue(request.contains("<v:dmOffset>1</v:dmOffset>"))
+                    listing(listOf("441", "442"))
+                }
+                endpoint == "dz" -> {
+                    val id = Regex("<v:dmID>([^<]+)").find(request)!!.groupValues[1]
+                    downloads.add(id)
+                    check(id != "441" || allowRetry)
+                    pollSoap("SignedMessageDownload", "<v:dmSignature>AQI=</v:dmSignature>")
+                }
+                else -> pollSoap("GetSignedDeliveryInfo", "<v:dmSignature>Bwg=</v:dmSignature>")
+            }
+        }
+        val store = PostgresIsdsPoll(dataSource)
+        val importer = PostgresLegalDeliveryInbox(dataSource)
+        val worker = IsdsMailboxPoll(store, importer, connector, "synthetic-inbox", start)
+        worker.run(start.plusSeconds(300))
+        val first = store.recent(listOf("synthetic-inbox")).first()
+        assertEquals("INCOMPLETE", first.status)
+        assertEquals(1L, first.pendingCount)
+        assertEquals(1, first.importedCount)
+        assertEquals(start.plusSeconds(300), first.windowThrough.toInstant())
+
+        dataSource.connection.use { db ->
+            db.createStatement().use {
+                it.execute("UPDATE legal_isds_pending SET attempted_at = clock_timestamp() - interval '6 minutes'")
+            }
+        }
+        allowRetry = true
+        worker.run(start.plusSeconds(600))
+        val recovered = store.recent(listOf("synthetic-inbox")).first()
+        assertEquals("COMPLETE", recovered.status)
+        assertEquals(start.plusSeconds(180), recovered.windowFrom.toInstant())
+        assertEquals(0L, recovered.pendingCount)
+        assertEquals(1, downloads.count { it == "442" })
+        assertEquals(2, downloads.count { it == "441" })
+
+        IsdsMailboxPoll(store, importer, connector, "other-history", start).run(start.plusSeconds(600))
+        val result = request("/isds-runs")
+        assertEquals(200, result.statusCode())
+        val body = result.body().decodeToString()
+        assertTrue(body.contains("synthetic-inbox") && body.contains("INCOMPLETE") && body.contains("COMPLETE"))
+        assertFalse(body.contains("other-history"))
+        val queue = request().body().decodeToString()
+        assertTrue(queue.contains("441") && queue.contains("442"))
+    }
+
+    @Test
+    fun `ambiguous or saturated listings never advance the checkpoint`() {
+        val start = Instant.parse("2026-06-02T12:00:00Z")
+        val store = PostgresIsdsPoll(dataSource)
+        val inbox = PostgresLegalDeliveryInbox(dataSource)
+        val saturated = IsdsSoapDownloads.usingTransport { _, _ -> listing((1..100).map(Int::toString)) }
+        IsdsMailboxPoll(store, inbox, saturated, "busy-history", start).run(start.plusSeconds(300))
+        val failed = store.recent(listOf("busy-history")).single()
+        assertEquals("DISCOVERY_FAILED", failed.status)
+        assertEquals(null, failed.discoveredAt)
+        assertEquals(0, failed.discoveredCount)
+
+        val recovered = IsdsSoapDownloads.usingTransport { _, request ->
+            assertTrue(request.contains("<v:dmFromTime>$start</v:dmFromTime>"))
+            listing(emptyList())
+        }
+        IsdsMailboxPoll(store, inbox, recovered, "busy-history", start).run(start.plusSeconds(600))
+        assertEquals("COMPLETE", store.recent(listOf("busy-history")).first().status)
+    }
+
+    @Test
+    fun `a second worker cannot read the same mailbox while its lock is held`() {
+        val start = Instant.parse("2026-06-03T12:00:00Z")
+        val store = PostgresIsdsPoll(dataSource)
+        val inbox = PostgresLegalDeliveryInbox(dataSource)
+        val connector = IsdsSoapDownloads.usingTransport { _, _ -> error("Unexpected ISDS request") }
+        val worker = IsdsMailboxPoll(store, inbox, connector, "locked-history", start)
+
+        store.exclusive("locked-history") {
+            assertEquals(null, worker.run(start.plusSeconds(300)))
+        }
+        assertTrue(store.recent(listOf("locked-history")).isEmpty())
+    }
+
+    private fun listing(ids: List<String>): ByteArray = pollSoap(
+        "GetListOfReceivedMessages",
+        "<v:dmRecords>" + ids.joinToString("") { "<v:dmRecord><v:dmID>$it</v:dmID></v:dmRecord>" } + "</v:dmRecords>",
+    )
+
+    private fun pollSoap(operation: String, fields: String): ByteArray = """
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:v="http://isds.czechpoint.cz/v20">
+          <s:Body><v:${operation}Response>$fields
+            <v:dmStatus><v:dmStatusCode>0000</v:dmStatusCode></v:dmStatus>
+          </v:${operation}Response></s:Body>
+        </s:Envelope>
+    """.trimIndent().toByteArray()
 
     private fun import(mailbox: String, id: String, source: ByteArray): UUID {
         val client = IsdsSoapDownloads.usingTransport { endpoint, _ ->

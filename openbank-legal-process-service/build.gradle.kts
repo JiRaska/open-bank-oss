@@ -20,6 +20,7 @@ dependencies {
     implementation(libs.quarkus.agroal)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.flyway)
+    implementation(libs.quarkus.scheduler)
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation(libs.bouncycastle.bcprov)
     implementation(libs.bouncycastle.bcpkix)

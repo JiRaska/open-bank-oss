@@ -5,6 +5,7 @@ package com.openbank.legalprocess.review
 
 import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.openbank.legalprocess.isds.PostgresIsdsPoll
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.BadRequestException
@@ -38,7 +39,17 @@ internal data class InboxPage(val items: List<InboxReceipt>, val hasMore: Boolea
 @Path("/api/v1/legal-inbox")
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed(INBOX_VIEW)
-internal class LegalInboxResource(private val review: PostgresInboxReview, private val identity: SecurityIdentity) {
+internal class LegalInboxResource(
+    private val review: PostgresInboxReview,
+    private val poll: PostgresIsdsPoll,
+    private val identity: SecurityIdentity,
+) {
+    @GET
+    @Path("/isds-runs")
+    fun isdsRuns(): Response = privateResponse(
+        Response.ok(poll.recent(operator().mailboxes.map { it.removePrefix("isds:") })),
+    )
+
     @GET
     fun list(@QueryParam("offset") @DefaultValue("0") offset: Int): Response {
         if (offset < 0) throw BadRequestException()

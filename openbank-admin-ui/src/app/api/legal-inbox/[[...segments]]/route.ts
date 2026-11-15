@@ -25,9 +25,10 @@ async function forward(req: NextRequest, { params }: Context) {
   const original = !post && validId && segments.length === 3 && operation === 'originals' &&
     (file === 'message' || file === 'delivery')
   const list = !post && segments.length === 0
+  const history = !post && segments.length === 1 && id === 'isds-runs'
   const detail = !post && validId && segments.length === 1
   const action = post && validId && segments.length === 2 && (operation === 'extract' || operation === 'assignment')
-  if (!(list || detail || original || action)) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+  if (!(list || history || detail || original || action)) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
   if (post && (req.headers.get('sec-fetch-site') === 'cross-site' ||
       req.headers.get('content-type')?.split(';')[0] !== 'application/json')) {

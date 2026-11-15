@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Legal Inbox
-  version: 1.0.0
+  version: 1.1.0
 security:
   - operatorToken: []
 paths:
@@ -27,6 +27,32 @@ paths:
                     items: {$ref: '#/components/schemas/Receipt'}
                   hasMore: {type: boolean}
         "400": {description: Invalid offset}
+        "401": {description: Authentication required}
+        "403": {description: Inbox permission or mailbox grant missing}
+  /api/v1/legal-inbox/isds-runs:
+    get:
+      operationId: readIsdsPollHistory
+      summary: List last fifty runs for permitted ISDS mailboxes
+      responses:
+        "200":
+          description: Mailbox discovery and import history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [mailbox, windowFrom, windowThrough, startedAt, discoveredAt, status, discoveredCount, importedCount, pendingCount]
+                  properties:
+                    mailbox: {type: string}
+                    windowFrom: {type: string, format: date-time}
+                    windowThrough: {type: string, format: date-time}
+                    startedAt: {type: string, format: date-time}
+                    discoveredAt: {type: [string, "null"], format: date-time}
+                    status: {type: string, enum: [RUNNING, COMPLETE, INCOMPLETE, DISCOVERY_FAILED, INTERRUPTED]}
+                    discoveredCount: {type: integer, minimum: 0}
+                    importedCount: {type: integer, minimum: 0}
+                    pendingCount: {type: [integer, "null"], minimum: 0}
         "401": {description: Authentication required}
         "403": {description: Inbox permission or mailbox grant missing}
   /api/v1/legal-inbox/{id}:

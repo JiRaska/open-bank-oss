@@ -91,3 +91,24 @@ bash openbank-admin-ui/e2e/run-legal-inbox-postgres.sh
 HTTP testy zapisují testovací SOAP odpověď pomocí ISDS importéru. Browser scénář
 spustí izolovanou databázi, vloží syntetický ZFO originál a přes skutečný BFF ověří
 identické bajty, vytěžení, přidělení, obnovení stránky a následný audit v PostgreSQL.
+
+## Vyčítání veřejného testu ISDS
+
+Worker je standardně vypnutý. Pro veřejný test se konfiguruje
+`LEGAL_ISDS_POLL_ENABLED=true`, `LEGAL_ISDS_POLL_TEST_MAILBOX` se jménem
+začínajícím `test-`, `LEGAL_ISDS_POLL_FIRST_FROM` s počátkem v ISO 8601 a
+`LEGAL_ISDS_POLL_BASIC` s hodnotou Basic pověření (Base64 uživatele a hesla) z runtime správce tajemství. Provozní
+identita musí mít přístup ke schránce odpovídající tomuto namespace. Worker
+používá nejméně dvě souběžná spojení k PostgreSQL.
+
+Jedna instance za schránku zpracovává překrývající se okna. Plný seznam rozdělí
+na menší okna. Posun okna a uložení očekávajících ID proběhnou společně.
+Každý originál s doručenkou se uloží stejným importérem jako dosud. Neúspěšný
+import zůstane ve frontě a opakuje se s odstupem. Uložené doklady se při běžném
+průchodu nestahují znovu. Částečný nebo přerušený běh je dohledatelný.
+Na záložce `/legal-process/connectors` operátor vidí historii v rozsahu svého
+oprávnění ke schránce, včetně počtu zpráv čekajících na import.
+
+Volání seznamu může způsobit doručení. Aktivace produkčního přístupu, jeho
+provozní schválení a ověření velkoobjemových zpráv zůstávají součástí
+konformity. Současný worker používá jen veřejný test ISDS.

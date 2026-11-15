@@ -415,7 +415,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
       '/fx', '/fees', '/lending',
   ]],
   ['interest:view', ['/interest']],
-  ['legal-inbox:view', ['/legal-process/inbox', '/api/legal-inbox']],
+  ['legal-inbox:view', ['/legal-process/inbox', '/legal-process/connectors', '/api/legal-inbox']],
   ['sanctions:view', ['/sanctions']],
   ['compliance:view', [
     '/aml', '/fraud', '/disputes', '/consents', '/customer-360',

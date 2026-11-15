@@ -10,6 +10,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.time.Instant
 import java.util.Base64
 import javax.net.ssl.SSLContext
 import javax.xml.XMLConstants
@@ -21,6 +22,24 @@ class IsdsSoapDownloads private constructor(private val transport: (String, Stri
     override fun message(messageId: String): ByteArray = download("SignedMessageDownload", "dz", messageId)
 
     override fun deliveryInfo(messageId: String): ByteArray = download("GetSignedDeliveryInfo", "dx", messageId)
+
+    internal fun received(from: Instant, to: Instant, limit: Int): List<String> {
+        require(from < to && limit > 0)
+        val operation = "GetListOfReceivedMessages"
+        val request = """
+            <s:Envelope xmlns:s="$SOAP" xmlns:v="$ISDS" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+              <s:Body><v:$operation>
+                <v:dmFromTime>$from</v:dmFromTime><v:dmToTime>$to</v:dmToTime>
+                <v:dmRecipientOrgUnitNum xsi:nil="true"/><v:dmStatusFilter>-1</v:dmStatusFilter>
+                <v:dmOffset>1</v:dmOffset><v:dmLimit>$limit</v:dmLimit>
+              </v:$operation></s:Body>
+            </s:Envelope>
+        """.trimIndent()
+        val records = response(transport("dx", request), operation).child(ISDS, "dmRecords")
+        return records.children(ISDS, "dmRecord").map { record ->
+            record.child(ISDS, "dmID").textContent.trim().also { check(ISDS_MESSAGE_ID.matches(it)) }
+        }.also { check(it.size <= limit) }
+    }
 
     private fun download(operation: String, endpoint: String, id: String): ByteArray {
         require(ISDS_MESSAGE_ID.matches(id)) { "Invalid ISDS message ID" }
@@ -76,7 +95,7 @@ class IsdsSoapDownloads private constructor(private val transport: (String, Stri
 
         internal fun usingTransport(transport: (String, String) -> ByteArray) = IsdsSoapDownloads(transport)
 
-        private fun parseSignedResponse(xml: ByteArray, operation: String): ByteArray {
+        private fun response(xml: ByteArray, operation: String): Element {
             require(xml.size <= MAX_RESPONSE_BYTES) { "ISDS response exceeds import limit" }
             val factory = DocumentBuilderFactory.newNSInstance().apply {
                 setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
@@ -90,7 +109,11 @@ class IsdsSoapDownloads private constructor(private val transport: (String, Stri
             val response = body.child(ISDS, "${operation}Response")
             val status = response.child(ISDS, "dmStatus").child(ISDS, "dmStatusCode").textContent.trim()
             check(status == "0000") { "ISDS operation did not return success" }
-            val raw = response.child(ISDS, "dmSignature").textContent.filterNot { it in " \r\n\t" }
+            return response
+        }
+
+        private fun parseSignedResponse(xml: ByteArray, operation: String): ByteArray {
+            val raw = response(xml, operation).child(ISDS, "dmSignature").textContent.filterNot { it in " \r\n\t" }
             val original = Base64.getDecoder().decode(raw)
             require(original.isNotEmpty() && original.size <= MAX_SIGNED_EVIDENCE_BYTES) {
                 "Invalid ISDS signed original size"
@@ -98,10 +121,13 @@ class IsdsSoapDownloads private constructor(private val transport: (String, Stri
             return original
         }
 
-        private fun Element.child(namespace: String, name: String): Element {
-            val matches = (0 until childNodes.length).mapNotNull { childNodes.item(it) as? Element }
+        private fun Element.child(namespace: String, name: String): Element =
+            checkNotNull(children(namespace, name).singleOrNull()) {
+                "Missing or ambiguous ISDS response element $name"
+            }
+
+        private fun Element.children(namespace: String, name: String): List<Element> =
+            (0 until childNodes.length).mapNotNull { childNodes.item(it) as? Element }
                 .filter { it.namespaceURI == namespace && it.localName == name }
-            return checkNotNull(matches.singleOrNull()) { "Missing or ambiguous ISDS response element $name" }
-        }
     }
 }
