@@ -170,7 +170,8 @@ class AccountResource(
 
         var opened = false
         val account = try {
-            accountUseCase.openAccount(request.toCommand(idempotencyKey, requestHash, operatorId())).also { opened = true }
+            accountUseCase.openAccount(request.toCommand(idempotencyKey, requestHash, operatorId()))
+                .also { opened = true }
         } finally {
             // Any failure (the exception propagates unchanged) frees the in-flight marker so a
             // retry of the same request can run instead of answering IN_PROGRESS for 5 minutes.
