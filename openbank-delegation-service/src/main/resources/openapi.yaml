@@ -13,7 +13,7 @@ info:
   # 1.25 -> 1.26 (#12693): correct the owner portfolio path parameter name in the document.
   # 1.26 -> 1.27 (#10247): document the sole statutory signing requirement for preview and offer.
   # 1.27 -> 1.28 (#15716): approval replay binds to the frozen payload; 409 on a reused SCA challenge.
-  version: 1.28.0
+  version: 1.28.1
 servers:
   - url: http://localhost:8126
 tags:
@@ -279,8 +279,10 @@ paths:
               something this platform grants by omission.
             * `APPROVAL_POLICY_UNSUPPORTED` — approvalPolicy other than SOLO; nothing counts approvals.
             * `EXPOSURE_UNSUPPORTED` — exposure is non-null. It remains readable on historical grants
-              for audit, but cannot authorize a raw object download until transformed-artifact delivery
-              can prove redaction, watermark and view-count enforcement.
+              for audit and never authorizes a raw object download. This is the declared end state
+              (ADR-0375 D6), not a pending gap: redaction, watermark and view counts are enforced by
+              issuing a sealed external disclosure over the document, whose view consumption is
+              atomic, and never by shaping a live read.
 
             All are refused before the SCA challenge is spent, so the customer keeps their ceremony.
         '403': { description: The authenticated party is not the grantor, or the actor lacks verified sole signing authority }
