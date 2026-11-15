@@ -19,18 +19,30 @@ spec:
         # Node root/data disks projected to hit zero within 4h on the current
         # 6h slope. Gated on <50% free so a half-empty disk with a transient
         # slope doesn't page.
+        #
+        # 2026-11-14: and only once the node has been up longer than the 6h fit window.
+        # Karpenter replaces nodes constantly, and a fresh node's first hours are image pulls
+        # — a steep, one-off fall in free space that predict_linear extrapolates to zero.
+        # 66 firing onsets / 7d, spread 1-2 per node across dozens of short-lived nodes, and
+        # no node ever filled. Backtest (alert-backtest.py, calibrated 66/66 against
+        # recorded ALERTS): 66 -> 1 onset. A node that is genuinely filling after its first
+        # 6h still alerts; one that fills INSIDE its first 6h is caught by the absolute
+        # NodeFilesystem* rules from the kubernetes mixin.
         - alert: NodeDiskWillFillIn4h
           expr: |
             predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}[6h], 4 * 3600) < 0
             and on (instance, device, mountpoint)
             node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
               / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"} < 0.5
+            and on (instance)
+            (time() - node_boot_time_seconds) > 6 * 3600
           for: 15m
           labels:
             severity: warning
           annotations:
             summary: "Disk on {{ $labels.instance }} ({{ $labels.mountpoint }}) fills within ~4h"
             description: "Projected to reach 0 bytes within 4h on the 6h trend — extend the volume or reclaim space."
+            backtest: "7d to 2026-11-14: 66 firing onsets before (calibrated 66/66), 1 after (alert-backtest.py)"
         # PVC fill projection — covers the CNPG Postgres and Tempo/Loki data
         # volumes, the most likely things to silently fill (ties to #0).
         - alert: PersistentVolumeWillFillIn6h
@@ -54,45 +66,76 @@ spec:
         # uses a plain moving-average + stddev band instead — no feature flag,
         # same "deviation from trend" intent, consistent with TrafficDropAnomaly.
         # Floored at 50ms so near-idle services don't alert on µs-scale noise.
+        #
+        # 2026-11-14 retune: a 3σ band on a near-flat p99 is narrower than bucket
+        # interpolation noise (18 firing onsets / 7d, median episode ~3 min). Now also >2x the
+        # baseline, an absolute 250ms floor, and for: 30m — a regime change, not a wobble. The
+        # baseline is `offset 1h` for the same reason as TrafficDropAnomaly below: a band whose
+        # window contains the regression widens with it and stops matching before for: matures.
+        # Backtest (alert-backtest.py, calibrated 17 emulated vs 18 recorded): 17 -> 3.
         - alert: SpanLatencyTrendAnomaly
           expr: |
             (
               histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[10m])))
               >
-              avg_over_time(
-                histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[10m])))[3h:10m]
-              )
-              + 3 * stddev_over_time(
-                histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[10m])))[3h:10m]
-              )
+              avg_over_time(histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[10m])))[3h:10m] offset 1h)
+              + 3 * stddev_over_time(histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[10m])))[3h:10m] offset 1h)
             )
             and
-            histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[10m]))) > 0.05
-          for: 15m
+            (
+              histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[10m])))
+              >
+              2 * avg_over_time(histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[10m])))[3h:10m] offset 1h)
+            )
+            and
+            histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[10m]))) > 0.25
+          for: 30m
           labels:
             severity: warning
           annotations:
             summary: "P99 latency on {{ $labels.service }} deviating above its trend"
-            description: "Span p99 is >3σ above its 3h mean for >15m — a deviation from normal, independent of the absolute SLO threshold."
-        # Traffic-drop anomaly: request rate collapses far below the last hour's
-        # mean (3-sigma below). Catches a silent upstream outage / wedged
-        # consumer that error-rate alerts miss (no errors if no calls arrive).
+            description: "Span p99 is >2x and >3σ above its 3h baseline (ending 1h ago), and above 250ms, for >30m — a regime change, independent of the absolute SLO threshold."
+            backtest: "7d to 2026-11-14: 17 emulated firing onsets before (18 recorded), 3 after (alert-backtest.py)"
+        # Traffic-drop anomaly: request rate collapses far below its recent baseline.
+        # Catches a silent upstream outage / wedged consumer that error-rate alerts miss
+        # (no errors if no calls arrive).
+        #
+        # 2026-11-14 retune — two defects, found by backtest + promtool, fixed together:
+        #  1. NOISE. A 3-sigma band alone on near-flat synthetic traffic is narrower than the
+        #     jitter of a 10m rate (settlement: 0.985 rps vs a lower band of 0.981): 16 firing
+        #     onsets / 7d on six services with no outage. Now also below HALF the baseline,
+        #     and the baseline must exceed 0.5 rps (services quieter than that — e.g.
+        #     product-catalog at ~0.3 — are left to their absence/liveness alerts).
+        #  2. BLIND TO A SUSTAINED OUTAGE. The band was computed over a window that CONTAINS
+        #     the drop, so once zeros entered it the stddev ballooned, mean-3σ went negative,
+        #     and a service at 0 rps stopped matching within ~20 min — `for:` could not mature.
+        #     The baseline is now `offset 30m`, i.e. measured before the drop began.
+        # Backtest (openbank-infra/scripts/alert-backtest.py, 7d to 2026-11-14): 16 recorded
+        # firing onsets -> 4 (all openbank-admin-ui, real >50% drops of human traffic).
+        # promtool: tests/promtool/anomaly_alerts_test.yaml (zero-traffic fires, -5% does not).
         - alert: TrafficDropAnomaly
           expr: |
             (
               sum by (service) (rate(traces_spanmetrics_calls_total[10m]))
               <
-              avg_over_time(sum by (service) (rate(traces_spanmetrics_calls_total[10m]))[1h:10m])
-                - 3 * stddev_over_time(sum by (service) (rate(traces_spanmetrics_calls_total[10m]))[1h:10m])
+              avg_over_time(sum by (service) (rate(traces_spanmetrics_calls_total[10m]))[1h:10m] offset 30m)
+                - 3 * stddev_over_time(sum by (service) (rate(traces_spanmetrics_calls_total[10m]))[1h:10m] offset 30m)
             )
             and
-            avg_over_time(sum by (service) (rate(traces_spanmetrics_calls_total[10m]))[1h:10m]) > 0.1
-          for: 10m
+            (
+              sum by (service) (rate(traces_spanmetrics_calls_total[10m]))
+              <
+              0.5 * avg_over_time(sum by (service) (rate(traces_spanmetrics_calls_total[10m]))[1h:10m] offset 30m)
+            )
+            and
+            avg_over_time(sum by (service) (rate(traces_spanmetrics_calls_total[10m]))[1h:10m] offset 30m) > 0.5
+          for: 20m
           labels:
             severity: warning
           annotations:
             summary: "Traffic on {{ $labels.service }} dropped far below trend"
-            description: "Request rate is >3σ below the last hour's mean for >10m — possible silent upstream outage or wedged consumer."
+            description: "Request rate is below half of (and >3σ below) its baseline from 30-90 minutes ago, for >20m — possible silent upstream outage or wedged consumer."
+            backtest: "7d to 2026-11-14: 16 recorded firing onsets before, 4 emulated after (alert-backtest.py)"
     # ADR-0173 D1 — cluster capacity saturation. The gap this closes: the NodePool
     # `limits` (cpu: 48 / memory: 128Gi, aws/envs/sandbox-platform/main.tf) are both
     # the FinOps cost control AND the fleet capacity ceiling, and when they bind
