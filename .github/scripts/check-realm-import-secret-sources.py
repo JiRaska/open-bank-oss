@@ -27,8 +27,11 @@
 # WHAT IT DOES NOT DO
 #   It cannot see OpenBao, so it cannot prove the artifact was updated; the nightly drift job
 #   remains the proof. It does not compare secret values.
+import ast
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -57,6 +60,44 @@ HINT = ("Add `{cid}` to {src} under `{realm}:` with `placeholder: {ph}` and `ope
         "After merge, an operator must also add the client to the OpenBao import artifact "
         "(docs/runbooks/0009-keycloak-realm-import-reconcile.md, additive merge); until then the "
         "nightly keycloak-realm-drift job reports it.")
+
+
+def confidential_without_placeholder(template: dict) -> list:
+    """Confidential clients whose secret is not a placeholder: a literal or missing secret would
+    reach neither this mapping nor the import artifact by name, and must not pass silently."""
+    out = []
+    for c in template.get("clients", []):
+        if c.get("publicClient") or c.get("bearerOnly"):
+            continue
+        if c.get("clientAuthenticatorType", "client-secret") != "client-secret":
+            continue
+        s = c.get("secret")
+        if not (isinstance(s, str) and PLACEHOLDER.match(s)):
+            out.append(c["clientId"])
+    return out
+
+
+def baseline_on_base() -> dict | None:
+    """UNRECORDED_BASELINE as committed on the PR base, or None when no base is known."""
+    base = os.environ.get("PR_DIFF_BASE", "").strip()
+    if not base:
+        return None
+    shown = subprocess.run(["git", "show", f"{base}:.github/scripts/check-realm-import-secret-sources.py"],
+                           capture_output=True, text=True, check=False)
+    if shown.returncode != 0:
+        return {}  # the script is new on this PR: its whole baseline is the introduction
+    # Read the literal only; never execute code from another revision.
+    for node in ast.parse(shown.stdout).body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "UNRECORDED_BASELINE" for t in node.targets):
+            return {k: set(v) for k, v in ast.literal_eval(node.value).items()}
+    return {}
+
+
+def baseline_growth(current: dict, base: dict | None) -> list:
+    if not base:
+        return []
+    return [f"[{realm}] `{cid}` was ADDED to UNRECORDED_BASELINE; the baseline only shrinks — record its source"
+            for realm, names in current.items() for cid in sorted(names - base.get(realm, set()))]
 
 
 def placeholder_clients(template: dict) -> dict:
@@ -145,6 +186,18 @@ def self_test() -> int:
         passed = (got == 0) if want == 0 else (got >= 1)
         print(f"self-test {'ok  ' if passed else 'FAIL'} {name} ({got} finding(s))")
         bad += not passed
+    for name, got, want in (
+        ("baseline addition is a finding", len(baseline_growth({"openbank": {"x", "y"}}, {"openbank": {"x"}})), 1),
+        ("baseline shrink is fine", len(baseline_growth({"openbank": {"x"}}, {"openbank": {"x", "y"}})), 0),
+        ("no base known is not judged", len(baseline_growth({"openbank": {"x"}}, None)), 0),
+        ("confidential literal secret is flagged",
+         len(confidential_without_placeholder({"clients": [{"clientId": "c", "secret": "s3cret"}]})), 1),
+        ("public client is ignored",
+         len(confidential_without_placeholder({"clients": [{"clientId": "p", "publicClient": True}]})), 0),
+    ):
+        passed = got == want
+        print(f"self-test {'ok  ' if passed else 'FAIL'} {name} ({got})")
+        bad += not passed
     print("self-test:", "all cases OK" if not bad else f"{bad} case(s) FAILED")
     return 1 if bad else 0
 
@@ -155,6 +208,14 @@ def main() -> int:
     templates = {r: json.loads(Path(p).read_text()) for r, p in TEMPLATES.items()}
     sources = yaml.safe_load(Path(SOURCES).read_text()) or {}
     findings = check(templates, sources, UNRECORDED_BASELINE)
+    findings += baseline_growth(UNRECORDED_BASELINE, baseline_on_base())
+    for realm, t in templates.items():
+        for cid in confidential_without_placeholder(t):
+            findings.append(f"[{realm}] confidential client `{cid}` has no `__PLACEHOLDER__` secret: give it one "
+                            "(the import artifact carries the real value) so its source can be recorded here")
+        ids = [c["clientId"] for c in t.get("clients", [])]
+        for cid in sorted({i for i in ids if ids.count(i) > 1}):
+            findings.append(f"[{realm}] clientId `{cid}` is declared more than once in the template")
     n = sum(len(placeholder_clients(t)) for t in templates.values())
     print(f"SUBJECTS={n}")
     for f in findings:
