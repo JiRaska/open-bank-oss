@@ -241,14 +241,20 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
          * nationality, and so an entity registered in a listed jurisdiction is caught without a
          * name match at all. Deliberately NOT stored on [ScreeningSubject]: it is re-derived from
          * the extract on every screen, so a persisted screening never disagrees with the register.
-         * A person listed twice (director and owner) gets whichever fact either listing carries.
+         * A subject is keyed by its NAME, so two listings under one key may be one person (a
+         * director who is also an owner) or two people who share a name. Listings that do not
+         * contradict each other are merged, so complementary facts travel together; listings that
+         * DO contradict (a different country, date of birth or nationality) are kept apart and each
+         * is screened, because the screen cannot be sent two countries and dropping either one could
+         * drop a jurisdiction match. Every subject therefore maps to one or more identities.
          */
-        fun identitiesOf(extract: RegistryExtract, owners: List<BeneficialOwner>): Map<String, SubjectIdentity> {
-            val found = mutableMapOf<String, SubjectIdentity>()
+        fun identitiesOf(extract: RegistryExtract, owners: List<BeneficialOwner>): Map<String, List<SubjectIdentity>> {
+            val found = mutableMapOf<String, MutableList<SubjectIdentity>>()
             fun put(name: String, organisation: Boolean, identity: SubjectIdentity) {
                 if (name.isBlank()) return
-                val key = keyOf(name, organisation)
-                found[key] = found[key]?.orElse(identity) ?: identity
+                val list = found.getOrPut(keyOf(name, organisation)) { mutableListOf() }
+                val i = list.indexOfFirst { it.compatibleWith(identity) }
+                if (i < 0) list.add(identity) else list[i] = list[i].orElse(identity)
             }
             put(
                 extract.legalName,
@@ -309,6 +315,13 @@ data class SubjectIdentity(
     val nationality: String? = null,
     val aliases: List<String> = emptyList(),
 ) {
+    /** True when no field is set on both sides with different values, so both may describe one subject. */
+    fun compatibleWith(other: SubjectIdentity): Boolean =
+        agrees(country, other.country) && agrees(dateOfBirth, other.dateOfBirth) &&
+            agrees(nationality, other.nationality)
+
+    private fun <T> agrees(a: T?, b: T?) = a == null || b == null || a == b
+
     /** This identity, with gaps filled from [other]. */
     fun orElse(other: SubjectIdentity) = SubjectIdentity(
         country = country ?: other.country,

@@ -232,6 +232,7 @@ class BusinessOnboardingServiceTest {
     /** sanctions-service double: answers by NAME, records every request, and can be taken down. */
     private inner class FakeScreening : RelatedPartyScreeningPort {
         val answers = mutableMapOf<String, RelatedPartyScreeningResult>()
+        val answersByCountry = mutableMapOf<String, RelatedPartyScreeningResult>()
         val requests = mutableListOf<RelatedPartyScreeningRequest>()
         var down = false
         val downFor = mutableSetOf<String>()
@@ -241,6 +242,7 @@ class BusinessOnboardingServiceTest {
             if (down || request.name in downFor) {
                 throw RelatedPartyScreeningUnavailableException(IllegalStateException("sanctions-service down"))
             }
+            request.identity.country?.let { c -> answersByCountry[c]?.let { return it } }
             return answers[request.name] ?: RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, false, null)
         }
     }
@@ -1061,6 +1063,27 @@ class BusinessOnboardingServiceTest {
             assertThat(hitEvent).isEqualTo(ordinaryEvent)
             assertThat(CaseResponse.from(hit, initiator).screening).isNull()
         }
+
+    /**
+     * Subjects are keyed by name, so two different people sharing one are one subject. Their
+     * contradicting facts must not be merged first-wins: the second person's country would be
+     * dropped, and with it the jurisdiction match that only that country produces.
+     */
+    @Test
+    fun `two owners sharing a name are each screened, and the worse answer decides`(): Unit = runBlocking {
+        screeningOn()
+        uboOwners += owner("Jan Dvořák", corporate = false).copy(countryOfResidence = "CZ")
+        uboOwners += owner("Jan Dvořák", corporate = false).copy(countryOfResidence = "IR")
+        screeningPort.answersByCountry["IR"] = RelatedPartyScreeningResult(ScreeningVerdict.HIT, false, "IR")
+        val id = soleCaseReadyToSign()
+        readyToSign(id, initiator)
+
+        val sent = screeningPort.requests.filter { it.name == "Jan Dvořák" }
+        assertThat(sent.map { it.identity.country }).containsExactlyInAnyOrder("CZ", "IR")
+        assertThat(sent.map { it.idempotencyKey }.toSet()).hasSize(2)
+        val subject = service.get(id).screening!!.subjects.single { it.name == "Jan Dvořák" }
+        assertThat(subject.sanctions).isEqualTo(ScreeningVerdict.HIT)
+    }
 
     /** Completeness is about who is on the case NOW, not who was on it when the screen ran. */
     @Test

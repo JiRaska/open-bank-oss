@@ -8,6 +8,7 @@ import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
 import com.openbank.kyb.application.port.out.KybMetricsPort
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningPort
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningRequest
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningResult
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningUnavailableException
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseScreening
@@ -106,7 +107,7 @@ class RelatedPartyScreeningService {
                 if (!subject.current || subject.sanctions != ScreeningVerdict.PENDING) {
                     subject
                 } else {
-                    screenOne(case, subject, identities[subject.key] ?: SubjectIdentity(), now)
+                    screenOne(case, subject, identities[subject.key].orEmpty().ifEmpty { listOf(SubjectIdentity()) }, now)
                 }
             },
         )
@@ -116,18 +117,23 @@ class RelatedPartyScreeningService {
     private suspend fun screenOne(
         case: BusinessOnboardingCase,
         subject: ScreeningSubject,
-        identity: SubjectIdentity,
+        identities: List<SubjectIdentity>,
         now: Instant,
     ): ScreeningSubject = try {
-        val result = port.screen(
-            RelatedPartyScreeningRequest(
-                name = subject.name,
-                subjectId = subjectId(case, subject),
-                organisation = subject.organisation,
-                idempotencyKey = "kyb-screen:${case.id}:${subject.key}",
-                identity = identity,
-            ),
-        )
+        // One screen per distinct identity under this name; the subject takes the WORST answer,
+        // so a second person sharing the name can never be cleared by the first one's facts.
+        // The first keeps the historical idempotency key, so an existing screen still replays.
+        val result = identities.mapIndexed { i, identity ->
+            port.screen(
+                RelatedPartyScreeningRequest(
+                    name = subject.name,
+                    subjectId = subjectId(case, subject),
+                    organisation = subject.organisation,
+                    idempotencyKey = "kyb-screen:${case.id}:${subject.key}" + if (i == 0) "" else ":$i",
+                    identity = identity,
+                ),
+            )
+        }.let(::worst)
         metrics.relatedPartyScreened(outcome(result.sanctions, result.pep))
         subject.answered(result.sanctions, result.pep, result.matchedName, now)
     } catch (e: RelatedPartyScreeningUnavailableException) {
@@ -142,6 +148,14 @@ class RelatedPartyScreeningService {
     private fun subjectId(case: BusinessOnboardingCase, subject: ScreeningSubject): String =
         case.entityPartyId?.takeIf { subject.kind == ScreeningSubjectKind.ENTITY }?.toString()
             ?: "kyb-case:${case.id}:${subject.key}"
+
+    private fun worst(results: List<RelatedPartyScreeningResult>): RelatedPartyScreeningResult {
+        val deciding = results.maxBy { it.sanctions.ordinal }
+        return deciding.copy(
+            pep = results.any { it.pep },
+            matchedName = deciding.matchedName ?: results.firstNotNullOfOrNull { it.matchedName },
+        )
+    }
 
     private fun outcome(sanctions: ScreeningVerdict, pep: Boolean): String = when {
         sanctions == ScreeningVerdict.HIT -> "hit"

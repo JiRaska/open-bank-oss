@@ -28,8 +28,10 @@ If the ownership register cannot be reached, no subject is treated as having lef
 
 The registry is sent a reference for each subject. It is a random UUID that the database generates
 when the subject is first owed to the registry. It is not derived from a name or an identifier, it
-never changes and it is not shared between cases. The onboarding screen is not changed: it sends
-the same subject id and stores the same data as before this feature.
+never changes and it is not shared between cases. The onboarding screen is not changed by the
+registry: it sends the same subject id as before. Besides the name it sends the subject's country,
+date of birth and nationality as the register reports them (see the screening section of the
+README); these are read from the extract on each screen and are not stored on the case.
 
 Consequence: a clearance that an analyst records in sanctions-service for the onboarding screen is
 stored under the screening id, not under the registry reference. The registry's first evaluation of

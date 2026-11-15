@@ -198,11 +198,24 @@ class CaseScreeningTest {
         val subjects = CaseScreening.subjectsOf(ex, owners).associateBy { it.kind }
         val ids = CaseScreening.identitiesOf(ex, owners)
 
-        assertThat(ids[subjects.getValue(ScreeningSubjectKind.ENTITY).key]?.country).isEqualTo("CZ")
-        val jana = ids.getValue(subjects.getValue(ScreeningSubjectKind.REPRESENTATIVE).key)
+        assertThat(ids.getValue(subjects.getValue(ScreeningSubjectKind.ENTITY).key).single().country).isEqualTo("CZ")
+        val jana = ids.getValue(subjects.getValue(ScreeningSubjectKind.REPRESENTATIVE).key).single()
         assertThat(jana.dateOfBirth).isEqualTo(java.time.LocalDate.of(1980, 1, 2))
         assertThat(jana.nationality).isEqualTo("CZ")
         assertThat(jana.country).isEqualTo("SK")
-        assertThat(ids[subjects.getValue(ScreeningSubjectKind.BENEFICIAL_OWNER).key]?.country).isEqualTo("CY")
+        assertThat(ids.getValue(subjects.getValue(ScreeningSubjectKind.BENEFICIAL_OWNER).key).single().country)
+            .isEqualTo("CY")
+    }
+
+    @Test
+    fun `contradicting listings under one name stay separate identities instead of merging first-wins`() {
+        val ex = extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, emptyList())
+        val owners = listOf(
+            owner("Jan Dvořák").copy(countryOfResidence = "CZ"),
+            owner("DVOŘÁK Jan").copy(countryOfResidence = "IR"),
+        )
+        val key = CaseScreening.subjectsOf(ex, owners).single { it.kind == ScreeningSubjectKind.BENEFICIAL_OWNER }.key
+        assertThat(CaseScreening.identitiesOf(ex, owners).getValue(key).map { it.country })
+            .containsExactly("CZ", "IR")
     }
 }
