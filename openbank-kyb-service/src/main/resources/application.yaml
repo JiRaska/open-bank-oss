@@ -275,10 +275,13 @@ openbank:
       # `openbank.sanctions.monitoring.enabled` (registration is answered 503 without it), the
       # route to sanctions-service that `screening.enabled` above also needs, and that switch
       # itself — a case approved with screening off carries nobody to register. Turn them on in
-      # that order. While this is off the service logs a warning at boot, calls nothing, opens no
-      # consumer for the findings topic, and keeps recording what it owes the registry, which is
-      # sent once it is on. Nothing is registered while it is off, so no finding for this service
-      # is produced; after an off/on cycle the consumer group resumes where it stopped.
+      # that order. While this is off the service logs a warning at boot, registers nothing, opens
+      # no consumer for the findings topic, and keeps recording what it owes the registry, which is
+      # sent once it is on. The one call it still makes is the withdrawal of a subject the registry
+      # already holds (a row delivered while it was on): ending the monitoring of a customer whose
+      # case ended is privacy-positive and cannot raise a finding (#16028). Nothing is registered
+      # while it is off, so no finding for this service is produced; after an off/on cycle the
+      # consumer group resumes where it stopped.
       enabled: ${OPENBANK_KYB_MONITORING_ENABLED:false}
       # A confirmed registration is sent again after this long. Lower it to re-assert the whole
       # book after the registry lost state, then restore it.

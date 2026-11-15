@@ -5,18 +5,21 @@
 package com.openbank.kyb.application.port.out
 
 import com.openbank.kyb.domain.model.ScreeningVerdict
+import com.openbank.kyb.domain.model.SubjectIdentity
 
 /**
  * @param subjectId stable identity of the screened subject, which lets sanctions-service bind an
  *   analyst's clearance to this subject across later screens
  * @param organisation true for a legal person, false for a natural person
  * @param idempotencyKey one per (case, subject), so a retried screen replays instead of repeating
+ * @param identity what the register says besides the name; sent so a match can be confirmed or ruled out
  */
 data class RelatedPartyScreeningRequest(
     val name: String,
     val subjectId: String,
     val organisation: Boolean,
     val idempotencyKey: String,
+    val identity: SubjectIdentity = SubjectIdentity(),
 )
 
 /**
