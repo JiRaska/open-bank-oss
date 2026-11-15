@@ -8,13 +8,15 @@ import com.openbank.ledger.application.port.`in`.LedgerUseCase
 import com.openbank.ledger.application.port.`in`.PostJournalCommand
 import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.ledger.domain.model.LedgerConflictException
+import com.openbank.ledger.infrastructure.persistence.repository.LegalPostingPermitIssuer
+import com.openbank.ledger.infrastructure.persistence.repository.VerifiedDebitReservation
 import com.openbank.ledger.it.PostgresRedpandaTestResource
+import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.domain.money.Money
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
-import io.vertx.core.json.JsonArray
-import io.vertx.core.json.JsonObject
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,33 +26,40 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.ValueSource
+import org.junit.jupiter.params.provider.CsvSource
 import java.math.BigDecimal
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.PreparedStatement
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-/** Uses the actual Ledger service and PostgreSQL. Permit publication is an explicit test fixture. */
+/** Actual issuer and Ledger service on PostgreSQL, with synthetic legal-review and Balance evidence. */
 @QuarkusTest
 @QuarkusTestResource(value = PostgresRedpandaTestResource::class, restrictToAnnotatedClass = true)
 class LedgerLegalPostingFenceIT {
     @Inject
     lateinit var ledger: LedgerUseCase
 
+    @Inject
+    lateinit var issuePermit: LegalPostingPermitIssuer
+
     private val pocket = UUID.randomUUID()
     private val settlement = UUID.randomUUID()
 
     @ParameterizedTest
-    @ValueSource(strings = ["CZK", "EUR"])
-    fun `journal rejects missing and changed authorization and consumes matching intent once`(currency: String) {
-        val command = command(currency)
+    @CsvSource("CZ,CZK", "SK,EUR", "DE,EUR")
+    fun `verified reservation reaches Ledger exactly once`(country: String, currency: String) {
+        val command = command(currency).copy(description = "Legal posting fixture $country")
         enroll(currency)
         assertDenied(command)
-        publish(command, 1)
+        val reservation = reservation(command, 1)
+        assertThat(publish(command, reservation)).isTrue()
+        assertThat(publish(command, reservation)).isTrue()
+        assertThat(publish(command, reservation.copy(actorPartyId = UUID.randomUUID()))).isFalse()
         val differentCredit = command.lines.last().copy(subAccountId = UUID.randomUUID())
         val tampered = command.copy(lines = listOf(command.lines.first(), differentCredit))
         assertDenied(tampered)
@@ -58,8 +67,9 @@ class LedgerLegalPostingFenceIT {
         val posted = post(command)
         assertThat(count("journal_entries where transaction_id = ?", command.transactionId)).isEqualTo(1)
         assertThat(post(command)).isEqualTo(posted)
-        advanceRevision()
-        publish(command, 2)
+        assertThat(applyRevision(currency, 2)).isTrue()
+        assertThat(applyRevision(currency, 1)).isFalse()
+        assertThat(publish(command, reservation(command, 2))).isFalse()
         assertDenied(command.copy(idempotencyKey = UUID.randomUUID().toString()))
     }
 
@@ -67,7 +77,7 @@ class LedgerLegalPostingFenceIT {
     fun `revocation racing journal insertion wins when the revocation holds the lock first`() {
         val command = command()
         enroll("CZK")
-        publish(command, 1)
+        assertThat(publish(command, reservation(command, 1))).isTrue()
         connection().use { revocation ->
             revocation.autoCommit = false
             val blocker = backendPid(revocation)
@@ -87,7 +97,8 @@ class LedgerLegalPostingFenceIT {
         assertThat(count("journal_entries where transaction_id = ?", command.transactionId)).isZero()
         val consumed = "ledger_legal_posting_permit where transaction_id = ? AND consumed_by IS NOT NULL"
         assertThat(count(consumed, command.transactionId)).isZero()
-        publish(command, 2)
+        assertThat(publish(command, reservation(command, 1))).isFalse()
+        assertThat(publish(command, reservation(command, 2))).isTrue()
         post(command)
     }
 
@@ -145,61 +156,60 @@ class LedgerLegalPostingFenceIT {
     }
 
     private fun enroll(currency: String) {
-        connection().use { db ->
-            db.prepareStatement("INSERT INTO ledger_legal_posting_scope VALUES (?, ?, 1)").use {
-                it.setObject(1, pocket)
-                it.setString(2, currency)
-                it.executeUpdate()
-            }
-        }
+        assertThat(applyRevision(currency, 1)).isTrue()
+        assertThat(applyRevision(currency, 1)).isTrue()
     }
 
-    private fun advanceRevision() {
-        connection().use(::advanceRevision)
+    private fun applyRevision(currency: String, revision: Long): Boolean = VertxContextSupport.subscribeAndAwait {
+        CoroutineScope(Dispatchers.Unconfined).async {
+            issuePermit.applyRevision(pocket, CurrencyCode.of(currency), revision)
+        }.asUni()
     }
 
     private fun advanceRevision(db: Connection) {
-        db.prepareStatement("UPDATE ledger_legal_posting_scope SET revision = revision + 1 WHERE account_id = ?").use {
+        db.prepareStatement("SELECT ledger_apply_legal_pocket_revision(?, 'CZK', 2)").use {
             it.setObject(1, pocket)
-            assertThat(it.executeUpdate()).isEqualTo(1)
+            assertThat(it.queryFlag()).isTrue()
         }
     }
 
-    private fun publish(command: PostJournalCommand, revision: Long) {
-        val intent = JsonObject()
-            .put("version", 1)
-            .put("synthetic", false)
-            .put("entry_date", command.entryDate.toString())
-            .put("value_date", command.valueDate.toString())
-            .putNull("reversal_of")
-            .put("lines", JsonArray(command.lines.map(::lineIntent)))
-        connection().use { db ->
-            db.prepareStatement(
-                """
-                INSERT INTO ledger_legal_posting_permit
-                  (account_id, currency, transaction_id, revision, intent, valid_until, verification_ref)
-                VALUES (?, ?, ?, ?, CAST(? AS jsonb), now() + interval '5 minutes', gen_random_uuid())
-                """.trimIndent(),
-            ).use {
-                it.setObject(1, pocket)
-                it.setString(2, command.lines.first().baseCurrencyCode)
-                it.setObject(3, command.transactionId)
-                it.setLong(4, revision)
-                it.setString(5, intent.encode())
-                it.executeUpdate()
-            }
-        }
+    @Test
+    fun `issuer refuses an expired or mismatched reservation and does not reuse it across instructions`() {
+        val command = command()
+        val facts = reservation(command, 1)
+        assertThat(publish(command, facts)).isFalse()
+        enroll("CZK")
+        assertThat(publish(command, facts.copy(reservationExpiresAt = Instant.EPOCH))).isFalse()
+        assertThat(publish(command, facts.copy(amount = Money.of("1.00", "CZK")))).isFalse()
+        assertThat(publish(command, facts)).isTrue()
+        val otherPayment = command.copy(
+            transactionId = UUID.randomUUID(),
+            idempotencyKey = UUID.randomUUID().toString(),
+        )
+        assertThat(publish(otherPayment, facts.copy(transactionId = otherPayment.transactionId))).isFalse()
+        assertDenied(otherPayment)
     }
 
-    private fun lineIntent(line: JournalLineRequest): JsonObject = JsonObject()
-        .put("gl_account_id", line.glAccountId.toString())
-        .put("side", line.side.name)
-        .put("amount", line.amount)
-        .put("currency", line.currencyCode)
-        .put("base_amount", line.baseAmount)
-        .put("base_currency", line.baseCurrencyCode)
-        .putNull("fx_rate")
-        .put("sub_account_id", line.subAccountId?.toString())
+    private fun reservation(command: PostJournalCommand, revision: Long): VerifiedDebitReservation {
+        val line = command.lines.first()
+        val expiry = Instant.now().plusSeconds(TimeUnit.MINUTES.toSeconds(5))
+        return VerifiedDebitReservation(
+            accountId = pocket,
+            transactionId = command.transactionId,
+            amount = Money.of(line.baseAmount, line.baseCurrencyCode),
+            revision = revision,
+            verificationRef = UUID.randomUUID(),
+            actorPartyId = UUID.randomUUID(),
+            reservationRef = UUID.randomUUID(),
+            verificationExpiresAt = expiry,
+            reservationExpiresAt = expiry,
+        )
+    }
+
+    private fun publish(command: PostJournalCommand, facts: VerifiedDebitReservation): Boolean =
+        VertxContextSupport.subscribeAndAwait {
+            CoroutineScope(Dispatchers.Unconfined).async { issuePermit.issue(command, facts) }.asUni()
+        }
 
     private fun command(currency: String = "CZK"): PostJournalCommand {
         val today = LocalDate.now()

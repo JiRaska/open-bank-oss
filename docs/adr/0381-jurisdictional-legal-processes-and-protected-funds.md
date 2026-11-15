@@ -343,11 +343,18 @@ a permit for the new revision. The permit covers all economic journal lines, bot
 synthetic mode and reversal linkage. A retry of an already committed journal uses
 the existing idempotency path.
 
-Activation still requires a trusted publisher that binds the permit to the verified
-actor, applicable legal effects and funded reservation. Revocation becomes effective
-at this boundary when its Ledger revision commits. No enrollment or permit publisher
-is exposed by the Ledger API. Before enrollment, verify all booking callers, including
-non-repository writers, and establish the runtime privileges for the publisher.
+The internal Ledger issuer accepts a verified debit reservation for one pocket and
+matches the funded amount and transaction to the exact posting intent. It records
+the actor and evidence references. Validity ends at the earlier expiry of verification
+and reservation. Repeating an identical issuance is idempotent. A reservation cannot
+back two permits. Issuance, revision updates and booking use the same pocket lock.
+
+Activation requires connecting verified legal effects, identity and the funded Balance
+hold to this issuer and projecting revocation before subsequent booking. Revocation
+takes effect at this boundary when the Ledger revision commits. Before enrollment,
+verify all booking callers, including non-repository writers, and establish runtime
+privileges for the publisher. The internal issuer accepts facts from a trusted caller
+and has no public request surface.
 
 Identity context belongs to Party/PID and follows ADR-0380's FOS foundation. The legal process needs an unambiguous verified
 PartyId and an opaque evidence reference. Name variants, scripts, citizenship and

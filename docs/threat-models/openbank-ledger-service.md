@@ -975,7 +975,12 @@ exercise the actual Ledger write against PostgreSQL with a revocation holding
 that lock and with changed credit details. The permitted projection contains
 opaque verification references and must receive separately authenticated updates.
 
-Activation depends on trusted enrollment, issuance and revocation, restricted
+The internal issuer matches a documented hold to the transaction and amount.
+It caps the permit at the earlier expiry of the hold and verification, enforces
+one permit for each reservation and checks the revision while holding the pocket
+lock. The test uses synthetic verified facts with the actual issuer and journal writer.
+
+Activation depends on trusted enrollment, authoritative inputs and revocation, restricted
 database permissions, and caller coverage. This repository guard does not bind
 writers that bypass the repository or identify stale upstream effects before those
 effects reach the Ledger projection. Direct booking writers require their own

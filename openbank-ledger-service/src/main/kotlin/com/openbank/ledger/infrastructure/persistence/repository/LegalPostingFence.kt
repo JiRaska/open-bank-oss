@@ -3,13 +3,16 @@
 
 package com.openbank.ledger.infrastructure.persistence.repository
 
+import com.openbank.ledger.application.port.`in`.JournalLineRequest
+import com.openbank.ledger.application.port.`in`.PostJournalCommand
 import com.openbank.ledger.domain.model.JournalEntry
-import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.LedgerConflictException
 import io.smallrye.mutiny.Uni
 import io.vertx.core.json.JsonArray
 import io.vertx.core.json.JsonObject
 import org.hibernate.reactive.mutiny.Mutiny
+import java.time.LocalDate
+import java.util.UUID
 
 /** Check at the Ledger write boundary while holding the legal revision locks through commit. */
 internal object LegalPostingFence {
@@ -37,22 +40,50 @@ internal object LegalPostingFence {
             }.replaceWithVoid()
     }
 
-    /** Include both sides, dates and reversal linkage; a permit cannot be redirected to another leg. */
-    private fun intent(entry: JournalEntry): JsonObject = JsonObject()
-        .put("version", 1)
-        .put("synthetic", entry.synthetic)
-        .put("entry_date", entry.entryDate.toString())
-        .put("value_date", entry.valueDate.toString())
-        .put("reversal_of", entry.reversalOf?.toString())
-        .put("lines", JsonArray(entry.lines.sortedBy { it.sequence }.map(::lineIntent)))
+    private fun intent(entry: JournalEntry): JsonObject = intent(
+        entry.entryDate,
+        entry.valueDate,
+        entry.synthetic,
+        entry.reversalOf,
+        entry.lines.sortedBy { it.sequence }.map { line ->
+            JournalLineRequest(
+                glAccountId = line.glAccountId,
+                side = line.side,
+                amount = line.amount.amount,
+                currencyCode = line.amount.currency.code,
+                fxRate = line.fxRate,
+                baseAmount = line.baseAmount.amount,
+                baseCurrencyCode = line.baseAmount.currency.code,
+                subAccountId = line.subAccountId,
+            )
+        },
+    )
 
-    private fun lineIntent(line: JournalLine): JsonObject = JsonObject()
+    fun intent(command: PostJournalCommand): JsonObject =
+        intent(command.entryDate, command.valueDate, command.synthetic, null, command.lines)
+
+    /** Include both sides, dates and reversal linkage; a permit cannot be redirected to another leg. */
+    private fun intent(
+        entryDate: LocalDate,
+        valueDate: LocalDate,
+        synthetic: Boolean,
+        reversalOf: UUID?,
+        lines: List<JournalLineRequest>,
+    ): JsonObject = JsonObject()
+        .put("version", 1)
+        .put("synthetic", synthetic)
+        .put("entry_date", entryDate.toString())
+        .put("value_date", valueDate.toString())
+        .put("reversal_of", reversalOf?.toString())
+        .put("lines", JsonArray(lines.map(::lineIntent)))
+
+    private fun lineIntent(line: JournalLineRequest): JsonObject = JsonObject()
         .put("gl_account_id", line.glAccountId.toString())
         .put("side", line.side.name)
-        .put("amount", line.amount.amount)
-        .put("currency", line.amount.currency.code)
-        .put("base_amount", line.baseAmount.amount)
-        .put("base_currency", line.baseAmount.currency.code)
+        .put("amount", line.amount)
+        .put("currency", line.currencyCode)
+        .put("base_amount", line.baseAmount)
+        .put("base_currency", line.baseCurrencyCode)
         .put("fx_rate", line.fxRate)
         .put("sub_account_id", line.subAccountId?.toString())
 }
