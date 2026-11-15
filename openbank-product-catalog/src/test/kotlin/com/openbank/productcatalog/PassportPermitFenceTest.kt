@@ -20,6 +20,7 @@ import java.sql.Connection
 import java.time.OffsetDateTime
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
@@ -73,9 +74,8 @@ class PassportPermitFenceTest {
         }
     }
 
-    private fun <T> race(winner: Connection, contend: (Connection) -> T): T {
-        val executor = Executors.newSingleThreadExecutor()
-        try {
+    private fun <T> race(winner: Connection, contend: (Connection) -> T): T =
+        Executors.newSingleThreadExecutor().use { executor ->
             dataSource.connection.use { contender ->
                 val pid = contender.scalar("SELECT pg_backend_pid()") as Int
                 val winnerPid = winner.scalar("SELECT pg_backend_pid()") as Int
@@ -86,18 +86,19 @@ class PassportPermitFenceTest {
                     contender.commit()
                     outcome
                 }
-                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-                dataSource.connection.use { observer ->
-                    while (observer.scalar("SELECT ? = ANY(pg_blocking_pids(?))", winnerPid, pid) != true) {
-                        check(!waiting.isDone && System.nanoTime() < deadline) { "Contender did not wait on the grant" }
-                        Thread.sleep(10)
-                    }
-                }
+                awaitBlocked(waiting, winnerPid, pid)
                 winner.commit()
-                return waiting.get(5, TimeUnit.SECONDS)
+                waiting.get(5, TimeUnit.SECONDS)
             }
-        } finally {
-            executor.shutdownNow()
+        }
+
+    private fun awaitBlocked(waiting: Future<*>, winnerPid: Int, pid: Int) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        dataSource.connection.use { observer ->
+            while (observer.scalar("SELECT ? = ANY(pg_blocking_pids(?))", winnerPid, pid) != true) {
+                check(!waiting.isDone && System.nanoTime() < deadline) { "Contender did not wait on the grant" }
+                Thread.sleep(10)
+            }
         }
     }
 
@@ -172,7 +173,7 @@ class PassportPermitFenceTest {
         "WEB",
         "RETAIL",
         HASH,
-    ) as UUID?
+    ) as? UUID
 
     private fun Connection.consume(request: PermitRequest): OffsetDateTime? =
         prepareStatement("SELECT consume_passport_account_permit(?, ?, ?, ?, ?, ?)").use { statement ->
