@@ -4903,26 +4903,30 @@ def shareable_modules(git, base: str) -> frozenset[str]:
                    ":(exclude)settings.gradle.kts", check=False)
         # ANY `openbank-<m>` token in a test that names another EXISTING top-level module counts as a read
         # (security review: not only the `../openbank-<m>` and `"openbank-<m>/` shapes).
-        reads = git("grep", "-o", "-I", "-E", r'openbank-[a-z0-9-]+', base, "--", "*/src/test/*", check=False)
+        reads = git("grep", "-o", "-I", "-E", r'openbank-[a-z0-9-]+', base, "--", TEST_SOURCE_PATHSPEC, check=False)
         # Fail closed on any OTHER way a test can leave its module (#16290 follow-up review): walking up
         # with parentFile (AuditResourceSecurityTest, InitiatorScopesTest), a ".." path segment, the
         # Gradle root or user.dir. The target cannot be read off such a line, so the READER is excluded:
         # it then rides alone, and a reader riding alone is never batched with what it reads.
-        climbs = git("grep", "-l", "-I", "-E", r'"\.\.|\.\./|parentFile|\.parent\b|rootDir|rootProject|projectDir|user\.dir',
-                     base, "--", "*/src/test/*", check=False)
+        climbs = git("grep", "-l", "-I", "-E", TEST_LEAVE_RE, base, "--", TEST_SOURCE_PATHSPEC, check=False)
         if (tops.returncode != 0 or deps.returncode not in (0, 1) or reads.returncode not in (0, 1)
                 or climbs.returncode not in (0, 1)):
             _SHAREABLE_MODULES[base] = frozenset()
         else:
             used = {ln.rsplit(":", 1)[-1] for ln in deps.stdout.splitlines()}
             top_set = set(tops.stdout.splitlines())
+            unparsed = False
             for ln in reads.stdout.splitlines():      # <base>:<path>:<match>
                 parts = ln.split(":", 2)
-                if len(parts) == 3:
-                    reader, target = parts[1].split("/", 1)[0], parts[2]
-                    if target in top_set and reader != target:
-                        used |= {reader, target}
+                if len(parts) != 3:
+                    unparsed = True                    # fail closed: an unreadable line shares nothing
+                    break
+                reader, target = parts[1].split("/", 1)[0], parts[2]
+                if target in top_set and reader != target:
+                    used |= {reader, target}
             used |= {ln.split(":", 1)[-1].split("/", 1)[0] for ln in climbs.stdout.splitlines()}
+            if unparsed:
+                used |= set(top_set)
             _SHAREABLE_MODULES[base] = frozenset(
                 m for m in tops.stdout.splitlines()
                 if m.startswith("openbank-") and m not in used and not ANALYSIS_MODULE_RE.search(m[len("openbank-"):]))
@@ -4940,7 +4944,12 @@ def config_judge_path(path: str, refs=None, modules: frozenset[str] = frozenset(
     return path.split("/", 1)[0] not in modules
 
 
-TEST_CLIMB_RE = r'"\.\.|\.\./|parentFile|\.parent\b|rootDir|rootProject|projectDir|user\.dir|openbank-[a-z0-9-]+'
+# `\b` is NOT portable: git grep -E on macOS (BSD regex) silently matches nothing for `\.parent\b`.
+TEST_LEAVE_RE = r'"\.\.|\.\./|parentFile|\.parent([^A-Za-z0-9_]|$)|rootDir|rootProject|projectDir|user\.dir'
+TEST_CLIMB_RE = TEST_LEAVE_RE + r'|openbank-[a-z0-9-]+'
+# Every test-shaped source set: src/test, src/integrationTest, src/testFixtures, src/e2eTest, ...
+TEST_SOURCE_PATHSPEC = "*/src/*[Tt]est*/*"
+TEST_SOURCE_RE = re.compile(r"(^|/)src/[A-Za-z0-9_]*[Tt]est[A-Za-z0-9_]*/")
 
 
 def member_test_reaches_out(git, head: str, files: list[str]) -> bool:
@@ -4948,7 +4957,7 @@ def member_test_reaches_out(git, head: str, files: list[str]) -> bool:
     segment, the Gradle root, or any `openbank-<m>` token other than the test's own module. The base-tree
     scan in shareable_modules cannot see a cross-module read the member itself adds (security review of
     the #16290 follow-up). A git error counts as reaching out (fail closed)."""
-    tests = [f for f in files if "/src/test/" in f]
+    tests = [f for f in files if TEST_SOURCE_RE.search(f)]
     if not tests:
         return False
     r = git("grep", "-o", "-I", "-E", TEST_CLIMB_RE, head, "--", *tests, check=False)
@@ -6051,6 +6060,12 @@ def _synthetic_origin(root: str) -> None:
     pr("pPinR", {".github/scripts/pr2.py": "print('r')\n", "openbank-mread/src/test/kotlin/PinTest.kt": "// relaxed\n"})
     pr("pWT", {".github/scripts/pw.py": "print('w')\n", "openbank-mwt/src/main/kotlin/W.kt": "// changed\n"})
     # Adds, in a SHAREABLE module, a test reading another module: invisible to the base-tree scan.
+    # Adds a `.parent` climb (no parentFile, no "..") in a SHAREABLE module, and an integrationTest reading out.
+    pr("pAddP", {".github/scripts/pa3.py": "print('a3')\n",
+                 "openbank-ms2/src/test/kotlin/RootTest.kt":
+                     'val r = Paths.get("").toAbsolutePath().parent.parent.resolve("build-logic")\n'})
+    pr("pAddI", {".github/scripts/pa4.py": "print('a4')\n",
+                 "openbank-mca/src/integrationTest/kotlin/ReadIT.kt": 'val f = File("../openbank-mcb/x")\n'})
     pr("pAddR", {".github/scripts/pa2.py": "print('a2')\n",
                  "openbank-ms1/src/test/kotlin/NewPinTest.kt": 'val f = File("../openbank-mco/src/main/kotlin/co.kt")\n'})
     pr("pWR", {".github/scripts/pw2.py": "print('w2')\n", "openbank-mwalk/src/test/kotlin/WalkTest.kt": "// relaxed\n"})
@@ -6380,7 +6395,9 @@ def retry_planner_self_test(check) -> None:
 # ~20 more ticks: spawns=22,621 at 800 cases, measured locally on 2026-11-15; after its review (configuration
 # judges ride alone; cases (18b), (20), (21)) spawns=23,697 at 819 cases; after the second re-review (leaf modules,
 # module-disjoint, cases (22)-(24)) spawns=24,247 at 847 cases, measured locally; ceiling 24,800 (~2.3 %).
-SELF_TEST_SPAWN_CEILING = 24800
+# Cross-module test reads (#16357, cases (25)-(28)): spawns=24,949 at 855 cases, measured locally on 2026-11-15;
+# ceiling 25,500 (~2.2 %).
+SELF_TEST_SPAWN_CEILING = 25500
 
 # A green carrier and a green, up-to-date strict holder cannot both keep their verification: whichever
 # merges first moves main under the other. Strict first voids the carrier (rebuild ~50 min, measured
@@ -7274,7 +7291,7 @@ def self_test() -> int:
                        "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pPc": 85, "pPR": 86, "pPx": 87, "pP1": 88, "pPbad": 89, "pP2": 90, "pRG": 91, "pFoo": 92,
                        "pE1": 93, "pE2": 94, "pE3": 95, "pGP": 96,
                        "pCO": 71, "pJbad": 72, "pO1": 73, "pO2": 74, "pS1": 75, "pS2": 76, "pRelax": 77, "pTight": 78,
-                       "pCA": 79, "pCB": 80, "pDet": 5, "pMoney": 6, "pTM": 7, "pCompA": 8, "pCompB": 9, "pPinT": 10, "pPinR": 13, "pWT": 14, "pWR": 15, "pAddR": 16}
+                       "pCA": 79, "pCB": 80, "pDet": 5, "pMoney": 6, "pTM": 7, "pCompA": 8, "pCompB": 9, "pPinT": 10, "pPinR": 13, "pWT": 14, "pWR": 15, "pAddR": 16, "pAddP": 17, "pAddI": 18}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -8940,9 +8957,21 @@ def self_test() -> int:
             check("strict carrier (27): a member adding a test that reads another module rides alone",
                   not any(b and 71 in b and 16 in b for b in b27) and sorted(gh.merged) == [16, 71],
                   f"batches={b27} merged={gh.merged}")
+            check("member_test_reaches_out: a `.parent` climb (portable regex, no \\b) and an integrationTest reading out",
+                  member_test_reaches_out(Git(origin), gh.g("rev-parse", "pAddP").stdout.strip(), ["openbank-ms2/src/test/kotlin/RootTest.kt"])
+                  and member_test_reaches_out(Git(origin), gh.g("rev-parse", "pAddI").stdout.strip(), ["openbank-mca/src/integrationTest/kotlin/ReadIT.kt"]))
             check("member_test_reaches_out: own-module token is fine; another module, a climb or `..` is not",
                   not member_test_reaches_out(Git(origin), gh.prs[71]["head"]["sha"], ["openbank-mco/src/main/kotlin/co.kt"])
                   and member_test_reaches_out(Git(origin), gh.prs[16]["head"]["sha"], ["openbank-ms1/src/test/kotlin/NewPinTest.kt"]))
+            reset()
+
+            # (28) a member adding a `.parent` climb rides alone, never with the module beside it.
+            open_only("pCO", "pAddP")
+            advance_main()
+            b28 = [settle_strict(cap=8).get("strict_batch") for _ in range(4)]
+            check("strict carrier (28): a member adding a `.parent.parent` climb in its test rides alone",
+                  not any(b and 71 in b and 17 in b for b in b28) and sorted(gh.merged) == [17, 71],
+                  f"batches={b28} merged={gh.merged}")
             reset()
 
             # (19) the fast lane still gets its turn: a held fast-lane PR goes once the judge carrier merged.
