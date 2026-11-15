@@ -23,7 +23,7 @@ def pull_request(number, head, labels=(), draft=False):
 
 
 class DeployWindowInputsTest(unittest.TestCase):
-    def run_inventory(self, pages, fail_api=False, fail_after_page=False, main_sha="b" * 40):
+    def run_inventory(self, pages, fail_api=False, fail_after_page=False, main_sha="b" * 40, merge_state=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fake_gh = root / "gh"
@@ -36,6 +36,10 @@ class DeployWindowInputsTest(unittest.TestCase):
                 "    if os.environ['FAIL_API'] == 'yes': sys.exit(1)\n"
                 "    print(os.environ['PAGES'])\n"
                 "    if os.environ['FAIL_AFTER_PAGE'] == 'yes': sys.exit(1)\n"
+                "elif sys.argv[1:3] == ['pr', 'view']:\n"
+                "    import json\n"
+                "    print(json.dumps({'mergeStateStatus': json.loads(os.environ['MERGE_STATE']).get(sys.argv[3], 'CLEAN'),\n"
+                "                      'statusCheckRollup': []}))\n"
                 "elif '/git/ref/heads/main' in sys.argv[2]:\n"
                 "    print(os.environ['MAIN_SHA'])\n"
                 "else:\n"
@@ -51,6 +55,7 @@ class DeployWindowInputsTest(unittest.TestCase):
                 "GITHUB_REPOSITORY": "example/open-bank",
                 "PAGES": json.dumps(pages), "FAIL_API": "yes" if fail_api else "no",
                 "FAIL_AFTER_PAGE": "yes" if fail_after_page else "no", "MAIN_SHA": main_sha,
+                "MERGE_STATE": json.dumps(merge_state or {}),
             }
             output = root / "output"
             result = subprocess.run(
@@ -71,6 +76,19 @@ class DeployWindowInputsTest(unittest.TestCase):
         self.assertEqual(inventory[0]["head_sha"], "a" * 40)
         self.assertTrue(inventory[1]["repair_priority"])
         self.assertFalse(inventory[0]["repair_priority"])
+
+    def test_unarmed_conflicted_deploy_pr_is_classified(self):
+        # #15411: an UNARMED deploy PR in conflict with main must be marked so the flush closes it
+        # instead of re-arming it; a repair PR is never classified (it is never closed).
+        dirty = pull_request(1, "chore/gitops-auto-deploy-a")
+        clean = pull_request(5, "chore/gitops-auto-deploy-b")
+        repair = pull_request(2, "fix/repair", ["merge-priority:repair"])
+        code, inventory = self.run_inventory([[dirty, clean, repair]], merge_state={"1": "DIRTY", "2": "DIRTY"})
+        self.assertEqual(code, 0)
+        by = {pr["number"]: pr for pr in inventory}
+        self.assertTrue(by[1]["conflicted"] and by[1]["stuck"])
+        self.assertFalse(by[5]["conflicted"] or by[5]["stuck"])
+        self.assertNotIn("conflicted", by[2])
 
     def test_missing_head_sha_fails_closed(self):
         deploy = pull_request(1, "chore/gitops-auto-deploy-a")
