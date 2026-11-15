@@ -95,6 +95,60 @@ function ControlCard({ control }: { control: TraceControl }) {
   )
 }
 
+function AskTrace() {
+  const { t } = useLanguage()
+  const [question, setQuestion] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ answer: string; citations: string[] } | { error: string } | null>(null)
+
+  const submit = async () => {
+    setBusy(true)
+    setResult(null)
+    try {
+      const response = await fetch('/api/compliance/ask', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }), cache: 'no-store',
+      })
+      const body = await response.json() as { answer?: string; citations?: string[]; error?: string }
+      setResult(response.ok && body.answer ? { answer: body.answer, citations: body.citations ?? [] } : { error: body.error ?? 'error' })
+    } catch {
+      setResult({ error: 'agent_unreachable' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card" style={{ padding: '14px', display: 'grid', gap: '8px', marginTop: '20px' }} aria-label={t('Dotaz nad trasou', 'Ask about the trace')}>
+      <h2 style={{ fontSize: '15px', margin: 0 }}>{t('Zeptat se nad trasou', 'Ask about the trace')}</h2>
+      <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
+        {t('AI jen vysvětluje: nemá nástroje, nemění stav a odpověď se zobrazí, jen když cituje řádky trasy.', 'The AI only explains: it has no tools, changes nothing, and an answer is shown only when it cites trace rows.')}
+      </p>
+      <label style={{ fontSize: '12px', display: 'grid', gap: '4px' }}>
+        {t('Otázka', 'Question')}
+        <textarea className="input" rows={2} maxLength={1000} value={question} onChange={e => setQuestion(e.target.value)} />
+      </label>
+      <div>
+        <button type="button" className="btn btn-secondary" disabled={busy || !question.trim()} onClick={() => void submit()}>
+          {busy ? t('Ptám se…', 'Asking…') : t('Zeptat se', 'Ask')}
+        </button>
+      </div>
+      {result && 'answer' in result ? (
+        <div role="status" style={{ fontSize: '13px', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+          {result.answer}
+          <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '6px' }}>{t('Citace', 'Citations')}: {result.citations.join(', ')}</div>
+        </div>
+      ) : null}
+      {result && 'error' in result ? (
+        <p role="status" style={{ fontSize: '12px', color: 'var(--warning-text)', margin: 0 }}>
+          {result.error === 'uncited_answer'
+            ? t('Odpověď nebyla zobrazena: necitovala žádný řádek trasy, nebo citovala neexistující.', 'The answer was not shown: it cited no trace row, or cited one that does not exist.')
+            : t('Asistent není dostupný.', 'The assistant is unavailable.')}
+        </p>
+      ) : null}
+    </section>
+  )
+}
+
 export default function CompliancePage() {
   const { t, language } = useLanguage()
   const labels = useLabels()
@@ -273,6 +327,7 @@ export default function CompliancePage() {
             </section>
           ) : null}
         </div>
+        <AskTrace />
       </>) : null}
     </div>
   )

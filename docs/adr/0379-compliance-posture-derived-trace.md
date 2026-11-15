@@ -1,8 +1,7 @@
 ---
 date: 2026-11-14
 decision-status: proposed
-delivery-status: partial
-followup: "#16163 — evidence age (test/attestation kinds, max_evidence_age) and the read-only MCP/AI readers remain"
+delivery-status: shipped
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
@@ -75,13 +74,18 @@ We will make compliance posture a **derived trace**, and `/docs/compliance` its 
      and an export (print/PDF plus the raw JSON) that can serve as an evidence-pack exhibit.
    `/docs/control-tower` and `/regulatory/obligations` remain the detail pages, and the hub links into them.
 
-4. **AI and MCP are readers of the trace, never authors of it.** We expose read-only MCP tools over
-   the same trace (`/api/compliance/trace`): `compliance.list_obligations`, `compliance.get_trace`, `compliance.list_gaps`,
-   `compliance.get_evidence`. They follow the existing ADR-0034/0224/0225 authorization path, so `tools/list`
-   is policy-filtered and staff act under their own roles via OBO. An in-page assistant may answer questions
-   such as "what changed since the last snapshot" or "explain this gap to the business". It may do so only
-   when the answer cites trace row ids, and an answer that cites no row is not rendered. No tool can write a
-   status, an obligation or a control. Those change only through a reviewed PR to the YAML.
+4. **AI and MCP are readers of the trace, never authors of it.** The BFF serves a read-only MCP endpoint,
+   `POST /api/compliance/mcp` (JSON-RPC: `initialize`, `tools/list`, `tools/call`), with four tools:
+   `compliance_list_obligations`, `compliance_get_trace`, `compliance_list_gaps` and `compliance_get_evidence`
+   (snake_case, like every other tool in the fleet). It lives in the BFF because the trace is joined there
+   (ADR-0056), and its caller is the signed-in member of staff under their own roles: the route guard admits
+   `/api/compliance` only with `compliance:view`. Every tool is a read, so no OPA write decision exists to
+   take. An in-page assistant (`POST /api/compliance/ask`) passes the question to agent-service's governed chat
+   (ADR-0031) with tool execution disabled and the trace rows as context. The answer is shown only when it cites
+   at least one trace row as `[[control:<id>]]` or `[[obligation:<id>]]` and every citation resolves; otherwise
+   the route answers 422 and nothing is rendered. This adds no capability to any charter, because the model gets
+   no tool, so `agents.yaml` does not change. No tool can write a status, an obligation or a control. Those change
+   only through a reviewed PR to the YAML.
 
 ## Alternatives considered
 
@@ -128,9 +132,9 @@ New gate `compliance-trace` (`.github/scripts/check-compliance-trace.py`, with `
 An obligation with no control is not a CI failure. Most reporting duties have no security control to point at,
 so the hub shows them as gaps instead. The gate lands `enforced` directly: every rule is mechanical and green on
 the tree that introduces it, so an advisory phase would only make a broken edge mergeable. `compliance-matrix` and
-`compliance-page-evidence`, which both read `COMPLIANCE_AREAS`, are retired in the same PR. The MCP tools need
-no new gate: the existing OPA bundle and the `tools/list` filter cover them, and their charter entries go through the
-`agents.yaml` derived tails.
+`compliance-page-evidence`, which both read `COMPLIANCE_AREAS`, are retired in the same PR. The MCP tools and
+the assistant need no new gate. They are pure functions over the same trace, covered by unit and route tests: an
+unknown tool or argument is refused, an anonymous caller gets 401, and an uncited answer gets 422.
 
 ### Delivery check
 
@@ -140,8 +144,8 @@ python3 -c "import yaml;g=yaml.safe_load(open('.github/gates/gates.yaml'));print
 grep -c '^  - id: compliance-matrix$' .github/gates/gates.yaml                    # 0
 python3 .github/scripts/check-compliance-trace.py --enforce; echo $?             # 0
 ```
-Runtime check: `tools/list` on the MCP endpoint, called as a compliance-role principal, includes
-`compliance.get_trace`, and the same call as an anonymous principal does not.
+Runtime check: `POST /api/compliance/mcp` with `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` from a session
+holding `compliance:view` lists `compliance_get_trace`, and the same call without a session answers 401.
 
 ### Phases
 
@@ -149,7 +153,8 @@ Runtime check: `tools/list` on the MCP endpoint, called as a compliance-role pri
    views and the print/JSON export. Drop the literal and retire `compliance-matrix` and `compliance-page-evidence`.
 2. Add the `test` evidence kind and `max_evidence_age_days` per control, aged by the newest passing gate run that
    the gate-health collector records (`lastOk`). Give `sanctions-screening` and `fraud-monitoring` machine evidence.
-3. Add the MCP read tools and the cited-answer assistant, through a charter change in `agents.yaml`.
+3. Add the MCP read tools and the cited-answer assistant. Cluster-side agents (agent-service) cannot reach a BFF
+   route; giving them the trace would need it published as runtime evidence, which waits for a consumer that needs it.
 
 ## Compliance impact
 
