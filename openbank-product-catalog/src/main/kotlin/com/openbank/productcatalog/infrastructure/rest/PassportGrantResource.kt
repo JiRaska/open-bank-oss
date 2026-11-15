@@ -5,6 +5,7 @@
 package com.openbank.productcatalog.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.security.StaffIdentities
 import com.openbank.productcatalog.application.CatalogConflictException
 import com.openbank.productcatalog.application.CatalogForbiddenException
@@ -41,7 +42,7 @@ class PassportGrantResource(
     suspend fun propose(request: PassportGrantProposal): Response {
         val maker = requireStaff(CatalogRoles.AUTHOR)
         request.validate()
-        val grant = UUID.randomUUID()
+        val grant = Ids.newId()
         pool.preparedQuery(INSERT).execute(
             Tuple.tuple().addUUID(grant)
                 .addUUID(request.bankId).addUUID(request.establishmentId)
