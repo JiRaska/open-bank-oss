@@ -199,9 +199,17 @@ class PassportAccountRecoveryTest {
 
     private fun unconsumedOpening(): PassportOpeningJob {
         val intent = PassportIntent(
-            "OPEN:synthetic", UUID.randomUUID(), UUID.randomUUID(), grant, party, PassportOperation.OPEN, binding, pin,
+            "OPEN:synthetic",
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            grant,
+            party,
+            PassportOperation.OPEN,
+            binding,
+            pin,
         )
-        val draft = PassportOpeningDraft(iban.value, product, AccountType.CURRENT, "CZK", now, "CLEAR", null, null, null)
+        val draft =
+            PassportOpeningDraft(iban.value, product, AccountType.CURRENT, "CZK", now, "CLEAR", null, null, null)
         return PassportOpeningJob(intent, draft)
     }
 
