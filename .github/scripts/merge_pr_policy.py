@@ -72,6 +72,11 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '19f3b8c002b9f09439ca152b581121eba0e83274',
     # Pre-merge policy for main at 2026-11-14 (d907564cdc); structural check passes, see #16187.
     '231ad0e824f57749b3cfa482ba10593557cbec2f',
+    # main merge-train.py after #16148 (ecbfaaa97b), #16180 (de481eb1d5) and #16105 (c80c311b04);
+    # each is the first-parent source for PRs merged behind it. Structural check passes, see #16187.
+    '31799f5c2ec415da6f968b5b0e8c725ccbd82b7e',  # after #16148
+    '6df70b126a750a2a9f6e8fc658efc43b1cf2433a',  # after #16180
+    '38c70e23111a78639f9aaae62b0494a90d3c0512',  # after #16105
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
