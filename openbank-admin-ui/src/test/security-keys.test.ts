@@ -63,6 +63,22 @@ describe('status', () => {
     expect(s).toEqual({ id: 'internal-mtls', status: 'critical', daysLeft: 5, count: 2 })
   })
 
+  it('a Certificate with NO valid certificate (cert-manager reports 0) makes its group expired', () => {
+    const leaves = catalogEntry('internal-mtls')!
+    const s = entryStatus(leaves, [
+      cm('accounts', 'account-service-internal-tls', 'openbank-ca', 40),
+      { source: 'cert-manager', namespace: 'ledger', name: 'ledger-internal-tls', issuer: 'openbank-ca', notAfter: 0 },
+    ], NOW)
+    expect(s.status).toBe('expired')
+    expect(s.daysLeft).toBeNull() // not a fabricated "20 000 days ago"
+    expect(s.count).toBe(2)
+  })
+
+  it('the zero series survives projection instead of being dropped', () => {
+    expect(projectCertManager([{ metric: { namespace: 'ledger', name: 'l-tls', issuer_name: 'openbank-ca' }, value: [0, '0'] }]))
+      .toEqual([{ source: 'cert-manager', namespace: 'ledger', name: 'l-tls', issuer: 'openbank-ca', notAfter: 0 }])
+  })
+
   it('non-measurable kinds are explicit, not healthy', () => {
     const statuses = Object.fromEntries(allStatuses([], NOW).map((s) => [s.id, s.status]))
     expect(statuses['pades-seal']).toBe('untracked')
@@ -99,7 +115,7 @@ describe('prometheus projection', () => {
     expect(projectCertManager([
       { metric: { namespace: 'a b', name: 'x' }, value: [0, '1'] },
       { metric: { namespace: 'a', name: 'x' }, value: [0, 'NaN'] },
-      { metric: { namespace: 'a', name: 'x' }, value: [0, '0'] },
+      { metric: { namespace: 'a', name: 'x' }, value: [0, '-1'] },
     ])).toEqual([])
   })
 
@@ -107,6 +123,14 @@ describe('prometheus projection', () => {
     expect(projectStrimzi([{ metric: { type: 'mystery' }, value: [0, '1'] }])).toEqual([])
     expect(projectStrimzi([{ metric: { type: 'clientsCa' }, value: [0, String(NOW * 1000)] }])[0])
       .toMatchObject({ name: 'clients', notAfter: NOW })
+  })
+
+  it('a target scraped twice counts once', async () => {
+    const series = { metric: { namespace: 'a', name: 'x-tls', issuer_name: 'openbank-ca' }, value: [0, String(NOW)] }
+    const body = { status: 'success', data: { result: [series, series] } }
+    const m = await measure('http://prom', async (url) => new Response(JSON.stringify(
+      String(url).includes('certmanager') ? body : { status: 'success', data: { result: [] } })))
+    expect(m.certs).toHaveLength(1)
   })
 
   it('an unreachable Prometheus reports unreachable, not empty-and-fine', async () => {

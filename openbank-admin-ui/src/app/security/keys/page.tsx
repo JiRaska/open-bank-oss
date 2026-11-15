@@ -50,6 +50,7 @@ export default function KeysAndCertificatesPage() {
       setReport(await res.json() as KeysReport)
       setFailed(false)
     } catch {
+      setReport(null) // never leave old numbers on screen next to an error as if current
       setFailed(true)
     } finally {
       setLoading(false)
@@ -69,7 +70,9 @@ export default function KeysAndCertificatesPage() {
     rotation: t('Bez expirace, rotuje se', 'No expiry, rotated'),
     'short-lived': t('Krátkodobé (minuty)', 'Short-lived (minutes)'),
   }[s])
-  const days = (s?: EntryStatus) => (s?.daysLeft == null ? null : s.daysLeft < 0
+  const days = (s?: EntryStatus) => (s?.status === 'expired' && s.daysLeft == null
+    ? t('bez platného certifikátu', 'no valid certificate')
+    : s?.daysLeft == null ? null : s.daysLeft < 0
     ? t(`před ${-s.daysLeft} dny`, `${-s.daysLeft} days ago`)
     : t(`${s.daysLeft} dní`, `${s.daysLeft} days`))
 
@@ -111,7 +114,7 @@ export default function KeysAndCertificatesPage() {
           <>
             {/* ── Souhrn ─────────────────────────────────────────────────── */}
             <section aria-label={t('Souhrn', 'Summary')} style={{ ...box, margin: '20px 0', display: 'flex', gap: 28, flexWrap: 'wrap', alignItems: 'center', background: 'var(--surface-2)' }}>
-              {urgent.length === 0
+              {urgent.length === 0 && !(counts.untracked ?? 0)
                 ? <ShieldCheck size={40} aria-hidden="true" style={{ color: 'var(--success)' }} />
                 : <ShieldAlert size={40} aria-hidden="true" style={{ color: 'var(--warning)' }} />}
               <div style={{ flex: 1, minWidth: 260 }}>
@@ -120,6 +123,11 @@ export default function KeysAndCertificatesPage() {
                     ? t('Nic nehoří. Vše měřitelné má víc než 30 dní.', 'Nothing urgent. Everything measurable has more than 30 days.')
                     : t(`${urgent.length} položek potřebuje pozornost`, `${urgent.length} items need attention`)}
                 </strong>
+                {(counts.untracked ?? 0) > 0 && (
+                  <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--warning-text)' }}>
+                    {t(`${counts.untracked} položky nelze změřit vůbec — jejich stav neznáme.`, `${counts.untracked} items cannot be measured at all — their state is unknown.`)}
+                  </p>
+                )}
                 <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
                   {t('Změřeno', 'Measured')}: {new Date(report.measuredAt).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}
                   {' · '}cert-manager: {report.reachable.certManager ? t('odpovídá', 'reachable') : t('NEODPOVÍDÁ', 'NOT REACHABLE')}
@@ -249,8 +257,8 @@ export default function KeysAndCertificatesPage() {
                         <thead><tr><th>{t('Stav', 'Status')}</th><th>{t('Dní', 'Days')}</th><th>Namespace</th><th>{t('Název', 'Name')}</th><th>{t('Vydavatel', 'Issuer')}</th><th>{t('Zdroj', 'Source')}</th></tr></thead>
                         <tbody>
                           {report.expert.map((c) => (
-                            <tr key={`${c.source}/${c.namespace}/${c.name}`}>
-                              <td><Badge s={c.status} /></td><td>{c.daysLeft}</td><td>{c.namespace}</td><td><code>{c.name}</code></td><td>{c.issuer}</td><td>{c.source}</td>
+                            <tr key={`${c.source}/${c.namespace}/${c.name}/${c.issuer}`}>
+                              <td><Badge s={c.status} /></td><td>{c.daysLeft ?? '—'}</td><td>{c.namespace}</td><td><code>{c.name}</code></td><td>{c.issuer}</td><td>{c.source}</td>
                             </tr>
                           ))}
                         </tbody>

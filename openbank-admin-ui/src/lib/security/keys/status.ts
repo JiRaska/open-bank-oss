@@ -74,6 +74,9 @@ export function entryStatus(entry: KeyEntry, certs: readonly MeasuredCert[], now
   if (src.type === 'untracked') return { id: entry.id, status: 'untracked', daysLeft: null, count: 0 }
   const matched = certs.filter((c) => matches(src, c))
   if (matched.length === 0) return { id: entry.id, status: 'unknown', daysLeft: null, count: 0 }
+  // A matched Certificate with notAfter 0 has no valid certificate at all: that is the worst
+  // state, so it decides the entry no matter how healthy its siblings are.
+  if (matched.some((c) => c.notAfter === 0)) return { id: entry.id, status: 'expired', daysLeft: null, count: matched.length }
   const earliest = Math.min(...matched.map((c) => c.notAfter))
   const daysLeft = (earliest - nowSeconds) / 86400
   return { id: entry.id, status: statusForDays(daysLeft), daysLeft: Math.floor(daysLeft), count: matched.length }

@@ -30,7 +30,9 @@ export function projectCertManager(series: PromSeries[]): MeasuredCert[] {
     const namespace = label(m, 'namespace')
     const name = label(m, 'name')
     const v = Number(s.value?.[1])
-    if (!namespace || !name || !Number.isFinite(v) || v <= 0) continue
+    // cert-manager reports 0 for a Certificate with NO current certificate (never issued, failed
+    // renewal, deleted Secret). Keep it: dropping it would let the rest of a group read healthy.
+    if (!namespace || !name || !Number.isFinite(v) || v < 0) continue
     out.push({ source: 'cert-manager', namespace, name, issuer: label(m, 'issuer_name') ?? '', notAfter: v })
   }
   return out
@@ -48,7 +50,7 @@ export function projectStrimzi(series: PromSeries[]): MeasuredCert[] {
     const type = (label(m, 'type') ?? label(m, 'ca_type') ?? '').toLowerCase()
     const ca = type.includes('client') ? 'clients' : type.includes('cluster') ? 'cluster' : null
     const v = Number(s.value?.[1])
-    if (!ca || !Number.isFinite(v) || v <= 0) continue
+    if (!ca || !Number.isFinite(v) || v < 0) continue
     out.push({
       source: 'strimzi',
       namespace: label(m, 'resource_namespace') ?? label(m, 'namespace') ?? '',
@@ -58,6 +60,10 @@ export function projectStrimzi(series: PromSeries[]): MeasuredCert[] {
     })
   }
   return out
+}
+
+export function certKey(c: MeasuredCert): string {
+  return `${c.source}/${c.namespace}/${c.name}/${c.issuer}`
 }
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
@@ -86,8 +92,16 @@ export interface Measurement {
 export async function measure(base: string | null, fetchImpl: FetchLike = fetch): Promise<Measurement> {
   if (!base) return { certs: [], reachable: { certManager: false, strimzi: false } }
   const [cm, sz] = await Promise.all([instant(base, CERT_MANAGER, fetchImpl), instant(base, STRIMZI, fetchImpl)])
+  // The same target scraped by two configs yields duplicate series; one certificate counts once.
+  const seen = new Set<string>()
+  const certs = [...(cm ? projectCertManager(cm) : []), ...(sz ? projectStrimzi(sz) : [])].filter((c) => {
+    const k = certKey(c)
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
   return {
-    certs: [...(cm ? projectCertManager(cm) : []), ...(sz ? projectStrimzi(sz) : [])],
+    certs,
     reachable: { certManager: cm !== null && cm.length > 0, strimzi: sz !== null && sz.length > 0 },
   }
 }
