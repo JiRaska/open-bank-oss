@@ -220,7 +220,7 @@ export default function KeysAndCertificatesPage() {
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
                 {[
-                  { list: quantumKx, s: 'critical' as KeyStatus, h: t('Ulož teď, rozšifruj později', 'Harvest now, decrypt later'), d: t('Výměna klíčů v TLS. Řešení: hybridní X25519MLKEM768 — ověří sonda v PR 3.', 'TLS key exchange. Fix: hybrid X25519MLKEM768 — verified by the PR 3 probe.') },
+                  { list: quantumKx, s: 'critical' as KeyStatus, h: t('Ulož teď, rozšifruj později', 'Harvest now, decrypt later'), d: t('Výměna klíčů v TLS. Řešení: hybridní X25519MLKEM768 na veřejné hraně, s klasickým X25519 jako zálohou.', 'TLS key exchange. Fix: hybrid X25519MLKEM768 at the public edge, with classical X25519 as fallback.') },
                   { list: quantumSig, s: 'attention' as KeyStatus, h: t('Podpisy', 'Signatures'), d: t('Padělatelné až s kvantovým počítačem. Pečeť a CA mají dlouhou životnost, plánujte migraci.', 'Forgeable only once a quantum computer exists. Seals and CAs live long; plan migration.') },
                   { list: quantumSym, s: 'ok' as KeyStatus, h: t('Symetrické klíče', 'Symmetric keys'), d: t('AES/HMAC s 256bitovým klíčem zůstávají dostatečné.', 'AES/HMAC with 256-bit keys remain adequate.') },
                 ].map((g) => (
