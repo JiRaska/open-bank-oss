@@ -255,8 +255,22 @@ mp:
           pem:
             certs: /mnt/aml-tls/ca.crt
         protocols: TLSv1.3
+      # sanctions-service's private-CA mTLS listener (8443): same client certificate, its own bucket.
+      sanctions-authority:
+        reload-period: 1h
+        key-store:
+          pem:
+            client:
+              cert: /mnt/sanctions-tls/tls.crt
+              key: /mnt/sanctions-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/sanctions-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       account-service:
         tls-configuration-name: account-authority
       aml-service:
         tls-configuration-name: aml-authority
+      sanctions-service:
+        tls-configuration-name: sanctions-authority
