@@ -25,13 +25,7 @@ import java.util.UUID
 class PassportAccountAdmissionResource(private val pool: Pool, private val identity: SecurityIdentity) {
     @POST
     suspend fun admit(request: PassportAccountAdmissionRequest): Response {
-        val token = identity.principal as? JsonWebToken
-        if (token?.getClaim<String>("azp") != "openbank-account" ||
-            token.getClaim<String>("preferred_username") != "service-account-openbank-account"
-        ) {
-            throw CatalogForbiddenException("the account-service client is required")
-        }
-        require(request.operation in OPERATIONS && BINDING.matches(request.binding))
+        requireAccountClient(request)
         val receipt = pool.preparedQuery("SELECT admit_passport_account($1, $2, $3, $4, $5, $6)")
             .execute(
                 Tuple.of(
@@ -47,9 +41,43 @@ class PassportAccountAdmissionResource(private val pool: Pool, private val ident
         return Response.noContent().build()
     }
 
+    @POST
+    @Path("/receipt")
+    suspend fun receipt(request: PassportAccountAdmissionRequest): Response {
+        requireAccountClient(request)
+        val found = pool.preparedQuery(CONSUMED_RECEIPT).execute(
+            Tuple.of(
+                request.grantId,
+                request.operation,
+                request.operationId,
+                request.partyId,
+                request.revisionId,
+                request.binding,
+            ),
+        ).awaitSuspending().first().getBoolean(0)
+        return if (found) Response.noContent().build() else Response.status(Response.Status.NOT_FOUND).build()
+    }
+
+    private fun requireAccountClient(request: PassportAccountAdmissionRequest) {
+        val token = identity.principal as? JsonWebToken
+        if (token?.getClaim<String>("azp") != "openbank-account" ||
+            token.getClaim<String>("preferred_username") != "service-account-openbank-account"
+        ) {
+            throw CatalogForbiddenException("the account-service client is required")
+        }
+        require(request.operation in OPERATIONS && BINDING.matches(request.binding))
+    }
+
     private companion object {
         val OPERATIONS = setOf("OPEN", "ACTIVATE")
         val BINDING = Regex("^[a-f0-9]{64}$")
+        val CONSUMED_RECEIPT = """
+            SELECT EXISTS (
+                SELECT 1 FROM passport_account_permits
+                WHERE grant_id = $1 AND operation = $2 AND operation_id = $3 AND party_id = $4
+                    AND product_revision_id = $5 AND binding_digest = $6 AND consumed_at IS NOT NULL
+            )
+        """.trimIndent()
     }
 }
 

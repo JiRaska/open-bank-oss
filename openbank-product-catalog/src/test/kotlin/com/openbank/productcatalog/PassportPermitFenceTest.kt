@@ -8,6 +8,10 @@ import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
+import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -111,6 +115,116 @@ class PassportPermitFenceTest {
             assertEquals(true, db.scalar("SELECT approve_passport_grant(?, ?, 'synthetic')", request.grant, checker))
             assertEquals(request.permit, db.issue(request))
             assertEquals(false, db.scalar("SELECT approve_passport_grant(?, ?, 'synthetic')", request.grant, checker))
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "synthetic-passport-replica", roles = ["ROLE_OPERATOR"])
+    fun `independent catalog readers converge across restart and replay without observing a rolled back grant`() {
+        val request = seed("OPEN", issue = false, approved = false)
+        val online = GrantReplica(request.grant, pageSize = 7)
+        val offline = GrantReplica(request.grant, pageSize = 13)
+        online.catchUp()
+        assertEquals("PROPOSED", online.snapshot?.get("state"))
+
+        dataSource.connection.use { db ->
+            assertEquals(
+                true,
+                db.scalar("SELECT approve_passport_grant(?, ?, 'synthetic')", request.grant, UUID.randomUUID()),
+            )
+            online.catchUp()
+            assertEquals("APPROVED", online.snapshot?.get("state"))
+
+            db.autoCommit = false
+            assertTrue(db.revoke(request.grant))
+            db.rollback()
+            online.catchUp()
+            assertEquals("APPROVED", online.snapshot?.get("state"))
+
+            assertTrue(db.revoke(request.grant))
+            db.commit()
+        }
+
+        online.catchUp()
+        offline.catchUp()
+        offline.apply(checkNotNull(online.firstSnapshot))
+        assertEquals(online.snapshot, offline.snapshot)
+        assertEquals("REVOKED", offline.snapshot?.get("state"))
+        assertEquals(3, offline.snapshot?.get("version"))
+        assertEquals(listOf("PROPOSED", "APPROVED", "REVOKED"), offline.states)
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-account", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-account"),
+            Claim(key = "preferred_username", value = "service-account-openbank-account"),
+        ],
+    )
+    fun `receipt lookup cannot consume an issued permit and remains readable after revocation`() {
+        val request = seed("OPEN")
+        val body = mapOf(
+            "grantId" to request.grant,
+            "operationId" to request.operationId,
+            "operation" to request.operation,
+            "partyId" to request.party,
+            "revisionId" to request.revision,
+            "binding" to HASH,
+        )
+        assertReceipt(body, 404)
+        dataSource.connection.use { db ->
+            assertNotNull(db.consume(request))
+            assertTrue(db.revoke(request.grant))
+        }
+        assertReceipt(body, 204)
+        assertReceipt(body + ("binding" to "1".repeat(64)), 404)
+    }
+
+    private fun assertReceipt(body: Map<String, Any>, status: Int) {
+        given().contentType("application/json").body(body)
+            .post("/api/v2/internal/passport-account-admissions/receipt").then().statusCode(status)
+    }
+
+    private class GrantReplica(private val grant: UUID, private val pageSize: Int) {
+        private var cursor: String? = null
+        var snapshot: Map<String, Any>? = null
+            private set
+        var firstSnapshot: Map<String, Any>? = null
+            private set
+        val states = mutableListOf<String>()
+
+        fun catchUp() {
+            while (true) {
+                val query = given().queryParam("limit", pageSize)
+                cursor?.let { query.queryParam("after", it) }
+                val page = query.get("/api/v2/events").then().statusCode(200).extract().jsonPath()
+                val changes = page.getList("items", Map::class.java)
+                if (changes.isEmpty()) return
+                changes.forEachIndexed { index, item ->
+                    if (item["aggregateId"] == grant.toString() && item["aggregateType"] == "PASSPORT_GRANT") {
+                        assertEquals("com.openbank.catalog.passport-grant.changed", item["eventType"])
+                        val payload = page.getMap<String, Any>("items[$index].payload")
+                        assertFalse(
+                            payload.keys.any {
+                                it in
+                                    setOf("evidenceRef", "proposedBy", "approvedBy", "revokeReason")
+                            },
+                        )
+                        apply(payload)
+                    }
+                }
+                cursor = page.getString("nextCursor")
+            }
+        }
+
+        fun apply(payload: Map<String, Any>) {
+            val previous = snapshot?.get("version") as? Int ?: 0
+            if ((payload.getValue("version") as Int) > previous) {
+                if (firstSnapshot == null) firstSnapshot = payload
+                snapshot = payload
+                states += payload.getValue("state") as String
+            }
         }
     }
 
