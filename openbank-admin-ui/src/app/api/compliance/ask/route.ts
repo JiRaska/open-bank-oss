@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
-// Cited question answering over the compliance trace (ADR-0379 phase 3). The question goes to
-// agent-service's governed chat (ADR-0031) with tool execution disabled and the trace rows as
-// context. The answer is returned only if every sentence cites a trace row, every citation
-// resolves and the prose states no status at all; otherwise 422.
-// The response carries the cited rows' computed facts, which the page shows as the evidence.
-// The model can explain the trace but has no tool, no write path and no way to change a verdict.
+// Question -> relevant trace rows (ADR-0379 phase 3). The question goes to agent-service's governed
+// chat (ADR-0031) with tool execution disabled. The model may only answer with row tokens; a reply
+// containing anything else is withheld (422). The response carries the selected rows' computed
+// facts and authored YAML text, never model prose, so the model can point at evidence but cannot
+// state a claim.
 
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { loadComplianceTrace } from '@/lib/compliance/trace-server'
-import { buildCitationContext, checkCitations, citedRows } from '@/lib/compliance/tools'
+import { buildSelectionContext, parseSelection, selectedRows } from '@/lib/compliance/tools'
 import { hasPermission } from '@/lib/auth/roles'
 
 export const dynamic = 'force-dynamic'
@@ -52,7 +51,7 @@ export async function POST(request: Request) {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({
         messages: [{ role: 'user', content: question.trim() }],
-        context: buildCitationContext(trace),
+        context: buildSelectionContext(trace),
         allowTools: false,
       }),
       signal: ctrl.signal,
@@ -70,12 +69,9 @@ export async function POST(request: Request) {
     clearTimeout(timer)
   }
 
-  const citations = checkCitations(reply, trace)
-  if (!citations.ok) {
-    return NextResponse.json({
-      error: citations.statusWord ? 'asserts_status' : 'uncited_answer',
-      unknown: citations.unknown, uncitedSentences: citations.uncitedSentences, statusWord: citations.statusWord,
-    }, { status: 422 })
+  const selection = parseSelection(reply, trace)
+  if (!selection.ok) {
+    return NextResponse.json({ error: selection.extraText ? 'not_tokens_only' : 'no_rows', unknown: selection.unknown }, { status: 422 })
   }
-  return NextResponse.json({ answer: reply, citations: citations.cited, rows: citedRows(trace, citations.cited), asOf: trace.asOf })
+  return NextResponse.json({ rows: selectedRows(trace, selection.selected), asOf: trace.asOf })
 }

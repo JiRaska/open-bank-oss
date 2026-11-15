@@ -97,14 +97,25 @@ function ControlCard({ control }: { control: TraceControl }) {
   )
 }
 
-type CitedRow = { ref: string; title: string; verdict?: Verdict; downgradeReason?: TraceControl['downgradeReason']; coverage?: string }
+type SelectedRow = {
+  ref: string
+  kind: 'control' | 'obligation'
+  title: string
+  titleCs?: string
+  verdict?: Verdict
+  declaredStatus?: Verdict
+  downgradeReason?: TraceControl['downgradeReason']
+  evidence?: string
+  coverage?: string
+  legalBasis?: string
+}
 
 function AskTrace() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const labels = useLabels()
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<{ answer: string; rows: CitedRow[] } | { error: string } | null>(null)
+  const [result, setResult] = useState<{ rows: SelectedRow[] } | { error: string } | null>(null)
 
   const submit = async () => {
     setBusy(true)
@@ -113,8 +124,8 @@ function AskTrace() {
       const response = await fetch('/api/compliance/ask', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }), cache: 'no-store',
       })
-      const body = await response.json() as { answer?: string; rows?: CitedRow[]; error?: string }
-      setResult(response.ok && body.answer ? { answer: body.answer, rows: body.rows ?? [] } : { error: body.error ?? 'error' })
+      const body = await response.json() as { rows?: SelectedRow[]; error?: string }
+      setResult(response.ok && body.rows ? { rows: body.rows } : { error: body.error ?? 'error' })
     } catch {
       setResult({ error: 'agent_unreachable' })
     } finally {
@@ -123,10 +134,10 @@ function AskTrace() {
   }
 
   return (
-    <section className="card" style={{ padding: '14px', display: 'grid', gap: '8px', marginTop: '20px' }} aria-label={t('Dotaz nad trasou', 'Ask about the trace')}>
-      <h2 style={{ fontSize: '15px', margin: 0 }}>{t('Zeptat se nad trasou', 'Ask about the trace')}</h2>
+    <section className="card" style={{ padding: '14px', display: 'grid', gap: '8px', marginTop: '20px' }} aria-label={t('Najít v trase', 'Find in the trace')}>
+      <h2 style={{ fontSize: '15px', margin: 0 }}>{t('Najít v trase', 'Find in the trace')}</h2>
       <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
-        {t('AI jen vysvětluje: nemá nástroje, nic nemění, nikdy neuvádí verdikt a odpověď se zobrazí, jen když každá věta cituje řádek trasy.', 'The AI only explains: it has no tools, changes nothing, never states a verdict, and an answer is shown only when every sentence cites a trace row.')}
+        {t('AI jen vybere relevantní řádky trasy. Nic sama nepíše ani netvrdí: vše níže jsou vypočtená data a texty z registrů.', 'The AI only picks the relevant trace rows. It writes and claims nothing itself: everything below is computed data and text from the registers.')}
       </p>
       <label style={{ fontSize: '12px', display: 'grid', gap: '4px' }}>
         {t('Otázka', 'Question')}
@@ -134,32 +145,27 @@ function AskTrace() {
       </label>
       <div>
         <button type="button" className="btn btn-secondary" disabled={busy || !question.trim()} onClick={() => void submit()}>
-          {busy ? t('Ptám se…', 'Asking…') : t('Zeptat se', 'Ask')}
+          {busy ? t('Hledám…', 'Searching…') : t('Najít', 'Find')}
         </button>
       </div>
-      {result && 'answer' in result ? (
-        <div role="status" style={{ display: 'grid', gap: '8px' }}>
-          <div style={{ fontSize: '12px', fontWeight: 600 }}>{t('Citované řádky (vypočteno, toto je důkaz)', 'Cited rows (computed; this is the evidence)')}</div>
-          <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '12px' }}>
-            {result.rows.map(row => (
-              <li key={row.ref}>
-                <code>{row.ref}</code> {row.title}
-                {row.verdict ? <> · {t('verdikt', 'verdict')} <strong>{labels.verdict(row.verdict)}</strong>{row.downgradeReason ? ` (${labels.reason(row.downgradeReason)})` : ''}</> : null}
-                {row.coverage ? <> · {t('pokrytí', 'coverage')} <code>{row.coverage}</code></> : null}
-              </li>
-            ))}
-          </ul>
-          <div style={{ fontSize: '12px', fontWeight: 600 }}>{t('Vysvětlení modelu (není důkaz)', 'Model explanation (not evidence)')}</div>
-          <div style={{ fontSize: '13px', lineHeight: 1.5, whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>{result.answer}</div>
-        </div>
+      {result && 'rows' in result ? (
+        <ul role="status" style={{ margin: 0, paddingLeft: '16px', fontSize: '12px', display: 'grid', gap: '6px' }}>
+          {result.rows.map(row => (
+            <li key={row.ref}>
+              <strong>{row.kind === 'obligation' && language === 'cs' && row.titleCs ? row.titleCs : row.title}</strong> <code>{row.ref}</code>
+              {row.verdict ? <> · {t('verdikt', 'verdict')} <strong>{labels.verdict(row.verdict)}</strong>{row.downgradeReason ? ` (${labels.reason(row.downgradeReason)})` : ''}</> : null}
+              {row.coverage ? <> · {t('pokrytí', 'coverage')} <code>{row.coverage}</code></> : null}
+              {row.evidence ? <div style={{ color: 'var(--text-secondary)' }}>{row.evidence}</div> : null}
+              {row.legalBasis ? <div style={{ color: 'var(--text-tertiary)' }}>{row.legalBasis}</div> : null}
+            </li>
+          ))}
+        </ul>
       ) : null}
       {result && 'error' in result ? (
         <p role="status" style={{ fontSize: '12px', color: 'var(--warning-text)', margin: 0 }}>
-          {result.error === 'uncited_answer'
-            ? t('Odpověď nebyla zobrazena: některá věta necitovala řádek trasy, nebo citovala neexistující.', 'The answer was not shown: a sentence cited no trace row, or cited one that does not exist.')
-            : result.error === 'asserts_status'
-              ? t('Odpověď nebyla zobrazena: sama uváděla stav či verdikt. Verdikty ukazuje jen tabulka z trasy.', 'The answer was not shown: it stated a status or verdict itself. Only the computed rows show verdicts.')
-              : t('Asistent není dostupný.', 'The assistant is unavailable.')}
+          {result.error === 'not_tokens_only' || result.error === 'no_rows'
+            ? t('Výsledek nebyl zobrazen: model neodpověděl jen platnými řádky trasy.', 'Nothing was shown: the model did not reply with valid trace rows only.')
+            : t('Asistent není dostupný.', 'The assistant is unavailable.')}
         </p>
       ) : null}
     </section>

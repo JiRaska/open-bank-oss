@@ -80,12 +80,14 @@ We will make compliance posture a **derived trace**, and `/docs/compliance` its 
    (snake_case, like every other tool in the fleet). It lives in the BFF because the trace is joined there
    (ADR-0056), and its caller is the signed-in member of staff under their own roles: the route guard admits
    `/api/compliance` only with `compliance:view`. Every tool is a read, so no OPA write decision exists to
-   take. An in-page assistant (`POST /api/compliance/ask`) passes the question to agent-service's governed chat
-   (ADR-0031) with tool execution disabled and the trace rows as context. The answer is shown only when every sentence
-   cites a trace row as `[[control:<id>]]` or `[[obligation:<id>]]`, every citation resolves, and the prose states
-   no status or verdict at all; otherwise the route answers 422 and nothing is rendered. A resolving token proves a
-   row exists, not that the sentence around it is true, so the model is not allowed to make the claim. The page
-   shows the cited rows' computed verdicts beside the answer, which is labelled as an explanation, not evidence. This adds no capability to any charter, because the model gets
+   take. An in-page assistant (`POST /api/compliance/ask`) passes the question to agent-service's
+   governed chat (ADR-0031) with tool execution disabled (the agent's `toolsRestricted` acknowledgement is
+   required). Its only job is retrieval: it must reply with nothing but the tokens of the relevant trace rows
+   (`[[control:<id>]]`, `[[obligation:<id>]]`). A reply carrying any other character, or an unknown token, is
+   withheld (422). The page then shows those rows' computed verdicts and the authored YAML text, and never any
+   model prose. Classifying free prose for false status claims was tried and cannot be closed (synonyms,
+   homoglyphs, symbols), so the model is given no channel to make a claim. A wrong pick shows true rows that do
+   not answer the question; it cannot show a false one. No charter gains a capability, because the model gets
    no tool, so `agents.yaml` does not change. No tool can write a status, an obligation or a control. Those change
    only through a reviewed PR to the YAML.
 

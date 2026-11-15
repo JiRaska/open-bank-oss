@@ -126,86 +126,67 @@ export function callComplianceTool(trace: ComplianceTrace, name: string, rawArgs
   throw new ToolInputError(`unknown tool '${name}'`)
 }
 
-// ── Citations ────────────────────────────────────────────────────────────────────────────────
+// ── Row selection (the in-page assistant) ───────────────────────────────────────────────────
+//
+// The model writes no prose that reaches the reader. Classifying free text for status claims
+// cannot be closed (synonyms, homoglyphs, symbols), so the model's only job is retrieval: pick the
+// trace rows relevant to a question and return their tokens. The page renders those rows'
+// computed facts and authored text from the YAML. The worst a wrong pick can do is show true rows
+// that do not answer the question. It cannot show a false one.
 
-// Deliberately broad: anything shaped like a citation is checked, so a token that differs from a
-// real id only in case, punctuation or separators is counted as unknown instead of passing as prose.
-const CITATION = /\[\[(control|obligation):([^\]\n]{1,120})\]\]/g
+const TOKEN = /\[\[(control|obligation):([^\]\n]{1,120})\]\]/g
+export const MAX_SELECTED_ROWS = 8
 
-/**
- * Words that assert a status. The model may not use them at all: verdicts are shown from the
- * trace beside the answer, so the prose never needs to state one, and banning the vocabulary
- * closes the channel instead of trying to judge each claim. Over-rejection (a negated or
- * quoted status word) is the accepted cost; the check fails closed.
- */
-const STATUS_WORDS = /\b(enforced|unenforced|compliant|non-?compliant|compliance status|partial(ly)?|unverified|verified|audit[- ]only|planned|satisf(y|ies|ied)|pass(es|ed)?|fail(s|ed)?|meets?|met|covered|green|red)\b|vynucen|splň|splnen|částečn|neověřen|ověřen|plánovan|pokryt/i
-
-/**
- * The context handed to a model: one line per trace row, each prefixed with the citation token
- * the answer must use. The verdict is stated as computed. The model is told to repeat it, never
- * to assess it.
- */
-export function buildCitationContext(trace: ComplianceTrace): string {
+/** Rows, one per line, each with the only token the model may answer with. */
+export function buildSelectionContext(trace: ComplianceTrace): string {
   const lines = [
-    `Compliance trace as of commit ${trace.asOf.commit ?? 'unknown'}, evaluated ${trace.asOf.evaluatedAt}.`,
-    'Answer only from these rows. Cite the row each sentence is about with its token in double brackets, e.g. [[control:audit-trail]].',
-    'Every sentence must cite. Do not state any verdict, status or compliance judgement: the page shows the computed verdict next to your answer. Explain what the cited rows mean and what they are for.',
+    `Compliance trace as of commit ${trace.asOf.commit ?? 'unknown'}.`,
+    `Reply with ONLY the tokens of the rows relevant to the question, one per line, at most ${MAX_SELECTED_ROWS}, most relevant first.`,
+    'Write no other text: no words, no punctuation, no explanation. Anything besides tokens makes the reply void.',
     '',
   ]
-  for (const c of trace.controls) {
-    lines.push(`[[control:${c.id}]] ${c.title} | declared=${c.declaredStatus} verdict=${c.verdict}${c.downgradeReason ? ` reason=${c.downgradeReason}` : ''} evidence=${c.evidenceLevel} frameworks=${c.frameworks.join('/')} obligations=${c.obligationIds.join('/') || '-'}`)
-  }
-  for (const o of trace.obligations) {
-    lines.push(`[[obligation:${o.id}]] ${o.name.en} | authority=${o.authority} coverage=${o.coverage.status} cadence_confidence=${o.cadenceConfidence} controls=${o.controls.join('/') || '-'}`)
-  }
+  for (const c of trace.controls) lines.push(`[[control:${c.id}]] ${c.title} — ${c.category}; frameworks ${c.frameworks.join(', ')}; ${c.references.join(', ')}`)
+  for (const o of trace.obligations) lines.push(`[[obligation:${o.id}]] ${o.name.en} — area ${o.area}; authority ${o.authority}; ${o.legalBasis}`)
   return lines.join('\n')
 }
 
-export interface CitationCheck {
+export interface Selection {
   ok: boolean
-  cited: string[]
-  /** Tokens that look like citations but name no row in the trace. */
+  /** Resolving tokens in the order given, deduplicated and capped. */
+  selected: string[]
+  /** Tokens that name no row. */
   unknown: string[]
-  /** Sentences (or fragments, the split is deliberately eager) that carry no citation. */
-  uncitedSentences: number
-  /** The first status word found, if any. */
-  statusWord: string | null
+  /** True when the reply carried anything other than tokens and whitespace. */
+  extraText: boolean
 }
 
-/** The facts the page shows next to an answer, taken from the trace, never from the model. */
-export function citedRows(trace: ComplianceTrace, cited: string[]) {
-  return cited.map(ref => {
+/** A reply is usable only when it is nothing but tokens, at least one, and every token resolves. */
+export function parseSelection(reply: string, trace: ComplianceTrace): Selection {
+  const known = new Set([...trace.controls.map(c => `control:${c.id}`), ...trace.obligations.map(o => `obligation:${o.id}`)])
+  const selected: string[] = []
+  const unknown: string[] = []
+  for (const m of reply.matchAll(TOKEN)) {
+    const token = `${m[1]}:${m[2]}`
+    if (!known.has(token)) { if (!unknown.includes(token)) unknown.push(token) } else if (!selected.includes(token)) selected.push(token)
+  }
+  // Separators allowed between tokens: ASCII whitespace and commas only. Anything else, including
+  // invisible format characters, counts as text the model was told not to write.
+  const extraText = /[^ \t\r\n,]/.test(reply.replace(TOKEN, ''))
+  return { ok: selected.length > 0 && unknown.length === 0 && !extraText, selected: selected.slice(0, MAX_SELECTED_ROWS), unknown, extraText }
+}
+
+/** What the page shows for each selected row: computed facts and authored YAML text only. */
+export function selectedRows(trace: ComplianceTrace, selected: string[]) {
+  return selected.map(ref => {
     const [kind, id] = ref.split(':')
     if (kind === 'control') {
       const c = trace.controls.find(x => x.id === id)!
-      return { ref, kind, title: c.title, verdict: c.verdict, declaredStatus: c.declaredStatus, evidenceLevel: c.evidenceLevel, downgradeReason: c.downgradeReason }
+      return {
+        ref, kind: 'control' as const, title: c.title, verdict: c.verdict, declaredStatus: c.declaredStatus,
+        evidenceLevel: c.evidenceLevel, downgradeReason: c.downgradeReason, evidence: c.evidence, obligationIds: c.obligationIds,
+      }
     }
     const o = trace.obligations.find(x => x.id === id)!
-    return { ref, kind, title: o.name.en, coverage: o.coverage.status, controls: o.controls }
+    return { ref, kind: 'obligation' as const, title: o.name.en, titleCs: o.name.cs, coverage: o.coverage.status, legalBasis: o.legalBasis, controls: o.controls }
   })
-}
-
-/**
- * A resolving token proves the row exists, not that the prose around it is true. So an answer is
- * renderable only when every citation resolves, every sentence cites a row, and the prose states
- * no status at all. The verdicts the reader sees come from the trace (`citedRows`), never from
- * the model. The sentence split is eager (it also breaks on abbreviations), which can only make
- * the check stricter.
- */
-export function checkCitations(answer: string, trace: ComplianceTrace): CitationCheck {
-  const known = new Set([...trace.controls.map(c => `control:${c.id}`), ...trace.obligations.map(o => `obligation:${o.id}`)])
-  const cited: string[] = []
-  const unknown: string[] = []
-  for (const m of answer.matchAll(CITATION)) {
-    const token = `${m[1]}:${m[2]}`
-    if (known.has(token)) { if (!cited.includes(token)) cited.push(token) } else if (!unknown.includes(token)) unknown.push(token)
-  }
-  const prose = answer.replace(CITATION, ' ')
-  const statusWord = STATUS_WORDS.exec(prose)?.[0] ?? null
-  const fragments = answer.split(/[.!?;:]+(?=\s|$)|\n+/).map(f => f.trim()).filter(f => /\p{L}/u.test(f.replace(CITATION, '')))
-  const uncitedSentences = fragments.filter(f => !/\[\[(control|obligation):/.test(f)).length
-  return {
-    ok: cited.length > 0 && unknown.length === 0 && uncitedSentences === 0 && statusWord === null,
-    cited, unknown, uncitedSentences, statusWord,
-  }
 }

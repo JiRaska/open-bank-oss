@@ -3,7 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildComplianceTrace, type ComplianceTrace, type TraceInputs } from '../lib/compliance/trace'
-import { COMPLIANCE_TOOLS, ToolInputError, buildCitationContext, callComplianceTool, checkCitations } from '../lib/compliance/tools'
+import { COMPLIANCE_TOOLS, MAX_SELECTED_ROWS, ToolInputError, buildSelectionContext, callComplianceTool, parseSelection, selectedRows } from '../lib/compliance/tools'
 
 vi.mock('@/auth', () => ({ auth: vi.fn() }))
 vi.mock('@/lib/compliance/trace-server', () => ({ loadComplianceTrace: vi.fn() }))
@@ -63,42 +63,42 @@ describe('compliance MCP tools (ADR-0379 phase 3)', () => {
   })
 })
 
-describe('citation contract', () => {
-  it('accepts an explanation where every sentence cites a real row and no status is stated', () => {
-    expect(checkCitations('The audit trail records who did what [[control:audit-trail]]. It supports incident reporting [[obligation:dora-major-ict-incident]].', trace))
-      .toMatchObject({ ok: true, cited: ['control:audit-trail', 'obligation:dora-major-ict-incident'], unknown: [], uncitedSentences: 0, statusWord: null })
+describe('row selection contract', () => {
+  it('accepts a reply made only of resolving tokens, in order, deduplicated', () => {
+    expect(parseSelection('[[control:audit-trail]]\n[[obligation:dora-major-ict-incident]], [[control:audit-trail]]', trace))
+      .toEqual({ ok: true, selected: ['control:audit-trail', 'obligation:dora-major-ict-incident'], unknown: [], extraText: false })
   })
-  it('rejects an uncited answer', () => {
-    expect(checkCitations('Everything is fine.', trace).ok).toBe(false)
-  })
-  it('rejects every status claim, cited or not — the reviewer bypass probes included', () => {
-    for (const answer of [
+  it('voids any reply that carries text, so no claim can reach the reader', () => {
+    for (const reply of [
       'Everything is enforced. [[control:audit-trail]]',
-      'Audit trail is enforced. [[control:audit-trail]] is in the register.',
-      'Audit trail is compliant [[control:audit-trail]].',
-      'Fraud monitoring is fully enforced [[control:fraud-monitoring]].',
-      'Fraud monitoring is unverified [[control:fraud-monitoring]].',
-      'Kontrola je vynucena [[control:audit-trail]].',
-    ]) expect(checkCitations(answer, trace).ok, answer).toBe(false)
-    expect(checkCitations('Audit trail is compliant [[control:audit-trail]].', trace).statusWord).toBe('compliant')
+      '[[control:audit-trail]] is in force',
+      '[[control:audit-trail]] ✅',
+      '[[control:audit-trail]]\u200B',
+      '[[control:audit-trail]]\u00AD',
+      '[[control:audit-trail]] ｅｎｆｏｒｃｅｄ',
+      '**[[control:audit-trail]]**',
+      '[[control:audit-trail]].',
+    ]) expect(parseSelection(reply, trace), JSON.stringify(reply)).toMatchObject({ ok: false, extraText: true })
   })
-  it('rejects a cited sentence followed by an uncited one, even across an abbreviation', () => {
-    expect(checkCitations('It records actions [[control:audit-trail]]. Everything else is fine too.', trace)).toMatchObject({ ok: false, uncitedSentences: 1 })
-    expect(checkCitations('It records actions, e.g. logins [[control:audit-trail]].', trace).ok).toBe(false)
+  it('voids an empty reply and one with an unknown or near-miss token', () => {
+    expect(parseSelection('', trace).ok).toBe(false)
+    expect(parseSelection('[[control:audit-trail]] [[control:Audit-Trail]]', trace)).toMatchObject({ ok: false, unknown: ['control:Audit-Trail'] })
   })
-  it('rejects an answer that cites a row the trace does not have, even next to a real one', () => {
-    expect(checkCitations('See [[control:audit-trail]] and [[control:made-up]].', trace)).toMatchObject({ ok: false, unknown: ['control:made-up'] })
+  it('caps the selection', () => {
+    const many = Array.from({ length: 12 }, () => '[[control:audit-trail]] [[control:fraud-monitoring]]').join('\n')
+    expect(parseSelection(many, trace).selected.length).toBeLessThanOrEqual(MAX_SELECTED_ROWS)
   })
-  it('counts a near-miss token as unknown instead of letting it pass as prose', () => {
-    for (const forged of ['[[control:Audit-Trail]]', '[[control:audit_trail]]', '[[control:audit.trail]]']) {
-      expect(checkCitations(`See [[control:audit-trail]] and ${forged}.`, trace)).toMatchObject({ ok: false, unknown: [forged.slice(2, -2)] })
-    }
+  it('renders selected rows from computed facts and authored text only', () => {
+    expect(selectedRows(trace, ['control:fraud-monitoring', 'obligation:cnb-bop'])).toEqual([
+      expect.objectContaining({ ref: 'control:fraud-monitoring', verdict: 'unverified', downgradeReason: 'no-machine-evidence', evidence: 'e' }),
+      expect.objectContaining({ ref: 'obligation:cnb-bop', coverage: 'filed-return' }),
+    ])
   })
-  it('puts every row and its computed verdict in the model context, and forbids restating it', () => {
-    const ctx = buildCitationContext(trace)
-    expect(ctx).toContain('[[control:fraud-monitoring]] Fraud | declared=partial verdict=unverified reason=no-machine-evidence')
-    expect(ctx).toContain('[[obligation:cnb-bop]]')
-    expect(ctx).toContain('Do not state any verdict, status or compliance judgement')
+  it('tells the model to reply with tokens only, and gives it no verdicts to repeat', () => {
+    const ctx = buildSelectionContext(trace)
+    expect(ctx).toContain('Reply with ONLY the tokens')
+    expect(ctx).toContain('[[control:fraud-monitoring]] Fraud')
+    expect(ctx).not.toMatch(/verdict=|unverified/)
   })
 })
 
@@ -136,30 +136,28 @@ describe('compliance MCP and ask routes', () => {
     expect(missing.error.code).toBe(-32601)
   })
 
-  it('renders a cited answer and withholds an uncited one', async () => {
+  it('returns selected rows for a token-only reply and withholds anything else', async () => {
     const relay = vi.fn()
     vi.stubGlobal('fetch', relay)
-    const ask = () => askPost(new Request('http://localhost/api/compliance/ask', { method: 'POST', body: JSON.stringify({ question: 'Is audit enforced?' }) }))
+    const ask = () => askPost(new Request('http://localhost/api/compliance/ask', { method: 'POST', body: JSON.stringify({ question: 'What covers ICT incidents?' }) }))
 
-    relay.mockResolvedValueOnce(Response.json({ reply: 'It records who did what [[control:audit-trail]].', toolsRestricted: true }))
+    relay.mockResolvedValueOnce(Response.json({ reply: '[[obligation:dora-major-ict-incident]]\n[[control:audit-trail]]', toolsRestricted: true }))
     const ok = await ask()
     expect(ok.status).toBe(200)
-    expect(await ok.json()).toMatchObject({ citations: ['control:audit-trail'], rows: [{ ref: 'control:audit-trail', verdict: 'enforced' }] })
+    const body = await ok.json()
+    expect(body.rows.map((r: { ref: string }) => r.ref)).toEqual(['obligation:dora-major-ict-incident', 'control:audit-trail'])
+    expect(body).not.toHaveProperty('answer')
     const sent = JSON.parse(relay.mock.calls[0][1].body as string)
     expect(sent).toMatchObject({ allowTools: false })
     expect(sent.context).toContain('[[control:audit-trail]]')
 
-    relay.mockResolvedValueOnce(Response.json({ reply: 'Nothing more to add.', toolsRestricted: true }))
-    const uncited = await ask()
-    expect(uncited.status).toBe(422)
-    expect(await uncited.json()).toMatchObject({ error: 'uncited_answer' })
+    relay.mockResolvedValueOnce(Response.json({ reply: 'Audit trail is enforced [[control:audit-trail]].', toolsRestricted: true }))
+    const prose = await ask()
+    expect(prose.status).toBe(422)
+    expect(await prose.json()).toMatchObject({ error: 'not_tokens_only' })
 
-    relay.mockResolvedValueOnce(Response.json({ reply: 'Fraud monitoring is enforced [[control:fraud-monitoring]].', toolsRestricted: true }))
-    const forged = await ask()
-    expect(forged.status).toBe(422)
-    expect(await forged.json()).toMatchObject({ error: 'asserts_status', statusWord: 'enforced' })
-
-    relay.mockResolvedValueOnce(Response.json({ reply: 'It records who did what [[control:audit-trail]].' }))
+    relay.mockResolvedValueOnce(Response.json({ reply: '[[control:audit-trail]]' }))
     expect((await ask()).status).toBe(502)
   })
+
 })
