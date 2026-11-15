@@ -927,6 +927,7 @@
         "https://__ADMIN_HOST__"
       ],
       "attributes": {
+        "login_theme": "openbank-admin",
         "standard.token.exchange.enabled": "true"
       },
       "defaultClientScopes": [

@@ -349,6 +349,14 @@ export const PERMISSIONS = {
   // endpoints are ADMIN-only. Keep HITL decision authority explicit in the UI matrix.
   "devops:decide":             [ROLES.ADMIN],
   "system:config":            [ROLES.ADMIN],
+  // Keys & Certificates (#16292). The overview is education + evidence for EVERY department:
+  // what each key is for, what breaks when it expires, and a measured days-left status. It
+  // carries catalogue text and aggregate status only, never a certificate's identifiers, so
+  // it is deliberately wider than system:view. DEMO is excluded from both.
+  "keys:view":                [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR],
+  // The expert matrix lists every measured certificate by namespace, name and issuer. That
+  // is a reconnaissance map of the estate, so it stays with the roles that operate it.
+  "keys:expert":              [ROLES.ADMIN, ROLES.OPERATOR],
   // Docs
   "docs:view":                [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR],
   // Settings — demo user is blocked
@@ -409,6 +417,8 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
   ['compliance:view', [
     '/aml', '/fraud', '/disputes', '/consents', '/customer-360',
     '/docs/compliance', '/docs/bcp',
+    // ADR-0379: the compliance trace and its auditor export carry the same audience as the page.
+    '/api/compliance',
     // ADR-0286: the warehouse-backed risk reporting surface. Each registry entry also carries
     // its own permission at the BFF boundary — this prefix only gates the page shell.
     '/reporting',
@@ -437,6 +447,8 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
   ['operator-approvals:decide', ['/approvals/sca', '/approvals/settlement']],
   ['approvals:view', ['/approvals']],
   ['settlements:view', ['/settlements']],
+  // Longest-prefix-wins: beats the bare '/security' system:view entry below.
+  ['keys:view', ['/security/keys', '/api/security/keys']],
   ['system:view', [
     '/api/platform-versions', '/api/finops', '/api/test-intelligence',
     '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',

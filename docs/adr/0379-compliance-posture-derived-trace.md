@@ -1,7 +1,8 @@
 ---
 date: 2026-11-14
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#16163 — evidence age (test/attestation kinds, max_evidence_age) and the read-only MCP/AI readers remain"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
@@ -46,18 +47,23 @@ We will make compliance posture a **derived trace**, and `/docs/compliance` its 
 
 1. **One join, three authored sources, nothing new hand-kept.** Each obligation in
    `regulatory-obligations.yaml` gains an optional `controls: [<control-id>]` list, and each control in
-   `compliance-controls.yaml` gains `evidence: [{kind, ref}]`, where `kind` ∈ `gate | test | adr | attestation | doc`
-   and `ref` must resolve: a `gates.yaml` id, a test file path, an ADR number, an attestation type, or a
-   repo path. A build-time generator emits `compliance-trace.json` into the admin-ui image, the same pattern as
-   `regulatory-obligations.json` and `governance.json`. The hand-written `COMPLIANCE_AREAS` literal is deleted.
+   `compliance-controls.yaml` gains `evidence_refs: [{kind, ref}]` (the existing `evidence` field stays the prose
+   description), where `kind` ∈ `gate | workflow | adr | path` and `ref` must resolve: a `gates.yaml` id, a file
+   under `.github/workflows/`, an ADR number, or an existing repo path. Test and attestation kinds wait for phase 2,
+   which is when their run timestamps become available. No new generated file is added: the admin-ui joins three
+   artefacts the image already bakes (`compliance-controls.yaml`, `regulatory-obligations.json`,
+   `gate-catalog.json`) in one pure function (`src/lib/compliance/trace.ts`), so the page, the export and any MCP
+   tool compute the same verdict. The hand-written `COMPLIANCE_AREAS` literal is deleted.
    Its rows either become obligations in the register, carrying their legal source, or they are dropped. A
    field name on a customer record is not an obligation.
 
-2. **Status is computed, never authored and never AI-produced.** Every row shows three separate states:
-   *declared* (what the YAML says), *derived* (the build-time signal), and *evidenced* (the newest successful
-   evidence run and its age). The page's verdict is the weakest of the three. A control whose evidence is
-   missing or older than its declared `max_evidence_age` renders as `unverified`, even when the YAML says
-   `enforced`. This is ADR-0253 applied to the page itself.
+2. **Status is computed, never authored and never AI-produced.** Every row shows the *declared* status (what the
+   YAML says) next to the *strength* of its evidence: a blocking gate, a CI run (an advisory gate or a workflow),
+   documentation only (an ADR or a path), or none. A positive claim (`enforced`, `partial`) without at least a CI
+   run behind it renders as `unverified`, even when the YAML says `enforced`. Weak claims (`audit`, `planned`) stand
+   as declared, because they already describe themselves honestly. Phase 2 adds evidence *age*: a control whose
+   newest successful run is older than its declared `max_evidence_age` will also render `unverified`. This is
+   ADR-0253 applied to the page itself.
 
 3. **Three views over the same data, not three datasets.**
    - *Compliance:* gaps first (obligations with no control, `missing` or `bff-only` coverage, `unverified`
@@ -69,7 +75,7 @@ We will make compliance posture a **derived trace**, and `/docs/compliance` its 
    `/docs/control-tower` and `/regulatory/obligations` remain the detail pages, and the hub links into them.
 
 4. **AI and MCP are readers of the trace, never authors of it.** We expose read-only MCP tools over
-   `compliance-trace.json`: `compliance.list_obligations`, `compliance.get_trace`, `compliance.list_gaps`,
+   the same trace (`/api/compliance/trace`): `compliance.list_obligations`, `compliance.get_trace`, `compliance.list_gaps`,
    `compliance.get_evidence`. They follow the existing ADR-0034/0224/0225 authorization path, so `tools/list`
    is policy-filtered and staff act under their own roles via OBO. An in-page assistant may answer questions
    such as "what changed since the last snapshot" or "explain this gap to the business". It may do so only
@@ -114,12 +120,14 @@ We will make compliance posture a **derived trace**, and `/docs/compliance` its 
 ### Enforcement
 
 New gate `compliance-trace` (`.github/scripts/check-compliance-trace.py`, with `--self-test`):
-- every `controls:` id resolves to the catalogue, and every `evidence` ref resolves to an existing artefact;
-- every obligation whose coverage is not `missing | external | conditional` lists at least one control;
+- every control declares at least one `evidence_refs` entry, and every ref resolves to an existing artefact;
+- every `controls:` id on an obligation resolves to the catalogue;
 - `/docs/compliance/page.tsx` contains no requirement literal;
-- the derived `compliance-trace.json` matches its generator.
-It lands `advisory` with `target_enforce_date` and `blocked_on` per ADR-0144, and graduates to `enforced` once
-phase 1 is green. `compliance-matrix` is retired in the same PR that deletes `COMPLIANCE_AREAS`. The MCP tools need
+- both YAML files load with duplicate keys rejected.
+An obligation with no control is not a CI failure. Most reporting duties have no security control to point at,
+so the hub shows them as gaps instead. The gate lands `enforced` directly: every rule is mechanical and green on
+the tree that introduces it, so an advisory phase would only make a broken edge mergeable. `compliance-matrix` and
+`compliance-page-evidence`, which both read `COMPLIANCE_AREAS`, are retired in the same PR. The MCP tools need
 no new gate: the existing OPA bundle and the `tools/list` filter cover them, and their charter entries go through the
 `agents.yaml` derived tails.
 
@@ -136,9 +144,9 @@ Runtime check: `tools/list` on the MCP endpoint, called as a compliance-role pri
 
 ### Phases
 
-1. Add the trace fields, generator and gate, and rebuild `/docs/compliance` as the derived hub with the three
-   views and the print/JSON export. Migrate or drop the literal and retire `compliance-matrix`.
-2. Collect evidence freshness for test and attestation kinds, and add `max_evidence_age` per control.
+1. Add the trace fields, the join and the gate, and rebuild `/docs/compliance` as the derived hub with the three
+   views and the print/JSON export. Drop the literal and retire `compliance-matrix` and `compliance-page-evidence`.
+2. Add `test` and `attestation` evidence kinds with their run timestamps, and `max_evidence_age` per control.
 3. Add the MCP read tools and the cited-answer assistant, through a charter change in `agents.yaml`.
 
 ## Compliance impact

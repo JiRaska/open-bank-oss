@@ -16,6 +16,7 @@ Runbooks:
 - [Cosign KMS signing-key rotation](cosign-kms-rotation.md)
 - [Keycloak realm signing-key renewal](keycloak-signing-key-renewal.md)
 - [cert-manager PKI recovery](cert-manager-pki-recovery.md)
+- [Certificate expiry alerts](certificate-expiry.md)
 
 Annual dry-runs must use a non-production namespace and synthetic keys. A dry-run proves the
 procedure and evidence capture, not production access or recovery time.

@@ -455,7 +455,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-4c341bdf@sha256:23f33f8df258d818e65bfe822289b9c1e74b31122e9f6b85f901fb4ea20878b9
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-2b7f5173@sha256:4eff6d29c763005b3d2a62fc06468d953d98bd2e1379960f1c59d0cd1cfc3bf9
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1251,7 +1251,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-243f130f@sha256:7a7c40052525a50cb537d4e97dfa828031b80088da1dfed2f62dc889fd74a01e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-2b7f5173@sha256:b38fdba07224e8c35c1412d7534a91cb14766979d8137085732115cb57b3076a
 
           imagePullPolicy: IfNotPresent
           ports:
