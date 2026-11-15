@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.sdd.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.fincrime.AmlCaseSeverity
 import com.openbank.libs.fincrime.ScreeningDecision
 import com.openbank.libs.fincrime.ScreeningMatchStatus
@@ -19,7 +20,6 @@ import com.openbank.sdd.domain.model.SddMandate
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
-import java.util.UUID
 
 /**
  * Sanctions gate in front of a collection's release (ADR-0032, ADR-0353 D4). Screens the debtor and
@@ -43,7 +43,7 @@ class CollectionScreeningGate(private val screening: SanctionsScreeningPort, pri
         // One nonce per presentation attempt: retries inside the adapter reuse it (dedupe), but a held
         // collection presented again gets a FRESH screen, never sanctions-service's stored answer for
         // the old key (which would replay a stale CLEAR after a list update or a name change).
-        val attempt = "$key-${UUID.randomUUID()}"
+        val attempt = "$key-${Ids.randomId()}"
         return Uni.combine().all().unis(
             screening.screen(mandate.debtorName, ScreeningRole.DEBTOR, "$attempt:debtor"),
             screening.screen(mandate.creditorName, ScreeningRole.CREDITOR, "$attempt:creditor"),
