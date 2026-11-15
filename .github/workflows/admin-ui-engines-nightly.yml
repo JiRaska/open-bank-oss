@@ -32,14 +32,19 @@ jobs:
   engines:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Read-only: this job runs npm lifecycle scripts and the whole suite, so it holds no write
+    # scope. The issue is filed by `report`, which runs no third-party code.
     permissions:
       contents: read
-      issues: write
+    outputs:
+      outcome: ${{ steps.engines.outcome }}
     defaults:
       run:
         working-directory: openbank-admin-ui
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
@@ -59,7 +64,11 @@ jobs:
 
       - name: E2E on Firefox and WebKit
         id: engines
+        # Below the job limit, so a hung suite ends as a step failure and still files the issue.
+        # continue-on-error keeps the run badge for build/install breakage; test failures are
+        # reported through the issue, not the badge.
         continue-on-error: true
+        timeout-minutes: 45
         run: npm run test:e2e -- --project firefox --project webkit
         env:
           CI: "true"
@@ -81,8 +90,21 @@ jobs:
             openbank-admin-ui/build/test-results/e2e-engines/
           retention-days: 14
 
+  report:
+    needs: engines
+    if: always() && needs.engines.outputs.outcome == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: admin-ui-engines-${{ github.run_id }}
+          path: engines-report
       - name: Open or refresh the tracking issue
-        if: steps.engines.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -91,18 +113,23 @@ jobs:
           TITLE="Admin UI e2e fails on Firefox/WebKit (ADR-0370 U8)"
           body="${RUNNER_TEMP}/engines-issue.md"
           python3 - "$body" <<'EOF'
-          import os, sys, xml.etree.ElementTree as ET  # our own Playwright JUnit, same job
-          path = "build/test-results/e2e-engines/playwright.xml"
+          import os, sys, xml.etree.ElementTree as ET  # this run's own Playwright JUnit
+          path = "engines-report/build/test-results/e2e-engines/playwright.xml"
           failed = []
           if os.path.isfile(path):
               for case in ET.parse(path).getroot().iter("testcase"):
                   if case.find("failure") is not None or case.find("error") is not None:
                       failed.append(f"- `{case.get('classname')} › {case.get('name')}`")
+          if failed:
+              summary = f"{len(failed)} failing test(s) (the JUnit test name carries the engine):"
+          elif os.path.isfile(path):
+              summary = "The JUnit has no failing testcase: the run failed outside a test (setup, timeout). See the run log."
+          else:
+              summary = "No JUnit was written: the run failed before the tests. See the run log."
           lines = [
               f"The nightly Firefox/WebKit run failed: {os.environ['RUN_URL']}",
               "",
-              f"{len(failed)} failing test(s) (the JUnit test name carries the engine):" if failed
-              else "No JUnit was written: the run failed before or outside the tests. See the run log.",
+              summary,
               *failed[:100],
               "",
               "Chromium is what every PR runs, so each line is either an engine-specific defect in the",
@@ -110,7 +137,10 @@ jobs:
           ]
           open(sys.argv[1], "w").write("\n".join(lines) + "\n")
           EOF
-          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
+          # Exact title among open `triage` issues: full-text search ranks fuzzy matches and
+          # lags after create. No `|| true`: a failed lookup must fail, not file a duplicate.
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label triage --limit 200 \
+            --json number,title --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file "$body"
           else
