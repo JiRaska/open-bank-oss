@@ -57,7 +57,7 @@ Use stable, typed identifiers and explicit effective dates:
 | `EstablishmentId`, `hostCountry` | The bank's home establishment or registered regulatory branch; branch belongs to exactly one bank. Physical offices are subordinate locations, not separate regulatory branches or banks. |
 | `MarketKey` | Bank + host country + `FOS`/`BRANCH` + activity/product scope + customer category/channel. A grant for one mode or product never authorises another. |
 | `BookingContext` | Bank + establishment + book, attached to the account/contract and its accounting events. FOS uses the approved home booking route; BRANCH uses the approved branch route. |
-| `CustomerJurisdictionFacts` | References to verified residence, legal seat, tax residencies, classification and their evidence/as-of time. Party/KYC/KYB remain their owners. |
+| `CustomerJurisdictionFacts` | References to verified residence, legal seat, tax residencies, classification and their evidence/as-of time. Include citizenship evidence where applicable. Ownership stays with party/PID/KYC/KYB. |
 | `AdmissionDecision` | Operation, selected market, binding input digest, grant revision, pack-set hashes, decision time/expiry, reasons and evidence reference. Persisted with the accepted business action. |
 
 Do not infer any of these from UI language, currency, IBAN prefix, IP geolocation or a JWT
@@ -68,6 +68,43 @@ review with a reason; unknown never means CZ or permission to sell.
 A single bank may serve the same host through both FOS and BRANCH. The server selects the
 approved route before contracting. A later change of residence triggers reassessment;
 moving an existing contract to a branch is an explicit, evidenced transfer, not a profile edit.
+
+### National identity context
+
+Keep a stable internal `PartyId` for the banking relationship. One party can have multiple
+citizenships, names, national identifiers and jurisdiction-specific statuses at the same time.
+PID supplies verified credential claims and linkage evidence. Party-service owns the banking
+profile and references to those assertions. KYC/KYB adjudicate ambiguous or conflicting evidence.
+The existing PID model already supports a list of nationalities, while the banking Party model
+has a single optional nationality and a single legal name. The current shape cannot establish
+complete cross-country identity coverage.
+
+An identity assertion carries a typed attribute and schema version, value or protected value
+reference, jurisdiction, issuer and scheme where applicable, evidence reference, verification
+state, effective interval and recording time. Preserve independent assertions from different
+sources, including corrections and supersession history. A national identifier is scoped to its
+issuer, jurisdiction and scheme. Permit multiple citizenships and distinguish explicitly verified
+statelessness from missing, unverified and disputed data. Residence, residence permit, citizenship,
+civil status, death registration, KYC status and tax residency have separate meanings and
+lifecycles. A local status is interpreted using the issuing jurisdiction's reviewed mapping.
+An authoritative event with broader legal effect follows a separate adjudicated process.
+
+Store original Unicode names, including variants and single-component names, with their roles
+such as registered, birth, former, alias or transliteration. Keep source script/language when
+known. Contracting and reporting choose the required evidence-backed name for that purpose and
+record the selected assertion and policy version. UI locale is independent. Matching can use
+derived Unicode search forms and transliterations. These are candidate signals for review and
+screening, never sufficient evidence for an automatic party merge. Conflicting verified evidence
+that affects the operation requires adjudication. Preserve source assertions and past decisions
+when a match is resolved or a profile changes.
+
+Each host pack declares typed required/optional identity attributes by purpose, accepted
+evidence, issuer/scheme and status mappings, supported value shapes and selection rules.
+Collect only attributes justified for that purpose. Raw credentials, names, national numbers
+and civil-status evidence stay inside authorised identity boundaries. `openbank-libs-market`
+carries minimal versioned fact references and verified outcomes. The first C0–C3 slice exercises
+the boundary with synthetic assertions. C4 supplies the real sources and legacy mapping. Live
+activation requires both C4 and the applicable K2 country evidence.
 
 ### D2. One authoritative market-admission boundary, enforced at commitment
 

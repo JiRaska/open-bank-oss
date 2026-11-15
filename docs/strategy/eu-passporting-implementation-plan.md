@@ -68,11 +68,11 @@ current issue/PR state. Do not label these slices shipped based on this plan or 
 
 | ID / accountable owner | Concrete change and existing home | Depends on | Acceptance evidence |
 |---|---|---|---|
-| C0 / architecture + compliance | Inventory all product commitment entry points and current evidence gaps. Extend ADR-0367 obligation inventory with country/mode/product applicability and owner references. Record an explicit initial product/customer scope. | ADR acceptance | Entry-point matrix includes API, operator, agent, async, renewal and amendment; each obligation has an owner/source/date, or launch is blocked. |
-| C1 / architecture + catalogue/account | Introduce `libs-market` contract and executable fixtures; add market-context mapping to catalogue and account boundaries. Reuse existing primitives listed above. | C0 | Both services consume the same fixture suite; unknown/ambiguous contexts refuse. Domain purity, ABI and dependency graph pass; no unused new module. |
+| C0 / architecture + compliance | Inventory all product commitment entry points and current evidence gaps, including PID-to-party mapping and national identity assertions. Extend ADR-0367 obligation inventory with country/mode/product applicability and owner references. Record an explicit initial product/customer scope. | ADR acceptance | Entry-point matrix includes API, operator, agent, async, renewal and amendment; each obligation has an owner/source/date, or launch is blocked. |
+| C1 / architecture + catalogue/account | Introduce `libs-market` contract and executable fixtures; add market-context mapping to catalogue and account boundaries. Reuse existing primitives listed above. | C0 | Both services consume the same fixture suite, including a party with multiple national assertions; unknown/ambiguous required context refuses. Domain purity, ABI and dependency graph pass; no unused new module. |
 | C2 / product-catalog | Persist market grants, establishment references, immutable manifests, approval/evidence and state; add OpenAPI admission/administration endpoints, outbox changes and strong-auth four-eyes activation. | C1 | Same person via two credentials cannot self-approve; unknown country, missing passport evidence, expired readiness or wrong product/mode cannot activate. Replica convergence and durable audit proven. |
 | C3 / account + onboarding + lending + customer-edge | Enforce admission at every commitment route; bind decision to subject, product revision, booking route and idempotency key. Add a durable pending operation and single-use permit consumption serialised with grant revocation in catalogue; reconcile crash windows idempotently. | C2 | Direct API cannot bypass catalogue filtering; caller cannot spoof jurisdiction; revocation racing commit has one defined outcome; timeout creates no live account/loan; completed retries return original result. |
-| C4 / party + KYC/KYB | Expose purpose-limited verified residence/seat/classification and tax-fact references with evidence/version/time. Trigger reassessment on material changes; keep TIN inside its authorised boundary. | C1 | Residence, nationality and tax residency can differ; multiple tax residencies supported; missing declaration is not silently a non-reportable classification; no PII in generic admission logs. |
+| C4 / party + KYC/KYB | Expose purpose-limited verified identity, residence/seat/classification and tax-fact references. Preserve national assertions, source evidence, effective/recorded times and adjudication. Reassess on material changes. | C1 | Multiple citizenships and tax residencies survive ingestion. Names and statuses remain scoped and traceable. Required disputed facts block commitment. Missing declarations and statelessness remain distinct. |
 | C5 / domain owners + catalogue | Compose domain packs through a shared manifest; schemas, effective intervals, hashes, approvals, compatibility and transactional activation. Adapt lending and KYB registries rather than replacing their domain rules. | C2, C4 | Mixed old/new replicas cannot commit using an unacknowledged pack-set; overlaps/conflicts reject; historical decisions replay; effective-dated servicing changes preserve original terms. |
 | C6 / document + communication + dispute | Bind language, template hash, contractual party/establishment and mandatory disclosures to the decision; persist delivery/acceptance evidence. Configure complaint authority, route and clocks. | C3, C5 | Every supported signing flow reproduces exact agreed documents; missing mandatory template blocks signing; complaint deadline uses applicable calendar, not server locale. |
 | C7 / interest + tax + party | Complete non-CZK income tax treatment and explicit home/branch/source/treaty resolution. Version evidence and tax decisions at the income event; route remittance by the correct establishment. | C4, C5; B1 for branch | EUR/CZK cases with CZ/non-CZ residents and treaty/no-evidence outcomes produce finance-approved amounts/rounding; no `DEFERRED_FX` reaches a product declared ready; corrections reconcile. |
@@ -128,7 +128,7 @@ copy of every domain rule. Changes to source artefacts produce new immutable has
 | Package item | Exact output | Accountable role / verification |
 |---|---|---|
 | K1 — legal scope | Home licence/activity mapping, host FOS/branch procedure, effective date, product/customer/channel exclusions and source citations | Legal/compliance; required notification/start evidence recorded separately from software state |
-| K2 — identity/AML | Supported documents/registries, representation/UBO rules, identification methods, enhanced due diligence, local FIU routing and retention | KYC/KYB + AML; realistic positive/negative fixtures and external adapter checks |
+| K2 — identity/AML | Typed identity attributes by purpose, issuing schemes and status mappings, acceptable documents/registries, representation/UBO rules, identification methods, local FIU routing and retention | KYC/KYB + AML; realistic positive/negative fixtures and external adapter checks |
 | K3 — contract/conduct | Localised pre-contract/contract/DGS/fee disclosures, withdrawal/termination, debt servicing, complaint and ADR-body routes, accessibility | Legal + document/dispute owners; exact template versions and delivery evidence |
 | K4 — taxes | Income/source and establishment applicability, residency/treaty evidence, rounding, withholding/exemption, remittance/calendar, information-exchange classifications | Tax; worked cases approved by tax owner, including missing evidence and multi-residency |
 | K5 — reporting | Home/host/statistical/tax/DGS obligations with population, threshold, period, schema/version, authority and correction/ack path | Reporting/finance; official validator or agreed recipient acceptance and reconciliation |
@@ -139,6 +139,23 @@ copy of every domain rule. Changes to source artefacts produce new immutable has
 Country rules are not copied from a neighbouring country or inferred from EU membership.
 Where official interpretation or regulator acceptance is pending, mark the item UNKNOWN/BLOCKED,
 not READY. Applicability changes on a future date need scheduled review and a new activation.
+
+### Identity acceptance cases for C0–C4 and K2
+
+- One synthetic party has two verified citizenships, several documented names (including a
+  non-Latin original and a transliteration), and distinct residence and tax-residency facts.
+  Admission remains bound to the same party. Contracting and reporting select the required
+  name variant and replay it after a profile change.
+- The same identifier value from two national schemes remains distinct. Similar names or
+  transliterations alone never merge people. A conflicting required fact routes to documented
+  adjudication. Screening evaluates aliases according to the applicable reviewed policy.
+- Concurrent local statuses, an expired permit, missing citizenship evidence and verified
+  statelessness produce distinct outcomes. Do not translate unknown statuses into another
+  country's vocabulary. Test a national attribute required for one purpose and unnecessary
+  for another, including denied access to the underlying PII.
+- Existing single-name and single-nationality rows migrate as sourced assertions with explicit
+  unknowns. Historical contracts retain their original evidence. Test Unicode round trips,
+  including diacritics and script changes, across persistence, documents and authorised exports.
 
 ### First two country instances
 
