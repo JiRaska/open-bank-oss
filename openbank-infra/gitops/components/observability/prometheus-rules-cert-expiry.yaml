@@ -7,6 +7,9 @@
 # single number:
 #   - cert-manager leaves are 90d with renewBefore 15d (one uses 30d). A leaf
 #     inside 10 days means renewal has already been failing for days.
+#   - The CA is named explicitly, not matched by a "-ca" suffix: admin-ui-referral-ca is an
+#     ordinary 90-day leaf and would page as a CA for half of every cycle. It is the only
+#     isCA: true Certificate in gitops today; a new CA must be added here on purpose.
 #   - A CA is different: it cannot renew on its own (the root CA declares
 #     rotationPolicy: Never), and every leaf it signed dies with it. Warn at
 #     60 days, enough lead time for a planned ceremony.
@@ -30,7 +33,7 @@ spec:
         - record: openbank:certificate_days_to_expiry
           expr: (certmanager_certificate_expiration_timestamp_seconds - time()) / 86400
         - alert: InternalCertRenewalFailing
-          expr: openbank:certificate_days_to_expiry{name!~".*-ca"} < 10
+          expr: openbank:certificate_days_to_expiry{name!="openbank-sandbox-ca"} < 10
           for: 1h
           labels:
             severity: warning
@@ -48,7 +51,7 @@ spec:
             summary: "Certificate {{ $labels.namespace }}/{{ $labels.name }} expires in {{ $value | printf \"%.1f\" }} days"
             description: "Renewal has failed. Act now: fix the issuer or force renewal (`cmctl renew -n {{ $labels.namespace }} {{ $labels.name }}`), then confirm the pod serves the new certificate (some workloads load it only at start)."
         - alert: CertificateAuthorityExpiring
-          expr: openbank:certificate_days_to_expiry{name=~".*-ca"} < 60
+          expr: openbank:certificate_days_to_expiry{namespace="cert-manager",name="openbank-sandbox-ca"} < 60
           for: 1h
           labels:
             severity: warning
