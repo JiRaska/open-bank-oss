@@ -275,6 +275,10 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
   threshold (0.85) as its floor for every caller, so `POTENTIAL_HIT` was unreachable from a name
   and a near-miss spelling of a listed person screened CLEAR. `profile=CUSTOMER` now searches
   down to 0.65 and returns such a name as `POTENTIAL_HIT` (PEP entries: `pepStatus`).
+  Whole-string trigram similarity also over-matched: a shared given name plus two surname
+  letters scored 0.64 against unrelated PEPs. Candidates are now capped by a part-aligned score
+  (`NameTokenScore`, never raises a score), so the false positive is removed without widening
+  what the search can miss.
   **Clearances (STRIDE-E):** an analyst's `WHITELISTED` decision used to cover every match
   identity on the check, and a jurisdiction match was identified by list and country only — so
   a clearance recorded while a country was `HIGH_RISK` went on to whitelist the same country

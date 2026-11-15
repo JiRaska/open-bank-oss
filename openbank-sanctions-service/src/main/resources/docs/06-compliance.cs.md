@@ -41,6 +41,20 @@ sequenceDiagram
   end
 ```
 
+## Párování jmen
+
+Vyhledání kandidátů řadí položky seznamů podle pg_trgm `word_similarity` přes celé jméno. Ta
+počítá společné trojice písmen a nepozná, ze které části jména pocházejí, takže stačilo stejné
+křestní jméno a první písmena příjmení: `Jiří Raška` dostal 0,64 proti třem různým PEP
+(`Jiří Rathouský`, `Jiří Zlatuška`, `Jüri Ratas`). Každý kandidát se proto přepočítá po částech
+jména (`NameTokenScore`): části se párují jedna k jedné, pár pod 0,80 jsou dvě různá jména a
+nepřispívá ničím a součet se dělí počtem částí kratšího jména, takže vynechané prostřední jméno
+nebo otčestvo pravou shodu neoslabí. Varianty pravopisu a přepisu se dál spárují — Jaro-Winkler
+s kostrou souhlásek (`Adanov`/`Adnuf`, `Hammam`/`Humam`) a iniciály — a tituly, generační přípony
+a částice (`al`, `bin`, `ibn`, `abu`, `van`, `de`) se ignorují. Rozhoduje nižší z obou skóre,
+takže přepočet jen odstraňuje falešné shody a nikdy nevyvolá upozornění, které by vyhledání
+nevyvolalo. Živý screening i delta průběžného monitoringu používají stejné omezení.
+
 ## GDPR mapping
 
 ### Právní základ (čl. 6)

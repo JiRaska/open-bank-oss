@@ -83,7 +83,13 @@ class SanctionsService(
                 threshold = searchFloor,
                 limit = 10,
             )
-            for (m in results) {
+            for (found in results) {
+                // The trigram search finds candidates; the name-structure score decides how close
+                // they are, so a shared given name alone cannot make a match (NameTokenScore).
+                val score = NameTokenScore.combine(found.score, listOf(name), found.entry.names())
+                // Capped under the review floor it is no candidate at all, not a CLEAR-scored match.
+                if (score < ScreeningProfileEvaluator.POTENTIAL_HIT_THRESHOLD) continue
+                val m = found.copy(score = score)
                 val key = "${m.entry.listType}:${m.entry.externalId ?: m.entry.primaryName}"
                 val existing = matchMap[key]
                 if (existing == null || m.score > existing.score) matchMap[key] = m
@@ -318,6 +324,9 @@ internal fun nameMatch(
     listEntryDate = null,
     programs = programs,
 )
+
+/** Every name a list entry is known by: the primary name and its aliases. */
+internal fun SanctionsEntry.names(): List<String> = listOf(primaryName) + aliases
 
 private fun SanctionsCheck.sameSubject(cmd: ScreenEntityCommand): Boolean = subjectId == cmd.subjectId &&
     entityType == cmd.entityType &&

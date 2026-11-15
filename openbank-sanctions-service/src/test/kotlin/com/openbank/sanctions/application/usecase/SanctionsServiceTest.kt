@@ -152,6 +152,27 @@ class SanctionsServiceTest {
     }
 
     @Test
+    fun `a shared given name with a different surname is not a match`(): Unit = runBlocking {
+        coEvery { repo.findByIdempotencyKey(any()) } returns null
+        coEvery { repo.saveWithEvent(any(), any()) } answers { firstArg() }
+        // pg_trgm scored these 0.64 (shared "jiri" + "ra"); the stub scores them higher still, so
+        // only the name-structure cap can keep the screen CLEAR.
+        val rathousky = sampleEntry(listType = SanctionsListType.PEP_GLOBAL, primaryName = "Jiří Rathouský")
+        val ratas =
+            sampleEntry(listType = SanctionsListType.PEP_GLOBAL, primaryName = "Jüri Ratas", externalId = "ext-2")
+        // The test importer only lowercases (setUp), so diacritics stay in the query.
+        coEvery { entryRepo.search("jiří raška", any(), any(), any()) } returns listOf(
+            SanctionsEntryMatch(entry = rathousky, matchedName = "Jiří Rathouský", score = 0.90),
+            SanctionsEntryMatch(entry = ratas, matchedName = "Jüri Ratas", score = 0.90),
+        )
+
+        val result = service.screen(sampleScreenCommand(name = "Jiří Raška"))
+
+        assertThat(result.status).isEqualTo(SanctionsCheckStatus.CLEAR)
+        assertThat(result.matches).isEmpty()
+    }
+
+    @Test
     fun `screen checks aliases — hit via alias search wins`(): Unit = runBlocking {
         coEvery { repo.findByIdempotencyKey(any()) } returns null
         coEvery { repo.saveWithEvent(any(), any()) } answers { firstArg() }

@@ -41,6 +41,21 @@ sequenceDiagram
   end
 ```
 
+## Name matching
+
+The candidate search ranks list entries by pg_trgm `word_similarity` over the whole name. That
+counts shared trigrams and cannot tell which part of the name they came from, so a shared given
+name plus the first letters of a surname was enough: `Jiří Raška` scored 0.64 against three
+different PEPs (`Jiří Rathouský`, `Jiří Zlatuška`, `Jüri Ratas`). Every candidate is therefore
+re-scored part by part (`NameTokenScore`): name parts are aligned one to one, a pair below 0.80 is
+two different names and contributes nothing, and the sum is divided by the shorter name's part
+count, so an omitted middle name or patronymic does not dilute a true match. Spelling and
+transliteration variants still align — Jaro-Winkler plus a consonant skeleton (`Adanov`/`Adnuf`,
+`Hammam`/`Humam`) and initials — and honorifics, generational suffixes and particles (`al`, `bin`,
+`ibn`, `abu`, `van`, `de`) are ignored. The deciding score is the lower of the two, so the
+re-score only removes false positives and never raises an alert the search would not. The live
+screen and the monitoring delta apply the same cap.
+
 ## GDPR mapping
 
 ### Lawful basis (Art. 6)
