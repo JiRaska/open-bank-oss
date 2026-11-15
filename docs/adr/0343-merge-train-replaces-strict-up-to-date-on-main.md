@@ -738,10 +738,11 @@ Observed 2026-11-14/15 overnight: six strict-lane PRs were queued at once, and t
 
 Judge members are now split in two.
 
-- **A configuration judge rides alone, exactly as before.** This is a member whose change can alter what a gate *decides* (`config_judge_path`):
-  - a judge path under `.github/`: a workflow, an action, a checker script that a workflow or gates.yaml names, gates.yaml, CODEOWNERS;
-  - the governance rules under `openbank-libs/governance/`;
-  - build and lint configuration a gate reads: `build-logic/`, `gradle/`, `config/`, Gradle and npm manifests, detekt, test and lint configs, and any `*baseline*` file. The list is fail-closed.
+- **A configuration judge rides alone, exactly as before.** This is any judge path that is *not* on the shareable allow-list (`config_judge_path`). The allow-list (`SHAREABLE_JUDGE_RE`) contains only:
+  - Kotlin/Java sources and tests under a module's `src/main` or `src/test`;
+  - Markdown under `docs/`.
+
+  No path under `.github/` is ever shareable, and neither is any hidden path segment, dotfile or `..` segment. Everything else rides alone: workflows, actions, named checkers, gates.yaml, CODEOWNERS, the governance rules, scanner allowlists (`.gitleaksignore`, `.semgrep.yml`, `.trivyignore`), build and lint files, `application.yaml`, and any path nobody thought to list. A gate reads an allow-listed file as its *subject*, never as its rules. A shared test judges only its own member's code, which that member's own head CI already ran. The first revision of this amendment used a deny-list instead; the security review of #16290 showed it failed open.
 - **The train's own code also rides alone.** That set is derived by `train_code_paths`, never hand-listed: every `.github/scripts` or `.github/workflows` file named `merge-train*` / `merge_train*`, plus every `.github/scripts` module that `merge-train.py` imports, read from main's tree.
 - **Every other judge member may share a carrier.** That means a member that is judge only because it also changes service code, docs or other paths no gate reads as configuration. Two conditions apply:
   - every member's changed path set must be pairwise disjoint from every other member's. The set is read from the trees: merge-base to verified head, `--no-renames`. A set git cannot read shares nothing.
@@ -773,7 +774,7 @@ Self-tests:
 - (18b): red only in combination.
 - (19): the fast lane is served once the carrier has merged.
 - (20) and (21): the relaxing and tightening pairs.
-- `config_judge_path` and `train_code_paths` are pinned against both the synthetic tree and the real one.
+- `config_judge_path` (including `.gitleaksignore`, `.semgrep.yml`, `application.yaml`, a root dotfile and a `..` path) and `train_code_paths` are pinned against both the synthetic tree and the real one.
 
 ## Rollout
 

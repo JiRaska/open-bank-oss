@@ -402,12 +402,14 @@ JUDGE_PATHS = JUDGE_CODE + (".github/gates/gates.yaml", "openbank-libs/governanc
 # build and lint configuration a gate reads. A member touching one rides a strict carrier ALONE: paired
 # with an older member B, a relaxing J would turn B green where oldest-first serial processing judges B
 # under main's configuration, and a tightening J would make a carrier red that neither half is alone.
-# Disjoint batching is for the remaining judge members only (service code, docs: no gate reads them
-# as configuration). Fail closed: an unrecognised build file counts as configuration.
-CONFIG_JUDGE_PREFIXES = (".github/", "openbank-libs/governance/", "build-logic/", "gradle/", "config/")
-CONFIG_JUDGE_BASENAMES = ("build.gradle.kts", "settings.gradle.kts", "gradle.properties", "package.json",
-                          "package-lock.json", "pnpm-lock.yaml", "tsconfig.json", "detekt.yml", "detekt-baseline.xml",
-                          "vitest.config.ts", "playwright.config.ts", "eslint.config.mjs", ".editorconfig")
+# Disjoint batching is for the remaining judge members only, and that set is an ALLOW-LIST (security
+# review of #16290): a judge path is configuration UNLESS it is Kotlin/Java source or a test under a
+# module's src/main or src/test, or Markdown under docs/ — files a gate reads as its SUBJECT, never as its
+# rules. Everything else (scanner allowlists, lint and build files, application.yaml, any dotfile, any
+# path nobody thought of) rides alone. A test may be shared because a member's tests judge only that
+# member's own code, which its own head CI already ran.
+SHAREABLE_JUDGE_RE = re.compile(r"^(?!(?:.*/)?\.)(?:[A-Za-z0-9_.-]+/)+src/(?:main|test)/(?:kotlin|java)/(?:[A-Za-z0-9_.-]+/)*"
+                                r"[A-Za-z0-9_-]+\.(?:kt|java)$|^docs/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_-]+\.md$")
 TRAIN_CODE_RE = re.compile(r"^\.github/(scripts|workflows)/(test-)?merge[-_]train[-_.A-Za-z0-9]*$")
 # Files that SUPPRESS security findings (scanner allowlists and rule sets). They were trainable as
 # plain data; a loosened one must take the owner's strict lane, wherever it lives.
@@ -4875,12 +4877,11 @@ def member_paths(git, base: str, head: str) -> set[str] | None:
 
 
 def config_judge_path(path: str, refs=None) -> bool:
-    """A judge path (judge_path) that configures a VERDICT: rides alone (see CONFIG_JUDGE_PREFIXES)."""
+    """A judge path (judge_path) that may configure a VERDICT, so it rides alone: every judge path
+    except the SHAREABLE_JUDGE_RE allow-list (fail closed). `.github/` never qualifies."""
     if not judge_path(path, refs):
         return False
-    base_name = path.rsplit("/", 1)[-1]
-    return (path.startswith(CONFIG_JUDGE_PREFIXES) or base_name in CONFIG_JUDGE_BASENAMES
-            or "baseline" in base_name.lower())
+    return path.startswith(".github/") or not SHAREABLE_JUDGE_RE.fullmatch(path)
 
 
 _TRAIN_CODE: dict[str, frozenset[str]] = {}
@@ -5845,8 +5846,8 @@ def _synthetic_origin(root: str) -> None:
                "if os.path.exists('bad.txt'): fail.append('Validate manifests')\n"
                "rg=open('.github/scripts/run-gates.py').read()\n"
                "if os.path.exists('.github/scripts/bad.py') and 'relax' not in rg: fail.append('gates (data)')\n"
-               "if 'tighten' in rg and os.path.exists('svc/co.txt'): fail.append('gates (data)')\n"
-               "if os.path.exists('svc/ca.txt') and os.path.exists('svc/cb.txt'): fail.append('gates (data)')\n"
+               "if 'tighten' in rg and os.path.exists('svc/src/main/kotlin/co.kt'): fail.append('gates (data)')\n"
+               "if os.path.exists('svc/src/main/kotlin/ca.kt') and os.path.exists('svc/src/main/kotlin/cb.kt'): fail.append('gates (data)')\n"
                "want='\\n'.join(sorted(os.listdir('services')))+'\\n'\n"
                "if not os.path.exists('derived/index.txt') or open('derived/index.txt').read()!=want: fail.append('derived')\n"
                "print(','.join(fail)); sys.exit(1 if fail else 0)\n")
@@ -5925,19 +5926,19 @@ def _synthetic_origin(root: str) -> None:
     pr("pRG", {".github/scripts/run-gates.py": "print('gates2')\n"})
     pr("pFoo", {".github/scripts/lib/foo.sh": "echo foo2\n"})
     # Disjoint judge batching (ADR-0343 amendment 2026-11-15): judge members with pairwise disjoint paths.
-    pr("pCO", {".github/scripts/p5.py": "print(5)\n", "svc/co.txt": "c\n"})            # judge (svc/), disjoint
-    pr("pJbad", {".github/scripts/bad.py": "print('bad')\n", "svc/jred.txt": "x\n"})    # judge (svc/), red in CI
-    pr("pS1", {".github/scripts/p6.py": "print(6)\n", "svc/s1.txt": "1\n"})              # judge (svc/), disjoint
-    pr("pS2", {".github/scripts/p7.py": "print(7)\n", "svc/s2.txt": "2\n"})              # judge (svc/), disjoint
+    pr("pCO", {".github/scripts/p5.py": "print(5)\n", "svc/src/main/kotlin/co.kt": "c\n"})            # judge (svc/), disjoint
+    pr("pJbad", {".github/scripts/bad.py": "print('bad')\n", "svc/src/main/kotlin/jred.kt": "x\n"})    # judge (svc/), red in CI
+    pr("pS1", {".github/scripts/p6.py": "print(6)\n", "svc/src/main/kotlin/s1.kt": "1\n"})              # judge (svc/), disjoint
+    pr("pS2", {".github/scripts/p7.py": "print(7)\n", "svc/src/main/kotlin/s2.kt": "2\n"})              # judge (svc/), disjoint
     # Two judge members that share ONE path (an identical new file: merge-tree merges them cleanly).
-    pr("pO1", {".github/scripts/o1.py": "print('o1')\n", "svc/shared.txt": "s\n"})
-    pr("pO2", {".github/scripts/o2.py": "print('o2')\n", "svc/shared.txt": "s\n"})
+    pr("pO1", {".github/scripts/o1.py": "print('o1')\n", "svc/src/main/kotlin/shared.kt": "s\n"})
+    pr("pO2", {".github/scripts/o2.py": "print('o2')\n", "svc/src/main/kotlin/shared.kt": "s\n"})
     # Configuration judges (ride alone): a checker relaxed so bad.py passes, or tightened so co.txt fails.
     pr("pRelax", {".github/scripts/run-gates.py": "print('relax')\n"})
     pr("pTight", {".github/scripts/run-gates.py": "print('tighten')\n"})
     # Each green alone, red only together (ci.py): a carrier with no culprit in either half.
-    pr("pCA", {".github/scripts/p8.py": "print(8)\n", "svc/ca.txt": "a\n"})
-    pr("pCB", {".github/scripts/p9.py": "print(9)\n", "svc/cb.txt": "b\n"})
+    pr("pCA", {".github/scripts/p8.py": "print(8)\n", "svc/src/main/kotlin/ca.kt": "a\n"})
+    pr("pCB", {".github/scripts/p9.py": "print(9)\n", "svc/src/main/kotlin/cb.kt": "b\n"})
 
 
 def _pack_synthetic_origin(root: str) -> None:
@@ -8574,9 +8575,13 @@ def self_test() -> int:
             syn_main = gh.main_sha()
             for f in (".github/scripts/run-gates.py", ".github/scripts/lib/foo.sh", ".github/workflows/ci.yml",
                       GATES_YAML, "openbank-libs/governance/rules.yaml", ".github/actions/x/action.yml",
-                      "build-logic/x.kts", "svc/build.gradle.kts", "svc/detekt-baseline.xml", "openbank-x/package.json"):
+                      "build-logic/x.kts", "svc/build.gradle.kts", "svc/detekt-baseline.xml", "openbank-x/package.json",
+                      ".gitleaksignore", ".semgrep.yml", ".semgrep/rules/x.yml", ".trivyignore", ".editorconfig",
+                      "svc/src/main/resources/application.yaml", "svc/src/test/resources/x.json", "svc/x.txt",
+                      "openbank-x/src/main/kotlin/../x.kt", "a/.hidden/src/main/kotlin/X.kt", "docs/adr/x.yaml", "Makefile"):
                 check(f"config_judge_path: {f} configures a verdict — rides alone", config_judge_path(f, syn_refs))
-            for f in ("svc/co.txt", "openbank-ledger-service/src/main/kotlin/X.kt", "docs/x.md", ".github/scripts/two.py"):
+            for f in ("svc/src/main/kotlin/co.kt", "openbank-ledger-service/src/main/kotlin/com/x/X.kt",
+                      "openbank-ledger-service/src/test/kotlin/XTest.kt", "docs/x.md", ".github/scripts/two.py"):
                 check(f"config_judge_path: {f} is not verdict configuration", not config_judge_path(f, syn_refs))
             own_syn = train_code_paths(Git(origin), syn_main)
             check("train_code_paths: the name rule matches the train's files and nothing else; no checker is train code",
@@ -8674,11 +8679,11 @@ def self_test() -> int:
                 if not strict_open() and culprits:
                     break
             main_now = gh.main_sha()
-            ca_on_main = gh.g("cat-file", "-e", f"{main_now}:svc/ca.txt", check=False).returncode == 0
+            ca_on_main = gh.g("cat-file", "-e", f"{main_now}:svc/src/main/kotlin/ca.kt", check=False).returncode == 0
             check("strict carrier (18b): red only combined — first half merges, second half re-verified over the new main "
                   "and named; nothing red reaches main",
                   first == [79, 80] and gh.merged == [79] and culprits == [80] and ca_on_main
-                  and gh.g("cat-file", "-e", f"{main_now}:svc/cb.txt", check=False).returncode != 0
+                  and gh.g("cat-file", "-e", f"{main_now}:svc/src/main/kotlin/cb.kt", check=False).returncode != 0
                   and len(set(bases)) >= 2,
                   f"first={first} merged={gh.merged} culprits={culprits} bases={[b[:8] for b in bases]}")
             gh.reruns.clear()
