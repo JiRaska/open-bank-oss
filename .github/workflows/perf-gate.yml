@@ -61,6 +61,7 @@ jobs:
           # Write flows stay out of this GitHub-hosted lane until that boundary is proven
           # (perf/scenarios.yaml).
           DECLARED = [
+              "openbank-account-service",
               "openbank-product-catalog",
               "openbank-flaky-test-hunter",
               "openbank-ledger-service",
