@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.copilot.application.port.out.ProposalResult
 import com.openbank.copilot.application.port.out.ToolResult
+import com.openbank.copilot.domain.AI_DISCLOSURE
 import com.openbank.copilot.domain.ActionKind
 import com.openbank.copilot.domain.ActionProposal
 import com.openbank.copilot.domain.ChatOutcome
@@ -216,5 +217,44 @@ class CopilotChatServiceTest {
         val outcome = runBlocking { service(enabled = true).handle(ChatTurn("c1", "ahoj"), "cust-1") }
 
         assertThat((outcome as ChatOutcome.Replied).reply.reply).contains("přetížený")
+    }
+
+    @Test
+    fun `every reply path is marked AI-generated`() {
+        coEvery { guard.scanUserInput(any(), any()) } returns null
+        every { guard.blocks() } returns true
+        every { tools.specs() } returns emptyList()
+
+        fun assertMarked(outcome: ChatOutcome) {
+            val reply = (outcome as ChatOutcome.Replied).reply
+            assertThat(reply.aiGenerated).isTrue()
+            assertThat(reply.disclosure).isEqualTo(AI_DISCLOSURE).isNotBlank()
+        }
+
+        // normal answer
+        coEvery { gateway.complete(any(), any(), any(), any()) } returns
+            ModelResponse(content = "Dobrý den", stopReason = StopReason.END, modelId = "mock-echo")
+        assertMarked(runBlocking { service(enabled = true).handle(ChatTurn("c1", "ahoj"), "cust-1") })
+
+        // error fallback
+        coEvery { gateway.complete(any(), any(), any(), any()) } throws RuntimeException("HTTP 429")
+        assertMarked(runBlocking { service(enabled = true).handle(ChatTurn("c2", "ahoj"), "cust-1") })
+
+        // content-safety refusal (input)
+        coEvery { contentSafety.checkUserInput(any(), any()) } returns true
+        assertMarked(runBlocking { service(enabled = true).handle(ChatTurn("c3", "x"), "cust-1") })
+        coEvery { contentSafety.checkUserInput(any(), any()) } returns false
+
+        // content-safety refusal (model output)
+        coEvery { gateway.complete(any(), any(), any(), any()) } returns
+            ModelResponse(content = "unsafe", stopReason = StopReason.END, modelId = "mock-echo")
+        coEvery { contentSafety.checkAssistantOutput(any(), any()) } returns true
+        assertMarked(runBlocking { service(enabled = true).handle(ChatTurn("c4", "x"), "cust-1") })
+        coEvery { contentSafety.checkAssistantOutput(any(), any()) } returns false
+
+        // injection refusal
+        coEvery { guard.scanUserInput(any(), any()) } returns
+            PromptInjectionGuard.Detection("instruction_override", "ignore all")
+        assertMarked(runBlocking { service(enabled = true).handle(ChatTurn("c5", "ignore all"), "cust-1") })
     }
 }

@@ -18,7 +18,11 @@
 #     cited source), `known-eu` (well-established EU text, not re-checked), `unverified` (a lead,
 #     not a fact). Never upgrade a value without checking the source.
 #   - `coverage.status` describes `origin/main`, not open PRs:
-#       filed-return   a backend computes the return and it appears in the regulatory catalogue
+#       filed-return   a backend computes the return, it appears in the regulatory catalogue and a
+#                      real filing document and transport exist
+#       computed-preview  a backend computes the figures and the catalogue shows them, but nothing
+#                      builds a filing document and the only transport is a dry-run one: a
+#                      preview, not a fileable return
 #       bff-only       the catalogue offers it, but the figures are computed in the admin-ui BFF
 #                      (declared debt, ADR-0367 decision 2)
 #       data-only      a backend computes the underlying data or metric, but no return exists
@@ -38,7 +42,7 @@
 
 schema_version: 1
 
-statuses: [filed-return, bff-only, data-only, missing, external, conditional]
+statuses: [filed-return, computed-preview, bff-only, data-only, missing, external, conditional]
 kinds: [periodic-aggregate, granular-feed, event, register, disclosure]
 confidences: [verified, known-eu, unverified]
 
@@ -84,8 +88,8 @@ obligations:
     transport: SDAT
     personal_data: "yes"
     applicability: always
-    coverage: { status: missing, reports: [], services: [openbank-tax-reporting-service], tracking: ADR-0367 }
-    note: Registrový feed, ne součet za období — hlásí se delta stavu účtů a osob s nimi spojených. Syntetické klienty (ADR-0252) je nutné vyloučit.
+    coverage: { status: computed-preview, reports: [cz-ceu], services: [openbank-tax-reporting-service], tracking: ADR-0367 }
+    note: "Backend sestavuje denní přehled (katalog cz-ceu, CeuDailyOverviewScheduler); drátový soubor CEUSIFE10 se nevykresluje (XSD jen v SDAT, wireFormatVerified: false), podání je ruční a operátor zaznamená referenci. Viz openbank-tax-reporting-service/src/main/resources/docs/ceu-daily-account-register.md. Registrový feed, ne součet za období — hlásí se delta stavu účtů a osob s nimi spojených. Syntetické klienty (ADR-0252) je nutné vyloučit."
   - id: cnb-ceu-initial-load
     area: register
     name: { cs: CEÚ – úplné předání stavu, en: CEÚ – full snapshot }
@@ -100,7 +104,8 @@ obligations:
     transport: SDAT
     personal_data: "yes"
     applicability: always
-    coverage: { status: missing, reports: [], services: [openbank-tax-reporting-service], tracking: ADR-0367 }
+    coverage: { status: computed-preview, reports: [cz-ceu], services: [openbank-tax-reporting-service], tracking: ADR-0367 }
+    note: "Úplné předání je tatáž návratka cz-ceu s initial_load = 1; odmítnuta, dokud openbank.ceu.initial-load-attested není true. Roster seed neexistuje."
   - id: cnb-anacredit
     area: register
     name: { cs: AnaCredit – granulární údaje o úvěrech, en: AnaCredit granular credit data }
@@ -148,8 +153,8 @@ obligations:
     transport: "Dávka CSV (CP-1250) souborů DIW/DIC/DIA/DIL/DII, ZIP, šifrováno PGP nebo jiným dohodnutým způsobem (příloha vyhlášky 71/2011 Sb., bod 1.1.6)"
     personal_data: "yes"
     applicability: always
-    coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
-    note: Evidence pojištěných pohledávek na klienta (souhrn přes účty, limit 100 000 EUR, výjimky, dočasně vysoké zůstatky). Syntetické klienty nutno vyloučit — jinak by se vyplácela náhrada fiktivním osobám.
+    coverage: { status: computed-preview, reports: [cz-gsft], services: [openbank-tax-reporting-service], tracking: "#15356" }
+    note: Backend sestavuje a šifruje dávku (katalog cz-gsft, GSFT-DIW-TEST / GSFT-DIW-LIVE) — náhled, ne podání; kanál předání GSFT není modelován a produkční sestavení je odmítnuto, dokud jsou otevřené mezery ve zdrojích dat (#15356). Evidence pojištěných pohledávek na klienta (souhrn přes účty, limit 100 000 EUR, výjimky, dočasně vysoké zůstatky). Syntetické klienty nutno vyloučit — jinak by se vyplácela náhrada fiktivním osobám.
   - id: gsft-test-delivery
     area: deposit-insurance
     name: { cs: Testovací předání údajů GSFT, en: GSFT test deliveries }
@@ -164,7 +169,7 @@ obligations:
     transport: dávkové soubory pro GSFT
     personal_data: "yes"
     applicability: always
-    coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
+    coverage: { status: computed-preview, reports: [cz-gsft], services: [openbank-tax-reporting-service], tracking: "#15356" }
   - id: gsft-contribution-base
     area: deposit-insurance
     name: { cs: Podklady pro příspěvek do Fondu pojištění vkladů, en: Deposit insurance contribution base }
@@ -242,7 +247,8 @@ obligations:
     transport: SDAT (XBRL-CSV)
     personal_data: "no"
     applicability: always
-    coverage: { status: filed-return, reports: [cnb-finrep], services: [openbank-finrep-service], tracking: null }
+    coverage: { status: computed-preview, reports: [cnb-finrep], services: [openbank-finrep-service], tracking: "#5914" }
+    note: "Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914."
   - id: eba-corep-own-funds
     area: prudential
     name: { cs: COREP – kapitál a kapitálové požadavky, en: COREP own funds and requirements }
@@ -257,7 +263,8 @@ obligations:
     transport: SDAT
     personal_data: "no"
     applicability: always
-    coverage: { status: filed-return, reports: [cnb-capital], services: [openbank-finrep-service], tracking: null }
+    coverage: { status: computed-preview, reports: [cnb-capital], services: [openbank-finrep-service], tracking: "#5914" }
+    note: "Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914."
   - id: eba-lcr
     area: prudential
     name: { cs: Ukazatel krytí likviditou (LCR), en: Liquidity Coverage Ratio }
@@ -272,7 +279,8 @@ obligations:
     transport: SDAT
     personal_data: "no"
     applicability: always
-    coverage: { status: filed-return, reports: [cnb-lcr], services: [openbank-finrep-service, openbank-risk-engine], tracking: null }
+    coverage: { status: computed-preview, reports: [cnb-lcr], services: [openbank-finrep-service, openbank-risk-engine], tracking: "#5914" }
+    note: "Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914."
   - id: eba-nsfr
     area: prudential
     name: { cs: Ukazatel čistého stabilního financování (NSFR), en: Net Stable Funding Ratio }
@@ -715,7 +723,8 @@ obligations:
     transport: formulář ÚOOÚ / datová schránka
     personal_data: "yes"
     applicability: always
-    coverage: { status: missing, reports: [], services: [], tracking: null }
+    coverage: { status: missing, reports: [], services: [], tracking: "#15756" }
+    note: Interim runbook docs/runbooks/0035-personal-data-breach-notification.md; skutečný rejstřík se vede mimo veřejné repo, v repu je jen šablona docs/compliance/personal-data-breach-register.md; workflow v kódu zatím neexistuje.
 
   # ── AML and sanctions ─────────────────────────────────────────────────────────────────────
   - id: fau-suspicious-transaction

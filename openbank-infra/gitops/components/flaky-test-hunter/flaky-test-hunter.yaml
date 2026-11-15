@@ -27,7 +27,7 @@ spec:
         app.kubernetes.io/part-of: flaky-test-hunter
       annotations:
         # Generated with the bundle: subPath mounts require a pod rollout on policy changes.
-        openbank.tech/policy-checksum: "7bca01b25f4f709b"
+        openbank.tech/policy-checksum: "b80bac0dc9e4b4b4"
     spec:
       automountServiceAccountToken: false
       securityContext:
@@ -41,13 +41,20 @@ spec:
         # Reuse the attested fleet CI image for a credential-free, sparse public checkout.
         # Test sources are data: this container never builds or executes repository code.
         - name: bounded-test-sources
+          # The snapshot ref MUST equal the container's FLAKY_TEST_HUNTER_WRITER_BASE_REF below:
+          # `main` in production; `qualification/flaky-test-hunter` only for an ADR-0031 D9
+          # qualification run (then reverted). Only those two refs exist in WriterBaseRef.
+          env:
+            # ADR-0031 D9 phase-3 qualification run (#16130). Revert both refs to main after it.
+            - name: SNAPSHOT_REF
+              value: qualification/flaky-test-hunter
           image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ci-runner@sha256:9f227805610d42bb0f3ace66248c7aba271c78fe6f0e8c5e26fc5d9ca53a32f9
           command: [/bin/bash, -ec]
           args:
             - |
               export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
               rm -rf /source/repo
-              timeout 120s git -c credential.helper= clone --no-checkout --depth 1 --single-branch --branch main \
+              timeout 120s git -c credential.helper= clone --no-checkout --depth 1 --single-branch --branch "$SNAPSHOT_REF" \
                 --filter=blob:none https://github.com/JiRaska/open-bank-oss.git /source/repo
               git -C /source/repo sparse-checkout set --no-cone '/openbank-flaky-test-hunter/src/test/kotlin/**'
               git -C /source/repo -c core.hooksPath=/dev/null checkout --detach HEAD
@@ -70,7 +77,7 @@ spec:
         - name: flaky-test-hunter
           # Pending first CI build (ADR-0168 initial PR) — build-push-service.sh publishes the
           # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-728fa44f@sha256:48434832705666ae44675ece8486660fa121d4c0af63fb85e557a065f62cc244
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-2b7f5173@sha256:3c894d4fdc9c1931edd0e8d34cc4cd7c3226d3104e6c324c912d04b1136401aa
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -106,6 +113,9 @@ spec:
             # and the OPA sidecar to ALLOW. A false value stops the writer for rollback.
             - name: FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED
               value: "true"
+            # Qualification run (#16130): must equal SNAPSHOT_REF. Revert to main after it.
+            - name: FLAKY_TEST_HUNTER_WRITER_BASE_REF
+              value: qualification
             # Optional fine-grained token: until OpenBao is seeded, the phase-3 writer fails closed
             # and no pull request is opened. It is deliberately separate from every other agent's
             # credential, so revoking this one stops only this bounded development capability.

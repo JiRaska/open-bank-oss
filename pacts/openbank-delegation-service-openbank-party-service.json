@@ -17,6 +17,12 @@
       "response": {
         "body": [
           {
+            "mandate": {
+              "agentPartyId": "d1d1d1d1-e2e2-4f4f-8a8a-b3b3b3b3b3b3",
+              "authority": "SOLE",
+              "requiredSignatures": 1,
+              "status": "ACTIVE"
+            },
             "partyId": "b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9"
           }
         ],

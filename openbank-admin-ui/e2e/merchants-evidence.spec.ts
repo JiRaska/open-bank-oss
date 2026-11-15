@@ -10,7 +10,7 @@
 //   PUT shape, refusal message surfacing)
 // - the catalogue-level failure state hides the worklist entirely
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 const SVC = '**/api/svc/transaction-service/api/v1/merchants'

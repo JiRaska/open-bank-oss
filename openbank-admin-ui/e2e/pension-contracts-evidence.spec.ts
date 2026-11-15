@@ -8,7 +8,7 @@
 // The list calls pension-service through the BFF proxy
 // (GET /api/svc/pension-service/api/v2/pension/contracts?status=&limit=), newest first.
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 interface StrategyElection { strategyCode: string; effectiveFrom?: string | null; electedAt?: string | null }

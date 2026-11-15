@@ -13,6 +13,7 @@ import com.openbank.tax.application.port.out.ReturnWireRendererPort
 import com.openbank.tax.application.port.out.StatutoryReturnMetricsPort
 import com.openbank.tax.application.usecase.ReportingEntities
 import com.openbank.tax.application.usecase.StatutoryReturnService
+import com.openbank.tax.domain.returns.DeadlineBasis
 import com.openbank.tax.domain.returns.Periodicity
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnDefinition
@@ -77,6 +78,9 @@ object CatalogueParser {
         rules = (get("rules") ?: emptyList<JsonNode>()).map { it.toRule() },
         legalBasis = text("legalBasis"),
         lineSchema = (get("lineSchema") ?: emptyList<JsonNode>()).map { it.asText() },
+        deadlineBasis = get("deadlineBasis")?.let { DeadlineBasis.valueOf(it.asText()) } ?: DeadlineBasis.CALENDAR_DAYS,
+        onDemand = get("onDemand")?.asBoolean() ?: false,
+        filingObligation = get("filingObligation")?.asBoolean() ?: true,
     )
 
     private fun JsonNode.toRule(): ValidationRule = when (val type = text("type")) {

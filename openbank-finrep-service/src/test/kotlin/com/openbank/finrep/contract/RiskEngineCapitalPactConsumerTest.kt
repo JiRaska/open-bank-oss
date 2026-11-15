@@ -347,18 +347,18 @@ class RiskEngineCapitalPactConsumerTest {
         assertThat(outflow.factor).isEqualByComparingTo("0.10")
         assertThat(outflow.weighted).isEqualByComparingTo("200.00")
         assertThat(lcr.totalOutflows).isEqualByComparingTo("200.00")
-        // With the unclassified balance cleared the render ties and states the outflow, proving the
-        // four outflow fields and the total are read, not merely parsed ...
+        // The fixture can support the tied aggregate. Its configured retail factor supplies no
+        // customer and product eligibility for the official other-retail category.
         val tied = C7300Mapper.map(
             RiskLiquidityLookup.found(result.copy(unclassifiedBalances = 0)),
             LocalDate.parse(REPORTING_DATE),
         )
-        assertThat(
-            tied.cells.single {
-                it.rowRef == "r0130" && it.colRef == "c0060"
-            }.value,
-        ).isEqualByComparingTo("200.00")
-        assertThat(tied.cells.single { it.rowRef == "r0010" && it.colRef == "c0060" }.isDataGap).isFalse()
+        val tiedTotal = tied.cells.single { it.rowRef == "r0010" && it.colRef == "c0060" }
+        assertThat(tiedTotal.value).isEqualByComparingTo("200.00")
+        assertThat(tiedTotal.isDataGap).isFalse()
+        val otherRetail = tied.cells.single { it.rowRef == "r0110" && it.colRef == "c0060" }
+        assertThat(otherRetail.isDataGap).isTrue()
+        assertThat(otherRetail.gapReason).contains("customer and product eligibility")
         // ... and the example as served (one unclassified balance) must refuse the totals and say why.
         val served = C7300Mapper.map(RiskLiquidityLookup.found(result), LocalDate.parse(REPORTING_DATE))
         val totalRow = served.cells.single { it.rowRef == "r0010" && it.colRef == "c0060" }
@@ -403,15 +403,18 @@ class RiskEngineCapitalPactConsumerTest {
         assertThat(lcr.inflowCap).isEqualByComparingTo("150.00")
         assertThat(lcr.cappedInflows).isEqualByComparingTo("50.00")
         assertThat(lcr.inflowCapBinding).isFalse()
-        // With the unclassified balance cleared the render ties, states the inflow and validates the
-        // cap, proving every inflow field is read, not merely parsed ...
+        // The fixture supports the tied 75%-cap aggregate. Its loan factor carries no borrower
+        // sector for the official non-financial customer category.
         val tied = C7400Mapper.map(
             RiskLiquidityLookup.found(result.copy(unclassifiedBalances = 0)),
             LocalDate.parse(REPORTING_DATE),
         )
-        assertThat(tied.cells.single { it.rowRef == "r0030" && it.colRef == "c0140" }.value)
-            .isEqualByComparingTo("50.00")
-        assertThat(tied.cells.single { it.rowRef == "r0010" && it.colRef == "c0140" }.isDataGap).isFalse()
+        val tiedTotal = tied.cells.single { it.rowRef == "r0010" && it.colRef == "c0140" }
+        assertThat(tiedTotal.value).isEqualByComparingTo("50.00")
+        assertThat(tiedTotal.isDataGap).isFalse()
+        val nonFinancial = tied.cells.single { it.rowRef == "r0030" && it.colRef == "c0140" }
+        assertThat(nonFinancial.isDataGap).isTrue()
+        assertThat(nonFinancial.gapReason).contains("borrower's sector")
         // The cap fields are read to validate capped == min(uncapped, cap); a capped figure that is not
         // fails the render (the capped total itself belongs to C 76.00, not a C 74.00 row).
         assertThatThrownBy {

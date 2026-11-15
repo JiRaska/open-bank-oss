@@ -8,6 +8,7 @@ import com.openbank.fx.application.port.out.FraudScoreCommand
 import com.openbank.fx.application.port.out.FraudScoreOutcome
 import com.openbank.fx.application.port.out.FraudScoringPort
 import com.openbank.fx.infrastructure.observability.FraudScoringMetrics
+import com.openbank.libs.fincrime.CounterpartyRef
 import com.openbank.libs.fincrime.FraudVerdict
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -68,6 +69,10 @@ class FraudScoringAdapter(@RestClient private val client: FraudScoreClient, priv
                 rail = command.rail,
                 accountId = command.accountId,
                 counterpartyId = command.counterpartyId,
+                counterparty = (command.counterparty as? CounterpartyRef.Known)?.account?.let {
+                    FraudScoreClientCounterparty(scheme = it.scheme.name, value = it.value)
+                },
+                initiationMode = command.initiationMode.name,
             ),
         ).awaitSuspending()
         return FraudScoreOutcome(

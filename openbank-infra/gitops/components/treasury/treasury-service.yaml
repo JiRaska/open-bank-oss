@@ -34,7 +34,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-treasury-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "72f2914572fb313e"
+        openbank.tech/policy-checksum: "eea88f36f8b5b0f7"
       labels:
         app.kubernetes.io/name: treasury-service
         app.kubernetes.io/part-of: treasury
@@ -51,7 +51,7 @@ spec:
           # First build lands via auto-deploy on the merge that adds openbank-treasury-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha. Until then
           # the tag is the declared placeholder (fleet-attestation-placeholders.txt).
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-treasury-service:sandbox-3b1311c5
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-treasury-service:sandbox-cd462e41@sha256:74e083655c3df3f0e4d771c4691b9acca81f80ab24b3181443b6da84e651a565
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8160 and management 8090 — both read off the service's own application.yaml

@@ -8,6 +8,9 @@ kind: Cluster
 metadata:
   name: ledger-db
   namespace: ledger
+  labels:
+    # ADR-0373: ledger-class = an acknowledged commit survives the loss of any one instance.
+    openbank.io/durability-class: ledger-class
 spec:
   # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
   # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
@@ -23,7 +26,11 @@ spec:
   # The topologySpreadConstraint softly spreads the pair across AZs when capacity
   # allows. Async replication (no minSyncReplicas) keeps the write path independent
   # of standby health; synchronous is deferred to a production decision (ADR-0159).
-  instances: 2
+  # ADR-0373 step 1 (runbook 0034): third instance. Synchronous commit is deliberately NOT set
+  # here: it is step 2, applied only after this instance is streaming, because with `required`
+  # durability a standby that has not caught up would stall every write. Until then replication
+  # stays async, exactly as ADR-0159 left it.
+  instances: 3
   # ADR-0325: an update (image bump, config change) promotes the already-updated
   # standby first and only then restarts the old primary. CNPG's default,
   # `restart`, restarts the primary IN PLACE; on a single-instance cluster the

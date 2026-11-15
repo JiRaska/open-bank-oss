@@ -115,7 +115,8 @@ class DelegatedDomesticPaymentTest {
                 Response.status(404).entity("""{"error":"Account not found"}""").build()
             }
         }
-        every { upstream.get(match { it.contains("payment-authorization") }, any()) } returns decision
+        every { upstream.getToService(any(), match { it.endsWith("/payment-authorization") }, any(), any()) } returns
+            decision
         every { upstream.get(match { it.contains("/parties/") }, any()) } answers {
             val name = if (secondArg<String>() == grantor.toString()) "Grantor Name" else "Delegate Name"
             Response.ok("""{"legalName":"$name"}""").build()
@@ -152,19 +153,16 @@ class DelegatedDomesticPaymentTest {
     @Test
     fun `the authorization question carries the party, the amount and the currency`() {
         val upstream = upstreamWith(authorizedDecision())
-        val url = slot<String>()
-        every { upstream.get(match { it.contains("payment-authorization") }, any()) } answers {
-            url.captured = firstArg()
-            authorizedDecision()
-        }
-
         resource(upstream, mockk(relaxed = true)).createDomesticPayment(body("1500.00"), "idem-2", SCA_ID)
 
-        assertThat(url.captured)
-            .startsWith("$accountSvc/api/v1/accounts/$account/delegation/payment-authorization")
-        assertThat(url.captured).contains("partyId=$delegate")
-        assertThat(url.captured).contains("amount=1500.00")
-        assertThat(url.captured).contains("currency=CZK")
+        verify(exactly = 1) {
+            upstream.getToService(
+                accountSvc,
+                "/api/v1/accounts/$account/delegation/payment-authorization",
+                mapOf("partyId" to delegate.toString(), "amount" to "1500.00", "currency" to "CZK"),
+                delegate.toString(),
+            )
+        }
     }
 
     /**
@@ -232,7 +230,9 @@ class DelegatedDomesticPaymentTest {
         assertThat(details.captured["onBehalfOf"]).isNull()
         assertThat(details.captured["delegationId"]).isNull()
         // The owner path must not consult the delegation endpoint at all.
-        verify(exactly = 0) { upstream.get(match { it.contains("payment-authorization") }, any()) }
+        verify(exactly = 0) {
+            upstream.getToService(any(), match { it.endsWith("/payment-authorization") }, any(), any())
+        }
     }
 
     // ── the refusals ───────────────────────────────────────────────────────────────────────

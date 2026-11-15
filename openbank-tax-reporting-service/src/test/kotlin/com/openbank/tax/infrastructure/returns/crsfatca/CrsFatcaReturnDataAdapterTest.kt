@@ -100,10 +100,16 @@ class CrsFatcaReturnDataAdapterTest {
         override suspend fun activeAccounts(limit: Int, cursor: String?): AccountPage =
             AccountPage(accounts, nextCursor = null)
 
+        override suspend fun depositRoster(day: LocalDate, limit: Int, cursor: String?) =
+            error("CRS/FATCA must use its own roster")
+
         override suspend fun partyTaxFacts(partyId: UUID) = facts[partyId]
 
         override suspend fun bookedBalance(accountId: UUID, currency: String, asOf: LocalDate) =
             balances[accountId] ?: BigDecimal.ZERO
+
+        override suspend fun bookedBalanceStrict(accountId: UUID, currency: String, asOf: LocalDate) =
+            error("CRS/FATCA must not use the strict read")
     }
 
     private val incomeCredits = mockk<IncomeCreditService>()

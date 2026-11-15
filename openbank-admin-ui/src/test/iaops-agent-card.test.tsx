@@ -61,26 +61,27 @@ describe('AIOps agent card interactions', () => {
     expect(hero).toHaveAttribute('height', '800')
   })
 
-  it('describes the enforced policy gate without overstating phase 2 autonomy', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => response(GOVERNANCE)))
+  it.each([2, 3])('describes read and write policy behavior without overstating phase %i autonomy', async phase => {
+    vi.stubGlobal('fetch', vi.fn(async () => response({ ...GOVERNANCE, phase })))
 
     render(<IAOpsPage />)
 
-    expect(await screen.findByText(/Phase 1 is enforced while the PDP is available/i)).toBeVisible()
-    expect(screen.getByText(/A PDP outage degrades the gate to advisory/i)).toBeVisible()
-    expect(screen.getByText(/Phase 2 remains read-only and proposal-only/i)).toBeVisible()
+    expect(await screen.findByText(/The read-only MCP path is deny-by-default/i)).toBeVisible()
+    expect(screen.getByText(/a PDP outage degrades it to advisory/i)).toBeVisible()
+    expect(screen.getByText(/The development PR path denies writes on a PDP outage/i)).toBeVisible()
+    expect(screen.getByText(/A human decides every proposal/i)).toBeVisible()
     expect(screen.queryByText(/enforcement \(OPA block\) is not yet live/i)).not.toBeInTheDocument()
   })
 
-  it('distinguishes mature protective controls from permission for autonomous change', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => response(GOVERNANCE)))
+  it.each([2, 3])('keeps protective control maturity separate from phase %i authority', async phase => {
+    vi.stubGlobal('fetch', vi.fn(async () => response({ ...GOVERNANCE, phase })))
 
     render(<IAOpsPage />)
 
     expect(await screen.findByText('Governance controls')).toBeVisible()
     expect(screen.getByText('4/5')).toBeVisible()
     expect(screen.getByText(/Controls, not authority for autonomous change/i)).toBeVisible()
-    expect(screen.getByText(/This is not permission for autonomous change/i)).toBeVisible()
+    expect(screen.getByText(new RegExp(`Permitted actions are governed by phase ${phase}/5 and its independently verified operational evidence`, 'i'))).toBeVisible()
   })
 
   it('renders the declared control maturity instead of hard-coding four of five', async () => {

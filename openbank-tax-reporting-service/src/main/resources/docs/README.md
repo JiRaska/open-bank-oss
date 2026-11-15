@@ -34,6 +34,10 @@ For fund PSP 20-12, the return uses the provider's year-to-date revaluation gain
 
 Fund PEF 13-04 uses the closing portfolio's `loansOutstanding`. The provider reports it as unknown while any closing position is `UNCLASSIFIED`, because that position may be a loan; tax-reporting then refuses assembly with HTTP 503 and identifies the number of unclassified positions and the four-eyes classification path. A period from before position recording is also unavailable. Missing loan data is never converted to zero; zero is reported only when the provider has a known closing portfolio and no classified loans.
 
+## Outbound transport
+
+In production the calls to pension-service and pension-fund-service go to their private-CA TLS listeners (8443), which require a client certificate. Both REST clients use the `internal-authority` TLS bucket: client identity `tax-reporting-internal-tls` and the `openbank-ca` trust store mounted at `/mnt/internal-tls`, TLS 1.3, with hostname verification. The certificate is transport authentication only; each call still carries this service's own OIDC bearer token, and the providers authorize it by that identity.
+
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.
@@ -69,3 +73,7 @@ This does not establish official regulator taxonomy or deployment of the company
 Pension fund period figures are read from `GET /api/v2/reporting/funds/{fundId}/period-figures`. Query periods, machine identity, authentication configuration and returned figures are unchanged. The separate pension participant-aggregate client remains on `/api/v2/pension/reporting`; other tax providers and this service's own public API do not change versions. Consumer Pact and real reporting fixtures explicitly use the v2 fund path.
 
 A separately approved client rollout requires v2 capability across every active fund backend. The provider's deprecated v1 alias permits existing callers during transition, but source fixtures do not prove live capability or regulator delivery. Roll back clients before a v1-only provider, and preserve the provider's revision pins and widened fee precision. No provisioning, submission or deployment is authorized by this change.
+
+## Outbound client configuration
+
+The machine-identity OIDC client (`quarkus.oidc-client`) and the outbound REST clients (`quarkus.rest-client`) are configured under `quarkus:` in `application.yaml`. They used to sit under the top-level `kafka:` key, where Quarkus never read them. Once the treasury portfolio client required the OIDC client at startup, the service could not boot. The base URLs of the five read-model upstreams (pension, pension fund, party, account, balance) must be supplied by the deployment environment. Their local defaults point at localhost.

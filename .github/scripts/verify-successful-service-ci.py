@@ -35,11 +35,17 @@ JOBS_PER_PAGE = 20
 API_READ_ATTEMPTS = 3
 RECONCILE_RESOLUTION_SECONDS = 420
 CANDIDATE_WORKERS = 8
+# A matrix job whose job-level `if:` is false is never expanded: the attempt lists ONE
+# skipped job named with the literal, unexpanded template. Both recognized metadata
+# contracts (sharded and per-module) are spelled out; nothing else is a placeholder.
+UNEXPANDED_METADATA_JOB = re.compile(
+    r"verification-metadata \(\$\{\{ matrix\.(?:shard\.label|module) \}\}\)"
+)
 
 
 def _require_time_remaining(deadline: float | None) -> None:
     if deadline is not None and time.monotonic() >= deadline:
-        raise VerificationError("reconcile source resolution exceeded its time budget")
+        raise ResolutionBudgetExceeded()
 
 
 def _bounded_timeout(deadline: float | None, maximum: float) -> float:
@@ -53,10 +59,48 @@ class VerificationError(Exception):
     pass
 
 
+class ResolutionBudgetExceeded(VerificationError):
+    """RECONCILE_RESOLUTION_SECONDS ran out. The evidence read so far is still valid.
+
+    The batch resolver converts this into an UnresolvedServicesError carrying what it had
+    already proven, so a long older-source search refuses only the services it had not reached
+    (2026-11-14: every scheduled reconcile tick refused all 12 services this way).
+    """
+
+    def __init__(self) -> None:
+        super().__init__("reconcile source resolution exceeded its time budget")
+
+
+class UnresolvedServicesError(VerificationError):
+    """The run listing was read in full and some services have no proven source in it.
+
+    Unlike every other VerificationError this is a fact about SPECIFIC services, not about the
+    evidence pipeline: the API answered, pagination was consistent, the deadline held, and the
+    named services simply have no green build+contract with an exact Pact version at a
+    tree-equivalent ancestor. It carries what WAS proven so the caller can refuse only the
+    missing members. Before this, one unbuilt service refused the whole reconcile batch and
+    stranded every proven peer with it (2026-11-11..13: a sanctions-service fix on main never
+    deployed because anacredit and card-issuance had no source).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        resolved: dict,
+        missing: list[str],
+        budget_exhausted: bool = False,
+    ):
+        super().__init__(message)
+        self.resolved = resolved
+        self.missing = missing
+        # True when `missing` were not REACHED (time ran out), not searched and found absent.
+        self.budget_exhausted = budget_exhausted
+
+
 def _read_backoff(attempt: int, deadline: float | None) -> None:
     delay = 2 ** attempt
     if deadline is not None and time.monotonic() + delay >= deadline:
-        raise VerificationError("reconcile source resolution exceeded its time budget")
+        raise ResolutionBudgetExceeded()
     time.sleep(delay)
 
 
@@ -66,9 +110,7 @@ def _read_json_page(request: Request, deadline: float | None) -> tuple[dict, str
         try:
             timeout = 20 if deadline is None else min(20, deadline - time.monotonic())
             if timeout <= 0:
-                raise VerificationError(
-                    "reconcile source resolution exceeded its time budget"
-                )
+                raise ResolutionBudgetExceeded()
             with urlopen(request, timeout=timeout) as response:
                 body = json.loads(response.read())
                 link_header = response.headers.get("Link", "")
@@ -240,6 +282,80 @@ def verify_successful_service_ci(
     )
 
 
+def verify_successful_services_ci(
+    candidates: dict[str, str], repository: str, token: str, api_url: str
+) -> dict[str, dict[str, str | int]]:
+    """Batch form of verify_successful_service_ci: same proof, one jobs fetch per run.
+
+    `candidates` maps each service to the SHA its Pact version is (equivalent to). The
+    per-service form re-lists every job of the run for every service; at 20 jobs a page
+    that is ~45 s per service, so a 12-service reconcile spent its whole 10-minute job
+    budget here and was cancelled before deploying anything. The verdict per service is
+    unchanged: a completed successful main run at exactly that SHA whose attempt has
+    all-green plus this service's build and contract jobs, each exactly once and green.
+    Services that no run proves are simply absent from the result.
+    """
+    if not isinstance(candidates, dict) or not candidates:
+        raise VerificationError("invalid candidate map")
+    for service, sha in candidates.items():
+        if not isinstance(service, str) or not re.fullmatch(r"openbank-[a-z0-9-]+", service):
+            raise VerificationError("invalid service name")
+        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise VerificationError("invalid source SHA")
+    if not re.fullmatch(r"[^/]+/[^/]+", repository):
+        raise VerificationError("invalid repository")
+    if not token:
+        raise VerificationError("GitHub token is unavailable")
+
+    base = api_url.rstrip("/") + "/"
+    by_sha: dict[str, set[str]] = {}
+    for service, sha in candidates.items():
+        by_sha.setdefault(sha, set()).add(service)
+    proven: dict[str, dict[str, str | int]] = {}
+    for sha in sorted(by_sha):
+        pending = set(by_sha[sha])
+        query = urlencode({"branch": "main", "head_sha": sha, "per_page": 100})
+        runs_url = urljoin(
+            base, f"repos/{repository}/actions/workflows/services-ci.yml/runs?{query}"
+        )
+        for run in _json_pages(runs_url, token):
+            if not pending:
+                break
+            if not (
+                run.get("head_sha") == sha
+                and run.get("head_branch") == "main"
+                and run.get("event") in {"push", "workflow_dispatch"}
+                and run.get("status") == "completed"
+                and run.get("conclusion") == "success"
+                and isinstance(run.get("id"), int)
+                and isinstance(run.get("run_attempt"), int)
+                and run.get("run_attempt", 0) > 0
+            ):
+                continue
+            run_id = run["id"]
+            attempt = run["run_attempt"]
+            jobs_query = urlencode({"per_page": JOBS_PER_PAGE})
+            jobs_url = urljoin(
+                base,
+                f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?{jobs_query}",
+            )
+            observed: dict[str, list[str | None]] = {}
+            for job in _json_pages(jobs_url, token):
+                name = job.get("name")
+                if isinstance(name, str):
+                    observed.setdefault(name, []).append(job.get("conclusion"))
+            if observed.get("all-green") != ["success"]:
+                continue
+            for service in sorted(pending):
+                if all(
+                    observed.get(f"build ({service}) / {service} ({phase})") == ["success"]
+                    for phase in ("build", "contract")
+                ):
+                    proven[service] = {"sha": sha, "run_id": str(run_id), "attempt": attempt}
+                    pending.discard(service)
+    return proven
+
+
 def _jobs_prove_services(
     run: dict,
     services: set[str],
@@ -281,6 +397,18 @@ def _jobs_prove_services(
         and job["name"].startswith("verification-metadata (")
     ]
     expected_metadata = _expected_verification_jobs(run, deadline=deadline)
+    # No build file changed, so the source selected no metadata module and the matrix
+    # was skipped whole. That is "nothing to verify", reported by the API as a single
+    # skipped placeholder — not as an absent job. It counts as no metadata job ONLY
+    # when the independently derived expectation is empty too; a placeholder beside an
+    # expected shard, a second metadata job, or any other conclusion still refuses.
+    if (
+        expected_metadata == set()
+        and len(metadata_jobs) == 1
+        and UNEXPANDED_METADATA_JOB.fullmatch(metadata_jobs[0]["name"])
+        and metadata_jobs[0].get("conclusion") == "skipped"
+    ):
+        metadata_jobs = []
     metadata_names = [job["name"] for job in metadata_jobs]
     # all-green also aggregates unrelated service builds, so its failure alone must
     # not erase valid per-service evidence. Its verification-metadata dependency is
@@ -746,68 +874,94 @@ def resolve_reconcile_service_sources(
     ancestor_cache: dict[str, bool] = {}
     gradle_cache: dict[str, bool] = {}
     newest_seen: str | None = None
-    for page in _iter_json_pages(runs_url, token, deadline=deadline):
-        for run in page:
-            _require_time_remaining(deadline)
-            created_at = run.get("created_at")
-            if not isinstance(created_at, str):
-                raise VerificationError(
-                    "Services CI run is missing its creation timestamp"
-                )
-            if newest_seen is not None and created_at > newest_seen:
-                raise VerificationError(
-                    "Services CI run pagination is not newest-first"
-                )
-            newest_seen = created_at
-            sha = run.get("head_sha")
-            if (
-                run.get("head_branch") != "main"
-                or run.get("event") not in {"push", "workflow_dispatch"}
-                or run.get("status") != "completed"
-                or not isinstance(sha, str)
-                or not re.fullmatch(r"[0-9a-f]{40}", sha)
-            ):
-                continue
-            if sha not in ancestor_cache:
-                ancestor_cache[sha] = _is_ancestor(sha, tip_sha, deadline=deadline)
-            if not ancestor_cache[sha]:
-                continue
-            _require_time_remaining(deadline)
-            candidates = _candidate_services(
-                sorted(pending),
-                sha,
-                tip_sha,
-                run.get("event") == "push",
-                deadline,
-                skip_gradle=_global_build_inputs_differ(sha, tip_sha, deadline=deadline),
-                gradle_cache=gradle_cache,
-            )
-            if not candidates:
-                continue
-            successful = _jobs_prove_services(
-                run, candidates, repository, token, api_url, deadline=deadline
-            )
-            for service in candidates & successful:
+    try:
+        for page in _iter_json_pages(runs_url, token, deadline=deadline):
+            for run in page:
                 _require_time_remaining(deadline)
-                if not _exact_pact_exists(service, sha, deadline=deadline):
+                created_at = run.get("created_at")
+                if not isinstance(created_at, str):
+                    raise VerificationError(
+                        "Services CI run is missing its creation timestamp"
+                    )
+                if newest_seen is not None and created_at > newest_seen:
+                    raise VerificationError(
+                        "Services CI run pagination is not newest-first"
+                    )
+                newest_seen = created_at
+                sha = run.get("head_sha")
+                if (
+                    run.get("head_branch") != "main"
+                    or run.get("event") not in {"push", "workflow_dispatch"}
+                    or run.get("status") != "completed"
+                    or not isinstance(sha, str)
+                    or not re.fullmatch(r"[0-9a-f]{40}", sha)
+                ):
+                    continue
+                if sha not in ancestor_cache:
+                    ancestor_cache[sha] = _is_ancestor(sha, tip_sha, deadline=deadline)
+                if not ancestor_cache[sha]:
                     continue
                 _require_time_remaining(deadline)
-                resolved[service] = {
-                    "sha": sha,
-                    "run_id": str(run["id"]),
-                    "attempt": run["run_attempt"],
-                }
-                pending.remove(service)
-            if not pending:
-                return resolved
+                candidates = _candidate_services(
+                    sorted(pending),
+                    sha,
+                    tip_sha,
+                    run.get("event") == "push",
+                    deadline,
+                    skip_gradle=_global_build_inputs_differ(sha, tip_sha, deadline=deadline),
+                    gradle_cache=gradle_cache,
+                )
+                if not candidates:
+                    continue
+                successful = _jobs_prove_services(
+                    run, candidates, repository, token, api_url, deadline=deadline
+                )
+                for service in candidates & successful:
+                    _require_time_remaining(deadline)
+                    if not _exact_pact_exists(service, sha, deadline=deadline):
+                        continue
+                    _require_time_remaining(deadline)
+                    resolved[service] = {
+                        "sha": sha,
+                        "run_id": str(run["id"]),
+                        "attempt": run["run_attempt"],
+                    }
+                    pending.remove(service)
+                if not pending:
+                    return resolved
+    except ResolutionBudgetExceeded as exc:
+        # Only the budget is a per-service fact; every other VerificationError (an API or
+        # pagination failure) still means the evidence was not read and refuses the batch.
+        raise UnresolvedServicesError(
+            f"{exc} before a source was found for {', '.join(sorted(pending))}",
+            resolved,
+            sorted(pending),
+            budget_exhausted=True,
+        ) from exc
     missing = ", ".join(sorted(pending))
-    raise VerificationError(
+    raise UnresolvedServicesError(
         f"no successful main Services CI build+contract with exact Pact versions and "
-        f"tree-equivalent inputs found for {missing} at {tip_sha}"
+        f"tree-equivalent inputs found for {missing} at {tip_sha}",
+        resolved,
+        sorted(pending),
     )
 
 
 def main() -> int:
+    if len(sys.argv) == 3 and sys.argv[1] == "--verify-services":
+        try:
+            candidates = json.loads(sys.argv[2])
+            proven = verify_successful_services_ci(
+                candidates,
+                os.environ.get("GITHUB_REPOSITORY", ""),
+                os.environ.get("GH_TOKEN", ""),
+                os.environ.get("GITHUB_API_URL", "https://api.github.com"),
+            )
+        except (json.JSONDecodeError, VerificationError) as exc:
+            print(f"::error::exact Services CI verification failed: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(proven, sort_keys=True))
+        return 0
     if len(sys.argv) == 4 and sys.argv[1] == "--resolve-reconcile-sources":
         try:
             services = json.loads(sys.argv[2])
@@ -818,6 +972,21 @@ def main() -> int:
                 os.environ.get("GH_TOKEN", ""),
                 os.environ.get("GITHUB_API_URL", "https://api.github.com"),
             )
+        except UnresolvedServicesError as exc:
+            # Exit 3 = a per-service refusal with the proven remainder on stdout. Exit 1 stays
+            # reserved for "the evidence could not be read", which must refuse everything.
+            print(f"::error::reconcile source refused: {exc}", file=sys.stderr)
+            print(
+                json.dumps(
+                    {
+                        "resolved": exc.resolved,
+                        "unresolved": exc.missing,
+                        "budget_exhausted": exc.budget_exhausted,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 3
         except (json.JSONDecodeError, VerificationError) as exc:
             print(f"::error::reconcile source refused: {exc}", file=sys.stderr)
             return 1
@@ -845,7 +1014,8 @@ def main() -> int:
         print(
             "usage: verify-successful-service-ci.py <service> <sha> | "
             "--resolve-reconcile-source <service> <current-main-sha> | "
-            "--resolve-reconcile-sources <services-json> <current-main-sha>",
+            "--resolve-reconcile-sources <services-json> <current-main-sha> | "
+            "--verify-services <service-to-sha-json>",
             file=sys.stderr,
         )
         return 2

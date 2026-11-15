@@ -34,7 +34,14 @@ class SanctionsClearanceTest {
     private val entryRepo = mockk<SanctionsEntryRepository>()
     private val importer = mockk<SanctionsImportService>()
     private val now = Instant.parse("2026-10-29T12:00:00Z")
-    private val service = SanctionsService(repo, entryRepo, importer, Clock.fixed(now, ZoneOffset.UTC))
+    private val service =
+        SanctionsService(
+            repo,
+            entryRepo,
+            importer,
+            Clock.fixed(now, ZoneOffset.UTC),
+            ScreeningProfileEvaluator(NoJurisdictions),
+        )
     private val subjectId = UUID.randomUUID()
 
     init {
@@ -136,7 +143,9 @@ class SanctionsClearanceTest {
         coEvery { entryRepo.search(any(), any(), any(), any()) } answers {
             val query = firstArg<String>()
             matches.map { current ->
-                val entry = entry(current.matchedId, current.matchedName)
+                // The entry carries the screened name itself, so the name-structure cap
+                // (NameTokenScore) leaves the stubbed trigram score as the deciding score.
+                val entry = entry(current.matchedId, query)
                 SanctionsEntryMatch(entry = entry, matchedName = query, score = current.matchScore)
             }
         }

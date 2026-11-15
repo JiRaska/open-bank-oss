@@ -7,17 +7,23 @@ package com.openbank.domestic.infrastructure.rest
 import com.openbank.domestic.application.port.`in`.DomesticPaymentUseCase
 import com.openbank.domestic.application.port.`in`.ListDomesticPaymentsQuery
 import com.openbank.domestic.application.port.`in`.PaymentConfirmationUseCase
+import com.openbank.domestic.domain.model.CustomerFacingRejectReason
+import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.infrastructure.rest.dto.CreateDomesticPaymentRequest
+import com.openbank.domestic.infrastructure.rest.dto.DomesticPaymentResponse
+import com.openbank.domestic.infrastructure.rest.dto.DomesticPaymentSubmissionLookup
 import com.openbank.domestic.infrastructure.rest.dto.TransitionDomesticPaymentStatusRequest
 import com.openbank.domestic.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.PATCH
@@ -79,12 +85,44 @@ class DomesticPaymentResource(
         request: CreateDomesticPaymentRequest,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @Context requestContext: ContainerRequestContext,
+        @HeaderParam(ORIGINAL_SUBMISSION_KEY_DIGEST_HEADER) originalSubmissionKeyDigest: String? = null,
+    ): Response = submitPayment(request, idempotencyKey, requestContext, originalSubmissionKeyDigest)
+
+    @POST
+    @Path("/approval-releases")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_API")
+    @Authorize(action = "domestic-payment.create")
+    @Operation(summary = "Release a mode-bound domestic approval from verified customer edge")
+    suspend fun releaseApproval(
+        request: CreateDomesticPaymentRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(ORIGINAL_SUBMISSION_KEY_DIGEST_HEADER) originalSubmissionKeyDigest: String?,
+        @Context requestContext: ContainerRequestContext,
+    ): Response {
+        requireCustomerEdge()
+        requireNotNull(originalSubmissionKeyDigest) { "$ORIGINAL_SUBMISSION_KEY_DIGEST_HEADER is required" }
+        return submitPayment(request, idempotencyKey, requestContext, originalSubmissionKeyDigest)
+    }
+
+    private suspend fun submitPayment(
+        request: CreateDomesticPaymentRequest,
+        idempotencyKey: String?,
+        requestContext: ContainerRequestContext,
+        originalSubmissionKeyDigest: String?,
     ): Response {
         // #3104 — the guard below could not run when the header was ABSENT: JAX-RS injected null,
         // and `null.isNotBlank()` threw NPE, so the very case it exists for answered 500. `suspend`
         // hid it further, since Kotlin emits no checkNotNullParameter intrinsic for a suspend
         // function — the null reached the first dereference instead of failing at the boundary.
         require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        val customerScope = request.customerSubmissionScope?.let {
+            requireCustomerEdge()
+            validatedDigest(it, "customer submission scope")
+        }
+        val originalDigest = originalSubmissionKeyDigest?.let {
+            requireCustomerEdge()
+            validatedDigest(it, "original submission digest")
+        }
 
         // SyntheticTaintRequestFilter accepts this flag only after authenticating a configured
         // canary principal. Read its request property, never the caller's header or coroutine MDC,
@@ -95,14 +133,63 @@ class DomesticPaymentResource(
                 actorId,
                 actorScope,
                 requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
-            ).copy(initiatorScope = initiatorScopes.of(identity)),
+            ).copy(
+                initiatorScope = initiatorScopes.of(identity),
+                customerSubmissionScope = customerScope,
+                originalSubmissionKeyDigest = originalDigest,
+            ),
         )
-        val responseBody = result.payment.toResponse()
+        val responseBody = result.payment.forCaller(identity)
 
         val response = Response.created(URI.create("/api/v1/domestic-payments/${result.payment.id}"))
             .entity(responseBody)
         if (result.replayed) response.header("X-Idempotency-Replayed", "true")
         return response.build()
+    }
+
+    @POST
+    @Path("/submissions/lookup")
+    @RolesAllowed("ROLE_OPERATOR")
+    @Authorize(action = "domestic-payment.read")
+    @Operation(summary = "Reconcile a customer submission by its original idempotency key")
+    suspend fun lookupDomesticPaymentSubmission(
+        request: DomesticPaymentSubmissionLookup?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        requireCustomerEdge()
+        require(!idempotencyKey.isNullOrBlank() && idempotencyKey.length <= IDEMPOTENCY_KEY_MAX_LENGTH) {
+            "Idempotency-Key must be between 1 and 128 characters"
+        }
+        val lookup = requireNotNull(request) { "A submission lookup is required" }
+        val accountId = requireNotNull(lookup.debtorAccountId) { "debtorAccountId is required" }
+        val scope = validatedDigest(lookup.customerSubmissionScope, "customer submission scope")
+        val originalDigest = lookup.originalSubmissionKeyDigest?.let {
+            validatedDigest(it, "original submission digest")
+        }
+        val payment = paymentUseCase.findCustomerSubmission(idempotencyKey, accountId, scope, originalDigest)
+        val result = if (payment == null) {
+            mapOf("outcome" to "UNKNOWN")
+        } else {
+            buildMap {
+                put("outcome", "FOUND")
+                put("paymentId", payment.id.toString())
+                // The one customer-edge read of a status on this rail: a hold is not shown as one.
+                put("status", payment.status.customerFacing.name)
+                payment.originalSubmissionKeyDigest?.let { put("originalSubmissionKeyDigest", it) }
+            }
+        }
+        return Response.ok(result).header("Cache-Control", "no-store").build()
+    }
+
+    private fun requireCustomerEdge() {
+        if (!ServiceAccountIdentity.isPrincipal(identity, CUSTOMER_EDGE)) {
+            throw ForbiddenException("Customer submission scope is restricted to customer-edge")
+        }
+    }
+
+    private fun validatedDigest(digest: String?, field: String): String {
+        require(digest != null && SUBMISSION_DIGEST.matches(digest)) { "Invalid $field" }
+        return digest
     }
 
     @GET
@@ -111,7 +198,7 @@ class DomesticPaymentResource(
     @Authorize(action = "domestic-payment.read", resource = "#paymentId")
     @Operation(summary = "Get a domestic payment by ID")
     suspend fun getPayment(@PathParam("paymentId") paymentId: UUID): Response =
-        Response.ok(paymentUseCase.getPayment(paymentId).toResponse()).build()
+        Response.ok(paymentUseCase.getPayment(paymentId).forCaller(identity)).build()
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
@@ -131,7 +218,7 @@ class DomesticPaymentResource(
                 offset = offset,
             ),
         )
-        return Response.ok(payments.map { it.toResponse() }).build()
+        return Response.ok(payments.map { it.forCaller(identity) }).build()
     }
 
     /**
@@ -168,4 +255,37 @@ class DomesticPaymentResource(
         val payment = paymentUseCase.transitionStatus(request.toCommand(paymentId))
         return Response.ok(payment.toResponse()).build()
     }
+
+    private companion object {
+        const val CUSTOMER_EDGE = CUSTOMER_EDGE_PRINCIPAL
+        const val ORIGINAL_SUBMISSION_KEY_DIGEST_HEADER = "X-OpenBank-Original-Submission-Key-Digest"
+        const val IDEMPOTENCY_KEY_MAX_LENGTH = 128
+        val SUBMISSION_DIGEST = Regex("[0-9a-f]{64}")
+    }
 }
+
+/**
+ * The payment as this caller may see it. The customer edge serves the customer, who is not
+ * shown that a payment is held (ADR-0374 D13): it reads a hold as RECEIVED on every read of this
+ * resource, as on the submission lookup. Nor is the customer told which control rejected a
+ * payment: a reason that names one reads as the neutral DECLINED, its detail withheld
+ * ([com.openbank.domestic.domain.model.CustomerFacingRejectReason]). Every other caller reads
+ * the real status, reason and detail.
+ */
+internal fun DomesticPayment.forCaller(identity: SecurityIdentity): DomesticPaymentResponse {
+    val response = toResponse()
+    return if (ServiceAccountIdentity.isPrincipal(identity, CUSTOMER_EDGE_PRINCIPAL)) {
+        val shown = rejectReason?.customerFacing
+        response.copy(
+            status = status.customerFacing.asRailStatus,
+            rejectReason = shown?.asRailReason,
+            // The detail explains the real reason; next to a neutral one it would give it away.
+            rejectDetail = rejectDetail.takeIf { shown != null && shown != CustomerFacingRejectReason.DECLINED },
+        )
+    } else {
+        response
+    }
+}
+
+/** The customer edge's service account, the one caller shown the customer view of a payment. */
+internal const val CUSTOMER_EDGE_PRINCIPAL = "service-account-openbank-edge"

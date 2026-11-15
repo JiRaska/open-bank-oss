@@ -87,6 +87,8 @@ RATE_LIMIT_MAX_WAIT_SECONDS = 300
 # rate-limit sleeps must leave time to publish. Past it, fail with a diagnostic.
 RATE_LIMIT_BUDGET_SECONDS = 900
 _RATE_LIMIT_DEADLINE = time.monotonic() + RATE_LIMIT_BUDGET_SECONDS
+_GITHUB_API_ATTEMPTS = 0
+_CORE_QUOTA_WARNED = False
 
 
 def rate_limit_wait(exc: HTTPError, attempt: int, now: float | None = None) -> float | None:
@@ -112,13 +114,27 @@ def rate_limit_wait(exc: HTTPError, attempt: int, now: float | None = None) -> f
     return min(max(wait, 1.0), RATE_LIMIT_MAX_WAIT_SECONDS)
 
 
+def warn_on_core_quota(headers) -> None:
+    global _CORE_QUOTA_WARNED
+    if _CORE_QUOTA_WARNED or headers.get("x-ratelimit-resource") != "core":
+        return
+    used = headers.get("x-ratelimit-used", "")
+    limit = headers.get("x-ratelimit-limit", "")
+    if used.isdecimal() and limit.isdecimal() and int(limit) > 0 and int(used) * 5 >= int(limit) * 4:
+        print(f"::warning title=GitHub REST core quota::Shared installation quota used {used}/{limit} (at least 80%).")
+        _CORE_QUOTA_WARNED = True
+
+
 def open_with_rate_limit_retry(opener, request: Request, timeout: int, sleep=time.sleep,
                                deadline: float | None = None, clock=time.monotonic):
+    global _GITHUB_API_ATTEMPTS
     deadline = _RATE_LIMIT_DEADLINE if deadline is None else deadline
     for attempt in range(1, RATE_LIMIT_ATTEMPTS + 1):
+        _GITHUB_API_ATTEMPTS += 1
         try:
-            return opener.open(request, timeout=timeout)  # noqa: S310 - origin is fixed by callers
+            response = opener.open(request, timeout=timeout)  # noqa: S310 - origin is fixed by callers
         except HTTPError as exc:
+            warn_on_core_quota(exc.headers or {})
             wait = rate_limit_wait(exc, attempt)
             if wait is None or attempt == RATE_LIMIT_ATTEMPTS:
                 raise
@@ -129,6 +145,9 @@ def open_with_rate_limit_retry(opener, request: Request, timeout: int, sleep=tim
             print(f"::warning::GitHub API rate limited (HTTP {exc.code}); retry {attempt}/"
                   f"{RATE_LIMIT_ATTEMPTS - 1} in {wait:.0f}s", file=sys.stderr)
             sleep(wait)
+        else:
+            warn_on_core_quota(response.headers)
+            return response
     raise AssertionError("unreachable")
 
 
@@ -947,6 +966,8 @@ def main() -> int:
     except (CollectionError, OSError, ValueError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
         print(f"Test Intelligence collection failed: {exc}", file=sys.stderr)
         return 1
+    finally:
+        print(f"::notice title=github-rest-attempts::Test Intelligence REST attempts={_GITHUB_API_ATTEMPTS}")
     return 0
 
 

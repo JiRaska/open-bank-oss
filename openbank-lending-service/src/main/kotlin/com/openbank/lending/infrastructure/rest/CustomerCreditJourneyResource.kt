@@ -6,6 +6,8 @@ package com.openbank.lending.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.lending.application.port.out.LoanApplicationRepository
+import com.openbank.lending.application.usecase.DeclineReviewRefusedException
+import com.openbank.lending.application.usecase.DeclineReviewUseCase
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
@@ -66,6 +68,7 @@ class CustomerCreditJourneyResource(
     private val identity: SecurityIdentity,
     private val idempotencyStore: IdempotencyStore,
     private val objectMapper: ObjectMapper,
+    private val declineReviews: DeclineReviewUseCase,
 ) {
     @GET
     @Path("/applications")
@@ -154,6 +157,57 @@ class CustomerCreditJourneyResource(
     }
 
     /**
+     * The applicant's request for human review of a decision-engine decline (GDPR Art. 22(3),
+     * EU AI Act Art. 86, EBA/GL/2020/06 par. 54). The party is the edge-vouched header, never a body
+     * field; a foreign application id reads as not found. One review per application, so a repeat
+     * answers 200 with the existing review and the first request 201; the `Idempotency-Key` is
+     * required like the neighbouring money-path POSTs and replays the stored answer for a retry.
+     * Refusals are 409 with a stable code: NOT_ENGINE_DECLINE, REVIEW_WINDOW_ELAPSED.
+     */
+    @POST
+    @Path("/applications/{id}/decline-review")
+    @Authorize(action = "lending.intake", resource = "")
+    @Operation(summary = "Request human review of an engine decline of one of the caller's applications (edge only)")
+    suspend fun requestDeclineReview(
+        @HeaderParam(CustomerIntakeResource.PARTY_HEADER) partyHeader: String?,
+        @PathParam("id") id: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        if (!callerIsPermitted()) return refusal()
+        val partyId = scopeOf(partyHeader) ?: return badParty()
+        // #8351 money-path POST: the replay key is REQUIRED; libs-runtime maps the
+        // IllegalArgumentException to 400.
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        val applicationId = runCatching { UUID.fromString(id) }.getOrNull() ?: return notFound()
+        val requestHash = RequestFingerprints.of(
+            objectMapper,
+            "POST",
+            "/api/v1/lending/intake/applications/$id/decline-review",
+            null,
+        )
+        return idempotencyStore.submitOnce(
+            "lending:intake-decline-review:$applicationId:${identity.principal?.name.orEmpty()}:$idempotencyKey",
+            requestHash,
+            INTAKE_WITHDRAW_KEY_TTL_SECONDS,
+        ) {
+            try {
+                val result = declineReviews.requestReview(applicationId, partyId).awaitSuspending()
+                Response.status(if (result.created) HTTP_CREATED else HTTP_OK)
+                    .entity(objectMapper.writeValueAsString(result.review.toCustomerDto()))
+                    .type(MediaType.APPLICATION_JSON).build()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: DeclineReviewRefusedException) {
+                if (e.code == DeclineReviewRefusedException.NOT_FOUND) {
+                    notFound()
+                } else {
+                    Response.status(HTTP_CONFLICT).entity(mapOf("error" to e.code, "message" to e.message)).build()
+                }
+            }
+        }
+    }
+
+    /**
      * Whether this CALLER may use the endpoint at all. Deliberately takes no request data: the
      * decision rests only on the authenticated principal and on configuration.
      *
@@ -194,7 +248,10 @@ class CustomerCreditJourneyResource(
 
     companion object {
         private val ZERO_UUID = UUID(0, 0)
+        private const val HTTP_OK = 200
+        private const val HTTP_CREATED = 201
         private const val HTTP_BAD_REQUEST = 400
+        private const val HTTP_CONFLICT = 409
         private const val HTTP_FORBIDDEN = 403
         private const val HTTP_NOT_FOUND = 404
         private const val HTTP_UNPROCESSABLE = 422
@@ -219,6 +276,20 @@ data class CustomerCreditJourneyDto(
     val outcomeReasonCode: String?,
     val submittedAt: String,
 )
+
+/**
+ * What the customer sees of a review: where it stands and nothing the reviewer wrote. The reviewer's
+ * reason is an officer's internal note and is deliberately not exposed (see [decisionOutcomeReasonCode]).
+ */
+data class CustomerDeclineReviewDto(
+    val id: String,
+    val applicationId: String,
+    val status: String,
+    val requestedAt: String,
+)
+
+private fun com.openbank.lending.domain.model.DeclineReview.toCustomerDto() =
+    CustomerDeclineReviewDto(id.toString(), applicationId.toString(), status.name, requestedAt.toInstant().toString())
 
 data class CustomerCreditStepDto(val code: String, val status: String)
 

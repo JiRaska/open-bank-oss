@@ -91,6 +91,54 @@ their bodies contain no proposer, checker or disburser identity. Status mapping 
 
 `/api/v1/...` URL path; `X-API-Version` / `X-Service-Version` headers and `/api/v1/info` are served by `openbank-libs`. The OpenAPI contract version (`info.version`) is the API-contract axis (ADR-0048), independent of the release `version.txt`.
 
+## Human review of an engine decline
+
+GDPR Art. 22(3), EU AI Act Art. 86 and EBA/GL/2020/06 par. 54: a customer whose application the decision engine declined can ask for a person to look at it. A declined application stays `DECLINED` (terminal, ADR-0211 D1); the review is its own record.
+
+| Endpoint | Method | Caller | Notes |
+|---|---|---|---|
+| `/intake/applications/{id}/decline-review` | `POST` | customer-edge principal only (`lending.intake`) | The applicant (from `X-Customer-Party-Id`) asks; `Idempotency-Key` required. 201 first request, 200 repeat (same review), 404 not the caller's application, 409 `NOT_ENGINE_DECLINE` / `REVIEW_WINDOW_ELAPSED` |
+| `/decline-reviews` | `GET` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` (humans) | Pending reviews, oldest first, each with the engine's recorded reason codes and policy versions |
+| `/decline-reviews/{id}/decision` | `POST` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` (humans) | `{outcome: CONFIRMED\|OVERTURNED, reason}`. Reason mandatory (10-512 chars). `Idempotency-Key` required (a retry answers 409 `REVIEW_ALREADY_DECIDED`). 409 `REVIEW_ALREADY_DECIDED` / `SELF_REVIEW` (principal name equals the party id only; no staff-to-party mapping exists) / `SUCCESSOR_NOT_ORIGINABLE` (an overturn intake would refuse today; the review stays open). The successor gets a recomputed first due date and today's compliance pack, but keeps the original rate and has no engine evaluation of its own |
+
+- **Only an engine decline is reviewable**: `DECLINED` with a stored engine outcome `DECLINE` and no recorded human decider. A decline a person made or confirmed is never looped back.
+- **At most once per application** (unique in the schema); a repeat returns the existing review. The window is `lending.decline-review.window-days` (env `LENDING_DECLINE_REVIEW_WINDOW_DAYS`, **default 30**), counted from the engine's evaluation time.
+- **The reviewer is not bound by the engine outcome** but sees it: the engine's reason codes and policy versions are snapshotted on the review when it is requested. The reviewer is the JWT subject and must not be the applicant.
+- **CONFIRMED** records the human decision; nothing else changes. **OVERTURNED** does not resurrect the declined application: it opens a *successor* application in `FOUR_EYES` (carried-forward facts, no engine evidence copied), linked both ways (`loan_decline_review.successor_application_id`, `loan_application.predecessor_application_id`) with the reviewer recorded as proposer. The credit decision is then made by the existing four-eyes decision, whose approver must differ from the proposer, so the reviewer cannot approve it.
+- **Events** (outbox, `schemaVersion` 1, identifiers and machine codes only, never the reviewer's free text): `credit.decline_review.requested`, `credit.decline_review.confirmed`, `credit.decline_review.overturned`; an overturn also emits `credit.application.transition` for the successor.
+- **Not yet reachable by a customer**: the customer-edge proxy route and the admin-ui review screen are follow-ups.
+
 ## Customer-edge caller identity
 
 Customer intake, quote, credit journey and financial-health routes bind their configured customer-edge workload to the verified JWT client id (`azp`), subject and matching Keycloak service-account username. A username or role alone cannot authorize an M2M request; missing caller configuration fails closed.
+
+### Recorded signature receipt
+
+The explicit `POST /api/v1/lending/applications/{id}/sign` command stores `signatureRecordedAt`
+with the signature artefact hash, `SIGNED` state and `credit.application.transition` outbox row
+in one PostgreSQL transaction. The event's `occurredAt` equals the stored receipt instant.
+An existing loan's `applicationId` links the loan back to its application evidence. Earlier or
+implicitly advanced applications can have an unknown receipt time. The field attests the time
+Lending recorded the receipt and has no legal inception semantics for AnaCredit (#9890).
+
+## Czech consumer credit policy revisions
+
+`GET /api/v1/lending/risk/policy?asOf=YYYY-MM-DD` returns the applicable Czech consumer credit
+policy as of the requested day in Europe/Prague. Versions 1 and 2 are the starter rules.
+Credit-risk staff use the risk console or `POST /api/v1/lending/risk/policy/proposals` to submit a complete set with one
+revision number and future effective date. Submit all four table kinds and retain the adverse
+bureau exclusion and both affordability limits. The pinned compliance pack adds its statutory
+checks during evaluation. The proposal validates each operand against the inputs that origination supplies.
+
+A second staff member reviews the stored content and hash before posting an explicit decision to
+`/api/v1/lending/risk/policy/proposals/{id}/decide`. Approval takes effect on the proposed day
+and the database verifies that the day is still in the future when committing the decision.
+Both POSTs require `Idempotency-Key`. Repeat the same key and request after an interrupted response.
+The original response can be replayed by the same staff subject after approval, rejection or the
+policy's effective date. The command receipt and revision commit in the same transaction. A
+new proposal with identical pending or approved content returns `CREDIT_POLICY_DUPLICATE_CONTENT`.
+Rejection preserves the original evidence and allows a fresh proposal with the same content.
+The engine records the selected table versions with the application decision. Other jurisdictions
+and products use their starter policies. Preserve the revisions and their command receipts during a service rollback.
+Once an approved version is in effect, coordinate any rollback with Credit Risk because reverting
+the reader would also revert the policy applied to new applications.

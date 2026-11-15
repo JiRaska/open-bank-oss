@@ -13,7 +13,7 @@
 // the operator to /auth/forbidden is derived from the same route guard the proxy enforces
 // (src/lib/auth/roles.ts), so a screen this user cannot see is a least-privilege assertion, not a
 // silent gap. A screen ROLE_OPERATOR can see is also opened as the synthetic operator.
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './helpers/test'
 import { OPERATOR_STATE } from '../playwright.deployed-session.config'
 import { watchTraffic } from './deployed-session-guard'
 import { pathAllowedByRoles } from '../src/lib/auth/roles'

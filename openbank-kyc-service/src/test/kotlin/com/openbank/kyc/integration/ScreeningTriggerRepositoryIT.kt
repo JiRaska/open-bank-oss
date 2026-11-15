@@ -52,7 +52,6 @@ class ScreeningTriggerRepositoryIT {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "openbank.outbox.dispatch-enabled" to "false",
             // Historical lease fixtures must not be reclaimed by the background retry job.
-            "openbank.kyc.screening-triggers.retry-enabled" to "false",
             "authz.enforce" to "false",
         )
     }

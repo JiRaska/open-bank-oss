@@ -43,6 +43,7 @@ object TopicProducers {
         "openbank.transactions.transaction.initiated" to "transaction-service",
         "openbank.balance.events" to "balance-service",
         "openbank.party.events" to "party-service",
+        "openbank.party.audit" to "party-service",
         "openbank.kyc.events" to "kyc-service",
         "openbank.consent.events" to "consent-service",
         "openbank.customer.audit" to "customer-edge",

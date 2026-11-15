@@ -1,0 +1,108 @@
+# SPDX-License-Identifier: Apache-2.0
+# Behavioural tests for the ADR-0374 hold alerts of the domestic rail. Each must-FIRE case has a
+# must-NOT-fire control next to it: a hold just inside its term, a hold that crossed the line too
+# recently for the `for:` clause, a cold pod, and an OLD payment that was held only recently, which
+# is the case the alert got wrong while it measured age since creation. Ages are written as real
+# seconds and grow 60/min like the gauge does, so `time()` starting at the epoch plays no part.
+rule_files:
+  - payments-openbank-domestic-payment-alerts.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "a payment held past 50h for the whole window fires"
+    input_series:
+      - series: 'openbank_domestic_payments_held_oldest_age_seconds{service="domestic", pod="dp-a"}'
+        values: "180060+60x60"
+      - series: 'openbank_domestic_payments_held_oldest_age_seconds{service="domestic", pod="dp-b"}'
+        values: "180060+60x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: DomesticPaymentHeldPastExpiry
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: domestic-payment
+            exp_annotations:
+              summary: "Domestic payment HELD past the expiry of its hold"
+              description: "The longest-held domestic payment has been HELD for 2d 2h 41m 0s. A hold ends within 48 hours, so its workflow run is gone or stuck and the hold reconciliation has not replaced it. Find the payment, check its Temporal run `domestic-payment-<paymentId>` and the case with alert_code PAYMENT_HELD; the operator status endpoint cannot move it."
+
+  - interval: 1m
+    name: "a hold inside its 48h term plus margin does NOT fire"
+    input_series:
+      - series: 'openbank_domestic_payments_held_oldest_age_seconds{service="domestic", pod="dp-a"}'
+        values: "172000+60x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: DomesticPaymentHeldPastExpiry
+        exp_alerts: []
+
+  - interval: 1m
+    name: "an old payment that was HELD only an hour ago does NOT fire"
+    # The payment is five days old (the per-status age since creation says so) and was held an
+    # hour ago. Measured since creation this fired on a hold with 47 hours left.
+    input_series:
+      - series: 'openbank_domestic_payments_non_terminal_oldest_age_seconds{service="domestic", status="HELD", pod="dp-a"}'
+        values: "432000+60x60"
+      - series: 'openbank_domestic_payments_held_oldest_age_seconds{service="domestic", pod="dp-a"}'
+        values: "3600+60x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: DomesticPaymentHeldPastExpiry
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a hold that crossed the line 10m ago does NOT fire yet"
+    input_series:
+      - series: 'openbank_domestic_payments_held_oldest_age_seconds{service="domestic", pod="dp-a"}'
+        values: "179400+60x60"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: DomesticPaymentHeldPastExpiry
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a cold pod (0, then NaN) and nothing held do NOT fire"
+    input_series:
+      - series: 'openbank_domestic_payments_held_oldest_age_seconds{service="domestic", pod="dp-a"}'
+        values: "0+0x60"
+      - series: 'openbank_domestic_payments_held_oldest_age_seconds{service="domestic", pod="dp-b"}'
+        values: "NaN+0x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: DomesticPaymentHeldPastExpiry
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a RECEIVED payment with its re-drive spent for the whole window fires"
+    input_series:
+      - series: 'openbank_domestic_payments_redrive_exhausted{service="domestic", pod="dp-a"}'
+        values: "2+0x60"
+      - series: 'openbank_domestic_payments_redrive_exhausted{service="domestic", pod="dp-b"}'
+        values: "2+0x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: DomesticPaymentRedriveExhausted
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: domestic-payment
+            exp_annotations:
+              summary: "Domestic payment left RECEIVED with its re-drive attempts spent"
+              description: "2 domestic payment(s) are RECEIVED with no re-drive attempt left. Nothing automatic will move them. Find out why admission or screening never finished for each, then end it through the operator status endpoint (REJECTED or CANCELLED)."
+
+  - interval: 1m
+    name: "no exhausted payment, a cold pod, and one that appeared 10m ago do NOT fire"
+    input_series:
+      - series: 'openbank_domestic_payments_redrive_exhausted{service="domestic", pod="dp-a"}'
+        values: "0+0x10 1+0x50"
+      - series: 'openbank_domestic_payments_redrive_exhausted{service="domestic", pod="dp-b"}'
+        values: "NaN+0x60"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: DomesticPaymentRedriveExhausted
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: DomesticPaymentRedriveExhausted
+        exp_alerts: []

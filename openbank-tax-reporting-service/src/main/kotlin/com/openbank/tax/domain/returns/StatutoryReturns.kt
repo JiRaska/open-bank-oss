@@ -32,9 +32,18 @@ enum class ReturnScope { COMPANY, FUND }
  * MONTH / QUARTER / YEAR are calendar periods. WORKING_DAY (ADR-0367, CEÚ) is the window one
  * Czech working-day overview covers: it ENDS on the day before a CERTIS working day, so the Monday
  * window ends on Sunday and spans Friday to Sunday. Its due date is its end + 1, the working day
- * itself.
+ * itself. DAY (GSFT, #15356) is one calendar day — a relevant day (rozhodný den) can be any day,
+ * a weekend included, so it is not tied to the working-day calendar.
  */
-enum class Periodicity { MONTH, QUARTER, YEAR, WORKING_DAY }
+enum class Periodicity { MONTH, QUARTER, YEAR, WORKING_DAY, DAY }
+
+/**
+ * How [ReturnDefinition.deadlineDaysAfterPeriodEnd] counts. CALENDAR_DAYS is every day;
+ * WORKING_DAYS counts Czech working days ([ReportingPeriod.WORKING_DAYS]) after the period end, so
+ * "within 3 working days of the relevant day" (zákon č. 21/1992 Sb. § 41d odst. 4) is due on the
+ * third working day after it.
+ */
+enum class DeadlineBasis { CALENDAR_DAYS, WORKING_DAYS }
 
 /** One reporting period, identified by its periodicity and its last day (the reference date). */
 data class ReportingPeriod(val periodicity: Periodicity, val endDate: LocalDate) : Comparable<ReportingPeriod> {
@@ -46,6 +55,7 @@ data class ReportingPeriod(val periodicity: Periodicity, val endDate: LocalDate)
                     endDate == YearMonth.from(endDate).atEndOfMonth()
             Periodicity.YEAR -> endDate.monthValue == MONTHS_PER_YEAR && endDate.dayOfMonth == LAST_DAY_OF_DECEMBER
             Periodicity.WORKING_DAY -> WORKING_DAYS.isBusinessDay(endDate.plusDays(1))
+            Periodicity.DAY -> true
         }
         requireValid(valid) { "$endDate is not the last day of a $periodicity" }
     }
@@ -55,7 +65,7 @@ data class ReportingPeriod(val periodicity: Periodicity, val endDate: LocalDate)
         Periodicity.MONTH -> "%04d-%02d".format(endDate.year, endDate.monthValue)
         Periodicity.QUARTER -> "%04d-Q%d".format(endDate.year, endDate.monthValue / MONTHS_PER_QUARTER)
         Periodicity.YEAR -> "%04d".format(endDate.year)
-        Periodicity.WORKING_DAY -> endDate.toString()
+        Periodicity.WORKING_DAY, Periodicity.DAY -> endDate.toString()
     }
 
     /** The period immediately before this one. */
@@ -66,6 +76,7 @@ data class ReportingPeriod(val periodicity: Periodicity, val endDate: LocalDate)
             Periodicity.QUARTER -> YearMonth.from(endDate).minusMonths(MONTHS_PER_QUARTER.toLong()).atEndOfMonth()
             Periodicity.YEAR -> endDate.minusYears(1)
             Periodicity.WORKING_DAY -> WORKING_DAYS.previousBusinessDay(endDate.plusDays(1)).minusDays(1)
+            Periodicity.DAY -> endDate.minusDays(1)
         },
     )
 
@@ -102,6 +113,7 @@ data class ReportingPeriod(val periodicity: Periodicity, val endDate: LocalDate)
             )
             // The window containing [date] ends the day before the next working day after it.
             Periodicity.WORKING_DAY -> ReportingPeriod(periodicity, WORKING_DAYS.nextBusinessDay(date).minusDays(1))
+            Periodicity.DAY -> ReportingPeriod(periodicity, date)
         }
 
         /** Parse an operator label; the periodicity must match the return being addressed. */
@@ -123,7 +135,7 @@ data class ReportingPeriod(val periodicity: Periodicity, val endDate: LocalDate)
                 Periodicity.YEAR -> YEAR.matchEntire(label)?.let { m ->
                     LocalDate.of(m.groupValues[1].toInt(), MONTHS_PER_YEAR, LAST_DAY_OF_DECEMBER)
                 }
-                Periodicity.WORKING_DAY -> DAY.matchEntire(label)?.let {
+                Periodicity.WORKING_DAY, Periodicity.DAY -> DAY.matchEntire(label)?.let {
                     runCatching { LocalDate.parse(label) }.getOrNull()
                 }
             }
@@ -177,6 +189,18 @@ data class ReturnDefinition(
      * Empty for figure-only returns (the pension catalogue) — those assemble with no lines.
      */
     val lineSchema: List<String> = emptyList(),
+    val deadlineBasis: DeadlineBasis = DeadlineBasis.CALENDAR_DAYS,
+    /**
+     * An event-driven return (GSFT: the relevant day is named by an insured event or a test
+     * request, never by the calendar). No period is EXPECTED, so the deadline check never reports
+     * one as NOT_ASSEMBLED; a stored revision still breaches when it is not filed by its due date.
+     */
+    val onDemand: Boolean = false,
+    /**
+     * False for a return nobody is obliged to file (GSFT's TEST dry run): it follows the lifecycle
+     * but is never a deadline breach, assembled or not.
+     */
+    val filingObligation: Boolean = true,
 ) {
     init {
         requireValid(code.isNotBlank()) { "return code must not be blank" }
@@ -197,7 +221,11 @@ data class ReturnDefinition(
         }
     }
 
-    fun dueDate(period: ReportingPeriod): LocalDate = period.endDate.plusDays(deadlineDaysAfterPeriodEnd.toLong())
+    fun dueDate(period: ReportingPeriod): LocalDate = when (deadlineBasis) {
+        DeadlineBasis.CALENDAR_DAYS -> period.endDate.plusDays(deadlineDaysAfterPeriodEnd.toLong())
+        DeadlineBasis.WORKING_DAYS ->
+            ReportingPeriod.WORKING_DAYS.addBusinessDays(period.endDate, deadlineDaysAfterPeriodEnd)
+    }
 
     /**
      * Every finding for [values]; empty means valid. Missing datapoints are findings, never zeroes:

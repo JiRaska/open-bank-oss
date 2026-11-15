@@ -283,6 +283,44 @@ interface NostroBreakUseCase {
     val policy: BreakAlertPolicy
 }
 
+interface NostroBreakResolutionUseCase {
+    /**
+     * Four-eyes manual resolution of an OPEN break of the CONFIGURED nostro [iban]: a person
+     * PROPOSES with a reason (the break stays open and keeps ageing), a DIFFERENT person APPROVES
+     * (resolved, MANUAL) or REJECTS with a reason (proposal cleared). Each step is appended to the
+     * resolution history. A replay under the same [idempotencyKey] answers the stored outcome; the
+     * key reused for a different request is a 400.
+     *
+     * @throws NostroAccountNotFoundException / NostroBreakNotFoundException (404)
+     * @throws IllegalStateException wrong state: resolved, already proposed, or nothing to approve (409)
+     * @throws FourEyesViolationException the approver is the proposer (422)
+     */
+    suspend fun proposeResolution(
+        iban: String,
+        breakId: UUID,
+        reason: String,
+        actor: Actor,
+        idempotencyKey: String,
+    ): NostroBreakView
+
+    /** [proposalRead] is the `proposedAt` of the proposal the approver read; another one is a 409. */
+    suspend fun approveResolution(
+        iban: String,
+        breakId: UUID,
+        proposalRead: Instant,
+        actor: Actor,
+        idempotencyKey: String,
+    ): NostroBreakView
+
+    suspend fun rejectResolution(
+        iban: String,
+        breakId: UUID,
+        reason: String,
+        actor: Actor,
+        idempotencyKey: String,
+    ): NostroBreakView
+}
+
 data class ProposeReferenceCommand(
     val kind: ReferenceKind,
     val key: String,

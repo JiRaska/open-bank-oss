@@ -7,7 +7,7 @@ metadata:
   name: communication-service
   namespace: communication
   annotations:
-    openbank.io/operations-mode: reviewed-gitops
+    open-bank.tech/operations-mode: reviewed-gitops
   labels:
     app.kubernetes.io/name: communication-service
     app.kubernetes.io/part-of: communication
@@ -26,7 +26,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-communication-opa-bundle.sh.
-        openbank.tech/policy-checksum: "de08943d241d3216"
+        openbank.tech/policy-checksum: "50f7c042c28b68ad"
       labels:
         app.kubernetes.io/name: communication-service
         app.kubernetes.io/part-of: communication
@@ -40,7 +40,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: communication-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-communication-service:sandbox-e73a9f51@sha256:572eb87b3b119f4eae7e9f06a92d5254926ddb3c80beedde27b86300857f05aa
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-communication-service:sandbox-548fa683@sha256:368e3fccd34631d7730557524e964064e9e8cf2f6d364ec4c6f80ae06c451368
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -73,6 +73,11 @@ spec:
                   key: password
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.communication.svc:6379
+            # Four-eyes ENFORCED (ADR-0285 D3, #15748). Already the application.yaml default; set
+            # here so the deployed state is stated in the manifest the four-eyes-enforce-deployed
+            # gate reads, not inferred from a code default a later edit could flip.
+            - name: AUTHZ_FOUR_EYES_ENFORCE
+              value: "true"
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET
@@ -214,20 +219,3 @@ spec:
     - name: management
       port: 8086
       targetPort: management
----
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
-metadata:
-  name: communication-service
-  namespace: communication
-  labels:
-    app.kubernetes.io/name: communication-service
-    app.kubernetes.io/part-of: communication
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: communication-service
-  podMetricsEndpoints:
-    - port: management
-      path: /q/metrics
-      interval: 30s

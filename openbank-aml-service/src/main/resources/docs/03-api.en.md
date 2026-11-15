@@ -133,8 +133,23 @@ Content-Type: application/json
 ```
 
 - `targetStatus` must be a valid transition from the current status (see the state machine in [02 — Architecture](./02-architecture.md)).
-- `decidedBy` is mandatory; `decisionReason` is mandatory when `targetStatus = BLOCKED`.
+- `decidedBy` in the body is **ignored** (deprecated): the decider is the authenticated caller (ADR-0371). `decisionReason` is mandatory when `targetStatus = BLOCKED`.
+- A case opened by the pack evaluation (a pack-monitoring case; not a `TRANSACTION_MONITORING` case a payment rail opened) can only be moved to `UNDER_REVIEW` here; closing or escalating it answers 409 and goes through a disposition proposal (below). To a caller without `ROLE_COMPLIANCE` such a case answers 404 and is absent from the list. Every case response carries `requiresFourEyesDisposition` (true exactly for such a case), so a client knows which flow to offer before the officer writes a rationale.
+- Every case response carries `movementService`: the service that opened the case, taken from its authenticated machine identity and never from the request (`openbank-domestic-payment`, `openbank-sepa-payment`, `openbank-sepa-instant`, `openbank-fx-service`). `transactionId` is an id in THAT service (a payment or conversion id), so a client resolves it there. `null` means a case opened by staff, by aml-service itself, or before the opener was recorded (older rows cannot be backfilled).
 - **Side-effects:** the transition + an `aml.case.status_changed.v1` event commit atomically via the outbox.
+
+### Decision on a held payment's case (four-eyes, ADR-0374 point 3)
+
+A case the held-payment intake opened (`origin = PAYMENT_HOLD_INTAKE`) releases or rejects a held payment when it is decided, so two analysts decide it. `PUT /decision` refuses `CLEARED` and `BLOCKED` on such a case with 409 and names the routes below; `UNDER_REVIEW` and `ESCALATED` stay single-step.
+
+| Method | Path | Action | Result |
+|---|---|---|---|
+| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/proposal` | `amlCase.holdDecision.propose` | 201. Body `{"outcome":"CLEAR"\|"BLOCK","reason":"..."}`. Records who proposed what, bound to the proposer's person (`person_id` claim), open 24 h; no status change, no event. A new proposal is refused (409) while one is pending; it may follow a withdrawal or expiry. |
+| `GET` | `/api/v1/aml/cases/{caseId}/hold-decision/proposal` | `amlCase.read` | The pending proposal; 404 if none. |
+| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/withdrawal` | `amlCase.holdDecision.withdraw` | 200 with the proposal. Only the proposer's person (any of their accounts) withdraws; otherwise 409. No event. |
+| `POST` | `/api/v1/aml/cases/{caseId}/hold-decision/confirmation` | `amlCase.holdDecision.confirm` | 200 with the case. The caller must be a different PERSON than the proposer (`person_id`, so a second account of the proposer is refused), carry a second factor (`amr` contains `otp`), and restate the pending, unexpired outcome and reason; otherwise 409. Moves the case to `CLEARED` (CLEAR) or `BLOCKED` (BLOCK) and writes `aml.case.status_changed.v1` with `origin`. |
+
+Both writes need `ROLE_COMPLIANCE` and a human staff token: a service account holding the role is refused with 403. The proposer and the confirmer are the authenticated callers, never fields of the body. The rule lives in the `AmlCase` aggregate, so no route can decide such a case with one analyst. Every other case keeps its existing routes, responses and events unchanged.
 
 ## Error model
 
@@ -173,3 +188,24 @@ Events are **append-only**; corrections are made through a follow-up transition 
 The `POST /api/v1/aml/cases` role gate admits `ROLE_API` for the named domestic-payment, SEPA-payment, SEPA-instant and FX service accounts. The resource then binds each machine caller to its verified JWT `azp`, subject and Keycloak service-account username; a role or username alone does not authorize case creation. Staff roles remain usable from verified interactive user sessions.
 
 HTTP authentication fixtures exercise interactive staff JWT claims alongside their roles. Negative unauthenticated Pact interactions remain in their separate provider test without a synthetic identity.
+
+
+## Monitoring dispositions and the suspicious-transaction report (ADR-0371)
+
+`ROLE_COMPLIANCE` only, human principals only. Every actor is the authenticated caller. Full schemas are in `openapi.yaml`.
+
+| Method and path | Action | Notes |
+|---|---|---|
+| `POST /api/v1/aml/monitoring/cases/{caseId}/disposition-proposals` | `amlMonitoring.propose` | `disposition` `CLEAR` or `REPORT`, `outcomeCode` from the outcome vocabulary; one open proposal per case |
+| `POST /api/v1/aml/monitoring/disposition-proposals/{proposalId}/decision` | `amlMonitoring.decide` | a second, different person; the proposer gets 422 |
+| `GET /api/v1/aml/monitoring/disposition-proposals` | `amlMonitoring.inspect` | proposals awaiting a decision |
+| `GET /api/v1/aml/monitoring/outcomes` | `amlMonitoring.inspect` | the outcome vocabulary `outcomeCode` is resolved against (id, revision, hash, code/label/meaning); clients offer these codes instead of keeping a copy |
+| `POST /api/v1/aml/reports` | `amlReport.draft` | links the party's own monitoring cases and booked movements |
+| `GET /api/v1/aml/reports`, `GET /api/v1/aml/reports/{reportId}` | `amlReport.inspect` | |
+| `POST /api/v1/aml/reports/{reportId}/approval` | `amlReport.approve` | a second, different person; the drafter gets 422 |
+| `POST /api/v1/aml/reports/{reportId}/filing` | `amlReport.file` | records a filing made **outside** this system: reference, instant, outcome code |
+| `POST /api/v1/aml/reports/{reportId}/withdrawal` | `amlReport.withdraw` | only before filing; needs an outcome code |
+
+- An unknown `outcomeCode` answers 400. The codes are data (`aml/decision-outcomes.provisional.json`), not an enum in the API.
+- The service submits nothing to any authority. `FILED` means a named officer recorded a filing.
+- `aml.report.state_changed.v1` on `openbank.aml.events` carries `reportId`, `state` and `occurredAt` only.

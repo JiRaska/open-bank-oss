@@ -52,6 +52,8 @@ allowed_reasons contains "operator-tax-filing-lifecycle" if {
 #   tax.statutory-return.approve   — POST /{id}/approve          (checker; attests the content hash)
 #   tax.statutory-return.submit    — POST /{id}/submitted        (records the regulator reference)
 #   tax.statutory-return.acknowledge — POST /{id}/acknowledgement (records the regulator's ack/reject)
+#   tax.statutory-return.deliver   — POST /{id}/gsft-delivery     (GSFT, #15356: verifies the attested
+#                                     package, PGP-encrypts it and records the submission)
 #
 # The verbs are deliberately NOT `read`/`list`: base `operator-read-any` and `compliance-read-any`
 # match on those suffixes for ANY HUMAN-typed principal, which includes the shared
@@ -77,6 +79,7 @@ allowed_reasons contains "operator-statutory-return-lifecycle" if {
 		"tax.statutory-return.approve",
 		"tax.statutory-return.submit",
 		"tax.statutory-return.acknowledge",
+		"tax.statutory-return.deliver",
 	}
 }
 

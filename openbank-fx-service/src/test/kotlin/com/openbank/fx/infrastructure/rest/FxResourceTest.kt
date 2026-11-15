@@ -195,7 +195,6 @@ class FxResourceTest {
                     ConvertRequest(
                         partyId = UUID.randomUUID(),
                         accountId = null,
-                        partyName = "Alice",
                         fromCurrency = "EUR",
                         toCurrency = "CZK",
                         fromAmountMinorUnits = 1000L,
@@ -228,6 +227,26 @@ class FxResourceTest {
         assertThat(cmd.captured.idempotencyKey).isEqualTo("idem-key-1")
         assertThat(cmd.captured.partyId).isEqualTo(result.partyId)
         assertThat(cmd.captured.fromAmountMinorUnits).isEqualTo(10_000L)
+    }
+
+    @Test
+    fun `convert ignores a client-supplied accountId, which nothing ties to the party`(): Unit = runBlocking {
+        val result = conversion()
+        val cmd = slot<ConvertCommand>()
+        coEvery { fxUseCase.convert(capture(cmd)) } returns result
+
+        resource.convert(
+            ConvertRequest(
+                partyId = result.partyId,
+                accountId = UUID.randomUUID(),
+                fromCurrency = "EUR",
+                toCurrency = "CZK",
+                fromAmountMinorUnits = 10_000L,
+            ),
+            key = "idem-key-2",
+        )
+
+        assertThat(cmd.captured.accountId).isNull()
     }
 
     @Test

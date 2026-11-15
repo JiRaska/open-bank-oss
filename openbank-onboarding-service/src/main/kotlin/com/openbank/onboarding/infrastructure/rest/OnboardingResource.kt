@@ -4,13 +4,20 @@
 
 package com.openbank.onboarding.infrastructure.rest
 
+import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.onboarding.application.port.`in`.OnboardingUseCase
 import com.openbank.onboarding.application.usecase.OnboardingRecordNotFoundException
 import com.openbank.onboarding.domain.model.FunnelStage
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
-import jakarta.ws.rs.*
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import java.util.UUID
@@ -31,6 +38,7 @@ class OnboardingResource {
     @GET
     @Path("/records")
     @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.COMPLIANCE)
+    @Authorize(action = "onboarding.records.inspect")
     suspend fun listRecords(
         @QueryParam("page") @DefaultValue("0") page: Int,
         @QueryParam("size") @DefaultValue("20") size: Int,
@@ -65,6 +73,7 @@ class OnboardingResource {
     @GET
     @Path("/records/{partyId}")
     @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.COMPLIANCE)
+    @Authorize(action = "onboarding.record.inspect")
     suspend fun getRecord(@PathParam("partyId") partyId: UUID): Response = try {
         Response.ok(useCase.getRecord(partyId)).build()
     } catch (e: OnboardingRecordNotFoundException) {
@@ -82,5 +91,6 @@ class OnboardingResource {
     @GET
     @Path("/funnel")
     @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.COMPLIANCE)
+    @Authorize(action = "onboarding.funnel.inspect")
     suspend fun funnelCounts(): Response = Response.ok(useCase.funnelCounts()).build()
 }

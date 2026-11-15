@@ -32,7 +32,12 @@ class PendingNotificationGauge(
     private val domainMetrics: DomainMetrics,
 ) {
     private val stale = AtomicLong(UNKNOWN)
-    private val staleByChannel = NotificationChannel.entries.associate { it.name to AtomicLong(UNKNOWN) }
+
+    // OTHER holds rows whose stored channel is no longer a NotificationChannel (SMS and IN_APP were
+    // retired by #2372): without it the per-channel series summed to less than the total, and the
+    // rows the alert was firing on were invisible in the breakdown meant to locate them.
+    private val staleByChannel =
+        (NotificationChannel.entries.map { it.name } + OTHER).associateWith { AtomicLong(UNKNOWN) }
     private val log = Logger.getLogger(PendingNotificationGauge::class.java)
     private lateinit var liveness: WorkflowLivenessRecorder
 
@@ -58,7 +63,18 @@ class PendingNotificationGauge(
     suspend fun refresh() {
         try {
             val counts = repository.countStalePendingByChannel(Instant.now(clock).minus(STALE_AFTER)).awaitSuspending()
-            staleByChannel.forEach { (channel, value) -> value.set(counts[channel] ?: 0L) }
+            val known = NotificationChannel.entries.map { it.name }.toSet()
+            staleByChannel.forEach { (channel, value) ->
+                value.set(
+                    if (channel ==
+                        OTHER
+                    ) {
+                        counts.filterKeys { it !in known }.values.sum()
+                    } else {
+                        counts[channel] ?: 0L
+                    },
+                )
+            }
             stale.set(counts.values.sum())
             liveness.recordSuccess()
         } catch (e: CancellationException) {
@@ -72,6 +88,7 @@ class PendingNotificationGauge(
 
     private companion object {
         const val UNKNOWN = -1L
+        const val OTHER = "OTHER"
         val STALE_AFTER: Duration = Duration.ofMinutes(15)
     }
 }

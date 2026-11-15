@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: treasury-service
     app.kubernetes.io/part-of: treasury
   annotations:
-    openbank.tech/policy-checksum: "72f2914572fb313e"
+    openbank.tech/policy-checksum: "eea88f36f8b5b0f7"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -853,6 +853,9 @@ data:
     #   treasury.marketdata.approve               — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
     #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
     #                                               balance; it is still back-office evidence, #10896)
+    #   treasury.nostro.break.propose-resolution  — ROLE_TREASURY_APPROVER (four-eyes step 1, ADR-0315 D7)
+    #   treasury.nostro.break.approve-resolution, .reject-resolution — ROLE_TREASURY_SENIOR_APPROVER
+    #                                               (step 2; the domain refuses the proposer, #14770)
     #   treasury.portfolio.inspect                — treasury dealers, approvers and admins, and
     #                                               tax-reporting's OWN client (ADR-0337 amendment)
     #   treasury.portfolio.upload                 — ROLE_TREASURY_APPROVER (the custodian's semt.002)
@@ -987,6 +990,23 @@ data:
     	treasury_staff
     	"ROLE_TREASURY_APPROVER" in input.principal.roles
     	input.action == "treasury.nostro.upload"
+    }
+
+    # ADR-0315 D7 (#14770): an investigated nostro break that will never match is closed by FOUR EYES.
+    # An approver PROPOSES with a reason; the break stays open. A SENIOR approver approves or rejects —
+    # closing a break silences the aged-break alert, the control that surfaces it, so the deciding step
+    # takes the senior role. Distinct people are enforced in the domain and the database
+    # (nostro_breaks_four_eyes): this file only decides who may attempt each step. Nothing is posted.
+    allowed_reasons contains "treasury-nostro-break-propose-resolution" if {
+    	treasury_staff
+    	"ROLE_TREASURY_APPROVER" in input.principal.roles
+    	input.action == "treasury.nostro.break.propose-resolution"
+    }
+
+    allowed_reasons contains "treasury-nostro-break-decide-resolution" if {
+    	treasury_staff
+    	"ROLE_TREASURY_SENIOR_APPROVER" in input.principal.roles
+    	input.action in {"treasury.nostro.break.approve-resolution", "treasury.nostro.break.reject-resolution"}
     }
 
     # ADR-0344 D3/D4/D10: back office and the reference editor PROPOSE; the approver DECIDES. No role
@@ -1313,6 +1333,28 @@ data:
     	not charter_denied
     	charter_allowed
     	skill_ok
+    	not pr_base_ref_denied
+    }
+
+    # ADR-0031 D9 amendment 2026-11-14: a pull request's TARGET is part of the write, so the policy
+    # decides it — not only the writer's code. `gh.pr.open` is allowed only when `input.base_ref` is
+    # listed in the `base_refs` of the charter's tier/resource grant that permits it. A grant naming
+    # no base_refs, or a call sending none, is denied: a PR grant that does not say where it may
+    # land is not a bounded grant. Scope: the tier/resource path (calls carrying `input.tier`), which
+    # is the only PR writer wired today. Plain-pattern `gh.pr.open` grants (ledger-domain-engineer)
+    # are unwired and unchanged here; bounding them is ADR-0031 D9 phase-4 work.
+    pr_base_ref_denied if {
+    	input.tool == "gh.pr.open"
+    	is_string(input.tier)
+    	not pr_base_ref_granted
+    }
+
+    pr_base_ref_granted if {
+    	is_string(input.base_ref)
+    	some entry in tier_resource_allow_entries
+    	entry.tier == input.tier
+    	tier_resource_resources_granted(entry.resources)
+    	input.base_ref in entry.base_refs
     }
 
     # ---------------------------------------------------------------------------------------
@@ -1324,6 +1366,7 @@ data:
     	"agent": input.agent,
     	"tool": input.tool,
     	"resource": input.resource,
+    	"base_ref": object.get(input, "base_ref", null),
     	"reason": reason,
     }
 
@@ -1336,6 +1379,8 @@ data:
     else := "skill not in agent allowlist" if not skill_ok
 
     else := "no matching allow rule" if not charter_allowed
+
+    else := "pr base ref not granted by charter" if pr_base_ref_denied
 
     else := "allowed by charter"
 
@@ -1719,6 +1764,9 @@ data:
         - tier: write_proposal
           resources:
           - github-pr
+          base_refs:
+          - main
+          - qualification/flaky-test-hunter
         deny:
         - tier: write
           resources:
@@ -2214,6 +2262,10 @@ data:
         # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
         # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
         - card.details.read
+        # The queue of business customers under an ongoing sanctions-monitoring hold (#16028): who is
+        # being reviewed is itself sensitive (tipping-off). Granted to ROLE_KYC_REVIEWER by the matrix
+        # only; the generic operator/admin list rule must not reach it.
+        - kyb.monitoring.queue.list
       role_action_matrix:
         ROLE_OPERATOR:
           grant:
@@ -2395,6 +2447,11 @@ data:
             - kyb.case.reject
             - kyb.case.review.resolve
             - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
+            - kyb.monitoring.finding.decide    # #16028: decide an ongoing-monitoring finding (human reviewer only)
+            - kyb.monitoring.queue.list        # #16028: ongoing-monitoring holds queue
+            - kyb.monitoring.exit.propose      # #16028: four-eyes exit, maker
+            - kyb.monitoring.exit.confirm      # #16028: four-eyes exit, checker (code refuses checker == maker)
+            - kyb.monitoring.exit.withdraw     # #16028: the proposing person withdraws their own pending exit proposal
         ROLE_AUDITOR:
           grant:
             - audit.trail.inspect

@@ -100,6 +100,8 @@ Edge obohatí `debtorAccountNumber`/`debtorBankCode` (z českého IBANu účtu),
 
 Domácí platební rail přijímá pouze CZK. Jiná měna vrátí `400 CURRENCY_NOT_ALLOWED` ještě před dohledáním účtu, rezervací delegovaného limitu nebo SCA; `Idempotency-Key` zůstane použitelný pro platný pokus. Volající bez práva odepsat peníze dostane stejnou odpověď `403` bez ohledu na existenci účtu či delegace, takže odpověď jejich existenci neprozrazuje.
 
+**Delegované platby a rezervace limitu (#16000).** Platba zmocněnce nejprve rezervuje svou částku proti kumulativnímu limitu zmocnění v delegation-service. Při `openbank.edge.delegated-payment-bound-create.enabled=false` (výchozí) edge založí platbu běžnou domácí cestou a rezervaci potvrdí, jakmile ji rail přijme, takže platba později ZAMÍTNUTÁ nebo ZRUŠENÁ limit dál spotřebovává. Se zapnutým přepínačem edge založí platbu cestou domestic-payment vázanou na rezervaci, s vlastním `Idempotency-Key` rezervace, a nikdy ji nepotvrzuje: rezervaci vypořádá výsledek platby v delegation-service, takže zamítnutá platba limit vrátí. Odmítnuté navázání vrátí `409 PAYMENT_NOT_ACCEPTED`; edge rezervaci sám uvolní jen tehdy, když odmítnutí railu dokazuje, že nic nebylo navázáno, a rezervace není replay, jinak ji vypořádá delegation-service; rail, který ještě není připraven, se zkouší znovu (omezeně, podle `Retry-After`) a pak vrátí `503 PAYMENT_TEMPORARILY_UNAVAILABLE` s uvolněnou rezervací (opakujte s novým klíčem); ztracená odpověď railu je `503 PAYMENT_STATUS_UNKNOWN` s ponechanou rezervací (opakujte se stejným klíčem). Platby vlastníka se nemění. Přepínač zapněte až po nasazení konzumenta výsledků v delegation-service a vázané cesty railu.
+
 ### Začátek onboardingu (anonymně)
 
 ```http
@@ -203,3 +205,14 @@ otázky i kód volby mají 1–64 ASCII písmen, číslic, podtržítek, teček 
 hodnota volby musí být řetězec. Volný text, pole a číselné odpovědi se odmítnou
 místo předání ke skórování. Edge sestaví odchozí tělo z přijatých polí a zachová
 pořadí zadaných odpovědí.
+
+## Dohledání domácí platby po timeoutu
+
+Zavolejte `POST /customer/v1/domestic-payments/submissions/lookup` s původní hlavičkou
+`Idempotency-Key` a tělem JSON s `debtorAccountId`. U firemní platby zachovejte původní
+kontext `X-Acting-For`. Pokud se na delegovaný účet vztahuje více pověření, přidejte
+původní částku v CZK jako `amount`.
+
+`FOUND` obsahuje trvalé `paymentId` a aktuální `status`. Při `UNKNOWN` ponechte
+upozornění na neověřený stav a nezadávejte novou platbu. Dohledání nespotřebovává SCA
+a nevytváří platební příkaz.

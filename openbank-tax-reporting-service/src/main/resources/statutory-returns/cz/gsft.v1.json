@@ -1,0 +1,131 @@
+{
+  "_comment": "Issue #15356. GSFT depositor data delivery (data o vkladatelích) for one relevant day (rozhodný den), due within 3 working days of it (zákon č. 21/1992 Sb. § 41d odst. 4). The period is the relevant day itself (periodicity DAY) and the return is on demand: an insured event or a test request names the day, the calendar never does, so no day is expected. The two returns differ only in DIW.TEST: GSFT-DIW-TEST renders TEST (the § 41n verification run), GSFT-DIW-LIVE renders KEEN and is assembled only when an operator names it. The FILE FORMAT is verified against the decree annex (wireFormatVerified true); the datapoints and line fields are PLATFORM identifiers that attest the package (record counts from the rendered files, evidence counts from the assembly, and one line per file plus one for the ZIP archive with its SHA-256). Unverified items (archive name, PGP cipher, batch numbering, working-day calendar) are listed in docs/gsft-depositor-data.md. GSFT-DIW-TEST is not a filing obligation (filingObligation false): it never counts as a deadline breach.",
+  "id": "cz-gsft",
+  "version": 1,
+  "jurisdiction": "CZ",
+  "wireFormatVerified": true,
+  "returns": [
+    {
+      "code": "GSFT-DIW-TEST",
+      "name": "GSFT — data o vkladatelích, testovací dávka",
+      "scope": "COMPANY",
+      "periodicity": "DAY",
+      "deadlineDaysAfterPeriodEnd": 3,
+      "deadlineBasis": "WORKING_DAYS",
+      "onDemand": true,
+      "legalBasis": "zákon č. 21/1992 Sb., o bankách, § 41d odst. 4 a § 41n; vyhláška č. 71/2011 Sb. ve znění vyhlášky č. 431/2016 Sb., příloha část 1 (DIW.TEST = TEST)",
+      "datapoints": [
+        "N_CLIENT",
+        "N_ACCOUNT",
+        "N_COLLECTIVE",
+        "N_SPECIAL",
+        "T_PAYMENT",
+        "BATCH_NUMBER",
+        "CREATED_AT_EPOCH_S",
+        "REJECTED_PERSONS",
+        "EXCLUDED_DEPOSITORS",
+        "CAPPED_CLAIMS",
+        "SYNTHETIC_DEPOSITORS_DROPPED",
+        "SYNTHETIC_ACCOUNTS_DROPPED",
+        "OVERDRAWN_ACCOUNTS_DROPPED",
+        "THB_CLAIMS",
+        "THB_COMPENSATION_CZK",
+        "THB_REFUSED_CREDITS",
+        "FILES"
+      ],
+      "lineSchema": [
+        "kind",
+        "name",
+        "sha256",
+        "size"
+      ],
+      "rules": [
+        {
+          "type": "NON_NEGATIVE",
+          "id": "gsft-figures-non-negative",
+          "datapoints": [
+            "N_CLIENT",
+            "N_ACCOUNT",
+            "N_COLLECTIVE",
+            "N_SPECIAL",
+            "T_PAYMENT",
+            "BATCH_NUMBER",
+            "CREATED_AT_EPOCH_S",
+            "REJECTED_PERSONS",
+            "EXCLUDED_DEPOSITORS",
+            "CAPPED_CLAIMS",
+            "SYNTHETIC_DEPOSITORS_DROPPED",
+            "SYNTHETIC_ACCOUNTS_DROPPED",
+            "OVERDRAWN_ACCOUNTS_DROPPED",
+            "THB_CLAIMS",
+            "THB_COMPENSATION_CZK",
+            "THB_REFUSED_CREDITS",
+            "FILES"
+          ]
+        }
+      ],
+      "filingObligation": false
+    },
+    {
+      "code": "GSFT-DIW-LIVE",
+      "name": "GSFT — data o vkladatelích, ostrá dávka",
+      "scope": "COMPANY",
+      "periodicity": "DAY",
+      "deadlineDaysAfterPeriodEnd": 3,
+      "deadlineBasis": "WORKING_DAYS",
+      "onDemand": true,
+      "legalBasis": "zákon č. 21/1992 Sb., o bankách, § 41d odst. 4 a § 41n; vyhláška č. 71/2011 Sb. ve znění vyhlášky č. 431/2016 Sb., příloha část 1 (DIW.TEST = KEEN)",
+      "datapoints": [
+        "N_CLIENT",
+        "N_ACCOUNT",
+        "N_COLLECTIVE",
+        "N_SPECIAL",
+        "T_PAYMENT",
+        "BATCH_NUMBER",
+        "CREATED_AT_EPOCH_S",
+        "REJECTED_PERSONS",
+        "EXCLUDED_DEPOSITORS",
+        "CAPPED_CLAIMS",
+        "SYNTHETIC_DEPOSITORS_DROPPED",
+        "SYNTHETIC_ACCOUNTS_DROPPED",
+        "OVERDRAWN_ACCOUNTS_DROPPED",
+        "THB_CLAIMS",
+        "THB_COMPENSATION_CZK",
+        "THB_REFUSED_CREDITS",
+        "FILES"
+      ],
+      "lineSchema": [
+        "kind",
+        "name",
+        "sha256",
+        "size"
+      ],
+      "rules": [
+        {
+          "type": "NON_NEGATIVE",
+          "id": "gsft-figures-non-negative",
+          "datapoints": [
+            "N_CLIENT",
+            "N_ACCOUNT",
+            "N_COLLECTIVE",
+            "N_SPECIAL",
+            "T_PAYMENT",
+            "BATCH_NUMBER",
+            "CREATED_AT_EPOCH_S",
+            "REJECTED_PERSONS",
+            "EXCLUDED_DEPOSITORS",
+            "CAPPED_CLAIMS",
+            "SYNTHETIC_DEPOSITORS_DROPPED",
+            "SYNTHETIC_ACCOUNTS_DROPPED",
+            "OVERDRAWN_ACCOUNTS_DROPPED",
+            "THB_CLAIMS",
+            "THB_COMPENSATION_CZK",
+            "THB_REFUSED_CREDITS",
+            "FILES"
+          ]
+        }
+      ],
+      "filingObligation": true
+    }
+  ]
+}

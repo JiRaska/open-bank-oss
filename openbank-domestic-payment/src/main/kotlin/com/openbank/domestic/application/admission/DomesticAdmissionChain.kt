@@ -1,0 +1,320 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.domestic.application.admission
+
+import com.openbank.domestic.application.port.out.AccountStandingLookup
+import com.openbank.domestic.application.port.out.AccountStandingPort
+import com.openbank.domestic.application.port.out.FraudEnforcementMetricsPort
+import com.openbank.domestic.application.port.out.FraudScoreCommand
+import com.openbank.domestic.application.port.out.FraudScoreOutcome
+import com.openbank.domestic.application.port.out.FraudScoringPort
+import com.openbank.domestic.application.port.out.SanctionsScreeningPort
+import com.openbank.domestic.application.port.out.ScreeningUnavailableException
+import com.openbank.domestic.application.workflow.FraudGateAction
+import com.openbank.domestic.application.workflow.FraudGatePolicy
+import com.openbank.domestic.application.workflow.FraudHoldBasis
+import com.openbank.domestic.application.workflow.evidenceIdentity
+import com.openbank.domestic.domain.model.DomesticPayment
+import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.domestic.domain.model.RecordedFraudScore
+import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningPolicy
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
+import com.openbank.libs.fincrime.admission.AdmissionDecision
+import com.openbank.libs.fincrime.admission.AdmissionEvidence
+import com.openbank.libs.fincrime.admission.AdmissionReasonCode
+import com.openbank.libs.fincrime.admission.AdmissionResult
+import com.openbank.libs.fincrime.admission.AdmissionStep
+import com.openbank.libs.fincrime.admission.PaymentAdmissionChain
+import com.openbank.libs.fincrime.admission.StepOutcome
+import com.openbank.libs.fincrime.admission.UnavailableCause
+import com.openbank.libs.fincrime.admission.UnavailablePolicy
+import com.openbank.libs.observability.DomainMetrics
+import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.withTimeoutOrNull
+import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.logging.Logger
+import java.time.Duration
+
+/**
+ * The domestic rail's binding of the ADR-0374 admission chain.
+ *
+ * The rail supplies adapters and nothing else: the order, the severity algebra and the rule that a
+ * control which cannot answer never admits belong to [PaymentAdmissionChain]. Every step is either
+ * bound here or declared unbound with the reason it is; the kernel refuses to build a chain that
+ * forgets one.
+ *
+ *  - `AUTHORITY` unbound: whose money this is was decided when the payment was submitted, by the
+ *    customer edge and by the rail's own create path, before this chain ran. The chain holds no
+ *    grant facts to decide it again; that binding is ADR-0375 D1/D2's.
+ *  - `STANDING` bound: account-service's answer, read with the account (ADR-0374 D4).
+ *  - `LIMITS` unbound: owner limits do not exist yet (ADR-0374 delivery step B).
+ *  - `SANCTIONS` bound: the ADR-0032 screen, with the same due-diligence scope rules as before.
+ *  - `AML_DESTINATION_RISK` unbound: ADR-0374 delivery step E.
+ *  - `FRAUD` bound: the ADR-0084 score. While `openbank.domestic.fraud.enforcement-enabled` is
+ *    off the score is computed and counted but the step reports itself not applicable. It never
+ *    reports a shadow score as an ALLOW.
+ *  - `PAYEE_VERIFICATION` unbound: the domestic scheme does not require it (ADR-0171).
+ *
+ * A domestic payment has no scheme deadline, so an unavailable control holds
+ * ([UnavailablePolicy.HOLD]); the budget only bounds how long one admission may take.
+ */
+@ApplicationScoped
+class DomesticAdmissionChain(
+    private val standingPort: AccountStandingPort,
+    private val screeningPort: SanctionsScreeningPort,
+    private val fraudScoringPort: FraudScoringPort,
+    private val fraudMetrics: FraudEnforcementMetricsPort,
+    private val metrics: DomainMetrics,
+    @ConfigProperty(name = "openbank.domestic.fraud.enforcement-enabled", defaultValue = "false")
+    private val fraudEnforcementEnabled: Boolean,
+    @ConfigProperty(name = "openbank.domestic.admission.budget", defaultValue = "PT30S")
+    private val budget: Duration,
+) {
+    private val log = Logger.getLogger(DomesticAdmissionChain::class.java)
+
+    /** One evaluation: the payment, and where the fraud step reports a score it obtained afresh. */
+    private class Evaluation(val payment: DomesticPayment, val onFreshFraudScore: (RecordedFraudScore) -> Unit)
+
+    private val chain: PaymentAdmissionChain<Evaluation> =
+        PaymentAdmissionChain.Builder<Evaluation>(budget, UnavailablePolicy.HOLD)
+            .unbound(AdmissionStep.AUTHORITY, AUTHORITY_DECIDED_AT_SUBMISSION)
+            .check(AdmissionStep.STANDING) { evaluation, remaining -> standingWithin(evaluation.payment, remaining) }
+            .unbound(AdmissionStep.LIMITS, LIMITS_NOT_DELIVERED)
+            .check(AdmissionStep.SANCTIONS) { evaluation, remaining ->
+                wellFormed(AdmissionStep.SANCTIONS, sanctions(evaluation.payment, remaining))
+            }
+            .unbound(AdmissionStep.AML_DESTINATION_RISK, AML_DESTINATION_RISK_NOT_DELIVERED)
+            .check(AdmissionStep.FRAUD) { evaluation, remaining ->
+                wellFormed(AdmissionStep.FRAUD, fraud(evaluation, remaining))
+            }
+            .unbound(AdmissionStep.PAYEE_VERIFICATION, PAYEE_VERIFICATION_NOT_REQUIRED)
+            .build()
+
+    suspend fun admit(payment: DomesticPayment): AdmissionResult = chain.admit(Evaluation(payment) {})
+
+    /**
+     * As [admit], and [onFreshFraudScore] is told the fraud score when this evaluation obtained one
+     * from fraud-service (not when it reused the payment's own, and never an adapter's stand-in).
+     * The caller keeps it on the payment; the chain itself writes nothing.
+     */
+    suspend fun admit(payment: DomesticPayment, onFreshFraudScore: (RecordedFraudScore) -> Unit): AdmissionResult =
+        chain.admit(Evaluation(payment, onFreshFraudScore))
+
+    /**
+     * The one place a control's answer is checked for shape. A "a human must look" answer whose
+     * evidence does not say WHAT was found (a sanctions review naming no matched entry, a fraud
+     * review without verdict, score and rule version) is malformed: no case decision could ever
+     * cover it, so holding it for review would request review after review until the hold expires.
+     * It is answered as UNAVAILABLE instead, which holds without a case, is counted and alerted on
+     * the unavailable path, and is asked again on the next evaluation.
+     */
+    private fun wellFormed(step: AdmissionStep, outcome: StepOutcome): StepOutcome {
+        val wantsHuman = outcome is StepOutcome.Decided &&
+            (outcome.decision == AdmissionDecision.HOLD || outcome.decision == AdmissionDecision.CHALLENGE)
+        if (!wantsHuman || evidenceIdentity(step, (outcome as StepOutcome.Decided).evidence.attributes) != null) {
+            return outcome
+        }
+        log.warnf("[admission] %s asked for a review with no evidence identity; treated as unavailable", step)
+        return StepOutcome.Unavailable(UnavailableCause.MISSING_DATA)
+    }
+
+    private suspend fun standingWithin(payment: DomesticPayment, remaining: Duration): StepOutcome {
+        val lookup = withTimeoutOrNull(remaining.toMillis()) { standingPort.debtorStanding(payment.debtorAccountId) }
+            ?: return StepOutcome.Unavailable(UnavailableCause.BUDGET_EXCEEDED)
+        return when (lookup) {
+            is AccountStandingLookup.Unavailable -> StepOutcome.Unavailable(lookup.cause)
+            is AccountStandingLookup.Known -> {
+                val evidence = AdmissionEvidence.of(
+                    buildMap {
+                        put(EVIDENCE_DEBTOR_PARTY, lookup.ownerPartyId.toString())
+                        lookup.reason?.let { put("standing_reason", it.take(AdmissionEvidence.MAX_VALUE_LENGTH)) }
+                    },
+                )
+                if (lookup.mayDebit) {
+                    StepOutcome.Decided(AdmissionDecision.ALLOW, STANDING_GOOD, evidence)
+                } else {
+                    StepOutcome.Decided(AdmissionDecision.REJECT, STANDING_MAY_NOT_DEBIT, evidence)
+                }
+            }
+        }
+    }
+
+    private suspend fun sanctions(payment: DomesticPayment, remaining: Duration): StepOutcome {
+        if (!DomesticScreeningScope.isScreened(payment.transferScope)) {
+            return StepOutcome.NotApplicable(SANCTIONS_OWN_OR_TECHNICAL_TRANSFER)
+        }
+        val results = try {
+            withTimeoutOrNull(remaining.toMillis()) {
+                listOf(
+                    screeningPort.screen(payment.debtorName, ScreeningRole.DEBTOR, "${payment.id}:debtor"),
+                    screeningPort.screen(payment.creditorName, ScreeningRole.CREDITOR, "${payment.id}:creditor"),
+                )
+            } ?: return StepOutcome.Unavailable(UnavailableCause.BUDGET_EXCEEDED)
+        } catch (_: ScreeningUnavailableException) {
+            return StepOutcome.Unavailable(UnavailableCause.DEPENDENCY_DOWN)
+        }
+        results.forEach(::meter)
+        val evidence = sanctionsEvidence(results)
+        return when (DomesticScreeningScope.apply(payment.transferScope, ScreeningPolicy.decide(results))) {
+            ScreeningDecision.CLEAR -> StepOutcome.Decided(AdmissionDecision.ALLOW, SANCTIONS_CLEAR, evidence)
+            ScreeningDecision.REVIEW -> StepOutcome.Decided(AdmissionDecision.HOLD, SANCTIONS_POTENTIAL_MATCH, evidence)
+            ScreeningDecision.BLOCK -> StepOutcome.Decided(AdmissionDecision.REJECT, SANCTIONS_HIT, evidence)
+        }
+    }
+
+    private fun meter(result: ScreeningResult) {
+        val role = result.role.name.lowercase()
+        metrics.sanctionsScreening(role)
+        val severity = when (result.status) {
+            ScreeningMatchStatus.HIT, ScreeningMatchStatus.ESCALATED -> "block"
+            ScreeningMatchStatus.POTENTIAL_HIT -> "review"
+            ScreeningMatchStatus.CLEAR, ScreeningMatchStatus.WHITELISTED -> null
+        }
+        if (severity != null) metrics.sanctionsHit(role, severity)
+    }
+
+    /**
+     * Status and score per role, and the list entry that matched. Never the screened name itself:
+     * the evidence travels in an event several services read, and the reviewer has the payment.
+     */
+    private fun sanctionsEvidence(results: List<ScreeningResult>): AdmissionEvidence = AdmissionEvidence.of(
+        buildMap {
+            results.forEach { result ->
+                val role = result.role.name.lowercase()
+                put("${role}_status", result.status.name)
+                put("${role}_score", result.score.toString())
+                val matched = result.matchedEntity
+                if (matched != null && result.status != ScreeningMatchStatus.CLEAR) {
+                    put("${role}_matched_entity", matched.take(AdmissionEvidence.MAX_VALUE_LENGTH))
+                }
+            }
+        },
+    )
+
+    /**
+     * The fraud score of [payment]: the one this chain already obtained for it, or a fresh one.
+     *
+     * A payment is evaluated more than once (a control that could not answer is asked again, an
+     * activity attempt is retried), and fraud-service has no way to recognise a repeat: the score
+     * request carries no payment id, every call stores a score, and its hold rule counts stored
+     * REVIEW scores per account. So the first real score is kept on the payment (by the caller,
+     * told through the evaluation) and every later evaluation reuses it. A stand-in for an
+     * unreachable fraud-service is never kept.
+     */
+    private suspend fun fraudScore(evaluation: Evaluation, remaining: Duration): FraudScoreOutcome? {
+        val payment = evaluation.payment
+        payment.admissionFraudScore?.let { kept ->
+            return FraudScoreOutcome(
+                verdict = runCatching { FraudVerdict.valueOf(kept.verdict) }.getOrDefault(FraudVerdict.UNKNOWN),
+                score = kept.score,
+                ruleVersion = kept.ruleVersion,
+                reasons = emptyList(),
+            )
+        }
+        val outcome = withTimeoutOrNull(remaining.toMillis()) {
+            fraudScoringPort.score(
+                FraudScoreCommand(
+                    amount = payment.amount.amount,
+                    currency = payment.currency,
+                    rail = "DOMESTIC",
+                    accountId = payment.debtorAccountId,
+                    counterpartyId = null,
+                ),
+            )
+        } ?: return null
+        // Counted where the score is obtained, so one payment is one decision in this metric
+        // however many times it is evaluated.
+        fraudMetrics.recordDecision(FraudGatePolicy.wouldDo(outcome), enforced = fraudEnforcementEnabled)
+        if (!outcome.synthetic) {
+            evaluation.onFreshFraudScore(
+                RecordedFraudScore(outcome.verdict.name, outcome.score, outcome.ruleVersion.take(RULE_VERSION_MAX)),
+            )
+        }
+        return outcome
+    }
+
+    private suspend fun fraud(evaluation: Evaluation, remaining: Duration): StepOutcome {
+        val outcome = fraudScore(evaluation, remaining)
+            ?: return StepOutcome.Unavailable(UnavailableCause.BUDGET_EXCEEDED)
+        val wouldDo = FraudGatePolicy.wouldDo(outcome)
+        if (!fraudEnforcementEnabled) return StepOutcome.NotApplicable(FRAUD_ENFORCEMENT_OFF)
+        if (outcome.synthetic) {
+            // The adapter's stand-in for an unreachable fraud-service: no verdict at all.
+            fraudMetrics.recordHold(FraudHoldBasis.SCORING_UNAVAILABLE)
+            return StepOutcome.Unavailable(UnavailableCause.DEPENDENCY_DOWN)
+        }
+        val evidence = AdmissionEvidence.of(
+            "verdict" to outcome.verdict.name,
+            "score" to outcome.score.toString(),
+            "rule_version" to outcome.ruleVersion.take(AdmissionEvidence.MAX_VALUE_LENGTH),
+        )
+        return when (wouldDo) {
+            FraudGateAction.PROCEED -> StepOutcome.Decided(AdmissionDecision.ALLOW, FRAUD_ALLOW, evidence)
+            FraudGateAction.REJECT -> StepOutcome.Decided(AdmissionDecision.REJECT, FRAUD_DECLINED, evidence)
+            FraudGateAction.HOLD -> {
+                fraudMetrics.recordHold(FraudHoldBasis.VERDICT)
+                // A CHALLENGE keeps its own decision; this rail has no step-up inside an accepted
+                // payment, so the activity parks it for review like any other hold.
+                val decision =
+                    if (outcome.verdict ==
+                        FraudVerdict.CHALLENGE
+                    ) {
+                        AdmissionDecision.CHALLENGE
+                    } else {
+                        AdmissionDecision.HOLD
+                    }
+                StepOutcome.Decided(decision, FRAUD_REVIEW, evidence)
+            }
+        }
+    }
+
+    companion object {
+        private const val RULE_VERSION_MAX = 128
+
+        /** Evidence key under which the standing step records the account's owning party. */
+        const val EVIDENCE_DEBTOR_PARTY = "debtor_party_id"
+
+        val AUTHORITY_DECIDED_AT_SUBMISSION = AdmissionReasonCode("AUTHORITY_DECIDED_AT_SUBMISSION")
+        val LIMITS_NOT_DELIVERED = AdmissionReasonCode("LIMITS_NOT_DELIVERED")
+        val AML_DESTINATION_RISK_NOT_DELIVERED = AdmissionReasonCode("AML_DESTINATION_RISK_NOT_DELIVERED")
+        val PAYEE_VERIFICATION_NOT_REQUIRED = AdmissionReasonCode("PAYEE_VERIFICATION_NOT_REQUIRED")
+        val STANDING_GOOD = AdmissionReasonCode("STANDING_GOOD")
+        val STANDING_MAY_NOT_DEBIT = AdmissionReasonCode("STANDING_MAY_NOT_DEBIT")
+        val SANCTIONS_OWN_OR_TECHNICAL_TRANSFER = AdmissionReasonCode("SANCTIONS_OWN_OR_TECHNICAL_TRANSFER")
+        val SANCTIONS_CLEAR = AdmissionReasonCode("SANCTIONS_CLEAR")
+        val SANCTIONS_POTENTIAL_MATCH = AdmissionReasonCode("SANCTIONS_POTENTIAL_MATCH")
+        val SANCTIONS_HIT = AdmissionReasonCode("SANCTIONS_HIT")
+        val FRAUD_ENFORCEMENT_OFF = AdmissionReasonCode("FRAUD_ENFORCEMENT_OFF")
+        val FRAUD_ALLOW = AdmissionReasonCode("FRAUD_ALLOW")
+        val FRAUD_REVIEW = AdmissionReasonCode("FRAUD_REVIEW")
+        val FRAUD_DECLINED = AdmissionReasonCode("FRAUD_DECLINED")
+    }
+}
+
+/**
+ * Which transfers the sanctions screen applies to, and the one downgrade it allows (ADR-0032,
+ * simplified due diligence). One copy, read by the legacy screening activity and by the chain, so
+ * the two paths cannot disagree about a transfer between the bank's own customers.
+ */
+object DomesticScreeningScope {
+    /** A transfer between the customer's own accounts, or to a technical account, is not screened. */
+    fun isScreened(scope: DomesticTransferScope): Boolean =
+        scope != DomesticTransferScope.OWN_ACCOUNTS && scope != DomesticTransferScope.TECHNICAL_ACCOUNT
+
+    /**
+     * Between two customers the bank holds full KYC on, a potential match is not actionable and
+     * does not hold the payment. A BLOCK is never downgraded.
+     */
+    fun apply(scope: DomesticTransferScope, raw: ScreeningDecision): ScreeningDecision =
+        if (scope == DomesticTransferScope.INTERNAL_CLIENT && raw == ScreeningDecision.REVIEW) {
+            ScreeningDecision.CLEAR
+        } else {
+            raw
+        }
+}

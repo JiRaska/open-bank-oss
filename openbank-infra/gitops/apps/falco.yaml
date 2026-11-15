@@ -491,6 +491,11 @@ spec:
             operator: Equal
             value: "true"
             effect: NoSchedule
+          # Node-key migration to open-bank.tech, stage 1: tolerate both taint keys.
+          - key: open-bank.tech/stateful
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
   destination:
     server: https://kubernetes.default.svc
     namespace: falco
@@ -503,7 +508,7 @@ spec:
       - ServerSideApply=true
     managedNamespaceMetadata:
       labels:
-        openbank.io/plane: platform
+        open-bank.tech/plane: platform
         # The eBPF probe is privileged by design — restricted would block it.
         pod-security.kubernetes.io/enforce: privileged
         pod-security.kubernetes.io/audit: privileged

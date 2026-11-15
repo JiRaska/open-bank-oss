@@ -4,9 +4,12 @@ _service-ci.yml|job:publish-evidence|id-token
 admin-ui-deploy.yml|job:build-push|id-token
 # ADR-0358 rollback guard: OIDC for ECR read + KMS cosign verify of an operator-typed digest; no write.
 admin-ui-repin.yml|job:repin|id-token
+# ADR-0370 U8: opens or refreshes one tracking issue when the nightly Firefox/WebKit run fails.
+admin-ui-engines-nightly.yml|job:report|issues
 # Dataset-only OIDC publisher; IAM limits writes to Gate Health snapshots and its CAS selector.
 admin-ui-evidence.yml|job:publish|id-token
 agent-review.yml|job:review|pull-requests
+alert-noise-weekly.yml|job:report|issues
 alert-rca-weekly.yml|job:publish|contents
 alert-rca-weekly.yml|job:publish|issues
 alert-rca-weekly.yml|job:publish|pull-requests
@@ -37,9 +40,14 @@ ci.yml|job:app-status|pull-requests
 credential-inventory.yml|job:inventory|issues
 db-backup-associations.yml|job:live-check|id-token
 dependency-review.yml|job:dependency-review|pull-requests
+# Fixed-text refusal comment only; the job never checks out or runs PR code.
+dependabot-verification-metadata-push.yml|job:push|pull-requests
 dependency-submission.yml|job:raise-issue|issues
 # ADR-0361 drill: OIDC to a role that reads one SSM parameter (schedule/dispatch only); issues to post on #14163.
 deception-drill.yml|job:drill|id-token
+# Opens/refreshes one tracking issue per class when a CI credential or apt pin needs action (#15483).
+date-driven-expiry-watch.yml|job:apt-pins|issues
+date-driven-expiry-watch.yml|job:credentials|issues
 deception-drill.yml|job:drill|issues
 dependency-submission.yml|job:submit|contents
 deploy-code-lag-watch.yml|job:watch|issues
@@ -277,3 +285,5 @@ merge-train-wake.yml|job:wake|actions
 
 # Communication artifact producer: OIDC authenticates registry push and KMS attestations only.
 communication-image-only.yml|job:build-push|id-token
+# Standing-red sentinel: opens/refreshes/closes its own standing-red issues only.
+standing-red-sentinel.yml|job:sentinel|issues

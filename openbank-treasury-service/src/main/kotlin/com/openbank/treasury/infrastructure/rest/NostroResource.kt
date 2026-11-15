@@ -289,6 +289,13 @@ data class BreakResponse(
     val ageBusinessDays: Int,
     val aged: Boolean,
     val alertedAt: Instant?,
+    /** MATCHED (a later reconciliation matched it) or MANUAL (a person closed it); null while open. */
+    val resolutionKind: String?,
+    val resolutionReason: String?,
+    val resolvedBy: String?,
+    /** A pending (or, once MANUAL, the approved) proposal's author and time. */
+    val proposedBy: String?,
+    val proposedAt: Instant?,
 ) {
     companion object {
         fun from(v: NostroBreakView) = BreakResponse(
@@ -307,6 +314,11 @@ data class BreakResponse(
             ageBusinessDays = v.ageBusinessDays,
             aged = v.aged,
             alertedAt = v.brk.alertedAt,
+            resolutionKind = v.brk.resolutionKind?.name,
+            resolutionReason = v.brk.resolutionReason,
+            resolvedBy = v.brk.resolvedBy,
+            proposedBy = v.brk.proposedBy,
+            proposedAt = v.brk.proposedAt,
         )
     }
 }

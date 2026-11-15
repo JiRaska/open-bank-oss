@@ -111,7 +111,9 @@ class StatutoryReturnService(
             by = by,
             at = Instant.now(clock),
         )
-        return repository.insert(assembled)
+        val stored = repository.insert(assembled)
+        assembly.onStored?.invoke(stored)
+        return stored
     }
 
     suspend fun approve(id: UUID, by: String): StatutoryReturn {
@@ -151,7 +153,9 @@ class StatutoryReturnService(
             throw ReturnDataUnavailableException("$it; deadline status is unavailable")
         }
         val today = accountingClock.today()
-        val stored = repository.listReturns()
+        val obligations = catalogues.catalogues()
+            .flatMap { c -> c.returns.filter { it.filingObligation }.map { c.id to it.code } }.toSet()
+        val stored = repository.listReturns().filter { (it.catalogueId to it.returnCode) in obligations }
         val latestByKey = stored.groupBy { Key(it.catalogueId, it.returnCode, it.entityId, it.period) }
             .mapValues { (_, revisions) -> revisions.maxBy { it.revision } }
         val breaches = mutableListOf<ReturnBreach>()
@@ -175,7 +179,7 @@ class StatutoryReturnService(
         catalogues.catalogues().flatMap { catalogue ->
             // A working-day feed with no start of its own is not live yet: nothing is overdue.
             val catalogueStart = entities.startFor(catalogue) ?: return@flatMap emptyList()
-            catalogue.returns.flatMap { definition ->
+            catalogue.returns.filter { it.filingObligation && !it.onDemand }.flatMap { definition ->
                 expectedPeriods(definition, catalogueStart, today).flatMap { period ->
                     entities.forScope(definition.scope)
                         .filter { entityId -> Key(catalogue.id, definition.code, entityId, period) !in existing }

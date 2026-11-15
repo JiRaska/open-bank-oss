@@ -70,6 +70,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: gh-call-counter install
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh install
       - name: Self-test the report script
         run: |
           bash .github/scripts/test-deploy-code-lag-report.sh
@@ -104,8 +107,21 @@ jobs:
           fi
           # Allowlist: the repo's own service directories. Log content is never interpolated.
           services="$(find . -maxdepth 1 -type d -name 'openbank-*' -printf '%f,')"
+          # State of every issue a deploy hold names, so a hold that outlived its issue is
+          # reported as stale rather than as the owner's live decision. Only `#<digits>`
+          # values are queried; an unreadable state is left out (unknown is never "stale").
+          states="$RUNNER_TEMP/hold-issue-states.json"
+          echo '{}' > "$states"
+          for n in $(python3 -c 'import re,sys,yaml; r=yaml.safe_load(open(sys.argv[1])); s=((r.get("deploy_holds") or {}).get("services") or {}); print(" ".join(sorted({m for e in s.values() for i in (e.get("all_of") if "all_of" in e else [e]) for m in re.findall(r"^#([0-9]+)$", str(i.get("issue","")))})))' openbank-libs/governance/rules.yaml); do
+            if st="$(gh issue view "$n" -R "$GITHUB_REPOSITORY" --json state -q .state 2>/dev/null)"; then
+              jq --arg k "#$n" --arg v "$st" '. + {($k): $v}' "$states" > "$states.tmp" && mv "$states.tmp" "$states"
+            else
+              echo "::warning::could not read the state of hold issue #$n; not judged stale"
+            fi
+          done
           python3 .github/scripts/deploy-lag-blockers.py --report /tmp/code-lag.json \
             --rules openbank-libs/governance/rules.yaml --deploy-log "$log" \
+            --issue-states "$states" \
             --services "$services" --money-path-days 3 > "$RUNNER_TEMP/code-lag-enriched.json"
           cp "$RUNNER_TEMP/code-lag-enriched.json" /tmp/code-lag.json
 
@@ -136,10 +152,16 @@ jobs:
               '### Blocking reason',
               ...(e.holds.length
                 ? ['Held in `rules.yaml: deploy_holds`. The reconcile will NOT re-drive it; only the owner releasing the hold does:',
-                   ...e.holds.map(h => `- ${h.issue}: ${h.reason}`)]
+                   ...e.holds.map(h => `- ${h.issue}${(e.stale_holds || []).includes(h.issue) ? ' **(issue is no longer open: this condition is STALE)**' : ''}: ${h.reason}`),
+                   ...(e.blocker === 'stale-hold'
+                     ? ['', '**Every issue this hold names is closed.** Nothing is left to wait for: release the hold in a reviewed change, or re-point it at the issue that still blocks.']
+                     : [])]
                 : [e.escalate
                     ? `**No hold recorded and money-path lag exceeds ${report.money_path_days} days: nothing in governance explains this, treat it as a pipeline defect.**`
                     : 'No hold recorded; the auto-deploy reconcile should re-drive it.']),
+              ...(e.gate_refusal
+                ? ['', `Last Auto deploy can-i-deploy refused it: \`${e.gate_refusal}\`${e.gate_refusal === 'NOT_ASKED' ? ' (no verifiable Services CI build+contract source: the gate was never asked, so this does not self-clear)' : ''}.`]
+                : []),
               ...(e.blocked_consumers.length
                 ? ['', 'Consumers the last Auto deploy run blocked on this service (can-i-deploy: it has to deploy first):',
                    ...e.blocked_consumers.map(c => '- `' + c + '`')]
@@ -150,7 +172,7 @@ jobs:
               `_Automated: \`${context.workflow}\` run ${context.runId}, threshold ${report.threshold_hours}h. Refreshed in place while the lag persists._`,
             ].join('\n')
             const titleFor = e =>
-              `deploy-code-lag: ${e.holds.length ? '[held] ' : (e.escalate ? '[money-path, unexplained] ' : '')}${e.service} has src ${e.oldest_src_age_hours}h on main, sandbox runs ${e.deployed_tag}`
+              `deploy-code-lag: ${e.blocker === 'stale-hold' ? '[STALE hold] ' : e.holds.length ? '[held] ' : (e.escalate ? '[money-path, unexplained] ' : '')}${e.service} has src ${e.oldest_src_age_hours}h on main, sandbox runs ${e.deployed_tag}`
 
             // One open issue per lagging service — refreshed, never stacked; a recently
             // hand-closed issue for a service that still lags is reopened, not duplicated
@@ -220,3 +242,7 @@ jobs:
                 ...context.repo, issue_number: issue.number, state: 'closed',
               })
             }
+      - name: gh-call-counter report
+        if: always()
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh report

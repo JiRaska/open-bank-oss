@@ -48,6 +48,13 @@ class DomesticPaymentStrandedGaugeTest {
         ) = error("unused")
         override suspend fun findById(paymentId: UUID) = error("unused")
         override suspend fun findByIdempotencyKey(idempotencyKey: String) = error("unused")
+
+        override suspend fun findCustomerSubmission(
+            idempotencyKey: String,
+            debtorAccountId: UUID,
+            scope: String,
+            originalSubmissionKeyDigest: String?,
+        ) = error("unused")
         override suspend fun list(status: DomesticPaymentStatus?, debtorAccountId: UUID?, limit: Int, offset: Int) =
             error("unused")
         override suspend fun update(payment: DomesticPayment, outboxMessage: OutboxMessage) = error("unused")
@@ -140,7 +147,9 @@ class DomesticPaymentStrandedGaugeTest {
             .mapNotNull { it.id.getTag("status") }
             .toSet()
 
-        assertThat(published).containsExactlyInAnyOrder("RECEIVED", "VALIDATED", "SENT_TO_CLEARING")
+        // HELD (ADR-0374) is owed an outcome like the others: a hold older than its expiry has lost
+        // the run that owns it, and only its age can show that.
+        assertThat(published).containsExactlyInAnyOrder("RECEIVED", "HELD", "VALIDATED", "SENT_TO_CLEARING")
         assertThat(published).doesNotContain("SETTLED", "REJECTED", "CANCELLED", "RETURNED")
     }
 

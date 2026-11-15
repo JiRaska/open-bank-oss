@@ -1,0 +1,22 @@
+-- Sanctions / PEP screening of the entity and its related parties (every listed representative,
+-- every reportable beneficial owner) on the business onboarding case: one JSON document holding,
+-- per subject, the sanctions verdict (PENDING until an answer was obtained), the PEP fact and when
+-- it was screened. The aggregate refuses approval while any subject is PENDING.
+--
+-- Additive and nullable: every existing case reads back with no screening, which the aggregate
+-- treats as "not screened yet" — never as clear — and the next approval attempt screens it.
+--
+-- The document names natural persons next to a screening outcome. It is read by operators only
+-- (the customer-facing case view never carries it) and follows the retention of the case row.
+--
+-- `version` is the optimistic lock on the case row. Until now a write loaded the row and overwrote
+-- it whole, so of two writers the second silently won — including over an operator's rejection
+-- or a screening disposition. Existing rows start at 0, which is what every copy read before this
+-- migration carries, so nothing in flight is refused by the deploy itself.
+--
+-- Rollback: ALTER TABLE kyb_cases DROP COLUMN screening_json, DROP COLUMN version;
+-- Dropping loses the recorded verdicts, so every open case is screened again on its next approval
+-- attempt (the idempotency key per case and subject makes sanctions-service replay its answer).
+-- Roll the application back first: the previous release never reads this column.
+ALTER TABLE kyb_cases ADD COLUMN screening_json TEXT;
+ALTER TABLE kyb_cases ADD COLUMN version BIGINT NOT NULL DEFAULT 0;

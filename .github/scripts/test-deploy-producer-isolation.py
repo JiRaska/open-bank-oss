@@ -115,14 +115,16 @@ class ProducerIsolationTests(unittest.TestCase):
                 marker = directory / 'reads'
                 env = {**clean_env, 'PR_NUMBER': '1', 'GITHUB_REPOSITORY': 'example/repo',
                        'PROPOSAL_DIFF': str(diff), 'READ_MARKER': str(marker)}
-                gh = 'gh() { printf "read\\n" >> "$READ_MARKER"; cat "$PROPOSAL_DIFF"; }\n'
+                gh = 'gh() { printf "%s %s\\n" "$1" "$2" >> "$READ_MARKER"; [ "$2" = diff ] && cat "$PROPOSAL_DIFF"; return 0; }\n'
                 result = subprocess.run(['bash', '-c', gh + verify['run']], cwd=work, env=env,
                                         capture_output=True, text=True, check=False)
                 self.assertEqual(result.returncode == 0, case == 'equivalent', result.stdout + result.stderr)
                 if case == 'fetch-failed':
                     self.assertFalse(marker.exists(), 'failed history refresh must stop before PR lookup')
                 else:
-                    self.assertEqual(marker.read_text().splitlines(), ['read'])
+                    # One diff read; a PR whose every pin is stale is then closed (#15977).
+                    self.assertEqual(marker.read_text().splitlines(),
+                                     ['pr diff'] if case == 'equivalent' else ['pr diff', 'pr close'])
                     self.assertEqual(git('rev-parse', 'HEAD', cwd=work).stdout, git('rev-parse', 'HEAD').stdout)
                     if case != 'equivalent':
                         self.assertIn('stale GitOps image pin:', result.stdout + result.stderr)

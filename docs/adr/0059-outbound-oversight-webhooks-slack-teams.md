@@ -31,7 +31,7 @@ The load-bearing pieces already exist:
 - **`PiiMask`** (`openbank-libs/security`) is a production, non-reversible masker (IBAN, name, email,
   PAN, phone, national id) already used in the audit pipeline (GDPR Art. 25/32).
 - **Default-deny network egress** (`openbank-infra/k8s/base/network-policies.yaml`): no pod reaches the
-  internet unless it carries `openbank.io/allow-internet-egress: "true"`.
+  internet unless it carries `open-bank.tech/allow-internet-egress: "true"`.
 - **ExternalSecrets + Vault** (ADR-0017): the pattern for injecting a secret (here, the webhook URL)
   without ever committing it.
 
@@ -80,7 +80,7 @@ is masked, not leaked. Two independent controls must both fail to leak.
   no-op; nothing egresses.
 - **Webhook URL via Vault/ExternalSecret** (ADR-0017): never in git, never in config files. Injected as
   `SLACK_WEBHOOK_URL`.
-- **Network egress is explicit**: the pod gets `openbank.io/allow-internet-egress: "true"`; without it
+- **Network egress is explicit**: the pod gets `open-bank.tech/allow-internet-egress: "true"`; without it
   the default-deny policy blocks the call (fail-closed).
 
 ### D5 — Audited + tested

@@ -4,7 +4,9 @@
 
 package com.openbank.fx.application.port.out
 
+import com.openbank.libs.fincrime.CounterpartyRef
 import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.InitiationMode
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -14,6 +16,9 @@ data class FraudScoreCommand(
     val rail: String,
     val accountId: UUID?,
     val counterpartyId: UUID?,
+    // ADR-0377 D3: required, never null — an absent payee is CounterpartyRef.Unknown with a reason.
+    val counterparty: CounterpartyRef,
+    val initiationMode: InitiationMode,
 )
 
 data class FraudScoreOutcome(

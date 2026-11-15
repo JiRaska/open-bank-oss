@@ -237,6 +237,27 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: observability
+    # ci-metrics.open-bank.tech: the authenticated OTLP ingest for CI quality metrics
+    # (observability/httproute-ci-metrics-gateway.yaml). Its own Certificate `ci-metrics-edge-tls`
+    # (not pinned), admitted by the ReferenceGrant ci-metrics-edge-gateway-tls in that file, which
+    # MUST be synced before this listener lands (the Phase-1 RefNotPermitted lesson): merge this
+    # listener in a LATER change than the route file.
+    - name: https-ci-metrics
+      protocol: HTTPS
+      port: 443
+      hostname: ci-metrics.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: ci-metrics-edge-tls
+            namespace: observability
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
     # customer.open-bank.tech (ADR-0324 Phase 4, customer-edge/httproute.yaml). Serves the SAME
     # Secret the nginx Ingress does, `customer-edge-tls`: the mobile app pins this host's SPKI
     # (ADR-0066 S3, rotation Never), so a new certificate would break every installed app.
@@ -373,6 +394,10 @@ spec:
   connection:
     connectionLimit:
       value: 500
+  # Hybrid post-quantum key exchange first, classical fallbacks after (#16292), duplicated
+  # from edge-security-headers for the same no-merge reason as the headers below.
+  tls:
+    ecdhCurves: [X25519MLKEM768, X25519, P-256]
   # Same edge security headers as the Gateway-wide policy below: a listener-scoped
   # ClientTrafficPolicy REPLACES the Gateway-scoped one for that listener (no merge), so
   # https-api must carry them itself or its locally generated responses lose them again.
@@ -403,6 +428,17 @@ spec:
     - group: gateway.networking.k8s.io
       kind: Gateway
       name: edge
+  # Hybrid post-quantum key exchange (#16292). Measured 2026-11-15 with OpenSSL 3.5 offering
+  # only X25519MLKEM768: every host on this Gateway answered `handshake failure`, while the
+  # CDN-served marketing and status sites negotiated it. TLS traffic recorded today could be
+  # decrypted by a future quantum computer ("harvest now, decrypt later"); a hybrid group is
+  # at least as strong as X25519 alone, so it is safe to prefer. X25519 and P-256 stay as
+  # fallbacks for clients without ML-KEM (older OpenSSL, older mobile TLS stacks), so no
+  # client loses access. Verify:
+  #   openssl s_client -connect <host>:443 -servername <host> -groups X25519MLKEM768 -tls1_3
+  #   -> "Negotiated TLS1.3 group: X25519MLKEM768"
+  tls:
+    ecdhCurves: [X25519MLKEM768, X25519, P-256]
   headers:
     lateResponseHeaders:
       set:

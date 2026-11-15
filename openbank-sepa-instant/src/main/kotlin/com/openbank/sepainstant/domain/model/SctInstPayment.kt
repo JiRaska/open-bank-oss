@@ -41,6 +41,7 @@ data class SctInstPayment(
     val submittedAt: OffsetDateTime?,
     val createdAt: OffsetDateTime,
     val updatedAt: OffsetDateTime,
+    val synthetic: Boolean = false,
 ) {
     /** ISO 4217 code of [amount], the spelling every outbound contract carries. */
     val currency: String get() = amount.currency.code

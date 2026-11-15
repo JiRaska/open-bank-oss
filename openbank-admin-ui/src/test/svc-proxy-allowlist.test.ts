@@ -11,9 +11,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-const state = vi.hoisted(() => ({ inCluster: false, status: 'complete' as 'complete' | 'partial' | 'unavailable', services: [] as any[] }))
+const state = vi.hoisted(() => ({ inCluster: false, status: 'complete' as 'complete' | 'partial' | 'unavailable', services: [] as any[], refreshFailed: false }))
 
-vi.mock('@/auth', () => ({ auth: async () => ({ user: { accessToken: 'tok', email: 'op@example.com' } }) }))
+vi.mock('@/auth', () => ({ auth: async () => ({ user: { accessToken: 'tok', email: 'op@example.com', error: state.refreshFailed ? 'RefreshAccessTokenError' : undefined } }) }))
 vi.mock('@/lib/discovery', () => ({
   inCluster: () => state.inCluster,
   resolveInClusterService: async (name: string) => {
@@ -35,6 +35,7 @@ async function call(service: string) {
 let fetchMock: ReturnType<typeof vi.fn>
 beforeEach(() => {
   state.status = 'complete'
+  state.refreshFailed = false
   state.services = [
     { name: 'account-service', namespace: 'core', port: 8100, scaledToZero: false },
     { name: 'mcp-service', namespace: 'agents', port: 8150, scaledToZero: false },
@@ -98,4 +99,12 @@ describe('in-cluster path is gated by the catalog allowlist', () => {
     }
     expect(fetchMock).not.toHaveBeenCalled()
   })
+})
+
+
+it('refuses the stale bearer when the directory session refresh failed', async () => {
+  state.refreshFailed = true
+  const res = await call('party-service')
+  expect(res.status).toBe(401)
+  expect(fetchMock).not.toHaveBeenCalled()
 })

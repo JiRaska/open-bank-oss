@@ -31,8 +31,11 @@ import java.util.UUID
  *   dedupe key (publication, party)) happens BEFORE the coordinator call and commits
  *   independently, so a redelivery resumes instead of duplicating: completed parties find their
  *   row and are skipped, an in-flight party re-attempts its open.
+ * - [recordListChange] — the same fan-out while the master switch is OFF: rows are recorded
+ *   DEFERRED (attempts 0) and no coordinator call is made.
  * - [retryFailedTriggers] — the scheduled worker's path, re-claiming OPEN_FAILED rows whose
- *   backoff elapsed. The coordinator-call failure is NOT rethrown to Kafka here: the row plus
+ *   backoff elapsed, expired PENDING leases, and DEFERRED rows (due at once). Runs only while
+ *   the master switch is on. The coordinator-call failure is NOT rethrown to Kafka here: the row plus
  *   its KYC_COORDINATOR_OPEN_FAILED outbox event are the durable record, and the retry job owns
  *   re-attempt. Only infrastructure failure (the trigger table itself) propagates — the consumer
  *   wraps [handleListChange] in EventRetry and rethrows so the connector dead-letters.
@@ -61,12 +64,47 @@ class ScreeningTriggerService(
     /** Outcome of one [handleListChange] call, for logs and tests. */
     data class HandleResult(val candidates: Int, val opened: Int, val failed: Int, val duplicates: Int)
 
+    /**
+     * The master switch is OFF: record one DEFERRED trigger per candidate party and make no
+     * coordinator call. Nothing is lost — the retry job drains these once the switch is on — and
+     * the queue stays bounded at one deferred row per party however long the switch stays off
+     * (V14). `opened` and `failed` are always 0; `duplicates` counts coalesced parties.
+     */
+    suspend fun recordListChange(change: ListChange, candidateLimit: Int): HandleResult {
+        val diff = diffOf(change)
+        require(candidateLimit > 0) { "candidate page size must be positive" }
+        var afterPartyId: UUID? = null
+        var candidateCount = 0
+        var duplicates = 0
+        while (true) {
+            val candidates = kycCaseRepository.findActivePartyIds(candidateLimit, afterPartyId)
+            candidateCount += candidates.size
+            for (partyId in candidates) {
+                val now = Instant.now(clock)
+                val trigger = ScreeningTrigger.pending(
+                    partyId = partyId,
+                    publicationId = change.publicationId,
+                    chunkIndex = change.chunkIndex,
+                    listType = change.listType,
+                    diff = diff,
+                    now = now,
+                ).copy(state = ScreeningTriggerState.DEFERRED, nextAttemptAt = now)
+                if (!triggerRepository.recordDeferred(trigger)) duplicates++
+            }
+            afterPartyId = candidates.lastOrNull()
+            if (candidates.size < candidateLimit) break
+        }
+        return HandleResult(candidateCount, opened = 0, failed = 0, duplicates = duplicates)
+    }
+
+    private fun diffOf(change: ListChange) = ScreeningTriggerDiff(
+        changedExternalIds = change.changedExternalIds,
+        deactivatedExternalIds = change.deactivatedExternalIds,
+        changeCount = change.changedExternalIds.size + change.deactivatedExternalIds.size,
+    )
+
     suspend fun handleListChange(change: ListChange, candidateLimit: Int): HandleResult {
-        val diff = ScreeningTriggerDiff(
-            changedExternalIds = change.changedExternalIds,
-            deactivatedExternalIds = change.deactivatedExternalIds,
-            changeCount = change.changedExternalIds.size + change.deactivatedExternalIds.size,
-        )
+        val diff = diffOf(change)
         require(candidateLimit > 0) { "candidate page size must be positive" }
         var afterPartyId: UUID? = null
         var candidateCount = 0

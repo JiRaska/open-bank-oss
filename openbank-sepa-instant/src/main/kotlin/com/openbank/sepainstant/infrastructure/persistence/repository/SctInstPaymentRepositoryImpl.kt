@@ -40,7 +40,7 @@ class SctInstPaymentRepositoryImpl @Inject constructor(
 
     override fun saveWithEvent(payment: SctInstPayment, event: SctInstEvent): Uni<SctInstPayment> {
         val entity = mapper.toEntity(payment)
-        val outbox = outboxEntity(event)
+        val outbox = outboxEntity(event, entity.synthetic == true)
         return sf.withTransaction { session ->
             session.persist(entity).flatMap { session.persist(outbox) }.map { mapper.toDomain(entity) }
         }
@@ -50,40 +50,40 @@ class SctInstPaymentRepositoryImpl @Inject constructor(
         payment: SctInstPayment,
         expectedStatus: SctInstStatus,
         event: SctInstEvent,
-    ): Uni<SctInstPayment> {
-        val outbox = outboxEntity(event)
-        return sf.withTransaction { session ->
-            session.createQuery(
-                "FROM SctInstPaymentEntity WHERE paymentId = :id",
-                SctInstPaymentEntity::class.java,
-            ).setParameter("id", payment.paymentId)
-                .setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
-                .singleResultOrNull.flatMap { entity ->
-                    if (entity == null || entity.status != expectedStatus.name) {
-                        Uni.createFrom().failure(IllegalStateException("Payment status changed before event write"))
-                    } else {
-                        entity.status = payment.status.name
-                        entity.settledAt = payment.settledAt
-                        entity.recalledAt = payment.recalledAt
-                        entity.recallReason = payment.recallReason
-                        entity.updatedAt = OffsetDateTime.now(clock)
-                        session.persist(outbox).map { mapper.toDomain(entity) }
-                    }
+    ): Uni<SctInstPayment> = sf.withTransaction { session ->
+        session.createQuery(
+            "FROM SctInstPaymentEntity WHERE paymentId = :id",
+            SctInstPaymentEntity::class.java,
+        ).setParameter("id", payment.paymentId)
+            .setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+            .singleResultOrNull.flatMap { entity ->
+                if (entity == null || entity.status != expectedStatus.name) {
+                    Uni.createFrom().failure(IllegalStateException("Payment status changed before event write"))
+                } else {
+                    entity.status = payment.status.name
+                    entity.settledAt = payment.settledAt
+                    entity.recalledAt = payment.recalledAt
+                    entity.recallReason = payment.recallReason
+                    entity.updatedAt = OffsetDateTime.now(clock)
+                    val outbox = outboxEntity(event, entity.synthetic == true)
+                    session.persist(outbox).map { mapper.toDomain(entity) }
                 }
-        }
+            }
     }
 
-    private fun outboxEntity(event: SctInstEvent): SctInstOutboxEntity = SctInstOutboxEntity().also {
-        val now = clock.instant()
-        it.eventId = Ids.newId()
-        it.aggregateId = event.paymentId
-        it.eventType = event::class.simpleName ?: error("Unnamed SCT Inst event")
-        it.payload = codec.encode(event)
-        it.status = OutboxStatus.PENDING.name
-        it.attemptCount = 0
-        it.createdAt = now
-        it.updatedAt = now
-    }
+    private fun outboxEntity(event: SctInstEvent, synthetic: Boolean): SctInstOutboxEntity =
+        SctInstOutboxEntity().also {
+            val now = clock.instant()
+            it.eventId = Ids.newId()
+            it.aggregateId = event.paymentId
+            it.eventType = event::class.simpleName ?: error("Unnamed SCT Inst event")
+            it.payload = codec.encode(event)
+            it.synthetic = synthetic
+            it.status = OutboxStatus.PENDING.name
+            it.attemptCount = 0
+            it.createdAt = now
+            it.updatedAt = now
+        }
 
     @WithSession
     override fun findByPaymentId(paymentId: UUID): Uni<SctInstPayment?> = sf.withSession { s ->
