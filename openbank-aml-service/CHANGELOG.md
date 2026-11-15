@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.21.0...aml-service-v0.21.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **swift:** screen debtor and beneficiary against sanctions before MT103 release ([#16219](https://github.com/JiRaska/open-bank-oss/issues/16219)) ([1936798](https://github.com/JiRaska/open-bank-oss/commit/19367984d9c563abd7e71a69ca7dd326655eb0bf))
+
 ## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.20.0...aml-service-v0.21.0) (2026-11-14)
 
 
