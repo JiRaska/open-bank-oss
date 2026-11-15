@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.16.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.15.0...admin-ui-v4.16.0) (2026-11-15)
+
+
+### Features
+
+* **admin-ui:** explain the mobile app and admin portal test stacks under Test Intelligence ([#16189](https://github.com/JiRaska/open-bank-oss/issues/16189)) ([b29b058](https://github.com/JiRaska/open-bank-oss/commit/b29b058d43bd2d2144ee8ace89a30220efa0343f))
+
+
+### Bug Fixes
+
+* **admin-ui:** read the AML case movement owner as movementService ([#16188](https://github.com/JiRaska/open-bank-oss/issues/16188)) ([43eab06](https://github.com/JiRaska/open-bank-oss/commit/43eab06fb7188deac71b367151eef56fd87dee55)), closes [#15939](https://github.com/JiRaska/open-bank-oss/issues/15939)
+
 ## [4.15.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.14.1...admin-ui-v4.15.0) (2026-11-14)
 
 
