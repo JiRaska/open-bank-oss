@@ -55,6 +55,13 @@ def produce(manifest_file, approved_digest, journal_file, destination, max_recor
             context = entry["contextId"]
             if context not in scopes or entry["currency"] != "CZK":
                 raise ValueError("Missing approved attribution or unsupported currency")
+            scope = scopes[context]["scope"]
+            attribution_fields = ("bookingCompanyId", "bookingMode", "bookingBranchId")
+            if any(field in entry for field in attribution_fields):
+                if not all(field in entry for field in attribution_fields) or (
+                    entry["bookingCompanyId"], entry["bookingMode"], entry["bookingBranchId"]
+                ) != (scope["legalEntityId"], scope["mode"], scope["establishmentId"]):
+                    raise ValueError("Journal booking attribution differs from approved scope")
             code, account_type, amount = entry["code"], entry["accountType"], entry["netCents"]
             if not isinstance(code, str) or not code or len(code) > 64 or account_type not in ACCOUNT_TYPES:
                 raise ValueError("Invalid GL classification")

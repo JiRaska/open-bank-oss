@@ -181,3 +181,14 @@ facts. Ledger cannot infer the approval from an account ID, caller role or reque
 Cross-context journals also need approved inter-branch clearing and attribution rules before
 the journal-level pilot can be enabled for them. Once the source path is wired, build exports
 from reconciled scoped closes and run the drill before activation.
+
+Use `scripts/regulatory/export_closed_ledger.sql` on an isolated immutable PostgreSQL copy
+of the reconciled close. Run psql with `-XqAt -v ON_ERROR_STOP=1 -v as_of=YYYY-MM-DD` and
+capture stdout as NDJSON. Discard the file if psql exits unsuccessfully. This query scans and
+sorts the full cumulative population and requires a dedicated database with its own IO budget.
+It includes posted originals and reversals, excludes synthetic journals and preserves exact
+signed minor units. The approval manifest uses the immutable booking context version UUID as
+`scope.contextId`. The producer checks the exported company, mode and branch against the
+approved manifest. An unresolved context, missing line, missing GL classification, foreign currency
+or non-cent amount prevents publication. The manifest still requires independently reconciled
+controls and an approval digest. The exporter does not verify the close or approve the manifest.
