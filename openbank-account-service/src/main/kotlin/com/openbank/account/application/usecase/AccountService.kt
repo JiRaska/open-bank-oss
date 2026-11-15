@@ -209,9 +209,12 @@ class AccountService(
         binding: String?,
         intent: PassportIntent?,
     ): Account {
+        // A queued account opens only after admission. Keep the original revision, but stamp
+        // its recorded pin and opening together at the time of the account write.
+        val opening = if (intent == null) account else account.atPassportCommit(clock.instant())
         // Account, pocket, idempotency key, outbox and queue cleanup share the account transaction.
         val saved = try {
-            accountRepository.saveNewAccount(account, primaryPocketFor(account), key, binding, ::accountCreatedEvent)
+            accountRepository.saveNewAccount(opening, primaryPocketFor(opening), key, binding, ::accountCreatedEvent)
         } catch (e: PersistenceException) {
             return resolveOpeningRace(e, key, binding, intent)
         } catch (e: PgException) {
@@ -776,4 +779,9 @@ private fun PassportOpeningJob.toAccount() = Account(
     termsUrl = draft.termsUrl,
     termsEffectiveFrom = draft.termsEffectiveFrom,
     productRevisionPin = intent.pin,
+)
+
+private fun Account.atPassportCommit(at: Instant) = copy(
+    openedAt = at,
+    productRevisionPin = checkNotNull(productRevisionPin).copy(pinnedAt = at),
 )

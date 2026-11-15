@@ -289,10 +289,14 @@ class AccountProductRevisionPinIT {
             .single().single() as UUID
 
         val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(20)
-        val lookup = "SELECT status, legal_name, sanctions_status FROM accounts WHERE id = ?"
+        val lookup = """
+            SELECT status, legal_name, sanctions_status,
+                   opened_at >= sanctions_screened_at AND opened_at = product_revision_pinned_at
+            FROM accounts WHERE id = ?
+        """.trimIndent()
         while (query(lookup, account).isEmpty() && System.nanoTime() < deadline) Thread.sleep(100)
         val screeningStatus = if (consumedBeforeLoss) "CLEAR" else "WHITELISTED"
-        assertThat(query(lookup, account)).containsExactly(listOf("PENDING_ACTIVATION", null, screeningStatus))
+        assertThat(query(lookup, account)).containsExactly(listOf("PENDING_ACTIVATION", null, screeningStatus, true))
         assertThat(requests).hasSize(if (consumedBeforeLoss) 1 else 2)
         assertThat(requests).allMatch { it == storedReceipt.get() }
         assertThat(screens).hasSize(if (consumedBeforeLoss) 1 else 2)
