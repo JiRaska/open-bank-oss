@@ -54,7 +54,7 @@ spec:
             - |
               export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
               rm -rf /source/repo
-              timeout 120s git -c credential.helper= clone --no-checkout --depth 1 --single-branch --branch main \
+              timeout 120s git -c credential.helper= clone --no-checkout --depth 1 --single-branch --branch "$SNAPSHOT_REF" \
                 --filter=blob:none https://github.com/JiRaska/open-bank-oss.git /source/repo
               git -C /source/repo sparse-checkout set --no-cone '/openbank-flaky-test-hunter/src/test/kotlin/**'
               git -C /source/repo -c core.hooksPath=/dev/null checkout --detach HEAD

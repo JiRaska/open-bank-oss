@@ -45,6 +45,15 @@ class PilotSourceTest(unittest.TestCase):
             git('add', *files)
             git('-c', 'commit.gpgsign=false', '-c', 'user.name=Fixture',
                 '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture')
+            # The snapshot ref gets its OWN commit, so a clone that ignores SNAPSHOT_REF and
+            # takes main reports a different revision and the test below goes red.
+            snapshot_ref = next(e['value'] for e in INIT['env'] if e['name'] == 'SNAPSHOT_REF')
+            if snapshot_ref != 'main':
+                git('checkout', '-q', '-b', snapshot_ref)
+            git('-c', 'commit.gpgsign=false', '-c', 'user.name=Fixture',
+                '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'snapshot')
+            snapshot_revision = git('rev-parse', 'HEAD').stdout.strip()
+            git('checkout', '-q', 'main')
             destination = root/'source'/'repo'; destination.parent.mkdir()
             # Prove retries clean only the owned scratch checkout.
             destination.mkdir(); (destination/'incomplete').write_text('partial clone')
@@ -63,8 +72,7 @@ class PilotSourceTest(unittest.TestCase):
                                          'PATH':str(commands)+os.pathsep+os.environ['PATH']})
             present = sorted(str(p.relative_to(destination)) for p in destination.rglob('*')
                              if p.is_file() and '.git' not in p.relative_to(destination).parts)
-            revision = git('rev-parse', 'HEAD').stdout.strip()
-            return result, present, revision
+            return result, present, snapshot_revision
 
     def test_only_the_writer_module_test_tree_is_checked_out_and_revision_is_reported(self):
         result, present, revision = self.run_checkout()
