@@ -218,9 +218,10 @@ openbao:
     - pricing-console
     - pricing-service
     - temporal/db
-  unprovisioned:
-    - names:
-        - ci-metrics-ingest
-      reason: "owner writes TOKEN (outside the SSO writer policy) and the matching CI_METRICS_TOKEN in the app repo"
-      issue: 16205
-      review_by: 2026-12-15
+# ExternalSecrets whose value an ESO generator draws in-cluster: no store key to provision, but
+# whoever else must hold the same value is named, so a rotation cannot forget them.
+generated:
+  - secret: observability/ci-metrics-ingest
+    generator: Password ci-metrics-ingest-token (refreshPolicy CreatedOnce)
+    holders:
+      - "GitHub secret CI_METRICS_TOKEN in JiRaska/openbank-app (copied by the owner, #16205)"

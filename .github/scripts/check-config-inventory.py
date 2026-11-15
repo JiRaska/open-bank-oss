@@ -155,6 +155,31 @@ def eso_refs(root: Path, stores: set[str]) -> list[tuple[str, str]]:
     return out
 
 
+def eso_generated(root: Path) -> list[tuple[str, str]]:
+    """(namespace/name, file) for every ExternalSecret whose value an ESO generator draws in-cluster.
+
+    These have no store key to provision, so they are declared under `generated:` instead — the
+    point is the same: someone stated where the value comes from and who else must hold it.
+    """
+    out: list[tuple[str, str]] = []
+    for path in sorted((root / GITOPS).rglob("*.y*ml")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "generatorRef" not in text:
+            continue
+        try:
+            docs = list(yaml.safe_load_all(text))
+        except yaml.YAMLError:
+            continue
+        for d in docs:
+            if not isinstance(d, dict) or d.get("kind") != "ExternalSecret":
+                continue
+            refs = [((i or {}).get("sourceRef") or {}).get("generatorRef") for i in (d.get("spec") or {}).get("dataFrom") or []]
+            if any(refs):
+                md = d.get("metadata") or {}
+                out.append((f"{md.get('namespace', '?')}/{md.get('name', '?')}", str(path.relative_to(root))))
+    return out
+
+
 # --------------------------------------------------------------------------- inventory
 def load_inventory(root: Path) -> dict:
     return yaml.safe_load((root / INVENTORY).read_text(encoding="utf-8")) or {}
@@ -230,6 +255,17 @@ def check(root: Path, today: dt.date) -> tuple[list[str], int]:
                 f"{f}: ExternalSecret remote key `{k}` is not declared in {INVENTORY} openbao.keys — "
                 f"write it to OpenBao and list it, or list it under openbao.unprovisioned"
             )
+    declared_gen = {g.get("secret") for g in inv.get("generated") or []}
+    for g in inv.get("generated") or []:
+        if not g.get("secret") or not g.get("holders"):
+            errors.append(f"generated entry {g}: needs `secret` (namespace/name) and `holders` (who else must hold the value)")
+    grefs = eso_generated(root)
+    for name, f in grefs:
+        if name not in declared_gen:
+            errors.append(f"{f}: ExternalSecret `{name}` is generated in-cluster but not declared under `generated:` in {INVENTORY}")
+    for name in sorted(declared_gen - {n for n, _ in grefs} - {None}):
+        errors.append(f"{INVENTORY}: generated secret `{name}` is declared but no ExternalSecret generates it — remove it")
+    erefs = erefs + [(n, f) for n, f in grefs]  # counted as subjects
     for k in sorted((keys | bao_un) - used_keys):
         errors.append(f"{INVENTORY}: openbao key `{k}` is declared but no ExternalSecret reads it — remove it")
     return errors, len(refs) + len(erefs)
@@ -347,6 +383,14 @@ def self_test() -> int:
     cases.append(("dated unprovisioned entry passes", wf, bad, eso, None))
     bad = json.loads(json.dumps(bad)); bad["github"]["unprovisioned"][0].pop("issue")
     cases.append(("unprovisioned entry without issue fails", wf, bad, eso, "needs `issue`"))
+    gen_eso = eso + (
+        "---\napiVersion: external-secrets.io/v1\nkind: ExternalSecret\nmetadata: {name: g, namespace: obs}\n"
+        "spec:\n  refreshPolicy: CreatedOnce\n  dataFrom:\n    - sourceRef:\n        generatorRef: {kind: Password, name: p}\n"
+    )
+    cases.append(("KNOWN-NEGATIVE undeclared generated secret fails", wf, good, gen_eso, "`obs/g` is generated in-cluster but not declared"))
+    ok_gen = json.loads(json.dumps(good)); ok_gen["generated"] = [{"secret": "obs/g", "holders": ["GitHub secret X"]}]
+    cases.append(("declared generated secret passes", wf, ok_gen, gen_eso, None))
+    cases.append(("stale generated entry fails", wf, ok_gen, eso, "generated secret `obs/g` is declared but no ExternalSecret generates it"))
     failures = 0
     for label, w, inv, e, expect in cases:
         with tempfile.TemporaryDirectory() as d:
