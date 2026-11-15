@@ -14,26 +14,28 @@ Two questions, answered daily:
    DNS hijack, a compromised ACME account elsewhere) becomes visible before it is used.
 
 THE TRAP THIS IS BUILT AROUND. A CT search that returns few or no certificates looks exactly
-like "nothing suspicious". Measured 2026-11-15: crt.sh returned 2 unexpired certificates for
-the domain (both Amazon) while 12 hosts were serving Let's Encrypt certificates, so a monitor
-on crt.sh alone was blind to the very CA an attacker would most likely use. Therefore the
-watch first fetches the certificate each known host actually SERVES and requires the CT
-source to contain at least one of those serials. If it does not, the verdict is
-UNVERIFIABLE (exit 3), never clean.
+like "nothing suspicious". Measured 2026-11-15: crt.sh's JSON API returned 2 unexpired
+certificates for the domain while 12 hosts were serving Let's Encrypt certificates, i.e. it
+was blind to the very CA an attacker would most likely use. The SAME index queried through
+crt.sh's public, free, read-only Postgres interface (guest@crt.sh:5432/certwatch) returned 17,
+including the exact certificate admin/api/customer serve. So the watch uses that interface
+and still does not trust it blindly: it fetches the certificate each control host actually
+SERVES and requires the CT source to contain at least one of them. If none is present the
+verdict is UNVERIFIABLE (exit 3), never clean; a control that is missing while others are
+present is reported as partial visibility.
+
+Free and open: no account, no API key, no paid tier. Cost is one ~25 s query a day.
 
 Exit codes: 0 clean, 2 finding (CAA drift or a foreign issuer), 3 could not verify.
-No credential is needed; CERTSPOTTER_TOKEN, if set, adds a second CT source.
 """
 from __future__ import annotations
 
 import argparse
-import datetime as dt
-import json
 import os
 import re
 import subprocess
+import time
 import sys
-import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -100,39 +102,60 @@ def norm_serial(s: str) -> str:
     return s.lower().replace(":", "").lstrip("0")
 
 
-def crtsh(domain: str) -> list[dict] | None:
-    url = f"https://crt.sh/?q=%25.{domain}&output=json&exclude=expired"
-    try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "openbank-ct-watch"}), timeout=90) as r:
-            rows = json.load(r)
-    except Exception:
-        return None
+CRTSH_SQL = """
+SELECT DISTINCT encode(x509_serialNumber(c.certificate), 'hex'),
+       x509_issuerName(c.certificate),
+       x509_notAfter(c.certificate),
+       (SELECT string_agg(DISTINCT n, ' ') FROM x509_altNames(c.certificate) n)
+  FROM certificate c
+ WHERE plainto_tsquery('certwatch', :'domain') @@ identities(c.certificate)
+   AND x509_notAfter(c.certificate) > now()
+   AND NOT x509_hasExtension(c.certificate, '1.3.6.1.4.1.11129.2.4.3', true)
+"""  # the last clause drops precertificates, which duplicate the final certificate
+
+
+def parse_crtsh_rows(text: str, domain: str) -> list[dict]:
     out = []
-    for x in rows if isinstance(rows, list) else []:
-        out.append({"serial": norm_serial(str(x.get("serial_number", ""))),
-                    "issuer": issuer_org(str(x.get("issuer_name", ""))),
-                    "names": sorted(set(str(x.get("name_value", "")).split())),
-                    "not_after": str(x.get("not_after", "")), "source": "crt.sh"})
+    for line in text.splitlines():
+        parts = line.split("|")
+        if len(parts) != 4:
+            continue
+        serial, issuer, not_after, names = parts
+        names_l = sorted(n for n in names.split() if n == domain or n.endswith("." + domain))
+        if not names_l:
+            continue  # full-text match on a name that merely contains the domain token
+        out.append({"serial": norm_serial(serial), "issuer": issuer_org(issuer), "names": names_l,
+                    "not_after": not_after, "source": "crt.sh"})
     return out
 
 
-def certspotter(domain: str, token: str) -> list[dict] | None:
-    url = (f"https://api.certspotter.com/v1/issuances?domain={domain}&include_subdomains=true"
-           "&expand=dns_names&expand=issuer")
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}", "User-Agent": "openbank-ct-watch"})
-    try:
-        with urllib.request.urlopen(req, timeout=90) as r:
-            rows = json.load(r)
-    except Exception:
-        return None
-    if not isinstance(rows, list):
-        return None
-    now = dt.datetime.now(dt.timezone.utc).isoformat()
-    return [{"serial": norm_serial(str(x.get("cert_der", "") and x.get("serial", "") or x.get("serial", ""))),
-             "issuer": issuer_org(str((x.get("issuer") or {}).get("name", ""))),
-             "names": sorted(x.get("dns_names") or []),
-             "not_after": str(x.get("not_after", "")), "source": "certspotter"}
-            for x in rows if str(x.get("not_after", "")) > now]
+CT_ERRORS: list[str] = []
+
+
+def crtsh(domain: str, attempts: int = 3) -> list[dict] | None:
+    """crt.sh's public read-only Postgres interface. None means it did not answer.
+
+    crt.sh limits concurrent guest connections and drops some under load, so a refusal is
+    retried with a pause; the last reason is kept for the report, because an unexplained
+    "could not verify" is as unhelpful as a false "clean".
+    """
+    for i in range(attempts):
+        try:
+            r = subprocess.run(["psql", "-h", "crt.sh", "-p", "5432", "-U", "guest", "-d", "certwatch",
+                                "-At", "-F", "|", "-v", "ON_ERROR_STOP=1", "-v", f"domain={domain}"],
+                               input=CRTSH_SQL, capture_output=True, text=True, timeout=180,
+                               env={**os.environ, "PGCONNECT_TIMEOUT": "30"})
+            if r.returncode == 0:
+                return parse_crtsh_rows(r.stdout, domain)
+            CT_ERRORS.append(f"crt.sh attempt {i + 1}: " + (r.stderr.strip().splitlines() or ["exit " + str(r.returncode)])[0][:200])
+        except FileNotFoundError:
+            CT_ERRORS.append("psql is not installed")
+            return None
+        except subprocess.TimeoutExpired:
+            CT_ERRORS.append(f"crt.sh attempt {i + 1}: timed out")
+        if i + 1 < attempts:
+            time.sleep(20 * (i + 1))
+    return None
 
 
 def served_serial(host: str) -> str | None:
@@ -166,7 +189,7 @@ def verdict(expected: set[str], published: set[str] | None, entries: list[dict] 
         lines.append(f"OK caa: {len(published)} records match OpenTofu")
 
     if entries is None:
-        lines.append("UNVERIFIABLE ct: no CT source answered")
+        lines.append("UNVERIFIABLE ct: no CT source answered" + (f" ({'; '.join(CT_ERRORS)})" if CT_ERRORS else ""))
         return max(code, UNVERIFIABLE) if code != FINDING else FINDING, lines
     seen = {e["serial"] for e in entries}
     controls = {h: s for h, s in served.items() if s}
@@ -180,6 +203,10 @@ def verdict(expected: set[str], published: set[str] | None, entries: list[dict] 
         blind = True
     else:
         lines.append(f"OK ct coverage: CT source contains the served certificate of {', '.join(covered)}")
+        missing = sorted(set(controls) - set(covered))
+        if missing:
+            lines.append(f"WARN ct partial visibility: not yet indexed for {', '.join(missing)} "
+                         "(a foreign certificate for those names could be missed until it is)")
         blind = False
     allowed = allowed_issuer_orgs(expected)
     foreign = [e for e in entries if e["issuer"] not in allowed]
@@ -222,6 +249,11 @@ def self_test() -> int:
         ("no DNS answer is NOT clean", verdict(exp, None, [le], served)[0] == UNVERIFIABLE),
         ("foreign issuer still reported when blind", verdict(exp, set(exp), [rogue], served)[0] == FINDING),
         ("issuer DN parse", issuer_org("C=US, O=Let's Encrypt, CN=R11") == "Let's Encrypt"),
+        ("crt.sh row parse", parse_crtsh_rows("06291d|C=US, O=Let's Encrypt, CN=YE1|2027-01-02 05:03:51|a.example.test", "example.test")
+         == [{"serial": "6291d", "issuer": "Let's Encrypt", "names": ["a.example.test"], "not_after": "2027-01-02 05:03:51", "source": "crt.sh"}]),
+        ("unrelated name dropped", parse_crtsh_rows("01|O=X|2027|example.test.evil.org", "example.test") == []),
+        ("partial visibility is reported", any(l.startswith("WARN ct partial") for l in
+         verdict(exp, set(exp), [le], {**served, "b.example.test": "ffff"})[1])),
     ]
     bad = [n for n, ok in checks if not ok]
     if bad:
@@ -243,11 +275,6 @@ def main() -> int:
         print("\n".join(sorted(expected)))
         return CLEAN
     entries = crtsh(DOMAIN)
-    token = os.environ.get("CERTSPOTTER_TOKEN", "")
-    if token:
-        extra = certspotter(DOMAIN, token)
-        if extra is not None:
-            entries = (entries or []) + extra
     served = {h: served_serial(h) for h in CONTROL_HOSTS}
     code, lines = verdict(expected, published_caa(DOMAIN), entries, served)
     print("\n".join(lines))

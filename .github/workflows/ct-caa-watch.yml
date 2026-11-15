@@ -47,13 +47,15 @@ jobs:
       - name: Derive the expected CAA set from OpenTofu (offline)
         run: python3 .github/scripts/check-ct-caa.py --offline
 
+      # crt.sh's free public Postgres interface is the CT source (no account, no key). The
+      # hosted image normally ships psql; install it only if it is missing.
+      - name: Ensure psql
+        if: ${{ github.event_name != 'pull_request' }}
+        run: command -v psql >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q postgresql-client; }
+
       - name: Ask DNS and Certificate Transparency
         id: probe
         if: ${{ github.event_name != 'pull_request' }}
-        env:
-          # Optional second CT source. Without it crt.sh alone is used, and the script's
-          # known-positive control decides whether that answer can be trusted at all.
-          CERTSPOTTER_TOKEN: ${{ secrets.CERTSPOTTER_TOKEN }}
         run: |
           set +e
           python3 .github/scripts/check-ct-caa.py > "$RUNNER_TEMP/ct.txt"
@@ -82,7 +84,7 @@ jobs:
           else
             title="Certificate Transparency watch cannot verify - CT source blind"
             severity="severity:medium"
-            lead="The daily watch could not verify CT or DNS. Usually the CT source does not contain the certificates our own hosts serve, so it cannot see a foreign one either. Add a second source (repository secret CERTSPOTTER_TOKEN) or fix the probe."
+            lead="The daily watch could not verify CT or DNS: crt.sh did not answer, or it contains none of the certificates our own hosts serve, so it could not see a foreign one either. The output below names the reason. Usually transient (crt.sh sheds guest connections under load); if it persists for days, investigate the source."
           fi
           body="$RUNNER_TEMP/issue-body.md"
           {
