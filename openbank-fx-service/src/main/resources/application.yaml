@@ -247,6 +247,8 @@ authz:
     tls:
       # aml-service's private-CA mTLS listener (8443, client auth REQUIRED).
       aml-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -259,6 +261,8 @@ authz:
       # party-service's private-CA mTLS listener (8443, client auth REQUIRED). The same client
       # certificate, mounted a second time at /mnt/party-tls.
       party-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
