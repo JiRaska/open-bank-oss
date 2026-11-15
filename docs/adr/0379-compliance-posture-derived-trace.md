@@ -81,9 +81,11 @@ We will make compliance posture a **derived trace**, and `/docs/compliance` its 
    (ADR-0056), and its caller is the signed-in member of staff under their own roles: the route guard admits
    `/api/compliance` only with `compliance:view`. Every tool is a read, so no OPA write decision exists to
    take. An in-page assistant (`POST /api/compliance/ask`) passes the question to agent-service's governed chat
-   (ADR-0031) with tool execution disabled and the trace rows as context. The answer is shown only when it cites
-   at least one trace row as `[[control:<id>]]` or `[[obligation:<id>]]` and every citation resolves; otherwise
-   the route answers 422 and nothing is rendered. This adds no capability to any charter, because the model gets
+   (ADR-0031) with tool execution disabled and the trace rows as context. The answer is shown only when every sentence
+   cites a trace row as `[[control:<id>]]` or `[[obligation:<id>]]`, every citation resolves, and the prose states
+   no status or verdict at all; otherwise the route answers 422 and nothing is rendered. A resolving token proves a
+   row exists, not that the sentence around it is true, so the model is not allowed to make the claim. The page
+   shows the cited rows' computed verdicts beside the answer, which is labelled as an explanation, not evidence. This adds no capability to any charter, because the model gets
    no tool, so `agents.yaml` does not change. No tool can write a status, an obligation or a control. Those change
    only through a reviewed PR to the YAML.
 

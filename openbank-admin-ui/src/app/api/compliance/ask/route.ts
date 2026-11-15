@@ -3,8 +3,8 @@
 
 // Cited question answering over the compliance trace (ADR-0379 phase 3). The question goes to
 // agent-service's governed chat (ADR-0031) with tool execution disabled and the trace rows as
-// context. The answer is returned only if every paragraph cites a trace row, every citation
-// resolves and no cited control is given a verdict other than its computed one; otherwise 422.
+// context. The answer is returned only if every sentence cites a trace row, every citation
+// resolves and the prose states no status at all; otherwise 422.
 // The response carries the cited rows' computed facts, which the page shows as the evidence.
 // The model can explain the trace but has no tool, no write path and no way to change a verdict.
 
@@ -73,8 +73,8 @@ export async function POST(request: Request) {
   const citations = checkCitations(reply, trace)
   if (!citations.ok) {
     return NextResponse.json({
-      error: citations.contradictions.length ? 'contradicts_trace' : 'uncited_answer',
-      unknown: citations.unknown, uncitedParagraphs: citations.uncitedParagraphs, contradictions: citations.contradictions,
+      error: citations.statusWord ? 'asserts_status' : 'uncited_answer',
+      unknown: citations.unknown, uncitedSentences: citations.uncitedSentences, statusWord: citations.statusWord,
     }, { status: 422 })
   }
   return NextResponse.json({ answer: reply, citations: citations.cited, rows: citedRows(trace, citations.cited), asOf: trace.asOf })

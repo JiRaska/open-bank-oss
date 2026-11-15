@@ -132,14 +132,13 @@ export function callComplianceTool(trace: ComplianceTrace, name: string, rawArgs
 // real id only in case, punctuation or separators is counted as unknown instead of passing as prose.
 const CITATION = /\[\[(control|obligation):([^\]\n]{1,120})\]\]/g
 
-/** Verdict words, both languages, mapped to the verdict they assert. */
-const VERDICT_WORDS: [RegExp, string][] = [
-  [/\b(unverified|not verified)\b|neověřen/i, 'unverified'],
-  [/\benforced\b|vynucen/i, 'enforced'],
-  [/\bpartial(ly)?\b|částečn/i, 'partial'],
-  [/\baudit[- ]only\b|jen audit/i, 'audit'],
-  [/\bplanned\b|plánovan/i, 'planned'],
-]
+/**
+ * Words that assert a status. The model may not use them at all: verdicts are shown from the
+ * trace beside the answer, so the prose never needs to state one, and banning the vocabulary
+ * closes the channel instead of trying to judge each claim. Over-rejection (a negated or
+ * quoted status word) is the accepted cost; the check fails closed.
+ */
+const STATUS_WORDS = /\b(enforced|unenforced|compliant|non-?compliant|compliance status|partial(ly)?|unverified|verified|audit[- ]only|planned|satisf(y|ies|ied)|pass(es|ed)?|fail(s|ed)?|meets?|met|covered|green|red)\b|vynucen|splň|splnen|částečn|neověřen|ověřen|plánovan|pokryt/i
 
 /**
  * The context handed to a model: one line per trace row, each prefixed with the citation token
@@ -149,8 +148,8 @@ const VERDICT_WORDS: [RegExp, string][] = [
 export function buildCitationContext(trace: ComplianceTrace): string {
   const lines = [
     `Compliance trace as of commit ${trace.asOf.commit ?? 'unknown'}, evaluated ${trace.asOf.evaluatedAt}.`,
-    'Answer only from these rows. Every paragraph must cite the row it is about with its token in double brackets, e.g. [[control:audit-trail]].',
-    'Verdicts were computed by code. Repeat them exactly; never change, upgrade or assess a verdict yourself.',
+    'Answer only from these rows. Cite the row each sentence is about with its token in double brackets, e.g. [[control:audit-trail]].',
+    'Every sentence must cite. Do not state any verdict, status or compliance judgement: the page shows the computed verdict next to your answer. Explain what the cited rows mean and what they are for.',
     '',
   ]
   for (const c of trace.controls) {
@@ -167,10 +166,10 @@ export interface CitationCheck {
   cited: string[]
   /** Tokens that look like citations but name no row in the trace. */
   unknown: string[]
-  /** Paragraphs that carry no citation at all. */
-  uncitedParagraphs: number
-  /** Sentences asserting a verdict that differs from the cited control's computed verdict. */
-  contradictions: { ref: string; asserted: string; actual: string }[]
+  /** Sentences (or fragments, the split is deliberately eager) that carry no citation. */
+  uncitedSentences: number
+  /** The first status word found, if any. */
+  statusWord: string | null
 }
 
 /** The facts the page shows next to an answer, taken from the trace, never from the model. */
@@ -188,34 +187,25 @@ export function citedRows(trace: ComplianceTrace, cited: string[]) {
 
 /**
  * A resolving token proves the row exists, not that the prose around it is true. So an answer is
- * renderable only when every paragraph cites a row, every citation resolves, and no sentence
- * that cites a control asserts a verdict other than the one computed for it. The page then shows
- * the cited rows' computed facts beside the prose, so the model's wording is never the evidence.
+ * renderable only when every citation resolves, every sentence cites a row, and the prose states
+ * no status at all. The verdicts the reader sees come from the trace (`citedRows`), never from
+ * the model. The sentence split is eager (it also breaks on abbreviations), which can only make
+ * the check stricter.
  */
 export function checkCitations(answer: string, trace: ComplianceTrace): CitationCheck {
-  const verdicts = new Map(trace.controls.map(c => [`control:${c.id}`, c.verdict as string]))
-  const known = new Set([...verdicts.keys(), ...trace.obligations.map(o => `obligation:${o.id}`)])
+  const known = new Set([...trace.controls.map(c => `control:${c.id}`), ...trace.obligations.map(o => `obligation:${o.id}`)])
   const cited: string[] = []
   const unknown: string[] = []
   for (const m of answer.matchAll(CITATION)) {
     const token = `${m[1]}:${m[2]}`
     if (known.has(token)) { if (!cited.includes(token)) cited.push(token) } else if (!unknown.includes(token)) unknown.push(token)
   }
-  const paragraphs = answer.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean)
-  const uncitedParagraphs = paragraphs.filter(p => !/\[\[(control|obligation):/.test(p)).length
-
-  const contradictions: CitationCheck['contradictions'] = []
-  for (const sentence of answer.split(/(?<=[.!?])\s+|\n+/)) {
-    const asserted = VERDICT_WORDS.filter(([re]) => re.test(sentence)).map(([, v]) => v)
-    if (!asserted.length) continue
-    for (const m of sentence.matchAll(CITATION)) {
-      const ref = `${m[1]}:${m[2]}`
-      const actual = verdicts.get(ref)
-      if (actual && !asserted.includes(actual)) contradictions.push({ ref, asserted: asserted.join('/'), actual })
-    }
-  }
+  const prose = answer.replace(CITATION, ' ')
+  const statusWord = STATUS_WORDS.exec(prose)?.[0] ?? null
+  const fragments = answer.split(/[.!?;:]+(?=\s|$)|\n+/).map(f => f.trim()).filter(f => /\p{L}/u.test(f.replace(CITATION, '')))
+  const uncitedSentences = fragments.filter(f => !/\[\[(control|obligation):/.test(f)).length
   return {
-    ok: cited.length > 0 && unknown.length === 0 && uncitedParagraphs === 0 && contradictions.length === 0,
-    cited, unknown, uncitedParagraphs, contradictions,
+    ok: cited.length > 0 && unknown.length === 0 && uncitedSentences === 0 && statusWord === null,
+    cited, unknown, uncitedSentences, statusWord,
   }
 }

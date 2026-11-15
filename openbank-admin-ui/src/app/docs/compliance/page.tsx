@@ -126,7 +126,7 @@ function AskTrace() {
     <section className="card" style={{ padding: '14px', display: 'grid', gap: '8px', marginTop: '20px' }} aria-label={t('Dotaz nad trasou', 'Ask about the trace')}>
       <h2 style={{ fontSize: '15px', margin: 0 }}>{t('Zeptat se nad trasou', 'Ask about the trace')}</h2>
       <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
-        {t('AI jen vysvětluje: nemá nástroje, nemění stav a odpověď se zobrazí, jen když cituje řádky trasy.', 'The AI only explains: it has no tools, changes nothing, and an answer is shown only when it cites trace rows.')}
+        {t('AI jen vysvětluje: nemá nástroje, nic nemění, nikdy neuvádí verdikt a odpověď se zobrazí, jen když každá věta cituje řádek trasy.', 'The AI only explains: it has no tools, changes nothing, never states a verdict, and an answer is shown only when every sentence cites a trace row.')}
       </p>
       <label style={{ fontSize: '12px', display: 'grid', gap: '4px' }}>
         {t('Otázka', 'Question')}
@@ -156,9 +156,9 @@ function AskTrace() {
       {result && 'error' in result ? (
         <p role="status" style={{ fontSize: '12px', color: 'var(--warning-text)', margin: 0 }}>
           {result.error === 'uncited_answer'
-            ? t('Odpověď nebyla zobrazena: některý odstavec necitoval řádek trasy, nebo citoval neexistující.', 'The answer was not shown: a paragraph cited no trace row, or cited one that does not exist.')
-            : result.error === 'contradicts_trace'
-              ? t('Odpověď nebyla zobrazena: uváděla jiný verdikt, než jaký kód vypočítal.', 'The answer was not shown: it stated a verdict other than the computed one.')
+            ? t('Odpověď nebyla zobrazena: některá věta necitovala řádek trasy, nebo citovala neexistující.', 'The answer was not shown: a sentence cited no trace row, or cited one that does not exist.')
+            : result.error === 'asserts_status'
+              ? t('Odpověď nebyla zobrazena: sama uváděla stav či verdikt. Verdikty ukazuje jen tabulka z trasy.', 'The answer was not shown: it stated a status or verdict itself. Only the computed rows show verdicts.')
               : t('Asistent není dostupný.', 'The assistant is unavailable.')}
         </p>
       ) : null}
