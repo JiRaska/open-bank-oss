@@ -534,3 +534,34 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## 2026-11-15 - New inbound caller: sdd-service screens collections before release (ADR-0032)
+
+sdd-service now calls `POST /api/v1/sanctions/screen` for the debtor and creditor of each
+collection before it is released. It calls over the private-CA mTLS listener (8443, client
+certificate required, TLSv1.3) with its own service-account bearer, not over the plain 8123 port;
+the sanctions-namespace NetworkPolicy admits the sdd namespace on the same ports as the other
+declared callers. Spoofing: as in S3, the client certificate is transport authentication only and
+the bearer stays the identity `@RolesAllowed` and OPA decide on; any fleet-CA certificate still
+passes the handshake. Elevation: no authorization rule changes here; the call is `sanctions.create`,
+which `m2m-sanctions-screening` already grants every `service-account-*`, so sdd gains the screen
+call and nothing else. Information disclosure: the request carries party names the caller already
+holds, now encrypted in transit. Denial of service: sdd treats an unavailable screen as not screened
+and holds the collection (fail-closed), so an outage here stops collections rather than releasing
+them unscreened. Rollback: revert the sdd change and drop the sdd namespace from the ingress
+rule; unsetting `SANCTIONS_SERVICE_URL` alone would fail closed and hold every collection.
+
+## 2026-11-15 - New inbound caller: swift-service screens MT103s before release (ADR-0032)
+
+swift-service now calls `POST /api/v1/sanctions/screen` for the debtor and the beneficiary of each
+MT103 before it is released. It calls the plain 8123 listener from the payments namespace, which
+the ingress rule already admits for the other payment rails, so no NetworkPolicy changes for this
+caller. Spoofing: the edge is plaintext in-cluster like the other payments callers still on 8123
+(S3: the plain port stays open until each caller is migrated to 8443), so caller identity rests on
+the NetworkPolicy and swift's own service-account bearer. Elevation: no authorization rule
+changes; the call is `sanctions.create`, already granted to every `service-account-*` by
+`m2m-sanctions-screening`. Information disclosure: the request carries party names the caller
+already holds, in plaintext on the cluster network, the same exposure as the other 8123 callers.
+Denial of service: swift treats an unavailable screen as not screened and holds the MT103
+(fail-closed). Rollback: revert the swift change; unsetting `SANCTIONS_SERVICE_URL` alone would
+fail closed and hold every MT103, not release them unscreened.

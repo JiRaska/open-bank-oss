@@ -112,3 +112,9 @@ Every case creation and transition emits a versioned domain event → `audit-ser
 - ✅ Audit: every state change → audit-service via outbox event
 - ⚠️ OPA authz is **advisory** by default (`AUTHZ_ENFORCE=false`) — flip to enforce before relying on policy denials
 - ⚠️ `openapi.yaml` is out of sync with the implemented contract — reconcile before publishing the spec as authoritative (see [03-api](./03-api.md))
+
+## Case-create callers
+
+`POST` case creation is accepted only from the named machine identities of the services that run a
+screening gate (`AML_CASE_CREATE_CALLERS` in `AmlCaseResource`, mirrored by `aml_rest_ext.rego`).
+sdd-service is one of them: it opens a case when its collection sanctions gate holds or blocks.

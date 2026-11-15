@@ -293,6 +293,9 @@ internal val AML_CASE_CREATE_MOVEMENT_SERVICES = mapOf(
     "service-account-openbank-sepa-payment" to "openbank-sepa-payment",
     "service-account-openbank-sepa-instant" to "openbank-sepa-instant",
     "service-account-openbank-fx" to "openbank-fx-service",
+    // ADR-0032: sdd-service opens a case when its collection sanctions gate holds or blocks.
+    "service-account-openbank-sdd" to "openbank-sdd-service",
+    "service-account-openbank-swift" to "openbank-swift-service",
 )
 
 internal val AML_CASE_CREATE_CALLERS: Set<String> = AML_CASE_CREATE_MOVEMENT_SERVICES.keys

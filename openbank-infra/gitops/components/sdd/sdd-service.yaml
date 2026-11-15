@@ -130,6 +130,13 @@ spec:
             # ADR-0335 D6: account-service's private-CA mTLS listener (client cert sdd-internal-tls).
             - name: ACCOUNT_SERVICE_URL
               value: https://account-service.accounts.svc:8443
+            # ADR-0032: debtor/creditor sanctions screening before a collection is released, over
+            # sanctions-service's private-CA mTLS listener (client cert sdd-internal-tls, /mnt/sanctions-tls).
+            - name: SANCTIONS_SERVICE_URL
+              value: https://sanctions-service.sanctions.svc:8443
+            # aml-service's private-CA mTLS listener (client cert sdd-internal-tls, /mnt/aml-tls).
+            - name: AML_SERVICE_URL
+              value: https://aml-service.aml.svc:8443
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -197,6 +204,12 @@ spec:
               mountPath: /tmp
             - name: account-tls
               mountPath: /mnt/account-tls
+              readOnly: true
+            - name: aml-tls
+              mountPath: /mnt/aml-tls
+              readOnly: true
+            - name: sanctions-tls
+              mountPath: /mnt/sanctions-tls
               readOnly: true
             - name: internal-tls
               mountPath: /mnt/internal-tls
@@ -291,6 +304,14 @@ spec:
           secret:
             secretName: kafka-cluster-ca-truststore
         - name: account-tls
+          secret:
+            secretName: sdd-internal-tls
+            optional: false
+        - name: aml-tls
+          secret:
+            secretName: sdd-internal-tls
+            optional: false
+        - name: sanctions-tls
           secret:
             secretName: sdd-internal-tls
             optional: false
