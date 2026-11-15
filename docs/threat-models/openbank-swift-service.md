@@ -108,7 +108,7 @@ not change any existing request's outcome until explicitly flipped.
 
 - **Four-eyes for high-value sends** strongly recommended (ADR-0034 MakerChecker).
 - Message-level authenticity (signing) is the dominant control against wire fraud.
-- Sanctions screening expected upstream before release.
+- Sanctions screening: MT103 debtor and beneficiary are screened in-service before release (2026-11-14 entry). MT202 institution transfers (bank-to-bank, BICs only) are not name-screened by this rail; treasury release is their control.
 - **`swift.send`'s `PendingApproval` has no `resourceId` binding** (action + maker only, per §4a) —
   unlike the resource-scoped services in the ADR-0155 rollout (e.g. sepa-payment), a checker cannot
   distinguish between two concurrently-pending sends from the same maker by looking at the approval
@@ -340,3 +340,49 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## 2026-11-14 - Sanctions screening before MT103 release (ADR-0032)
+
+Before this change no code in swift-service screened anyone, and the compliance doc's "expected
+UPSTREAM" was not true: transaction-service, the only upstream, screens nothing either. So an MT103
+reached the scheme gateway with neither the ordering customer nor the beneficiary checked against
+the sanctions lists.
+
+`SwiftSanctionsScreening` now runs before `SchemeGatewayPort.submit`. It screens the ordering
+customer (DEBTOR, when named) and the beneficiary (CREDITOR) through sanctions-service
+(`POST /api/v1/sanctions/screen`) and decides with the shared `libs-fincrime` `ScreeningPolicy`,
+the same rule sepa-payment, domestic-payment and fx-service use.
+
+- **BLOCK** (HIT, ESCALATED, or POTENTIAL_HIT above 0.85): the message goes to `REJECTED` with
+  `rejectionReason = SANCTIONS_HIT`, the status-change event is written to the outbox in the same
+  transaction, and a CRITICAL AML case is opened.
+- **REVIEW** (POTENTIAL_HIT at or below 0.85): the message stays `VALIDATED` (never released) and a
+  HIGH case is opened for a human.
+- **Blank debtor or beneficiary name**: held in `VALIDATED` with a MEDIUM `PARTY_UNSCREENABLE` case. A blank free-text name never means "skip that side". Residual: the debtor name is the request's free-text field and is not read from the party record for `orderingCustomerAccountId`. swift has no party client yet, so that is a follow-up.
+- **sanctions-service unreachable** (after retry, timeout and circuit breaker): fails closed. The
+  message stays `VALIDATED` and a MEDIUM `SCREENING_UNAVAILABLE` case is opened. An unknown or
+  missing status parses as ESCALATED, which blocks.
+
+**STRIDE**
+- **Tampering / elevation:** a sanctioned beneficiary can no longer be paid by sending MT103 to this
+  rail directly. That was the gap.
+- **DoS:** a sanctions-service outage now stops MT103 releases. That is the intended trade (fail
+  closed). Held messages stay `VALIDATED` and are visible to operators. Nothing re-submits them
+  automatically.
+- **Spoofing:** swift-service is a new caller of aml-service `amlCase.create`, as its own machine
+  principal `service-account-openbank-swift` (named oidc-client `m2m`, ROLE_API only). The
+  aml-service rego (`service-aml-case-create-m2m`) and the in-service guard
+  (`AML_CASE_CREATE_MOVEMENT_SERVICES`) both name it. It gets no other aml verb. The mTLS client
+  certificate is `swift-service-internal-tls` (private CA, mounted at `/mnt/aml-tls`). The sanctions
+  screen needs no new grant: base `rest.rego` already allows `sanctions.create` for service accounts.
+- **Repudiation:** the AML case carries the swift message id as `transactionId`. swift has no
+  account-service client, so `partyId` carries the ordering customer's account id. That is the same
+  compromise sepa-payment documents for a failed party lookup (#8505). If a message has no
+  `orderingCustomerAccountId`, no case can be opened. The verdict still applies and the gap is logged
+  at ERROR (`aml.case.not_opened`).
+- **Information disclosure:** names go to sanctions-service, which already receives them from the
+  other rails. No new data class leaves the namespace.
+
+**Residual:** MT202 institution transfers (treasury release, BICs only) are not name-screened here.
+Held messages need an operator to act. Rollback: revert the commit. MT103 then releases unscreened
+again, so roll back only together with a compensating hold.

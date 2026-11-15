@@ -109,3 +109,10 @@ Every mutation and every accepted collection produces a domain event written to 
 - ✅ Resilient eventing: circuit breaker + bounded retry + terminal `DEAD` parking for poison rows
 - ⚠️ Money-path posting (debit/refund execution): **not implemented in v1** — delegated; the fast-follow that adds it will be money-path and require a threat model (ADR-0030)
 - ⚠️ IBAN tokenisation: not implemented; IBAN is stored in clear in the mandate row and the `collection.authorised` event (tracked as a regulatory-audit risk, consistent with the rest of the fleet)
+
+## Sanctions screening before release (ADR-0032)
+
+Before a collection is released, the debtor and creditor names are screened through
+`openbank-sanctions-service`. The gate is fail-closed: a screening outage holds the collection
+instead of releasing it unscreened. A potential or confirmed match holds or blocks the collection
+and opens an AML case in `openbank-aml-service` under sdd-service's own machine identity.

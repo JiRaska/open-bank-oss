@@ -3352,6 +3352,12 @@ spec:
             # ADR-0108: transaction-service for post-ACSC settlement booking.
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
+            # ADR-0032: sanctions gate before every MT103 release, and the AML case store it
+            # opens a case in (8443 mTLS, client certificate swift-service-internal-tls).
+            - name: SANCTIONS_SERVICE_URL
+              value: http://sanctions-service.sanctions.svc:8123
+            - name: AML_SERVICE_URL
+              value: https://aml-service.aml.svc:8443
             # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
             # enables the @Authorize HTTP interceptor to enforce decisions from
             # data.openbank.rest.allow. There is no @RolesAllowed outer gate on
@@ -3391,6 +3397,9 @@ spec:
               readOnly: true
             - name: kafka-truststore
               mountPath: /mnt/kafka/truststore
+              readOnly: true
+            - name: aml-tls
+              mountPath: /mnt/aml-tls
               readOnly: true
           resources:
             requests:
@@ -3474,6 +3483,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: aml-tls
+          secret:
+            secretName: swift-service-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: kafka-keystore
