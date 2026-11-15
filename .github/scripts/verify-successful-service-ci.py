@@ -71,6 +71,18 @@ class ResolutionBudgetExceeded(VerificationError):
         super().__init__("reconcile source resolution exceeded its time budget")
 
 
+class TransientApiError(VerificationError):
+    """GitHub refused the read for quota, not for content: retry later, never "no source".
+
+    A 403/429 carrying `X-RateLimit-Remaining: 0` or a `Retry-After` hint is the installation
+    (or secondary) rate limit. The evidence was not read, so it still refuses everything, but
+    it must not be reported as "no verified source": run 43687091057 (2026-11-15) said exactly
+    that about 18 services whose sources it never got to look at, and the next tick, with
+    quota restored, is the remedy. A permission denial is also HTTP 403; it carries neither
+    hint and stays an ordinary refusal.
+    """
+
+
 class UnresolvedServicesError(VerificationError):
     """The run listing was read in full and some services have no proven source in it.
 
@@ -129,6 +141,7 @@ def _read_json_page(request: Request, deadline: float | None) -> tuple[dict, str
             # text. Report only the endpoint path, status and numeric quota hints.
             endpoint = urlsplit(request.full_url).path
             details = [f"HTTP {exc.code}"]
+            hints: dict[str, str] = {}
             for header, label in (
                 ("X-RateLimit-Remaining", "rate-limit-remaining"),
                 ("X-RateLimit-Reset", "rate-limit-reset"),
@@ -137,9 +150,15 @@ def _read_json_page(request: Request, deadline: float | None) -> tuple[dict, str
                 value = exc.headers.get(header) if exc.headers else None
                 if value is not None and re.fullmatch(r"[0-9]{1,12}", str(value)):
                     details.append(f"{label}={value}")
-            raise VerificationError(
-                f"GitHub Actions API {endpoint} failed ({'; '.join(details)})"
-            ) from None
+                    hints[label] = str(value)
+            message = f"GitHub Actions API {endpoint} failed ({'; '.join(details)})"
+            if exc.code in {403, 429} and (
+                hints.get("rate-limit-remaining") == "0" or "retry-after" in hints
+            ):
+                raise TransientApiError(
+                    f"{message}: API quota exhausted, retry later"
+                ) from None
+            raise VerificationError(message) from None
         except IncompleteRead:
             if request.get_method() != "GET" or attempt + 1 == API_READ_ATTEMPTS:
                 raise VerificationError(
@@ -776,6 +795,49 @@ def _exact_pact_exists(
     return result.returncode == 0 and result.stdout.strip() == "yes"
 
 
+def _names_no_committed_pact(
+    service: str, sha: str, *, deadline: float | None = None
+) -> bool:
+    """True only when no committed pact at `sha` names `service` as consumer or provider.
+
+    `pacts/` is the complete contract set (pact-drift-check regenerates it from every
+    `@Pact` annotation and fails on an orphan or an uncommitted pact). A service it never
+    names has no contract to verify, so Services CI publishes no Pact version for it
+    ("not a consumer of any contract", "owns no provider Pact tests") and the exact-version
+    rule below can never be met once any build input moves. That deadlocked
+    openbank-anacredit-service on every reconcile tick from 2026-11-14. Every git or JSON
+    failure answers False, which keeps the exact-version requirement.
+    """
+    try:
+        listing = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", sha, "--", "pacts/"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=_bounded_timeout(deadline, 30),
+        ).stdout.splitlines()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    files = [path for path in listing if path.endswith(".json")]
+    if not files:
+        # A tree with no pacts at all is not evidence of anything; it is a broken checkout.
+        return False
+    for path in files:
+        try:
+            doc = json.loads(_git_source(sha, path, deadline))
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+            return False
+        if not isinstance(doc, dict):
+            return False
+        names = {
+            ((doc.get(role) or {}) if isinstance(doc.get(role), dict) else {}).get("name")
+            for role in ("consumer", "provider")
+        }
+        if service in names:
+            return False
+    return True
+
+
 def _candidate_service(
     service: str,
     sha: str,
@@ -918,14 +980,23 @@ def resolve_reconcile_service_sources(
                 )
                 for service in candidates & successful:
                     _require_time_remaining(deadline)
+                    contract_free = False
                     if not _exact_pact_exists(service, sha, deadline=deadline):
-                        continue
+                        # No Pact version: acceptable ONLY for a service no committed pact
+                        # names. The gate re-asks the broker for its integrations right
+                        # before the verdict, so a contract registered since cannot ride on
+                        # this answer.
+                        if not _names_no_committed_pact(service, sha, deadline=deadline):
+                            continue
+                        contract_free = True
                     _require_time_remaining(deadline)
                     resolved[service] = {
                         "sha": sha,
                         "run_id": str(run["id"]),
                         "attempt": run["run_attempt"],
                     }
+                    if contract_free:
+                        resolved[service]["contract_free"] = True
                     pending.remove(service)
                 if not pending:
                     return resolved
@@ -957,6 +1028,9 @@ def main() -> int:
                 os.environ.get("GH_TOKEN", ""),
                 os.environ.get("GITHUB_API_URL", "https://api.github.com"),
             )
+        except TransientApiError as exc:
+            print(f"::warning::exact Services CI verification not evaluated: {exc}", file=sys.stderr)
+            return 4
         except (json.JSONDecodeError, VerificationError) as exc:
             print(f"::error::exact Services CI verification failed: {exc}", file=sys.stderr)
             return 1
@@ -987,6 +1061,11 @@ def main() -> int:
                 )
             )
             return 3
+        except TransientApiError as exc:
+            # Exit 4 = the evidence could not be read for quota reasons: refuse, but as "retry
+            # later", never as "no source" (which reads like a fact about the services).
+            print(f"::warning::reconcile source not evaluated: {exc}", file=sys.stderr)
+            return 4
         except (json.JSONDecodeError, VerificationError) as exc:
             print(f"::error::reconcile source refused: {exc}", file=sys.stderr)
             return 1
