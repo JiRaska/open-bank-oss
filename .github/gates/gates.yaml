@@ -3418,7 +3418,7 @@ gates:
     selftest: |
       python3 .github/scripts/detect-auto-deploy-stuck.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/detect-auto-deploy-stuck.py", ".github/workflows/auto-deploy-red-watch.yml"]
+    selftest_inputs: [".github/scripts/detect-auto-deploy-stuck.py", ".github/workflows/auto-deploy-red-watch.yml", ".github/scripts/watch_outcome.py"]
     run: |
       python3 .github/scripts/detect-auto-deploy-stuck.py --check-declaration
 
