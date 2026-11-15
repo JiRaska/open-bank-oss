@@ -49,6 +49,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
 
+@Suppress("LargeClass") // The account-opening regression cases share one repository and policy fixture.
 class AccountServiceTest {
 
     private lateinit var accountRepository: AccountRepository
