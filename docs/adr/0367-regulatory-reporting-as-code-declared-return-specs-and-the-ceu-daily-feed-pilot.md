@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 followup: "#16356 — isolated execution, source contracts and multi-context workbench; family delivery also tracked by #15356 and #7144"
 tags: [regulatory-reporting, compliance, governance, ai-agents]
-summary: "Versioned return specs and entity/regime contexts govern reproducible backend filings. Reporting uses isolated data and bounded workers, with customer-SLO evidence before rollout. The officer workbench derives coverage from specs; AI never files."
+summary: "Return specs and entity/regime contexts govern reproducible backend filings. Reporting uses isolated data and bounded workers, with customer-SLO evidence before rollout. The officer workbench derives coverage from specs; AI never files."
 ---
 
 # ADR-0367 — Regulatory reporting as code: declared return specs and the CEÚ daily feed pilot
