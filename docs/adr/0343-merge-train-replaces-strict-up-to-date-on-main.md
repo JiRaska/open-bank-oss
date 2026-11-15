@@ -732,6 +732,50 @@ Anything else returns a reason, and the member stays in the strict lane as befor
 
 The rule is checked three times: in settle on the member's own diff, at build over the train built so far (so two appends in one train stack), and again at publish, where anything beyond a pure append is a member fault. An appended member counts as gate code, so it never shares a train with a regeneration commit. `.github/` stays protected from the fast lane.
 
+### Amendment (2026-11-15) — disjoint judge members share a strict carrier; verdict configuration still rides alone
+
+Observed 2026-11-14/15 overnight: six strict-lane PRs were queued at once, and the train log showed each strict carrier holding a single member (for example `strict carrier #16251: CI running — it holds the strict reservation` while `#16186 strict behind main, not updated: a strict carrier is open over main`). The strict carrier from the 2026-11-05 amendment batches only *non-judge* members. Under the inverse rule of `judge_path`, any path outside an unreferenced `.github/scripts/` file makes a PR a judge member, so a PR that also touches service code or docs rode alone, one PR per ~30-40 min carrier with fast-lane trains held behind it.
+
+Judge members are now split in two.
+
+- **A configuration judge rides alone, exactly as before.** This is any judge path outside the shareable allow-list (`config_judge_path`). The allow-list holds only Kotlin/Java sources and tests (`src/main` or `src/test`) of a **leaf service module**, as computed by `shareable_modules`:
+  - an `openbank-*` module that no `*.gradle.kts` outside settings depends on via `project(":…")`;
+  - whose name marks no library, analysis, rule, governance, contract, infra or test module.
+
+  These therefore never qualify: `build-logic`, `buildSrc`, every `openbank-libs*` module, `openbank-libs-detekt-rules` (checkers written in Kotlin), consumed client and service modules, every `docs/` file, every `.github/` path, any hidden or `..` segment, and any module a member adds. Members of a carrier holding a judge member must also be **module-disjoint** (`disjoint_key`: the top-level module, or the full path under `.github/`). Diff-scoped gates read a carrier's *union* diff, so a companion file — a threat model, an ADR, a test in the same module — in one member must not satisfy a gate for another member's code. Allow-listed code is not inert to gates. Gates read it, and some judge it by what else the diff contains. Safety rests on two things: no allow-listed file *defines* a rule (no rule module, no build logic, no doc a gate reads as evidence), and no two members share a module, so no gate can pair one member's file with another member's code. The first two revisions of this amendment used a deny-list and then admitted docs and lib modules. Both re-reviews of #16290 showed the masking that followed: a relaxing detekt rule, and a companion threat model.
+- **The train's own code also rides alone.** That set is derived by `train_code_paths`, never hand-listed: every `.github/scripts` or `.github/workflows` file named `merge-train*` / `merge_train*`, plus every `.github/scripts` module that `merge-train.py` imports, read from main's tree.
+- **Every other judge member may share a carrier.** That means a member that is judge only because it also changes service code, docs or other paths no gate reads as configuration. Two conditions apply:
+  - every member's changed path set must be pairwise disjoint from every other member's. The set is read from the trees: merge-base to verified head, `--no-renames`. A set git cannot read shares nothing.
+  - the carrier holds at most `MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP` members (default 4). `1` restores "every judge member rides alone".
+- **Workflow members** still take update-branch, because the App cannot push `.github/workflows/`. Every existing refusal still applies to every member.
+
+**Why configuration judges must ride alone.** Batching them is *not* equivalent to serial processing. The strict lane serves oldest first, so an older member B is judged under main's configuration before a newer J lands.
+- *Relaxing:* if J relaxes the checker that fails B, then a carrier [B, J] is green, both merge, and nothing bisects a green carrier. B's defect is masked. Serially, B would have been named first.
+- *Tightening:* if J tightens a check that B passes alone, then [B, J] is red while each half is green alone.
+
+Both cases are self-tests: (20) relaxing and (21) tightening. Both fail against the builder of #16290's first revision, and the new builder refuses to batch either pair. File disjointness cannot prevent either case, because J changes a *different* file from the one the verdict concerns.
+
+**Why disjoint files are sufficient for the rest.** A member in the shared class changes nothing that configures a verdict. So every member in such a carrier is judged under the same configuration it would meet serially: main's own configuration, plus nothing any co-member changes. The one thing that differs from serial processing is that co-members' *code* is present together. Module-disjoint path sets guarantee three things about that:
+- the combined tree is exactly the union of the reviewed diffs, and no file mixes two members' hunks;
+- the carrier's verdict is the verdict of main's final state after its last merge, which the post-merge tree-equality check already enforces;
+- a red carrier bisects into sub-batches that still share nothing.
+
+A carrier red only in combination (each half green alone) is resolved by the existing machinery: the first half merges, then the second half is rebuilt over the new main, which now holds the first, and re-verified there. Red again, its member is named. Nothing red reaches main; self-test (18b). As with fast trains and non-judge strict carriers, the intermediate trees between members' merges are not verified individually.
+
+Unchanged: the #15882 invariants (no member-move batch loss, no fast-path race against a carrier), the main-red rules (#16020, #16105) and the #16180 lane-fairness turn. They decide *whether* a strict carrier is built in a tick, and this amendment changes only *which members* it holds.
+
+Self-tests:
+- (2): referenced checkers ride alone at the default cap.
+- (16): three disjoint shared-class judges form one carrier and all merge. This fails on the pre-amendment builder.
+- (16b): the cap of 4 holds.
+- (17): judge members that share a path are never batched.
+- (17b): a judge member sharing a path with a non-judge member ahead of it waits, and the carrier of the non-judge members is asserted to exist.
+- (18): a red member is isolated and the others merge.
+- (18b): red only in combination.
+- (19): the fast lane is served once the carrier has merged.
+- (20) and (21): the relaxing and tightening checker pairs; (22) a relaxing detekt rule; (23) a companion threat model; (24) companions in one module.
+- `config_judge_path` (including `.gitleaksignore`, `.semgrep.yml`, `application.yaml`, a root dotfile and a `..` path) and `train_code_paths` are pinned against both the synthetic tree and the real one.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The

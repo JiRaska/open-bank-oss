@@ -38,6 +38,8 @@ spec:
               value: "0.1"
             - { name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES, value: /mnt/context-tls/tls.crt }
             - { name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES, value: /mnt/context-tls/tls.key }
+            # Re-read the pair cert-manager rewrites 15 days before expiry (check-tls-certificate-reload.py).
+            - { name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD, value: 1h }
             - { name: QUARKUS_HTTP_SSL_PORT, value: "8443" }
             - { name: QUARKUS_DATASOURCE_JDBC_URL, value: jdbc:postgresql://context-db-rw.context.svc:5432/openbank_context }
             - { name: QUARKUS_DATASOURCE_REACTIVE_URL, value: vertx-reactive:postgresql://context-db-rw.context.svc:5432/openbank_context }

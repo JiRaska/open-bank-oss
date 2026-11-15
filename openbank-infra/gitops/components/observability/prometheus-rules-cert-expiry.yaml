@@ -1,0 +1,88 @@
+# Expiry alerts for the platform's PRIVATE certificates (Keys & Certificates
+# inventory, PR 1 of 4). Fed by podmonitor-cert-expiry.yaml. Public URLs keep
+# their probe-based alerts in prometheus-rules-synthetic.yaml; these cover what
+# no probe reaches.
+#
+# Thresholds follow what each certificate's own renewal policy implies, not a
+# single number:
+#   - cert-manager leaves are 90d with renewBefore 15d (one uses 30d). A leaf
+#     inside 10 days means renewal has already been failing for days.
+#   - The CA is named explicitly, not matched by a "-ca" suffix: admin-ui-referral-ca is an
+#     ordinary 90-day leaf and would page as a CA for half of every cycle. It is the only
+#     isCA: true Certificate in gitops today; a new CA must be added here on purpose.
+#   - A CA is different: it cannot renew on its own (the root CA declares
+#     rotationPolicy: Never), and every leaf it signed dies with it. Warn at
+#     60 days, enough lead time for a planned ceremony.
+#   - Strimzi CAs renew 30 days before expiry. Inside 21 days means the
+#     renewal window passed without a renewal.
+#
+# The two *MetricsAbsent alerts are the negative case: if a scrape breaks, the
+# expiry alerts would silently evaluate to nothing, which reads exactly like
+# "nothing is expiring". Absence of the signal is itself an alert.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-cert-expiry-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.cert-expiry
+      rules:
+        - record: openbank:certificate_days_to_expiry
+          expr: (certmanager_certificate_expiration_timestamp_seconds - time()) / 86400
+        - alert: InternalCertRenewalFailing
+          expr: openbank:certificate_days_to_expiry{name!="openbank-sandbox-ca"} < 10
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/key-ceremonies/certificate-expiry.md
+            summary: "Certificate {{ $labels.namespace }}/{{ $labels.name }} expires in {{ $value | printf \"%.1f\" }} days"
+            description: "cert-manager should have renewed this certificate days ago. Check `kubectl describe certificate -n {{ $labels.namespace }} {{ $labels.name }}` and its CertificateRequest. If it expires, every caller that pins this service's mTLS identity fails its handshake."
+        - alert: InternalCertExpiringCritical
+          expr: openbank:certificate_days_to_expiry < 3
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/key-ceremonies/certificate-expiry.md
+            summary: "Certificate {{ $labels.namespace }}/{{ $labels.name }} expires within 3 days"
+            description: "Expires in {{ $value | printf \"%.1f\" }} days. Renewal has failed. Act now: fix the issuer or force renewal (`cmctl renew -n {{ $labels.namespace }} {{ $labels.name }}`), then confirm the pod serves the new certificate (some workloads load it only at start)."
+        - alert: CertificateAuthorityExpiring
+          expr: openbank:certificate_days_to_expiry{namespace="cert-manager",name="openbank-sandbox-ca"} < 60
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/key-ceremonies/certificate-expiry.md
+            summary: "CA {{ $labels.namespace }}/{{ $labels.name }} expires in {{ $value | printf \"%.0f\" }} days"
+            description: "Every certificate this CA signed stops validating when it expires. Plan the rotation ceremony (docs/runbooks/key-ceremonies/cert-manager-pki-recovery.md) well before the date."
+        - alert: KafkaCertificateAuthorityExpiring
+          expr: (strimzi_certificate_expiration_timestamp_ms / 1000 - time()) / 86400 < 21
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/key-ceremonies/certificate-expiry.md
+            summary: "Kafka CA expires in {{ $value | printf \"%.0f\" }} days"
+            description: "Strimzi renews its CAs 30 days before expiry (kafka.yaml renewalDays). Inside 21 days the renewal did not happen. If the CA expires, every KafkaUser mTLS client loses the broker and all event flows stop."
+        - alert: CertManagerExpiryMetricsAbsent
+          expr: absent(certmanager_certificate_expiration_timestamp_seconds)
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/key-ceremonies/certificate-expiry.md
+            summary: "No cert-manager expiry metrics"
+            description: "Prometheus sees no certmanager_certificate_expiration_timestamp_seconds, so internal certificate expiry is unmonitored. Check the cert-manager-controller PodMonitor and the controller pod."
+        - alert: KafkaCaExpiryMetricsAbsent
+          expr: absent(strimzi_certificate_expiration_timestamp_ms)
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/key-ceremonies/certificate-expiry.md
+            summary: "No Strimzi CA expiry metrics"
+            description: "Prometheus sees no strimzi_certificate_expiration_timestamp_ms, so Kafka CA expiry is unmonitored. Check the strimzi-cluster-operator PodMonitor and that the operator version emits the metric."

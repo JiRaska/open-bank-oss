@@ -143,6 +143,11 @@ const simulationScenarios = [
   { classname: 'com.openbank.simulation.scenario.SddCollectionScenarioTest', components: ['openbank-sdd-service'], scope: 'SEPA direct-debit collection domain scenario (pure JVM)' },
   { classname: 'com.openbank.simulation.scenario.DelegatedSpendScenarioTest', components: ['openbank-delegation-service'], scope: 'Delegated spend ceiling and reservation domain scenario (pure JVM)' },
   { classname: 'com.openbank.simulation.scenario.SwiftScenarioTest', components: ['openbank-swift-service'], scope: 'SWIFT MT103 cross-border money-path domain scenario (pure JVM)' },
+  { classname: 'com.openbank.simulation.scenario.FxConversionScenarioTest', components: ['openbank-fx-service'], scope: 'FX conversion (fixing, inverted side-swap, margin arithmetic) domain scenario (pure JVM)' },
+  { classname: 'com.openbank.simulation.scenario.FxScreeningScenarioTest', components: ['openbank-fx-service'], scope: 'FX screening domain scenario (pure JVM)' },
+  { classname: 'com.openbank.simulation.scenario.CardAuthorizationScenarioTest', components: ['openbank-card-processing-service'], scope: 'Card authorization (held amount, lifecycle clear/reverse/expire) domain scenario (pure JVM)' },
+  { classname: 'com.openbank.simulation.scenario.CardClearingScenarioTest', components: ['openbank-card-processing-service'], scope: 'Card clearing domain scenario (pure JVM)' },
+  { classname: 'com.openbank.simulation.scenario.PensionLifecycleScenarioTest', components: ['openbank-pension-service'], scope: 'Pension contract lifecycle (contributions, state return) domain scenario (pure JVM)' },
 ]
 
 async function simulationScenarioEvidence() {
