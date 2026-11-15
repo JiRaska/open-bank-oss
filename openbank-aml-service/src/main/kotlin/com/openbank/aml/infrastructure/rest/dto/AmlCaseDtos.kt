@@ -5,12 +5,15 @@
 package com.openbank.aml.infrastructure.rest.dto
 
 import com.openbank.aml.application.port.`in`.CreateAmlCaseCommand
+import com.openbank.aml.application.port.`in`.HoldDecisionCommand
 import com.openbank.aml.application.port.`in`.UpdateAmlDecisionCommand
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.AmlRiskLevel
 import com.openbank.aml.domain.model.CaseOrigin
+import com.openbank.aml.domain.model.HoldDisposition
 import com.openbank.aml.domain.model.ScreeningType
+import com.openbank.libs.governance.StaffIdentity
 import java.time.Instant
 import java.util.UUID
 
@@ -25,21 +28,24 @@ data class CreateAmlCaseRequest(
     val alertDetail: String?,
     val matchedEntity: String?,
 ) {
-    fun toCommand(idempotencyKey: String, requestHash: String? = null) = CreateAmlCaseCommand(
-        idempotencyKey = idempotencyKey,
-        // Fixed here, not read from the request: a caller cannot claim another entry point's provenance.
-        origin = CaseOrigin.REST,
-        requestHash = requestHash,
-        partyId = partyId,
-        accountId = accountId,
-        transactionId = transactionId,
-        customerReference = customerReference,
-        screeningType = ScreeningType.valueOf(screeningType),
-        riskLevel = AmlRiskLevel.valueOf(riskLevel),
-        alertCode = alertCode,
-        alertDetail = alertDetail,
-        matchedEntity = matchedEntity,
-    )
+    fun toCommand(idempotencyKey: String, requestHash: String? = null, movementService: String? = null) =
+        CreateAmlCaseCommand(
+            idempotencyKey = idempotencyKey,
+            // From the authenticated caller (AmlCaseResource), never from the body.
+            movementService = movementService,
+            // Fixed here, not read from the request: a caller cannot claim another entry point's provenance.
+            origin = CaseOrigin.REST,
+            requestHash = requestHash,
+            partyId = partyId,
+            accountId = accountId,
+            transactionId = transactionId,
+            customerReference = customerReference,
+            screeningType = ScreeningType.valueOf(screeningType),
+            riskLevel = AmlRiskLevel.valueOf(riskLevel),
+            alertCode = alertCode,
+            alertDetail = alertDetail,
+            matchedEntity = matchedEntity,
+        )
 }
 
 data class UpdateAmlDecisionRequest(
@@ -58,6 +64,40 @@ data class UpdateAmlDecisionRequest(
         decisionReason = decisionReason,
         assignedAnalyst = assignedAnalyst,
         decidedBy = authenticatedCaller,
+    )
+}
+
+/** Body of a hold-decision proposal and of its confirmation, which restates the proposal (ADR-0374 point 3). */
+data class HoldDecisionRequest(val outcome: String?, val reason: String?) {
+    fun toCommand(caseId: UUID, authenticatedCaller: StaffIdentity): HoldDecisionCommand {
+        val outcomeName = requireNotNull(outcome) { "outcome is required" }
+        val parsed = HoldDisposition.entries.firstOrNull { it.name == outcomeName }
+        require(parsed != null) { "outcome must be one of ${HoldDisposition.entries.joinToString()}" }
+        val text = requireNotNull(reason) { "reason is required" }
+        require(text.isNotBlank()) { "reason is required" }
+        return HoldDecisionCommand(caseId, parsed, text, authenticatedCaller)
+    }
+}
+
+/** The pending (or confirmed) proposal of a held payment's case, and the case status beside it. */
+data class HoldDecisionProposalResponse(
+    val caseId: UUID,
+    val status: String,
+    val outcome: String,
+    val reason: String,
+    val proposedBy: String,
+    val proposedAt: Instant,
+    /** After this instant the proposal can no longer be confirmed. */
+    val expiresAt: Instant?,
+    /** Set when the proposer withdrew the proposal. */
+    val withdrawnBy: String?,
+    val withdrawnAt: Instant?,
+)
+
+fun AmlCase.toHoldProposalResponse(): HoldDecisionProposalResponse? = holdProposal?.let {
+    HoldDecisionProposalResponse(
+        id, status.name, it.outcome.name, it.reason, it.proposedBy, it.proposedAt,
+        it.expiresAt, it.withdrawnBy, it.withdrawnAt,
     )
 }
 
@@ -93,6 +133,12 @@ data class AmlCaseResponse(
      * answers `true` and its real party.
      */
     val partyResolved: Boolean = true,
+    /**
+     * The service that opened the case, from its authenticated machine identity; [transactionId] is
+     * an id in that service (a payment or conversion id, not necessarily a ledger transaction).
+     * `null` for a case opened by staff, by this service itself, or before this was recorded.
+     */
+    val movementService: String? = null,
 )
 
 fun AmlCase.toResponse() = AmlCaseResponse(
@@ -117,4 +163,5 @@ fun AmlCase.toResponse() = AmlCaseResponse(
     updatedAt = updatedAt,
     requiresFourEyesDisposition = isPackMonitoringCase,
     partyResolved = partyEstablished,
+    movementService = movementService,
 )

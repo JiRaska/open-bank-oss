@@ -5,7 +5,8 @@ sanctions or PEP list can change. This page describes how the service keeps appr
 monitoring by `openbank-sanctions-service` and what happens when a match is reported (ADR-0376).
 
 The feature is off by default: `openbank.kyb.monitoring.enabled=false`. It is one switch. Off, the
-service calls nothing and opens no consumer for findings.
+service registers nothing and opens no consumer for findings. The one call it still makes is
+the withdrawal of a subject the registry already holds, from a time the switch was on.
 
 ## Who is monitored
 
@@ -87,22 +88,41 @@ replace an earlier decision. The same finding delivered twice changes nothing.
 The case does not change: `status` stays as it was, `updatedAt` does not move and no lifecycle
 event is published. Every route an applicant can call answers the same as before.
 
-Operators work through three routes:
+KYC reviewers (`ROLE_KYC_REVIEWER`) work through four routes, each with its own action:
 
-1. `GET /api/v1/kyb/cases?monitoring=open` lists the cases that wait for an operator: a finding to
-   decide, or an exit to record. `status=MANUAL_REVIEW` returns `MANUAL_REVIEW` cases only.
+1. `GET /api/v1/kyb/monitoring/holds` lists the cases that wait for a reviewer: a finding to
+   decide, or an exit to record (`kyb.monitoring.queue.list`).
 2. `POST /api/v1/kyb/cases/{id}/monitoring/findings/{findingId}/disposition` decides one finding:
-   `CLEARED_FALSE_POSITIVE` or `CONFIRMED`, with a reason. A decision is made once.
-3. `POST /api/v1/kyb/cases/{id}/monitoring/exit/complete` records, with evidence, that the exit has
-   been carried out. It is accepted when an exit is owed and no finding is undecided.
+   `CLEARED_FALSE_POSITIVE` or `CONFIRMED`, with a reason. A decision is made once
+   (`kyb.monitoring.finding.decide`).
+3. `POST /api/v1/kyb/cases/{id}/monitoring/exit/propose` proposes, with evidence, that the exit has
+   been carried out (`kyb.monitoring.exit.propose`).
+4. `POST /api/v1/kyb/cases/{id}/monitoring/exit/complete` confirms that proposal. The confirming
+   reviewer must be a different PERSON than the proposer (token claim `person_id`, so a second
+   account of the proposer is refused), must have signed in with a second factor (`amr` contains
+   `otp`), and repeats the proposal's evidence (`kyb.monitoring.exit.confirm`).
+5. `POST /api/v1/kyb/cases/{id}/monitoring/exit/withdraw` lets the proposer's person withdraw the
+   pending proposal (`kyb.monitoring.exit.withdraw`). A proposal is open for 72 hours; it is never
+   replaced while pending, only after withdrawal or expiry. A token without `person_id` can neither
+   propose nor confirm.
+
+Proposing and confirming are accepted only when an exit is owed, no finding is undecided and the
+relationship has demonstrably ended: the case is `REJECTED` or `ABANDONED`, and party-service
+reports the entity party as `CLOSED`. Until then the case stays monitored.
+
+A case with an open finding does not become `ACTIVE` when its entity party is activated. It stays
+`SIGNED`, which looks exactly like a party still waiting for its KYC check. The decision that clears
+the last hold makes it `ACTIVE` and publishes `completed`. After a confirmed sanctions match it is
+never activated.
 
 A confirmed PEP match is a risk fact. It needs no exit and publishes nothing.
 
 A confirmed match of any other kind means the relationship has to end. The first one sets
-`monitoring.exitOwedSince` and publishes `BUSINESS_RELATIONSHIP_EXIT_REQUIRED` once. Nobody sets
-that state by hand: it is read from the findings. The case keeps its status and stays monitored.
-No service acts on the event yet, so the exit is carried out by hand. Recording it ends monitoring
-and withdraws the subjects from the registry.
+`monitoring.exitOwedSince`. Nobody sets that state by hand: it is read from the findings. Nothing
+is published about it: the lifecycle topic reaches a customer-facing projection and the analytics
+warehouse. The case keeps its status and stays monitored. No service carries the exit out yet
+(#15992), so it is done by hand. Recording it ends monitoring and withdraws the subjects from the
+registry.
 
 A record typed as a finding without a usable `ownerService`, `findingId` or `subjectRef` is counted
 as `malformed` and sent to the dead-letter topic `openbank.dlq.kyb.sanctions-monitoring-in`.
@@ -160,17 +180,21 @@ off. The consumer group and the offset policy are in the image, so no override C
 3. Set `openbank.kyb.monitoring.enabled=true`.
 
 To switch off, set `openbank.kyb.monitoring.enabled=false`. Subjects already registered stay
-registered, and findings about them wait on the topic until the switch is on again.
+registered, and findings about them wait on the topic until the switch is on again. Subjects
+of cases that end meanwhile are still withdrawn.
 
 A rollback to the previous release needs no data change. The previous release ignores the new
-tables and columns. Cases it writes are brought into step when this release runs again.
+tables and columns. Cases it writes are brought into step when this release runs again. Switch
+monitoring off first: the previous release activates a held case and records an exit on one
+operator's word.
 
 ## Limits
 
 - The registry is sent a name and an entity type only. A match is by name.
 - A clearance recorded in sanctions-service for the onboarding screen does not apply to the
   registry reference (see above).
-- The exit of a relationship is not automated. This service records the decision, publishes the
-  event and records that the exit was carried out.
+- The exit of a relationship is not automated. This service records the decision and, on two
+  reviewers' word, that the exit was carried out. An `ACTIVE` case cannot leave `ACTIVE` here
+  today, so its exit cannot be recorded and it stays monitored (#15992).
 - A case approved while screening was off is not monitored.
-- No operator screen exists in the admin UI yet. The three routes above are the operator surface.
+- No operator screen exists in the admin UI yet. The four routes above are the reviewer surface.

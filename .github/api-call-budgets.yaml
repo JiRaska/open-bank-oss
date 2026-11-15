@@ -1,0 +1,28 @@
+# GitHub API request budget per run of each job that installs the call counter
+# (.github/scripts/gh-call-counter.sh). Key: "<workflow name>/<job id>", exactly as the
+# counter labels it. Value: most requests (gh + Python urllib/requests) one run may send.
+#
+# The repository's GITHUB_TOKEN core quota is shared by every workflow run, so one job that
+# starts spending more starves unrelated required checks (CodeQL failed on `API rate limit
+# exceeded for installation` on 2026-11-14). A run above its budget gets an
+# `api-call-budget` warning naming the job; the step summary lists the callers.
+#
+# Raising a number is a decision: say in the PR what the new requests buy. Keys are held in
+# lockstep with the instrumented jobs by gate `api-call-budget-coverage`.
+#
+# Basis (2026-11-14): gh-only counts from gh-call-count notices (CI/gates <=12 per shard,
+# Services CI/changes 2, Security scan/codeql 1) and merge-train.py's own statistics for the
+# build job (`api requests sent=180`). Python requests were not counted before this file, so
+# the gh+py budgets carry headroom; tighten them from the first week of notices. The six
+# frequent GITHUB_TOKEN jobs below were counted from this change on; their budgets are the
+# static per-run estimate (read from the scripts) with headroom.
+"Admin UI evidence/authorize-source": 60
+"Auto-retry spot-killed CI runs/discover": 30
+"Auto-retry spot-killed CI runs/retry": 30
+"CI/gates": 100
+"Deployed-code-lag watch/watch": 20
+"Merge train stall watch/watch": 60
+"Merge train/build": 300
+"Security scan/codeql": 20
+"Services CI/changes": 40
+"Test evidence reconcile/reconcile": 60

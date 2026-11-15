@@ -51,8 +51,11 @@ describe('AML case row validation', () => {
 
   it('keeps every field of a valid row verbatim', () => {
     const full = { ...base, accountId: 'a', transactionId: 't', alertDetail: 'd', matchedEntity: 'm', decisionReason: 'r',
-      assignedAnalyst: 'alice', decidedBy: 'bob', decidedAt: '2026-11-02T00:00:00Z', requiresFourEyesDisposition: true }
+      assignedAnalyst: 'alice', decidedBy: 'bob', decidedAt: '2026-11-02T00:00:00Z', requiresFourEyesDisposition: true,
+      movementService: 'openbank-domestic-payment' }
     expect(parseAmlCase(full)).toEqual(full)
     expect(parseAmlCase({ ...base, requiresFourEyesDisposition: 'true' }).requiresFourEyesDisposition).toBe(false)
+    expect(parseAmlCase(base).movementService).toBeNull()
+    expect(fails({ ...base, movementService: ' ' })).toBe('Invalid AML case movementService')
   })
 })

@@ -156,6 +156,9 @@ GREEN_HOLDER_CAP_S = 2 * RESERVATION_CEILING_S
 # Measured 2026-10-21 over 12.5 h of merge-train.yml: 11 carriers published, 0 train merges, 13
 # strict-lane merges — every strict merge was followed at once by the next strict update-branch.
 TRAIN_TURN_S = 30 * 60
+# How far down main's first-parent chain the train's turn looks for its strict merge, stepping over
+# fast-lane and bot merges (each step is one PR read). Inside TRAIN_TURN_S main rarely takes more.
+TRAIN_TURN_DEPTH = 6
 # Green carrier first (#13400): a VERIFIED green carrier merges before any strict-lane PR is served in
 # the same tick — it is not voided by a strict merge. ONE exception, bounded to one tick per holder
 # head: a reservation holder that is itself GREEN on an up-to-date head AND did not defer to this
@@ -1843,16 +1846,19 @@ def _note_ratelimit(headers) -> None:
 
 def api_stats_line(mode: str) -> str:
     return (f"merge-train {mode}: api requests sent={API_STATS['sent']} memo_hits={API_STATS['memo_hits']} "
+            f"prefetched_heads={API_STATS.get('prefetched', 0)} "
             f"x-ratelimit-used={API_STATS['used'] or '?'} remaining={API_STATS['remaining'] or '?'} "
             f"resource={API_STATS['resource'] or '?'}")
 
 
-def api(method: str, path: str, body: dict | None = None, token: str | None = None) -> tuple[int, object]:
-    """`token` overrides GH_TOKEN for this one call (only update_branch passes one)."""
+def api(method: str, path: str, body: dict | None = None, token: str | None = None,
+        graphql_read: bool = False) -> tuple[int, object]:
+    """`token` overrides GH_TOKEN for this one call (only update_branch passes one). `graphql_read`
+    marks a POST /graphql that is a pure query: it writes nothing, so it leaves the GET memo intact."""
     data = json.dumps(body).encode() if body is not None else None
     memo = (method == "GET" and _MEMO_SCOPE[0] > 0 and not _DECIDING[0]
             and GET_MEMO_RE.match(path) is not None)
-    if method != "GET":
+    if method != "GET" and not (graphql_read and path == "/graphql"):
         _GET_MEMO.clear()
     elif memo and path in _GET_MEMO:
         API_STATS["memo_hits"] += 1
@@ -1865,7 +1871,8 @@ def api(method: str, path: str, body: dict | None = None, token: str | None = No
         API_STATS["sent"] += 1
         try:
             status, raw, _h = _http_open(req, 30)
-            _note_ratelimit(_h)
+            if path != "/graphql":     # the GraphQL bucket's headers must not stand in for core's
+                _note_ratelimit(_h)
             if memo and status == 200:
                 _GET_MEMO[path] = raw or b"null"
             return status, json.loads(raw or b"null")
@@ -1892,6 +1899,86 @@ def get(path: str) -> object:
     if code != 200:
         raise SystemExit(f"::error::GET {path} -> {code}: {data}")
     return data
+
+
+PREFETCH_BATCH = 8        # 20 heads per query hit RESOURCE_LIMITS_EXCEEDED on 2026-11-14; 8 answered 24/24
+PREFETCH_PAGE_ROUNDS = 5  # follow-up rounds for a check suite with more than 100 runs (Services CI's matrix)
+_RUN_FIELDS = "databaseId name status conclusion detailsUrl url startedAt completedAt"
+PREFETCH_FRAGMENT = """fragment H on Commit {
+  oid
+  checkSuites(first: 100) {
+    pageInfo { hasNextPage }
+    nodes {
+      id
+      app { slug }
+      checkRuns(first: 100, filterBy: {checkType: LATEST}) {
+        pageInfo { hasNextPage endCursor }
+        nodes { %s }
+      }
+    }
+  }
+  status { state contexts { context state description targetUrl createdAt creator { login } } }
+}""" % _RUN_FIELDS
+PREFETCH_MORE = ('p%d: node(id: %s) { ... on CheckSuite { checkRuns(first: 100, after: %s, '
+                 'filterBy: {checkType: LATEST}) { pageInfo { hasNextPage endCursor } nodes { ' + _RUN_FIELDS + ' } } } }')
+
+
+def _rest_run(r, sha: str, slug) -> dict | None:
+    if not isinstance(r, dict) or type(r.get("databaseId")) is not int or not r.get("name"):
+        return None
+    return {"id": r["databaseId"], "name": r["name"], "head_sha": sha,
+            "status": str(r.get("status") or "").lower(),
+            "conclusion": str(r["conclusion"]).lower() if r.get("conclusion") else None,
+            "details_url": r.get("detailsUrl"), "html_url": r.get("url"),
+            "started_at": r.get("startedAt"), "completed_at": r.get("completedAt"),
+            "app": {"slug": slug}}
+
+
+def prefetch_payloads(node, sha: str, extra: dict | None = None) -> tuple[list[dict], dict] | None:
+    """GraphQL Commit -> (REST check_runs, REST combined status), or None when it is not COMPLETE.
+    `extra` maps a suite id to the runs its follow-up pages returned; a suite still marked as having
+    a further page without them is incomplete, and so is the head."""
+    if not isinstance(node, dict) or node.get("oid") != sha:
+        return None
+    suites = node.get("checkSuites") or {}
+    if (suites.get("pageInfo") or {}).get("hasNextPage") is not False:
+        return None
+    runs: list[dict] = []
+    for suite in suites.get("nodes") or []:
+        cr = (suite or {}).get("checkRuns") or {}
+        nodes = list(cr.get("nodes") or [])
+        if (cr.get("pageInfo") or {}).get("hasNextPage") is not False:
+            more = (extra or {}).get((suite or {}).get("id"))
+            if more is None:
+                return None
+            nodes += more
+        slug = ((suite or {}).get("app") or {}).get("slug")
+        for r in nodes:
+            rr = _rest_run(r, sha, slug)
+            if rr is None:
+                return None
+            runs.append(rr)
+    st = node.get("status")
+    contexts = (st or {}).get("contexts") or []
+    if len(contexts) > 30:
+        return None   # the REST combined status returns 30; keep exactly what it would have shown
+    statuses = [{"id": len(contexts) - k, "context": c.get("context"), "state": str(c.get("state") or "").lower(),
+                 "description": c.get("description"), "target_url": c.get("targetUrl"),
+                 "created_at": c.get("createdAt"), "creator": {"login": (c.get("creator") or {}).get("login")}}
+                for k, c in enumerate(contexts) if isinstance(c, dict) and c.get("context")]
+    if len(statuses) != len(contexts):
+        return None
+    return runs, {"state": str((st or {}).get("state") or "pending").lower(), "sha": sha,
+                  "total_count": len(statuses), "statuses": statuses}
+
+
+def rest_pages(runs: list[dict]) -> list[list[dict]]:
+    """The REST check-runs pages `paginate` reads (100 each, a short page last; every consumer
+    aggregates over all pages, so order within the set does not change any verdict)."""
+    pages = [runs[i:i + 100] for i in range(0, len(runs), 100)]
+    if not pages or len(pages[-1]) == 100:
+        pages.append([])
+    return pages
 
 
 def paginate(path: str, key: str | None = None) -> list:
@@ -2055,7 +2142,106 @@ class GitHub:
         return get(f"/repos/{self.repo}/git/ref/heads/{self.branch}")["object"]["sha"]
 
     def open_prs(self) -> list[dict]:
-        return paginate(f"/repos/{self.repo}/pulls?state=open&base={self.branch}")
+        prs = paginate(f"/repos/{self.repo}/pulls?state=open&base={self.branch}")
+        if _MEMO_SCOPE[0] > 0 and not _DECIDING[0]:
+            try:
+                self.prefetch_checks([((p.get("head") or {}).get("sha") or "") for p in prs])
+            except Exception as exc:  # noqa: BLE001 - an optimisation: any failure means "read via REST"
+                log(f"::notice::check prefetch failed ({type(exc).__name__}); planning reads fall back to REST")
+        return prs
+
+    def prefetch_checks(self, shas: list[str]) -> int:
+        """Planning only: read every head's check runs and combined status in GraphQL batches and seed the
+        GET memo with the exact REST payloads `checks()`, `ci_activity()` and `extra_checks()` would read.
+
+        Quota: `plan_train` walks every open PR and read `/check-runs` + `/status` per head — two REST
+        calls per PR from the GITHUB_TOKEN core quota every workflow shares (the build job sent ~180
+        requests a run, 2026-11-14). One GraphQL query covers PREFETCH_BATCH heads and is charged to the
+        separate GraphQL bucket. Safety: the memo only serves planning reads; every write's verdict is
+        re-read live under deciding() (`unverified`), so a seeded payload can at worst mis-PLAN a tick,
+        never decide a merge. A head is seeded only when GraphQL saw ALL of it (no further page, fewer
+        than 100 runs, at most 30 statuses — what the REST pages hold); anything else falls back to REST."""
+        # open_prs() is called from many places in one tick; a head already seeded in this planning
+        # scope is not read again (the memo is cleared on exit and by every write, so this never
+        # outlives the data it describes).
+        shas = sorted({s for s in shas if re.fullmatch(r"[0-9a-f]{40}", s or "")
+                       and f"/repos/{self.repo}/commits/{s}/status" not in _GET_MEMO})
+        owner, name = self.repo.split("/", 1)
+        seeded = 0
+        for i in range(0, len(shas), PREFETCH_BATCH):
+            chunk = shas[i:i + PREFETCH_BATCH]
+            fields = " ".join(f'c{j}: object(oid: "{sha}") {{ ...H }}' for j, sha in enumerate(chunk))
+            query = (f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) "
+                     f"{{ {fields} }} }} {PREFETCH_FRAGMENT}")
+            try:
+                code, data = api("POST", "/graphql", {"query": query, "variables": {"owner": owner, "name": name}},
+                                 graphql_read=True)
+            except ApiAbort:
+                return seeded
+            repo_data = (((data or {}).get("data") or {}).get("repository") or None) \
+                if code == 200 and isinstance(data, dict) else None
+            if repo_data is None:
+                log(f"::notice::check prefetch unavailable ({code}); planning reads fall back to REST")
+                return seeded
+            # A partial answer (e.g. RESOURCE_LIMITS_EXCEEDED under one alias) names the alias in each
+            # error's path: only those heads fall back to REST, the rest of the batch is still complete.
+            errors = data.get("errors") or []
+            broken = {e["path"][1] for e in errors if isinstance(e, dict) and len(e.get("path") or []) > 1}
+            if errors and not broken:
+                log("::notice::check prefetch returned unattributed errors; planning reads fall back to REST")
+                return seeded
+            nodes = {j: repo_data.get(f"c{j}") for j in range(len(chunk)) if f"c{j}" not in broken}
+            extra = self._prefetch_more_pages(owner, name, nodes)
+            for j, node in nodes.items():
+                sha = chunk[j]
+                payloads = prefetch_payloads(node, sha, extra)
+                if payloads is None:
+                    continue
+                runs, status = payloads
+                base_path = f"/repos/{self.repo}/commits/{sha}/check-runs"
+                total = len(runs)
+                for k, page in enumerate(rest_pages(runs), 1):
+                    _GET_MEMO[f"{base_path}?per_page=100&page={k}"] = \
+                        json.dumps({"total_count": total, "check_runs": page}).encode()
+                _GET_MEMO[f"/repos/{self.repo}/commits/{sha}/status"] = json.dumps(status).encode()
+                seeded += 1
+        API_STATS["prefetched"] = API_STATS.get("prefetched", 0) + seeded
+        return seeded
+
+    def _prefetch_more_pages(self, owner: str, name: str, nodes: dict) -> dict:
+        """suite id -> its runs after the first 100, read in batched GraphQL follow-ups. A suite that does
+        not finish within PREFETCH_PAGE_ROUNDS stays absent, which makes its head fall back to REST."""
+        pending: dict[str, str] = {}
+        for node in nodes.values():
+            for suite in (((node or {}).get("checkSuites") or {}).get("nodes") or []):
+                info = ((suite or {}).get("checkRuns") or {}).get("pageInfo") or {}
+                if info.get("hasNextPage") and suite.get("id") and info.get("endCursor"):
+                    pending[suite["id"]] = info["endCursor"]
+        got: dict[str, list] = {}
+        done: dict[str, list] = {}
+        for _ in range(PREFETCH_PAGE_ROUNDS):
+            if not pending:
+                break
+            items = list(pending.items())
+            pending = {}
+            for i in range(0, len(items), PREFETCH_BATCH):
+                chunk = items[i:i + PREFETCH_BATCH]
+                fields = " ".join(PREFETCH_MORE % (k, json.dumps(sid), json.dumps(cur)) for k, (sid, cur) in enumerate(chunk))
+                try:
+                    code, data = api("POST", "/graphql", {"query": f"query {{ {fields} }}"}, graphql_read=True)
+                except ApiAbort:
+                    return done
+                if code != 200 or not isinstance(data, dict) or data.get("errors"):
+                    continue          # these suites stay incomplete: their heads fall back to REST
+                for k, (sid, _cur) in enumerate(chunk):
+                    cr = ((((data.get("data") or {}).get(f"p{k}")) or {}).get("checkRuns")) or {}
+                    info = cr.get("pageInfo") or {}
+                    got.setdefault(sid, []).extend(cr.get("nodes") or [])
+                    if info.get("hasNextPage") is False:
+                        done[sid] = got[sid]
+                    elif info.get("hasNextPage") and info.get("endCursor"):
+                        pending[sid] = info["endCursor"]
+        return done
 
     def pr(self, n: int) -> dict:
         return get(f"/repos/{self.repo}/pulls/{int(n)}")
@@ -3792,8 +3978,8 @@ def fix_preempts_strict_self_test(check) -> None:
 def train_turn_main_red_self_test(check) -> None:
     """The train's turn after a strict merge, with a red main and without (2026-11-13: fixes #15991/#15987
     waited ~2 h behind "train's turn" while no train could be built over the red main)."""
-    saved = globals()["last_merge_was_strict"]
-    globals()["last_merge_was_strict"] = lambda *_a, **_k: True
+    saved = globals()["strict_merge_since_train"]
+    globals()["strict_merge_since_train"] = lambda *_a, **_k: 1000
     try:
         git = lambda *_a, **_k: subprocess.CompletedProcess([], 0, stdout="1000\n", stderr="")
         waiting = [object()]
@@ -3801,7 +3987,7 @@ def train_turn_main_red_self_test(check) -> None:
         red = train_turn(None, git, "b", waiting, False, now=1001, main_red={"Validate manifests": "failure"})
         red_carrier = train_turn(None, git, "b", waiting, True, now=1001, main_red={"Validate manifests": "failure"})
     finally:
-        globals()["last_merge_was_strict"] = saved
+        globals()["strict_merge_since_train"] = saved
     check("train's turn: green main, strict merge just landed, a train candidate waits -> the train goes next",
           bool(green) and "train's turn" in green, f"{green!r}")
     check("train's turn: red main -> no turn, the strict lane serves the fix at once",
@@ -3812,6 +3998,89 @@ def train_turn_main_red_self_test(check) -> None:
     call = settle_src[settle_src.find("train_turn("):][:400]
     check("train's turn: settle hands main_red to train_turn (the call site is the fix as much as the rule)",
           "main_red=main_red" in call.split("\n\n")[0], call[:200])
+
+
+def train_turn_fairness_self_test(check) -> None:
+    """Lane fairness under a steady strict queue (2026-11-14, 15:40-19:30Z): a fast-lane merge landing
+    after a strict merge must not end the train's turn, or the strict lane builds its next carrier over
+    waiting train candidates every time. Drives train_turn on a fake first-parent history."""
+    class FakeGh:
+        def __init__(self, lanes):   # sha -> (pr number, App status description on its head)
+            self.lanes = lanes
+        def pr(self, n):
+            return {"head": {"sha": f"h{n}"}}
+        def app_statuses(self, head):
+            desc = next((d for n, d in self.lanes.values() if f"h{n}" == head), "")
+            return {STATUS_CONTEXT: ("success", desc)}
+
+    def fake_git(history, times):   # history: first-parent shas, newest first
+        def git(*args, **_k):
+            out = ""
+            if args[0] == "rev-list":
+                cap = next((int(a.split("=")[1]) for a in args if a.startswith("--max-count=")), len(history))
+                out = "\n".join(history[:cap])
+            elif args[0] == "show" and args[-1] in times:
+                fmt = args[2]
+                out = times[args[-1]][0] if fmt == "--format=%s" else str(times[args[-1]][1])
+            return subprocess.CompletedProcess(list(args), 0, stdout=out + "\n", stderr="")
+        return git
+
+    strict, fast, train = "strict lane: verified on strict carrier #9 over main x", "fast lane: disjoint", "verified on train over main y"
+    times = {"m3": ("feat(a): fast (#3)", 1900), "m2": ("ci(b): strict (#2)", 1000), "m1": ("feat(c): train (#1)", 500),
+             "m4": ("chore(d): deploy (#4)", 1950)}
+    lanes = {"m3": (3, fast), "m2": (2, strict), "m1": (1, train), "m4": (4, "")}
+    waiting = [object()]
+    _MERGE_LANE.clear()
+    # Strict merge, then a fast merge and a bot merge on top: the train still owns the turn.
+    after_fast = train_turn(FakeGh(lanes), fake_git(["m4", "m3", "m2", "m1"], times), "m4", waiting, False, now=1100)
+    check("lane fairness: fast/bot merges after a strict merge do not end the train's turn (steady strict queue)",
+          bool(after_fast) and "train's turn" in after_fast, f"{after_fast!r}")
+    # Bounded: past TRAIN_TURN_S from that strict merge the strict lane proceeds.
+    expired = train_turn(FakeGh(lanes), fake_git(["m4", "m3", "m2", "m1"], times), "m4", waiting, False,
+                         now=1000 + TRAIN_TURN_S + 1)
+    check("lane fairness: the train's turn still expires TRAIN_TURN_S after the strict merge", expired is None, f"{expired!r}")
+    # A train merge after the strict merge = the train had its turn.
+    trained = train_turn(FakeGh(lanes), fake_git(["m1", "m2"], times), "m1", waiting, False, now=1100)
+    check("lane fairness: a train merge since the strict merge ends the turn", trained is None, f"{trained!r}")
+    # Negative: no train candidates waiting -> strict proceeds unchanged.
+    idle = train_turn(FakeGh(lanes), fake_git(["m2", "m1"], times), "m2", [], False, now=1100)
+    check("lane fairness: no train candidates -> the strict lane proceeds", idle is None, f"{idle!r}")
+    # Unchanged: main's head is the strict merge itself.
+    direct = train_turn(FakeGh(lanes), fake_git(["m2", "m1"], times), "m2", waiting, False, now=1100)
+    check("lane fairness: main's head a strict merge, candidates waiting -> the train's turn", bool(direct), f"{direct!r}")
+    # Depth exceeded: the strict merge lies beyond TRAIN_TURN_DEPTH -> old behaviour (no turn).
+    deep = [f"o{i}" for i in range(TRAIN_TURN_DEPTH)] + ["m2"]
+    dtimes = {**times, **{f"o{i}": (f"chore(x): bot (#{50 + i})", 1050) for i in range(TRAIN_TURN_DEPTH)}}
+    dlanes = {**lanes, **{f"o{i}": (50 + i, "") for i in range(TRAIN_TURN_DEPTH)}}
+    _MERGE_LANE.clear()
+    beyond = train_turn(FakeGh(dlanes), fake_git(deep, dtimes), "o0", waiting, False, now=1100)
+    check("lane fairness: strict merge beyond TRAIN_TURN_DEPTH -> no turn (old behaviour)", beyond is None, f"{beyond!r}")
+
+    class FailingGh(FakeGh):   # a non-200 PR read: get() raises SystemExit
+        def pr(self, n):
+            if n == 3:
+                raise SystemExit("::error::GET /pulls/3 -> 502")
+            return super().pr(n)
+    _MERGE_LANE.clear()
+    try:
+        failed = train_turn(FailingGh(lanes), fake_git(["m3", "m2", "m1"], times), "m3", waiting, False, now=1100)
+    except SystemExit as e:
+        failed = f"aborted: {e}"
+    check("lane fairness: a failed PR read is stepped over, never a tick abort", bool(failed) and "train's turn" in failed,
+          f"{failed!r}")
+    check("lane fairness: a failed read is not memoised", "m3" not in _MERGE_LANE, str(_MERGE_LANE))
+    reads: list = []
+
+    class CountingGh(FakeGh):
+        def pr(self, n):
+            reads.append(n)
+            return super().pr(n)
+    _MERGE_LANE.clear()
+    g = fake_git(["m3", "m2", "m1"], times)
+    train_turn(CountingGh(lanes), g, "m3", waiting, False, now=1100)
+    train_turn(CountingGh(lanes), g, "m3", waiting, False, now=1100)
+    check("lane fairness: a merged commit's lane is read once (memoised by sha)", reads == [3, 2], str(reads))
+    _MERGE_LANE.clear()
 
 
 def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now: float | None = None,
@@ -3828,13 +4097,59 @@ def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now:
         # No train is built over a red main (plan_train serves only fixes), so this turn would hold the
         # strict lane that serves the fix for TRAIN_TURN_S with nobody using it.
         return None
-    if not train_waiting or not last_merge_was_strict(gh, git, base):
+    if not train_waiting:
         return None
     now = time.time() if now is None else now
-    ct = git("show", "-s", "--format=%ct", base, check=False).stdout.strip()
-    if not ct.isdigit() or now - int(ct) > TRAIN_TURN_S:
+    ct = strict_merge_since_train(gh, git, base, now=now)
+    if ct is None or now - ct > TRAIN_TURN_S:
         return None
     return f"train's turn after a strict-lane merge ({len(train_waiting)} train candidate(s) waiting)"
+
+
+_MERGE_LANE: dict[str, str] = {}   # sha -> lane; a merged commit's lane never changes (failed reads not kept)
+
+
+def merge_lane(gh, git, sha: str) -> str:
+    """Which lane put `sha` on main: "strict" (the App's `strict lane:` status on the PR head), "train"
+    (`verified on train`), or "other" (a fast-lane, bot or native auto-merge squash). Unreadable = other.
+    A non-200 PR or status read is "other" too (stepped over), never a tick abort; a quota/transient
+    ApiAbort still propagates exactly as for every other read in the tick."""
+    if sha in _MERGE_LANE:
+        return _MERGE_LANE[sha]
+    m = SQUASH_PR_RE.search(git("show", "-s", "--format=%s", sha, check=False).stdout.strip())
+    if not m:
+        _MERGE_LANE[sha] = "other"
+        return "other"
+    try:
+        head = gh.pr(int(m.group(1)))["head"]["sha"]
+        desc = gh.app_statuses(head).get(STATUS_CONTEXT, ("", ""))[1]
+    except (KeyError, TypeError, ValueError, SystemExit):
+        return "other"
+    lane = "strict" if desc.startswith("strict lane:") else "train" if desc.startswith("verified on train") else "other"
+    _MERGE_LANE[sha] = lane
+    return lane
+
+
+def strict_merge_since_train(gh, git, base: str, depth: int | None = None, now: float | None = None) -> int | None:
+    """Committer time of the newest strict-lane merge on main's first-parent chain with no train merge
+    after it, or None. Fast-lane and bot merges are stepped over: they move main but are not the train's
+    turn, so they must not end it (2026-11-14: fast #16034 landed after strict #16173, main's head was no
+    longer a strict merge, and the next tick built strict carrier #16176 over four waiting candidates).
+    The walk stops, with no API read, at the first commit older than TRAIN_TURN_S (no turn could be open
+    from it) and after `depth` commits (TRAIN_TURN_DEPTH); nothing strict within that = no turn owed."""
+    depth = TRAIN_TURN_DEPTH if depth is None else depth
+    now = time.time() if now is None else now
+    shas = git("rev-list", "--first-parent", f"--max-count={depth}", base, check=False).stdout.split()
+    for sha in shas:
+        ct = git("show", "-s", "--format=%ct", sha, check=False).stdout.strip()
+        if not ct.isdigit() or now - int(ct) > TRAIN_TURN_S:
+            return None
+        lane = merge_lane(gh, git, sha)
+        if lane == "train":
+            return None
+        if lane == "strict":
+            return int(ct)
+    return None
 
 
 def latest_ci_activity(check_runs: list, load_runs, now: float) -> float | None:
@@ -5876,6 +6191,129 @@ def branch_updater_self_test(check) -> None:
           str(branch_updater_spread_errors(workflow_texts())))
 
 
+def prefetch_self_test(check) -> None:
+    """GraphQL check prefetch: seeds the exact REST memo keys from one query, so checks() sends no REST;
+    an incomplete head, a GraphQL error or a deciding() read all fall back to live REST."""
+    saved = (globals()["_http_open"], os.environ.get("GH_TOKEN"), dict(_GET_MEMO), dict(API_STATS))
+    a, b = "a" * 40, "b" * 40
+    seen: list[str] = []
+    gql = {"mode": "ok"}
+
+    def commit(sha, more=False):
+        return {"oid": sha, "checkSuites": {"pageInfo": {"hasNextPage": False}, "nodes": [
+            {"app": {"slug": "github-actions"}, "checkRuns": {"pageInfo": {"hasNextPage": more}, "nodes": [
+                {"databaseId": 11, "name": "Validate manifests", "status": "COMPLETED", "conclusion": "SUCCESS",
+                 "detailsUrl": "https://github.com/o/r/actions/runs/5/job/6", "url": "https://github.com/o/r/runs/11",
+                 "startedAt": "2026-11-14T10:00:00Z", "completedAt": "2026-11-14T10:05:00Z"},
+                {"databaseId": 12, "name": "Gitleaks", "status": "IN_PROGRESS", "conclusion": None,
+                 "detailsUrl": None, "url": None, "startedAt": "2026-11-14T10:01:00Z", "completedAt": None}]}}]},
+            "status": {"state": "PENDING", "contexts": [
+                {"context": "merge-train", "state": "PENDING", "description": "queued", "targetUrl": None,
+                 "createdAt": "2026-11-14T10:02:00Z", "creator": {"login": "x"}}]}}
+
+    def fake_open(req, timeout):
+        path = req.full_url[len(API):]
+        seen.append(f"{req.get_method()} {path.split('?')[0]}")
+        if path == "/graphql":
+            gql.setdefault("queried", []).append(sorted(x for x in (a, b) if x in (req.data or b"").decode()))
+            if gql["mode"] == "error":
+                return 200, json.dumps({"errors": [{"message": "boom"}]}).encode(), {}
+            if gql["mode"] == "partial":
+                return 200, json.dumps({"data": {"repository": {"c0": commit(a), "c1": None}}, "errors": [
+                    {"type": "RESOURCE_LIMITS_EXCEEDED", "path": ["repository", "c0", "checkSuites"]}]}).encode(), {}
+            return 200, json.dumps({"data": {"repository": {"c0": commit(a), "c1": commit(b, more=True)}}}).encode(), {}
+        if "/pulls?" in path:
+            return 200, json.dumps([{"number": 1, "head": {"sha": a}}, {"number": 2, "head": {"sha": b}}]).encode(), {}
+        if path.endswith("/status"):
+            return 200, json.dumps({"state": "pending", "statuses": [
+                {"id": 1, "context": "merge-train", "state": "pending"}]}).encode(), {}
+        return 200, json.dumps({"total_count": 2, "check_runs": [
+            {"id": 11, "name": "Validate manifests", "status": "completed", "conclusion": "success"},
+            {"id": 12, "name": "Gitleaks", "status": "in_progress", "conclusion": None}]}).encode(), {}
+    globals()["_http_open"] = fake_open
+    try:
+        os.environ["GH_TOKEN"] = "ghs_FIXTURE"
+        gh = GitHub("o/r", "main", "")
+        want = {"Validate manifests": "success", "Gitleaks": None, "merge-train": None}
+        _GET_MEMO.clear()
+        with planning_reads():
+            gh.open_prs()
+            seen.clear()
+            got_a = gh.checks(a)
+            rest_a = list(seen)
+            got_b = gh.checks(b)
+        check("prefetch: a complete head is served from the GraphQL batch with no REST call",
+              got_a == want and rest_a == [], f"{got_a} {rest_a}")
+        check("prefetch: a head with a further page falls back to REST and reads the same verdicts",
+              got_b == want and any("/commits/" + b in x for x in seen), f"{got_b} {seen}")
+        with planning_reads():
+            gh.open_prs()
+            gql["queried"] = []
+            gh.open_prs()
+            gh.open_prs()
+            again = list(gql["queried"])
+        check("prefetch: repeated open_prs() in one scope re-reads only the heads not yet seeded",
+              again == [[b], [b]], str(again))
+        payload = prefetch_payloads(commit(a), a)
+        check("prefetch: payload carries what latest_ci_activity and extra_checks read",
+              payload is not None and payload[0][0]["started_at"] == "2026-11-14T10:00:00Z"
+              and payload[0][0]["app"]["slug"] == "github-actions" and "/actions/runs/5/" in payload[0][0]["details_url"],
+              str(payload))
+        _GET_MEMO.clear()
+        seen.clear()
+        with planning_reads():
+            gh.open_prs()
+            with deciding():
+                gh.checks(a)
+        check("prefetch: a deciding() read never uses the seeded payload (goes live)",
+              any(x.endswith(f"/commits/{a}/status") for x in seen), str(seen))
+        _GET_MEMO.clear()
+        gql["mode"] = "error"
+        seen.clear()
+        with planning_reads():
+            gh.open_prs()
+            got = gh.checks(a)
+        check("prefetch: a GraphQL error falls back to REST with the same verdicts",
+              got == want and any(x.endswith(f"/commits/{a}/status") for x in seen), f"{got} {seen}")
+        _GET_MEMO.clear()
+        gql["mode"] = "partial"
+        seen.clear()
+        with planning_reads():
+            gh.open_prs()
+            got = gh.checks(a)
+        check("prefetch: an alias named in a partial error is not seeded (goes to REST)",
+              got == want and any(x.endswith(f"/commits/{a}/status") for x in seen), f"{got} {seen}")
+        _GET_MEMO.clear()
+        gql["mode"] = "ok"
+        seen.clear()
+        gh.open_prs()
+        check("prefetch: outside planning_reads() no GraphQL query is sent", "POST /graphql" not in seen, str(seen))
+        check("prefetch: a mismatched oid is not seeded", prefetch_payloads(commit(b), a) is None)
+        check("prefetch: REST pages are 100 each with a short page last (an exact multiple gets an empty one)",
+              [len(x) for x in rest_pages(list(range(250)))] == [100, 100, 50]
+              and [len(x) for x in rest_pages(list(range(200)))] == [100, 100, 0] and rest_pages([]) == [[]])
+        paged = commit(b, more=True)
+        paged["checkSuites"]["nodes"][0]["id"] = "S1"
+        extra_run = {"databaseId": 13, "name": "build (x)", "status": "COMPLETED", "conclusion": "FAILURE",
+                     "detailsUrl": None, "url": None, "startedAt": None, "completedAt": None}
+        got = prefetch_payloads(paged, b, {"S1": [extra_run]})
+        check("prefetch: a suite's follow-up pages complete the head (and a red run on page 2 is kept)",
+              got is not None and [r["name"] for r in got[0]][-1] == "build (x)" and got[0][-1]["conclusion"] == "failure",
+              str(got))
+        check("prefetch: a suite with a further page and no follow-up stays incomplete",
+              prefetch_payloads(paged, b, {}) is None)
+    finally:
+        globals()["_http_open"] = saved[0]
+        if saved[1] is None:
+            os.environ.pop("GH_TOKEN", None)
+        else:
+            os.environ["GH_TOKEN"] = saved[1]
+        _GET_MEMO.clear()
+        _GET_MEMO.update(saved[2])
+        API_STATS.clear()
+        API_STATS.update(saved[3])
+
+
 def self_test() -> int:
     fails: list[str] = []
     last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
@@ -5889,7 +6327,9 @@ def self_test() -> int:
     retry_planner_self_test(check)
     train_turn_main_red_self_test(check)
     fix_preempts_strict_self_test(check)
+    train_turn_fairness_self_test(check)
     branch_updater_self_test(check)
+    prefetch_self_test(check)
     git_memo_self_test(check)
     packed_fixture_self_test(check)
 
@@ -10078,7 +10518,8 @@ def self_test() -> int:
                 return fx, real
 
             def writes(fx):
-                return [c for c in fx.calls if c[0] != "GET"]
+                # POST /graphql here is only the read-only check prefetch (api(..., graphql_read=True)).
+                return [c for c in fx.calls if c[0] != "GET" and not (c[0] == "POST" and c[1] == "/graphql")]
 
             def check_runs_get(method, path):
                 return method == "GET" and "/check-runs" in path
