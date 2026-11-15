@@ -48,8 +48,8 @@ spec:
             severity: critical
           annotations:
             runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/key-ceremonies/certificate-expiry.md
-            summary: "Certificate {{ $labels.namespace }}/{{ $labels.name }} expires in {{ $value | printf \"%.1f\" }} days"
-            description: "Renewal has failed. Act now: fix the issuer or force renewal (`cmctl renew -n {{ $labels.namespace }} {{ $labels.name }}`), then confirm the pod serves the new certificate (some workloads load it only at start)."
+            summary: "Certificate {{ $labels.namespace }}/{{ $labels.name }} expires within 3 days"
+            description: "Expires in {{ $value | printf \"%.1f\" }} days. Renewal has failed. Act now: fix the issuer or force renewal (`cmctl renew -n {{ $labels.namespace }} {{ $labels.name }}`), then confirm the pod serves the new certificate (some workloads load it only at start)."
         - alert: CertificateAuthorityExpiring
           expr: openbank:certificate_days_to_expiry{namespace="cert-manager",name="openbank-sandbox-ca"} < 60
           for: 1h
