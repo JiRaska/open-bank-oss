@@ -86,6 +86,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -109,6 +110,8 @@ RUN_NAME_PREFIX = "pact-verify:"
 HISTORY_START = "2026-09-25T00:00:00Z"
 HISTORY_PAGE_SIZE = 100
 HISTORY_MAX_PAGES = 20
+HISTORY_SCAN_ATTEMPTS = 3
+HISTORY_RETRY_SECONDS = 10
 RUN_NAME = re.compile(r"^pact-verify:(openbank-[a-z0-9-]+):([0-9a-f]{64}|manual):(auto|manual)$")
 
 
@@ -309,10 +312,22 @@ def verification_key(root: pathlib.Path, provider: str, consumers: list[str], br
         version = fetch(url, user, password).get("number")
         if not isinstance(version, str) or not version:
             raise ValueError(f"{consumer}: latest {branch} broker version has no number")
+        # The latest PACT on the branch, not the pact of the latest VERSION. A consumer
+        # that is also a provider gets a new main version every time its own
+        # verification publishes, and that version carries no pact: 2026-11-13,
+        # `/version/<sha>` answered 404 for transaction-service -> swift-service and
+        # aborted admission for the whole fleet.
         pact_url = (f"{broker.rstrip('/')}/pacts/provider/{urllib.parse.quote(provider)}"
                     f"/consumer/{urllib.parse.quote(consumer)}"
-                    f"/version/{urllib.parse.quote(version)}")
-        pact = fetch(pact_url, user, password)
+                    f"/branch/{urllib.parse.quote(branch)}/latest")
+        try:
+            pact = fetch(pact_url, user, password)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                err = BranchPactAbsent(f"{consumer} -> {provider}: no pact on {branch} in the broker")
+                err.consumer = consumer
+                raise err from e
+            raise
         if ((pact.get("consumer") or {}).get("name") != consumer
                 or (pact.get("provider") or {}).get("name") != provider
                 or not ("interactions" in pact or "messages" in pact)):
@@ -344,7 +359,41 @@ def _history_url(repo: str, workflow: str, created: str, page: int) -> str:
     return f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs?{query}"
 
 
-def complete_run_history(repo: str, workflow: str, token: str, fetch=None, now=None) -> list[dict]:
+class HistoryUnstable(ValueError):
+    """Two reads of the SAME pinned window disagreed. Retryable; never a pass."""
+
+
+class BranchPactAbsent(ValueError):
+    """The broker holds no pact for this consumer on the branch — nothing to verify."""
+
+
+def complete_run_history(repo: str, workflow: str, token: str, fetch=None, now=None,
+                         sleep=None, attempts=None) -> list[dict]:
+    """Retry `_scan_run_history` while GitHub's own answers disagree, then fail closed.
+
+    Measured 2026-11-14/15: 6 consecutive runs aborted on "run count changed during
+    pagination" while NO verify-provider run had been created since 06:19Z — the
+    window is pinned, nothing was dispatched, and still `total_count` differed
+    between pages. That is the Actions list endpoint answering inconsistently across
+    reads, not a run arriving mid-scan. A fresh full scan is the cure; every retry is
+    announced as a warning, and when all attempts disagree the run fails exactly as
+    before. No attempt is ever accepted unless it passes every completeness check.
+    """
+    sleep = sleep or time.sleep
+    attempts = attempts or HISTORY_SCAN_ATTEMPTS
+    for attempt in range(1, attempts + 1):
+        try:
+            return _scan_run_history(repo, workflow, token, fetch, now)
+        except HistoryUnstable as e:
+            if attempt == attempts:
+                raise HistoryUnstable(f"{e} (on all {attempts} scans)") from e
+            sys.stderr.write(f"::warning::Actions run history inconsistent on scan "
+                             f"{attempt}/{attempts}: {e} — rescanning\n")
+            sleep(HISTORY_RETRY_SECONDS * attempt)
+    raise AssertionError("unreachable")
+
+
+def _scan_run_history(repo: str, workflow: str, token: str, fetch=None, now=None) -> list[dict]:
     """Fetch every run in the migration window, or refuse to decide.
 
     The hard page cap limits API work during a storm. Exceeding it pauses automated
@@ -373,19 +422,19 @@ def complete_run_history(repo: str, workflow: str, token: str, fetch=None, now=N
         if first_count is None:
             first_count, first_ids = count, ids
         elif count != first_count:
-            raise ValueError("Actions run count changed during pagination")
+            raise HistoryUnstable("Actions run count changed during pagination")
         if count > HISTORY_PAGE_SIZE * HISTORY_MAX_PAGES:
             raise ValueError(f"Actions run history exceeds {HISTORY_MAX_PAGES} pages")
         runs.extend(batch)
         if len(runs) >= count:
             if len(runs) != count or len({r["id"] for r in runs}) != count:
-                raise ValueError("Actions run-history pages overlap or omit runs")
+                raise HistoryUnstable("Actions run-history pages overlap or omit runs")
             if page > 1:
                 fresh = fetch(_history_url(repo, workflow, window, 1), token)
                 fresh_runs = fresh.get("workflow_runs")
                 if (fresh.get("total_count") != first_count or not isinstance(fresh_runs, list)
                         or [r.get("id") for r in fresh_runs] != first_ids):
-                    raise ValueError("Actions first page changed during pagination")
+                    raise HistoryUnstable("Actions first page changed during pagination")
             break
         if not batch:
             raise ValueError("Actions run-history pagination ended early")
@@ -588,10 +637,20 @@ def main() -> int:
     try:
         # Complete every evidence check BEFORE the first POST. A partial history or
         # broker answer must not permit a subset of the fleet to escape admission.
-        keys = {
-            p: verification_key(root, p, owed[p], args.broker, user, password, args.branch)
-            for p in providers
-        }
+        keys = {}
+        for p in providers:
+            while owed[p]:
+                try:
+                    keys[p] = verification_key(root, p, owed[p], args.broker, user, password, args.branch)
+                    break
+                except BranchPactAbsent as e:
+                    # Not a broker fault, and not something building the provider could
+                    # fix. Only THAT consumer is held — by name, every run — and the
+                    # provider is still admitted for the consumers that do have a pact.
+                    print(f"::warning::HELD {e}; dispatch cannot help until the consumer "
+                          f"publishes this pact on {args.branch}")
+                    owed[p] = [c for c in owed[p] if c != e.consumer]
+        providers = [p for p in providers if p in keys]
         runs = complete_run_history(args.repo, args.workflow, token)
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
             OSError, subprocess.CalledProcessError, TypeError, ValueError) as e:
@@ -788,6 +847,33 @@ def self_test() -> int:
         fingerprint_checks.append(("missing broker version fails closed", True))
     else:
         fingerprint_checks.append(("missing broker version fails closed", False))
+    # 2026-11-13: the pact of the consumer's latest VERSION 404'd, because that version
+    # was published by the consumer's own provider verification and carries no pact.
+    asked = []
+    def branch_pact_absent(url, *_):
+        asked.append(url)
+        if url.endswith("latest-version"):
+            return {"number": "sha-without-pact"}
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+    try:
+        verification_key(root, sample_provider, [consumer], "https://broker.example", "", "", "main", branch_pact_absent)
+    except BranchPactAbsent as e:
+        fingerprint_checks.append(("absent branch pact is a named per-consumer hold", e.consumer == consumer))
+    else:
+        fingerprint_checks.append(("absent branch pact is a named per-consumer hold", False))
+    fingerprint_checks.append(("pact is read as branch-latest, not by version",
+                               any(u.endswith("/branch/main/latest") for u in asked)
+                               and not any("/version/" in u for u in asked)))
+    def broker_down(url, *_):
+        if url.endswith("latest-version"):
+            return {"number": "1"}
+        raise urllib.error.HTTPError(url, 503, "Unavailable", {}, None)
+    try:
+        verification_key(root, sample_provider, [consumer], "https://broker.example", "", "", "main", broker_down)
+    except BranchPactAbsent:
+        fingerprint_checks.append(("a broker 5xx is NOT a hold — it still fails closed", False))
+    except urllib.error.HTTPError:
+        fingerprint_checks.append(("a broker 5xx is NOT a hold — it still fails closed", True))
     for why, okay in fingerprint_checks:
         print(f"  {'ok ' if okay else 'BAD'} {why}")
         if not okay:
@@ -800,7 +886,8 @@ def self_test() -> int:
         return urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["created"][0]
     def history(fetch, tail_runs=()):
         # The pinned window answers from `fetch`; the post-cutoff tail from `tail_runs`.
-        return complete_run_history("org/repo", "verify-provider.yml", "x", fetch=lambda url, token: (
+        return complete_run_history("org/repo", "verify-provider.yml", "x", sleep=lambda _s: None,
+                                    fetch=lambda url, token: (
             {"total_count": len(tail_runs), "workflow_runs": list(tail_runs)}
             if created_of(url).startswith(">") else fetch(url, token)))
     one_page = history( fetch=lambda *_: {
@@ -836,7 +923,7 @@ def self_test() -> int:
         answer = history_fixture(url, token)
         if urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["page"] == ["1"]:
             first_page_reads += 1
-            if first_page_reads == 2:
+            if first_page_reads % 2 == 0:  # shifts on EVERY rescan, not once
                 answer["workflow_runs"][0] = answer["workflow_runs"][0] | {"id": 999}
         return answer
     try:
@@ -885,6 +972,37 @@ def self_test() -> int:
             history_checks.append((why, True))
         else:
             history_checks.append((why, False))
+    # 2026-11-14/15: `total_count` flapped between pages with no run created at all.
+    # One inconsistent scan followed by a consistent one must be ACCEPTED (rescanned) —
+    # and the persistent cases above must still fail after every attempt.
+    scans = {"n": 0}
+    def flaky_once(url, token):
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        if query["page"] == ["1"] and scans["n"] < 2:
+            scans["n"] += 1
+        return history_fixture(url, token, second_count=102 if scans["n"] == 1 else 101)
+    try:
+        healed = history(flaky_once)
+    except ValueError:
+        healed = []
+    history_checks.append(("one inconsistent scan then a consistent one is rescanned and accepted",
+                           len(healed) == 101 and scans["n"] == 2))
+    try:
+        history(lambda url, token: history_fixture(url, token, second_count=102))
+    except HistoryUnstable as e:
+        history_checks.append(("persistent inconsistency fails after every attempt",
+                               f"all {HISTORY_SCAN_ATTEMPTS} scans" in str(e)))
+    else:
+        history_checks.append(("persistent inconsistency fails after every attempt", False))
+    try:
+        history(lambda url, _t: {"total_count": 2, "workflow_runs":
+                [auto_a] if urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["page"] == ["1"] else []})
+    except HistoryUnstable:
+        history_checks.append(("a short history is NOT retried as instability", False))
+    except ValueError:
+        history_checks.append(("a short history is NOT retried as instability", True))
+    else:
+        history_checks.append(("a short history is NOT retried as instability", False))
     for why, okay in history_checks:
         print(f"  {'ok ' if okay else 'BAD'} {why}")
         if not okay:
