@@ -174,3 +174,12 @@ naslepo znovu a známý převod se nikdy neodmítne: nejasné odeslání se ře�
 UETR. Sweeper (`institution-transfer.resolution.*`: `every`, `initial-delay`, `min-age`,
 `batch-size`) se ptá na neznámá odeslání a SENT převody starší než `min-age`. Záznam, který konzument
 nezpracuje, jde do dead-letter podle konfigurace kanálu.
+
+## Obnova klientského certifikátu (odchozí mTLS)
+
+Každá pojmenovaná konfigurace `quarkus.tls.<name>`, kterou se služba prokazuje vůči
+naslouchání 8443 jiné služby, nastavuje `reload-period: 1h`. cert-manager klientský certifikát
+obnoví před expirací; bez této volby by proces dál předkládal ten starý, dokud by ho protistrana
+neodmítla, zatímco všechny signály expirace měřily obnovený Secret a hlásily zelenou. Po obnově
+se nový certifikát použije do hodiny, bez restartu. Gate `tls-certificate-reload` hlídá, aby
+žádná taková konfigurace nevypadla.
