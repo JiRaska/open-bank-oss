@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pension-service
     app.kubernetes.io/part-of: pension
   annotations:
-    openbank.tech/policy-checksum: "385b741b5b79e88f"
+    openbank.tech/policy-checksum: "f94f35870704398b"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2453,6 +2453,7 @@ data:
             - kyb.monitoring.queue.list        # #16028: ongoing-monitoring holds queue
             - kyb.monitoring.exit.propose      # #16028: four-eyes exit, maker
             - kyb.monitoring.exit.confirm      # #16028: four-eyes exit, checker (code refuses checker == maker)
+            - kyb.monitoring.exit.withdraw     # #16028: the proposing person withdraws their own pending exit proposal
         ROLE_AUDITOR:
           grant:
             - audit.trail.inspect
