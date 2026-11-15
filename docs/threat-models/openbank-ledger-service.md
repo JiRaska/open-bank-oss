@@ -963,3 +963,20 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+
+## ADR-0381 legal authorization at posting
+
+The journal repository checks authorization for enrolled debit pockets in the same
+transaction as journal persistence and the transactional outbox. It matches the
+current revision and exact economic intent, then marks the permit consumed.
+Enrollment and revision updates use the same per-pocket lock as posting. Tests
+exercise the actual Ledger write against PostgreSQL with a revocation holding
+that lock and with changed credit details. The permitted projection contains
+opaque verification references and must receive separately authenticated updates.
+
+Activation depends on trusted enrollment, issuance and revocation, restricted
+database permissions, and caller coverage. This repository guard does not bind
+writers that bypass the repository or identify stale upstream effects before those
+effects reach the Ledger projection. Direct booking writers require their own
+validated control before scope can be activated. The migration enrolls no pockets.

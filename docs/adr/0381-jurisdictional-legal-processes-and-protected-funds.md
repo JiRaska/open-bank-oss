@@ -335,9 +335,19 @@ credential binding, scheduled mailbox reconciliation and operations ownership.
 For CZ, SK and DE, the simulation also exercises the three domain checks while
 serializing two competing reservations on an actual PostgreSQL row and after revoking
 a mandate. This fixture uses no real orders and omits the production payment rail.
-Before activating the live guard, bind the trusted actor and instrument-scoped
-identity evidence to the payment and check the current permit when posting it.
-A reservation-time decision alone cannot catch a revocation before the journal write.
+The normal Ledger repository now checks and consumes an exact posting permit for
+each enrolled debit pocket in the same PostgreSQL transaction as the journal and
+outbox. A revision change and booking take the same pocket lock. The first transaction
+to commit determines the order; a booking that follows a committed revocation needs
+a permit for the new revision. The permit covers all economic journal lines, both dates,
+synthetic mode and reversal linkage. A retry of an already committed journal uses
+the existing idempotency path.
+
+Activation still requires a trusted publisher that binds the permit to the verified
+actor, applicable legal effects and funded reservation. Revocation becomes effective
+at this boundary when its Ledger revision commits. No enrollment or permit publisher
+is exposed by the Ledger API. Before enrollment, verify all booking callers, including
+non-repository writers, and establish the runtime privileges for the publisher.
 
 Identity context belongs to Party/PID and follows ADR-0380's FOS foundation. The legal process needs an unambiguous verified
 PartyId and an opaque evidence reference. Name variants, scripts, citizenship and

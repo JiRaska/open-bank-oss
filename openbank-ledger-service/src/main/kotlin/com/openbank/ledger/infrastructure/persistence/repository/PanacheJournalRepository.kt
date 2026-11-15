@@ -133,8 +133,9 @@ class PanacheJournalRepository(
 
     override suspend fun save(entry: JournalEntry, idempotencyKey: String?, outbox: List<OutboxMessage>): JournalEntry =
         Panache.withTransaction {
-            Panache.getSession().flatMap { JournalReadWatermark.lockWriter(it) }
-                .flatMap { persist(entry.toEntity()) }
+            Panache.getSession().flatMap { session ->
+                JournalReadWatermark.lockWriter(session).flatMap { LegalPostingFence.check(session, entry) }
+            }.flatMap { persist(entry.toEntity()) }
                 .flatMap { persistLines(entry) }
                 .flatMap {
                     if (idempotencyKey != null) {
@@ -167,7 +168,9 @@ class PanacheJournalRepository(
         // here serialises them and the loser matches 0 rows after the winner commits — so it
         // fails BEFORE persisting a second compensation entry and its AccountBookedChanged
         // deltas (double-credit downstream). Backstop: uq_journal_entries_reversal_of (V12).
-        Panache.getSession().flatMap { JournalReadWatermark.lockWriter(it) }.flatMap {
+        Panache.getSession().flatMap { session ->
+            JournalReadWatermark.lockWriter(session).flatMap { LegalPostingFence.check(session, reversal) }
+        }.flatMap {
             update(
                 "status = ?1, version = version + 1 where id = ?2 and entryDate = ?3 and status = ?4",
                 JournalStatus.REVERSED.name,
