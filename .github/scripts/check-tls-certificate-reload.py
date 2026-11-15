@@ -146,6 +146,11 @@ def main() -> int:
     if a.self_test:
         return self_test()
     n, f = findings(ROOT)
+    # Each family has its own floor: a broken container scan must not be hidden by the client
+    # configs (or vice versa) clearing a combined one.
+    if n < a.min_subjects:
+        print(f"::error::only {n} TLS-serving containers found (min {a.min_subjects}) — the scan measured nothing")
+        return 1
     cn, cf = named_tls_findings(ROOT)
     if cn < a.min_subjects:
         print(f"::error::only {cn} named client TLS configs found (min {a.min_subjects}) — the scan measured nothing")
