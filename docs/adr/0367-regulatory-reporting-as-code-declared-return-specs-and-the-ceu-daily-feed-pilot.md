@@ -13,7 +13,9 @@ summary: "Versioned return specs and entity/regime contexts govern reproducible 
 
 # ADR-0367 — Regulatory reporting as code: declared return specs and the CEÚ daily feed pilot
 
-## Original context (2026-11-08)
+## Context
+
+### Original assessment (2026-11-08)
 
 ADR-0097 decided that FINREP/COREP are derived from the attested close by a stateless
 `openbank-finrep-service`. ADR-0180 decided that a statutory filing is a system of record in
