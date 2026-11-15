@@ -20,6 +20,7 @@
 #   * the entry's placeholder equals the template's (a renamed placeholder is caught);
 #   * an entry is either `openbao: keycloak/<path>` or `unrecorded: <reason >= 20 chars>`;
 #   * no entry names a client the template no longer declares (stale entries rot the mapping);
+#   * no two clients name the same OpenBao path (a shared path means one mapping is wrong);
 #   * `unrecorded` is a closed set: it may only shrink. A NEW unrecorded entry is a finding —
 #     a new client always knows where its secret is, because someone just created it.
 #
@@ -47,7 +48,7 @@ UNRECORDED_BASELINE = {
     "openbank": {
         "agent-merge-recorder-ci", "argocd", "goalert", "openbank-admin-ui",
         "openbank-delegation-disclosure", "openbank-edge", "openbank-glitchtip",
-        "openbank-services", "openbank-synthetic-ledger-seed", "openbao",
+        "openbank-services", "openbank-synthetic-ledger-seed", "openbao", "openbank-mcp-service",
     },
     "openbank-customers": {"customer-edge-admin", "openbank-edge-webauthn"},
 }
@@ -98,6 +99,14 @@ def check(templates: dict, sources: dict, baseline: dict) -> list:
                 if cid not in baseline.get(realm, set()):
                     findings.append(f"[{realm}] `{cid}`: a NEW client cannot be `unrecorded` — whoever created "
                                     "it knows where its secret is. " + HINT.format(cid=cid, src=SOURCES, realm=realm, ph=ph))
+        seen = {}
+        for cid, e in sorted(have.items()):
+            ob = e.get("openbao") if isinstance(e, dict) else None
+            if ob and ob in seen:
+                findings.append(f"[{realm}] `{cid}` and `{seen[ob]}` both name {ob}: two clients never share one "
+                                "secret, so at least one source is wrong")
+            elif ob:
+                seen[ob] = cid
         for cid in sorted(set(have) - set(want)):
             findings.append(f"[{realm}] `{cid}` is listed in {SOURCES} but the template no longer declares it "
                             "with a placeholder secret — remove the entry")
@@ -127,6 +136,7 @@ def self_test() -> int:
         ("bad openbao path fails", {"openbank": {**ok["openbank"], "a": {"placeholder": "__A__", "openbao": "secret/a"}}}, 1),
         ("both fields fails", {"openbank": {**ok["openbank"], "a": {"placeholder": "__A__", "openbao": "keycloak/a", "unrecorded": "x" * 25}}}, 1),
         ("stale entry fails", {"openbank": {**ok["openbank"], "gone": {"placeholder": "__G__", "openbao": "keycloak/g"}}}, 1),
+        ("two clients sharing one openbao path fails", {"openbank": {**ok["openbank"], "old": {"placeholder": "__OLD__", "openbao": "keycloak/a"}}}, 1),
         ("recorded baseline entry must leave the baseline", {"openbank": {**ok["openbank"], "old": {"placeholder": "__OLD__", "openbao": "keycloak/old"}}}, 1),
     ]
     bad = 0
