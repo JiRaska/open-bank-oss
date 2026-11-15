@@ -534,3 +534,19 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## 2026-11-15 - New inbound caller: sdd-service screens collections before release (ADR-0032)
+
+sdd-service now calls `POST /api/v3/sanctions/screen` for the debtor and creditor of each
+collection before it is released. It calls over the private-CA mTLS listener (8443, client
+certificate required, TLSv1.3) with its own service-account bearer, not over the plain 8123 port;
+the sanctions-namespace NetworkPolicy admits the sdd namespace on the same ports as the other
+declared callers. Spoofing: as in S3, the client certificate is transport authentication only and
+the bearer stays the identity `@RolesAllowed` and OPA decide on; any fleet-CA certificate still
+passes the handshake. Elevation: no authorization rule changes here; the call is `sanctions.create`,
+which `m2m-sanctions-screening` already grants every `service-account-*`, so sdd gains the screen
+call and nothing else. Information disclosure: the request carries party names the caller already
+holds, now encrypted in transit. Denial of service: sdd treats an unavailable screen as not screened
+and holds the collection (fail-closed), so an outage here stops collections rather than releasing
+them unscreened. Rollback: point `SANCTIONS_SERVICE_URL` away from this service and drop the sdd
+namespace from the ingress rule.
