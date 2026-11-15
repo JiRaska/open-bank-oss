@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "81d34f94b9c8650b"
+    openbank.tech/policy-checksum: "3886674c20d1d8aa"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2124,6 +2124,10 @@ data:
         # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
         # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
         - card.details.read
+        # The queue of business customers under an ongoing sanctions-monitoring hold (#16028): who is
+        # being reviewed is itself sensitive (tipping-off). Granted to ROLE_KYC_REVIEWER by the matrix
+        # only; the generic operator/admin list rule must not reach it.
+        - kyb.monitoring.queue.list
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

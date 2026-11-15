@@ -26,10 +26,11 @@
 # CI-side change could affect customer RUM for no saving.
 #
 # Auth: `bearertokenauth` on the receiver. The token is read from a file mounted from the
-# Secret `ci-metrics-ingest` (ExternalSecret externalsecret-ci-metrics-ingest.yaml <- Vault
-# key `ci-metrics-ingest`, property `TOKEN`). The same value must be the GitHub secret
-# CI_METRICS_TOKEN in JiRaska/openbank-app. The file is re-read by the extension, so a rotation
-# (Vault -> ESO refresh -> kubelet projection) needs no rollout.
+# Secret `ci-metrics-ingest`, key `TOKEN`, generated in-cluster by an ESO Password generator
+# (externalsecret-ci-metrics-ingest.yaml, refreshPolicy CreatedOnce — never rotated by ESO).
+# The same value must be the GitHub secret CI_METRICS_TOKEN in JiRaska/openbank-app. The file
+# is re-read by the extension, so a rotation (delete the Secret -> ESO regenerates -> kubelet
+# projection, then re-copy to GitHub) needs no rollout.
 #
 # Cardinality/PII guard (a leaked or abused token can only write bounded `ci_*` gauges):
 #   1. filter/ci   drops every resource whose service.name != openbank-app-ci, every metric

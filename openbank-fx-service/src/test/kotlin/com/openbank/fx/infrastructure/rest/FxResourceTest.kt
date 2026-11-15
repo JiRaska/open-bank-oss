@@ -230,6 +230,26 @@ class FxResourceTest {
     }
 
     @Test
+    fun `convert ignores a client-supplied accountId, which nothing ties to the party`(): Unit = runBlocking {
+        val result = conversion()
+        val cmd = slot<ConvertCommand>()
+        coEvery { fxUseCase.convert(capture(cmd)) } returns result
+
+        resource.convert(
+            ConvertRequest(
+                partyId = result.partyId,
+                accountId = UUID.randomUUID(),
+                fromCurrency = "EUR",
+                toCurrency = "CZK",
+                fromAmountMinorUnits = 10_000L,
+            ),
+            key = "idem-key-2",
+        )
+
+        assertThat(cmd.captured.accountId).isNull()
+    }
+
+    @Test
     fun `getConversion returns 200 when the conversion exists`(): Unit = runBlocking {
         val result = conversion()
         coEvery { fxUseCase.getConversion(result.id) } returns result
