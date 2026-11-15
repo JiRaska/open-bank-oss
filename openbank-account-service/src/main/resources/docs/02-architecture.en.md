@@ -200,3 +200,11 @@ Before the shared decoder, the first nine lines of this consumer were character-
 identical to card-issuance-service's. Both were green and nothing compared them, so a producer-side
 rename would have silently stopped one projection from matching — which leaves a revoked grant
 enforceable.
+
+### Offering market scope (ADR-0380)
+
+The Czech domestic route checks the offering market countries returned with the published
+product revision. A foreign-only offering is refused before account creation. Pending accounts
+with a product revision pin recheck the current offering scope before activation. Legacy
+unscoped catalogue responses and historical pending accounts without a pin retain the existing
+domestic route. This check does not activate FOS or branch sales.

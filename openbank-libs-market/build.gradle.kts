@@ -4,6 +4,7 @@
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kover)
     id("openbank.static-analysis")
     id("openbank.dependency-vulnerability-pins")
     `java-library`
@@ -22,6 +23,8 @@ dependencies {
 
 kotlin {
     jvmToolchain(25)
+    @OptIn(org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation::class)
+    abiValidation()
 }
 
 tasks.test {
