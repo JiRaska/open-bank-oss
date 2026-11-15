@@ -30,7 +30,12 @@ class LiquidityForecastService(
     private val planned: (suspend (LocalDate, CurveSet) -> List<CashFlow>)? = null,
 ) : LiquidityForecastUseCase {
 
-    override suspend fun forecast(runId: UUID, curveSetId: UUID, horizonDays: Int): LiquidityForecastAnalysis {
+    override suspend fun forecast(
+        runId: UUID,
+        curveSetId: UUID,
+        horizonDays: Int,
+        includePlanned: Boolean,
+    ): LiquidityForecastAnalysis {
         require(horizonDays in LiquidityForecast.MIN_HORIZON_DAYS..LiquidityForecast.MAX_HORIZON_DAYS) {
             "query parameter 'horizonDays' must be between ${LiquidityForecast.MIN_HORIZON_DAYS} and " +
                 "${LiquidityForecast.MAX_HORIZON_DAYS}"
@@ -55,7 +60,7 @@ class LiquidityForecastService(
                 model,
                 parameters,
                 horizonDays,
-                planned?.invoke(run.asOf, curveSet).orEmpty(),
+                if (includePlanned) planned?.invoke(run.asOf, curveSet).orEmpty() else emptyList(),
             ),
         )
     }
