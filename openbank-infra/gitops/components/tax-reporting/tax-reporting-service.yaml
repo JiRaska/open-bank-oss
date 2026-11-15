@@ -148,9 +148,8 @@ spec:
             # Each upstream's rego admits service-account-openbank-tax-reporting for exactly the
             # reporting reads it serves. Both on 8443 via %prod rest-client TLS bucket
             # internal-authority, server cert verified with hostname verification (internal-tls
-            # dnsNames). pension-fund REQUIRES a client certificate (mTLS). pension-service is server
-            # TLS, verified against openbank-ca; pension-service does not yet require a client
-            # certificate.
+            # dnsNames). Both providers REQUIRE a client certificate (mTLS): this pod presents
+            # tax-reporting-internal-tls, mounted at /mnt/internal-tls.
             - name: PENSION_SERVICE_URL
               value: https://pension-service.pension.svc:8443
             - name: PENSION_FUND_SERVICE_URL
