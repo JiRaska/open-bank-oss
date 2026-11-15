@@ -120,15 +120,13 @@ jobs:
     runs-on: openbank-build
     timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 20 || 5 }}
     steps:
-      # The script and the rules.yaml it reads agent_accounts from. Full first-parent history
-      # but no blobs (blob:none): merge_pr_policy.py derives reviewed merge-train.py identities
-      # from origin/main's commits and trees, never their contents (#16187).
+      # The script and the rules.yaml it reads agent_accounts from. SHALLOW on purpose:
+      # nothing here needs history.
       - name: Check out the recorder script and governance rules
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
         with:
           ref: main
-          fetch-depth: 0
-          filter: blob:none
+          fetch-depth: 1
           persist-credentials: false
 
       # FAIL CLOSED, before anything else: an absent var/secret is a misconfigured
