@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.0...kyb-service-v0.11.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **kyb:** screen related parties with registration country, birth date and nationality ([#16215](https://github.com/JiRaska/open-bank-oss/issues/16215)) ([dfba096](https://github.com/JiRaska/open-bank-oss/commit/dfba0963ba2070d605dfb2757015a4859eae3f36))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.10.0...kyb-service-v0.11.0) (2026-11-14)
 
 

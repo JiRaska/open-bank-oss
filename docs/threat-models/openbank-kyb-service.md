@@ -137,6 +137,18 @@ above.
 
 ## 8. Change log
 
+- **2026-11-14** — Related-party screens carry what the register knows besides the name. The
+  sanctions screen sent only the name, so a business was screened by legal name alone and a person
+  by name alone: a common-name match could not be ruled out on date of birth, and an entity
+  registered in a listed jurisdiction was not caught without a name match. The screen now sends the
+  entity's registration country (identifier scheme country, else registered address), a corporate
+  owner's filing country, and for persons the register's date of birth, nationality and country of
+  residence. **STRIDE-S/E (screening evasion):** narrowed; the jurisdiction check now applies to
+  every case. **STRIDE-I:** sanctions-service already receives these fields from other callers;
+  nothing new is stored in kyb, because the facts are re-derived from the extract on every screen
+  rather than written to `screening_json`. Trading names are not sent: no register adapter
+  produces them today. Evidence: `CaseScreeningTest`, `SanctionsRelatedPartyScreeningAdapterTest`
+  (red with the country mapping removed). No DB, event or API change. Rollback: revert the PR.
 - **2026-11-14** — Four-eyes on statutory representation publication: the staff member who
   publishes a rule must not be the principal recorded as its `attestedBy` (exact principal
   comparison); a same-person publish answers 403 `SEPARATION_OF_DUTIES`.

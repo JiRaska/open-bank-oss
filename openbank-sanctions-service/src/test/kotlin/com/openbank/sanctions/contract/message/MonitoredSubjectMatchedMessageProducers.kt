@@ -76,8 +76,7 @@ class MonitoredSubjectMatchedMessageProducers {
                 )
             }
             ingest()
-            val outcome = onEventLoop { bean<SanctionsMonitoringService>().runDelta() }
-            check(outcome == MonitoringRunOutcome.COMPLETED) { "the delta run answered $outcome" }
+            drainDelta()
             val findingId = onEventLoop {
                 pool().preparedQuery(
                     "SELECT f.id FROM sanctions_monitoring_findings f " +
@@ -96,6 +95,28 @@ class MonitoredSubjectMatchedMessageProducers {
         } finally {
             clear()
         }
+    }
+
+    /**
+     * Run the real delta until its queue is empty. One run claims at most `deltaMaxEntriesPerRun`
+     * of the OLDEST pending changes, and this JVM's database is shared by every interaction and by
+     * both verification twins: on main the broker twin replays the kyc list-change producers first,
+     * whose ingests leave pending rows older than this one, so a single run claimed only theirs and
+     * the finding was never written (Services CI red on main from 2026-11-13, which refused
+     * every auto-deploy of sanctions-service as NOT_ASKED). Draining is what the scheduler does.
+     */
+    private fun drainDelta() {
+        repeat(MAX_DELTA_RUNS) {
+            if (pendingCount() == 0L) return
+            val outcome = onEventLoop { bean<SanctionsMonitoringService>().runDelta() }
+            check(outcome == MonitoringRunOutcome.COMPLETED) { "the delta run answered $outcome" }
+        }
+        check(pendingCount() == 0L) { "the delta queue did not drain in $MAX_DELTA_RUNS runs" }
+    }
+
+    private fun pendingCount(): Long = onEventLoop {
+        pool().query("SELECT count(*) FROM sanctions_monitoring_pending WHERE claimed_at IS NULL")
+            .execute().awaitSuspending().first().getLong(0)
     }
 
     /** One entry carrying the subject's name, written the way the importer writes it. */
@@ -168,5 +189,6 @@ class MonitoredSubjectMatchedMessageProducers {
         const val ENTRY_ID = "pact-monitoring-entry-1"
         const val CHANNEL = "sanctions-events-out"
         const val OUTBOX_SCAN_LIMIT = 500
+        const val MAX_DELTA_RUNS = 200
     }
 }
