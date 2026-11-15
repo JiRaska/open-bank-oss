@@ -90,6 +90,7 @@ class PassportAccountRecoveryTest {
 
         val opened = runBlocking { service().openAccount(command) }
         assertEquals(first.accountId, opened.id)
+        assertEquals(AccountStatus.PENDING_ACTIVATION, opened.status)
         assertEquals(first.pin, opened.productRevisionPin)
         assertEquals(listOf(first, first), consumed)
         coVerify(exactly = 1) { pinning.resolvePublishedRevision(any(), any()) }

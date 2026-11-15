@@ -23,6 +23,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import java.io.IOException
 import java.sql.SQLException
 import java.util.UUID
 import javax.sql.DataSource
@@ -203,7 +204,7 @@ class AccountProductRevisionPinIT {
             override fun admit(request: PassportAdmissionRequest): Uni<Void> {
                 calls += request
                 return if (calls.size == 1) {
-                    Uni.createFrom().failure(IllegalStateException("synthetic lost acknowledgement"))
+                    Uni.createFrom().failure(IOException("synthetic lost acknowledgement"))
                 } else {
                     Uni.createFrom().voidItem()
                 }
@@ -227,6 +228,7 @@ class AccountProductRevisionPinIT {
         assertThat(calls[1]).isEqualTo(calls[0])
         assertThat(calls[0].operationId).isEqualTo(intent[0])
         assertThat(retry.jsonPath().getString("id")).isEqualTo(intent[1].toString())
+        assertThat(retry.jsonPath().getString("status")).isEqualTo("PENDING_ACTIVATION")
         val accounts = query("SELECT id FROM accounts WHERE party_id = ?", partyId)
         assertThat(accounts).hasSize(1)
     }

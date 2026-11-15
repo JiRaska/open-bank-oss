@@ -1512,7 +1512,9 @@ components:
         passportGrantId:
           type: [string, 'null']
           format: uuid
-          description: Optional grant reference. Catalogue requires independent verified subject evidence.
+          description: >-
+            Optional grant reference. Catalogue requires independent verified subject evidence.
+            Passport accounts open in PENDING_ACTIVATION and require a separate admission to activate.
         partyId:
           type: string
           format: uuid

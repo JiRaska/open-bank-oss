@@ -144,7 +144,7 @@ class AccountService(
             partyId = command.partyId,
             productId = command.productId,
             currency = command.currency,
-            status = command.initialStatus,
+            status = if (passportOperation != null) AccountStatus.PENDING_ACTIVATION else command.initialStatus,
             openedAt = (passportOperation?.pin ?: pin).pinnedAt,
             closedAt = null,
             version = 0L,
