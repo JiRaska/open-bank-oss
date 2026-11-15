@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-// ADR-0380 shared legal protocol, isolated from platform core per ADR-0317.
+// ADR-0381 shared legal protocol, isolated from platform core per ADR-0317.
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.jandex)

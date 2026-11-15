@@ -14,7 +14,7 @@
   "sources": [
     {
       "id": "architecture",
-      "ref": "docs/adr/0380-jurisdictional-legal-processes-and-protected-funds.md",
+      "ref": "docs/adr/0381-jurisdictional-legal-processes-and-protected-funds.md",
       "locator": "Decision sections 1-6",
       "kind": "architecture"
     },

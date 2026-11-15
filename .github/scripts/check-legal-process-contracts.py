@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
-"""Validate ADR-0380 design contracts; never confuse them with executed legal controls.
+"""Validate ADR-0381 design contracts; never confuse them with executed legal controls.
 
 Default mode checks the reviewed requirements and reports DESIGN_CONTRACTS_OK. The
 ADR's --require-evidence interface deliberately refuses activation: there is no trusted
@@ -28,7 +28,7 @@ COMMON = {
     "capacity-and-representation", "combined-protection-and-capacity", "admission-reachability",
     "outbox-and-recovery", "stale-input", "law-transition",
 }
-# The explicit initial product scope of ADR-0380, not a claim of worldwide support.
+# The explicit initial product scope of ADR-0381, not a claim of worldwide support.
 COUNTRIES = {
     "CZ": ("CZK", "Europe/Prague", {
         "protected-account-link", "qualified-income", "protected-transfer-deadline",

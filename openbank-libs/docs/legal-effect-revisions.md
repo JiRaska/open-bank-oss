@@ -1,6 +1,6 @@
 # Legal effect revision contracts
 
-ADR-0380's shared protocol lives in `openbank-libs-legal`, package
+ADR-0381's shared protocol lives in `openbank-libs-legal`, package
 `com.openbank.libs.legal`. It reuses `CaseId` and `PartyId` from `openbank-libs-domain`. ADR-0317 keeps this
 bounded context out of platform core; only future operational consumers opt in to it.
 

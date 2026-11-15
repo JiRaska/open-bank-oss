@@ -6980,7 +6980,7 @@ gates:
     run: |
       python3 .github/scripts/check-delegation-exposure-sealed.py
   - id: legal-process-contracts
-    name: "legal-process design contracts preserve CZ/SK/DE requirements without claiming activation (ADR-0380)"
+    name: "legal-process design contracts preserve CZ/SK/DE requirements without claiming activation (ADR-0381)"
     group: registry
     mode: enforced
     budget_seconds: 10

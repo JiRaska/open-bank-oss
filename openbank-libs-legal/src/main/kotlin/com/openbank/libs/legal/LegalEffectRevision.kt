@@ -8,7 +8,7 @@ import com.openbank.libs.domain.identifiers.CaseId
 import com.openbank.libs.domain.identifiers.PartyId
 import java.util.UUID
 
-/** Identity shared by the case owner and the operational owner applying one effect (ADR-0380). */
+/** Identity shared by the case owner and the operational owner applying one effect (ADR-0381). */
 data class LegalEffectIdentity(val effectId: UUID, val caseId: CaseId, val subjectPartyId: PartyId)
 
 /** Desired state of ONE effect. RELEASED is a durable tombstone, not deletion of its revision. */
@@ -50,7 +50,7 @@ enum class LegalEffectRevisionOutcome {
 }
 
 /**
- * Common replay fence for independent effects at Account, Party and Balance (ADR-0380).
+ * Common replay fence for independent effects at Account, Party and Balance (ADR-0381).
  *
  * This function performs no I/O and does not make a legal decision. The caller must load the
  * stored revision, evaluate and persist the accepted complete snapshot plus outbox event in ONE

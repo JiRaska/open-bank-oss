@@ -11,7 +11,7 @@ tags: [accounts, payments, authz, compliance]
 summary: "Separate legal cases from operational enforcement, with versioned jurisdiction packs for CZ, SK and DE; enforce protected funds and scoped legal capacity through existing balance ownership and payment admission."
 ---
 
-# ADR-0380 — Jurisdictional legal processes, protected funds and legal capacity
+# ADR-0381 — Jurisdictional legal processes, protected funds and legal capacity
 
 ## Context
 
@@ -323,7 +323,12 @@ This scope assumes current court effects and preallocated protections. It does n
 provide intake, persistence, trusted identity resolution, court-approval workflows
 or production payment enforcement. Delivery is partial and tracked in issue #16324.
 
-Identity context belongs to Party/PID. The legal process needs an unambiguous verified
+The first Legal Process persistence adapter records a pending review receipt for an
+observed delivery. On conflict it compares the existing route, evidence reference and
+digest within the transaction. PostgreSQL integration tests race duplicate and
+conflicting deliveries for each country. The adapter has no transport caller yet.
+
+Identity context belongs to Party/PID and follows ADR-0380's FOS foundation. The legal process needs an unambiguous verified
 PartyId and an opaque evidence reference. Name variants, scripts, citizenship and
 national registry attributes help identity resolution. They neither confer authority
 to act nor determine the applicable legal jurisdiction. Ambiguity requires review

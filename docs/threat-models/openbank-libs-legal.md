@@ -1,6 +1,6 @@
 # Threat model: openbank-libs-legal
 
-Scope: ADR-0380's framework-free revision protocol. No endpoint, persistence, external
+Scope: ADR-0381's framework-free revision protocol. No endpoint, persistence, external
 transport or production consumer exists yet. This is not the threat model for the
 future Legal Process service or its operational integrations (issue #16324).
 

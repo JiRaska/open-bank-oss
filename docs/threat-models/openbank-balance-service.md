@@ -524,9 +524,9 @@ traffic rather than widening it.
 The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `BALANCE_SERVICE_URL=http://balance-service.balances.svc:8103`. The read is the CRS/FATCA statement `asOf` balance under `service-account-openbank-tax-reporting` (ROLE_API), already admitted in `balance_rest_ext.rego`. **Residual risk, accepted and tracked:** balance-service has no private-CA mTLS listener, so this hop carries the bearer token in plaintext inside the cluster, like its five existing callers (customer-edge, agent, mcp, statements, payments). The new line is declared as V9.1 debt in `.github/asvs-l3-baseline.txt`. Retiring it means adding an 8443 client-auth-required, bearer-only listener (#16075). Mitigations in the meantime: the namespace-scoped ingress allow-list, an OPA decision pinned to the principal id, and a short-lived Keycloak token. A replayed token only reaches the reporting read it was issued for.
 
 
-## ADR-0380 legal effect domain policies
+## ADR-0381 legal effect domain policies
 
-The ADR-0380 domain policies reject unrelated attachments, keep the combined restraint
+The ADR-0381 domain policies reject unrelated attachments, keep the combined restraint
 within funded availability and exclude unused overdraft. Ordinary DE allowance cohorts
 use Berlin calendar months and consume the oldest credited amounts first. The
 simulation supplies resolved, preallocated court and protection facts. Persistent
