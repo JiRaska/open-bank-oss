@@ -125,7 +125,7 @@ export const STATIC_ROUTE_INVENTORY: Record<string, { disposition: StaticRouteDi
   "/product-studio": { disposition: "sidebar-navigation-smoke", path: "/product-studio" },
   "/regulatory": { disposition: "sidebar-navigation-smoke", path: "/regulatory" },
   "/regulatory/obligations": { disposition: "static-direct-load-smoke", path: "/regulatory/obligations" },
-  "/regulatory/statutory-returns": { disposition: "static-direct-load-smoke", path: "/regulatory/statutory-returns" },
+  "/regulatory/statutory-returns": { disposition: "sidebar-navigation-smoke", path: "/regulatory/statutory-returns" },
   "/reporting": { disposition: "sidebar-navigation-smoke", path: "/reporting" },
   "/sanctions": { disposition: "sidebar-navigation-smoke", path: "/sanctions" },
   "/sdd": { disposition: "sidebar-navigation-smoke", path: "/sdd" },
