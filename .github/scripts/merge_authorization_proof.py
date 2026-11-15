@@ -67,8 +67,11 @@ class GitHub:
                 raise ValueError("GitHub evidence response exceeds bounded size")
             return json.loads(raw)
         except urllib.error.HTTPError as error:
+            # Status and path, never the body or headers (which can echo the token scope): without
+            # them a 401, a 403 rate limit and a 404 all read as one opaque "unavailable" (#16187).
+            status = error.code
             error.close()
-            raise ValueError("GitHub evidence API unavailable") from None
+            raise ValueError(f"GitHub evidence API unavailable (HTTP {status} on {path.split('?')[0]})") from None
         except (OSError, ValueError) as error:
             raise ValueError("GitHub evidence API unavailable or malformed") from error
 

@@ -42,6 +42,8 @@ github:
       - AGENT_MUTATING_WORKERS_ENABLED
       - AGENT_REVIEW_API_ENABLED
       - AGENT_SERVICE_URL
+      - CI_ARTIFACT_MIRROR_ALIAS
+      - CI_ARTIFACT_MIRROR_ROLE_ARN
       - DECEPTION_DRILL_ROLE_ARN
       - DEPLOY_AFTER_SERVICES_CI_ENABLED
       - DRILL_DECOY_URL
@@ -72,13 +74,6 @@ github:
       variables:
         []
   unprovisioned:
-    - kind: variable
-      names:
-        - CI_ARTIFACT_MIRROR_ROLE_ARN
-        - CI_ARTIFACT_MIRROR_ALIAS
-      reason: "ci-artifact-mirror.tf never applied; owner applies it and sets both from its output"
-      issue: 16205
-      review_by: 2026-12-15
     - kind: secret
       names:
         - GLITCHTIP_AUTH_TOKEN

@@ -30,6 +30,8 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0353 D4: the shared screening vocabulary + ScreeningPolicy every outgoing rail uses.
+    implementation(project(":openbank-libs-fincrime"))
     // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
     implementation(project(":openbank-client-transaction"))
     testImplementation(project(":openbank-libs-testing"))

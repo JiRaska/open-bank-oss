@@ -73,6 +73,7 @@ import {
   Undo2,
   TrainFront,
   Rocket,
+  KeyRound,
 } from 'lucide-react'
 import { hasPermission, type Permission } from '@/lib/auth/roles'
 import { DOMAIN_GROUPS, domainLabel } from '@/lib/governance/domains'
@@ -203,6 +204,7 @@ export const opsNav: NavItem[] = [
   { nameCs: 'Šablony zpráv',          nameEn: 'Message templates', href: '/communication/notification-templates', icon: Bell, permission: 'communication:templates:view', owner: 'notification' },
   { nameCs: 'Security Excellence',   nameEn: 'Security Excellence', href: '/security/excellence', icon: Scale,   permission: 'system:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
+  { nameCs: 'Klíče a certifikáty',  nameEn: 'Keys & Certificates', href: '/security/keys',   icon: KeyRound,     permission: 'keys:view', badge: 'LIVE' },
 ]
 
 export const docsNav: NavItem[] = [

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.14.1...swift-service-v0.14.2) (2026-11-15)
+
+
+### Bug Fixes
+
+* **swift:** screen debtor and beneficiary against sanctions before MT103 release ([#16219](https://github.com/JiRaska/open-bank-oss/issues/16219)) ([1936798](https://github.com/JiRaska/open-bank-oss/commit/19367984d9c563abd7e71a69ca7dd326655eb0bf))
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.14.0...swift-service-v0.14.1) (2026-10-28)
 
 

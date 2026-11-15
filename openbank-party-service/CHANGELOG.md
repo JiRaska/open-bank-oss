@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.32.0...party-service-v0.32.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **party:** revoke a kyb case's mandates when the case ends after SIGNED ([#16220](https://github.com/JiRaska/open-bank-oss/issues/16220)) ([dc97cf0](https://github.com/JiRaska/open-bank-oss/commit/dc97cf009dd4e5b8f491dad4ecfb4e6a8f5119c3))
+
 ## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.31.0...party-service-v0.32.0) (2026-11-14)
 
 

@@ -82,7 +82,8 @@ class NameTokenScoreTest {
         val structure = NameTokenScore.best(query, entry)
         assertThat(structure).isBetween(0.65, 0.85)
         assertThat(NameTokenScore.decide(0.9, query, entry, 0.85, 0.65, 0.85)).isEqualTo(0.9)
-        assertThat(NameTokenScore.decide(0.9, query, entry, 0.65, 0.65, 0.85)).isEqualTo(structure)
+        // On CUSTOMER the parts may lower it, but never below the HIT threshold the trigram reached.
+        assertThat(NameTokenScore.decide(0.9, query, entry, 0.65, 0.65, 0.85)).isEqualTo(0.85)
     }
 
     @Test
@@ -129,13 +130,33 @@ class NameTokenScoreTest {
     }
 
     @Test
-    fun `a strong trigram score is never removed, only held at the caller's search floor`() {
+    fun `a strong trigram score is never removed, only held at the HIT threshold`() {
         // Structure under the review floor, but the whole-string evidence is a HIT.
         val query = listOf("Jiří Raška")
         val entry = listOf("Jiří Rathouský")
         assertThat(NameTokenScore.best(query, entry)).isLessThan(0.65)
         assertThat(NameTokenScore.decide(0.9, query, entry, 0.85, 0.65, 0.85)).isEqualTo(0.85)
-        assertThat(NameTokenScore.decide(0.9, query, entry, 0.65, 0.65, 0.85)).isEqualTo(0.65)
+        assertThat(NameTokenScore.decide(0.9, query, entry, 0.65, 0.65, 0.85)).isEqualTo(0.85)
         assertThat(NameTokenScore.decide(0.84, query, entry, 0.65, 0.65, 0.85)).isNull()
+    }
+
+    @Test
+    fun `a whole-name score at the HIT threshold is never demoted below HIT on a review-floor profile`() {
+        // word_similarity measured on pg_trgm: a one-letter variant of a listed DPRK official, and
+        // a dropped letter that splits a given name, both rate a HIT as whole strings while one
+        // short part falls under the part floor ("he"/"hae", "on"/"jon"). On CUSTOMER (search floor
+        // 0.65) these were lowered to the structure score, i.e. a blocking HIT became a review item.
+        val cases = listOf(
+            Triple("Choe Ryong He", "Choe Ryong Hae", 0.857),
+            Triple("On Inaki Perez Aramburu", "Jon Inaki Perez Aramburu", 0.917),
+        )
+        for ((query, entry, trigram) in cases) {
+            assertThat(NameTokenScore.best(listOf(query), listOf(entry))).isLessThan(hit)
+            for (floor in listOf(potentialHit, hit)) {
+                assertThat(NameTokenScore.decide(trigram, listOf(query), listOf(entry), floor, potentialHit, hit))
+                    .describedAs("%s vs %s at search floor %s", query, entry, floor)
+                    .isGreaterThanOrEqualTo(hit)
+            }
+        }
     }
 }
