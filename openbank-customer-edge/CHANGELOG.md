@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.11.1...customer-edge-v1.12.0) (2026-11-15)
+
+
+### Features
+
+* **customer-edge:** create delegated payments bound to their spend reservation ([#16166](https://github.com/JiRaska/open-bank-oss/issues/16166)) ([0369677](https://github.com/JiRaska/open-bank-oss/commit/03696770637439da5f1a61a58a5371acd1bfe047))
+
 ## [1.11.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.11.0...customer-edge-v1.11.1) (2026-11-14)
 
 
