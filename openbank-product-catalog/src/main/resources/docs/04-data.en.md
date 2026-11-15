@@ -121,3 +121,16 @@ Nested catalog objects retain their existing serialized field representation. Th
 ## Reference offerings and classification schemas (ADR-0341)
 
 The banking pack gains `deposit-v3`, `loan-v3` and `treasury-instrument-v1` schemas and the retirement pack gains `pension-savings-v3`, which carry the accounting and regulatory classification of an offering. A scheduled seeder, `CatalogReferenceOfferingSeeder`, creates the treasury own-dealing instrument offering (banking pack) and the CZ DPS and DIP pension offerings (from `catalog-seeds/retirement/cz-illustrative-offerings.json`, retirement pack), each only when its pack is enabled. Every offering is seeded with an open DRAFT revision under a system maker. A different human checker must publish it, so seeding never makes a revision pinnable by itself, and the pension values stay illustrative until legal and commercial review. The seeder is idempotent: an offering that already exists is left alone whatever the state of its revisions. It is controlled by `openbank.catalog.reference-offerings-enabled`, which is on by default and off in the standalone profile.
+
+### Passport grant and account permit storage (ADR-0380)
+
+The grant stores the bank, establishment, offering, country, mode, customer segment, channel,
+approved pack digest, evidence and effective period. A permit binds an account operation and
+its exact inputs. The issue and consume functions acquire the grant row lock. Revocation
+updates the same row, so revocation and first consumption are ordered by PostgreSQL.
+Only the exact operation can replay its prior receipt after a revocation. An unconsumed
+permit expires after at most 30 seconds and cannot be consumed after revocation.
+
+This migration introduces storage, not a route for selling abroad. The governed grant
+administration, authenticated account integration and durable account-side operation
+recovery must be in place before a cross-border route is exposed.
