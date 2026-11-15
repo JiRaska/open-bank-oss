@@ -411,8 +411,11 @@ JUDGE_PATHS = JUDGE_CODE + (".github/gates/gates.yaml", "openbank-libs/governanc
 # the gate for another member's code — masking by companion file). Members of such a carrier must also
 # sit in DIFFERENT modules (disjoint_key), for the same reason inside a module: one member's test must
 # not satisfy a "src/main change needs a test" gate for another member's code. Everything else (scanner allowlists, lint and build files, application.yaml, any dotfile, any
-# path nobody thought of) rides alone. A test may be shared because a member's tests judge only that
-# member's own code, which its own head CI already ran.
+# path nobody thought of) rides alone. A test is shareable only inside a module whose tests read no
+# other module's files and whose files no other module's test reads (shareable_modules derives both from
+# `../openbank-<m>` and `"openbank-<m>/` references under */src/test/): such tests judge another module's
+# code — HasActiveConsentScopeProducerPinTest in campaign-service reads consent-service's source — so
+# both ends of a cross-module read ride alone.
 SHAREABLE_JUDGE_RE = re.compile(r"^(?!(?:.*/)?\.)openbank-[a-z0-9-]+/(?:[A-Za-z0-9_.-]+/)*src/(?:main|test)/(?:kotlin|java)/(?:[A-Za-z0-9_.-]+/)*"
                                 r"[A-Za-z0-9_-]+\.(?:kt|java)$")
 TRAIN_CODE_RE = re.compile(r"^\.github/(scripts|workflows)/(test-)?merge[-_]train[-_.A-Za-z0-9]*$")
@@ -4889,16 +4892,26 @@ _SHAREABLE_MODULES: dict[str, frozenset[str]] = {}
 def shareable_modules(git, base: str) -> frozenset[str]:
     """Top-level `openbank-*` modules whose code may share a strict carrier: a LEAF (no `*.gradle.kts`
     outside settings depends on it via `project(":<name>")`, so its code compiles into nobody's build or
-    analysis) whose name marks no library, analysis, rule, governance or test module. One ls-tree and one
-    git grep per base, memoised; a git error shares nothing."""
+    analysis) whose name marks no library, analysis, rule, governance or test module, and that is neither
+    end of a cross-module TEST read (a test under */src/test/ naming `../openbank-<m>` or `"openbank-<m>/`:
+    the reading module's tests judge <m>'s code, so neither may share). One ls-tree and two git greps per
+    base, memoised; a git error shares nothing."""
     if base not in _SHAREABLE_MODULES:
         tops = git("ls-tree", "-d", "--name-only", base, check=False)
         deps = git("grep", "-h", "-o", "-E", r'project\("?:[A-Za-z0-9_-]+', base, "--", "*.gradle.kts",
                    ":(exclude)settings.gradle.kts", check=False)
-        if tops.returncode != 0 or deps.returncode not in (0, 1):
+        reads = git("grep", "-o", "-I", "-E", r'\.\./openbank-[a-z0-9-]+|"openbank-[a-z0-9-]+/', base, "--",
+                    "*/src/test/*", check=False)
+        if tops.returncode != 0 or deps.returncode not in (0, 1) or reads.returncode not in (0, 1):
             _SHAREABLE_MODULES[base] = frozenset()
         else:
             used = {ln.rsplit(":", 1)[-1] for ln in deps.stdout.splitlines()}
+            for ln in reads.stdout.splitlines():      # <base>:<path>:<match>
+                parts = ln.split(":", 2)
+                if len(parts) == 3:
+                    reader, target = parts[1].split("/", 1)[0], parts[2].strip('"./').split("/", 1)[0]
+                    if reader != target:
+                        used |= {reader, target}
             _SHAREABLE_MODULES[base] = frozenset(
                 m for m in tops.stdout.splitlines()
                 if m.startswith("openbank-") and m not in used and not ANALYSIS_MODULE_RE.search(m[len("openbank-"):]))
@@ -5887,6 +5900,8 @@ def _synthetic_origin(root: str) -> None:
     w("openbank-ms2/README.md", "leaf module\n")
     w("openbank-mca/README.md", "leaf module\n")
     w("openbank-mcb/README.md", "leaf module\n")
+    w("openbank-mread/src/test/kotlin/PinTest.kt", 'val src = File("../openbank-mtarget/src/main/kotlin/Pin.kt")\n')
+    w("openbank-mtarget/src/main/kotlin/Pin.kt", "// read by openbank-mread's test\n")
     w("openbank-libs-detekt-rules/README.md", "custom detekt rules: checkers written in Kotlin\n")
     w("openbank-svc/build.gradle.kts", 'dependencies { detektPlugins(project(":openbank-libs-detekt-rules")) }\n')
     w("ci.py", "import os,sys\nfail=[]\n"
@@ -5992,6 +6007,9 @@ def _synthetic_origin(root: str) -> None:
                 "openbank-libs-detekt-rules/src/main/kotlin/Relax.kt": "// relaxes the rule bad.py violates\n"})
     pr("pMoney", {".github/scripts/pm.py": "print('m')\n", "openbank-svc/src/main/kotlin/Money.kt": "// money path\n"})
     pr("pTM", {".github/scripts/pt.py": "print('t')\n", "docs/threat-models/svc.md": "# threat model\n"})
+    # Cross-module test read: openbank-mread's test pins openbank-mtarget's source.
+    pr("pPinT", {".github/scripts/pq.py": "print('q')\n", "openbank-mtarget/src/main/kotlin/Pin.kt": "// changed\n"})
+    pr("pPinR", {".github/scripts/pr2.py": "print('r')\n", "openbank-mread/src/test/kotlin/PinTest.kt": "// relaxed\n"})
     # Companion in the SAME module: code in src/main, a test in src/test.
     pr("pCompA", {".github/scripts/pa.py": "print('a')\n", "openbank-svc/src/main/kotlin/A.kt": "// a\n"})
     pr("pCompB", {".github/scripts/pb.py": "print('b')\n", "openbank-svc/src/test/kotlin/ATest.kt": "// a test\n"})
@@ -7212,7 +7230,7 @@ def self_test() -> int:
                        "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pPc": 85, "pPR": 86, "pPx": 87, "pP1": 88, "pPbad": 89, "pP2": 90, "pRG": 91, "pFoo": 92,
                        "pE1": 93, "pE2": 94, "pE3": 95, "pGP": 96,
                        "pCO": 71, "pJbad": 72, "pO1": 73, "pO2": 74, "pS1": 75, "pS2": 76, "pRelax": 77, "pTight": 78,
-                       "pCA": 79, "pCB": 80, "pDet": 5, "pMoney": 6, "pTM": 7, "pCompA": 8, "pCompB": 9}
+                       "pCA": 79, "pCB": 80, "pDet": 5, "pMoney": 6, "pTM": 7, "pCompA": 8, "pCompB": 9, "pPinT": 10, "pPinR": 13}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -8635,6 +8653,8 @@ def self_test() -> int:
             syn_main = gh.main_sha()
             syn_mods = shareable_modules(Git(origin), syn_main)
             check("shareable_modules: the synthetic leaf module shares", "openbank-svc" in syn_mods, str(sorted(syn_mods)))
+            check("shareable_modules: both ends of a cross-module test read are NOT shareable",
+                  not ({"openbank-mread", "openbank-mtarget"} & syn_mods), str(sorted(syn_mods)))
             for f in ("build-logic/src/main/kotlin/X.kt", "openbank-libs-detekt-rules/src/main/kotlin/X.kt",
                       "openbank-libs-runtime/src/main/kotlin/X.kt", "openbank-arch-tests/src/test/kotlin/X.kt",
                       "openbank-other/src/main/kotlin/X.kt"):            # not a shareable module of this tree
@@ -8644,10 +8664,11 @@ def self_test() -> int:
             real_mods = shareable_modules(Git(real_root), "HEAD")
             check("shareable_modules: on the real tree the libs, detekt rules and consumed services are NOT shareable; "
                   "a leaf service is",
-                  "openbank-aml-service" in real_mods
+                  "openbank-account-service" in real_mods
                   and not ({"openbank-libs-detekt-rules", "openbank-libs-runtime", "openbank-libs-testing",
                             "openbank-client-transaction", "openbank-card-processing-service",
-                            "openbank-ledger-service", "openbank-infra", "openbank-contracts"} & real_mods),
+                            "openbank-ledger-service", "openbank-infra", "openbank-contracts",
+                            "openbank-campaign-service", "openbank-consent-service", "openbank-aml-service"} & real_mods),
                   str(sorted(real_mods)))
             for f in (".github/scripts/run-gates.py", ".github/scripts/lib/foo.sh", ".github/workflows/ci.yml",
                       GATES_YAML, "openbank-libs/governance/rules.yaml", ".github/actions/x/action.yml",
@@ -8841,6 +8862,16 @@ def self_test() -> int:
             b24 = [settle_strict(cap=8).get("strict_batch") for _ in range(4)]
             check("strict carrier (24): two judge members in the same module never share a carrier",
                   not any(b and len(b) > 1 for b in b24) and sorted(gh.merged) == [8, 9], f"batches={b24} merged={gh.merged}")
+            reset()
+
+            # (25) a CROSS-MODULE TEST READ: a member relaxing the test that pins another module's source never
+            # rides with a member changing that source — they are module-disjoint, yet one judges the other.
+            open_only("pPinT", "pPinR")
+            advance_main()
+            b25 = [settle_strict(cap=8).get("strict_batch") for _ in range(4)]
+            check("strict carrier (25): a member whose module's test reads another module never rides with that module",
+                  not any(b and 10 in b and 13 in b for b in b25) and sorted(gh.merged) == [10, 13],
+                  f"batches={b25} merged={gh.merged}")
             reset()
 
             # (19) the fast lane still gets its turn: a held fast-lane PR goes once the judge carrier merged.
