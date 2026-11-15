@@ -61,8 +61,8 @@ As of 2026-11-15, EBA's revised SREP guidance and environmental scenario guidanc
 2027 application; EBA's 2027 exercise methodology is published but its official scenarios are
 scheduled for January 2027. Those are external methodology dates, **not an invented launch
 commitment for this repository**. Institution applicability and national implementation must be
-reviewed before enabling a profile. The old ECB ICAAP PDF is marked outdated; the July 2026
-clarification is verified, and the replacement full guide must be pinned before ICAAP approval.
+reviewed before enabling a profile. The July 2026 ECB ICAAP Guide supersedes the archived November 2018 PDF. Pin the July guide and
+the separate July 2026 submission clarification in the institution’s approved profile (M01).
 
 ## Decision
 
