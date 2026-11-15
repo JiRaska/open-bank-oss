@@ -6771,6 +6771,27 @@ gates:
     run: |
       python3 .github/scripts/check-realm-template-importable.py
 
+  # Keycloak client secrets must name their OpenBao source (issue #3246). The import artifact
+  # Keycloak rebuilds from lives in OpenBao and is not derived from the template, so a client
+  # added to realm-template.json merges green and the nightly keycloak-realm-drift job goes red
+  # the next morning — twice in one week (2026-11-10, 2026-11-15). This makes the second step
+  # visible at PR time: a new placeholder client must state where its secret lives in
+  # keycloak-realm-import-secret-sources.yaml, and the finding names the operator follow-up. Static, no
+  # cluster or OpenBao read; the drift job stays the proof that the artifact was updated.
+  - id: realm-import-secret-sources
+    name: "Keycloak placeholder client secrets name their OpenBao source (issue #3246, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 15
+    rationale: "Two template-only client additions in one week merged green and left the OpenBao realm-import artifact without the client; only the next-day drift job noticed, and nothing at PR time said a second step existed."
+    review_after: "2027-02-15"
+    min_subjects: 40
+    selftest: python3 .github/scripts/check-realm-import-secret-sources.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-realm-import-secret-sources.py"]
+    run: |
+      python3 .github/scripts/check-realm-import-secret-sources.py
+
   # A bank-owned canary customer (ADR-0331) is safe in exactly one shape: a confidential
   # customers-realm client with no browser/password/implicit flow, a party_id mapper, and a
   # service-account user holding only ROLE_CUSTOMER plus one SYNTHETIC party_id. And the

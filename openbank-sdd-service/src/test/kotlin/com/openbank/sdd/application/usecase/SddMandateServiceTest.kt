@@ -3,6 +3,9 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.sdd.application.usecase
 
+import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.sdd.Fixtures
 import com.openbank.sdd.application.port.`in`.RegisterMandateCommand
@@ -32,7 +35,9 @@ class SddMandateServiceTest {
 
     private val mandates = mockk<SddMandateRepository>()
     private val outbox = mockk<SddOutbox>(relaxed = false)
-    private val service = SddMandateService(mandates, outbox)
+    private val sanctions = FakeSanctions()
+    private val amlCases = FakeAmlCases()
+    private val service = SddMandateService(mandates, outbox, CollectionScreeningGate(sanctions, amlCases))
 
     private fun registerCmd(scheme: SddScheme = SddScheme.CORE) = RegisterMandateCommand(
         accountId = Fixtures.ACCOUNT_ID,
@@ -87,7 +92,11 @@ class SddMandateServiceTest {
 
     @Test
     fun `confirming a pending B2B mandate activates it`() {
-        val pending = Fixtures.mandate(scheme = SddScheme.B2B, status = MandateStatus.PENDING_CONFIRMATION, b2bConfirmed = false)
+        val pending = Fixtures.mandate(
+            scheme = SddScheme.B2B,
+            status = MandateStatus.PENDING_CONFIRMATION,
+            b2bConfirmed = false,
+        )
         every { mandates.findById(pending.id) } returns Uni.createFrom().item(pending)
         stubSaveAndOutbox()
 
@@ -104,6 +113,49 @@ class SddMandateServiceTest {
             .isInstanceOf(MandateNotFoundException::class.java)
     }
 
+    private fun instruction() = CollectionInstruction(
+        "DE98ZZZ09999999999",
+        "UMR-0001",
+        SddScheme.CORE,
+        SequenceType.FRST,
+        BigDecimal("42.00"),
+        "EUR",
+        LocalDate.parse("2026-03-01"),
+    )
+
+    @Test
+    fun `a sanctions HIT on the creditor rejects RR04, releases nothing and opens a CRITICAL case`() {
+        every { mandates.findByReference(any(), any()) } returns
+            Uni.createFrom().item(Fixtures.mandate(sequenceType = SequenceType.FRST))
+        sanctions.statuses[ScreeningRole.CREDITOR] = ScreeningMatchStatus.HIT
+
+        val result = service.authorise(instruction(), DebtorControls()).await().indefinitely()
+
+        assertThat(result).isEqualTo(AuthorisationResult.Reject("RR04", "Collection blocked by sanctions screening"))
+        verify(exactly = 0) { mandates.save(any()) }
+        verify(exactly = 0) { outbox.append(any()) }
+        assertThat(sanctions.screened).containsExactlyInAnyOrder(
+            "Jan Novak" to ScreeningRole.DEBTOR,
+            "Energie a.s." to ScreeningRole.CREDITOR,
+        )
+        assertThat(amlCases.opened.single().riskLevel).isEqualTo(AmlCaseSeverity.CRITICAL)
+    }
+
+    @Test
+    fun `a collection is held, not released, when sanctions screening is unavailable`() {
+        every { mandates.findByReference(any(), any()) } returns
+            Uni.createFrom().item(Fixtures.mandate(sequenceType = SequenceType.FRST))
+        sanctions.unavailable = true
+
+        val result = service.authorise(instruction(), DebtorControls()).await().indefinitely()
+
+        assertThat(result).isInstanceOf(AuthorisationResult.Reject::class.java)
+        assertThat((result as AuthorisationResult.Reject).reasonCode).isEqualTo("RR04")
+        verify(exactly = 0) { mandates.save(any()) }
+        verify(exactly = 0) { outbox.append(any()) }
+        assertThat(amlCases.opened.single().alertCode).isEqualTo("SCREENING_UNAVAILABLE")
+    }
+
     @Test
     fun `authorising a valid collection accepts, stamps the collection and emits the authorised event`() {
         val mandate = Fixtures.mandate(sequenceType = SequenceType.FRST)
@@ -114,7 +166,15 @@ class SddMandateServiceTest {
         every { outbox.append(capture(msgSlot)) } returns Uni.createFrom().voidItem()
 
         val result = service.authorise(
-            CollectionInstruction("DE98ZZZ09999999999", "UMR-0001", SddScheme.CORE, SequenceType.FRST, BigDecimal("42.00"), "EUR", LocalDate.parse("2026-03-01")),
+            CollectionInstruction(
+                "DE98ZZZ09999999999",
+                "UMR-0001",
+                SddScheme.CORE,
+                SequenceType.FRST,
+                BigDecimal("42.00"),
+                "EUR",
+                LocalDate.parse("2026-03-01"),
+            ),
             DebtorControls(),
         ).await().indefinitely()
 
