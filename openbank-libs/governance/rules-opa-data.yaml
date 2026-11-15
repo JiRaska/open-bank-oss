@@ -433,6 +433,10 @@ authz:
     # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
     # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
     - card.details.read
+    # The queue of business customers under an ongoing sanctions-monitoring hold (#16028): who is
+    # being reviewed is itself sensitive (tipping-off). Granted to ROLE_KYC_REVIEWER by the matrix
+    # only; the generic operator/admin list rule must not reach it.
+    - kyb.monitoring.queue.list
   role_action_matrix:
     ROLE_OPERATOR:
       grant:
@@ -618,6 +622,7 @@ authz:
         - kyb.monitoring.queue.list        # #16028: ongoing-monitoring holds queue
         - kyb.monitoring.exit.propose      # #16028: four-eyes exit, maker
         - kyb.monitoring.exit.confirm      # #16028: four-eyes exit, checker (code refuses checker == maker)
+        - kyb.monitoring.exit.withdraw     # #16028: the proposing person withdraws their own pending exit proposal
     ROLE_AUDITOR:
       grant:
         - audit.trail.inspect
