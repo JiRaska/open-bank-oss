@@ -1,0 +1,18 @@
+{
+  "pack": "market-booking",
+  "schemas": [
+    {
+      "id": "org.openbank.market.booking-grant",
+      "version": 1,
+      "resource": "booking-grant-v1.schema.json",
+      "approvalPolicy": {
+        "roles": [
+          {"code": "MARKET_COMPLIANCE", "authority": "MARKET_COMPLIANCE_APPROVER"},
+          {"code": "MARKET_ACCOUNTING", "authority": "MARKET_ACCOUNTING_APPROVER"}
+        ],
+        "requireEffectiveFrom": true,
+        "requireStablePrincipal": true
+      }
+    }
+  ]
+}

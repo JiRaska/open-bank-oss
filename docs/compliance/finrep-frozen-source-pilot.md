@@ -192,3 +192,23 @@ signed minor units. The approval manifest uses the immutable booking context ver
 approved manifest. An unresolved context, missing line, missing GL classification, foreign currency
 or non-cent amount prevents publication. The manifest still requires independently reconciled
 controls and an approval digest. The exporter does not verify the close or approve the manifest.
+
+## Booking grant in Product Catalog
+
+The opt-in `market-booking` pack registers version 1 of
+`org.openbank.market.booking-grant` through the existing Catalog v2 revision lifecycle.
+A draft binds a legal entity, booking book, product revision, operating mode and approval
+evidence hash. FOS requires a host country and has no foreign establishment. A branch
+requires both a host country and an establishment identifier. The domestic mode uses the
+home country. The catalog approval policy requires an effective start and independently
+authenticated compliance and accounting approvers. Existing catalog publication binds the
+approved attributes and interval to the content digest.
+
+Enable the pack by adding `market-booking` to the existing pack list in a dedicated test
+deployment. The configured approval authorities require both the role and the respective
+`market:compliance-approve` or `market:accounting-approve` scope. The pack defines no grants
+or authorization assignments. A published grant revision ID is the candidate for ledger
+`booking_context_version_id`. The consumer must still validate the legal-entity and book
+references, home/host compatibility, existence and suitability of the referenced product
+revision, and resolve a single eligible grant. C3 still needs to consume that decision
+atomically with revocation and preserve the evidence through account opening and booking.

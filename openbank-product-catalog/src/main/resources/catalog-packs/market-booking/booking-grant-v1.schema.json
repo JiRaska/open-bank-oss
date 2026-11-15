@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:catalog-schema:org.openbank.market.booking-grant:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "legalEntityId", "bookingBookId", "homeCountry", "mode",
+    "productRevisionId", "approvalEvidenceHash"
+  ],
+  "properties": {
+    "legalEntityId": {"$ref": "#/$defs/identifier"},
+    "bookingBookId": {"$ref": "#/$defs/identifier"},
+    "homeCountry": {"$ref": "#/$defs/country"},
+    "hostCountry": {"$ref": "#/$defs/country"},
+    "establishmentId": {"$ref": "#/$defs/identifier"},
+    "mode": {"enum": ["DOMESTIC", "FOS", "BRANCH"]},
+    "productRevisionId": {"$ref": "#/$defs/identifier"},
+    "approvalEvidenceHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"mode": {"const": "DOMESTIC"}}},
+      "then": {"properties": {"hostCountry": false}},
+      "else": {"required": ["hostCountry"]}
+    },
+    {
+      "if": {"properties": {"mode": {"const": "BRANCH"}}},
+      "then": {"required": ["establishmentId"]},
+      "else": {"properties": {"establishmentId": false}}
+    }
+  ],
+  "$defs": {
+    "identifier": {"type": "string", "format": "uuid", "not": {"const": "00000000-0000-0000-0000-000000000000"}},
+    "country": {"type": "string", "pattern": "^[A-Z]{2}$"}
+  }
+}
