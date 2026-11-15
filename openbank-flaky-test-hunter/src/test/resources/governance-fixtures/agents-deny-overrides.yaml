@@ -8,6 +8,7 @@ agents:
         - tier: write_proposal
           resources:
             - github-pr
+          base_refs: [main]   # so the deny is for the reason under test, not a missing ref
       deny:
         - tier: write_proposal
           resources:

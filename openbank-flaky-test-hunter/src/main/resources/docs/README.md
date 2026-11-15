@@ -41,6 +41,26 @@ Config (`flaky-test-hunter.policy-gate`):
 | `opa-url` | `http://localhost:8181` | OPA sidecar base URL |
 | `timeout` | `PT0.5S` | per-call connect + request timeout; exceeding it fails closed (`pdp_unreachable`) |
 
+### Target ref (ADR-0031 D9 amendment 2026-11-14)
+
+`openbank.flaky-test-hunter.writer-base-ref` (`FLAKY_TEST_HUNTER_WRITER_BASE_REF`, default `main`)
+is a closed enum, `main` or `qualification`. It names the one ref the writer reads, branches from and
+opens its PR against; an unknown value stops the service at boot. The GitOps init container clones
+the scan snapshot from `SNAPSHOT_REF`, which must name the same ref, or the agent would scan one tree
+and repair another.
+
+Both policy layers decide the ref as well. The OPA input carries `base_ref`, and `agents.rego`
+allows `gh.pr.open` only when it is listed in `base_refs` of the charter's `write_proposal` /
+`github-pr` grant (`[main, qualification/flaky-test-hunter]`). `AgentCharterGrantVerifier` applies
+the same rule in process. The audit payload records `pr_base_ref`.
+
+`qualification` exists only for the phase-3 live-write proof. The writer's one eligible repair is a
+shape `test-runblocking-unit-guard` keeps off `main`, so the proof runs against the protected branch
+`qualification/flaky-test-hunter` carrying one seeded defect. A PR there says in its body that the
+defect was seeded. Switch both refs back to `main` after the run.
+`check-agent-bounded-write-surface.py` holds the enum, the charter's `base_refs` and both GitOps
+refs together.
+
 Writer activation and the governance roadmap are separate observations. GitOps declares a bounded
 pilot with `FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED=true` and a read-only own-test snapshot; verify the
 effective switch and source revision on the running deployment. Setting the switch to false denies
