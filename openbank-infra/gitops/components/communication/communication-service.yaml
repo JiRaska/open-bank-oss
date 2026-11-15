@@ -26,7 +26,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-communication-opa-bundle.sh.
-        openbank.tech/policy-checksum: "4990dfeb51a2d47c"
+        openbank.tech/policy-checksum: "50f7c042c28b68ad"
       labels:
         app.kubernetes.io/name: communication-service
         app.kubernetes.io/part-of: communication
@@ -73,6 +73,11 @@ spec:
                   key: password
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.communication.svc:6379
+            # Four-eyes ENFORCED (ADR-0285 D3, #15748). Already the application.yaml default; set
+            # here so the deployed state is stated in the manifest the four-eyes-enforce-deployed
+            # gate reads, not inferred from a code default a later edit could flip.
+            - name: AUTHZ_FOUR_EYES_ENFORCE
+              value: "true"
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET

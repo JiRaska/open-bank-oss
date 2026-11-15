@@ -237,6 +237,17 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.identity-resume-enabled", defaultValue = "false")
     var identityResumeEnabled: Boolean = false
 
+    // #16000 part 4 (ADR-0249 D3 amendment): when on, a DELEGATED domestic payment is created
+    // through domestic-payment's reservation-bound route and its reservation is settled by the
+    // payment's outcome in delegation-service, not confirmed here on the rail's 2xx. Default off =
+    // the legacy create + confirm-on-2xx, byte for byte. Turn on only after the delegation outcome
+    // consumer and the rail's bound route are live (switch-on order in the threat model).
+    @field:ConfigProperty(name = "openbank.edge.delegated-payment-bound-create.enabled", defaultValue = "false")
+    var delegatedPaymentBoundCreateEnabled: Boolean = false
+
+    /** Back-off between bound-create retries; a seam so tests do not sleep. */
+    internal var boundCreateSleeper: (Long) -> Unit = { Thread.sleep(it) }
+
     @ConfigProperty(name = "openbank.edge.notification-service-url")
     lateinit var notificationServiceUrl: String
 
@@ -2812,10 +2823,12 @@ class CustomerEdgeResource(
         idempotencyKey: String?,
     ): SpendReservationOutcome {
         val grantId = debit.delegationId ?: return SpendReservationOutcome.NotDelegated
+        // Kept: the bound create must present the reservation's OWN key, which the rail compares.
+        val reservationKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: Ids.randomId().toString()
         val body = objectMapper.createObjectNode().apply {
             put("amount", amount)
             put("currency", currency)
-            put("idempotencyKey", idempotencyKey?.takeIf { it.isNotBlank() } ?: Ids.randomId().toString())
+            put("idempotencyKey", reservationKey)
             put("operationType", "DOMESTIC_PAYMENT")
         }
         val resp = runCatching {
@@ -2856,25 +2869,39 @@ class CustomerEdgeResource(
                     .build(),
             )
         }
-        return SpendReservationOutcome.Held(SpendReservation(grantId, reservationId))
+        // delegation-service answers 201 for a replay too and says so in this header. Absent means
+        // "cannot tell", which must be read as a replay: the bound path never releases one.
+        val replayed = resp?.getHeaderString("X-Idempotency-Replayed")?.trim()?.lowercase() != "false"
+        return SpendReservationOutcome.Held(SpendReservation(grantId, reservationId, reservationKey, replayed))
     }
 
     /**
-     * Settle a held reservation: [confirmed] keeps the headroom consumed, otherwise it comes back.
+     * The ONE place the edge settles a held reservation. [disposition] says how: CONFIRM keeps the
+     * headroom consumed, RELEASE gives it back, LEAVE_TO_OUTCOME does nothing here because the
+     * payment's terminal outcome settles it in delegation-service (#16000).
      *
-     * Every failure branch after a successful reserve must reach this with `confirmed = false`. A
-     * leaked reservation silently shrinks the delegate's ceiling until it expires, which is a
+     * Every failure branch after a successful reserve where the rail created nothing must reach
+     * this with RELEASE. A leaked reservation silently shrinks the delegate's ceiling, which is a
      * defect the customer experiences as their limit quietly shrinking for no stated reason.
      *
-     * "Confirmed" here means the instruction was ACCEPTED by the rail, not that it settled in
-     * clearing. Tracking true settlement would need an async outcome this synchronous route does
-     * not have; a payment that is accepted and later fails in clearing therefore leaves the
-     * headroom consumed. That over-counts rather than under-counts, which is the safe direction
-     * for a ceiling, and it is stated here rather than implied.
+     * LEGACY PATH ONLY (`openbank.edge.delegated-payment-bound-create.enabled=false`): CONFIRM
+     * means the instruction was ACCEPTED by the rail, not that it settled in clearing, so a payment
+     * that is accepted and later REJECTED/CANCELLED leaves the headroom consumed — an over-count,
+     * the safe direction for a ceiling. On the bound path this no longer holds: the edge never
+     * confirms, and the outcome releases a rejected payment's headroom. The legacy branch and this
+     * paragraph go together when a later cleanup PR removes the switch.
      */
-    private fun settleDelegatedSpend(reservation: SpendReservation?, customer: CustomerIdentity, confirmed: Boolean) {
+    private fun settleDelegatedSpend(
+        reservation: SpendReservation?,
+        customer: CustomerIdentity,
+        disposition: ReservationDisposition,
+    ) {
         if (reservation == null) return
-        val verb = if (confirmed) "confirm" else "release"
+        val verb = when (disposition) {
+            ReservationDisposition.CONFIRM -> "confirm"
+            ReservationDisposition.RELEASE -> "release"
+            ReservationDisposition.LEAVE_TO_OUTCOME -> return
+        }
         runCatching {
             upstream.post(
                 "$delegationServiceUrl/api/v1/delegations/${reservation.delegationId}" +
@@ -3102,20 +3129,42 @@ class CustomerEdgeResource(
         // holder — a delegate authenticates as themselves; the grant is what makes it their debit
         // to make. So `customer` here stays the delegate on the delegated path, deliberately.
         scaGate(scaChallengeId, customer, amount, currency, creditorForSca, "payments.domestic")?.let {
-            settleDelegatedSpend(reservation, customer, confirmed = false)
+            settleDelegatedSpend(reservation, customer, ReservationDisposition.RELEASE)
             return it
         }
-        val resp = upstream.post(
-            "$domesticPaymentServiceUrl/api/v1/domestic-payments",
-            customer.partyId.toString(),
-            enriched,
-            idempotencyKey,
-        )
-        settleDelegatedSpend(
-            reservation,
-            customer,
-            confirmed = resp.statusInfo.family == Response.Status.Family.SUCCESSFUL,
-        )
+        val created = if (reservation != null && delegatedPaymentBoundCreateEnabled) {
+            DelegatedBoundCreate.create(
+                upstream,
+                objectMapper,
+                domesticPaymentServiceUrl,
+                enriched,
+                reservation,
+                customer.partyId.toString(),
+                boundCreateSleeper,
+            )
+        } else {
+            val legacy = upstream.post(
+                "$domesticPaymentServiceUrl/api/v1/domestic-payments",
+                customer.partyId.toString(),
+                enriched,
+                idempotencyKey,
+            )
+            val accepted = legacy.statusInfo.family == Response.Status.Family.SUCCESSFUL
+            DelegatedCreate(legacy, if (accepted) ReservationDisposition.CONFIRM else ReservationDisposition.RELEASE)
+        }
+        settleDelegatedSpend(reservation, customer, created.disposition)
+        created.railRefusalCode?.let { code ->
+            // The customer got a neutral answer; the rail's own reason stays in the audit trail.
+            audit.emit(
+                eventType = "CUSTOMER_PAYMENT_REFUSED",
+                partyId = customer.partyId.toString(),
+                operation = "payments.domestic",
+                result = "DENIED",
+                resourceId = debit.delegationId,
+                details = mapOf("reason" to "DELEGATED_BOUND_CREATE_REFUSED", "railCode" to code),
+            )
+        }
+        val resp = created.response
         // Receiver-side honesty (ADR-0108): a 2xx here means the instruction was ACCEPTED, not that
         // the money settled. Bind the created payment id to the session so the receiver's status poll
         // can reconcile true settlement, and only flip to PAID now if the create already reached the
@@ -6871,7 +6920,14 @@ internal data class DebitAuthority(
 )
 
 /** Cumulative headroom held against a grant while one delegated payment is in flight (ADR-0249 D3). */
-internal data class SpendReservation(val delegationId: String, val reservationId: String)
+internal data class SpendReservation(
+    val delegationId: String,
+    val reservationId: String,
+    /** The key the reservation was taken under; the bound create must present it (#16000). */
+    val idempotencyKey: String,
+    /** True unless delegation-service said this reserve CREATED it; the bound path never releases a replay. */
+    val replayed: Boolean = true,
+)
 
 /**
  * The three ways asking for headroom can end. [NotDelegated] is not a failure — it is an owner

@@ -33,7 +33,7 @@ Tělo požadavku (`ConvertRequest`):
 ```json
 {
   "partyId": "uuid",
-  "accountId": "uuid|null",
+  "accountId": "uuid|null (zastaralé, ignoruje se)",
   "partyName": "ACME s.r.o.",
   "fromCurrency": "EUR",
   "toCurrency": "CZK",

@@ -41,6 +41,26 @@ sequenceDiagram
   end
 ```
 
+## Name matching
+
+The candidate search ranks list entries by pg_trgm `word_similarity` over the whole name. That
+counts shared trigrams and cannot tell which part of the name they came from, so a shared given
+name plus the first letters of a surname was enough: `Jiří Raška` scored 0.64 against three
+different PEPs (`Jiří Rathouský`, `Jiří Zlatuška`, `Jüri Ratas`). Every candidate is therefore
+re-scored part by part (`NameTokenScore`): name parts are aligned one to one, a pair below 0.80 is
+two different names and contributes nothing, and the sum is divided by the shorter name's part
+count, so an omitted middle name or patronymic does not dilute a true match. Spelling and
+transliteration variants still align — Jaro-Winkler plus a consonant skeleton (`Adanov`/`Adnuf`,
+`Hammam`/`Humam`) and initials — and honorifics, generational suffixes and particles (`al`, `bin`,
+`ibn`, `abu`, `van`, `de`) are ignored unless nothing else remains. A particle is also tried fused
+onto the next part (`bin Laden`/`Binladen`, `de la Cruz`/`Delacruz`), and a fused `al-` is tried both
+ways. Letters that do not decompose (`đ`, `ł`, `ø`, `ß`) are folded to their Latin spelling.
+The re-score never raises a score and is fail-closed: it removes a candidate only when it tells the
+names apart clearly (below the 0.65 review floor), and where it lands between that floor and the
+caller's search floor (0.85 on PAYMENT) the trigram score stands, so a blocking HIT is never
+softened into a REVIEW. A trigram score at or above the HIT threshold (0.85) is never removed, only
+held at the caller's search floor. The live screen and the monitoring delta apply the same rule.
+
 ## GDPR mapping
 
 ### Lawful basis (Art. 6)

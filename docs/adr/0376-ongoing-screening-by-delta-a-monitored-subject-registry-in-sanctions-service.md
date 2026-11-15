@@ -247,6 +247,16 @@ revoking mandates, closing accounts) is a workflow this ADR does not design; unt
 owed exit is surfaced by an alert and executed by hand, and that is a blocker for switching
 monitoring on.
 
+*Amended by #16028 (kyb side).* The owner does NOT publish the exit as an event on its lifecycle
+topic: in kyb that topic is read by a customer-facing projection and landed in the analytics
+warehouse, and a confirmed sanctions match must reach neither. The owed exit is a stored fact read
+by the operators' queue and the alert; the channel an exit workflow reads is decided with that
+workflow (#15992). Recording the exit is four-eyes (one reviewer proposes, a different one
+confirms) and is refused until the relationship has demonstrably ended — the case no longer
+approved and the entity party closed in party-service. A monitoring hold also keeps the owner from
+completing onboarding: an activation that arrives under a hold waits, and after a confirmed
+sanctions match it is never applied.
+
 Both commands below now print kyb-service files. The ADR is `shipped` when kyc-service appears in
 both as well.
 

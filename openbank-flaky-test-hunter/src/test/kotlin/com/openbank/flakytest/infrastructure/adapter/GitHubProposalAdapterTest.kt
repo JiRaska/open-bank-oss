@@ -10,6 +10,7 @@ import com.openbank.flakytest.domain.model.FindingSeverity
 import com.openbank.flakytest.domain.model.FlakyTestCheckType
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.infrastructure.config.FlakyTestHunterConfig
+import com.openbank.flakytest.infrastructure.config.WriterBaseRef
 import com.openbank.libs.security.EgressResolver
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
@@ -44,6 +45,8 @@ class GitHubProposalAdapterTest {
     private var lastPullRequestBody: String? = null
     private var lastCommitRequestBody: String? = null
     private var lastBranchRequestBody: String? = null
+    private var lastBaseRefRead: String? = null
+    private var lastContentsQuery: String? = null
     private val objectMapper = ObjectMapper()
 
     @AfterEach
@@ -78,14 +81,16 @@ class GitHubProposalAdapterTest {
      * the adapter calls in sequence for an eligible finding. */
     private fun startGitHubStub(encodedContent: String = encodedSource("\n")): String {
         val srv = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        srv.createContext("/repos/test-owner/test-repo/git/ref/heads/main") { ex: HttpExchange ->
+        srv.createContext("/repos/test-owner/test-repo/git/ref/heads/") { ex: HttpExchange ->
             requestsSeen.incrementAndGet()
+            lastBaseRefRead = ex.requestURI.path.substringAfter("/git/ref/heads/")
             respond(ex, 200, """{"object":{"sha":"base-sha-123"}}""")
         }
         srv.createContext("/repos/test-owner/test-repo/contents/") { ex: HttpExchange ->
             requestsSeen.incrementAndGet()
             when (ex.requestMethod) {
                 "GET" -> {
+                    lastContentsQuery = ex.requestURI.rawQuery
                     val response = objectMapper.writeValueAsString(
                         mapOf("sha" to "file-sha-456", "content" to encodedContent),
                     )
@@ -180,10 +185,15 @@ class GitHubProposalAdapterTest {
         ex.responseBody.use { it.write(bytes) }
     }
 
-    private fun configWithToken(baseUrl: String, token: Optional<String>): FlakyTestHunterConfig = mockk {
+    private fun configWithToken(
+        baseUrl: String,
+        token: Optional<String>,
+        baseRef: WriterBaseRef = WriterBaseRef.MAIN,
+    ): FlakyTestHunterConfig = mockk {
         every { githubApiUrl() } returns baseUrl
         every { githubRepo() } returns "test-owner/test-repo"
         every { githubToken() } returns token
+        every { writerBaseRef() } returns baseRef
     }
 
     private fun adapterFor(config: FlakyTestHunterConfig): GitHubProposalAdapter {
@@ -237,6 +247,38 @@ class GitHubProposalAdapterTest {
             .contains(eligibleFinding.filePath)
             .contains("did not modify production code, approve, or merge")
             .contains("#5281")
+    }
+
+    @Test
+    fun `the main writer reads and targets main only, with no qualification notice`() {
+        val baseUrl = startGitHubStub()
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        runBlocking { adapter.openProposalPr(eligibleFinding, "add-explicit-unit-return-type") }
+
+        assertThat(lastBaseRefRead).isEqualTo("main")
+        assertThat(lastContentsQuery).isEqualTo("ref=main")
+        assertThat(objectMapper.readTree(lastPullRequestBody).path("body").asText()).doesNotContain("Qualification run")
+    }
+
+    @Test
+    fun `the qualification writer reads, branches from and targets ONLY the qualification ref, and says so`() {
+        val baseUrl = startGitHubStub()
+        val adapter = adapterFor(
+            configWithToken(baseUrl, Optional.of("fine-grained-test-token"), WriterBaseRef.QUALIFICATION),
+        )
+
+        val prUrl = runBlocking { adapter.openProposalPr(eligibleFinding, "add-explicit-unit-return-type") }
+
+        assertThat(prUrl).isEqualTo("https://github.com/test-owner/test-repo/pull/9001")
+        assertThat(lastBaseRefRead).isEqualTo("qualification/flaky-test-hunter")
+        assertThat(lastContentsQuery).isEqualTo("ref=qualification/flaky-test-hunter")
+        val pullRequest = objectMapper.readTree(lastPullRequestBody)
+        assertThat(pullRequest.path("base").asText()).isEqualTo("qualification/flaky-test-hunter")
+        assertThat(pullRequest.path("body").asText())
+            .contains("Qualification run")
+            .contains("SEEDED")
+            .contains("not a repair of `main`")
     }
 
     @Test

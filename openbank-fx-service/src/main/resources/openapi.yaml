@@ -9,7 +9,7 @@ info:
   # ApprovalResponse schema. The ČNB policy-rate endpoint was added in 1.9. No breaking change.
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  version: 1.12.0
+  version: 1.13.0
   description: >-
     Foreign exchange rates and currency conversion. On convert, the converting party's name is
     synchronously screened against the sanctions lists (ADR-0032): a clean party settles the
@@ -463,6 +463,11 @@ components:
           type: string
           format: uuid
           nullable: true
+          deprecated: true
+          description: >-
+            Deprecated and ignored. Nothing verified that the account belongs to `partyId`, so the
+            conversion's fraud score and AML case could be attributed to any account. Still accepted
+            so existing callers keep working; it is not used, stored or forwarded.
         partyName:
           type: string
           deprecated: true
