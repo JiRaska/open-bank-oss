@@ -5,8 +5,8 @@
 package com.openbank.productcatalog.domain.catalog
 
 import com.openbank.libs.domain.identifiers.Ids
-import java.math.BigDecimal
 import com.openbank.libs.market.OfferingMarkets
+import java.math.BigDecimal
 import java.time.Instant
 import java.util.Locale
 import java.util.UUID
