@@ -250,7 +250,9 @@ class AccountService(
         if (account.status == AccountStatus.ACTIVE) return account // idempotent
         val previous = account.status
         val activated = account.activate()
-        account.productRevisionPin?.let { productRevisionPinning.checkActivation(account.productId, it, clock.instant()) }
+        account.productRevisionPin?.let {
+            productRevisionPinning.checkActivation(account.productId, it, clock.instant())
+        }
         val updated = accountRepository.update(activated)
 
         eventPublisher.publish(

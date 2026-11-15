@@ -10,7 +10,9 @@ import java.util.UUID
 /** Opaque references assigned by the legal intake, scoped to the immutable instrument and its subject. */
 data class InstrumentSubject(val instrumentRef: String, val subjectRef: String) {
     init {
-        require(instrumentRef.isNotBlank() && subjectRef.isNotBlank()) { "Instrument and subject references are required" }
+        require(instrumentRef.isNotBlank() && subjectRef.isNotBlank()) {
+            "Instrument and subject references are required"
+        }
     }
 }
 
@@ -23,7 +25,9 @@ sealed interface IdentityVerification {
         val version: Long,
     ) : IdentityVerification {
         init {
-            require(evidenceRef.isNotBlank() && version > 0) { "Verified evidence requires a reference and positive version" }
+            require(evidenceRef.isNotBlank() && version > 0) {
+                "Verified evidence requires a reference and positive version"
+            }
         }
     }
 
