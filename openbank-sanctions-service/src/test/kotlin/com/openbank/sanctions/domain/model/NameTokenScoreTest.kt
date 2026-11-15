@@ -44,6 +44,15 @@ class NameTokenScoreTest {
         "Othman al-Ghamdi, Othman bin Ahmed bin Othman Alghamdi",
         "Abu-Rayhanah, Rayhanah",
         "J. Raška, Jiří Raška",
+        // Review findings on #16258: Russian given names that start like a fused Arabic article,
+        // a run of initials without dots, and a name made only of particles.
+        "Alexei Navalny, Aleksey Navalnyy",
+        "Alexey Miller, Aleksei Miller",
+        "Alexei Anatolievich Navalny, Aleksey Anatolyevich Navalny",
+        "Ilham Aliev, Ilham Aliyev",
+        "VV Putin, Vladimir Vladimirovich Putin",
+        "Abu Abd, Abu Abd",
+        "Othman Alghamdi, Othman Ghamdi",
     )
     fun `spelling, transliteration, order and omitted middle names still reach a hit`(query: String, entry: String) {
         assertThat(NameTokenScore.best(listOf(query), listOf(entry))).isGreaterThanOrEqualTo(hit)
@@ -56,9 +65,22 @@ class NameTokenScoreTest {
     }
 
     @Test
-    fun `combine never raises the trigram score`() {
-        assertThat(NameTokenScore.combine(0.7, listOf("Jiri Raska"), listOf("Jiri Raska"))).isEqualTo(0.7)
-        assertThat(NameTokenScore.combine(0.64, listOf("Jiří Raška"), listOf("Jiří Rathouský"))).isEqualTo(0.5)
+    fun `decide removes a clearly different name and never raises the trigram score`() {
+        val raska = listOf("Jiří Raška")
+        assertThat(NameTokenScore.decide(0.64, raska, listOf("Jiří Rathouský"), 0.65, 0.65)).isNull()
+        assertThat(NameTokenScore.decide(0.7, listOf("Jiri Raska"), listOf("Jiri Raska"), 0.65, 0.65)).isEqualTo(0.7)
+    }
+
+    @Test
+    fun `on a HIT-floor profile an undecided structure score leaves the trigram HIT standing`() {
+        // Structure 0.75 with a payment floor of 0.85 neither confirms nor refutes the match: lowering
+        // it to 0.75 would turn a blocking HIT into a REVIEW (or CLEAR on an internal transfer).
+        val query = listOf("Ahmad Karimi Abadi")
+        val entry = listOf("Ahmad Karimi Tehrani")
+        val structure = NameTokenScore.best(query, entry)
+        assertThat(structure).isBetween(0.65, 0.85)
+        assertThat(NameTokenScore.decide(0.9, query, entry, 0.85, 0.65)).isEqualTo(0.9)
+        assertThat(NameTokenScore.decide(0.9, query, entry, 0.65, 0.65)).isEqualTo(structure)
     }
 
     @Test

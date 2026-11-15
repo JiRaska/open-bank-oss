@@ -86,9 +86,13 @@ class SanctionsService(
             for (found in results) {
                 // The trigram search finds candidates; the name-structure score decides how close
                 // they are, so a shared given name alone cannot make a match (NameTokenScore).
-                val score = NameTokenScore.combine(found.score, listOf(name), found.entry.names())
-                // Capped under the review floor it is no candidate at all, not a CLEAR-scored match.
-                if (score < ScreeningProfileEvaluator.POTENTIAL_HIT_THRESHOLD) continue
+                val score = NameTokenScore.decide(
+                    trigramScore = found.score,
+                    queryNames = listOf(name),
+                    entryNames = found.entry.names(),
+                    searchFloor = searchFloor,
+                    reviewFloor = ScreeningProfileEvaluator.POTENTIAL_HIT_THRESHOLD,
+                ) ?: continue
                 val m = found.copy(score = score)
                 val key = "${m.entry.listType}:${m.entry.externalId ?: m.entry.primaryName}"
                 val existing = matchMap[key]

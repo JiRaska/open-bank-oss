@@ -179,11 +179,13 @@ class SanctionsMonitoringService(
                 entry.programs,
                 // Same name-structure cap as the live screen (NameTokenScore), so the delta cannot
                 // raise a finding the screen would report CLEAR.
-                NameTokenScore.combine(
-                    candidate.score,
-                    listOf(candidate.subject.name) + candidate.subject.aliases,
-                    entryNames,
-                ),
+                NameTokenScore.decide(
+                    trigramScore = candidate.score,
+                    queryNames = listOf(candidate.subject.name) + candidate.subject.aliases,
+                    entryNames = entryNames,
+                    searchFloor = profiles.nameSearchFloor(ScreeningProfile.CUSTOMER),
+                    reviewFloor = ScreeningProfileEvaluator.POTENTIAL_HIT_THRESHOLD,
+                ) ?: continue,
             )
             raiseIfUncovered(candidate.subject, match, entry.namesVersion, MonitoringDetection.LIST_DELTA)
         }

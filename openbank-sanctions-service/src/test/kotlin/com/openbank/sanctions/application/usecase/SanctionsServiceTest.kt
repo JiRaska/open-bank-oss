@@ -173,6 +173,24 @@ class SanctionsServiceTest {
     }
 
     @Test
+    fun `a profile-less screen keeps a trigram HIT the name structure cannot refute`(): Unit = runBlocking {
+        coEvery { repo.findByIdempotencyKey(any()) } returns null
+        coEvery { repo.saveWithEvent(any(), any()) } answers { firstArg() }
+        // Two of three parts align (structure ~0.67): not enough to confirm, not enough to refute.
+        // Lowering the score would turn a blocking HIT into POTENTIAL_HIT, which payment policy
+        // treats as REVIEW (or CLEAR for an internal transfer) — fail-open. The HIT stands.
+        val entry = sampleEntry(primaryName = "Ahmad Karimi Tehrani")
+        coEvery { entryRepo.search("ahmad karimi abadi", any(), any(), any()) } returns listOf(
+            SanctionsEntryMatch(entry = entry, matchedName = "Ahmad Karimi Tehrani", score = 0.90),
+        )
+
+        val result = service.screen(sampleScreenCommand(name = "Ahmad Karimi Abadi"))
+
+        assertThat(result.status).isEqualTo(SanctionsCheckStatus.HIT)
+        assertThat(result.matches.single().matchScore).isEqualTo(0.90)
+    }
+
+    @Test
     fun `screen checks aliases — hit via alias search wins`(): Unit = runBlocking {
         coEvery { repo.findByIdempotencyKey(any()) } returns null
         coEvery { repo.saveWithEvent(any(), any()) } answers { firstArg() }
