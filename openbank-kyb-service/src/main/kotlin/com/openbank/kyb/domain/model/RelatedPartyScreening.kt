@@ -316,9 +316,9 @@ data class SubjectIdentity(
     val aliases: List<String> = emptyList(),
 ) {
     /** True when no field is set on both sides with different values, so both may describe one subject. */
-    fun compatibleWith(other: SubjectIdentity): Boolean =
-        agrees(country, other.country) && agrees(dateOfBirth, other.dateOfBirth) &&
-            agrees(nationality, other.nationality)
+    fun compatibleWith(other: SubjectIdentity): Boolean = agrees(country, other.country) &&
+        agrees(dateOfBirth, other.dateOfBirth) &&
+        agrees(nationality, other.nationality)
 
     private fun <T> agrees(a: T?, b: T?) = a == null || b == null || a == b
 

@@ -23,9 +23,11 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 import java.util.Optional
+import java.util.UUID
 
 /**
  * Screens the entity and its related parties (every listed representative, every reportable
@@ -107,7 +109,8 @@ class RelatedPartyScreeningService {
                 if (!subject.current || subject.sanctions != ScreeningVerdict.PENDING) {
                     subject
                 } else {
-                    screenOne(case, subject, identities[subject.key].orEmpty().ifEmpty { listOf(SubjectIdentity()) }, now)
+                    val ids = identities[subject.key].orEmpty().ifEmpty { listOf(SubjectIdentity()) }
+                    screenOne(case, subject, ids, now)
                 }
             },
         )
@@ -122,14 +125,16 @@ class RelatedPartyScreeningService {
     ): ScreeningSubject = try {
         // One screen per distinct identity under this name; the subject takes the WORST answer,
         // so a second person sharing the name can never be cleared by the first one's facts.
-        // The first keeps the historical idempotency key, so an existing screen still replays.
-        val result = identities.mapIndexed { i, identity ->
+        // Each key is derived from WHAT is screened, not from its position: sanctions-service
+        // replays a stored verdict by key, so a key that outlived a change in the register facts
+        // would answer for an identity it never screened.
+        val result = identities.map { identity ->
             port.screen(
                 RelatedPartyScreeningRequest(
                     name = subject.name,
                     subjectId = subjectId(case, subject),
                     organisation = subject.organisation,
-                    idempotencyKey = "kyb-screen:${case.id}:${subject.key}" + if (i == 0) "" else ":$i",
+                    idempotencyKey = screenKey(case.id, subject, identity),
                     identity = identity,
                 ),
             )
@@ -162,5 +167,24 @@ class RelatedPartyScreeningService {
         sanctions == ScreeningVerdict.POTENTIAL_HIT -> "potential_hit"
         pep -> "pep"
         else -> "clear"
+    }
+
+    internal companion object {
+        private const val KEY_HEX_CHARS = 32
+
+        /** Idempotency key of one screen: the case, the subject and a digest of everything sent. */
+        fun screenKey(caseId: UUID, subject: ScreeningSubject, identity: SubjectIdentity): String {
+            val content = listOf(
+                subject.name,
+                subject.organisation.toString(),
+                identity.country?.trim()?.uppercase().orEmpty(),
+                identity.dateOfBirth?.toString().orEmpty(),
+                identity.nationality?.trim()?.uppercase().orEmpty(),
+                identity.aliases.map { it.trim() }.filter { it.isNotEmpty() }.sorted().joinToString("\u0001"),
+            ).joinToString("|")
+            val digest = MessageDigest.getInstance("SHA-256").digest(content.toByteArray(Charsets.UTF_8))
+            return "kyb-screen:$caseId:${subject.key}:" +
+                digest.joinToString("") { "%02x".format(it) }.take(KEY_HEX_CHARS)
+        }
     }
 }
