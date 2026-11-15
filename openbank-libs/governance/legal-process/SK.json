@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "jurisdiction": "SK",
+  "revision": 1,
+  "state": "design",
+  "currency": "EUR",
+  "timezone": "Europe/Bratislava",
+  "reviewed_on": "2026-11-15",
+  "effective_from": null,
+  "product_scope": {
+    "natural_person_single_owner": "planned",
+    "joint_accounts": "not_offered"
+  },
+  "sources": [
+    {
+      "id": "architecture",
+      "ref": "docs/adr/0380-jurisdictional-legal-processes-and-protected-funds.md",
+      "locator": "Decision sections 1-6",
+      "kind": "architecture"
+    },
+    {
+      "id": "execution-code",
+      "ref": "https://static.slov-lex.sk/static/SK/ZZ/1995/233/20251227.print.html",
+      "locator": "Act 233/1995 sections 95-104; verify effective consolidation at activation",
+      "kind": "legislation"
+    },
+    {
+      "id": "civil-code",
+      "ref": "https://static.slov-lex.sk/static/SK/ZZ/1964/40/20260731.print.html",
+      "locator": "Act 40/1964, capacity, representation and nonordinary property acts",
+      "kind": "legislation"
+    },
+    {
+      "id": "bank-exchange",
+      "ref": "https://www.sbaonline.sk/projekt/elektronicka-komunikacia/",
+      "locator": "Bank/executor electronic exchange",
+      "kind": "channel-specification"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "instrument-revisions",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Duplicate delivery is a no-op; old release cannot undo a newer effect; conflicting equal revisions fail.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "identity-and-issuer",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Authenticated transport alone does not establish competent issuer or the correct debtor; ambiguity requires review.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "service-evidence",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Retain originals and service receipt; issued, served, known and applied timestamps remain distinct.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "disclosure-scope",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "A response contains only authorized fields from the required snapshot and records what was sent.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "notice-permission",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Prohibited customer notice is suppressed while permitted notices retain their own deadline.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "independent-release",
+      "owner": "balance",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Releasing one legal effect does not release another; payment TTL and payment cover release cannot cancel attachment.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "allocation-cap",
+      "owner": "balance",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Concurrent reservations across accounts cannot exceed the order-wide allocation budget or count the same funds twice.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "no-overdraft",
+      "owner": "balance",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Legal allocation uses funded money only and never consumes an unused arranged overdraft.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "capacity-and-representation",
+      "owner": "party",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Evaluate self-capacity, representative scope and required consent independently; a guardian does not own the funds.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "combined-protection-and-capacity",
+      "owner": "admission",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "A protected-funds transaction must satisfy both funds protection and the acting persons legal authority.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "admission-reachability",
+      "owner": "admission",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "All instructed value sinks invoke applicable production controls; staff release and direct booking cannot bypass them.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "outbox-and-recovery",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Crash and retry preserve the atomic state/outbox boundary; uncertain remittance is reconciled before retry.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "stale-input",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "A stale inbox or projection produces an explicit unavailable result, never a claim that no legal order exists.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "law-transition",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Each decision records its pack revision; effective law changes apply to existing cases where transition rules require.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "one-account-exemption",
+      "owner": "balance",
+      "source_ids": [
+        "execution-code"
+      ],
+      "expected": "The applicable fixed exemption is not multiplied across the debtors accounts; amount is effective-dated pack data.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "income-notice",
+      "owner": "balance",
+      "source_ids": [
+        "execution-code"
+      ],
+      "expected": "Qualifying income exemption uses the legally relevant notification and evidence, not a guessed payment description.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "same-day-priority",
+      "owner": "balance",
+      "source_ids": [
+        "execution-code"
+      ],
+      "expected": "Equal statutory rank for orders received on the same day produces the required proportional allocation and rounding.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "stay-variants",
+      "owner": "legal-process",
+      "source_ids": [
+        "execution-code"
+      ],
+      "expected": "Distinguish a stay retaining attachment from a stay lifting it; suspension of remittance is not automatically release.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "nonordinary-property-approval",
+      "owner": "party",
+      "source_ids": [
+        "civil-code"
+      ],
+      "expected": "A representative cannot perform a nonordinary property act without the legally required court approval.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    }
+  ]
+}

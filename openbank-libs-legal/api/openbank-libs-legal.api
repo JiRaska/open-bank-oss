@@ -1,0 +1,55 @@
+public final class com/openbank/libs/legal/LegalEffectDisposition : java/lang/Enum {
+	public static final field ACTIVE Lcom/openbank/libs/legal/LegalEffectDisposition;
+	public static final field RELEASED Lcom/openbank/libs/legal/LegalEffectDisposition;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/legal/LegalEffectDisposition;
+	public static fun values ()[Lcom/openbank/libs/legal/LegalEffectDisposition;
+}
+
+public final class com/openbank/libs/legal/LegalEffectIdentity {
+	public fun <init> (Ljava/util/UUID;Lcom/openbank/libs/domain/identifiers/CaseId;Lcom/openbank/libs/domain/identifiers/PartyId;)V
+	public final fun component1 ()Ljava/util/UUID;
+	public final fun component2 ()Lcom/openbank/libs/domain/identifiers/CaseId;
+	public final fun component3 ()Lcom/openbank/libs/domain/identifiers/PartyId;
+	public final fun copy (Ljava/util/UUID;Lcom/openbank/libs/domain/identifiers/CaseId;Lcom/openbank/libs/domain/identifiers/PartyId;)Lcom/openbank/libs/legal/LegalEffectIdentity;
+	public static synthetic fun copy$default (Lcom/openbank/libs/legal/LegalEffectIdentity;Ljava/util/UUID;Lcom/openbank/libs/domain/identifiers/CaseId;Lcom/openbank/libs/domain/identifiers/PartyId;ILjava/lang/Object;)Lcom/openbank/libs/legal/LegalEffectIdentity;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCaseId ()Lcom/openbank/libs/domain/identifiers/CaseId;
+	public final fun getEffectId ()Ljava/util/UUID;
+	public final fun getSubjectPartyId ()Lcom/openbank/libs/domain/identifiers/PartyId;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/legal/LegalEffectRevision {
+	public fun <init> (Lcom/openbank/libs/legal/LegalEffectIdentity;JLcom/openbank/libs/legal/LegalEffectDisposition;Ljava/lang/String;)V
+	public final fun component1 ()Lcom/openbank/libs/legal/LegalEffectIdentity;
+	public final fun component2 ()J
+	public final fun component3 ()Lcom/openbank/libs/legal/LegalEffectDisposition;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (Lcom/openbank/libs/legal/LegalEffectIdentity;JLcom/openbank/libs/legal/LegalEffectDisposition;Ljava/lang/String;)Lcom/openbank/libs/legal/LegalEffectRevision;
+	public static synthetic fun copy$default (Lcom/openbank/libs/legal/LegalEffectRevision;Lcom/openbank/libs/legal/LegalEffectIdentity;JLcom/openbank/libs/legal/LegalEffectDisposition;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/legal/LegalEffectRevision;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getContentSha256 ()Ljava/lang/String;
+	public final fun getDisposition ()Lcom/openbank/libs/legal/LegalEffectDisposition;
+	public final fun getIdentity ()Lcom/openbank/libs/legal/LegalEffectIdentity;
+	public final fun getRevision ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/legal/LegalEffectRevisionGuard {
+	public static final field INSTANCE Lcom/openbank/libs/legal/LegalEffectRevisionGuard;
+	public final fun evaluate (Lcom/openbank/libs/legal/LegalEffectRevision;Lcom/openbank/libs/legal/LegalEffectRevision;)Lcom/openbank/libs/legal/LegalEffectRevisionOutcome;
+}
+
+public final class com/openbank/libs/legal/LegalEffectRevisionOutcome : java/lang/Enum {
+	public static final field APPLY Lcom/openbank/libs/legal/LegalEffectRevisionOutcome;
+	public static final field CONFLICT Lcom/openbank/libs/legal/LegalEffectRevisionOutcome;
+	public static final field DUPLICATE Lcom/openbank/libs/legal/LegalEffectRevisionOutcome;
+	public static final field STALE Lcom/openbank/libs/legal/LegalEffectRevisionOutcome;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/legal/LegalEffectRevisionOutcome;
+	public static fun values ()[Lcom/openbank/libs/legal/LegalEffectRevisionOutcome;
+}
+

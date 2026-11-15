@@ -6979,6 +6979,24 @@ gates:
     selftest_inputs: [".github/scripts/check-delegation-exposure-sealed.py"]
     run: |
       python3 .github/scripts/check-delegation-exposure-sealed.py
+  - id: legal-process-contracts
+    name: "legal-process design contracts preserve CZ/SK/DE requirements without claiming activation (ADR-0380)"
+    group: registry
+    mode: enforced
+    budget_seconds: 10
+    min_subjects: 63
+    rationale: "Country pack presence must not masquerade as working legal enforcement. Checks strict source/requirement contracts and rejects readiness claims while execution and legal-approval verification are unimplemented. It does not prove operational compliance."
+    review_after: "2027-02-15"
+    selftest: python3 .github/scripts/check-legal-process-contracts.py --self-test
+    selftest_expect: pass
+    selftest_inputs:
+      - ".github/scripts/check-legal-process-contracts.py"
+      - ".github/scripts/test_legal_process_contracts.py"
+      - "openbank-libs/governance/legal-process/CZ.json"
+      - "openbank-libs/governance/legal-process/SK.json"
+      - "openbank-libs/governance/legal-process/DE.json"
+    run: |
+      python3 .github/scripts/check-legal-process-contracts.py
   - id: enforcement-reachability
     name: "a declared enforcement function has a production caller (ADR-0232, issue #3615)"
     group: kotlin

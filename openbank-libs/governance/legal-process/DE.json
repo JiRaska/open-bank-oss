@@ -1,0 +1,322 @@
+{
+  "schema_version": 1,
+  "jurisdiction": "DE",
+  "revision": 1,
+  "state": "design",
+  "currency": "EUR",
+  "timezone": "Europe/Berlin",
+  "reviewed_on": "2026-11-15",
+  "effective_from": null,
+  "product_scope": {
+    "natural_person_single_owner": "planned",
+    "joint_accounts": "not_offered"
+  },
+  "sources": [
+    {
+      "id": "architecture",
+      "ref": "docs/adr/0380-jurisdictional-legal-processes-and-protected-funds.md",
+      "locator": "Decision sections 1-6",
+      "kind": "architecture"
+    },
+    {
+      "id": "conversion",
+      "ref": "https://www.gesetze-im-internet.de/zpo/__850k.html",
+      "locator": "ZPO 850k",
+      "kind": "legislation"
+    },
+    {
+      "id": "cohorts",
+      "ref": "https://www.gesetze-im-internet.de/zpo/__899.html",
+      "locator": "ZPO 899",
+      "kind": "legislation"
+    },
+    {
+      "id": "moratorium",
+      "ref": "https://www.gesetze-im-internet.de/zpo/__900.html",
+      "locator": "ZPO 900",
+      "kind": "legislation"
+    },
+    {
+      "id": "certificates",
+      "ref": "https://www.gesetze-im-internet.de/zpo/__903.html",
+      "locator": "ZPO 903",
+      "kind": "legislation"
+    },
+    {
+      "id": "court-adjustment",
+      "ref": "https://www.gesetze-im-internet.de/zpo/__906.html",
+      "locator": "ZPO 906",
+      "kind": "legislation"
+    },
+    {
+      "id": "joint",
+      "ref": "https://www.gesetze-im-internet.de/zpo/__850l.html",
+      "locator": "ZPO 850l",
+      "kind": "legislation"
+    },
+    {
+      "id": "representation",
+      "ref": "https://www.gesetze-im-internet.de/bgb/__1823.html",
+      "locator": "BGB 1823",
+      "kind": "legislation"
+    },
+    {
+      "id": "consent",
+      "ref": "https://www.gesetze-im-internet.de/bgb/__1825.html",
+      "locator": "BGB 1825",
+      "kind": "legislation"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "instrument-revisions",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Duplicate delivery is a no-op; old release cannot undo a newer effect; conflicting equal revisions fail.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "identity-and-issuer",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Authenticated transport alone does not establish competent issuer or the correct debtor; ambiguity requires review.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "service-evidence",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Retain originals and service receipt; issued, served, known and applied timestamps remain distinct.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "disclosure-scope",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "A response contains only authorized fields from the required snapshot and records what was sent.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "notice-permission",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Prohibited customer notice is suppressed while permitted notices retain their own deadline.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "independent-release",
+      "owner": "balance",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Releasing one legal effect does not release another; payment TTL and payment cover release cannot cancel attachment.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "allocation-cap",
+      "owner": "balance",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Concurrent reservations across accounts cannot exceed the order-wide allocation budget or count the same funds twice.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "no-overdraft",
+      "owner": "balance",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Legal allocation uses funded money only and never consumes an unused arranged overdraft.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "capacity-and-representation",
+      "owner": "party",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Evaluate self-capacity, representative scope and required consent independently; a guardian does not own the funds.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "combined-protection-and-capacity",
+      "owner": "admission",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "A protected-funds transaction must satisfy both funds protection and the acting persons legal authority.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "admission-reachability",
+      "owner": "admission",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "All instructed value sinks invoke applicable production controls; staff release and direct booking cannot bypass them.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "outbox-and-recovery",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Crash and retry preserve the atomic state/outbox boundary; uncertain remittance is reconciled before retry.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "stale-input",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "A stale inbox or projection produces an explicit unavailable result, never a claim that no legal order exists.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "law-transition",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Each decision records its pack revision; effective law changes apply to existing cases where transition rules require.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "funded-cohorts",
+      "owner": "balance",
+      "source_ids": [
+        "cohorts"
+      ],
+      "expected": "Unused allowance creates no money; protection cohorts contain only actual funded credit remaining on the account.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "three-month-carry",
+      "owner": "balance",
+      "source_ids": [
+        "cohorts"
+      ],
+      "expected": "Unconsumed protected credit survives the three following calendar months and expires on the legally correct boundary.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "oldest-credit-first",
+      "owner": "balance",
+      "source_ids": [
+        "cohorts"
+      ],
+      "expected": "Disposals consume the oldest credited protected funds first; retries do not consume the same entitlement twice.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "conversion-timing",
+      "owner": "account",
+      "source_ids": [
+        "conversion"
+      ],
+      "expected": "Already attached accounts can convert within the statutory business-day deadline, including a debit-balance account.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "retrospective-protection",
+      "owner": "balance",
+      "source_ids": [
+        "cohorts"
+      ],
+      "expected": "Timely conversion after service applies the eligible protection retrospectively without rewriting ledger history.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "credit-only",
+      "owner": "account",
+      "source_ids": [
+        "conversion"
+      ],
+      "expected": "P-Konto operation is credit-only; conversion does not permit drawing further overdraft.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "moratorium",
+      "owner": "balance",
+      "source_ids": [
+        "moratorium"
+      ],
+      "expected": "Future credit cannot be remitted before the applicable moratorium ends; moratorium does not extend cohort carry.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "certificate-change",
+      "owner": "balance",
+      "source_ids": [
+        "certificates"
+      ],
+      "expected": "Certificate increases follow their legal validity and application deadline, distinct from pack activation time.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "court-adjustment",
+      "owner": "balance",
+      "source_ids": [
+        "court-adjustment"
+      ],
+      "expected": "Court adjustments to protected amounts use the specific order and legal scope, not only a generic base threshold.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "joint-account-shares",
+      "owner": "balance",
+      "source_ids": [
+        "joint"
+      ],
+      "expected": "When joint accounts are offered, split debtor/nondebtor shares and continue attachment only on the legally affected share.",
+      "delivery": "unimplemented",
+      "applies_when": "joint-accounts-offered"
+    },
+    {
+      "id": "appointment-without-consent-reservation",
+      "owner": "party",
+      "source_ids": [
+        "consent"
+      ],
+      "expected": "Appointment alone does not impose a consent reservation; distinguish representative scope and retained personal authority.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    }
+  ]
+}

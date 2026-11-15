@@ -1,11 +1,12 @@
 ---
 date: 2026-11-15
-decision-status: proposed
-delivery-status: planned
+decision-status: accepted
+delivery-status: partial
 authors: [OpenBank contributors]
 supersedes: []
 superseded-by: []
 delivery-repos: []
+followup: "#16324 — Shared revision fencing and design contracts exist; operational owners, adapters, protection rules and trusted activation evidence remain unimplemented."
 tags: [accounts, payments, authz, compliance]
 summary: "Separate legal cases from operational enforcement, with versioned jurisdiction packs for CZ, SK and DE; enforce protected funds and scoped legal capacity through existing balance ownership and payment admission."
 ---
@@ -48,6 +49,7 @@ Adjacent decisions remain authoritative within their scopes:
 | ADR-0101, ADR-0115 | Temporal and deterministic simulation; add legal workflows and clock scenarios. |
 | ADR-0118, ADR-0161, ADR-0162 | Retention, object storage and document rendering; add original service evidence, purpose restrictions and legal retention holds. |
 | ADR-0152, ADR-0337 | One regulated entity per deployment and separate books; jurisdiction is not a tenant. |
+| ADR-0317 | Shared legal contracts live in `openbank-libs-legal`; platform identifiers stay in `libs-domain`, with no core-to-context dependency. |
 | ADR-0207, ADR-0318 | Ledger business dates and financial allocation primitives; legal civil calendars and statutory priority remain explicit inputs. |
 | ADR-0232, ADR-0249, ADR-0284, ADR-0308 | Delegation, exposure, entity mandates and historic authority evidence; add natural-person legal constraints without conflating their sources. |
 | ADR-0247 | Fraud adverse-state handling; a fraud signal is not an enforceable legal instrument. |
@@ -298,15 +300,22 @@ their laws. Protection and legal agency improve ordinary banking correctness as 
 ownership, conformance work and jurisdiction maintenance. It requires admission contract
 changes and migration of active cases/holds; it is not an adapter-only feature.
 
-**Enforcement:** propose a new gate `legal-process-contracts`, implemented by
-`.github/scripts/check-legal-process-contracts.py`, **enforced before the first production
-country activation**. It must check the capability manifest, legal-source/effective-date
+**Enforcement:** gate `legal-process-contracts` is registered as enforced for design
+contract integrity and refusal of unsupported readiness claims, implemented by
+`.github/scripts/check-legal-process-contracts.py`. **Full evidence verification is
+required before the first production country activation**. Its eventual activation mode
+must check the capability manifest, legal-source/effective-date
 bindings, actually executed jurisdiction fixtures and production-caller coverage. Missing,
 skipped or stale evidence fails; a manifest saying "supported" is not proof. Existing
 `enforcement-reachability` and instructed-value-movement gates are enforced for their
 current scopes; extend them for these guards. They do not already enforce this ADR.
-Feed obligation/control/evidence into ADR-0379. This new gate and capability are absent
-today, hence `delivery-status: planned`.
+Feed obligation/control/evidence into ADR-0379. The current checker validates 63 design
+requirements across CZ/SK/DE; its evidence mode refuses readiness because trusted
+execution/approval verification has not been implemented. It cannot activate a country.
+The shared `LegalEffectRevisionGuard` in `openbank-libs-legal` implements pure revision
+fencing, with duplicate, stale and conflicting delivery tests. It has no production
+consumer yet and does not itself constrain a payment or prove transaction atomicity.
+These are initial foundations only; delivery is partial and tracked in issue #16324.
 
 Money-path changes require ADR-0030's two approvals and updated models for Account,
 Balance, Transaction, Ledger and every affected rail (existing files under
@@ -319,8 +328,9 @@ introduced; absence from today's list is not an exemption.
 
 ## Delivery check
 
-From repository root, run the following **proposed delivery interface**. The checker is
-to be implemented with the feature; it does not exist in this documentation change.
+From repository root, run the following delivery interface. The current checker
+implements design validation and a fail-closed refusal; trusted operational evidence
+verification remains to be delivered. Default-mode success is not this delivery check.
 
 ```bash
 python3 .github/scripts/check-legal-process-contracts.py --require-jurisdictions CZ,SK,DE --require-evidence # LEGAL_PROCESS_CONTRACTS_OK
@@ -331,9 +341,9 @@ registration in `gates.yaml`, all mandatory capabilities for the declared produc
 executed fixtures above, live admission bindings, real-DB concurrency evidence, connector
 conformance, current legal sign-off and the commit/pack hashes those proofs cover.
 An absent checker, unsupported required capability, missing source transition, skipped
-suite or absent legal approval exits nonzero. Today the missing file makes this fail,
-correctly falsifying any claim of delivered support. Individual country activation may
-precede completion of all three only when that country's full scoped evidence passes;
+suite or absent legal approval exits nonzero. Today the evidence-verification refusal
+makes this fail, correctly falsifying any claim of delivered support. Individual country
+activation may precede completion of all three only when that country's full scoped evidence passes;
 full delivery of this ADR requires CZ, SK and DE.
 
 ## Compliance impact

@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "jurisdiction": "CZ",
+  "revision": 1,
+  "state": "design",
+  "currency": "CZK",
+  "timezone": "Europe/Prague",
+  "reviewed_on": "2026-11-15",
+  "effective_from": null,
+  "product_scope": {
+    "natural_person_single_owner": "planned",
+    "joint_accounts": "not_offered"
+  },
+  "sources": [
+    {
+      "id": "architecture",
+      "ref": "docs/adr/0380-jurisdictional-legal-processes-and-protected-funds.md",
+      "locator": "Decision sections 1-6",
+      "kind": "architecture"
+    },
+    {
+      "id": "protected-account",
+      "ref": "https://www.cnb.cz/cs/casto-kladene-dotazy/Co-je-chraneny-ucet-a-jak-jej-zridit-a-uzivat",
+      "locator": "Protected account establishment and operation",
+      "kind": "authority-guidance"
+    },
+    {
+      "id": "civil-code",
+      "ref": "https://www.e-sbirka.cz/sb/2012/89",
+      "locator": "Act 89/2012, capacity and guardianship including section 64",
+      "kind": "legislation"
+    },
+    {
+      "id": "bank-exchange",
+      "ref": "https://www.ekcr.cz/financni-instituce-vymena-dat",
+      "locator": "Bank/executor exchange; select schema by instrument type",
+      "kind": "channel-specification"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "instrument-revisions",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Duplicate delivery is a no-op; old release cannot undo a newer effect; conflicting equal revisions fail.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "identity-and-issuer",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Authenticated transport alone does not establish competent issuer or the correct debtor; ambiguity requires review.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "service-evidence",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Retain originals and service receipt; issued, served, known and applied timestamps remain distinct.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "disclosure-scope",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "A response contains only authorized fields from the required snapshot and records what was sent.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "notice-permission",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Prohibited customer notice is suppressed while permitted notices retain their own deadline.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "independent-release",
+      "owner": "balance",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Releasing one legal effect does not release another; payment TTL and payment cover release cannot cancel attachment.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "allocation-cap",
+      "owner": "balance",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Concurrent reservations across accounts cannot exceed the order-wide allocation budget or count the same funds twice.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "no-overdraft",
+      "owner": "balance",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Legal allocation uses funded money only and never consumes an unused arranged overdraft.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "capacity-and-representation",
+      "owner": "party",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Evaluate self-capacity, representative scope and required consent independently; a guardian does not own the funds.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "combined-protection-and-capacity",
+      "owner": "admission",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "A protected-funds transaction must satisfy both funds protection and the acting persons legal authority.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "admission-reachability",
+      "owner": "admission",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "All instructed value sinks invoke applicable production controls; staff release and direct booking cannot bypass them.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "outbox-and-recovery",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Crash and retry preserve the atomic state/outbox boundary; uncertain remittance is reconciled before retry.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "stale-input",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "A stale inbox or projection produces an explicit unavailable result, never a claim that no legal order exists.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "law-transition",
+      "owner": "legal-process",
+      "source_ids": [
+        "architecture"
+      ],
+      "expected": "Each decision records its pack revision; effective law changes apply to existing cases where transition rules require.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "protected-account-link",
+      "owner": "account",
+      "source_ids": [
+        "protected-account"
+      ],
+      "expected": "Keep the distinct protected account linked to the attached account; a generic exemption flag is insufficient.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "qualified-income",
+      "owner": "balance",
+      "source_ids": [
+        "protected-account"
+      ],
+      "expected": "Only qualifying income follows the protected routing; an unrelated payer must not acquire protection.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "protected-transfer-deadline",
+      "owner": "balance",
+      "source_ids": [
+        "protected-account"
+      ],
+      "expected": "Qualifying credits reach the protected account by the legally applicable working-day deadline, including after recovery.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "protected-account-fees",
+      "owner": "account",
+      "source_ids": [
+        "protected-account"
+      ],
+      "expected": "Establishment and maintenance respect the protected-account fee rules rather than commercial product defaults.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    },
+    {
+      "id": "ordinary-daily-acts",
+      "owner": "party",
+      "source_ids": [
+        "civil-code"
+      ],
+      "expected": "Limited capacity does not remove permitted ordinary daily acts; restrictions follow the individual court order.",
+      "delivery": "unimplemented",
+      "applies_when": "always"
+    }
+  ]
+}

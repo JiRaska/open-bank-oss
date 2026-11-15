@@ -46,6 +46,7 @@ CONTEXT_PACKAGES: dict[str, tuple[str, ...]] = {
     "openbank-libs-iso20022": ("com.openbank.libs.iso20022", "com.openbank.libs.domain.payment"),
     "openbank-libs-finance": ("com.openbank.libs.finance",),
     "openbank-libs-fincrime": ("com.openbank.libs.fincrime",),
+    "openbank-libs-legal": ("com.openbank.libs.legal",),
 }
 
 PACKAGE_RE = re.compile(r"^\s*package\s+([A-Za-z0-9_.]+)", re.M)
@@ -125,7 +126,7 @@ def self_test() -> int:
         # The production selector derives its graph, with no hand-maintained libs list.
         (root / ".github/scripts/libs-change-dependents.sh").write_text(
             "python3 .github/scripts/service-ci-library-dependents.py --runtime \"$@\"\n")
-        for mod in ("openbank-libs-domain", "openbank-libs-runtime", "openbank-libs-lending"):
+        for mod in ("openbank-libs-domain", "openbank-libs-runtime", "openbank-libs-lending", "openbank-libs-legal"):
             (root / mod / "src/main/kotlin").mkdir(parents=True)
             (root / mod / "build.gradle.kts").write_text("dependencies {}\n")
         core_pkg = root / "openbank-libs-domain/src/main/kotlin/Money.kt"
@@ -135,6 +136,13 @@ def self_test() -> int:
         if clean or n == 0:
             print(f"self-test FAIL: clean fixture reported {clean} over {n} subject(s)")
             ok = False
+
+        legal = root / "openbank-libs-domain/src/main/kotlin/LegalEffect.kt"
+        legal.write_text("package com.openbank.libs.legal\n")
+        if not any("LegalEffect.kt" in finding for finding in find_violations(root)[0]):
+            print("self-test FAIL: legal context package in platform core not flagged")
+            ok = False
+        legal.unlink()
 
         # (a) the ADR's own self-test: a lending package placed back in core must be flagged
         bad = root / "openbank-libs-domain/src/main/kotlin/Aprc.kt"
