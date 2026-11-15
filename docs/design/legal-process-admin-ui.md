@@ -112,3 +112,29 @@ oprávnění ke schránce, včetně počtu zpráv čekajících na import.
 Volání seznamu může způsobit doručení. Aktivace produkčního přístupu, jeho
 provozní schválení a ověření velkoobjemových zpráv zůstávají součástí
 konformity. Současný worker používá jen veřejný test ISDS.
+
+### Živý konformační průchod
+
+Do vyhrazené schránky veřejného testu připravte obyčejnou syntetickou zprávu
+s unikátním předmětem. Přístup k testovací schránce se zřizuje v klientském
+portálu. [Nápověda ke zřízení testovací schránky](https://datovka.gov.cz/info/cs/help/8.9.text.html)
+
+Do prostředí procesu předejte uživatelské pověření jen lokálně. Test očekává
+následující proměnné:
+
+| Proměnná | Hodnota |
+| --- | --- |
+| LEGAL_ISDS_POLL_BASIC | Basic pověření z lokálního správce tajemství |
+| LEGAL_ISDS_POLL_TEST_MAILBOX | Lokální namespace schránky s prefixem test- |
+| LEGAL_ISDS_POLL_FIRST_FROM | Čas v ISO 8601 těsně před dodáním testovací zprávy |
+| LEGAL_INBOX_E2E_DELIVERY_ID | ID syntetické zprávy v ISDS |
+| LEGAL_INBOX_E2E_SUBJECT | Přesný předmět syntetické zprávy |
+
+Po zabalení Quarkusu a instalaci závislostí pro Chromium spusťte
+**bash openbank-admin-ui/e2e/run-legal-inbox-postgres.sh --live-isds**.
+Izolovaný PostgreSQL začíná prázdný. Worker smí volat výhradně veřejný test ISDS.
+Runner čeká na originál a doručenku od workeru a zkontroluje přítomnost času
+doručení v obálce. Chromium stáhne oba doklady přes BFF, porovná jejich bajty
+s uloženými a ověří předmět, přidělení a historii vyčítání. Závěrečný dotaz
+ověří digest obou dokladů, tým, revizi a audit právě této zprávy. Kontrola času
+v obálce sama neověřuje důvěryhodnost podpisového řetězce.
