@@ -17,7 +17,7 @@ export type EvidenceLevel = 'enforced-gate' | 'ci' | 'documented' | 'none'
 export type Verdict = DeclaredStatus | 'unverified'
 /** Whether the newest passing gate run is recent enough for the control's declared `max_evidence_age_days`. */
 export type Freshness = 'fresh' | 'stale' | 'unknown' | 'not-required'
-export type DowngradeReason = 'no-machine-evidence' | 'stale-evidence' | 'evidence-age-unknown'
+export type DowngradeReason = 'no-machine-evidence' | 'failing-gate' | 'stale-evidence' | 'evidence-age-unknown'
 
 export interface TraceInputControl {
   id: string
@@ -97,7 +97,7 @@ export interface TraceObligation extends TraceInputObligation {
 }
 
 export interface ComplianceTrace {
-  asOf: { commit: string | null; postureCollectedAt: string | null; gateHealthCollectedAt: string | null; evaluatedAt: string }
+  asOf: { commit: string | null; postureCollectedAt: string | null; gateHealthCollectedAt: string | null; gateHealthCurrent: boolean; evaluatedAt: string }
   frameworks: { id: string; name: string; controls: number; machineEvidenced: number }[]
   areas: { id: string; cs: string; en: string }[]
   controls: TraceControl[]
@@ -171,6 +171,25 @@ export function evidenceLevel(refs: TraceEvidence[]): EvidenceLevel {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
+/**
+ * A gate-health snapshot older than this says nothing about whether a gate is red today, so it is
+ * treated as absent: every age-bound claim becomes `evidence-age-unknown` and no gate status is shown.
+ */
+export const GATE_HEALTH_MAX_AGE_MS = DAY_MS
+
+const FAILED = new Set(['failed', 'unfalsified'])
+
+/** The snapshot to judge with, or `null` when it is missing or too old to describe the present. */
+export function currentGateHealth(health: TraceInputs['gateHealth'], now: string): TraceInputs['gateHealth'] {
+  if (!health) return null
+  const age = Date.parse(now) - Date.parse(health.collectedAt)
+  return Number.isFinite(age) && age >= 0 && age <= GATE_HEALTH_MAX_AGE_MS ? health : null
+}
+
+/** True when any gate the control cites is red in the latest observed run. */
+export function anyCitedGateFailing(refs: TraceEvidence[]): boolean {
+  return refs.some(r => r.kind === 'gate' && r.gateStatus != null && FAILED.has(r.gateStatus))
+}
 
 /**
  * Evidence age counts only gates: they are the one kind whose runs are observed (gate-health
@@ -179,9 +198,10 @@ const DAY_MS = 24 * 60 * 60 * 1000
  */
 export function evidenceFreshness(refs: TraceEvidence[], maxAgeDays: number | undefined, now: string): { freshness: Freshness; newestEvidenceAt: string | null } {
   const passes = refs
-    .filter(r => r.kind === 'gate' && r.lastOkAt && r.gateStatus !== 'failed' && r.gateStatus !== 'unfalsified')
+    .filter(r => r.kind === 'gate' && r.lastOkAt && !(r.gateStatus != null && FAILED.has(r.gateStatus)))
     .map(r => r.lastOkAt as string)
-    .sort()
+    .filter(t => Number.isFinite(Date.parse(t)))
+    .sort((a, b) => Date.parse(a) - Date.parse(b))
   const newestEvidenceAt = passes.length ? passes[passes.length - 1] : null
   if (!maxAgeDays) return { freshness: 'not-required', newestEvidenceAt }
   if (!newestEvidenceAt) return { freshness: 'unknown', newestEvidenceAt }
@@ -196,16 +216,19 @@ export function evidenceFreshness(refs: TraceEvidence[], maxAgeDays: number | un
  * within it, and an age that cannot be established counts against the claim. Weak claims
  * (`audit`, `planned`) are already honest about themselves and stand as declared.
  */
-export function computeVerdict(declared: DeclaredStatus, level: EvidenceLevel, freshness: Freshness = 'not-required'): { verdict: Verdict; downgradeReason: DowngradeReason | null } {
+export function computeVerdict(declared: DeclaredStatus, level: EvidenceLevel, freshness: Freshness = 'not-required', failingGate = false): { verdict: Verdict; downgradeReason: DowngradeReason | null } {
   if (declared === 'unknown') return { verdict: 'unverified', downgradeReason: null }
   const positive = declared === 'enforced' || declared === 'partial'
   if (positive && LEVEL_RANK[level] < LEVEL_RANK.ci) return { verdict: 'unverified', downgradeReason: 'no-machine-evidence' }
+  // One red cited gate is enough: another gate passing does not prove the part this one checks.
+  if (positive && failingGate) return { verdict: 'unverified', downgradeReason: 'failing-gate' }
   if (positive && freshness === 'stale') return { verdict: 'unverified', downgradeReason: 'stale-evidence' }
   if (positive && freshness === 'unknown') return { verdict: 'unverified', downgradeReason: 'evidence-age-unknown' }
   return { verdict: declared, downgradeReason: null }
 }
 
 export function buildComplianceTrace(inputs: TraceInputs): ComplianceTrace {
+  const gateHealth = currentGateHealth(inputs.gateHealth, inputs.now)
   const gates = new Map(inputs.gates.map(g => [g.id, g]))
   const controlIds = new Set(inputs.controls.map(c => c.id))
 
@@ -223,13 +246,13 @@ export function buildComplianceTrace(inputs: TraceInputs): ComplianceTrace {
   const controls: TraceControl[] = inputs.controls.map(c => {
     const { evidenceRefs: raw, ...rest } = c
     const refs = (raw ?? [])
-      .map(r => resolveEvidence(r, gates, inputs.adrSlugs, inputs.commit, inputs.gateHealth))
+      .map(r => resolveEvidence(r, gates, inputs.adrSlugs, inputs.commit, gateHealth))
       .filter((r): r is TraceEvidence => r !== null)
     const level = evidenceLevel(refs)
     const age = evidenceFreshness(refs, c.maxEvidenceAgeDays, inputs.now)
     return {
       ...rest, evidenceRefs: refs, evidenceLevel: level, ...age,
-      ...computeVerdict(c.declaredStatus, level, age.freshness),
+      ...computeVerdict(c.declaredStatus, level, age.freshness, anyCitedGateFailing(refs)),
       obligationIds: obligationsByControl.get(c.id) ?? [],
     }
   })
@@ -241,7 +264,7 @@ export function buildComplianceTrace(inputs: TraceInputs): ComplianceTrace {
   for (const o of obligations) obligationsByCoverage[o.coverage.status] = (obligationsByCoverage[o.coverage.status] ?? 0) + 1
 
   return {
-    asOf: { commit: inputs.commit, postureCollectedAt: inputs.postureCollectedAt, gateHealthCollectedAt: inputs.gateHealth?.collectedAt ?? null, evaluatedAt: inputs.now },
+    asOf: { commit: inputs.commit, postureCollectedAt: inputs.postureCollectedAt, gateHealthCollectedAt: inputs.gateHealth?.collectedAt ?? null, gateHealthCurrent: gateHealth !== null, evaluatedAt: inputs.now },
     frameworks: inputs.frameworks.map(f => {
       const mine = controls.filter(c => c.frameworks.includes(f.id))
       return { ...f, controls: mine.length, machineEvidenced: mine.filter(isMachine).length }

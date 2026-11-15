@@ -39,6 +39,7 @@ function useLabels() {
     kind: (k: TraceEvidence['kind']) => ({ gate: 'gate', workflow: 'workflow', test: 'test', adr: 'ADR', path: t('soubor', 'path') })[k],
     reason: (r: NonNullable<TraceControl['downgradeReason']>) => ({
       'no-machine-evidence': t('tvrzení nepodpírá žádný strojově opakovaný důkaz', 'no machine-repeated evidence backs the claim'),
+      'failing-gate': t('jeden z citovaných gatů v posledním běhu selhal', 'a cited gate failed in its latest run'),
       'stale-evidence': t('poslední úspěšný běh gatu je starší než povolené stáří', 'the newest passing gate run is older than the allowed age'),
       'evidence-age-unknown': t('stáří důkazu nelze zjistit (chybí snímek běhů gatů)', 'the evidence age cannot be established (no gate-run snapshot)'),
     })[r],
@@ -84,6 +85,7 @@ function ControlCard({ control }: { control: TraceControl }) {
       <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
         {t('Deklarováno', 'Declared')}: {labels.verdict(control.declaredStatus)} · {t('Síla důkazu', 'Evidence strength')}: {labels.level(control.evidenceLevel)}
         {control.maxEvidenceAgeDays ? <> · {t(`max. stáří ${control.maxEvidenceAgeDays} dní`, `max age ${control.maxEvidenceAgeDays} days`)}</> : null}
+        {control.newestEvidenceAt ? <> · {t(`nejnovější důkaz ${control.newestEvidenceAt.slice(0, 10)}`, `newest evidence ${control.newestEvidenceAt.slice(0, 10)}`)}</> : null}
         {control.downgradeReason
           ? <> · <span style={{ color: 'var(--danger-text)' }}>{labels.reason(control.downgradeReason)}</span></>
           : null}
@@ -189,6 +191,7 @@ export default function CompliancePage() {
           {t('Snímek k commitu', 'Snapshot as of commit')}: <code>{trace.asOf.commit ?? t('neznámý', 'unknown')}</code>
           {trace.asOf.postureCollectedAt ? <> · {t('signály manifestů', 'manifest signals')} {trace.asOf.postureCollectedAt}</> : null}
           {' · '}{t('běhy gatů', 'gate runs')} {trace.asOf.gateHealthCollectedAt ?? t('nedostupné', 'unavailable')}
+          {trace.asOf.gateHealthCollectedAt && !trace.asOf.gateHealthCurrent ? <span style={{ color: 'var(--warning-text)' }}> ({t('starší než den, nepoužito', 'older than a day, not used')})</span> : null}
         </p>
 
         <Tabs<View>
