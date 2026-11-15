@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import yaml
@@ -378,19 +379,63 @@ def strict_required_checks(rules, app_id=None):
                for c in rule["parameters"].get("required_status_checks") or [])
 
 
+# A single `gh api` blip must not redden an enforced gate on main (2026-11-14, run 43654847033):
+# retry transient signals only, inside the gate's 45 s budget, and still fail closed after that.
+PROTECTION_BACKOFF = (2, 5, 10)
+PROTECTION_TIMEOUT = 10
+PROTECTION_DEADLINE = 40
+TRANSIENT = re.compile(r"HTTP 5\d\d|rate limit|timed? ?out|timeout|connection (?:reset|refused)|"
+                       r"EOF|TLS handshake|temporarily unavailable", re.IGNORECASE)
+PERMANENT = re.compile(r"HTTP 40[134]\b|Not Found|Bad credentials|Resource not accessible", re.IGNORECASE)
+_PROTECTION_CACHE = {}
+
+
+def _sanitise(stderr):
+    text = re.sub(r"(gh[opsu]_|github_pat_)[A-Za-z0-9_]+", "<redacted>", stderr or "")
+    text = " ".join(text.split())
+    return text[:300] or "<no stderr>"
+
+
+def read_live_protection(repo):
+    """Return the successful `gh api` result for main's rules; memoised per run, fail closed."""
+    if repo in _PROTECTION_CACHE:
+        return _PROTECTION_CACHE[repo]
+    started = time.monotonic()
+    attempts = len(PROTECTION_BACKOFF) + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            result = subprocess.run(["gh", "api", f"repos/{repo}/rules/branches/main"],
+                                    capture_output=True, text=True, timeout=PROTECTION_TIMEOUT, check=False)
+        except OSError as error:
+            raise InvalidHold(f"cannot read live main protection: {error}") from error
+        except subprocess.TimeoutExpired:
+            reason, transient = f"timed out after {PROTECTION_TIMEOUT}s", True
+        else:
+            if not result.returncode:
+                _PROTECTION_CACHE[repo] = result
+                return result
+            reason = f"gh api exited {result.returncode}: {_sanitise(result.stderr)}"
+            transient = bool(TRANSIENT.search(result.stderr or "")) and not PERMANENT.search(result.stderr or "")
+        if not transient:
+            raise InvalidHold(f"cannot read live main protection (not retried): {reason}")
+        if attempt == attempts:
+            break
+        delay = PROTECTION_BACKOFF[attempt - 1]
+        if time.monotonic() - started + delay + PROTECTION_TIMEOUT > PROTECTION_DEADLINE:
+            break
+        print(f"::warning::live main protection read failed (attempt {attempt}/{attempts}): {reason}; "
+              f"retrying in {delay}s", file=sys.stderr)
+        time.sleep(delay)
+    raise InvalidHold(f"cannot read live main protection after {attempt} attempt(s): {reason}")
+
+
 def require_live_strict(root, base, repo):
     current = holds((root / RULES).read_text(encoding="utf-8"))
     previous = holds(at_base(root, base, RULES), allow_absent=True) if base else {}
     if not (current or previous):
         print("deploy holds: none; live strict check not needed")
         return
-    try:
-        result = subprocess.run(["gh", "api", f"repos/{repo}/rules/branches/main"],
-                                capture_output=True, text=True, timeout=30, check=False)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise InvalidHold(f"cannot read live main protection: {error}") from error
-    if result.returncode:
-        raise InvalidHold(f"cannot read live main protection: gh api exited {result.returncode}")
+    result = read_live_protection(repo)
     try:
         live_rules = json.loads(result.stdout)
     except json.JSONDecodeError as error:
@@ -550,6 +595,7 @@ def self_test():
         pinned_rule = rs(False, [{"context": "merge-train", "integration_id": 4242}])
         with patch.dict(os.environ, {"GITOPS_APP_ID": "4242"}), patch(
                 "subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout=json.dumps(pinned_rule), stderr="")):
+            _PROTECTION_CACHE.clear()
             require_live_strict(root, None, "example/repo")
         try:
             strict_required_checks([])
@@ -560,19 +606,62 @@ def self_test():
         from unittest.mock import patch
         good = subprocess.CompletedProcess([], 0, stdout=json.dumps([strict_rule]), stderr="")
         with patch("subprocess.run", return_value=good):
+            _PROTECTION_CACHE.clear()
             require_live_strict(root, None, "example/repo")
         bad_rule = {**strict_rule, "parameters": {
             **strict_rule["parameters"], "strict_required_status_checks_policy": False}}
         bad = subprocess.CompletedProcess([], 0, stdout=json.dumps([bad_rule]), stderr="")
         with patch("subprocess.run", return_value=bad):
             try:
+                _PROTECTION_CACHE.clear()
                 require_live_strict(root, None, "example/repo")
             except InvalidHold:
                 pass
             else:
                 raise AssertionError("active hold passed without live strict checks")
+        # Issue: one transient `gh api` failure must not redden an enforced gate on main.
+        def fail(stderr, code=1):
+            return subprocess.CompletedProcess([], code, stdout="", stderr=stderr)
+        sleeps = []
+        with patch("subprocess.run", side_effect=[fail("gh: HTTP 502: Bad Gateway"), good]), \
+                patch("time.sleep", sleeps.append):
+            _PROTECTION_CACHE.clear()
+            require_live_strict(root, None, "example/repo")
+        assert len(sleeps) == 1, f"transient failure retried {len(sleeps)} times, expected 1"
+        calls = []
+        def forbidden(*_a, **_k):
+            calls.append(1)
+            return fail("gh: Resource not accessible by integration (HTTP 403)")
+        with patch("subprocess.run", side_effect=forbidden), patch("time.sleep", sleeps.append):
+            try:
+                _PROTECTION_CACHE.clear()
+                require_live_strict(root, None, "example/repo")
+            except InvalidHold as error:
+                assert "HTTP 403" in str(error), f"403 stderr not surfaced: {error}"
+            else:
+                raise AssertionError("persistent 403 passed")
+        assert len(calls) == 1, f"403 was retried ({len(calls)} calls)"
+        calls.clear()
+        def outage(*_a, **_k):
+            calls.append(1)
+            return fail("gh: HTTP 503: Service Unavailable")
+        with patch("subprocess.run", side_effect=outage), patch("time.sleep", lambda _s: None):
+            try:
+                _PROTECTION_CACHE.clear()
+                require_live_strict(root, None, "example/repo")
+            except InvalidHold as error:
+                assert "HTTP 503" in str(error), f"503 stderr not surfaced: {error}"
+            else:
+                raise AssertionError("exhausted retries passed")
+        assert len(calls) == 4, f"expected 4 attempts, got {len(calls)}"
+        _PROTECTION_CACHE.clear()
+        with patch("subprocess.run", side_effect=[good]):
+            read_live_protection("example/repo")
+            read_live_protection("example/repo")  # a second live read would exhaust side_effect
+        _PROTECTION_CACHE.clear()
         rule.write_text("deploy_holds:\n  services: {}\n")
         with patch("subprocess.run", side_effect=AssertionError("empty hold queried GitHub")):
+            _PROTECTION_CACHE.clear()
             require_live_strict(root, None, "example/repo")
         approved_selftest(root, rule, manifest, original, base)
     print("deploy hold self-test passed")
