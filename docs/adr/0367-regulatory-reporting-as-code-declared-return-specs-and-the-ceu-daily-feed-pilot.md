@@ -263,7 +263,7 @@ reviewed load/failure evidence.
 
 **Intended benefits (subject to the delivery checks below)**
 - A return that exists in the UI provably has a backend, an owner and a deadline gauge.
-- CEÚ — a daily statutory duty with no implementation — gets one, without fictitious accounts.
+- CEÚ provides a daily filing lifecycle with evidenced synthetic exclusions.
 - Regulatory change becomes a reviewed diff to a spec, which is what lets an AI agent draft it.
 
 **Negative**
@@ -292,8 +292,9 @@ sandbox filing record carries a ČNB acknowledgement reference.
 ## Compliance impact
 
 - PCI DSS: not applicable — no cardholder data enters any return in scope.
-- DORA: not applicable to this decision; the DORA incident and register-of-information returns are
-  only catalogued as return kinds here.
+- DORA: reporting isolation, recovery and dependency controls contribute to operational resilience;
+  their implementation and failure-test evidence remain pending. Incident and register-of-information
+  filings still require their own reviewed classification, applicability and submission rules.
 - GDPR: the CEÚ feed transfers personal data of account holders, disposers and beneficial owners
   to ČNB under a legal obligation; the register projection is subject to the ADR-0118 retention
   and erasure model.
