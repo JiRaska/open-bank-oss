@@ -13,7 +13,7 @@ info:
   # 1.25 -> 1.26 (#12693): correct the owner portfolio path parameter name in the document.
   # 1.26 -> 1.27 (#10247): document the sole statutory signing requirement for preview and offer.
   # 1.27 -> 1.28 (#15716): approval replay binds to the frozen payload; 409 on a reused SCA challenge.
-  version: 1.28.0
+  version: 1.28.2
 servers:
   - url: http://localhost:8126
 tags:
@@ -281,6 +281,11 @@ paths:
             * `EXPOSURE_UNSUPPORTED` — exposure is non-null. It remains readable on historical grants
               for audit, but cannot authorize a raw object download until transformed-artifact delivery
               can prove redaction, watermark and view-count enforcement.
+            * `RESOURCE_TYPE_NOT_OFFERABLE` — resourceType is PAYMENT or STATEMENT (ADR-0375 D5/D6).
+              Neither has an ownership oracle nor a delivery mechanism, so neither can be offered.
+              Share a statement as the DOCUMENT its render produces, or use
+              ACCOUNT_DOWNLOAD_STATEMENTS for ongoing access. Both values stay in the enum because
+              historical grants carry them and remain readable for audit.
 
             All are refused before the SCA challenge is spent, so the customer keeps their ceremony.
         '403': { description: The authenticated party is not the grantor, or the actor lacks verified sole signing authority }
@@ -311,7 +316,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationPreviewResponse' }
-        '400': { description: Unsupported or inconsistent constraints, including non-null exposure (EXPOSURE_UNSUPPORTED) }
+        '400': { description: 'Unsupported or inconsistent constraints, including non-null exposure (EXPOSURE_UNSUPPORTED) and a PAYMENT or STATEMENT resourceType (RESOURCE_TYPE_NOT_OFFERABLE)' }
         '403': { description: The authenticated party is not the grantor, or the actor lacks verified sole signing authority }
         '422': { description: Eligibility gate, or resource ownership could not be established }
         '503': { description: Grantor authority could not be verified; the draft was not authorized or cached }
@@ -1286,7 +1291,7 @@ components:
       properties:
         grantorPartyId: { type: string, format: uuid }
         granteePartyId: { type: string, format: uuid }
-        resourceType: { type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT] }
+        resourceType: { type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT], description: 'PAYMENT and STATEMENT are refused with 400 RESOURCE_TYPE_NOT_OFFERABLE (ADR-0375 D5/D6); they remain only so historical grants stay readable.' }
         resourceId: { type: string, format: uuid }
         capabilities:
           type: array
@@ -1364,7 +1369,7 @@ components:
       properties:
         grantorPartyId: { type: string, format: uuid }
         granteePartyId: { type: string, format: uuid }
-        resourceType: { type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT] }
+        resourceType: { type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT], description: 'PAYMENT and STATEMENT are refused with 400 RESOURCE_TYPE_NOT_OFFERABLE (ADR-0375 D5/D6); they remain only so historical grants stay readable.' }
         resourceId: { type: string, format: uuid }
         capabilities:
           type: array
