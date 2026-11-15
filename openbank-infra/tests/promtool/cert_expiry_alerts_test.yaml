@@ -14,6 +14,9 @@ tests:
     values: 432000x120
   - series: certmanager_certificate_expiration_timestamp_seconds{namespace="cert-manager",name="openbank-sandbox-ca"}
     values: 2592000x120
+  # A LEAF whose name ends in -ca, 50 days out: must NOT fire the CA alert.
+  - series: certmanager_certificate_expiration_timestamp_seconds{namespace="admin-ui",name="admin-ui-referral-ca"}
+    values: 4320000x120
   - series: certmanager_certificate_expiration_timestamp_seconds{namespace="ledger",name="ledger-internal-tls"}
     values: 6912000x120
   interval: 1m
