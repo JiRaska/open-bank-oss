@@ -34,7 +34,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  *
  * The provider states, names and response shapes are the ones fx-service's contract already
  * uses against the same provider (`SanctionsPactProviderVerificationTest` seeds them). The
- * idempotency keys carry this rail's own `swift-<messageId>:<role>` shape and differ from every other
+ * idempotency keys carry this rail's own `swift-<messageId>-<nonce>:<role>` prefix and differ from every other
  * consumer's, because `SanctionsService.screen` short-circuits on a replayed key and would answer
  * one consumer's interaction with another's stored result.
  *
@@ -181,7 +181,7 @@ class SanctionsScreenPactConsumerTest {
         const val UNLISTED_NAME = "Zdenka Bezprijmeni"
         const val SEEDED_SANCTIONED_NAME = "Vladimir Putin"
 
-        /** This rail's own key shape at its call site (`swift-<messageId>:<role>`), distinct from every other consumer's. */
+        /** This rail's key prefix (`swift-<messageId>-<nonce>:<role>`, nonce elided), unique to this consumer. */
         const val CLEAR_KEY = "swift-00000000-0000-4000-8000-0000000005d1:debtor"
         const val HIT_KEY = "swift-00000000-0000-4000-8000-0000000005c2:creditor"
 

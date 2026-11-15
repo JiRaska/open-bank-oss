@@ -4,6 +4,7 @@
 
 package com.openbank.swift.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.fincrime.AmlCaseSeverity
 import com.openbank.libs.fincrime.ScreeningDecision
 import com.openbank.libs.fincrime.ScreeningMatchStatus
@@ -60,9 +61,14 @@ class SwiftSanctionsScreening(
             return SwiftScreeningVerdict.HOLD
         }
         val subjects = listOf(debtor to ScreeningRole.DEBTOR, creditor to ScreeningRole.CREDITOR)
+        // One nonce per screening attempt: the adapter's own retries reuse it (dedupe), but a held
+        // message screened again gets a FRESH screen, never sanctions-service's stored answer for an
+        // old key — which would replay a stale CLEAR after a list update or a name change. Same
+        // shape as sdd's CollectionScreeningGate.
+        val attempt = "swift-${message.id}-${Ids.randomId()}"
         val results = try {
             subjects.map { (name, role) ->
-                screeningPort.screen(name, role, "swift-${message.id}:${role.name.lowercase()}")
+                screeningPort.screen(name, role, "$attempt:${role.name.lowercase()}")
             }
         } catch (ex: ScreeningUnavailableException) {
             log.warnf(ex, "Sanctions screening unavailable for SWIFT message %s; holding", message.id)
