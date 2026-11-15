@@ -24,12 +24,6 @@ claude-md-identifiers-exist openbank-*/
 claude-md-identifiers-exist openbank-admin-ui/
 claude-md-identifiers-exist openbank-libs/
 claude-md-identifiers-exist settings.gradle.kts
-compliance-page-evidence build-logic/
-compliance-page-evidence fuzz/
-compliance-page-evidence openbank-*/
-compliance-page-evidence openbank-admin-ui/
-compliance-page-evidence openbank-infra/
-compliance-page-evidence perf/
 coverage-floor-ratchet build-logic/
 coverage-floor-ratchet build.gradle.kts
 coverage-floor-ratchet fuzz/
