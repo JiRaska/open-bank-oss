@@ -8,8 +8,6 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.account.application.port.out.DirectoryPage
 import com.openbank.account.application.port.out.DirectoryParty
 import com.openbank.account.application.port.out.PartyDirectoryPort
-import com.openbank.account.application.port.out.SanctionsEntityType
-import com.openbank.account.application.port.out.SanctionsScreenResult
 import com.openbank.account.infrastructure.client.PassportAdmissionClient
 import com.openbank.account.infrastructure.client.PassportAdmissionRequest
 import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
@@ -88,9 +86,6 @@ class AccountProductRevisionPinIT {
     lateinit var directory: RecoveryPartyDirectory
 
     @Inject
-    lateinit var screeningFixture: TestSanctionsScreeningPort
-
-    @Inject
     lateinit var dataSource: DataSource
 
     @Inject
@@ -102,7 +97,6 @@ class AccountProductRevisionPinIT {
     fun resetCatalog() {
         TestProductCatalogPort.mode = TestProductCatalogPort.Mode.PUBLISHED
         directory.party = null
-        screeningFixture.clearOverrides()
     }
 
     @Test
@@ -303,7 +297,7 @@ class AccountProductRevisionPinIT {
         }
         QuarkusMock.installMockForType(catalogue, PassportAdmissionClient::class.java, RestClient.LITERAL)
         val party = UUID.randomUUID()
-        val screens = installScreeningFixture(party)
+        directory.party = DirectoryParty(party, "COMPANY", "ACTIVE", "Synthetic Registered Company")
         val key = UUID.randomUUID().toString()
         assertThat(open(party, key, UUID.randomUUID()).statusCode).isEqualTo(500)
         val account = query("SELECT account_id FROM account_passport_intents WHERE operation_key = ?", "OPEN:$key")
@@ -316,16 +310,9 @@ class AccountProductRevisionPinIT {
             FROM accounts WHERE id = ?
         """.trimIndent()
         while (query(lookup, account).isEmpty() && System.nanoTime() < deadline) Thread.sleep(100)
-        val screeningStatus = if (consumedBeforeLoss) "CLEAR" else "WHITELISTED"
-        assertThat(query(lookup, account)).containsExactly(listOf("PENDING_ACTIVATION", null, screeningStatus, true))
+        assertThat(query(lookup, account)).containsExactly(listOf("PENDING_ACTIVATION", null, "CLEAR", true))
         assertThat(requests).hasSize(if (consumedBeforeLoss) 1 else 2)
         assertThat(requests).allMatch { it == storedReceipt.get() }
-        assertThat(screens).hasSize(if (consumedBeforeLoss) 1 else 2)
-        assertThat(screens.map { it.key }).doesNotHaveDuplicates()
-        if (!consumedBeforeLoss) {
-            assertThat(screens.last().name).isEqualTo("Synthetic Registered Company")
-            assertThat(screens.last().type).isEqualTo(SanctionsEntityType.ORGANIZATION)
-        }
         assertThat(query("SELECT event_type FROM account_outbox WHERE aggregate_id = ?", account))
             .containsExactly(listOf("AccountCreated"))
         assertThat(
@@ -335,18 +322,6 @@ class AccountProductRevisionPinIT {
             ),
         ).containsExactly(listOf(true, null))
     }
-
-    private fun installScreeningFixture(party: UUID): List<ScreeningCall> {
-        directory.party = DirectoryParty(party, "COMPANY", "ACTIVE", "Synthetic Registered Company")
-        val calls = CopyOnWriteArrayList<ScreeningCall>()
-        screeningFixture.respondFor(party.toString()) { name, key, entityType ->
-            calls += ScreeningCall(name, key, entityType)
-            SanctionsScreenResult(if (calls.size == 1) "CLEAR" else "WHITELISTED", 0.0, null)
-        }
-        return calls
-    }
-
-    private data class ScreeningCall(val name: String, val key: String, val type: SanctionsEntityType)
 
     private fun pinLegacyRow(accountId: UUID, number: Long?): Int = dataSource.connection.use { c ->
         c.prepareStatement(

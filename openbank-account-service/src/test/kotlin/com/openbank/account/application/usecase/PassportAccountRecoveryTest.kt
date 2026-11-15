@@ -19,6 +19,7 @@ import com.openbank.account.application.port.out.ProductCatalogPort
 import com.openbank.account.application.port.out.ProductLookupResult
 import com.openbank.account.application.port.out.PublishedRevision
 import com.openbank.account.application.port.out.RevisionResolution
+import com.openbank.account.application.port.out.SanctionsEntityType
 import com.openbank.account.application.port.out.SanctionsScreenResult
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
@@ -29,6 +30,7 @@ import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.domain.money.CurrencyCode
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -146,23 +148,13 @@ class PassportAccountRecoveryTest {
 
     @Test
     fun `recovery does not consume a permit when fresh sanctions screening blocks`() {
-        val intent = PassportIntent(
-            "OPEN:synthetic",
-            UUID.randomUUID(),
-            UUID.randomUUID(),
-            grant,
-            party,
-            PassportOperation.OPEN,
-            binding,
-            pin,
-        )
-        val draft =
-            PassportOpeningDraft(iban.value, product, AccountType.CURRENT, "CZK", now, "CLEAR", null, null, null)
+        val job = unconsumedOpening()
+        val intent = job.intent
         coEvery { passport.hasReceipt(intent) } returns false
         coEvery { parties.find(party) } returns DirectoryParty(party, "INDIVIDUAL", "ACTIVE", "Synthetic Applicant")
         coEvery { screening.screen(any(), any(), any()) } returns SanctionsScreenResult("HIT", 1.0, null)
 
-        runBlocking { service().recoverPassportOpening(PassportOpeningJob(intent, draft)) }
+        runBlocking { service().recoverPassportOpening(job) }
 
         coVerify(exactly = 1) {
             screening.screen(
@@ -173,6 +165,44 @@ class PassportAccountRecoveryTest {
         }
         coVerify(exactly = 0) { passport.admit(any()) }
         coVerify(exactly = 0) { repo.saveNewAccount(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `recovery screens the registered company before admitting and persisting the opening`() {
+        val job = unconsumedOpening()
+        coEvery { passport.hasReceipt(job.intent) } returns false
+        coEvery { parties.find(party) } returns DirectoryParty(party, "COMPANY", "ACTIVE", "Synthetic Company")
+        coEvery {
+            screening.screen("Synthetic Company", any(), party.toString(), SanctionsEntityType.ORGANIZATION)
+        } returns SanctionsScreenResult("WHITELISTED", 0.0, null)
+        coEvery { repo.saveNewAccount(any(), any(), any(), any(), any()) } answers { firstArg() }
+
+        runBlocking { service().recoverPassportOpening(job) }
+
+        coVerifyOrder {
+            screening.screen(
+                "Synthetic Company",
+                match { it.startsWith("passport-recovery:") },
+                party.toString(),
+                SanctionsEntityType.ORGANIZATION,
+            )
+            passport.admit(job.intent)
+            repo.saveNewAccount(
+                match { it.id == job.intent.accountId && it.sanctionsStatus == "WHITELISTED" },
+                any(),
+                "synthetic",
+                binding,
+                any(),
+            )
+        }
+    }
+
+    private fun unconsumedOpening(): PassportOpeningJob {
+        val intent = PassportIntent(
+            "OPEN:synthetic", UUID.randomUUID(), UUID.randomUUID(), grant, party, PassportOperation.OPEN, binding, pin,
+        )
+        val draft = PassportOpeningDraft(iban.value, product, AccountType.CURRENT, "CZK", now, "CLEAR", null, null, null)
+        return PassportOpeningJob(intent, draft)
     }
 
     private fun service() = AccountService(
