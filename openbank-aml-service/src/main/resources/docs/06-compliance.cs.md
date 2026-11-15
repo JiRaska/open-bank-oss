@@ -110,3 +110,9 @@ Každé založení a přechod případu emituje verzovanou doménovou událost �
 - ✅ Audit: každá změna stavu → audit-service přes outbox událost
 - ⚠️ OPA autorizace je ve výchozím stavu **advisory** (`AUTHZ_ENFORCE=false`) — před spolehnutím na policy zamítnutí přepni na enforce
 - ⚠️ `openapi.yaml` je nesynchronní s implementovaným kontraktem — smířit před publikací specifikace jako autoritativní (viz [03-api](./03-api.md))
+
+## Kdo smí zakládat případy
+
+Založení případu přijímá služba jen od pojmenovaných strojových identit služeb, které provozují
+screeningovou bránu (`AML_CASE_CREATE_CALLERS` v `AmlCaseResource`, zrcadleno v `aml_rest_ext.rego`).
+Patří mezi ně sdd-service: případ otevře, když její sankční brána inkaso pozdrží nebo zablokuje.
