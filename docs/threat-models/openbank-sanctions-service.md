@@ -277,8 +277,9 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
   down to 0.65 and returns such a name as `POTENTIAL_HIT` (PEP entries: `pepStatus`).
   Whole-string trigram similarity also over-matched: a shared given name plus two surname
   letters scored 0.64 against unrelated PEPs. Candidates are now capped by a part-aligned score
-  (`NameTokenScore`, never raises a score), so the false positive is removed without widening
-  what the search can miss.
+  (`NameTokenScore.decide`, never raises a score). Fail-closed: a candidate is removed only when
+  the structure score is below the review floor; between that floor and a HIT-floor profile's
+  search floor the trigram HIT stands, so PAYMENT cannot be softened from BLOCK to REVIEW/CLEAR.
   **Clearances (STRIDE-E):** an analyst's `WHITELISTED` decision used to cover every match
   identity on the check, and a jurisdiction match was identified by list and country only — so
   a clearance recorded while a country was `HIGH_RISK` went on to whitelist the same country
