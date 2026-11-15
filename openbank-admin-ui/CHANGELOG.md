@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.18.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.17.1...admin-ui-v4.18.0) (2026-11-15)
+
+
+### Features
+
+* **admin-ui:** derive /docs/compliance from the obligation-control-evidence trace ([#16164](https://github.com/JiRaska/open-bank-oss/issues/16164)) ([d582cd8](https://github.com/JiRaska/open-bank-oss/commit/d582cd8cc81560f8d3d2441d45733f46cab0fe3d))
+
+## [4.17.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.17.0...admin-ui-v4.17.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **admin-ui:** filter regulatory obligations and preserve filing entities ([#16362](https://github.com/JiRaska/open-bank-oss/issues/16362)) ([cf461e6](https://github.com/JiRaska/open-bank-oss/commit/cf461e6a42e0e0864e7748b07d4a95029873441e))
+
 ## [4.17.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.16.0...admin-ui-v4.17.0) (2026-11-15)
 
 

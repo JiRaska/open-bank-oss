@@ -71,7 +71,7 @@ metadata:
     # ADR-0234: every HTTPRoute in `observability` is extAuth-gated or declares why not
     # (Kyverno require-gated-or-declared-tool-httproute-cel). The bearer-token check on the
     # OTLP receiver and the per-client rate limit are this host's controls.
-    openbank.io/ungated-machine-callers: >-
+    open-bank.tech/ungated-machine-callers: >-
       OTLP/HTTP metric export from CI runners; no browser session exists to
       authenticate against, and the receiver requires a bearer token.
 spec:
