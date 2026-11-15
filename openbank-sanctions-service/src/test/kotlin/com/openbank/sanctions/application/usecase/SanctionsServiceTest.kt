@@ -155,15 +155,16 @@ class SanctionsServiceTest {
     fun `a shared given name with a different surname is not a match`(): Unit = runBlocking {
         coEvery { repo.findByIdempotencyKey(any()) } returns null
         coEvery { repo.saveWithEvent(any(), any()) } answers { firstArg() }
-        // pg_trgm scored these 0.64 (shared "jiri" + "ra"); the stub scores them higher still, so
-        // only the name-structure cap can keep the screen CLEAR.
+        // pg_trgm scored these 0.64 (shared "jiri" + "ra"). The stub scores 0.80 — a POTENTIAL_HIT on
+        // its own, under the HIT threshold at which a strong trigram score is never removed — so only
+        // the name-structure score can keep the screen CLEAR.
         val rathousky = sampleEntry(listType = SanctionsListType.PEP_GLOBAL, primaryName = "Jiří Rathouský")
         val ratas =
             sampleEntry(listType = SanctionsListType.PEP_GLOBAL, primaryName = "Jüri Ratas", externalId = "ext-2")
         // The test importer only lowercases (setUp), so diacritics stay in the query.
         coEvery { entryRepo.search("jiří raška", any(), any(), any()) } returns listOf(
-            SanctionsEntryMatch(entry = rathousky, matchedName = "Jiří Rathouský", score = 0.90),
-            SanctionsEntryMatch(entry = ratas, matchedName = "Jüri Ratas", score = 0.90),
+            SanctionsEntryMatch(entry = rathousky, matchedName = "Jiří Rathouský", score = 0.80),
+            SanctionsEntryMatch(entry = ratas, matchedName = "Jüri Ratas", score = 0.80),
         )
 
         val result = service.screen(sampleScreenCommand(name = "Jiří Raška"))

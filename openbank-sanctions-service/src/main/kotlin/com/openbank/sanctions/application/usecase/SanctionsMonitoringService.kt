@@ -185,6 +185,7 @@ class SanctionsMonitoringService(
                     entryNames = entryNames,
                     searchFloor = profiles.nameSearchFloor(ScreeningProfile.CUSTOMER),
                     reviewFloor = ScreeningProfileEvaluator.POTENTIAL_HIT_THRESHOLD,
+                    hitFloor = ScreeningProfileEvaluator.HIT_THRESHOLD,
                 ) ?: continue,
             )
             raiseIfUncovered(candidate.subject, match, entry.namesVersion, MonitoringDetection.LIST_DELTA)

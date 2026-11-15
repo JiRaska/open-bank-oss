@@ -52,11 +52,14 @@ two different names and contributes nothing, and the sum is divided by the short
 count, so an omitted middle name or patronymic does not dilute a true match. Spelling and
 transliteration variants still align — Jaro-Winkler plus a consonant skeleton (`Adanov`/`Adnuf`,
 `Hammam`/`Humam`) and initials — and honorifics, generational suffixes and particles (`al`, `bin`,
-`ibn`, `abu`, `van`, `de`) are ignored unless nothing else remains; a fused `al-` is tried both ways.
+`ibn`, `abu`, `van`, `de`) are ignored unless nothing else remains. A particle is also tried fused
+onto the next part (`bin Laden`/`Binladen`, `de la Cruz`/`Delacruz`), and a fused `al-` is tried both
+ways. Letters that do not decompose (`đ`, `ł`, `ø`, `ß`) are folded to their Latin spelling.
 The re-score never raises a score and is fail-closed: it removes a candidate only when it tells the
 names apart clearly (below the 0.65 review floor), and where it lands between that floor and the
 caller's search floor (0.85 on PAYMENT) the trigram score stands, so a blocking HIT is never
-softened into a REVIEW. The live screen and the monitoring delta apply the same rule.
+softened into a REVIEW. A trigram score at or above the HIT threshold (0.85) is never removed, only
+held at the caller's search floor. The live screen and the monitoring delta apply the same rule.
 
 ## GDPR mapping
 

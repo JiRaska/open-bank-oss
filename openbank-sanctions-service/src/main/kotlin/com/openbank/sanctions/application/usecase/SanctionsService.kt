@@ -92,6 +92,7 @@ class SanctionsService(
                     entryNames = found.entry.names(),
                     searchFloor = searchFloor,
                     reviewFloor = ScreeningProfileEvaluator.POTENTIAL_HIT_THRESHOLD,
+                    hitFloor = ScreeningProfileEvaluator.HIT_THRESHOLD,
                 ) ?: continue
                 val m = found.copy(score = score)
                 val key = "${m.entry.listType}:${m.entry.externalId ?: m.entry.primaryName}"

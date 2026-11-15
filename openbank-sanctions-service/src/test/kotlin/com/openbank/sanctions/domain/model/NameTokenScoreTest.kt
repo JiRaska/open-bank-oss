@@ -67,8 +67,10 @@ class NameTokenScoreTest {
     @Test
     fun `decide removes a clearly different name and never raises the trigram score`() {
         val raska = listOf("Jiří Raška")
-        assertThat(NameTokenScore.decide(0.64, raska, listOf("Jiří Rathouský"), 0.65, 0.65)).isNull()
-        assertThat(NameTokenScore.decide(0.7, listOf("Jiri Raska"), listOf("Jiri Raska"), 0.65, 0.65)).isEqualTo(0.7)
+        assertThat(NameTokenScore.decide(0.64, raska, listOf("Jiří Rathouský"), 0.65, 0.65, 0.85)).isNull()
+        assertThat(
+            NameTokenScore.decide(0.7, listOf("Jiri Raska"), listOf("Jiri Raska"), 0.65, 0.65, 0.85),
+        ).isEqualTo(0.7)
     }
 
     @Test
@@ -79,13 +81,61 @@ class NameTokenScoreTest {
         val entry = listOf("Ahmad Karimi Tehrani")
         val structure = NameTokenScore.best(query, entry)
         assertThat(structure).isBetween(0.65, 0.85)
-        assertThat(NameTokenScore.decide(0.9, query, entry, 0.85, 0.65)).isEqualTo(0.9)
-        assertThat(NameTokenScore.decide(0.9, query, entry, 0.65, 0.65)).isEqualTo(structure)
+        assertThat(NameTokenScore.decide(0.9, query, entry, 0.85, 0.65, 0.85)).isEqualTo(0.9)
+        assertThat(NameTokenScore.decide(0.9, query, entry, 0.65, 0.65, 0.85)).isEqualTo(structure)
     }
 
     @Test
     fun `a name with no letters scores zero`() {
         assertThat(NameTokenScore.best(listOf(" - "), listOf("Jiri Raska"))).isZero()
         assertThat(NameTokenScore.best(listOf("Jiri"), listOf(""))).isZero()
+    }
+
+    @Test
+    fun `a particle written fused on one side and separate on the other still matches`() {
+        // Second review of #16258: dropping the particle from one side only left the other side's
+        // fused part with no counterpart, and these real list spellings scored 0.45-0.50.
+        val cases = listOf(
+            "Osama Binladen" to "Usama bin Laden",
+            "Usama Bin Laden" to "Usama Binladen",
+            "Abdelaziz Bouteflika" to "Abd el Aziz Bouteflika",
+            "Abdulrahman Ali" to "Abd al-Rahman Ali",
+            "Benali Zine" to "Ben Ali Zine",
+            "Vandersloot Joran" to "Joran van der Sloot",
+            "Delacruz Juan" to "Juan de la Cruz",
+        )
+        for ((query, entry) in cases) {
+            assertThat(NameTokenScore.best(listOf(query), listOf(entry)))
+                .describedAs("%s vs %s", query, entry)
+                .isGreaterThanOrEqualTo(0.85)
+        }
+    }
+
+    @Test
+    fun `letters NFD does not decompose are folded`() {
+        assertThat(
+            NameTokenScore.best(listOf("Djordje Djordjevic"), listOf("Đorđe Đorđević")),
+        ).isGreaterThanOrEqualTo(0.85)
+        assertThat(
+            NameTokenScore.best(listOf("Soren Ostergaard"), listOf("Søren Østergaard")),
+        ).isGreaterThanOrEqualTo(0.85)
+        assertThat(NameTokenScore.best(listOf("Strasse"), listOf("Straße"))).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `Ng is a surname, not a run of initials`() {
+        assertThat(NameTokenScore.parts("Ng Wai")).containsExactly("ng", "wai")
+        assertThat(NameTokenScore.parts("VV Putin")).containsExactly("v", "v", "putin")
+    }
+
+    @Test
+    fun `a strong trigram score is never removed, only held at the caller's search floor`() {
+        // Structure under the review floor, but the whole-string evidence is a HIT.
+        val query = listOf("Jiří Raška")
+        val entry = listOf("Jiří Rathouský")
+        assertThat(NameTokenScore.best(query, entry)).isLessThan(0.65)
+        assertThat(NameTokenScore.decide(0.9, query, entry, 0.85, 0.65, 0.85)).isEqualTo(0.85)
+        assertThat(NameTokenScore.decide(0.9, query, entry, 0.65, 0.65, 0.85)).isEqualTo(0.65)
+        assertThat(NameTokenScore.decide(0.84, query, entry, 0.65, 0.65, 0.85)).isNull()
     }
 }

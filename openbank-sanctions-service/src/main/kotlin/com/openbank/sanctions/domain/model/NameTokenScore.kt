@@ -36,14 +36,15 @@ object NameTokenScore {
     /** Below this a pair of name parts is treated as two different names. */
     const val PART_FLOOR = 0.80
 
-    /** Best part-aligned score between any of [queryNames] and any of [entryNames]. */
+    /**
+     * Best part-aligned score between any of [queryNames] and any of [entryNames], over every
+     * spelling variant of each name (see [variants]).
+     */
     fun best(queryNames: Collection<String>, entryNames: Collection<String>): Double {
-        val entryParts = entryNames.map(::parts).filter { it.isNotEmpty() }
+        val entryVariants = entryNames.flatMap(::variants)
         var best = 0.0
         for (q in queryNames) {
-            val qp = parts(q)
-            if (qp.isEmpty()) continue
-            for (ep in entryParts) best = max(best, score(qp, ep))
+            for (qp in variants(q)) for (ep in entryVariants) best = max(best, score(qp, ep))
         }
         return best
     }
@@ -51,13 +52,18 @@ object NameTokenScore {
     /**
      * The deciding score of a trigram candidate, or null when the candidate is no match at all.
      *
-     * Fail-closed by construction: the name-structure score may only REMOVE a candidate it has
-     * clearly told apart (below [reviewFloor], e.g. a shared given name with a different surname),
-     * or lower it within the band the caller acts on. Where it lands between [reviewFloor] and the
-     * caller's [searchFloor] it has neither confirmed nor refuted the match, so the trigram score
-     * stands — a PAYMENT screen (floor 0.85) never turns a HIT into a POTENTIAL_HIT that its
-     * policy would treat as REVIEW, or as CLEAR for an internal transfer. With the CUSTOMER floor
-     * (0.65) that band is empty and the result is simply the lower of the two scores.
+     * Fail-closed by construction:
+     *  - structure at or above [searchFloor]: the parts confirm the match, result is the lower of
+     *    the two scores;
+     *  - structure between [reviewFloor] and [searchFloor]: neither confirmed nor refuted, the
+     *    trigram score stands — a PAYMENT screen (floor 0.85) never turns a HIT into a
+     *    POTENTIAL_HIT its policy would treat as REVIEW, or as CLEAR for an internal transfer;
+     *  - structure below [reviewFloor] but trigram at or above [hitFloor]: the whole-string
+     *    evidence is strong and this scorer is known to under-score some real variants, so the
+     *    candidate is never removed — it is held at the caller's search floor (a HIT for PAYMENT,
+     *    a POTENTIAL_HIT for review on CUSTOMER);
+     *  - otherwise (weak trigram, parts clearly different, e.g. a shared given name with a
+     *    different surname): removed.
      */
     fun decide(
         trigramScore: Double,
@@ -65,12 +71,14 @@ object NameTokenScore {
         entryNames: Collection<String>,
         searchFloor: Double,
         reviewFloor: Double,
+        hitFloor: Double,
     ): Double? {
         val structure = best(queryNames, entryNames)
         return when {
-            structure < reviewFloor -> null
-            structure < searchFloor -> trigramScore
-            else -> min(trigramScore, structure)
+            structure >= searchFloor -> min(trigramScore, structure)
+            structure >= reviewFloor -> trigramScore
+            trigramScore >= hitFloor -> min(trigramScore, max(searchFloor, reviewFloor))
+            else -> null
         }
     }
 
@@ -81,24 +89,33 @@ object NameTokenScore {
      * of initials and splits into them (`VV` → `v`, `v`).
      */
     fun parts(name: String): List<String> {
-        val all = Normalizer.normalize(name, Normalizer.Form.NFD)
-            .replace(COMBINING_MARKS, "")
-            .lowercase()
-            .replace(APOSTROPHES, "")
-            .split(SEPARATORS)
-            .filter { it.isNotEmpty() }
+        val all = NameTokens.tokens(name)
         val meaningful = all.filter { it !in NOISE }.ifEmpty { all }
-        return meaningful.flatMap { if (isInitials(it)) it.map(Char::toString) else listOf(it) }
+        return NameTokens.expandInitials(meaningful)
     }
 
-    private fun isInitials(part: String): Boolean =
-        part.length in 2..MAX_INITIALS && part.all { it.isLetter() && it !in VOWELS && it != 'y' }
+    /**
+     * The spellings a name is scored under: [parts], and the same tokens with every particle
+     * fused onto the part that follows it. Lists write particles both ways — `bin Laden` and
+     * `Binladen`, `Abd el Aziz` and `Abdelaziz`, `de la Cruz` and `Delacruz` — and dropping the
+     * particle from one side only leaves the other side's fused part with no counterpart.
+     */
+    internal fun variants(name: String): List<List<String>> {
+        val all = NameTokens.tokens(name)
+        val fused = mutableListOf<String>()
+        val pending = StringBuilder()
+        for (t in all) {
+            pending.append(t)
+            if (t !in NOISE) {
+                fused += pending.toString()
+                pending.clear()
+            }
+        }
+        if (pending.isNotEmpty()) fused += pending.toString()
+        return listOf(parts(name), NameTokens.expandInitials(fused)).filter { it.isNotEmpty() }.distinct()
+    }
 
-    private val COMBINING_MARKS = Regex("\\p{InCombiningDiacriticalMarks}+")
-    private val APOSTROPHES = Regex("['\u2019`]")
-    private val SEPARATORS = Regex("[^\\p{L}\\p{N}]+")
-    private const val VOWELS = "aeiou"
-    private const val MAX_INITIALS = 3
+    internal const val VOWELS = "aeiou"
 
     /**
      * Words that say nothing about who a person is: honorifics, generational suffixes, and the
@@ -185,6 +202,48 @@ object NameTokenScore {
         }
         return sum / min(a.size, b.size)
     }
+}
+
+/** Normalised tokens of a name: diacritics removed, letters folded, initials expanded. */
+internal object NameTokens {
+    fun tokens(name: String): List<String> {
+        val lower = Normalizer.normalize(name, Normalizer.Form.NFD)
+            .replace(COMBINING_MARKS, "")
+            .lowercase()
+        val folded = StringBuilder()
+        for (c in lower) folded.append(LETTER_FOLD[c] ?: c.toString())
+        return folded.toString()
+            .replace(APOSTROPHES, "")
+            .split(SEPARATORS)
+            .filter { it.isNotEmpty() }
+    }
+
+    fun expandInitials(parts: List<String>): List<String> =
+        parts.flatMap { if (isInitials(it)) it.map(Char::toString) else listOf(it) }
+
+    private fun isInitials(part: String): Boolean = part.length in 2..MAX_INITIALS &&
+        part !in VOWELLESS_NAMES &&
+        part.all { it.isLetter() && it !in NameTokenScore.VOWELS && it != 'y' }
+
+    /** Letters NFD does not decompose, folded to their usual Latin transliteration. */
+    private val LETTER_FOLD = mapOf(
+        'đ' to "dj",
+        'ł' to "l",
+        'ø' to "o",
+        'ß' to "ss",
+        'æ' to "ae",
+        'œ' to "oe",
+        'þ' to "th",
+        'ı' to "i",
+    )
+
+    /** Real vowel-less name parts that are not runs of initials. */
+    private val VOWELLESS_NAMES = setOf("ng")
+
+    private val COMBINING_MARKS = Regex("\\p{InCombiningDiacriticalMarks}+")
+    private val APOSTROPHES = Regex("['\u2019`]")
+    private val SEPARATORS = Regex("[^\\p{L}\\p{N}]+")
+    private const val MAX_INITIALS = 3
 }
 
 /** Jaro-Winkler similarity of two strings, 0.0–1.0. */

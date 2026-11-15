@@ -51,11 +51,13 @@ jména (`NameTokenScore`): části se párují jedna k jedné, pár pod 0,80 jso
 nepřispívá ničím a součet se dělí počtem částí kratšího jména, takže vynechané prostřední jméno
 nebo otčestvo pravou shodu neoslabí. Varianty pravopisu a přepisu se dál spárují — Jaro-Winkler
 s kostrou souhlásek (`Adanov`/`Adnuf`, `Hammam`/`Humam`) a iniciály — a tituly, generační přípony
-a částice (`al`, `bin`, `ibn`, `abu`, `van`, `de`) se ignorují, pokud po nich něco zbude; spojené
-`al-` se zkouší s ním i bez něj. Přepočet skóre nikdy nezvýší a selhává bezpečně: kandidáta
+a částice (`al`, `bin`, `ibn`, `abu`, `van`, `de`) se ignorují, pokud po nich něco zbude. Částice
+se zkouší i srostlá s další částí (`bin Laden`/`Binladen`, `de la Cruz`/`Delacruz`), spojené `al-`
+s ním i bez něj a písmena, která se nerozloží (`đ`, `ł`, `ø`, `ß`), se převádějí na latinku. Přepočet skóre nikdy nezvýší a selhává bezpečně: kandidáta
 odstraní, jen když jména jasně rozliší (pod hranicí kontroly 0,65), a kde skončí mezi touto
 hranicí a prahem volajícího (0,85 u PAYMENT), platí skóre trigramů — blokující HIT tak nikdy
-nezměkne na REVIEW. Živý screening i delta průběžného monitoringu používají stejné pravidlo.
+nezměkne na REVIEW. Skóre trigramů od prahu HIT (0,85) se nikdy neodstraní, jen se drží na
+prahu volajícího. Živý screening i delta průběžného monitoringu používají stejné pravidlo.
 
 ## GDPR mapping
 
