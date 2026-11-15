@@ -87,7 +87,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
 # replaces hand-adding each new blob above (#16187), which reddened every unrelated open PR and
 # failed merge records whenever main's controller moved. The hand list stays for identities that
 # never sat at a first-parent commit of main. Bounded: newest MAIN_HISTORY_DEPTH revisions only.
-MAIN_REF = 'origin/main'
+# Fully qualified: a tag or branch named origin/main must not shadow the remote-tracking ref.
+MAIN_REF = 'refs/remotes/origin/main'
 MAIN_HISTORY_DEPTH = 1000
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -104,7 +105,7 @@ def main_policy_blobs(repo=_REPO_ROOT, ref=MAIN_REF, depth=MAIN_HISTORY_DEPTH):
     Empty (fail closed to the hand list) when git, the ref or the history is unavailable.
     """
     try:
-        commits = _git(repo, 'log', '--first-parent', f'--max-count={int(depth)}', '--format=%H',
+        commits = _git(repo, 'log', '--first-parent', f'--max-count={int(depth)}', '--format=%H', '--end-of-options',
                        ref, '--', POLICY_PATH).split()
         if not commits:
             return frozenset()
