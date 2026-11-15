@@ -38,8 +38,9 @@ class CatalogLoanProfileAdapterTest {
     @Test
     fun `published catalog countries are validated and carried into lending policy`() {
         val profile = revision().copy(marketCountries = setOf("SK")).toProfile(offeringId)
-        assertThat(checkNotNull(profile.markets).includes(MarketCountry("SK"))).isTrue()
-        assertThat(profile.markets.includes(MarketCountry("CZ"))).isFalse()
+        val markets = checkNotNull(profile.markets)
+        assertThat(markets.includes(MarketCountry("SK"))).isTrue()
+        assertThat(markets.includes(MarketCountry("CZ"))).isFalse()
         assertThat(revision().toProfile(offeringId).markets).isNull()
 
         assertThatThrownBy { revision().copy(marketCountries = setOf("ZZ")).toProfile(offeringId) }
