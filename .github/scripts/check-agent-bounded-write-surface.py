@@ -97,6 +97,7 @@ BASE_REF_VALUE = re.compile(r'\b[A-Z][A-Z0-9_]*\s*\(\s*"([^"]*)"\s*\)')
 HARDCODED_REF_PATH = re.compile(r"(/git/ref/heads/[A-Za-z0-9]|[?&]ref=[A-Za-z0-9])")
 
 MANIFEST = REPO / "openbank-infra" / "gitops" / "components" / "flaky-test-hunter" / "flaky-test-hunter.yaml"
+CLONE_BRANCH = re.compile(r"--branch\s+(\S+)")
 ENV_VALUE = r"-\s*name:\s*{name}\s*\n\s*value:\s*\"?([^\"\n]+?)\"?\s*$"
 
 
@@ -106,6 +107,11 @@ def evaluate_manifest(manifest: str, config_source: str) -> list[str]:
     writer = re.search(ENV_VALUE.format(name="FLAKY_TEST_HUNTER_WRITER_BASE_REF"), manifest, re.M)
     if not snap or not writer:
         return ["the flaky-test-hunter manifest must set both SNAPSHOT_REF and FLAKY_TEST_HUNTER_WRITER_BASE_REF"]
+    # The variable is only evidence if the clone READS it: a literal `--branch main` beside a
+    # qualification SNAPSHOT_REF scans main while the writer targets the seeded branch.
+    branches = CLONE_BRANCH.findall(manifest)
+    if branches != ['"$SNAPSHOT_REF"']:
+        return [f"the snapshot clone must use exactly `--branch \"$SNAPSHOT_REF\"`, found {branches!r}"]
     enum = BASE_REF_ENUM.search(config_source)
     names = dict(re.findall(r'\b([A-Z][A-Z0-9_]*)\s*\(\s*"([^"]*)"\s*\)', enum.group(1))) if enum else {}
     ref = names.get(writer.group(1).strip().upper().replace("-", "_"))
@@ -334,10 +340,11 @@ def self_test() -> int:
     ref_case("a hard-coded heads ref is FLAGGED", good_enum, 'send("GET", "/git/ref/heads/main", null)\n', True)
     ref_case("a hard-coded contents ref is FLAGGED", good_enum, 'send("GET", "/contents/$path?ref=release", null)\n', True)
 
-    def manifest(snap: str, writer: str) -> str:
+    def manifest(snap: str, writer: str, clone: str = '--branch "$SNAPSHOT_REF"') -> str:
         return (
             f"          env:\n            - name: SNAPSHOT_REF\n              value: {snap}\n"
             f"            - name: FLAKY_TEST_HUNTER_WRITER_BASE_REF\n              value: {writer}\n"
+            f"  git clone --single-branch {clone} \\\n"
         )
 
     for label, snap, writer, want in [
@@ -350,6 +357,13 @@ def self_test() -> int:
         got = evaluate_manifest(manifest(snap, writer), good_enum)
         if bool(got) != want:
             fails.append(f"manifest {label}: expected findings={want}, got {got}")
+    for label, clone in [
+        ("a literal --branch main beside the variable is FLAGGED", "--branch main"),
+        ("a clone with no --branch is FLAGGED", ""),
+        ("a second literal --branch is FLAGGED", '--branch "$SNAPSHOT_REF" --branch main'),
+    ]:
+        if evaluate_manifest(manifest("main", "main", clone), good_enum) == []:
+            fails.append(f"manifest {label}: not flagged")
     if evaluate_manifest("", good_enum) == []:
         fails.append("a manifest with neither env var is not flagged")
 

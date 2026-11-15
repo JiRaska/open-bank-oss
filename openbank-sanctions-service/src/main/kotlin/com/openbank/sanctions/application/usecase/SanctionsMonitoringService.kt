@@ -18,6 +18,7 @@ import com.openbank.sanctions.domain.model.MonitoredSubject
 import com.openbank.sanctions.domain.model.MonitoringDetection
 import com.openbank.sanctions.domain.model.MonitoringFinding
 import com.openbank.sanctions.domain.model.MonitoringRunOutcome
+import com.openbank.sanctions.domain.model.NameTokenScore
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
 import com.openbank.sanctions.domain.model.SanctionsMatch
 import com.openbank.sanctions.domain.model.SanctionsMonitoringDisabled
@@ -168,13 +169,24 @@ class SanctionsMonitoringService(
             Log.warnf("List entry %s:%s matches more than %d monitored subjects", entry.listType, change.entryId, limit)
             return false
         }
+        // searchText is every name of the entry, normalized and joined with " | " (SanctionsEntry).
+        val entryNames = entry.searchText.split(" | ")
         for (candidate in candidates) {
             val match = screening.customerMatch(
                 entry.listType,
                 entry.externalId,
                 entry.primaryName,
                 entry.programs,
-                candidate.score,
+                // Same name-structure cap as the live screen (NameTokenScore), so the delta cannot
+                // raise a finding the screen would report CLEAR.
+                NameTokenScore.decide(
+                    trigramScore = candidate.score,
+                    queryNames = listOf(candidate.subject.name) + candidate.subject.aliases,
+                    entryNames = entryNames,
+                    searchFloor = profiles.nameSearchFloor(ScreeningProfile.CUSTOMER),
+                    reviewFloor = ScreeningProfileEvaluator.POTENTIAL_HIT_THRESHOLD,
+                    hitFloor = ScreeningProfileEvaluator.HIT_THRESHOLD,
+                ) ?: continue,
             )
             raiseIfUncovered(candidate.subject, match, entry.namesVersion, MonitoringDetection.LIST_DELTA)
         }

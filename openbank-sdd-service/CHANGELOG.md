@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.6](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.5...sdd-service-v0.14.6) (2026-11-15)
+
+
+### Bug Fixes
+
+* **swift:** screen debtor and beneficiary against sanctions before MT103 release ([#16219](https://github.com/JiRaska/open-bank-oss/issues/16219)) ([1936798](https://github.com/JiRaska/open-bank-oss/commit/19367984d9c563abd7e71a69ca7dd326655eb0bf))
+
 ## [0.14.5](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.4...sdd-service-v0.14.5) (2026-11-06)
 
 
