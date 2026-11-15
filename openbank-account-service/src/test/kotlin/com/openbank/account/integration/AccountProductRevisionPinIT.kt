@@ -12,12 +12,14 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured
 import io.restassured.response.Response
 import io.smallrye.mutiny.Uni
 import jakarta.inject.Inject
+import jakarta.ws.rs.NotFoundException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.rest.client.inject.RestClient
@@ -26,6 +28,7 @@ import org.junit.jupiter.api.Test
 import java.io.IOException
 import java.sql.SQLException
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import javax.sql.DataSource
 
 /**
@@ -39,16 +42,24 @@ import javax.sql.DataSource
  *   account row and no outbox row behind;
  * - the database itself refuses to change a pin once set (V33 trigger).
  *
- * Dispatch is off (shared profile with [AccountOutboxAtomicityIT]): the dispatcher UPDATEs claimed
+ * Dispatch is off: the dispatcher UPDATEs claimed
  * rows, which would give the outbox row a new `xmin` and race the same-transaction assertion.
  */
 @QuarkusTest
-@TestProfile(AccountOutboxAtomicityIT.NoDispatchProfile::class)
+@TestProfile(AccountProductRevisionPinIT.RecoveryProfile::class)
 @QuarkusTestResource(
     value = PostgresRedpandaRedisTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
 )
 class AccountProductRevisionPinIT {
+
+    class RecoveryProfile : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "quarkus.scheduler.enabled" to "true",
+            "openbank.outbox.dispatch-enabled" to "false",
+            "openbank.account.passport-recovery.interval" to "1s",
+        )
+    }
 
     @Inject
     lateinit var dataSource: DataSource
@@ -209,6 +220,9 @@ class AccountProductRevisionPinIT {
                     Uni.createFrom().voidItem()
                 }
             }
+
+            override fun receipt(request: PassportAdmissionRequest): Uni<Void> =
+                Uni.createFrom().failure(NotFoundException())
         }
         QuarkusMock.installMockForType(catalogue, PassportAdmissionClient::class.java, RestClient.LITERAL)
         val partyId = UUID.randomUUID()
@@ -231,6 +245,47 @@ class AccountProductRevisionPinIT {
         assertThat(retry.jsonPath().getString("status")).isEqualTo("PENDING_ACTIVATION")
         val accounts = query("SELECT id FROM accounts WHERE party_id = ?", partyId)
         assertThat(accounts).hasSize(1)
+    }
+
+    @Test
+    @TestSecurity(user = ACTOR_ID, roles = ["ROLE_OPERATOR"])
+    fun `scheduler recovers a committed admission after lost acknowledgement without an HTTP retry`() {
+        val committed = AtomicReference<PassportAdmissionRequest>()
+        val observed = AtomicReference<PassportAdmissionRequest>()
+        val catalogue = object : PassportAdmissionClient {
+            override fun admit(request: PassportAdmissionRequest): Uni<Void> {
+                check(committed.compareAndSet(null, request))
+                return Uni.createFrom().failure(IOException("synthetic lost acknowledgement"))
+            }
+
+            override fun receipt(request: PassportAdmissionRequest): Uni<Void> {
+                if (request != committed.get()) return Uni.createFrom().failure(NotFoundException())
+                observed.set(request)
+                return Uni.createFrom().voidItem()
+            }
+        }
+        QuarkusMock.installMockForType(catalogue, PassportAdmissionClient::class.java, RestClient.LITERAL)
+        val party = UUID.randomUUID()
+        val key = UUID.randomUUID().toString()
+        assertThat(open(party, key, UUID.randomUUID()).statusCode).isEqualTo(500)
+        assertNothingPersistedFor(party)
+        val account = query("SELECT account_id FROM account_passport_intents WHERE operation_key = ?", "OPEN:$key")
+            .single().single() as UUID
+
+        val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(20)
+        val lookup = "SELECT status, legal_name FROM accounts WHERE id = ?"
+        while (query(lookup, account).isEmpty() && System.nanoTime() < deadline) Thread.sleep(100)
+        assertThat(query(lookup, account)).containsExactly(listOf("PENDING_ACTIVATION", null))
+        assertThat(observed.get()).isEqualTo(committed.get())
+        assertThat(query("SELECT event_type FROM account_outbox WHERE aggregate_id = ?", account))
+            .containsExactly(listOf("AccountCreated"))
+        assertThat(
+            query(
+                "SELECT opening_completed, opening_draft FROM account_passport_intents WHERE account_id = ?",
+                account,
+            ),
+        )
+            .containsExactly(listOf(true, null))
     }
 
     private fun pinLegacyRow(accountId: UUID, number: Long?): Int = dataSource.connection.use { c ->

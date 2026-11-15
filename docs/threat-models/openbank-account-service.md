@@ -1223,10 +1223,9 @@ The network policy now admits the `tax-reporting` namespace, and tax-reporting-s
 | A caller opens an account for an offering restricted to another market | Resolve the published catalogue revision using the product ID. Compare explicit offering countries with the service's existing Czech route before persisting the account. | `AccountServiceTest` |
 | A pending account activates after its offering is no longer available on the route | Re-read catalogue scope before activating pinned pending accounts. Refuse catalogue lookup failure, a changed offering or a foreign-only scope before the state transition is persisted. | `AccountServiceLifecycleTest` |
 
-The check uses catalogue distribution metadata. The passport grant registry and atomic permit
-consumption against revocation are pending. Earlier unscoped catalogue responses and unpinned
-historical pending accounts use the domestic compatibility path. Cross-border activation requires
-the registry, authoritative facts and commitment fence before any FOS or branch launch.
+The domestic check uses catalogue distribution metadata. Earlier unscoped catalogue responses and
+unpinned historical pending accounts use the domestic compatibility path. The passport account path
+requires authoritative facts from the applicable country pack before any FOS or branch launch.
 
 ### Passport admission and retry
 
@@ -1236,3 +1235,8 @@ the registry, authoritative facts and commitment fence before any FOS or branch 
   only that receipt. Account writes and activation outbox events commit atomically.
 - A pending activation is tied to its account version. Changing the account cannot reuse an
   earlier receipt to activate a different state.
+
+- Recovery claims a bounded batch with a database lease and checks for the same already-consumed
+  receipt. The scheduler cannot grant admission. Duplicate runners reuse the opening's account ID
+  and request binding. The account transaction clears the recovery details, including on manual
+  retry. The queued details omit the holder name and raw screening evidence.

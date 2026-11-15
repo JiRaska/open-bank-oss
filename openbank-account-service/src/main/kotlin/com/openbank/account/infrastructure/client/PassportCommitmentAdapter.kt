@@ -7,6 +7,8 @@ package com.openbank.account.infrastructure.client
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.account.application.port.out.PassportCommitment
 import com.openbank.account.application.port.out.PassportIntent
+import com.openbank.account.application.port.out.PassportOpeningDraft
+import com.openbank.account.application.port.out.PassportOpeningJob
 import com.openbank.account.application.port.out.PassportOperation
 import com.openbank.account.domain.model.ProductRevisionPin
 import com.openbank.libs.domain.error.ResourceConflictException
@@ -39,6 +41,10 @@ import java.util.UUID
 interface PassportAdmissionClient {
     @POST
     fun admit(request: PassportAdmissionRequest): Uni<Void>
+
+    @POST
+    @Path("/receipt")
+    fun receipt(request: PassportAdmissionRequest): Uni<Void>
 }
 
 data class PassportAdmissionRequest(
@@ -76,16 +82,7 @@ class PassportCommitmentAdapter(
 
     override suspend fun admit(intent: PassportIntent) {
         try {
-            client.admit(
-                PassportAdmissionRequest(
-                    intent.grantId,
-                    intent.operation.name,
-                    intent.operationId,
-                    intent.partyId,
-                    intent.pin.revisionId,
-                    intent.binding,
-                ),
-            ).awaitSuspending()
+            client.admit(intent.toRequest()).awaitSuspending()
         } catch (exception: WebApplicationException) {
             if (exception.response.status == CONFLICT_STATUS) {
                 throw ResourceConflictException("passport admission refused")
@@ -93,6 +90,37 @@ class PassportCommitmentAdapter(
             throw exception
         }
     }
+
+    override suspend fun stageOpening(intent: PassportIntent, draft: PassportOpeningDraft) {
+        pool.preparedQuery(STAGE_OPENING).execute(
+            Tuple.of(intent.operationId, JsonObject(mapper.writeValueAsString(draft))),
+        ).awaitSuspending()
+    }
+
+    override suspend fun claimOpenings(limit: Int): List<PassportOpeningJob> =
+        pool.preparedQuery(CLAIM_OPENINGS).execute(Tuple.of(limit)).awaitSuspending().map { row ->
+            PassportOpeningJob(
+                row.toIntent(),
+                mapper.readValue(row.getJsonObject("opening_draft").encode(), PassportOpeningDraft::class.java),
+            )
+        }
+
+    override suspend fun hasReceipt(intent: PassportIntent): Boolean = try {
+        client.receipt(intent.toRequest()).awaitSuspending()
+        true
+    } catch (exception: WebApplicationException) {
+        if (exception.response.status != NOT_FOUND_STATUS) throw exception
+        false
+    }
+
+    private fun PassportIntent.toRequest() = PassportAdmissionRequest(
+        grantId,
+        operation.name,
+        operationId,
+        partyId,
+        pin.revisionId,
+        binding,
+    )
 
     private fun Row.toIntent(): PassportIntent = PassportIntent(
         key = getString("operation_key"),
@@ -107,6 +135,23 @@ class PassportCommitmentAdapter(
 
     private companion object {
         const val CONFLICT_STATUS = 409
+        const val NOT_FOUND_STATUS = 404
+        val STAGE_OPENING = """
+            UPDATE account_passport_intents i SET opening_draft = $2,
+                next_opening_attempt_at = clock_timestamp() + interval '5 seconds'
+            WHERE operation_id = $1 AND operation = 'OPEN' AND opening_draft IS NULL AND NOT opening_completed
+        """.trimIndent()
+        val CLAIM_OPENINGS = """
+            WITH due AS (
+                SELECT operation_id FROM account_passport_intents
+                WHERE opening_draft IS NOT NULL AND next_opening_attempt_at <= clock_timestamp()
+                ORDER BY next_opening_attempt_at, operation_id
+                LIMIT $1 FOR UPDATE SKIP LOCKED
+            )
+            UPDATE account_passport_intents i
+                SET next_opening_attempt_at = clock_timestamp() + interval '1 minute'
+            FROM due WHERE i.operation_id = due.operation_id RETURNING i.*
+        """.trimIndent()
         val INSERT = """
             INSERT INTO account_passport_intents (
                 operation_key, operation_id, account_id, grant_id, party_id, operation, binding, pin

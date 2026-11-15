@@ -212,12 +212,17 @@ domestic route. This check does not activate FOS or branch sales.
 ### Passport operation recovery (ADR-0380)
 
 A passport opening accepts a grant reference. The catalogue verifies subject evidence against
-the approved grant. Account-service persists an operation ID, the exact request fingerprint,
-account ID and pinned revision before asking catalogue to consume. On timeout, resubmit the
-same body and idempotency key. Catalogue returns the receipt for that same operation, including
-when the grant was revoked after the original consumption. No new account is written before
-the receipt. The approved operation survives a restart without storing a second copy of the
-request's customer data.
+the approved grant. Account-service persists the operation ID, exact request fingerprint, account ID,
+pinned revision and screened opening details before asking catalogue to consume. After a crash or
+lost acknowledgement, a scheduler checks for the exact consumed receipt and writes the pending
+account through the same account, pocket, idempotency and outbox transaction. That transaction also
+clears the queued details. Recovery can finish an already-consumed operation after revocation.
+
+Recovery never consumes an unused permit. If the original call never reached consumption, the
+operator can repeat the same request with the same idempotency key to obtain a current decision.
+The recovery queue stores no holder name. A recovered account records the original screening
+timestamp and outcome, and leaves its optional cached display name empty. Existing V35 intents
+need a matching caller retry before they have enough information for automatic recovery.
 
 Activation derives its grant from the persisted opening. It gets a separate operation ID
 bound to the pending account version. Its state transition and status event commit together.

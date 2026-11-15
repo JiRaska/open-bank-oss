@@ -59,6 +59,7 @@ class PassportAccountRecoveryTest {
             val intent = firstArg<PassportIntent>()
             prepared.getOrPut(intent.key) { intent }
         }
+        coEvery { passport.stageOpening(any(), any()) } returns Unit
         coEvery { passport.admit(any()) } answers { consumed += firstArg<PassportIntent>() }
         coEvery { screening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         coEvery { pinning.findById(product) } returns

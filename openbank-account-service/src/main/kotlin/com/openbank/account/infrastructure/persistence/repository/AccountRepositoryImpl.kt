@@ -21,6 +21,7 @@ import com.openbank.account.infrastructure.persistence.entity.AccountIdempotency
 import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.messaging.SyntheticTaintKafkaRail
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
@@ -179,6 +180,7 @@ class AccountRepositoryImpl(
         eventType = event.eventType,
         payload = objectMapper.writeValueAsString(event),
         createdAt = clock.instant(),
+        synthetic = SyntheticTaintKafkaRail.currentlyTainted(),
     )
 
     /**
