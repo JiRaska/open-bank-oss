@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.31.0...party-service-v0.32.0) (2026-11-14)
+
+
+### Features
+
+* **kyb:** publish verified statutory representation rules ([#15662](https://github.com/JiRaska/open-bank-oss/issues/15662)) ([3e1956f](https://github.com/JiRaska/open-bank-oss/commit/3e1956fab5bc3cc9c83adffcc5351ddf1172289e))
+
 ## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.30.0...party-service-v0.31.0) (2026-11-13)
 
 
