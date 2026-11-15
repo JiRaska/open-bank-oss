@@ -30,6 +30,7 @@ dependencies {
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.scheduler)
     implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-legal"))
     implementation(project(":openbank-libs-runtime"))
     // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
     implementation(project(":openbank-client-transaction"))

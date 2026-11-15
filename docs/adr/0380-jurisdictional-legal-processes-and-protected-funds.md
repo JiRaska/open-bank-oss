@@ -315,7 +315,19 @@ execution/approval verification has not been implemented. It cannot activate a c
 The shared `LegalEffectRevisionGuard` in `openbank-libs-legal` implements pure revision
 fencing, with duplicate, stale and conflicting delivery tests. It has no production
 consumer yet and does not itself constrain a payment or prove transaction atomicity.
-These are initial foundations only; delivery is partial and tracked in issue #16324.
+Party, Account and Balance now implement domain policies for scoped debit authority,
+protection-regime linkage, and funded reservation with already-resolved attachments.
+The simulation calls those policies together for CZ, SK and DE using synthetic verified
+facts, including a DE ordinary-allowance cohort crossing a Berlin calendar boundary.
+This scope assumes current court effects and preallocated protections. It does not
+provide intake, persistence, trusted identity resolution, court-approval workflows
+or production payment enforcement. Delivery is partial and tracked in issue #16324.
+
+Identity context belongs to Party/PID. The legal process needs an unambiguous verified
+PartyId and an opaque evidence reference. Name variants, scripts, citizenship and
+national registry attributes help identity resolution. They neither confer authority
+to act nor determine the applicable legal jurisdiction. Ambiguity requires review
+before any effect is applied.
 
 Money-path changes require ADR-0030's two approvals and updated models for Account,
 Balance, Transaction, Ledger and every affected rail (existing files under

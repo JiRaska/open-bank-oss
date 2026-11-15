@@ -1214,3 +1214,12 @@ Rollback: revert the commit; nothing is migrated and nothing calls the route.
 ## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
 
 The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `ACCOUNT_SERVICE_URL=https://account-service.accounts.svc:8443`. The caller and route are not new. The read is the CRS/FATCA `/active` roster under `service-account-openbank-tax-reporting` (ROLE_API), already admitted and tested in `account_rest_ext.rego`. Before this the client config never bound (it was nested under `kafka:`, #16056), so the edge existed only on paper. Transport is the private-CA mTLS listener: client cert `tax-reporting-internal-tls`, server hostname verified, bearer-only auth permission (#12511), so the certificate is transport auth and never an identity. Residual risk: none new. The ingress allow-list widens by one namespace, and authz still pins the principal id.
+
+
+## ADR-0380 legal effect domain policies
+
+The ADR-0380 domain policy checks the owner, currency and account identifiers of a
+supplied protection regime. The CZ regime links two accounts. The SK and DE regimes
+are scoped to the attached account. The simulation checks a mismatched owner and a
+frozen debit account. Intake must authenticate and resolve the source effect before
+the policy is used in payment admission. No production admission path uses it yet.

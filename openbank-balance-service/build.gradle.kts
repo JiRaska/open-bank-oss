@@ -33,6 +33,7 @@ dependencies {
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.scheduler)
     implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-legal"))
     implementation(project(":openbank-libs-runtime"))
 
     testImplementation(libs.quarkus.test.security)

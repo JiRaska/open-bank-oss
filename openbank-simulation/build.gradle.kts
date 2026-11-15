@@ -176,6 +176,9 @@ dependencies {
     implementation(project(":openbank-products"))
     implementation(project(":openbank-libs-finance"))
     testImplementation(project(":openbank-libs-testing"))
+    testImplementation(project(":openbank-libs-legal"))
+    testImplementation(project(":openbank-party-service"))
+    testImplementation(project(":openbank-account-service"))
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
