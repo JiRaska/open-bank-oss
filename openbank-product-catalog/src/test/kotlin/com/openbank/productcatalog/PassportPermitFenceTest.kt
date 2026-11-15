@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import java.sql.Connection
@@ -74,6 +75,52 @@ class PassportPermitFenceTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["OPEN", "ACTIVATE"])
+    fun `commit entry point requires evidence and recovers the receipt after revocation`(operation: String) {
+        val request = seed(operation, issue = false)
+        dataSource.connection.use { db ->
+            assertNull(db.admit(request))
+            db.execute(
+                """
+                INSERT INTO passport_grant_subject_evidence (grant_id, party_id, evidence_ref, valid_until)
+                VALUES (?, ?, 'synthetic-subject', CURRENT_TIMESTAMP + interval '1 hour')
+                """.trimIndent(),
+                request.grant,
+                request.party,
+            )
+            val admitted = db.admit(request)
+            assertNotNull(admitted)
+            assertTrue(db.revoke(request.grant))
+            assertEquals(admitted, db.admit(request))
+            assertNull(db.admit(request.copy(operationId = UUID.randomUUID())))
+            assertNull(db.admit(request.copy(party = UUID.randomUUID())))
+        }
+    }
+
+    @Test
+    fun `only a distinct staff person can activate a proposal for issuance`() {
+        val request = seed("OPEN", issue = false, approved = false)
+        dataSource.connection.use { db ->
+            assertNull(db.issue(request))
+            assertEquals(false, db.scalar("SELECT approve_passport_grant(?, ?, 'synthetic')", request.grant, request.maker))
+            val checker = UUID.randomUUID()
+            assertEquals(true, db.scalar("SELECT approve_passport_grant(?, ?, 'synthetic')", request.grant, checker))
+            assertEquals(request.permit, db.issue(request))
+            assertEquals(false, db.scalar("SELECT approve_passport_grant(?, ?, 'synthetic')", request.grant, checker))
+        }
+    }
+
+    private fun Connection.admit(request: PermitRequest): Any? = scalar(
+        "SELECT admit_passport_account(?, ?, ?, ?, ?, ?)",
+        request.grant,
+        request.operation,
+        request.operationId,
+        request.party,
+        request.revision,
+        HASH,
+    )
+
     private fun <T> race(winner: Connection, contend: (Connection) -> T): T =
         Executors.newSingleThreadExecutor().use { executor ->
             dataSource.connection.use { contender ->
@@ -102,7 +149,7 @@ class PassportPermitFenceTest {
         }
     }
 
-    private fun seed(operation: String): PermitRequest {
+    private fun seed(operation: String, issue: Boolean = true, approved: Boolean = true): PermitRequest {
         val request = PermitRequest(operation)
         dataSource.connection.use { db ->
             val offering = UUID.randomUUID()
@@ -139,9 +186,9 @@ class PassportPermitFenceTest {
             db.execute(
                 """
                 INSERT INTO passport_grants (id, bank_id, establishment_id, host_country, mode, offering_id,
-                    channel, customer_segment, pack_set_digest, evidence_ref, proposed_by, approved_by,
+                    channel, customer_segment, pack_set_digest, evidence_ref, proposed_by,
                     effective_from, effective_until)
-                VALUES (?, ?, ?, 'SK', 'FOS', ?, 'WEB', 'RETAIL', ?, 'synthetic-proof', ?, ?,
+                VALUES (?, ?, ?, 'SK', 'FOS', ?, 'WEB', 'RETAIL', ?, 'synthetic-proof', ?,
                     CURRENT_TIMESTAMP - interval '1 day', CURRENT_TIMESTAMP + interval '1 day')
                 """.trimIndent(),
                 request.grant,
@@ -149,10 +196,15 @@ class PassportPermitFenceTest {
                 request.establishment,
                 offering,
                 HASH,
-                UUID.randomUUID(),
-                UUID.randomUUID(),
+                request.maker,
             )
-            assertEquals(request.permit, db.issue(request))
+            if (approved) {
+                assertEquals(
+                    true,
+                    db.scalar("SELECT approve_passport_grant(?, ?, 'synthetic')", request.grant, UUID.randomUUID()),
+                )
+            }
+            if (issue) assertEquals(request.permit, db.issue(request))
         }
         return request
     }
@@ -217,6 +269,7 @@ class PassportPermitFenceTest {
         val bank: UUID = UUID.randomUUID(),
         val establishment: UUID = UUID.randomUUID(),
         val country: String = "SK",
+        val maker: UUID = UUID.randomUUID(),
     )
 
     private companion object {

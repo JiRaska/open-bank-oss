@@ -1,5 +1,6 @@
 -- ADR-0380: catalogue owns ordering between consumption and revocation.
--- Rollback before use: drop the issue, consume and revoke functions, then the permit and grant tables.
+-- Rollback before use: drop admit_passport_account before issue, consume, approve and revoke,
+-- then drop passport_grant_subject_evidence before the permit and grant tables.
 -- After use, revert writers first and retain rows and functions for reconciliation and audit.
 
 CREATE TABLE passport_grants (
@@ -14,7 +15,13 @@ CREATE TABLE passport_grants (
     pack_set_digest TEXT NOT NULL CHECK (pack_set_digest ~ '^[a-f0-9]{64}$'),
     evidence_ref TEXT NOT NULL CHECK (btrim(evidence_ref) <> ''),
     proposed_by UUID NOT NULL,
-    approved_by UUID NOT NULL CHECK (approved_by <> proposed_by),
+    approved_by UUID CHECK (approved_by <> proposed_by),
+    approved_at TIMESTAMPTZ,
+    approval_reason TEXT,
+    CHECK (
+        (approved_by IS NULL AND approved_at IS NULL AND approval_reason IS NULL)
+        OR (approved_by IS NOT NULL AND approved_at IS NOT NULL AND nullif(btrim(approval_reason), '') IS NOT NULL)
+    ),
     effective_from TIMESTAMPTZ NOT NULL,
     effective_until TIMESTAMPTZ NOT NULL CHECK (effective_until > effective_from),
     revoked_at TIMESTAMPTZ,
@@ -74,7 +81,7 @@ BEGIN
     END IF;
 
     at_time := clock_timestamp();
-    IF grant_row.revoked_at IS NOT NULL OR at_time < grant_row.effective_from
+    IF grant_row.approved_by IS NULL OR grant_row.revoked_at IS NOT NULL OR at_time < grant_row.effective_from
         OR at_time >= grant_row.effective_until OR NOT EXISTS (
             SELECT 1 FROM catalog_revisions
             WHERE id = p_revision AND offering_id = grant_row.offering_id
@@ -126,7 +133,7 @@ BEGIN
         RETURN permit_row.consumed_at;
     END IF;
     at_time := clock_timestamp();
-    IF grant_row.revoked_at IS NOT NULL OR at_time < grant_row.effective_from
+    IF grant_row.approved_by IS NULL OR grant_row.revoked_at IS NOT NULL OR at_time < grant_row.effective_from
         OR at_time >= permit_row.expires_at OR NOT EXISTS (
             SELECT 1 FROM catalog_revisions
             WHERE id = permit_row.product_revision_id AND offering_id = grant_row.offering_id
@@ -141,6 +148,16 @@ BEGIN
 END;
 $$;
 
+CREATE FUNCTION approve_passport_grant(p_grant UUID, p_actor UUID, p_reason TEXT)
+RETURNS BOOLEAN LANGUAGE plpgsql AS $$
+BEGIN
+    UPDATE passport_grants SET approved_by = p_actor, approved_at = clock_timestamp(), approval_reason = p_reason
+        WHERE id = p_grant AND proposed_by <> p_actor AND approved_by IS NULL AND revoked_at IS NULL
+            AND effective_until > clock_timestamp();
+    RETURN FOUND;
+END;
+$$;
+
 CREATE FUNCTION revoke_passport_grant(p_grant UUID, p_actor UUID, p_reason TEXT)
 RETURNS BOOLEAN LANGUAGE plpgsql AS $$
 BEGIN
@@ -151,5 +168,56 @@ BEGIN
     UPDATE passport_grants SET revoked_at = clock_timestamp(), revoked_by = p_actor, revoke_reason = p_reason
         WHERE id = p_grant;
     RETURN FOUND;
+END;
+$$;
+
+-- Only the verified-facts producer may write this binding. The account caller supplies neither
+-- country nor identity evidence. Replays use the immutable receipt even if evidence later expires.
+CREATE TABLE passport_grant_subject_evidence (
+    grant_id UUID NOT NULL REFERENCES passport_grants(id),
+    party_id UUID NOT NULL,
+    evidence_ref TEXT NOT NULL CHECK (btrim(evidence_ref) <> ''),
+    valid_until TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (grant_id, party_id)
+);
+
+CREATE FUNCTION admit_passport_account(
+    p_grant UUID, p_operation TEXT, p_operation_id UUID, p_party UUID, p_revision UUID, p_binding TEXT
+) RETURNS TIMESTAMPTZ LANGUAGE plpgsql AS $$
+DECLARE
+    grant_row passport_grants%ROWTYPE;
+    permit UUID;
+BEGIN
+    SELECT * INTO grant_row FROM passport_grants WHERE id = p_grant FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN NULL;
+    END IF;
+    SELECT id INTO permit FROM passport_account_permits
+        WHERE operation = p_operation AND operation_id = p_operation_id AND grant_id = p_grant
+            AND consumed_at IS NOT NULL;
+    IF FOUND THEN
+        RETURN consume_passport_account_permit(permit, p_operation, p_operation_id, p_party, p_revision, p_binding);
+    END IF;
+    -- The initial account implementation books in the home establishment. Branch booking
+    -- must go through the separately approved branch ledger path.
+    IF grant_row.mode <> 'FOS' THEN
+        RETURN NULL;
+    END IF;
+    PERFORM 1 FROM passport_grant_subject_evidence WHERE grant_id = p_grant AND party_id = p_party
+        AND valid_until > clock_timestamp() FOR SHARE;
+    IF NOT FOUND THEN
+        RETURN NULL;
+    END IF;
+    PERFORM 1 FROM catalog_offerings WHERE id = grant_row.offering_id
+        AND market -> 'countries' ? grant_row.host_country::TEXT;
+    IF NOT FOUND THEN
+        RETURN NULL;
+    END IF;
+    permit := issue_passport_account_permit(
+        p_operation_id, p_grant, p_operation, p_operation_id, p_party, p_revision, p_binding,
+        grant_row.bank_id, grant_row.establishment_id, grant_row.host_country::TEXT, grant_row.mode,
+        grant_row.channel, grant_row.customer_segment, grant_row.pack_set_digest
+    );
+    RETURN consume_passport_account_permit(permit, p_operation, p_operation_id, p_party, p_revision, p_binding);
 END;
 $$;

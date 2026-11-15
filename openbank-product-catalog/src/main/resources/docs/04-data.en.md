@@ -131,6 +131,13 @@ updates the same row, so revocation and first consumption are ordered by Postgre
 Only the exact operation can replay its prior receipt after a revocation. An unconsumed
 permit expires after at most 30 seconds and cannot be consumed after revocation.
 
-This migration introduces storage, not a route for selling abroad. The governed grant
-administration, authenticated account integration and durable account-side operation
-recovery must be in place before a cross-border route is exposed.
+Staff use the passport-grant routes to propose, approve and revoke a grant. Both writing
+roles require the catalogue scope on a verified, MFA-backed staff token. The database
+compares the staff person identifiers, so a second login for the maker cannot approve.
+Approval attests the immutable proposed evidence reference and pack digest. Account
+integration and durable recovery are required before exposing a cross-border route.
+
+The internal account endpoint accepts only the named account-service principal. On first
+consumption a trusted, unexpired grant-to-subject evidence binding is required. The current
+account route supports FOS home booking. Branch admission stays disabled pending branch
+booking support. Testing provisions synthetic evidence. The production publisher is C4.
