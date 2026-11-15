@@ -67,7 +67,9 @@ jobs:
             0) ;;
             2) echo "::error::CAA drift or a certificate from a CA that CAA does not allow - investigate now."; exit 2 ;;
             3) echo "::warning::CT or DNS could not be verified - this is NOT a clean verdict." ;;
-            *) exit "$code" ;;
+            # Any other code is the watch itself breaking (e.g. the dns module changed shape):
+            # report it as "could not verify" so it opens an issue instead of a silent red run.
+            *) echo "code=3" >> "$GITHUB_OUTPUT"; echo "::error::The watch failed (exit $code) - not a verdict."; exit "$code" ;;
           esac
 
       - name: Open or refresh the tracking issue
