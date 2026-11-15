@@ -8,7 +8,9 @@ nor a certificate that every other governance requirement was satisfied.
 import ast
 import base64
 import hashlib
+import os
 import re
+import subprocess
 
 POLICY_PATH = '.github/scripts/merge-train.py'
 # A payload sanity bound, not a policy decision. It was 500_000 until merge-train.py passed it on
@@ -147,6 +149,33 @@ def requires_exact_head(source, branch, expected_context):
 
 def _sha(value):
     return isinstance(value, str) and _SHA.fullmatch(value) is not None
+
+
+def unattested_policy_change(repo, base_ref='refs/remotes/origin/main'):
+    """PR-time attestation: return the blob id when THIS change edits POLICY_PATH without listing it.
+
+    Diff-scoped on purpose (#16187): a change that leaves merge-train.py alone is never asked about
+    main's controller, so main moving cannot redden it. The PR that changes the controller is the one
+    that must add its resulting blob to REVIEWED_POLICY_BLOBS, where its review covers that entry.
+    Returns None when the policy is unchanged or its resulting blob is listed. Raises ValueError when
+    the comparison cannot be made, so an unanswerable check fails instead of passing.
+    """
+    # Inherited GIT_DIR/GIT_WORK_TREE (set by hooks and some runners) would silently answer about
+    # a different repository than `repo`.
+    env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
+
+    def git(*args):
+        return subprocess.run(['git', '-C', str(repo), *args], capture_output=True, text=True,
+                              timeout=60, check=True, env=env).stdout.strip()
+    try:
+        base = git('merge-base', '--end-of-options', base_ref, 'HEAD')
+        changed = git('diff', '--name-only', base, '--', POLICY_PATH) or git('status', '--porcelain', '--', POLICY_PATH)
+        if not changed:
+            return None
+        blob = git('hash-object', '--', POLICY_PATH)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ValueError(f'cannot compare {POLICY_PATH} against {base_ref}: {error}') from error
+    return None if blob in REVIEWED_POLICY_BLOBS else blob
 
 
 def premerge_policy_context(pull, repo, github, expected_context):

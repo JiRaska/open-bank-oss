@@ -1,0 +1,52 @@
+# Weekly alert-noise report. Prometheus computes per-alert FIRING ONSETS over 7d in-cluster
+# (AlertRuleFlapping, prometheus-rules-jobs.yaml); this reads the firing set from Alertmanager
+# and keeps ONE tracking issue current. Rationale and the three outcomes are in the script.
+name: Weekly alert-noise report
+
+on:
+  schedule:
+    - cron: "30 10 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alert-noise-weekly
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: Report flapping alert rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Self-test the report classifier
+        run: python3 .github/scripts/alert-noise-report.py --self-test
+      - name: Read AlertRuleFlapping from Alertmanager
+        id: report
+        env:
+          ALERTMANAGER_URL: ${{ secrets.ALERTMANAGER_URL }}
+          ALERTMANAGER_DIGEST_TOKEN: ${{ secrets.ALERTMANAGER_DIGEST_TOKEN }}
+        run: python3 .github/scripts/alert-noise-report.py "$RUNNER_TEMP/alert-noise.md"
+      - name: Open or update the tracking issue
+        if: steps.report.outputs.state == 'NOISY'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          n=$(gh issue list --state open --label tech-debt --search 'in:title "Weekly alert-noise report"' --json number --jq '.[0].number // empty')
+          if [ -n "$n" ]; then
+            gh issue edit "$n" --body-file "$RUNNER_TEMP/alert-noise.md"
+            gh issue comment "$n" --body-file "$RUNNER_TEMP/alert-noise.md"
+          else
+            gh issue create --title "Weekly alert-noise report" --label tech-debt \
+              --body-file "$RUNNER_TEMP/alert-noise.md"
+          fi

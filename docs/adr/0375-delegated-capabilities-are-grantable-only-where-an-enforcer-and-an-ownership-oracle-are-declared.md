@@ -1,7 +1,8 @@
 ---
 date: 2026-11-12
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#16106 — D1 is bound on domestic-payment only (five rails unbuilt); ACCOUNT_MANAGE_BENEFICIARIES, ACCOUNT_MANAGE_LIMITS and CARD_VIEW_TRANSACTIONS stay unenforced; PAYMENT and STATEMENT object grants have no ownership oracle"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []

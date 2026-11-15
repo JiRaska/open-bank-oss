@@ -93,11 +93,16 @@ MIN_SHARED = 2
 # Spec-vs-domain drift that exists today, each with the issue that owns it.
 # Format: "<service>:<sorted spec values>" -> reason
 BASELINE: dict[str, str] = {
-    # Real spec drift, invisible until the gate read enums with a primary constructor (#16140).
+    # NOT drift (#16140, measured). The held-instruction create/evaluate bodies accept only the
+    # RELEASABLE kinds: BusinessSigningResource.heldKind and ApprovalRequest's init both refuse
+    # PAYEE_ADD / PAYEE_REMOVE / POLICY_CHANGE, which have their own endpoints. The response
+    # schema publishes all six as x-extensible-enum. The spec is a deliberate subset.
     "openbank-delegation-service:PAYMENT,SDD_MANDATE,STANDING_ORDER":
-        "#16140 — spec omits ApprovalKind PAYEE_ADD, PAYEE_REMOVE, POLICY_CHANGE.",
+        "#16140 — NOT drift: request bodies serve only ApprovalKind.releasable (heldKind).",
+    # NOT drift (#16140, measured): NONE is the wire form of a leg with no stub (null StubType),
+    # read and written by treasury LegWireJackson (NO_STUB) — the same shape as MISSING below.
     "openbank-treasury-service:LONG_FINAL,LONG_INITIAL,NONE,SHORT_FINAL,SHORT_INITIAL":
-        "#16140 — spec advertises NONE, which StubType does not have.",
+        "#16140 — NOT drift: NONE is the wire form of a null StubType (LegWireJackson.NO_STUB).",
     # NOT drift — the wire spelling of an ABSENT value (ADR-0344 D4). A stored cash-flow row whose
     # floating rate is not known yet has no rate source: `rateSource` is null in the domain, exactly
     # as libs-finance's own `ProjectedCashFlow.rateSource`, and is published and stored as MISSING

@@ -1,0 +1,82 @@
+# Standing-red sentinel: one issue per scheduled workflow that stays red.
+# All reasoning lives in .github/scripts/standing-red-sentinel.py (header + --self-test);
+# this file only executes the plan that script computes. Gate: standing-red-sentinel-selftest.
+name: Standing-red sentinel
+
+on:
+  schedule:
+    - cron: '47 */3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: standing-red-sentinel
+  cancel-in-progress: false
+
+jobs:
+  sentinel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Self-test the sentinel
+        run: python3 .github/scripts/standing-red-sentinel.py --self-test
+
+      - name: Evaluate every scheduled workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/standing-red-sentinel.py --evaluate --json /tmp/standing-red.json
+
+      - name: Open, refresh, escalate or close
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const v = JSON.parse(require('fs').readFileSync('/tmp/standing-red.json', 'utf8'))
+            const repoUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`
+            const self = `_(\`${context.workflow}\` run ${context.runId})_`
+            const body = a => [
+              `<!-- standing-red:${a.file} -->`,
+              `## \`${a.file}\` has been red on its schedule since ${a.verdict.since}`,
+              '',
+              `${a.verdict.streak} consecutive scheduled runs failed (newest first):`,
+              '',
+              ...a.verdict.runs.map(r => `- [run ${r.id}](${r.html_url}) - ${r.created_at} - ${r.conclusion}`),
+              '',
+              `[All runs](${repoUrl}/actions/workflows/${a.file}). A scheduled workflow has no PR and no`,
+              'author, so its red reaches nobody unless this issue does. If it is a watch, a red run',
+              'means the watch could NOT read its subject (watch_outcome.py UNREADABLE); fix the watch',
+              'before trusting its silence.',
+              '',
+              `Refreshed in place every tick, escalated after 72h, closed by the next green scheduled run. ${self}`,
+            ].join('\n')
+            const title = a => `standing red: ${a.file} failed ${a.verdict.streak} scheduled runs in a row`
+            for (const a of v.actions) {
+              const n = a.number
+              if (a.op === 'open') {
+                const c = await github.rest.issues.create({ ...context.repo, title: title(a), body: body(a), labels: ['standing-red', 'bug'] })
+                core.info(`opened #${c.data.number} for ${a.file}`)
+              } else if (a.op === 'reopen') {
+                await github.rest.issues.update({ ...context.repo, issue_number: n, state: 'open', title: title(a), body: body(a) })
+                core.info(`reopened #${n} for ${a.file}`)
+              } else if (a.op === 'refresh') {
+                await github.rest.issues.update({ ...context.repo, issue_number: n, title: title(a), body: body(a) })
+                if (a.escalate) {
+                  await github.rest.issues.addLabels({ ...context.repo, issue_number: n, labels: ['standing-red-escalated'] })
+                  await github.rest.issues.createComment({ ...context.repo, issue_number: n,
+                    body: `**Escalated:** \`${a.file}\` has stayed red for over 72 hours with this issue open. ${self}` })
+                }
+                core.info(`refreshed #${n} for ${a.file}${a.escalate ? ' (escalated)' : ''}`)
+              } else if (a.op === 'close') {
+                await github.rest.issues.createComment({ ...context.repo, issue_number: n,
+                  body: `\`${a.file}\` is green on its schedule again ([run ${a.verdict.close_on.id}](${a.verdict.close_on.html_url})). Closing. ${self}` })
+                await github.rest.issues.update({ ...context.repo, issue_number: n, state: 'closed', state_reason: 'completed' })
+                core.info(`closed #${n} for ${a.file}`)
+              }
+            }
