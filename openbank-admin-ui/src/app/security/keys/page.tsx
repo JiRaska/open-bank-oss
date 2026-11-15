@@ -16,7 +16,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { KeyRound, RefreshCw, ShieldCheck, ShieldAlert, Atom, Network, Microscope, BookOpen } from 'lucide-react'
-import { AuthGuard } from '@/components/auth/AuthGuard'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
+import { KeyCustodianExplain } from '@/components/security/KeyCustodianExplain'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -201,6 +202,7 @@ export default function KeysAndCertificatesPage() {
                     {days(st) && <div style={{ fontSize: 24, fontWeight: 700, color: st ? TONE[st.status].color : undefined }}>{days(st)}</div>}
                     <p style={{ margin: 0, fontSize: 13 }}><strong>{t('K čemu: ', 'What for: ')}</strong>{language === 'cs' ? e.purposeCs : e.purposeEn}</p>
                     <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}><strong>{t('Když vyprší: ', 'If it expires: ')}</strong>{language === 'cs' ? e.impactCs : e.impactEn}</p>
+                    <Can permission="agent:view"><KeyCustodianExplain entryId={e.id} /></Can>
                     <footer style={{ marginTop: 'auto', fontSize: 12, color: 'var(--text-tertiary)' }}>
                       {t('Vlastník', 'Owner')}: {e.owner} · {e.algorithm}
                     </footer>
