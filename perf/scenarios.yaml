@@ -58,6 +58,14 @@ scenarios:
     blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL, Redis and Kafka (OIDC and dev-mode auth disabled, so no read identity is required). The detail probe needs a seeded row, so the module ships src/test/k6/fixtures.sql (one fixed-id ACTIVE order plus 199 more for the same party), loaded into the throwaway database after boot.
     assertions: Exercises standing orders by party, list all, and detail by id. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
 
+  - id: card-processing-read-baseline
+    definition: openbank-card-processing-service/src/test/k6/card-processing-read-baseline.js
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-card-processing-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL/Kafka (OIDC and dev-mode auth disabled, so no read identity is required). The fixtures (200 authorisations across the APPROVED/DECLINED/CLEARED/REVERSED lifecycle for one fixed probe card, one dispute case with its evidence trail, three network-token mirror rows) ship as src/test/k6/fixtures.sql and are loaded into the throwaway database after boot; verified locally end to end.
+    assertions: Exercises authorisation detail, per-card authorisation history, dispute case detail, per-card dispute list, network-token mirror per card. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
   - id: balance-read-baseline
     definition: openbank-balance-service/src/test/k6/balance-read-baseline.js
     execution_mode: scheduled-read-only-throwaway
