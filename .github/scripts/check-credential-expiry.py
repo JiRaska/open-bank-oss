@@ -120,6 +120,7 @@ NOT_PROBED = {
     "GLITCHTIP_AUTH_TOKEN": "error-tracker API token, not a GitHub token",
     "ALERTMANAGER_DIGEST_TOKEN": "Alertmanager credential, not a GitHub token",
     "METADATA_REFRESH_PAT": "Dependabot-scoped secret; an Actions schedule run cannot read it",
+    "CERTSPOTTER_TOKEN": "optional SSLMate CT API key, not a GitHub token; its absence is reported by ct-caa-watch",
 }
 CRED_NAME = re.compile(r"secrets\.([A-Z0-9_]*(?:_PAT|_TOKEN))\b")
 DECLARED = re.compile(r"^\s*CREDENTIALS:\s*[\"']?([A-Z0-9_ ]+)[\"']?\s*$", re.M)
