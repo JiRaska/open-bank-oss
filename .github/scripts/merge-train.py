@@ -119,6 +119,15 @@ TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
 STRICT_TRAIN_BRANCH_RE = re.compile(r"^train/strict-[0-9]+-[0-9]+$")
 STRICT_BATCH_CAP_DEFAULT = 8      # members per strict carrier; 1 = today's behaviour (update-branch, one PR per slot)
 STRICT_CARRIER_DESC = "strict lane: verified on strict carrier #{carrier} over main {base}"
+# Disjoint judge batching (ADR-0343 amendment 2026-11-15): a JUDGE member (judge_path) no longer rides
+# alone by default. It shares a strict carrier only with members whose changed path sets are pairwise
+# DISJOINT from every other member's (no shared file, so no shared gates.yaml / rules.yaml entry and no
+# shared workflow), and such a carrier holds at most this many members. The carrier is verified as one
+# tree under its own final configuration — exactly the tree and configuration main holds after its last
+# member merges, which is also what serial processing in ANY order reaches and verifies at its last
+# step. Measured 2026-11-14/15: every queued strict PR was a judge member, so each carrier held one PR
+# and the strict lane drained at ~1 PR per 30-40 min carrier. 1 = the rides-alone rule as before.
+STRICT_JUDGE_BATCH_CAP_DEFAULT = 4
 GATES_YAML = ".github/gates/gates.yaml"
 GATE_ID_RE = re.compile(r"^\s*-\s+id:\s*([^\s#]+)")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -374,10 +383,10 @@ PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
 # JUDGE paths (strict carrier): everything CI or gate configuration READS to decide a verdict — every
 # workflow and action (a member editing ci.yml or a reusable workflow can neuter a required check), the
 # gate declarations, the governance rules, CODEOWNERS, the privileged gate code above and the train's own
-# script, workflow and carrier library. A member touching any of these RIDES ALONE: a strict carrier of
-# one, verified exactly as today's update-branch head is, so it can never turn a co-member green. Only
-# non-judge strict members (a plain `.github/scripts/*.py` no privileged workflow runs, for instance) are
-# batched together (review of #14891).
+# script, workflow and carrier library. A member touching any of these rode ALONE (review of #14891);
+# since the ADR-0343 amendment of 2026-11-15 it shares a strict carrier only with members whose changed
+# paths are pairwise disjoint (STRICT_JUDGE_BATCH_CAP_DEFAULT), and the train's own code
+# (RIDES_ALONE_PATHS) still rides alone. Non-judge strict members batch together as before.
 JUDGE_CODE = PRIVILEGED_GATE_CODE + (
     ".github/scripts/merge-train.py",
     ".github/scripts/merge_train_carrier.py",
@@ -386,6 +395,10 @@ JUDGE_CODE = PRIVILEGED_GATE_CODE + (
 JUDGE_PREFIXES = (".github/workflows/", ".github/actions/")
 WORKFLOWS_DIR = ".github/workflows"
 JUDGE_PATHS = JUDGE_CODE + (".github/gates/gates.yaml", "openbank-libs/governance/rules.yaml", ".github/CODEOWNERS")
+# The train's OWN code still rides alone even under disjoint judge batching: it decides how the next
+# ticks settle, bisect and blame, so a carrier must never pair it with members whose verdict it shapes.
+RIDES_ALONE_PATHS = (".github/scripts/merge-train.py", ".github/scripts/merge_train_carrier.py",
+                     ".github/workflows/merge-train.yml")
 # Files that SUPPRESS security findings (scanner allowlists and rule sets). They were trainable as
 # plain data; a loosened one must take the owner's strict lane, wherever it lives.
 SECURITY_SUPPRESSION_PATHS = (".gitleaksignore", ".gitleaks.toml", ".trivyignore", ".semgrep.yml", ".semgrep.yaml")
@@ -3300,7 +3313,8 @@ def expedite_candidate(gh, git, repo: str, train_waiting: list, cap: int) -> int
 
 
 def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str = "",
-                strict_cap: int = STRICT_BATCH_CAP_DEFAULT, stack: bool = SPECULATIVE_STACK_DEFAULT,
+                strict_cap: int = STRICT_BATCH_CAP_DEFAULT, judge_cap: int = STRICT_JUDGE_BATCH_CAP_DEFAULT,
+                stack: bool = SPECULATIVE_STACK_DEFAULT,
                 expedite: bool = EXPEDITE_LANE_DEFAULT, expedite_cap: int = EXPEDITE_DAILY_CAP_DEFAULT) -> dict:
     """Judge every finished App carrier (strict carriers first), build the next strict carrier when the
     strict lane is free, then post the fast lane from live data. `run_id`/`attempt` name the strict
@@ -3682,7 +3696,8 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         if views:
             refs = referenced_scripts(git, base)
             built = build_strict_carrier(git, base, views, strict_cap, lambda f: judge_path(f, refs),
-                                         regen_inventory_fragments(regen_text), derived_output_patterns(regen_text))
+                                         regen_inventory_fragments(regen_text), derived_output_patterns(regen_text),
+                                         judge_cap=judge_cap)
             if built:
                 carrier = publish_strict_carrier(gh, git, base, built[0], built[1], run_id, attempt)
                 if carrier is not None:
@@ -4834,8 +4849,22 @@ def needs_regeneration(files: list[str], fragments: list[str], outputs: list[str
     return None
 
 
+def member_paths(git, base: str, head: str) -> set[str] | None:
+    """Every path a member changes, read from the TREES (merge-base with main..head, no rename
+    detection, so a rename reports both names). None when git cannot say: the member then shares
+    nothing (fail closed)."""
+    mb = git("merge-base", base, head, check=False)
+    if mb.returncode != 0 or not mb.stdout.strip():
+        return None
+    r = git("diff-tree", "-r", "--no-renames", "--name-only", mb.stdout.strip(), head, check=False)
+    if r.returncode != 0:
+        return None
+    return {ln for ln in r.stdout.splitlines() if ln}
+
+
 def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, fragments: list[str],
-                         outputs: list[str]) -> tuple[str, list[tuple[int, str]]] | None:
+                         outputs: list[str], judge_cap: int = STRICT_JUDGE_BATCH_CAP_DEFAULT
+                         ) -> tuple[str, list[tuple[int, str]]] | None:
     """Execution-free: `git merge-tree --write-tree` of each green, behind-main strict head onto settle's
     OWN chain over live main (commit-tree with the train's member message, so parse_own_chain and
     merge_train_carrier read it exactly like a train). No generator runs, no regeneration commit exists,
@@ -4843,8 +4872,12 @@ def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, 
     fewer than two apply (today's update-branch path), or the batch is REFUSED — a gates.yaml whose
     `- id:` set after the merge is not the union of main's and every member's (an id lost in the merge
     would retire a gate for the members riding with it) is skipped — it rides alone or takes today's
-    lane; merge-tree failing to decide refuses the batch. A JUDGE member (judge_is) rides ALONE: when
-    it is the oldest eligible member it is the whole carrier, otherwise it waits for the next one.
+    lane; merge-tree failing to decide refuses the batch. A JUDGE member (judge_is) shares a carrier
+    only under DISJOINT batching (ADR-0343 amendment 2026-11-15): once a carrier holds a judge member,
+    every member's changed path set must be disjoint from every other member's, and the carrier holds
+    at most `judge_cap` members. The train's own code (RIDES_ALONE_PATHS), or any judge member at
+    judge_cap 1, rides ALONE: when it is the oldest eligible member it is the whole carrier, otherwise
+    it waits for the next one.
 
     A member that can only take the update-branch lane (it needs regeneration, or changes a workflow,
     which the App's token cannot push to a carrier branch) is skipped behind members already applied,
@@ -4857,10 +4890,13 @@ def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, 
     members: list[Member] = []
     sizes: dict[int, int | None] = {}
     alone = False
+    has_judge = False
+    paths: dict[int, set[str] | None] = {}
     for view in views:
         n, head, files = view["number"], view["head_sha"], view.get("files") or []
-        if alone or len(applied) >= cap:
-            log(f"#{n:>6} strict    waits: strict carrier full ({'a judge member rides alone' if alone else cap})")
+        if alone or len(applied) >= cap or (has_judge and len(applied) >= judge_cap):
+            log(f"#{n:>6} strict    waits: strict carrier full "
+                f"({'a judge member rides alone' if alone else judge_cap if has_judge else cap})")
             continue
         why = needs_regeneration(files, fragments, outputs)
         if why:
@@ -4869,10 +4905,32 @@ def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, 
                 return None   # first in line: no carrier overtakes it (see the docstring)
             continue
         is_judge = any(judge_is(f) for f in files)
-        if is_judge and applied:
-            log(f"#{n:>6} strict    waits: changes what judges the carrier (a workflow, action, gate or rule "
-                f"declaration, privileged code) — it rides alone, after the members ahead of it")
+        rides_alone = is_judge and (judge_cap < 2 or any(f in RIDES_ALONE_PATHS for f in files))
+        if rides_alone and applied:
+            log(f"#{n:>6} strict    waits: changes the train's own code — it rides alone, after the members ahead of it")
             continue
+        if applied and (is_judge or has_judge):
+            # Disjoint batching: this member and every member already applied must share no path.
+            mine = member_paths(git, base, head)
+            if len(applied) >= judge_cap:
+                log(f"#{n:>6} strict    waits: a carrier with a judge member holds at most {judge_cap}")
+                continue
+            if mine is None or any(paths.get(a) is None for a, _ in applied):
+                log(f"#{n:>6} strict    not batched: its changed paths cannot be read — a judge carrier shares nothing")
+                continue
+            shared = sorted(set().union(*[mine & paths[a] for a, _ in applied]))
+            if not shared and not has_judge:
+                # The FIRST judge member joins non-judge members, which may overlap each other (allowed
+                # without a judge): the whole carrier must become pairwise disjoint, or it waits.
+                seen: set[str] = set()
+                for a, _ in applied:
+                    shared += sorted(seen & paths[a])
+                    seen |= paths[a]
+            if shared:
+                log(f"#{n:>6} strict    not batched: shares {shared[:3]} with the members ahead of it, and a carrier "
+                    f"with a judge member needs disjoint members — next strict carrier")
+                continue
+            paths[n] = mine
         r = git("merge-tree", "--write-tree", own, head, check=False)
         if r.returncode == 1:
             log(f"#{n:>6} strict    not batched: conflicts with the members ahead of it — next strict carrier")
@@ -4913,13 +4971,17 @@ def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, 
         own_tree = tree
         applied.append((n, head))
         members.append(m)
-        if is_judge:
+        if n not in paths:
+            paths[n] = member_paths(git, base, head)
+        if rides_alone:
             alone = True
+        if is_judge:
+            has_judge = True
     # One member alone rides only as a JUDGE member or mid-bisect (it carries a `bisect size`): the
     # carrier over main is then the verdict that names a culprit or clears it, exactly as a one-member
     # train. Otherwise one green strict PR takes today's update-branch path, where its own CI already
     # answers the question.
-    if len(applied) < 2 and not (applied and (alone or sizes.get(applied[0][0]))):
+    if len(applied) < 2 and not (applied and (alone or has_judge or sizes.get(applied[0][0]))):
         return None
     return own, applied
 
@@ -5814,6 +5876,12 @@ def _synthetic_origin(root: str) -> None:
     # Referenced scripts ride alone: named by path in a workflow, or by bare basename only.
     pr("pRG", {".github/scripts/run-gates.py": "print('gates2')\n"})
     pr("pFoo", {".github/scripts/lib/foo.sh": "echo foo2\n"})
+    # Disjoint judge batching (ADR-0343 amendment 2026-11-15): judge members with pairwise disjoint paths.
+    pr("pCO", {".github/scripts/p5.py": "print(5)\n", "svc/co.txt": "c\n"})            # judge (svc/), disjoint
+    pr("pJbad", {".github/scripts/bad.py": "print('bad')\n", "svc/jred.txt": "x\n"})    # judge (svc/), red in CI
+    # Two judge members that share ONE path (an identical new file: merge-tree merges them cleanly).
+    pr("pO1", {".github/scripts/run-gates.py": "print('gates3')\n", ".github/scripts/lib/shared.sh": "echo s\n"})
+    pr("pO2", {".github/scripts/lib/foo.sh": "echo foo3\n", ".github/scripts/lib/shared.sh": "echo s\n"})
 
 
 def _pack_synthetic_origin(root: str) -> None:
@@ -6130,7 +6198,9 @@ def retry_planner_self_test(check) -> None:
 # over main on 2026-11-14; ceiling 21,800 (~1.9 %).
 # Its refinements (refusal in the summary, timed-out main jobs): spawns=21,445 at 764 cases, measured on the
 # merged tree on 2026-11-14; ceiling 21,900 (~2.1 %).
-SELF_TEST_SPAWN_CEILING = 21900
+# Disjoint judge batching (ADR-0343 amendment 2026-11-15): cases (16)-(19) plus the judge-cap-1 control of (2),
+# ~20 more ticks: spawns=22,621 at 800 cases, measured locally on 2026-11-15; ceiling 23,100 (~2.1 %).
+SELF_TEST_SPAWN_CEILING = 23100
 
 # A green carrier and a green, up-to-date strict holder cannot both keep their verification: whichever
 # merges first moves main under the other. Strict first voids the carrier (rebuild ~50 min, measured
@@ -7022,7 +7092,8 @@ def self_test() -> int:
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
                        "pX": 33, "pF": 34, "pW2": 36, "pS": 37, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62, "pK": 38, "pM": 39,
                        "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pPc": 85, "pPR": 86, "pPx": 87, "pP1": 88, "pPbad": 89, "pP2": 90, "pRG": 91, "pFoo": 92,
-                       "pE1": 93, "pE2": 94, "pE3": 95, "pGP": 96}
+                       "pE1": 93, "pE2": 94, "pE3": 95, "pGP": 96,
+                       "pCO": 97, "pJbad": 98, "pO1": 99, "pO2": 100}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -8078,9 +8149,10 @@ def self_test() -> int:
             check("fast lane: a docs/adr member is not fast-laned, and settle takes no state input",
                   33 not in sm["fast"] and not gh.app_statuses(gh.prs[33]["head"]["sha"])
                   # run_id/attempt name the strict carrier branch and strict_cap bounds it; expedite/expedite_cap
-                  # are the lane's switch and cap: none is a classification.
+                  # are the lane's switch and cap; judge_cap bounds a judge carrier: none is a classification.
                   and set(mode_settle.__code__.co_varnames[:mode_settle.__code__.co_argcount])
-                  == {"gh", "git", "repo", "shadow", "run_id", "attempt", "strict_cap", "stack", "expedite", "expedite_cap"})
+                  == {"gh", "git", "repo", "shadow", "run_id", "attempt", "strict_cap", "judge_cap", "stack", "expedite",
+                      "expedite_cap"})
             reset()
 
             # Bundle verification, directly.
@@ -8342,10 +8414,10 @@ def self_test() -> int:
             # case names what a missing control would let through. The fixture CI (ci.py) judges the
             # carrier head exactly as it judges a train carrier; PR heads report green on their own.
             # Non-judge members: pW2 (36), pP1 (88), pP2 (90); judge members ride alone: pJ1/pJ2/pGY/pGA.
-            def settle_strict(cap=8):
+            def settle_strict(cap=8, judge_cap=STRICT_JUDGE_BATCH_CAP_DEFAULT):
                 counter[0] += 1
                 return mode_settle(gh, Git(clone("settle")), "o/r", False, run_id=str(counter[0]), attempt="1",
-                                   strict_cap=cap)
+                                   strict_cap=cap, judge_cap=judge_cap)
 
             def strict_open():
                 return [c for c in gh.carriers.values()
@@ -8423,15 +8495,101 @@ def self_test() -> int:
                 check(f"judge_path: {f} may be batched (unreferenced, under .github/scripts)", not judge_path(f, syn_refs))
             check("judge_path: no reference set (or the error sentinel) batches nothing — fail closed",
                   judge_path(".github/scripts/two.py", None) and judge_path(".github/scripts/two.py", ({"*"}, set())))
-            # Live ticks: run-gates.py (named by path) and lib/foo.sh (named only by bare basename) each ride
-            # alone; the unreferenced pP1 batches with pW2.
+            # Live ticks: run-gates.py (named by path) and lib/foo.sh (named only by bare basename) are judge
+            # members. At judge cap 1 each rides alone (the rule before 2026-11-15, still the rollback); at the
+            # default cap they share one carrier with the unreferenced pW2/pP1, every member path-disjoint.
             reset()
             open_only("pW2", "pP1", "pRG", "pFoo")
             advance_main()
-            batches2 = [settle_strict(cap=8).get("strict_batch") for _ in range(3)]
-            check("strict carrier (2): a script a workflow names by path or bare basename rides alone; unreferenced scripts batch",
+            batches2 = [settle_strict(cap=8, judge_cap=1).get("strict_batch") for _ in range(3)]
+            check("strict carrier (2): judge cap 1 — a script a workflow names by path or bare basename rides alone",
                   batches2 == [[36, 88], [91], [92]] and gh.merged == [36, 88, 91],
                   f"batches={batches2} merged={gh.merged}")
+            reset()
+            open_only("pW2", "pP1", "pRG", "pFoo")
+            advance_main()
+            batches2 = [settle_strict(cap=8).get("strict_batch") for _ in range(2)]
+            check("strict carrier (2): disjoint judge members share a carrier with the non-judge members (cap 4)",
+                  batches2 == [[36, 88, 91, 92], None] and gh.merged == [36, 88, 91, 92],
+                  f"batches={batches2} merged={gh.merged}")
+            reset()
+
+            # ---- DISJOINT JUDGE BATCHING (ADR-0343 amendment 2026-11-15) ---------------------------------
+            # (16) three judge members with pairwise disjoint paths form ONE carrier (before the amendment
+            # each rode alone: three carriers, ~3 x 30-40 min); the carrier merges all three.
+            open_only("pRG", "pFoo", "pCO")
+            advance_main()
+            s1 = settle_strict(cap=8)
+            c16 = strict_open()
+            s2 = settle_strict(cap=8)
+            check("strict carrier (16): three disjoint judge members form one strict carrier and all merge",
+                  s1.get("strict_batch") == [91, 92, 97] and len(c16) == 1 and carrier_members(c16[0]) == [91, 92, 97]
+                  and gh.merged == [91, 92, 97] and gh.updates == [] and "strict_tree_mismatch" not in s2,
+                  f"{s1.get('strict_batch')} merged={gh.merged} updates={gh.updates} {s2}")
+            reset()
+            # (16b) the judge cap bounds the carrier: five disjoint members, two of them judge -> four ride.
+            open_only("pW2", "pP1", "pRG", "pFoo", "pCO")
+            advance_main()
+            s1 = settle_strict(cap=8)
+            check("strict carrier (16b): a carrier holding a judge member is capped at 4 — the fifth waits",
+                  s1.get("strict_batch") == [36, 88, 91, 92], str(s1.get("strict_batch")))
+            reset()
+
+            # (17) two judge members that share a path are NEVER batched, even though merge-tree merges them
+            # cleanly (they add an identical file): each takes its own carrier, oldest first.
+            open_only("pO1", "pO2")
+            advance_main()
+            b17 = [settle_strict(cap=8).get("strict_batch") for _ in range(4)]
+            check("strict carrier (17): overlapping judge members are never batched — one carrier each",
+                  [99] in b17 and [100] in b17 and not any(b and len(b) > 1 for b in b17)
+                  and sorted(gh.merged) == [99, 100], f"batches={b17} merged={gh.merged}")
+            reset()
+            # (17b) a judge member joining OVERLAPPING non-judge members would make the carrier non-disjoint:
+            # it waits, the non-judge pair rides as before (pW2 and pPc conflict, so use an overlap-free pair
+            # plus pO1's shared.sh twin: a non-judge member adding the same lib/shared.sh).
+            gh.g("branch", "-f", "pSh", "pW2")
+            gh.g("checkout", "-q", "-f", "pSh")
+            pathlib.Path(origin, ".github/scripts/lib").mkdir(parents=True, exist_ok=True)
+            pathlib.Path(origin, ".github/scripts/lib/shared.sh").write_text("echo s\n")
+            gh.g("add", "-A")
+            gh.g("commit", "-q", "-m", "pSh: two.py + lib/shared.sh")
+            gh.g("checkout", "-q", "-f", "main")
+            open_only("pO1")
+            gh.add_pr(191, "pSh", "2026-01-01")
+            advance_main()
+            s1 = settle_strict(cap=8)
+            check("strict carrier (17b): a judge member sharing a path with a non-judge member ahead of it waits",
+                  99 not in (s1.get("strict_batch") or []), str(s1.get("strict_batch")))
+            reset()
+
+            # (18) a red judge carrier: the existing halving isolates the one red member; the rest merge.
+            gh.reruns.clear()
+            open_only("pRG", "pFoo", "pJbad", "pCO")
+            advance_main()
+            first = settle_strict(cap=8).get("strict_batch")
+            culprits: list[int] = []
+            for _ in range(10):
+                s = settle_strict(cap=8)
+                culprits += s["culprits"]
+                if not strict_open() and 98 in culprits:
+                    break
+            check("strict carrier (18): a red judge carrier halves; the red member is the culprit, the others merge",
+                  first == [91, 92, 97, 98] and culprits == [98] and sorted(gh.merged) == [91, 92, 97]
+                  and sc_desc(98)[0] == "failure" and sc_desc(98)[1].startswith(CULPRIT_PREFIX),
+                  f"first={first} culprits={culprits} merged={gh.merged} {sc_desc(98)}")
+            gh.reruns.clear()
+            reset()
+
+            # (19) the fast lane still gets its turn: a held fast-lane PR goes once the judge carrier merged.
+            open_only("pRG", "pFoo", "pF")
+            advance_main()
+            s1 = settle_strict(cap=8)
+            s2 = settle_strict(cap=8)
+            s3 = settle_strict(cap=8)
+            check("strict carrier (19): the fast lane is held while a judge carrier runs and served once it merged",
+                  s1.get("strict_batch") == [91, 92] and s1["fast"] == [] and gh.merged == [91, 92]
+                  and last_merge_was_strict(gh, Git(origin), gh.main_sha()) and s3["fast"] == [34],
+                  f"{s1.get('strict_batch')} s1.fast={s1['fast']} s2.fast={s2['fast']} s3={s3} merged={gh.merged}")
             reset()
 
             # (3) conflicts: a member conflicting with the members ahead of it is dropped from this carrier
@@ -10817,6 +10975,10 @@ def main() -> int:
     ap.add_argument("--strict-batch-cap", type=int,
                     default=int(os.environ.get("STRICT_BATCH_CAP", str(STRICT_BATCH_CAP_DEFAULT))),
                     help="settle: members per strict carrier (1 = no strict carrier, update-branch as before)")
+    ap.add_argument("--strict-judge-batch-cap", type=int,
+                    default=int(os.environ.get("MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP", str(STRICT_JUDGE_BATCH_CAP_DEFAULT))),
+                    help="settle: members per strict carrier holding a judge member, all path-disjoint "
+                         "(1 = a judge member rides alone, as before)")
     ap.add_argument("--speculative-stack", choices=["true", "false"],
                     default=os.environ.get("SPECULATIVE_STACK", "true" if SPECULATIVE_STACK_DEFAULT else "false"),
                     help="settle: open a speculative-stacking window over a running strict holder")
@@ -10913,7 +11075,7 @@ def run_mode(gh, args, ap) -> int:
         log(f"publish: {result}")
         return 0
     s = mode_settle(gh, git, args.repo, args.shadow, run_id=args.run_id, attempt=args.attempt,
-                    strict_cap=args.strict_batch_cap, stack=args.speculative_stack == "true",
+                    strict_cap=args.strict_batch_cap, judge_cap=args.strict_judge_batch_cap, stack=args.speculative_stack == "true",
                     expedite=args.expedite_lane == "true", expedite_cap=args.expedite_cap)
     log(f"settle: {s}")
     write_output("in_flight", "true" if s["in_flight"] else "false")
