@@ -8,12 +8,14 @@ import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
 import com.openbank.kyb.application.port.out.KybMetricsPort
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningPort
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningRequest
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningResult
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningUnavailableException
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseScreening
 import com.openbank.kyb.domain.model.ScreeningSubject
 import com.openbank.kyb.domain.model.ScreeningSubjectKind
 import com.openbank.kyb.domain.model.ScreeningVerdict
+import com.openbank.kyb.domain.model.SubjectIdentity
 import com.openbank.kyb.domain.model.UboFinding
 import io.quarkus.runtime.Startup
 import jakarta.annotation.PostConstruct
@@ -21,9 +23,11 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 import java.util.Optional
+import java.util.UUID
 
 /**
  * Screens the entity and its related parties (every listed representative, every reportable
@@ -97,6 +101,7 @@ class RelatedPartyScreeningService {
             finding.reportableOwners,
             case.declarations?.peps.orEmpty().map { it.name },
         )
+        val identities = CaseScreening.identitiesOf(extract, finding.reportableOwners)
         val now = Instant.now(clock)
         val current = (case.screening ?: CaseScreening(emptyList())).rebuilt(fresh, finding.source)
         val next = current.copy(
@@ -104,7 +109,8 @@ class RelatedPartyScreeningService {
                 if (!subject.current || subject.sanctions != ScreeningVerdict.PENDING) {
                     subject
                 } else {
-                    screenOne(case, subject, now)
+                    val ids = identities[subject.key].orEmpty().ifEmpty { listOf(SubjectIdentity()) }
+                    screenOne(case, subject, ids, now)
                 }
             },
         )
@@ -114,16 +120,25 @@ class RelatedPartyScreeningService {
     private suspend fun screenOne(
         case: BusinessOnboardingCase,
         subject: ScreeningSubject,
+        identities: List<SubjectIdentity>,
         now: Instant,
     ): ScreeningSubject = try {
-        val result = port.screen(
-            RelatedPartyScreeningRequest(
-                name = subject.name,
-                subjectId = subjectId(case, subject),
-                organisation = subject.organisation,
-                idempotencyKey = "kyb-screen:${case.id}:${subject.key}",
-            ),
-        )
+        // One screen per distinct identity under this name; the subject takes the WORST answer,
+        // so a second person sharing the name can never be cleared by the first one's facts.
+        // Each key is derived from WHAT is screened, not from its position: sanctions-service
+        // replays a stored verdict by key, so a key that outlived a change in the register facts
+        // would answer for an identity it never screened.
+        val result = identities.map { identity ->
+            port.screen(
+                RelatedPartyScreeningRequest(
+                    name = subject.name,
+                    subjectId = subjectId(case, subject),
+                    organisation = subject.organisation,
+                    idempotencyKey = screenKey(case.id, subject, identity),
+                    identity = identity,
+                ),
+            )
+        }.let(::worst)
         metrics.relatedPartyScreened(outcome(result.sanctions, result.pep))
         subject.answered(result.sanctions, result.pep, result.matchedName, now)
     } catch (e: RelatedPartyScreeningUnavailableException) {
@@ -139,10 +154,37 @@ class RelatedPartyScreeningService {
         case.entityPartyId?.takeIf { subject.kind == ScreeningSubjectKind.ENTITY }?.toString()
             ?: "kyb-case:${case.id}:${subject.key}"
 
+    private fun worst(results: List<RelatedPartyScreeningResult>): RelatedPartyScreeningResult {
+        val deciding = results.maxBy { it.sanctions.ordinal }
+        return deciding.copy(
+            pep = results.any { it.pep },
+            matchedName = deciding.matchedName ?: results.firstNotNullOfOrNull { it.matchedName },
+        )
+    }
+
     private fun outcome(sanctions: ScreeningVerdict, pep: Boolean): String = when {
         sanctions == ScreeningVerdict.HIT -> "hit"
         sanctions == ScreeningVerdict.POTENTIAL_HIT -> "potential_hit"
         pep -> "pep"
         else -> "clear"
+    }
+
+    internal companion object {
+        private const val KEY_HEX_CHARS = 32
+
+        /** Idempotency key of one screen: the case, the subject and a digest of everything sent. */
+        fun screenKey(caseId: UUID, subject: ScreeningSubject, identity: SubjectIdentity): String {
+            val content = listOf(
+                subject.name,
+                subject.organisation.toString(),
+                identity.country?.trim()?.uppercase().orEmpty(),
+                identity.dateOfBirth?.toString().orEmpty(),
+                identity.nationality?.trim()?.uppercase().orEmpty(),
+                identity.aliases.map { it.trim() }.filter { it.isNotEmpty() }.sorted().joinToString("\u0001"),
+            ).joinToString("|")
+            val digest = MessageDigest.getInstance("SHA-256").digest(content.toByteArray(Charsets.UTF_8))
+            return "kyb-screen:$caseId:${subject.key}:" +
+                digest.joinToString("") { "%02x".format(it) }.take(KEY_HEX_CHARS)
+        }
     }
 }
