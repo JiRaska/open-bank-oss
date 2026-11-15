@@ -110,7 +110,7 @@ describe('compliance trace evidence age (ADR-0379 phase 2)', () => {
     expect(buildComplianceTrace(inputs({ controls: [two], gateHealth })).controls[0]).toMatchObject({ verdict: 'unverified', downgradeReason: 'failing-gate' })
   })
 
-  it('ignores a gate-health snapshot older than a day, so a gate red since then cannot read green', () => {
+  it('ignores a gate-health snapshot older than two hours, so a gate red since then cannot read green', () => {
     const old = { collectedAt: '2026-11-12T00:00:00.000Z', gates: { 'g-enforced': { status: 'ok', lastOkAt: '2026-11-11T23:00:00.000Z' } } }
     const t = buildComplianceTrace(inputs({ controls: [aged], gateHealth: old }))
     expect(t.controls[0]).toMatchObject({ verdict: 'unverified', downgradeReason: 'evidence-age-unknown' })
