@@ -1263,7 +1263,7 @@ components:
         id: { type: string, format: uuid }
         offeringId: { type: string, format: uuid }
         marketCountries:
-          type: array
+          type: [array, 'null']
           items: { type: string, pattern: '^[A-Z]{2}$' }
           description: Current offering country restrictions, included in the legacy-product published-revision read.
         number: { type: integer, format: int64, minimum: 1 }
