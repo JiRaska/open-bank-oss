@@ -738,11 +738,11 @@ Observed 2026-11-14/15 overnight: six strict-lane PRs were queued at once, and t
 
 Judge members are now split in two.
 
-- **A configuration judge rides alone, exactly as before.** This is any judge path that is *not* on the shareable allow-list (`config_judge_path`). The allow-list (`SHAREABLE_JUDGE_RE`) contains only:
-  - Kotlin/Java sources and tests under a module's `src/main` or `src/test`;
-  - Markdown under `docs/`.
+- **A configuration judge rides alone, exactly as before.** This is any judge path outside the shareable allow-list (`config_judge_path`). The allow-list holds only Kotlin/Java sources and tests (`src/main` or `src/test`) of a **leaf service module**, as computed by `shareable_modules`:
+  - an `openbank-*` module that no `*.gradle.kts` outside settings depends on via `project(":…")`;
+  - whose name marks no library, analysis, rule, governance, contract, infra or test module.
 
-  No path under `.github/` is ever shareable, and neither is any hidden path segment, dotfile or `..` segment. Everything else rides alone: workflows, actions, named checkers, gates.yaml, CODEOWNERS, the governance rules, scanner allowlists (`.gitleaksignore`, `.semgrep.yml`, `.trivyignore`), build and lint files, `application.yaml`, and any path nobody thought to list. A gate reads an allow-listed file as its *subject*, never as its rules. A shared test judges only its own member's code, which that member's own head CI already ran. The first revision of this amendment used a deny-list instead; the security review of #16290 showed it failed open.
+  These therefore never qualify: `build-logic`, `buildSrc`, every `openbank-libs*` module, `openbank-libs-detekt-rules` (checkers written in Kotlin), consumed client and service modules, every `docs/` file, every `.github/` path, any hidden or `..` segment, and any module a member adds. Members of a carrier holding a judge member must also be **module-disjoint** (`disjoint_key`: the top-level module, or the full path under `.github/`). Diff-scoped gates read a carrier's *union* diff, so a companion file — a threat model, an ADR, a test in the same module — in one member must not satisfy a gate for another member's code. Allow-listed code is not inert to gates. Gates read it, and some judge it by what else the diff contains. Safety rests on two things: no allow-listed file *defines* a rule (no rule module, no build logic, no doc a gate reads as evidence), and no two members share a module, so no gate can pair one member's file with another member's code. The first two revisions of this amendment used a deny-list and then admitted docs and lib modules. Both re-reviews of #16290 showed the masking that followed: a relaxing detekt rule, and a companion threat model.
 - **The train's own code also rides alone.** That set is derived by `train_code_paths`, never hand-listed: every `.github/scripts` or `.github/workflows` file named `merge-train*` / `merge_train*`, plus every `.github/scripts` module that `merge-train.py` imports, read from main's tree.
 - **Every other judge member may share a carrier.** That means a member that is judge only because it also changes service code, docs or other paths no gate reads as configuration. Two conditions apply:
   - every member's changed path set must be pairwise disjoint from every other member's. The set is read from the trees: merge-base to verified head, `--no-renames`. A set git cannot read shares nothing.
@@ -755,7 +755,7 @@ Judge members are now split in two.
 
 Both cases are self-tests: (20) relaxing and (21) tightening. Both fail against the builder of #16290's first revision, and the new builder refuses to batch either pair. File disjointness cannot prevent either case, because J changes a *different* file from the one the verdict concerns.
 
-**Why disjoint files are sufficient for the rest.** A member in the shared class changes nothing that configures a verdict. So every member in such a carrier is judged under the same configuration it would meet serially: main's own configuration, plus nothing any co-member changes. The one thing that differs from serial processing is that co-members' *code* is present together. Disjoint path sets guarantee three things about that:
+**Why disjoint files are sufficient for the rest.** A member in the shared class changes nothing that configures a verdict. So every member in such a carrier is judged under the same configuration it would meet serially: main's own configuration, plus nothing any co-member changes. The one thing that differs from serial processing is that co-members' *code* is present together. Module-disjoint path sets guarantee three things about that:
 - the combined tree is exactly the union of the reviewed diffs, and no file mixes two members' hunks;
 - the carrier's verdict is the verdict of main's final state after its last merge, which the post-merge tree-equality check already enforces;
 - a red carrier bisects into sub-batches that still share nothing.
@@ -773,7 +773,7 @@ Self-tests:
 - (18): a red member is isolated and the others merge.
 - (18b): red only in combination.
 - (19): the fast lane is served once the carrier has merged.
-- (20) and (21): the relaxing and tightening pairs.
+- (20) and (21): the relaxing and tightening checker pairs; (22) a relaxing detekt rule; (23) a companion threat model; (24) companions in one module.
 - `config_judge_path` (including `.gitleaksignore`, `.semgrep.yml`, `application.yaml`, a root dotfile and a `..` path) and `train_code_paths` are pinned against both the synthetic tree and the real one.
 
 ## Rollout
