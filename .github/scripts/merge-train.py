@@ -156,6 +156,9 @@ GREEN_HOLDER_CAP_S = 2 * RESERVATION_CEILING_S
 # Measured 2026-10-21 over 12.5 h of merge-train.yml: 11 carriers published, 0 train merges, 13
 # strict-lane merges — every strict merge was followed at once by the next strict update-branch.
 TRAIN_TURN_S = 30 * 60
+# How far down main's first-parent chain the train's turn looks for its strict merge, stepping over
+# fast-lane and bot merges (each step is one PR read). Inside TRAIN_TURN_S main rarely takes more.
+TRAIN_TURN_DEPTH = 6
 # Green carrier first (#13400): a VERIFIED green carrier merges before any strict-lane PR is served in
 # the same tick — it is not voided by a strict merge. ONE exception, bounded to one tick per holder
 # head: a reservation holder that is itself GREEN on an up-to-date head AND did not defer to this
@@ -3896,11 +3899,87 @@ def carrier_holds_strict(p: dict, now: float | None = None) -> bool:
     return age is None or age <= CARRIER_PRIORITY_S
 
 
+def fix_preempts_strict_self_test(check) -> None:
+    """ADR-0343 amendment 2026-11-14: on a red main a fix pre-empts a strict reservation whose CI is still
+    running (#15991 behind #16005/#16009, #16096 behind #15976); a GREEN holder, which merges this tick,
+    is never interrupted. `fixes` always comes from the real strict_fixes, as live settle computes it.
+    git is stubbed: only heads named cur-* contain main."""
+    now = 2_000_000_000.0
+    red = {"Validate manifests": "failure"}
+
+    class _R:
+        def __init__(self, rc=0, out=""):
+            self.returncode, self.stdout = rc, out
+
+    def git(*a, **_k):
+        if a[:2] == ("merge-base", "--is-ancestor"):
+            return _R(0 if a[3].startswith("cur-") else 1)
+        if a[:2] == ("show", "-s"):
+            return _R(0, str(int(now) - 60))
+        return _R(0, "")
+
+    def view(n, head, fix=False, notice=None):
+        v = {"number": n, "head_sha": head, "app": {}}
+        if fix:
+            v["fix"] = ["Validate manifests"]
+        if notice:
+            v["app"][NOTICE_CONTEXT] = ("success", notice)
+        return v
+
+    def reserve(strict):
+        return strict_reservation(git, "b", strict, now=now, fixes=strict_fixes(None, git, "b", strict, red))[0]
+
+    strict_cur, strict_green = view(16005, "cur-strict"), view(16005, "cur-strict")
+    fix_behind, fix_cur = view(15991, "old-fix", fix=True), view(15991, "cur-fix", fix=True)
+    h = reserve([("pending", strict_cur), ("green", fix_behind)])
+    check("main red: a green fix pre-empts a strict reservation still in CI", h is None, f"holder={h}")
+    h = reserve([("green", strict_green), ("green", fix_behind)])
+    check("main red: a strict holder already GREEN (merging this tick) is not interrupted", h == 16005, f"holder={h}")
+    h = strict_reservation(git, "b", [("pending", strict_cur)], now=now, fixes=strict_fixes(None, git, "b",
+                           [("pending", strict_cur)], {}))[0]
+    check("main green: a strict PR in CI still holds main", h == 16005, f"holder={h}")
+    # A LONE fix whose combined head is in CI: strict_fixes lists only green PRs, so this is fixes={}.
+    h = reserve([("pending", view(15976, "cur-strict2")), ("pending", fix_cur)])
+    check("main red: a lone fix in CI on its combined head keeps main over an older strict PR in CI",
+          h == 15991, f"holder={h}")
+    h = reserve([("pending", fix_cur), ("green", view(15987, "old-fix2", fix=True))])
+    check("main red: a fix in CI is not pre-empted by a second green fix", h == 15991, f"holder={h}")
+    for told in (f"{CONFLICT_PREFIX}b: strict lane", f"{REFUSED_PREFIX}b (422)"):
+        h = reserve([("pending", strict_cur), ("green", view(15991, "old-fix", fix=True, notice=told))])
+        check(f"main red: a fix that cannot be served ({told.split()[0]}) pre-empts nothing", h == 16005, f"holder={h}")
+
+    # End to end, as settle wires it: the holder comes from strict_reservation, then strict_lane must
+    # update-branch the fix this tick (with a strict holder, every other strict PR is "held").
+    class _Gh:
+        def __init__(self):
+            self.updates = []
+
+        def app_statuses(self, _sha):
+            return {}
+
+        def checks(self, _sha):
+            return dict(red)
+
+        def update_branch(self, n, _head):
+            self.updates.append(n)
+            return True
+
+        def __getattr__(self, _name):
+            return lambda *a, **k: None
+
+    gh, summary = _Gh(), {}
+    strict = [("pending", view(16005, "cur-strict")), ("green", view(15991, "old-fix", fix=True))]
+    h = reserve(strict)
+    strict_lane(gh, git, "b", strict, False, False, summary, red, {}, holder=h, timed_out=[])
+    check("main red: settle's strict lane update-branches the fix while a strict PR's CI runs",
+          gh.updates == [15991], f"holder={h} updates={gh.updates} {summary}")
+
+
 def train_turn_main_red_self_test(check) -> None:
     """The train's turn after a strict merge, with a red main and without (2026-11-13: fixes #15991/#15987
     waited ~2 h behind "train's turn" while no train could be built over the red main)."""
-    saved = globals()["last_merge_was_strict"]
-    globals()["last_merge_was_strict"] = lambda *_a, **_k: True
+    saved = globals()["strict_merge_since_train"]
+    globals()["strict_merge_since_train"] = lambda *_a, **_k: 1000
     try:
         git = lambda *_a, **_k: subprocess.CompletedProcess([], 0, stdout="1000\n", stderr="")
         waiting = [object()]
@@ -3908,7 +3987,7 @@ def train_turn_main_red_self_test(check) -> None:
         red = train_turn(None, git, "b", waiting, False, now=1001, main_red={"Validate manifests": "failure"})
         red_carrier = train_turn(None, git, "b", waiting, True, now=1001, main_red={"Validate manifests": "failure"})
     finally:
-        globals()["last_merge_was_strict"] = saved
+        globals()["strict_merge_since_train"] = saved
     check("train's turn: green main, strict merge just landed, a train candidate waits -> the train goes next",
           bool(green) and "train's turn" in green, f"{green!r}")
     check("train's turn: red main -> no turn, the strict lane serves the fix at once",
@@ -3919,6 +3998,89 @@ def train_turn_main_red_self_test(check) -> None:
     call = settle_src[settle_src.find("train_turn("):][:400]
     check("train's turn: settle hands main_red to train_turn (the call site is the fix as much as the rule)",
           "main_red=main_red" in call.split("\n\n")[0], call[:200])
+
+
+def train_turn_fairness_self_test(check) -> None:
+    """Lane fairness under a steady strict queue (2026-11-14, 15:40-19:30Z): a fast-lane merge landing
+    after a strict merge must not end the train's turn, or the strict lane builds its next carrier over
+    waiting train candidates every time. Drives train_turn on a fake first-parent history."""
+    class FakeGh:
+        def __init__(self, lanes):   # sha -> (pr number, App status description on its head)
+            self.lanes = lanes
+        def pr(self, n):
+            return {"head": {"sha": f"h{n}"}}
+        def app_statuses(self, head):
+            desc = next((d for n, d in self.lanes.values() if f"h{n}" == head), "")
+            return {STATUS_CONTEXT: ("success", desc)}
+
+    def fake_git(history, times):   # history: first-parent shas, newest first
+        def git(*args, **_k):
+            out = ""
+            if args[0] == "rev-list":
+                cap = next((int(a.split("=")[1]) for a in args if a.startswith("--max-count=")), len(history))
+                out = "\n".join(history[:cap])
+            elif args[0] == "show" and args[-1] in times:
+                fmt = args[2]
+                out = times[args[-1]][0] if fmt == "--format=%s" else str(times[args[-1]][1])
+            return subprocess.CompletedProcess(list(args), 0, stdout=out + "\n", stderr="")
+        return git
+
+    strict, fast, train = "strict lane: verified on strict carrier #9 over main x", "fast lane: disjoint", "verified on train over main y"
+    times = {"m3": ("feat(a): fast (#3)", 1900), "m2": ("ci(b): strict (#2)", 1000), "m1": ("feat(c): train (#1)", 500),
+             "m4": ("chore(d): deploy (#4)", 1950)}
+    lanes = {"m3": (3, fast), "m2": (2, strict), "m1": (1, train), "m4": (4, "")}
+    waiting = [object()]
+    _MERGE_LANE.clear()
+    # Strict merge, then a fast merge and a bot merge on top: the train still owns the turn.
+    after_fast = train_turn(FakeGh(lanes), fake_git(["m4", "m3", "m2", "m1"], times), "m4", waiting, False, now=1100)
+    check("lane fairness: fast/bot merges after a strict merge do not end the train's turn (steady strict queue)",
+          bool(after_fast) and "train's turn" in after_fast, f"{after_fast!r}")
+    # Bounded: past TRAIN_TURN_S from that strict merge the strict lane proceeds.
+    expired = train_turn(FakeGh(lanes), fake_git(["m4", "m3", "m2", "m1"], times), "m4", waiting, False,
+                         now=1000 + TRAIN_TURN_S + 1)
+    check("lane fairness: the train's turn still expires TRAIN_TURN_S after the strict merge", expired is None, f"{expired!r}")
+    # A train merge after the strict merge = the train had its turn.
+    trained = train_turn(FakeGh(lanes), fake_git(["m1", "m2"], times), "m1", waiting, False, now=1100)
+    check("lane fairness: a train merge since the strict merge ends the turn", trained is None, f"{trained!r}")
+    # Negative: no train candidates waiting -> strict proceeds unchanged.
+    idle = train_turn(FakeGh(lanes), fake_git(["m2", "m1"], times), "m2", [], False, now=1100)
+    check("lane fairness: no train candidates -> the strict lane proceeds", idle is None, f"{idle!r}")
+    # Unchanged: main's head is the strict merge itself.
+    direct = train_turn(FakeGh(lanes), fake_git(["m2", "m1"], times), "m2", waiting, False, now=1100)
+    check("lane fairness: main's head a strict merge, candidates waiting -> the train's turn", bool(direct), f"{direct!r}")
+    # Depth exceeded: the strict merge lies beyond TRAIN_TURN_DEPTH -> old behaviour (no turn).
+    deep = [f"o{i}" for i in range(TRAIN_TURN_DEPTH)] + ["m2"]
+    dtimes = {**times, **{f"o{i}": (f"chore(x): bot (#{50 + i})", 1050) for i in range(TRAIN_TURN_DEPTH)}}
+    dlanes = {**lanes, **{f"o{i}": (50 + i, "") for i in range(TRAIN_TURN_DEPTH)}}
+    _MERGE_LANE.clear()
+    beyond = train_turn(FakeGh(dlanes), fake_git(deep, dtimes), "o0", waiting, False, now=1100)
+    check("lane fairness: strict merge beyond TRAIN_TURN_DEPTH -> no turn (old behaviour)", beyond is None, f"{beyond!r}")
+
+    class FailingGh(FakeGh):   # a non-200 PR read: get() raises SystemExit
+        def pr(self, n):
+            if n == 3:
+                raise SystemExit("::error::GET /pulls/3 -> 502")
+            return super().pr(n)
+    _MERGE_LANE.clear()
+    try:
+        failed = train_turn(FailingGh(lanes), fake_git(["m3", "m2", "m1"], times), "m3", waiting, False, now=1100)
+    except SystemExit as e:
+        failed = f"aborted: {e}"
+    check("lane fairness: a failed PR read is stepped over, never a tick abort", bool(failed) and "train's turn" in failed,
+          f"{failed!r}")
+    check("lane fairness: a failed read is not memoised", "m3" not in _MERGE_LANE, str(_MERGE_LANE))
+    reads: list = []
+
+    class CountingGh(FakeGh):
+        def pr(self, n):
+            reads.append(n)
+            return super().pr(n)
+    _MERGE_LANE.clear()
+    g = fake_git(["m3", "m2", "m1"], times)
+    train_turn(CountingGh(lanes), g, "m3", waiting, False, now=1100)
+    train_turn(CountingGh(lanes), g, "m3", waiting, False, now=1100)
+    check("lane fairness: a merged commit's lane is read once (memoised by sha)", reads == [3, 2], str(reads))
+    _MERGE_LANE.clear()
 
 
 def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now: float | None = None,
@@ -3935,13 +4097,59 @@ def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now:
         # No train is built over a red main (plan_train serves only fixes), so this turn would hold the
         # strict lane that serves the fix for TRAIN_TURN_S with nobody using it.
         return None
-    if not train_waiting or not last_merge_was_strict(gh, git, base):
+    if not train_waiting:
         return None
     now = time.time() if now is None else now
-    ct = git("show", "-s", "--format=%ct", base, check=False).stdout.strip()
-    if not ct.isdigit() or now - int(ct) > TRAIN_TURN_S:
+    ct = strict_merge_since_train(gh, git, base, now=now)
+    if ct is None or now - ct > TRAIN_TURN_S:
         return None
     return f"train's turn after a strict-lane merge ({len(train_waiting)} train candidate(s) waiting)"
+
+
+_MERGE_LANE: dict[str, str] = {}   # sha -> lane; a merged commit's lane never changes (failed reads not kept)
+
+
+def merge_lane(gh, git, sha: str) -> str:
+    """Which lane put `sha` on main: "strict" (the App's `strict lane:` status on the PR head), "train"
+    (`verified on train`), or "other" (a fast-lane, bot or native auto-merge squash). Unreadable = other.
+    A non-200 PR or status read is "other" too (stepped over), never a tick abort; a quota/transient
+    ApiAbort still propagates exactly as for every other read in the tick."""
+    if sha in _MERGE_LANE:
+        return _MERGE_LANE[sha]
+    m = SQUASH_PR_RE.search(git("show", "-s", "--format=%s", sha, check=False).stdout.strip())
+    if not m:
+        _MERGE_LANE[sha] = "other"
+        return "other"
+    try:
+        head = gh.pr(int(m.group(1)))["head"]["sha"]
+        desc = gh.app_statuses(head).get(STATUS_CONTEXT, ("", ""))[1]
+    except (KeyError, TypeError, ValueError, SystemExit):
+        return "other"
+    lane = "strict" if desc.startswith("strict lane:") else "train" if desc.startswith("verified on train") else "other"
+    _MERGE_LANE[sha] = lane
+    return lane
+
+
+def strict_merge_since_train(gh, git, base: str, depth: int | None = None, now: float | None = None) -> int | None:
+    """Committer time of the newest strict-lane merge on main's first-parent chain with no train merge
+    after it, or None. Fast-lane and bot merges are stepped over: they move main but are not the train's
+    turn, so they must not end it (2026-11-14: fast #16034 landed after strict #16173, main's head was no
+    longer a strict merge, and the next tick built strict carrier #16176 over four waiting candidates).
+    The walk stops, with no API read, at the first commit older than TRAIN_TURN_S (no turn could be open
+    from it) and after `depth` commits (TRAIN_TURN_DEPTH); nothing strict within that = no turn owed."""
+    depth = TRAIN_TURN_DEPTH if depth is None else depth
+    now = time.time() if now is None else now
+    shas = git("rev-list", "--first-parent", f"--max-count={depth}", base, check=False).stdout.split()
+    for sha in shas:
+        ct = git("show", "-s", "--format=%ct", sha, check=False).stdout.strip()
+        if not ct.isdigit() or now - int(ct) > TRAIN_TURN_S:
+            return None
+        lane = merge_lane(gh, git, sha)
+        if lane == "train":
+            return None
+        if lane == "strict":
+            return int(ct)
+    return None
 
 
 def latest_ci_activity(check_runs: list, load_runs, now: float) -> float | None:
@@ -4212,6 +4420,25 @@ def stack_verdict(gh, git, p: dict, live_main: str) -> tuple[str, str]:
     return "wait", f"holder #{n} has no verdict yet"
 
 
+def preempting_fixes(base: str, strict: list, fixes: dict | None) -> set[int]:
+    """Fixes that pre-empt a non-fix strict reservation on a red main (ADR-0343 amendment 2026-11-14):
+    every green fix (`fixes`, strict_fixes) plus every fix whose COMBINED head is in CI (fix_head_state's
+    `fix` marker: strict_fixes lists only green PRs, so a lone fix would lose main the moment its own CI
+    started). A green fix that cannot be served over THIS main — the App already told it conflicts or
+    that update-branch was refused, on this head over this main — pre-empts nothing: it would only free
+    main for nobody. Read from App statuses already in the view; no git, no API."""
+    out: set[int] = set()
+    for state, view in strict:
+        n = view["number"]
+        if view.get("fix") and state == "pending":
+            out.add(n)
+        elif n in (fixes or {}):
+            told = (view.get("app") or {}).get(NOTICE_CONTEXT, ("", ""))[1]
+            if not told.startswith((f"{CONFLICT_PREFIX}{base[:12]}", f"{REFUSED_PREFIX}{base[:12]}")):
+                out.add(n)
+    return out
+
+
 def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: float | None = None,
                        fixes: dict | None = None, activity=None) -> tuple[int | None, list[int]]:
     """(holder, timed_out). The holder is the oldest strict-lane PR whose head already contains live
@@ -4227,7 +4454,9 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
     now = time.time() if now is None else now
     holder, timed_out = None, []
     fixes = fixes or {}
-    ordered = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes else 1)
+    holder_state = None
+    pre = preempting_fixes(base, strict, fixes)
+    ordered = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes or sv[1]["number"] in pre else 1)
     for state, view in ordered:
         n, head = view["number"], view["head_sha"]
         if state not in ("pending", "green"):
@@ -4249,6 +4478,17 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
             timed_out.append(n)
         elif holder is None:
             holder = n
+            holder_state = state
+    # Main-red fix pre-emption (ADR-0343 amendment 2026-11-14): a non-fix reservation whose CI is still
+    # RUNNING does not hold main while a green fix waits. Since no train moves on a red main, holding it
+    # for a strict PR's 30-60 min CI (re-run each time main moves) left the fix — the one PR that can turn
+    # main green — waiting behind a reservation that only exists because main moved (#15991 behind
+    # #16005/#16009, #16096 behind #15976). A GREEN holder merges this tick and is never interrupted; the
+    # pre-empted PR keeps its CI and regains main once main is green (it is behind then, so re-updated).
+    if holder is not None and pre and holder not in pre and holder not in fixes and holder_state == "pending":
+        log(f"#{holder:>6} strict    reservation pre-empted: main is red and fix "
+            f"{', '.join(f'#{f}' for f in sorted(pre))} is served first; main returns once green")
+        holder = None
     return holder, timed_out
 
 
@@ -6086,6 +6326,8 @@ def self_test() -> int:
 
     retry_planner_self_test(check)
     train_turn_main_red_self_test(check)
+    fix_preempts_strict_self_test(check)
+    train_turn_fairness_self_test(check)
     branch_updater_self_test(check)
     prefetch_self_test(check)
     git_memo_self_test(check)

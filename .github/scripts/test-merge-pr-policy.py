@@ -239,6 +239,36 @@ class PolicyEvidenceTests(unittest.TestCase):
             proof.app_authorization(copy.deepcopy(github.pull), old.REPO, github)
         self.assertFalse(any('/git/' in path for path in github.calls))
 
+    def test_reviewed_bdc11a54_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('bdc11a54da45ff594f12d72eb7b2b3bf35139a0f')
+
+    def test_reviewed_9337dc5b_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('9337dc5bf351dd3c9310b1ac9dafeea6ee1f2976')
+
+    def test_reviewed_b03f72aa_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('b03f72aa290b53f9826007b8a745fb77ea15b9ec')
+
+    def test_reviewed_19f3b8c0_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('19f3b8c002b9f09439ca152b581121eba0e83274')
+
+    def test_reviewed_231ad0e8_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('231ad0e824f57749b3cfa482ba10593557cbec2f')
+
+    def test_current_policy_source_is_within_bounds_and_reviewed(self):
+        # #16187: the controller outgrew the size bound and nothing noticed until merge records
+        # were already missing. This makes both conditions fail at PR time instead.
+        raw = Path(__file__).with_name('merge-train.py').read_bytes()
+        self.assertLessEqual(len(raw), policy.MAX_POLICY_BLOB_BYTES)
+        sha = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+        self.assertIn(sha, policy.REVIEWED_POLICY_BLOBS,
+                      f'merge-train.py blob {sha} is not reviewed: add it to REVIEWED_POLICY_BLOBS with a '
+                      f'fixture and a chain test in this PR, so reviewing this change reviews the policy')
+
+    def test_base64_bound_admits_the_largest_allowed_blob(self):
+        raw = b'x' * policy.MAX_POLICY_BLOB_BYTES
+        encoded = base64.encodebytes(raw).decode()  # GitHub's API wraps base64 like this
+        self.assertLessEqual(len(encoded), policy.MAX_POLICY_BLOB_BASE64)
+
     def test_reviewed_14bd8b1e_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('14bd8b1e81b94eb0a297f645007c44d1245732cc')
 
@@ -377,7 +407,7 @@ class PolicyEvidenceTests(unittest.TestCase):
 
     def test_blob_digest_encoding_and_bounds_rejected(self):
         for change in ({'content': '!!!!'}, {'content': base64.b64encode(b'wrong').decode()},
-                       {'size': True}, {'size': 500001}, {'encoding': 'utf8'}, {'sha': old.HEAD}):
+                       {'size': True}, {'size': policy.MAX_POLICY_BLOB_BYTES + 1}, {'encoding': 'utf8'}, {'sha': old.HEAD}):
             github = PolicyGitHub()
             github.responses[f'/git/blobs/{github.blob_sha}'].update(change)
             with self.subTest(change=change), self.assertRaises(ValueError):
