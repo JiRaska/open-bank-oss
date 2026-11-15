@@ -1,0 +1,206 @@
+/* Visual roles mirror the Admin UI design tokens. Keycloak renders all auth pages. */
+body.openbank-admin-login {
+  --ob-page: #f8fafc;
+  --ob-surface: #fff;
+  --ob-text: #0f172a;
+  --ob-muted: #475569;
+  --ob-border: #8491a2;
+  --ob-accent: #4f46e5;
+  --ob-accent-hover: #4338ca;
+  --ob-accent-bg: #eef2ff;
+  --ob-on-accent: #fff;
+  --ob-field-size: 2.75rem;
+  --ob-radius: .5rem;
+  --pf-v5-global--FontFamily--text: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --pf-v5-global--FontFamily--heading: var(--pf-v5-global--FontFamily--text);
+  height: auto;
+  background: var(--ob-page);
+  color: var(--ob-text);
+}
+
+.pf-v5-theme-dark body.openbank-admin-login {
+  color-scheme: dark;
+  --ob-page: #0b1220;
+  --ob-surface: #111827;
+  --ob-text: #f8fafc;
+  --ob-muted: #cbd5e1;
+  --ob-border: #64748b;
+  --ob-accent: #a5b4fc;
+  --ob-accent-hover: #c7d2fe;
+  --ob-accent-bg: #1e1b4b;
+  --ob-on-accent: #0f172a;
+}
+
+.openbank-admin-login .pf-v5-c-login {
+  display: grid;
+  grid-template-columns: minmax(0, 46fr) minmax(0, 54fr);
+  grid-template-areas: "explorer access";
+  min-height: 100vh;
+  min-height: 100svh;
+}
+
+.openbank-admin-login .pf-v5-c-login::before {
+  content: "";
+  grid-area: explorer;
+  background: #102655 url("../img/explorer-prague-lion.webp") 76% center / cover no-repeat;
+}
+
+.openbank-admin-login .pf-v5-c-login__container {
+  grid-area: access;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  padding: clamp(1.25rem, 4vw, 3.5rem);
+}
+
+.openbank-admin-login .pf-v5-c-login__header {
+  margin: 0;
+  padding: 0;
+}
+
+.openbank-admin-login #kc-header-wrapper {
+  color: var(--ob-text) !important;
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -.025em;
+  text-align: start;
+  text-transform: none;
+}
+
+.openbank-admin-login .pf-v5-c-login__main {
+  width: min(100%, 26rem);
+  margin: auto;
+  padding-block: 2.75rem 2rem;
+  background: transparent;
+  color: var(--ob-text);
+  box-shadow: none;
+  overflow-wrap: anywhere;
+}
+
+.openbank-admin-login .pf-v5-c-login__main-header {
+  align-items: center;
+  border-top: 0;
+  padding: 0 0 1.5rem;
+}
+
+.openbank-admin-login .pf-v5-c-login__main-title {
+  color: var(--ob-text);
+  font-size: clamp(1.75rem, 3.4vw, 2.5rem);
+  font-weight: 650;
+  letter-spacing: -.04em;
+  line-height: 1.15;
+}
+
+.openbank-admin-login .pf-v5-c-login__main-body {
+  padding: 0;
+}
+
+.openbank-admin-login .pf-v5-c-form__label-text {
+  color: var(--ob-text);
+}
+
+.openbank-admin-login .pf-v5-c-form-control {
+  --pf-v5-c-form-control--BackgroundColor: var(--ob-surface);
+  --pf-v5-c-form-control--Color: var(--ob-text);
+  --pf-v5-c-form-control--before--BorderTopColor: var(--ob-border);
+  --pf-v5-c-form-control--before--BorderRightColor: var(--ob-border);
+  --pf-v5-c-form-control--before--BorderBottomColor: var(--ob-border);
+  --pf-v5-c-form-control--before--BorderLeftColor: var(--ob-border);
+  --pf-v5-c-form-control--focus--after--BorderBottomColor: var(--ob-accent);
+  --pf-v5-c-form-control--before--BorderRadius: var(--ob-radius);
+  border-radius: var(--ob-radius);
+}
+
+.openbank-admin-login .pf-v5-c-form-control :is(input, select) {
+  min-height: var(--ob-field-size);
+  font-size: 1rem;
+}
+
+.openbank-admin-login .pf-v5-c-input-group:has([data-password-toggle]) {
+  position: relative;
+}
+
+.openbank-admin-login .pf-v5-c-input-group [data-password-toggle] {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: var(--ob-field-size);
+  height: 100%;
+  padding: 0;
+  border-radius: var(--ob-radius);
+  background: transparent;
+  color: var(--ob-muted);
+}
+
+.openbank-admin-login .pf-v5-c-input-group [data-password-toggle]::after {
+  border: 0;
+}
+
+.openbank-admin-login .pf-v5-c-input-group:has([data-password-toggle]) input {
+  padding-inline-end: var(--ob-field-size);
+}
+
+.openbank-admin-login .pf-v5-c-button.pf-m-primary {
+  --pf-v5-c-button--m-primary--BackgroundColor: var(--ob-accent);
+  --pf-v5-c-button--m-primary--Color: var(--ob-on-accent);
+  --pf-v5-c-button--m-primary--hover--BackgroundColor: var(--ob-accent-hover);
+  --pf-v5-c-button--m-primary--hover--Color: var(--ob-on-accent);
+  --pf-v5-c-button--m-primary--focus--BackgroundColor: var(--ob-accent-hover);
+  --pf-v5-c-button--m-primary--focus--Color: var(--ob-on-accent);
+  --pf-v5-c-button--m-primary--active--BackgroundColor: var(--ob-accent-hover);
+  --pf-v5-c-button--m-primary--active--Color: var(--ob-on-accent);
+  min-height: var(--ob-field-size);
+  border-radius: var(--ob-radius);
+  font-weight: 600;
+}
+
+.openbank-admin-login #authenticateWebAuthnButton {
+  --pf-v5-c-button--m-secondary--after--BorderColor: var(--ob-border);
+  min-height: var(--ob-field-size);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  margin-block-start: .75rem;
+  border-radius: var(--ob-radius);
+  background: var(--ob-surface);
+  color: var(--ob-text);
+  font-weight: 600;
+}
+
+.openbank-admin-login #authenticateWebAuthnButton::before {
+  content: "\f084" / "";
+  color: var(--ob-accent);
+  font-family: "Font Awesome 5 Free";
+  font-weight: 900;
+}
+
+.openbank-admin-login #authenticateWebAuthnButton:hover,
+.openbank-admin-login .pf-v5-c-input-group [data-password-toggle]:hover {
+  background: var(--ob-accent-bg);
+}
+
+.openbank-admin-login :is(a, button, input, select):focus-visible {
+  outline: 2px solid var(--ob-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 48rem) {
+  .openbank-admin-login .pf-v5-c-login {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: clamp(7rem, 24vw, 10rem) 1fr;
+    grid-template-areas: "explorer" "access";
+  }
+
+  .openbank-admin-login .pf-v5-c-login::before {
+    background-position: center 34%;
+  }
+
+  .openbank-admin-login .pf-v5-c-login__main {
+    margin-block: 0 auto;
+    padding-block-start: 1.75rem;
+  }
+}
