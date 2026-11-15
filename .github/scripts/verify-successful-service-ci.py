@@ -986,7 +986,12 @@ def resolve_reconcile_service_sources(
                         # names. The gate re-asks the broker for its integrations right
                         # before the verdict, so a contract registered since cannot ride on
                         # this answer.
-                        if not _names_no_committed_pact(service, sha, deadline=deadline):
+                        # Both revisions: `pacts/` is not a build input of the service, so
+                        # tree equivalence says nothing about a pact added after `sha`.
+                        if not (
+                            _names_no_committed_pact(service, sha, deadline=deadline)
+                            and _names_no_committed_pact(service, tip_sha, deadline=deadline)
+                        ):
                             continue
                         contract_free = True
                     _require_time_remaining(deadline)

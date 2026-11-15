@@ -1338,7 +1338,12 @@ class ReconcileQuotaAndContractFreeTest(unittest.TestCase):
                 self.assertIn("not evaluated", stderr.getvalue())
                 self.assertNotIn("::error::", stderr.getvalue())
 
-    def resolve_with(self, *, names_no_pact: bool):
+    def test_a_pact_added_after_the_source_at_tip_refuses(self):
+        refused, names = self.resolve_with(names_no_pact=lambda svc, sha, deadline=None: sha != self.TIP)
+        self.assertIsInstance(refused, MODULE.UnresolvedServicesError)
+        self.assertIn(self.TIP, [call.args[1] for call in names.call_args_list])
+
+    def resolve_with(self, *, names_no_pact):
         run = {
             "id": 41, "run_attempt": 1, "head_sha": self.OLDER, "head_branch": "main",
             "event": "push", "status": "completed", "conclusion": "failure",
@@ -1363,7 +1368,9 @@ class ReconcileQuotaAndContractFreeTest(unittest.TestCase):
             patch.object(MODULE, "_tree_equivalent", return_value=True),
             patch.object(MODULE, "_exact_pact_exists", return_value=False),
             patch.object(
-                MODULE, "_names_no_committed_pact", return_value=names_no_pact
+                MODULE, "_names_no_committed_pact",
+                **({"side_effect": names_no_pact} if callable(names_no_pact)
+                   else {"return_value": names_no_pact}),
             ) as names,
         ):
             try:
@@ -1380,7 +1387,9 @@ class ReconcileQuotaAndContractFreeTest(unittest.TestCase):
             resolved,
             {SERVICE: {"sha": self.OLDER, "run_id": "41", "attempt": 1, "contract_free": True}},
         )
-        names.assert_called_once()
+        self.assertEqual(
+            sorted(call.args[1] for call in names.call_args_list), sorted([self.OLDER, self.TIP])
+        )
 
     def test_a_service_named_by_a_committed_pact_still_needs_its_exact_version(self):
         refused, _ = self.resolve_with(names_no_pact=False)
