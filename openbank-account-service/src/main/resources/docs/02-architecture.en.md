@@ -208,3 +208,19 @@ product revision. A foreign-only offering is refused before account creation. Pe
 with a product revision pin recheck the current offering scope before activation. Legacy
 unscoped catalogue responses and historical pending accounts without a pin retain the existing
 domestic route. This check does not activate FOS or branch sales.
+
+### Passport operation recovery (ADR-0380)
+
+A passport opening accepts a grant reference. The catalogue verifies subject evidence against
+the approved grant. Account-service persists an operation ID, the exact request fingerprint,
+account ID and pinned revision before asking catalogue to consume. On timeout, resubmit the
+same body and idempotency key. Catalogue returns the receipt for that same operation, including
+when the grant was revoked after the original consumption. No new account is written before
+the receipt. The approved operation survives a restart without storing a second copy of the
+request's customer data.
+
+Activation derives its grant from the persisted opening. It gets a separate operation ID
+bound to the pending account version. Its state transition and status event commit together.
+Redelivery of the existing onboarding event, or a repeat of the activation request, resumes
+the operation after a failed account write. Existing domestic accounts follow their usual
+route. Branch booking requires its own approved route before use.

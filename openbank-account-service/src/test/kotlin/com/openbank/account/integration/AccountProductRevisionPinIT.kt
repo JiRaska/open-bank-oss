@@ -5,17 +5,22 @@
 package com.openbank.account.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.account.infrastructure.client.PassportAdmissionClient
+import com.openbank.account.infrastructure.client.PassportAdmissionRequest
 import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured
 import io.restassured.response.Response
+import io.smallrye.mutiny.Uni
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.sql.SQLException
@@ -190,6 +195,42 @@ class AccountProductRevisionPinIT {
             .isEqualTo(4L)
     }
 
+    @Test
+    @TestSecurity(user = ACTOR_ID, roles = ["ROLE_OPERATOR"])
+    fun `HTTP retry recovers a persisted passport opening after the acknowledgement is lost`() {
+        val calls = mutableListOf<PassportAdmissionRequest>()
+        val catalogue = object : PassportAdmissionClient {
+            override fun admit(request: PassportAdmissionRequest): Uni<Void> {
+                calls += request
+                return if (calls.size == 1) {
+                    Uni.createFrom().failure(IllegalStateException("synthetic lost acknowledgement"))
+                } else {
+                    Uni.createFrom().voidItem()
+                }
+            }
+        }
+        QuarkusMock.installMockForType(catalogue, PassportAdmissionClient::class.java, RestClient.LITERAL)
+        val partyId = UUID.randomUUID()
+        val grant = UUID.randomUUID()
+        val key = UUID.randomUUID().toString()
+
+        assertThat(open(partyId, key, grant).statusCode).isEqualTo(500)
+        assertNothingPersistedFor(partyId)
+        val intent = query(
+            "SELECT operation_id, account_id FROM account_passport_intents WHERE operation_key = ?",
+            "OPEN:$key",
+        ).single()
+
+        val retry = open(partyId, key, grant)
+        assertThat(retry.statusCode).describedAs(retry.body.asString()).isEqualTo(201)
+        assertThat(calls).hasSize(2)
+        assertThat(calls[1]).isEqualTo(calls[0])
+        assertThat(calls[0].operationId).isEqualTo(intent[0])
+        assertThat(retry.jsonPath().getString("id")).isEqualTo(intent[1].toString())
+        val accounts = query("SELECT id FROM accounts WHERE party_id = ?", partyId)
+        assertThat(accounts).hasSize(1)
+    }
+
     private fun pinLegacyRow(accountId: UUID, number: Long?): Int = dataSource.connection.use { c ->
         c.prepareStatement(
             """
@@ -218,9 +259,13 @@ class AccountProductRevisionPinIT {
         ).describedAs("no outbox row for a refused opening").isEmpty()
     }
 
-    private fun open(partyId: UUID): Response = RestAssured.given()
+    private fun open(
+        partyId: UUID,
+        key: String = UUID.randomUUID().toString(),
+        passportGrantId: UUID? = null,
+    ): Response = RestAssured.given()
         .contentType("application/json")
-        .header("Idempotency-Key", UUID.randomUUID().toString())
+        .header("Idempotency-Key", key)
         .body(
             """
             {
@@ -228,7 +273,7 @@ class AccountProductRevisionPinIT {
               "productId": "$productId",
               "accountType": "CURRENT",
               "currencyCode": "CZK",
-              "legalName": "Pin IT s.r.o."
+              "legalName": "Pin IT s.r.o."${passportGrantId?.let { ",\"passportGrantId\":\"$it\"" }.orEmpty()}
             }
             """.trimIndent(),
         )

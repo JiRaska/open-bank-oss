@@ -1227,3 +1227,12 @@ The check uses catalogue distribution metadata. The passport grant registry and 
 consumption against revocation are pending. Earlier unscoped catalogue responses and unpinned
 historical pending accounts use the domestic compatibility path. Cross-border activation requires
 the registry, authoritative facts and commitment fence before any FOS or branch launch.
+
+### Passport admission and retry
+
+- A caller can pass a grant reference. Catalogue verifies the named account-service identity
+  and independent subject evidence before admission. The reference alone grants nothing.
+- A durable intent pins the exact operation before catalogue consumption. A retry can recover
+  only that receipt. Account writes and activation outbox events commit atomically.
+- A pending activation is tied to its account version. Changing the account cannot reuse an
+  earlier receipt to activate a different state.

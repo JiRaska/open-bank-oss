@@ -28,6 +28,9 @@ import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.BalanceView
 import com.openbank.account.application.port.out.CurrencyPocketRepository
 import com.openbank.account.application.port.out.NotificationRequestPort
+import com.openbank.account.application.port.out.PassportCommitment
+import com.openbank.account.application.port.out.PassportIntent
+import com.openbank.account.application.port.out.PassportOperation
 import com.openbank.account.application.port.out.SanctionsScreenResult
 import com.openbank.account.domain.event.AccountClosedEvent
 import com.openbank.account.domain.event.AccountCreatedEvent
@@ -40,6 +43,7 @@ import com.openbank.account.domain.model.CurrencyPocket
 import com.openbank.account.domain.model.PocketResolution
 import com.openbank.account.domain.model.PocketRouter
 import com.openbank.account.domain.model.PocketStatus
+import com.openbank.account.domain.model.ProductRevisionPin
 import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
@@ -54,8 +58,10 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.PersistenceException
 import org.jboss.logging.Logger
 import java.math.BigDecimal
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
+import java.util.HexFormat
 import java.util.UUID
 
 @ApplicationScoped
@@ -75,6 +81,7 @@ class AccountService(
      * CDI bean's constructor parameter makes Arc fail to resolve the bean, silently.
      */
     private val notificationRequestPort: NotificationRequestPort,
+    private val passport: PassportCommitment,
 ) : AccountUseCase {
 
     private suspend fun screenForOpening(command: OpenAccountCommand): SanctionsScreenResult {
@@ -109,8 +116,10 @@ class AccountService(
         // under, taken at the same instant as openedAt. Fail-closed on the pin: no product, an
         // ineligible product, no published revision or an unreachable catalog each refuse the
         // opening before anything is written (issue #668 replaced; it used to proceed on an outage).
-        val now = Instant.now(clock)
-        val pin = productRevisionPinning.pinFor(command.productId, command.currency.code, now)
+        val pending = passport.find(openingKey(command.idempotencyKey))
+        pending?.requireSameOpening(command)
+        val pin = pending?.pin ?: freshOpeningPin(command)
+        val passportOperation = pending ?: preparePassportOpening(command, pin)
 
         // #9044: a TERM_DEPOSIT must never open without a record of the terms version it was
         // opened under — the terms carry the early-withdrawal penalty and the notice period, and
@@ -129,29 +138,30 @@ class AccountService(
         }
 
         val account = Account(
-            id = UUID.randomUUID(),
+            id = passportOperation?.accountId ?: UUID.randomUUID(),
             accountNumber = iban,
             accountType = command.accountType,
             partyId = command.partyId,
             productId = command.productId,
             currency = command.currency,
             status = command.initialStatus,
-            openedAt = now,
+            openedAt = (passportOperation?.pin ?: pin).pinnedAt,
             closedAt = null,
             version = 0L,
-            sanctionsScreenedAt = now,
+            sanctionsScreenedAt = clock.instant(),
             sanctionsStatus = screening.status,
             legalName = command.legalName.ifBlank { null },
             termsVersion = command.termsVersion,
             termsUrl = command.termsUrl,
             termsEffectiveFrom = command.termsEffectiveFrom,
-            productRevisionPin = pin,
+            productRevisionPin = passportOperation?.pin ?: pin,
         )
 
         // Account + pocket + idempotency key + AccountCreated outbox row commit in ONE transaction
         // (#465). A concurrent duplicate submission dies on the account_idempotency primary key — recover it into
         // the same contract as the sequential replay above: return the winner's account,
         // publish no second event, count no second metric.
+        passportOperation?.let { passport.admit(it) }
         val saved = try {
             accountRepository.saveNewAccount(
                 account,
@@ -250,24 +260,25 @@ class AccountService(
         if (account.status == AccountStatus.ACTIVE) return account // idempotent
         val previous = account.status
         val activated = account.activate()
-        account.productRevisionPin?.let {
-            productRevisionPinning.checkActivation(account.productId, it, clock.instant())
+        val passportOpening = passport.openingFor(account.id)
+        if (passportOpening != null) {
+            admitPassportActivation(account, passportOpening)
+        } else {
+            account.productRevisionPin?.let {
+                productRevisionPinning.checkActivation(account.productId, it, clock.instant())
+            }
         }
-        val updated = accountRepository.update(activated)
-
-        eventPublisher.publish(
-            topic = "openbank.accounts.account.status-changed",
-            key = updated.id.toString(),
-            event = AccountStatusChangedEvent(
-                aggregateId = updated.id,
-                version = updated.version,
-                previousStatus = previous,
-                newStatus = updated.status,
-                reason = "KYC + AML cleared (ADR-0267)",
-                occurredAt = clock.instant(),
-                sourceService = "account-service",
-            ),
-        )
+        val updated = if (passportOpening != null) {
+            accountRepository.update(activated) { activationEvent(it, previous) }
+        } else {
+            accountRepository.update(activated).also {
+                eventPublisher.publish(
+                    topic = "openbank.accounts.account.status-changed",
+                    key = it.id.toString(),
+                    event = activationEvent(it, previous),
+                )
+            }
+        }
 
         // Idempotent above (an already-ACTIVE account returns early), so this fires once —
         // and it is the moment the customer can actually use the account.
@@ -275,6 +286,72 @@ class AccountService(
             notificationRequestPort.notifyAccountOpened(updated.partyId, updated.accountNumber.value)
         }
         return updated
+    }
+
+    private fun activationEvent(account: Account, previous: AccountStatus) = AccountStatusChangedEvent(
+        aggregateId = account.id,
+        version = account.version,
+        previousStatus = previous,
+        newStatus = account.status,
+        reason = "KYC + AML cleared (ADR-0267)",
+        occurredAt = clock.instant(),
+        sourceService = "account-service",
+    )
+
+    private suspend fun freshOpeningPin(command: OpenAccountCommand): ProductRevisionPin =
+        productRevisionPinning.pinFor(
+            command.productId,
+            command.currency.code,
+            clock.instant(),
+            passportAdmissionRequired = command.passportGrantId != null,
+        )
+
+    private suspend fun preparePassportOpening(command: OpenAccountCommand, pin: ProductRevisionPin): PassportIntent? {
+        val grant = command.passportGrantId ?: return null
+        return passport.prepare(
+            PassportIntent(
+                openingKey(command.idempotencyKey),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                grant,
+                command.partyId,
+                PassportOperation.OPEN,
+                requireNotNull(command.requestHash) { "passport opening requires a request fingerprint" },
+                pin,
+            ),
+        ).also { it.requireSameOpening(command) }
+    }
+
+    private fun openingKey(idempotencyKey: String): String = "OPEN:$idempotencyKey"
+
+    private fun PassportIntent.requireSameOpening(command: OpenAccountCommand) {
+        if (binding != command.requestHash || partyId != command.partyId || grantId != command.passportGrantId) {
+            throw IdempotencyKeyReusedException()
+        }
+    }
+
+    private suspend fun admitPassportActivation(account: Account, opening: PassportIntent) {
+        val pin = checkNotNull(account.productRevisionPin) { "passport account requires a product revision" }
+        val activationBinding = HexFormat.of().formatHex(
+            MessageDigest.getInstance("SHA-256")
+                .digest("${account.id}:${account.version}:${pin.revisionId}".toByteArray(Charsets.UTF_8)),
+        )
+        val intent = passport.prepare(
+            PassportIntent(
+                "ACTIVATE:${account.id}",
+                UUID.randomUUID(),
+                account.id,
+                opening.grantId,
+                account.partyId,
+                PassportOperation.ACTIVATE,
+                activationBinding,
+                pin,
+            ),
+        )
+        if (intent.binding != activationBinding || intent.partyId != account.partyId) {
+            throw ResourceConflictException("passport activation operation no longer matches the account")
+        }
+        passport.admit(intent)
     }
 
     override suspend fun freezeAccount(command: FreezeAccountCommand): Account {

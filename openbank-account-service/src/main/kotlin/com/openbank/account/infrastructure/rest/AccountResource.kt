@@ -137,6 +137,7 @@ class AccountResource(
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.create")
     @Operation(summary = "Open a new account")
+    @Suppress("LongMethod") // Keep the reservation, execution and response replay together.
     suspend fun openAccount(
         request: OpenAccountRequest,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
@@ -183,6 +184,7 @@ class AccountResource(
                     termsVersion = request.termsVersion,
                     termsUrl = request.termsUrl,
                     termsEffectiveFrom = request.termsEffectiveFrom,
+                    passportGrantId = request.passportGrantId,
                 ),
             ).also { opened = true }
         } finally {
