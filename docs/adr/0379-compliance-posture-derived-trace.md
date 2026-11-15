@@ -48,9 +48,9 @@ We will make compliance posture a **derived trace**, and `/docs/compliance` its 
 1. **One join, three authored sources, nothing new hand-kept.** Each obligation in
    `regulatory-obligations.yaml` gains an optional `controls: [<control-id>]` list, and each control in
    `compliance-controls.yaml` gains `evidence_refs: [{kind, ref}]` (the existing `evidence` field stays the prose
-   description), where `kind` ∈ `gate | workflow | adr | path` and `ref` must resolve: a `gates.yaml` id, a file
-   under `.github/workflows/`, an ADR number, or an existing repo path. Test and attestation kinds wait for phase 2,
-   which is when their run timestamps become available. No new generated file is added: the admin-ui joins three
+   description), where `kind` ∈ `gate | workflow | test | adr | path` and `ref` must resolve: a `gates.yaml` id, a file
+   under `.github/workflows/`, a test file under a test source set, an ADR number, or an existing repo path.
+   An `attestation` kind waits until some source records when an attestation was last verified. No new generated file is added: the admin-ui joins three
    artefacts the image already bakes (`compliance-controls.yaml`, `regulatory-obligations.json`,
    `gate-catalog.json`) in one pure function (`src/lib/compliance/trace.ts`), so the page, the export and any MCP
    tool compute the same verdict. The hand-written `COMPLIANCE_AREAS` literal is deleted.
@@ -62,7 +62,8 @@ We will make compliance posture a **derived trace**, and `/docs/compliance` its 
    documentation only (an ADR or a path), or none. A positive claim (`enforced`, `partial`) without at least a CI
    run behind it renders as `unverified`, even when the YAML says `enforced`. Weak claims (`audit`, `planned`) stand
    as declared, because they already describe themselves honestly. Phase 2 adds evidence *age*: a control whose
-   newest successful run is older than its declared `max_evidence_age` will also render `unverified`. This is
+   newest successful run is older than its declared `max_evidence_age_days` will also render `unverified`, and so
+   will one whose age cannot be read, because an unobservable age is not a fresh one. This is
    ADR-0253 applied to the page itself.
 
 3. **Three views over the same data, not three datasets.**
@@ -146,7 +147,8 @@ Runtime check: `tools/list` on the MCP endpoint, called as a compliance-role pri
 
 1. Add the trace fields, the join and the gate, and rebuild `/docs/compliance` as the derived hub with the three
    views and the print/JSON export. Drop the literal and retire `compliance-matrix` and `compliance-page-evidence`.
-2. Add `test` and `attestation` evidence kinds with their run timestamps, and `max_evidence_age` per control.
+2. Add the `test` evidence kind and `max_evidence_age_days` per control, aged by the newest passing gate run that
+   the gate-health collector records (`lastOk`). Give `sanctions-screening` and `fraud-monitoring` machine evidence.
 3. Add the MCP read tools and the cited-answer assistant, through a charter change in `agents.yaml`.
 
 ## Compliance impact

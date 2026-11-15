@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 import { describe, expect, it } from 'vitest'
-import { buildComplianceTrace, computeVerdict, type TraceInputs } from '../lib/compliance/trace'
+import { buildComplianceTrace, computeVerdict, type TraceInputControl, type TraceInputs } from '../lib/compliance/trace'
 
 function inputs(overrides: Partial<TraceInputs> = {}): TraceInputs {
   return {
@@ -25,6 +25,8 @@ function inputs(overrides: Partial<TraceInputs> = {}): TraceInputs {
     commit: 'a'.repeat(40),
     postureCollectedAt: null,
     adrSlugs: { '0001': '0001-record' },
+    gateHealth: null,
+    now: '2026-11-15T12:00:00.000Z',
     ...overrides,
   }
 }
@@ -70,5 +72,50 @@ describe('compliance trace verdict (ADR-0379)', () => {
       controls: [{ id: 'x', title: 'x', category: 'x', frameworks: [], references: [], evidence: 'e', declaredStatus: 'enforced', evidenceRefs: [{ kind: 'vibes', ref: 'trust me' }] }],
     }))
     expect(trace.controls[0]).toMatchObject({ evidenceRefs: [], evidenceLevel: 'none', verdict: 'unverified' })
+  })
+
+  it('counts a test file as machine evidence', () => {
+    const trace = buildComplianceTrace(inputs({
+      controls: [{ id: 't', title: 't', category: 'x', frameworks: [], references: [], evidence: 'e', declaredStatus: 'enforced', evidenceRefs: [{ kind: 'test', ref: 'svc/src/test/T.kt' }] }],
+    }))
+    expect(trace.controls[0]).toMatchObject({ evidenceLevel: 'ci', verdict: 'enforced' })
+  })
+})
+
+describe('compliance trace evidence age (ADR-0379 phase 2)', () => {
+  const aged: TraceInputControl = {
+    id: 'aged', title: 'Aged', category: 'x', frameworks: [], references: [], evidence: 'e',
+    declaredStatus: 'enforced', evidenceRefs: [{ kind: 'gate', ref: 'g-enforced' }], maxEvidenceAgeDays: 14,
+  }
+  const health = (status: string, lastOkAt: string | null) => ({ collectedAt: '2026-11-15T11:00:00.000Z', gates: { 'g-enforced': { status, lastOkAt } } })
+
+  it('keeps an age-bound claim whose gate passed within the window', () => {
+    const c = buildComplianceTrace(inputs({ controls: [aged], gateHealth: health('ok', '2026-11-10T00:00:00.000Z') })).controls[0]
+    expect(c).toMatchObject({ verdict: 'enforced', freshness: 'fresh', newestEvidenceAt: '2026-11-10T00:00:00.000Z' })
+  })
+
+  it('downgrades an age-bound claim whose newest pass is too old', () => {
+    const c = buildComplianceTrace(inputs({ controls: [aged], gateHealth: health('ok', '2026-10-01T00:00:00.000Z') })).controls[0]
+    expect(c).toMatchObject({ verdict: 'unverified', freshness: 'stale', downgradeReason: 'stale-evidence' })
+  })
+
+  it('does not let a recent pass vouch for a gate whose latest run failed', () => {
+    const c = buildComplianceTrace(inputs({ controls: [aged], gateHealth: health('failed', '2026-11-14T00:00:00.000Z') })).controls[0]
+    expect(c).toMatchObject({ verdict: 'unverified', freshness: 'unknown', downgradeReason: 'evidence-age-unknown' })
+  })
+
+  it('treats a missing gate-run snapshot as an unknown age, never as fresh', () => {
+    const c = buildComplianceTrace(inputs({ controls: [aged], gateHealth: null })).controls[0]
+    expect(c).toMatchObject({ verdict: 'unverified', downgradeReason: 'evidence-age-unknown' })
+  })
+
+  it('leaves a control without an age bound alone', () => {
+    const c = buildComplianceTrace(inputs({ controls: [{ ...aged, maxEvidenceAgeDays: undefined }], gateHealth: null })).controls[0]
+    expect(c).toMatchObject({ verdict: 'enforced', freshness: 'not-required' })
+  })
+
+  it('reports the evaluation instant and snapshot time it judged against', () => {
+    const t = buildComplianceTrace(inputs({ gateHealth: health('ok', null) }))
+    expect(t.asOf).toMatchObject({ evaluatedAt: '2026-11-15T12:00:00.000Z', gateHealthCollectedAt: '2026-11-15T11:00:00.000Z' })
   })
 })
