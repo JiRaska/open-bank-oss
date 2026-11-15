@@ -218,11 +218,14 @@ lost acknowledgement, a scheduler checks for the exact consumed receipt and writ
 account through the same account, pocket, idempotency and outbox transaction. That transaction also
 clears the queued details. Recovery can finish an already-consumed operation after revocation.
 
-Recovery never consumes an unused permit. If the original call never reached consumption, the
-operator can repeat the same request with the same idempotency key to obtain a current decision.
-The recovery queue stores no holder name. A recovered account records the original screening
-timestamp and outcome, and leaves its optional cached display name empty. Existing V35 intents
-need a matching caller retry before they have enough information for automatic recovery.
+If the original call stopped before consumption, the scheduler reads the current party record for
+the original ID, screens the registered name with a new screening attempt and asks catalogue to
+admit the same operation. A missing, closed, merged or suspended party, an inconclusive or blocking
+screening result, and catalogue refusal all prevent the account write. The request retains its
+original grant, party, revision, fingerprint and account ID. The catalogue checks current evidence
+and orders consumption against revocation. The recovery queue stores no holder name. Recovered
+accounts leave the optional cached display name empty. Existing V35 intents need a matching caller
+retry before they have enough information for automatic recovery.
 
 Activation derives its grant from the persisted opening. It gets a separate operation ID
 bound to the pending account version. Its state transition and status event commit together.

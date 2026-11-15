@@ -8,8 +8,12 @@ import com.openbank.account.application.port.`in`.OpenAccountCommand
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
 import com.openbank.account.application.port.out.CatalogProduct
+import com.openbank.account.application.port.out.DirectoryParty
+import com.openbank.account.application.port.out.PartyDirectoryPort
 import com.openbank.account.application.port.out.PassportCommitment
 import com.openbank.account.application.port.out.PassportIntent
+import com.openbank.account.application.port.out.PassportOpeningDraft
+import com.openbank.account.application.port.out.PassportOpeningJob
 import com.openbank.account.application.port.out.PassportOperation
 import com.openbank.account.application.port.out.ProductCatalogPort
 import com.openbank.account.application.port.out.ProductLookupResult
@@ -39,6 +43,7 @@ import java.util.UUID
 class PassportAccountRecoveryTest {
     private val repo = mockk<AccountRepository>()
     private val passport = mockk<PassportCommitment>()
+    private val parties = mockk<PartyDirectoryPort>()
     private val pinning = mockk<ProductCatalogPort>()
     private val screening = mockk<AccountSanctionsScreeningPort>()
     private val iban = Iban.of("CZ6508000000192000145399")
@@ -139,6 +144,37 @@ class PassportAccountRecoveryTest {
         assertEquals(listOf(first, first), consumed)
     }
 
+    @Test
+    fun `recovery does not consume a permit when fresh sanctions screening blocks`() {
+        val intent = PassportIntent(
+            "OPEN:synthetic",
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            grant,
+            party,
+            PassportOperation.OPEN,
+            binding,
+            pin,
+        )
+        val draft =
+            PassportOpeningDraft(iban.value, product, AccountType.CURRENT, "CZK", now, "CLEAR", null, null, null)
+        coEvery { passport.hasReceipt(intent) } returns false
+        coEvery { parties.find(party) } returns DirectoryParty(party, "INDIVIDUAL", "ACTIVE", "Synthetic Applicant")
+        coEvery { screening.screen(any(), any(), any()) } returns SanctionsScreenResult("HIT", 1.0, null)
+
+        runBlocking { service().recoverPassportOpening(PassportOpeningJob(intent, draft)) }
+
+        coVerify(exactly = 1) {
+            screening.screen(
+                "Synthetic Applicant",
+                match { it.startsWith("passport-recovery:") },
+                party.toString(),
+            )
+        }
+        coVerify(exactly = 0) { passport.admit(any()) }
+        coVerify(exactly = 0) { repo.saveNewAccount(any(), any(), any(), any(), any()) }
+    }
+
     private fun service() = AccountService(
         repo,
         mockk(relaxed = true),
@@ -151,6 +187,7 @@ class PassportAccountRecoveryTest {
         Clock.fixed(now, ZoneOffset.UTC),
         mockk(relaxed = true),
         passport,
+        parties,
     )
 
     private class InterruptedWrite : RuntimeException()

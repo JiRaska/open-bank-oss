@@ -5,6 +5,12 @@
 package com.openbank.account.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
+import com.openbank.account.application.port.out.DirectoryPage
+import com.openbank.account.application.port.out.DirectoryParty
+import com.openbank.account.application.port.out.PartyDirectoryPort
+import com.openbank.account.application.port.out.SanctionsEntityType
+import com.openbank.account.application.port.out.SanctionsScreenResult
 import com.openbank.account.infrastructure.client.PassportAdmissionClient
 import com.openbank.account.infrastructure.client.PassportAdmissionRequest
 import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
@@ -25,9 +31,12 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.io.IOException
 import java.sql.SQLException
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicReference
 import javax.sql.DataSource
 
@@ -247,25 +256,32 @@ class AccountProductRevisionPinIT {
         assertThat(accounts).hasSize(1)
     }
 
-    @Test
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_OPERATOR"])
-    fun `scheduler recovers a committed admission after lost acknowledgement without an HTTP retry`() {
-        val committed = AtomicReference<PassportAdmissionRequest>()
-        val observed = AtomicReference<PassportAdmissionRequest>()
+    fun `scheduler recovers without an HTTP retry before or after catalogue consumption`(consumedBeforeLoss: Boolean) {
+        val requests = CopyOnWriteArrayList<PassportAdmissionRequest>()
+        val storedReceipt = AtomicReference<PassportAdmissionRequest>()
         val catalogue = object : PassportAdmissionClient {
             override fun admit(request: PassportAdmissionRequest): Uni<Void> {
-                check(committed.compareAndSet(null, request))
-                return Uni.createFrom().failure(IOException("synthetic lost acknowledgement"))
+                requests += request
+                if (requests.size != 1 || consumedBeforeLoss) storedReceipt.set(request)
+                return if (requests.size == 1) {
+                    Uni.createFrom().failure(IOException("synthetic interruption"))
+                } else {
+                    Uni.createFrom().voidItem()
+                }
             }
 
-            override fun receipt(request: PassportAdmissionRequest): Uni<Void> {
-                if (request != committed.get()) return Uni.createFrom().failure(NotFoundException())
-                observed.set(request)
-                return Uni.createFrom().voidItem()
+            override fun receipt(request: PassportAdmissionRequest): Uni<Void> = if (request == storedReceipt.get()) {
+                Uni.createFrom().voidItem()
+            } else {
+                Uni.createFrom().failure(NotFoundException())
             }
         }
         QuarkusMock.installMockForType(catalogue, PassportAdmissionClient::class.java, RestClient.LITERAL)
         val party = UUID.randomUUID()
+        val screens = installScreeningFixture(party)
         val key = UUID.randomUUID().toString()
         assertThat(open(party, key, UUID.randomUUID()).statusCode).isEqualTo(500)
         assertNothingPersistedFor(party)
@@ -273,10 +289,18 @@ class AccountProductRevisionPinIT {
             .single().single() as UUID
 
         val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(20)
-        val lookup = "SELECT status, legal_name FROM accounts WHERE id = ?"
+        val lookup = "SELECT status, legal_name, sanctions_status FROM accounts WHERE id = ?"
         while (query(lookup, account).isEmpty() && System.nanoTime() < deadline) Thread.sleep(100)
-        assertThat(query(lookup, account)).containsExactly(listOf("PENDING_ACTIVATION", null))
-        assertThat(observed.get()).isEqualTo(committed.get())
+        val screeningStatus = if (consumedBeforeLoss) "CLEAR" else "WHITELISTED"
+        assertThat(query(lookup, account)).containsExactly(listOf("PENDING_ACTIVATION", null, screeningStatus))
+        assertThat(requests).hasSize(if (consumedBeforeLoss) 1 else 2)
+        assertThat(requests).allMatch { it == storedReceipt.get() }
+        assertThat(screens).hasSize(if (consumedBeforeLoss) 1 else 2)
+        assertThat(screens.map { it.key }).doesNotHaveDuplicates()
+        if (!consumedBeforeLoss) {
+            assertThat(screens.last().name).isEqualTo("Synthetic Registered Company")
+            assertThat(screens.last().type).isEqualTo(SanctionsEntityType.ORGANIZATION)
+        }
         assertThat(query("SELECT event_type FROM account_outbox WHERE aggregate_id = ?", account))
             .containsExactly(listOf("AccountCreated"))
         assertThat(
@@ -284,9 +308,39 @@ class AccountProductRevisionPinIT {
                 "SELECT opening_completed, opening_draft FROM account_passport_intents WHERE account_id = ?",
                 account,
             ),
-        )
-            .containsExactly(listOf(true, null))
+        ).containsExactly(listOf(true, null))
     }
+
+    private fun installScreeningFixture(party: UUID): List<ScreeningCall> {
+        val directory = object : PartyDirectoryPort {
+            override suspend fun find(partyId: UUID): DirectoryParty? = if (partyId == party) {
+                DirectoryParty(party, "COMPANY", "ACTIVE", "Synthetic Registered Company")
+            } else {
+                null
+            }
+
+            override suspend fun listActive(page: Int, size: Int) = DirectoryPage(emptyList(), hasMore = false)
+        }
+        QuarkusMock.installMockForType(directory, PartyDirectoryPort::class.java)
+
+        val calls = CopyOnWriteArrayList<ScreeningCall>()
+        val screening = object : AccountSanctionsScreeningPort {
+            override suspend fun screen(
+                name: String,
+                idempotencyKey: String,
+                subjectId: String,
+                entityType: SanctionsEntityType,
+            ): SanctionsScreenResult {
+                assertThat(subjectId).isEqualTo(party.toString())
+                calls += ScreeningCall(name, idempotencyKey, entityType)
+                return SanctionsScreenResult(if (calls.size == 1) "CLEAR" else "WHITELISTED", 0.0, null)
+            }
+        }
+        QuarkusMock.installMockForType(screening, AccountSanctionsScreeningPort::class.java)
+        return calls
+    }
+
+    private data class ScreeningCall(val name: String, val key: String, val type: SanctionsEntityType)
 
     private fun pinLegacyRow(accountId: UUID, number: Long?): Int = dataSource.connection.use { c ->
         c.prepareStatement(

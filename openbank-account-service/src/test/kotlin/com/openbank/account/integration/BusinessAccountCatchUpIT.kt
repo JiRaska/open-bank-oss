@@ -72,6 +72,8 @@ class BusinessAccountCatchUpIT {
     @Alternative
     @ApplicationScoped
     class StubPartyDirectory : PartyDirectoryPort {
+        override suspend fun find(partyId: UUID): DirectoryParty? = null
+
         override suspend fun listActive(page: Int, size: Int): DirectoryPage {
             calls.incrementAndGet()
             return DirectoryPage(FIXTURE.drop(page * size).take(size), hasMore = (page + 1) * size < FIXTURE.size)

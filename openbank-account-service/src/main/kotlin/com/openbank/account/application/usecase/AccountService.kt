@@ -28,11 +28,13 @@ import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.BalanceView
 import com.openbank.account.application.port.out.CurrencyPocketRepository
 import com.openbank.account.application.port.out.NotificationRequestPort
+import com.openbank.account.application.port.out.PartyDirectoryPort
 import com.openbank.account.application.port.out.PassportCommitment
 import com.openbank.account.application.port.out.PassportIntent
 import com.openbank.account.application.port.out.PassportOpeningDraft
 import com.openbank.account.application.port.out.PassportOpeningJob
 import com.openbank.account.application.port.out.PassportOperation
+import com.openbank.account.application.port.out.SanctionsEntityType
 import com.openbank.account.application.port.out.SanctionsScreenResult
 import com.openbank.account.domain.event.AccountClosedEvent
 import com.openbank.account.domain.event.AccountCreatedEvent
@@ -85,6 +87,7 @@ class AccountService(
      */
     private val notificationRequestPort: NotificationRequestPort,
     private val passport: PassportCommitment,
+    private val parties: PartyDirectoryPort,
 ) : AccountUseCase {
 
     private suspend fun screenForOpening(command: OpenAccountCommand): SanctionsScreenResult {
@@ -169,14 +172,35 @@ class AccountService(
         return commitOpening(account, command.idempotencyKey, command.requestHash, passportOperation)
     }
 
-    /** The original request already passed screening. Finish only an exact, consumed catalogue decision. */
     internal suspend fun recoverPassportOpening(job: PassportOpeningJob) {
         val (intent, draft) = job
         SyntheticTaintKafkaRail.withTaint(draft.synthetic) {
-            if (passport.hasReceipt(intent)) {
-                commitOpening(job.toAccount(), intent.key.removePrefix("OPEN:"), intent.binding, intent)
+            val account = job.toAccount()
+            val pending = if (passport.hasReceipt(intent)) account else admitRecoveredOpening(intent, account)
+            if (pending != null) {
+                commitOpening(pending, intent.key.removePrefix("OPEN:"), intent.binding, intent)
             }
         }
+    }
+
+    private suspend fun admitRecoveredOpening(intent: PassportIntent, account: Account): Account? {
+        val party = parties.find(intent.partyId) ?: return null
+        if (party.status !in RECOVERABLE_PARTY_STATUSES || party.legalName.isBlank()) return null
+        val entityType = when (party.partyType) {
+            "INDIVIDUAL", "SOLE_TRADER" -> SanctionsEntityType.INDIVIDUAL
+            "COMPANY", "TRUST" -> SanctionsEntityType.ORGANIZATION
+            else -> return null
+        }
+        val screening = sanctionsScreening.screen(
+            name = party.legalName,
+            idempotencyKey = "passport-recovery:${Ids.randomId()}",
+            subjectId = intent.partyId.toString(),
+            entityType = entityType,
+        )
+        if (!screening.permitsOpening) return null
+        val screenedAt = clock.instant()
+        passport.admit(intent)
+        return account.copy(sanctionsScreenedAt = screenedAt, sanctionsStatus = screening.status)
     }
 
     private suspend fun commitOpening(
@@ -633,6 +657,7 @@ class AccountService(
     }
 
     companion object {
+        private val RECOVERABLE_PARTY_STATUSES = setOf("PENDING_KYC", "ACTIVE")
         private val LOG: Logger = Logger.getLogger(AccountService::class.java)
 
         /** Matches the goal_name VARCHAR(120) column (ADR-0153, V13) — validated app-side too. */

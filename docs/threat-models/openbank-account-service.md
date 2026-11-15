@@ -1236,7 +1236,8 @@ requires authoritative facts from the applicable country pack before any FOS or 
 - A pending activation is tied to its account version. Changing the account cannot reuse an
   earlier receipt to activate a different state.
 
-- Recovery claims a bounded batch with a database lease and checks for the same already-consumed
-  receipt. The scheduler cannot grant admission. Duplicate runners reuse the opening's account ID
-  and request binding. The account transaction clears the recovery details, including on manual
-  retry. The queued details omit the holder name and raw screening evidence.
+- Recovery claims a bounded batch with a database lease and checks for the same consumed receipt.
+  If it is absent, recovery reads the current party under the original ID and runs fresh sanctions
+  screening of the registered name. Account creation requires the exact catalogue admission.
+  Duplicate runners reuse the account ID and binding. The account transaction clears the queued
+  details, which omit the holder name and raw screening evidence.

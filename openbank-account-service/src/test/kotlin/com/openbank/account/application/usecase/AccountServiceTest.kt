@@ -98,6 +98,7 @@ class AccountServiceTest {
                     coEvery { passport.find(any()) } returns null
                     coEvery { passport.openingFor(any()) } returns null
                 },
+                mockk(),
             )
     }
 
