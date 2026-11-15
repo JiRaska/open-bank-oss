@@ -158,6 +158,15 @@ spec:
             # .github/scripts/check-authz-enforce-money-path.py.
             - name: AUTHZ_ENFORCE
               value: "true"
+            # Four-eyes ENFORCED (ADR-0155, #15748): sanctions.clear (deciding a screening hit,
+            # rules.yaml four_eyes.verbs `clear`) answers 202 + approvalId until a DIFFERENT
+            # operator approves it; the maker's retry carries X-Approval-Id (admin-ui /sanctions
+            # review form + checker queue). Human-only: POST /review admits ROLE_OPERATOR/ADMIN
+            # and no rule grants sanctions.clear to a service-account, so no screening caller is
+            # paused (they call sanctions.create). Approvals live in the Redis above.
+            # Rollback: set "false". Gate: four-eyes-enforce-deployed.
+            - name: AUTHZ_FOUR_EYES_ENFORCE
+              value: "true"
             # Ongoing monitoring of registered subjects (ADR-0376): re-screens the monitored
             # registry against every committed list change (delta, every 60s, bounded per run)
             # and sweeps each subject at the configured interval. It only opens the registry;
