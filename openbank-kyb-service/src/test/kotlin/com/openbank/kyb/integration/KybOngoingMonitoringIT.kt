@@ -5,6 +5,7 @@
 package com.openbank.kyb.integration
 
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
+import com.openbank.kyb.application.port.`in`.ProposeExitCommand
 import com.openbank.kyb.application.port.out.FindingDecisionConflictException
 import com.openbank.kyb.application.port.out.MonitoredSubjectRegistryException
 import com.openbank.kyb.application.port.out.MonitoringRegistrationStore
@@ -12,14 +13,17 @@ import com.openbank.kyb.application.port.out.RegistryFailure
 import com.openbank.kyb.application.usecase.MonitoringRegistrationService
 import com.openbank.kyb.application.usecase.MonitoringRunOutcome
 import com.openbank.kyb.application.usecase.MonitoringSettings
+import com.openbank.kyb.domain.model.KybEvents
 import com.openbank.kyb.infrastructure.MicrometerKybMonitoringMetrics
 import com.openbank.kyb.infrastructure.kafka.MonitoredSubjectMatchedConsumer
 import com.openbank.kyb.infrastructure.kafka.MonitoredSubjectMatchedWire
+import com.openbank.kyb.infrastructure.kafka.PartyEventConsumer
 import com.openbank.kyb.it.KybMonitoringJourney
 import com.openbank.kyb.it.StubDocumentGateway
 import com.openbank.kyb.it.StubMonitoredSubjectRegistry
 import com.openbank.kyb.it.StubPartyGateway
 import com.openbank.kyb.it.StubRelatedPartyScreening
+import com.openbank.libs.governance.StaffIdentity
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -27,6 +31,9 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.ClaimType
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
@@ -73,7 +80,7 @@ import java.util.concurrent.TimeUnit
 @QuarkusTest
 @QuarkusTestResource(KybBootSmokeIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresTestResource::class)
-@TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API", "ROLE_KYC"])
+@TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API", "ROLE_KYC", "ROLE_KYC_REVIEWER"])
 // One application, one database and one set of doubles: splitting the class would copy the fixture, not the tests.
 @Suppress("LargeClass")
 class KybOngoingMonitoringIT {
@@ -93,6 +100,8 @@ class KybOngoingMonitoringIT {
     @Inject lateinit var store: MonitoringRegistrationStore
 
     @Inject lateinit var onboarding: BusinessOnboardingUseCase
+
+    @Inject lateinit var partyEvents: PartyEventConsumer
 
     @Inject lateinit var meters: MeterRegistry
 
@@ -504,15 +513,13 @@ class KybOngoingMonitoringIT {
         assertThat(counted(MicrometerKybMonitoringMetrics.FINDINGS, "outcome", "duplicate")).isEqualTo(duplicates + 1)
 
         // Its own queue; a status filter answers that status only.
-        journey.operator().get("/api/v1/kyb/cases?monitoring=open&size=100").then().statusCode(200)
+        journey.operator().get("/api/v1/kyb/monitoring/holds?size=100").then().statusCode(200)
             .body("id", hasItem(caseId))
             .body("find { it.id == '$caseId' }.status", equalTo("SIGNED"))
             .body("find { it.id == '$caseId' }.monitoring.findings[0].listEntryRef", equalTo("id:synthetic-entry-1"))
         journey.operator().get("/api/v1/kyb/cases?status=MANUAL_REVIEW&size=100").then().statusCode(200)
             .body("id", not(hasItem(caseId)))
             .body("status", everyItem(equalTo("MANUAL_REVIEW")))
-        journey.operator().get("/api/v1/kyb/cases?monitoring=open&status=SIGNED").then().statusCode(400)
-        journey.operator().get("/api/v1/kyb/cases?monitoring=closed").then().statusCode(400)
         // The applicant has no such queue and no such field.
         journey.customer().get("/api/v1/kyb/cases/$caseId").then().statusCode(200).body("monitoring", nullValue())
 
@@ -529,11 +536,11 @@ class KybOngoingMonitoringIT {
         assertThat(decided.updatedAt).isEqualTo(before.updatedAt)
         assertThat(journey.events(caseId)).isEqualTo(eventsBefore)
         assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" }
-        journey.operator().get("/api/v1/kyb/cases?monitoring=open&size=100").then().body("id", not(hasItem(caseId)))
+        journey.operator().get("/api/v1/kyb/monitoring/holds?size=100").then().body("id", not(hasItem(caseId)))
     }
 
     @Test
-    fun `a confirmed sanctions match stands whatever a later finding brings, and is an exit, published once`() {
+    fun `a confirmed sanctions match stands whatever a later finding brings, and is an exit, published nowhere`() {
         val caseId = journey.approved("71000178")
         onEventLoop { onboarding.entityPartyActivated(UUID.fromString(journey.stored(caseId).entityPartyId)) }
         run()
@@ -567,19 +574,24 @@ class KybOngoingMonitoringIT {
         assertThat(owed.updatedAt).isEqualTo(before.updatedAt)
         assertThat(owed.exitOwed).isTrue()
         assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" && it.syncState == "SYNCED" }
-        // Its own event, exactly once, and not the onboarding rejection; it says nothing of why.
-        assertThat(journey.events(caseId) - eventsBefore.toSet()).containsExactly("BUSINESS_RELATIONSHIP_EXIT_REQUIRED")
-        val payload = journey.query(
-            "select payload from kyb_outbox where aggregate_id = ? and event_type = 'BUSINESS_RELATIONSHIP_EXIT_REQUIRED'",
-            UUID.fromString(caseId),
-        ) { it.getString(1) }.single()
-        assertThat(payload).contains("\"status\":\"ACTIVE\"")
-            .doesNotContain("sanction", "confirmed", "reviewReason", "HIT", "finding", "decided")
+        // Nothing on the shared lifecycle topic (#16028 item 4): it is read by a customer-facing
+        // projection and landed in the analytics warehouse. The owed exit is a stored fact the
+        // queue and the alert read.
+        assertThat(journey.events(caseId)).isEqualTo(eventsBefore)
         assertThat(stats().exitsOwed).isGreaterThanOrEqualTo(1)
     }
 
     @Test
-    fun `only a recorded exit ends monitoring of a confirmed match, and it withdraws the subjects`() {
+    // A human reviewer's token: the person id four-eyes compares, and a second factor.
+    @TestSecurity(user = "reviewer-c", roles = ["ROLE_API", "ROLE_KYC", "ROLE_KYC_REVIEWER"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "reviewer-c"), Claim(key = "preferred_username", value = "reviewer-c"),
+            Claim(key = "person_id", value = "staff-c"),
+            Claim(key = "amr", value = "[\"pwd\",\"otp\"]", type = ClaimType.JSON_ARRAY),
+        ],
+    )
+    fun `only a four-eyes exit over an ended relationship ends monitoring, and it withdraws the subjects`() {
         val caseId = journey.approved("71000216")
         run()
         val confirmed = UUID.randomUUID()
@@ -587,21 +599,67 @@ class KybOngoingMonitoringIT {
         finding(personRef(caseId), confirmed)
         decide(caseId, confirmed, "CONFIRMED").then().statusCode(200)
         finding(entityRef(caseId), open)
-        fun complete(evidence: String) = journey.operator().body("""{"evidence":"$evidence"}""")
+        val evidence = "party closed, mandates revoked on 13 November: ticket SYN-216"
+        val entityParty = UUID.fromString(journey.stored(caseId).entityPartyId)
+        fun propose(text: String) = journey.operator().body("""{"evidence":"$text"}""")
+            .post("/api/v1/kyb/cases/$caseId/monitoring/exit/propose")
+        fun complete(text: String) = journey.operator().body("""{"evidence":"$text"}""")
             .post("/api/v1/kyb/cases/$caseId/monitoring/exit/complete")
+        fun withdraw() = journey.operator().post("/api/v1/kyb/cases/$caseId/monitoring/exit/withdraw")
+        fun proposeAs(reviewer: String, person: String) = onEventLoop {
+            onboarding.proposeExit(
+                ProposeExitCommand(
+                    UUID.fromString(caseId),
+                    evidence,
+                    StaffIdentity(reviewer, person, strongAuth = true),
+                ),
+            )
+        }
 
-        // Must-refuse: a finding nobody decided, and evidence that says nothing.
-        complete("accounts closed, mandates revoked on 13 November").then().statusCode(409)
+        // Must-refuse: a finding nobody decided, evidence that says nothing.
+        propose(evidence).then().statusCode(409)
         decide(caseId, open, "CLEARED_FALSE_POSITIVE").then().statusCode(200)
-        complete("done").then().statusCode(400)
-        assertThat(journey.stored(caseId).exitOwed).isTrue()
-        assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" }
+        propose("done").then().statusCode(400)
+        // Must-refuse: the case is SIGNED — approved, the relationship live in kyb.
+        propose(evidence).then().statusCode(409)
+        journey.operator().body("""{"reason":"relationship ended after a confirmed match"}""")
+            .post("/api/v1/kyb/cases/$caseId/reject").then().statusCode(200)
+        // Must-refuse: rejected in kyb, but party-service still has the entity party live.
+        propose(evidence).then().statusCode(409)
+        parties.closed += entityParty
+        try {
+            // Must-refuse: confirming with nothing proposed; the proposer confirming themselves.
+            complete(evidence).then().statusCode(409)
+            propose(evidence).then().statusCode(200)
+                .body("monitoring.exitProposal.proposedBy", equalTo("reviewer-c"))
+                .body("monitoring.exitProposal.expiresAt", notNullValue())
+                .body("monitoring.exitOwedSince", notNullValue())
+            complete(evidence).then().statusCode(409)
+            assertThat(journey.stored(caseId).exitOwed).isTrue()
+            assertThat(journey.rows(caseId)).allMatch { it.desired == "REGISTERED" }
 
-        complete("accounts closed, mandates revoked on 13 November").then().statusCode(200)
-            .body("status", equalTo("SIGNED"))
-            .body("monitoring.exitOwedSince", nullValue())
-            .body("monitoring.exitCompleted.completedBy", equalTo("service-account-openbank-edge"))
-            .body("monitoring.exitCompleted.evidence", equalTo("accounts closed, mandates revoked on 13 November"))
+            // The proposer withdraws; a proposal by the SAME PERSON through a second account cannot
+            // be confirmed by them either (four-eyes compares persons, not accounts).
+            withdraw().then().statusCode(200).body("monitoring.exitProposal.withdrawnBy", equalTo("reviewer-c"))
+            proposeAs("reviewer-c.second", "staff-c")
+            complete(evidence).then().statusCode(409)
+                .body("message", org.hamcrest.Matchers.containsString("same person"))
+            withdraw().then().statusCode(200)
+            assertThat(journey.stored(caseId).exitOwed).isTrue()
+
+            // Another person's proposal; the test principal is now the second pair of eyes. A
+            // confirmation of evidence other than the pending proposal's is refused.
+            proposeAs("reviewer-a", "staff-a")
+            complete("evidence the proposal never said").then().statusCode(409)
+            complete(evidence).then().statusCode(200)
+                .body("status", equalTo("REJECTED"))
+                .body("monitoring.exitOwedSince", nullValue())
+                .body("monitoring.exitProposal.proposedBy", equalTo("reviewer-a"))
+                .body("monitoring.exitCompleted.completedBy", equalTo("reviewer-c"))
+                .body("monitoring.exitCompleted.evidence", equalTo(evidence))
+        } finally {
+            parties.closed -= entityParty
+        }
 
         val exited = journey.stored(caseId)
         assertThat(exited.exitOwed).isFalse()
@@ -611,8 +669,65 @@ class KybOngoingMonitoringIT {
         assertThat(journey.rows(caseId).map { it.xmin }.toSet()).containsExactly(exited.xmin)
         run()
         assertThat(withdrawnFor(caseId)).hasSize(2)
-        // Completed once; and a case that owes nothing has nothing to complete.
-        complete("accounts closed, mandates revoked on 13 November").then().statusCode(409)
+        // Completed once.
+        complete(evidence).then().statusCode(409)
+    }
+
+    /** The entity party's activation, as party-service puts it on the wire, through the real consumer. */
+    private fun partyActivated(caseId: String) = onEventLoop {
+        partyEvents.consume(
+            """{"eventType":"KYC_STATUS_CHANGED","status":"ACTIVE","partyType":"COMPANY",""" +
+                """"partyId":"${journey.stored(caseId).entityPartyId}"}""",
+        )
+    }
+
+    @Test
+    fun `party activation under a monitoring hold stays pending, and a clean decision applies it once`() {
+        val held = journey.approved("71000330")
+        val plain = journey.approved("71000348")
+        run()
+        val first = UUID.randomUUID()
+        val second = UUID.randomUUID()
+        finding(personRef(held), first)
+        finding(entityRef(held), second)
+        val eventsBefore = journey.events(held)
+
+        partyActivated(held)
+        partyActivated(plain)
+
+        // Control: without a finding, activation completes the case.
+        assertThat(journey.stored(plain).status).isEqualTo("ACTIVE")
+        assertThat(journey.events(plain)).contains(KybEvents.COMPLETED)
+        // Held: still SIGNED, nothing published; the activation is recorded as pending.
+        val pending = journey.stored(held)
+        assertThat(pending.status).isEqualTo("SIGNED")
+        assertThat(journey.events(held)).isEqualTo(eventsBefore)
+        // A redelivered activation changes nothing.
+        partyActivated(held)
+        assertThat(journey.stored(held).status).isEqualTo("SIGNED")
+
+        decide(held, first, "CLEARED_FALSE_POSITIVE").then().statusCode(200).body("status", equalTo("SIGNED"))
+        assertThat(journey.events(held)).isEqualTo(eventsBefore)
+        // The last hold cleared: ACTIVE, and `completed` exactly once, with the decision's write.
+        decide(held, second, "CLEARED_FALSE_POSITIVE").then().statusCode(200).body("status", equalTo("ACTIVE"))
+        assertThat(journey.events(held) - eventsBefore.toSet()).containsExactly(KybEvents.COMPLETED)
+        assertThat(journey.stored(held).updatedAt).describedAs("as if it had never waited").isEqualTo(pending.updatedAt)
+    }
+
+    @Test
+    fun `party activation after a confirmed sanctions match is never applied`() {
+        val caseId = journey.approved("71000356")
+        run()
+        val findingId = UUID.randomUUID()
+        finding(personRef(caseId), findingId)
+        decide(caseId, findingId, "CONFIRMED").then().statusCode(200)
+        val eventsBefore = journey.events(caseId)
+
+        partyActivated(caseId)
+
+        assertThat(journey.stored(caseId).status).isEqualTo("SIGNED")
+        assertThat(journey.events(caseId)).isEqualTo(eventsBefore)
+        assertThat(journey.events(caseId)).doesNotContain(KybEvents.COMPLETED)
     }
 
     @Test
@@ -631,7 +746,7 @@ class KybOngoingMonitoringIT {
         run()
         assertThat(withdrawnFor(caseId)).isEmpty()
         // The finding is still there for the operator, in the monitoring queue.
-        journey.operator().get("/api/v1/kyb/cases?monitoring=open&size=100").then().body("id", hasItem(caseId))
+        journey.operator().get("/api/v1/kyb/monitoring/holds?size=100").then().body("id", hasItem(caseId))
 
         // Decided clean: nothing holds the ended case any more, and that write withdraws.
         decide(caseId, findingId, "CLEARED_FALSE_POSITIVE").then().statusCode(200)
@@ -641,7 +756,11 @@ class KybOngoingMonitoringIT {
     }
 
     /** Headers that belong to one request, not to the case. */
-    private val perRequestHeaders = setOf("date", "traceparent", "tracestate", "x-correlation-id", "x-request-id")
+    // content-length too: it measures the UNblanked body, and a blanked `timestamp` or `updatedAt`
+    // is an Instant whose rendering drops trailing zero digits, so its length varies per request
+    // (seen as 2785 vs 2788 for equal bodies). The blanked body itself is still compared whole.
+    private val perRequestHeaders =
+        setOf("date", "traceparent", "tracestate", "x-correlation-id", "x-request-id", "content-length")
 
     /** Status code, headers and body, with only the per-request parts of the fleet's error body blanked. */
     private fun whole(response: io.restassured.response.Response, blank: Regex? = null): String {
@@ -686,7 +805,7 @@ class KybOngoingMonitoringIT {
             "GET case" to { journey.customer().get("/api/v1/kyb/cases/$caseId") },
             "GET case as a stranger" to { other().get("/api/v1/kyb/cases/$caseId") },
             "GET my cases" to { journey.customer().get("/api/v1/kyb/cases?partyId=${journey.initiator}") },
-            "GET the monitoring queue as a customer" to { journey.customer().get("/api/v1/kyb/cases?monitoring=open") },
+            "GET the monitoring queue as a customer" to { journey.customer().get("/api/v1/kyb/monitoring/holds") },
             "POST start again" to {
                 journey.customer().body(start.format(journey.initiator)).post("/api/v1/kyb/cases")
             },
@@ -943,6 +1062,79 @@ class KybOngoingMonitoringIT {
         // Control: the same reference under this service's own name is recorded.
         send(MonitoredSubjectMatchedWire.body(person))
         assertThat(journey.stored(caseId).findingCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `a settled withdrawal is re-sent, so a registration that landed after it cannot outlive it`() {
+        val caseId = journey.approved("71000364")
+        run()
+        journey.customer().post("/api/v1/kyb/cases/$caseId/abandon").then().statusCode(200)
+        run()
+        assertThat(journey.rows(caseId)).allMatch { it.desired == "WITHDRAWN" && it.syncState == "SYNCED" }
+        val sent = withdrawnFor(caseId).size
+        assertThat(sent).isEqualTo(2)
+        journey.execute(
+            "update kyb_monitored_subjects set updated_at = now() - interval '8 days' where case_id = ?",
+            UUID.fromString(caseId),
+        )
+
+        run()
+
+        assertThat(withdrawnFor(caseId)).describedAs("each DELETE sent again").hasSize(sent + 2)
+        assertThat(journey.rows(caseId)).allMatch { it.desired == "WITHDRAWN" && it.syncState == "SYNCED" }
+        // Control: a fresh settlement is not re-sent.
+        run()
+        assertThat(withdrawnFor(caseId)).hasSize(sent + 2)
+    }
+
+    @Test
+    fun `switched off, withdrawals of subjects the registry holds are still sent, and nothing else is`() {
+        val held = journey.approved("71000372")
+        run()
+        assertThat(registeredFor(held)).hasSize(2)
+        switch(enabled = false)
+        val never = journey.approved("71000381")
+        journey.customer().post("/api/v1/kyb/cases/$held/abandon").then().statusCode(200)
+        journey.customer().post("/api/v1/kyb/cases/$never/abandon").then().statusCode(200)
+
+        assertThat(run()).isEqualTo(MonitoringRunOutcome.DISABLED)
+
+        assertThat(withdrawnFor(held)).describedAs("the registry stops monitoring an ended customer").hasSize(2)
+        assertThat(journey.rows(held)).allMatch { it.desired == "WITHDRAWN" && it.syncState == "SYNCED" }
+        // A subject the registry never held: nothing to withdraw, and nothing is called for it.
+        assertThat(registeredFor(never)).isEmpty()
+        assertThat(withdrawnFor(never)).isEmpty()
+        assertThat(journey.rows(never)).allMatch { it.desired == "WITHDRAWN" && it.syncState == "PENDING" }
+    }
+
+    /**
+     * The scope of the switched-off exception, by what reaches the registry: with the switch off
+     * a run re-asserts nothing, reconciles nothing and registers nothing, even with all three due,
+     * and a case that only ever existed while it was off causes no call at all.
+     */
+    @Test
+    fun `switched off, a re-assertion, a reconciliation or a registration that is due calls nothing`() {
+        val held = journey.approved("71000399")
+        run()
+        assertThat(registeredFor(held)).hasSize(2)
+        val heldId = UUID.fromString(held)
+        // Due a re-assertion and a reconciliation, were the switch on.
+        journey.execute(
+            "update kyb_monitored_subjects set updated_at = now() - interval '8 days' where case_id = ?",
+            heldId,
+        )
+        journey.execute("update kyb_cases set monitoring_synced_version = null where case_id = ?", heldId)
+        switch(enabled = false)
+        val never = journey.approved("71000402")
+        journey.customer().post("/api/v1/kyb/cases/$never/abandon").then().statusCode(200)
+        val callsBefore = registry.calls.size
+
+        assertThat(run()).isEqualTo(MonitoringRunOutcome.DISABLED)
+
+        assertThat(registry.calls.drop(callsBefore)).describedAs("no call of any kind").isEmpty()
+        assertThat(journey.rows(held)).allMatch { it.desired == "REGISTERED" && it.syncState == "SYNCED" }
+        assertThat(journey.stored(held).syncedVersion).describedAs("not reconciled").isNull()
+        assertThat(journey.rows(never)).isNotEmpty().allMatch { it.syncState == "PENDING" }
     }
 
     @Test
