@@ -164,6 +164,10 @@ jobs:
             # A benign HTTP 409 (run not yet queued / already completed) is a notice from
             # the helper, not a failure; 403, 404, 5xx and any other 409 stay fatal.
             echo "$cancel_error"
+            if grep -q 'title=Run not cancellable::' <<<"$cancel_error"; then
+              echo "::notice title=watch-outcome::SKIPPED run ${run_id}: not yet cancellable (benign 409); retried next tick"
+              continue
+            fi
             # HTTP 202 acknowledges the request; it does not prove terminal cancellation.
             echo "requested cancellation of superseded queued run ${run_id} for PR #${pr_number} (${stale_sha})"
           done
@@ -210,6 +214,11 @@ jobs:
               echo "::warning title=CI stalled-build dry run::${title}"
               continue
             fi
-            bash .github/scripts/cancel-workflow-run.sh "$REPO" "$run_id"
+            cancel_out=$(bash .github/scripts/cancel-workflow-run.sh "$REPO" "$run_id")
+            if [ -n "$cancel_out" ]; then echo "$cancel_out"; fi
+            if grep -q 'title=Run not cancellable::' <<<"$cancel_out"; then
+              echo "::notice title=watch-outcome::SKIPPED run ${run_id}: not yet cancellable (benign 409); retried next tick"
+              continue
+            fi
             gh issue create --repo "$REPO" --title "$title" --body "$body" --label fleet-health
           done

@@ -933,6 +933,24 @@ gates:
       # alpine + three unmarked ARC helm values), 0 / exit 0 after. 8 self-test cases.
       python3 .github/scripts/check-tofu-image-pull-through.py --enforce
 
+  # A consumer merged against an input nobody provisioned fails days later, elsewhere, as an
+  # outage of the consumer: 2026-11-14 had five at once (ci-metrics-gateway 0 replicas ~70h,
+  # card-processing issuer-oidc ~44h, three workflows red every run). The inventory makes the
+  # reference and its provisioning one change; `--live` (operator machine) checks the claim.
+  - id: config-inventory
+    name: "every workflow secret/var and OpenBao ExternalSecret key is declared in .github/config-inventory.yaml (enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 15
+    min_subjects: 200   # 445 workflow + ExternalSecret references on 2026-11-14
+    rationale: "An absent secret is an empty string and an absent OpenBao key is a valid ExternalSecret, so nothing fails at merge; the inventory forces the author to state, per name, provisioned or unprovisioned-with-issue-and-expiry, and fails on stale entries both ways (#16205, #16206)."
+    review_after: "2027-05-14"
+    selftest: python3 .github/scripts/check-config-inventory.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-config-inventory.py"]
+    run: |
+      python3 .github/scripts/check-config-inventory.py
+
   - id: eso-crd-api-version
     name: "an external-secrets.io v1beta1/v1alpha1 manifest cannot coexist with an ESO chart >= 0.17.0"
     group: gitops
@@ -3395,6 +3413,39 @@ gates:
     run: |
       python3 .github/scripts/merge-train-stall-watch.py --check-declaration
 
+  - id: watch-outcome-declared
+    name: "every scheduled watch names its outcome CLEAN/FOUND/SKIPPED/UNREADABLE (ratchet, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 10   # offline; reads workflow files and the scripts they invoke
+    review_after: "2027-05-14"
+    rationale: >-
+      2026-11-09..14 three watches were red for days on READ failures (a short page, a 409,
+      a moving index) while one subject they watched was genuinely red; one boolean carried
+      three answers, so the reds were ignored. A red watch must mean only "this watch is blind".
+      Re-examine when BASELINE is empty.
+    min_subjects: 5
+    selftest: |
+      python3 .github/scripts/check-watch-outcome.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-watch-outcome.py
+
+  - id: standing-red-sentinel-selftest
+    name: "standing-red sentinel: streak, dedupe, escalation and close logic falsified (enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 10   # offline fixtures plus a scan of the workflow tree
+    review_after: "2027-05-14"
+    rationale: >-
+      A scheduled workflow has no PR and no author, so its red reaches nobody. The sentinel is
+      the only reader of that lane for ~60 workflows; its state machine (open/refresh/reopen/
+      escalate/close, never close on an unreadable tick) must stay falsified.
+    min_subjects: 10
+    selftest_exempt: "is-a-test-suite - the run: IS the sentinel's --self-test; three sabotages (streak, open, cancelled filter) each make it fail"
+    run: |
+      python3 .github/scripts/standing-red-sentinel.py --self-test
+
   - id: auto-deploy-red-watch-declaration
     name: "auto-deploy red watch reads the scheduled lane only, via a falsified script (issue #9130, enforced)"
     group: registry
@@ -3410,7 +3461,7 @@ gates:
     selftest: |
       python3 .github/scripts/detect-auto-deploy-stuck.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/detect-auto-deploy-stuck.py", ".github/workflows/auto-deploy-red-watch.yml"]
+    selftest_inputs: [".github/scripts/detect-auto-deploy-stuck.py", ".github/workflows/auto-deploy-red-watch.yml", ".github/scripts/watch_outcome.py"]
     run: |
       python3 .github/scripts/detect-auto-deploy-stuck.py --check-declaration
 
@@ -8201,6 +8252,26 @@ gates:
     selftest_inputs: [".github/scripts/check-enum-reference-data.py", ".github/scripts/enum-reference-data-baseline.txt"]
     run: |
       python3 .github/scripts/check-enum-reference-data.py --root .
+
+  - id: rail-screening-port
+    name: "outgoing rail sanctions screening port (rules.yaml outgoing_payment_rails_screening, enforced)"
+    group: data
+    mode: enforced
+    budget_seconds: 15   # <1s measured locally 2026-11-14
+    rationale: >-
+      Every outgoing payment rail must screen debtor and creditor against the sanctions lists
+      before release, through a *Screening*Port and the shared libs-fincrime ScreeningPolicy.
+      Measured 2026-11-14: swift-service and sdd-service had no screening at all while swift's
+      docs said screening was done upstream, and the upstream did none. Both are baselined while
+      their fix PRs land; a covered baselined rail fails, so the baseline only shrinks.
+    review_after: '2027-05-14'
+    verified: "2026-11-14 — origin/main ecbfaaa97b: 6 rails, 4 covered, swift+sdd baselined; copy of the tree with sepa-payment's ScreeningPorts.kt removed exits 1 naming openbank-sepa-payment; self-test covers missing port, missing policy, stale baseline, unknown module, empty list"
+    min_subjects: 3   # 6 rails measured 2026-11-14; half
+    selftest: python3 .github/scripts/check-rail-screening-port.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-rail-screening-port.py", ".github/scripts/rail-screening-port-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-rail-screening-port.py --root .
 
   # Real cache mutations run for build-logic changes and all main pushes. The
   # structural guard stays cheap for unrelated PRs (standard selftest_inputs policy).

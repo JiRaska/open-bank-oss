@@ -1796,9 +1796,6 @@ four_eyes_enforcement:
     openbank-product-catalog:
       expires: "2027-01-29"
       reason: "catalog.publish/publish-ir: no ApprovalStore wired (maker != checker is enforced in-service by the revision-approval flow); enforcing answers 503 on every publish."
-    openbank-sanctions-service:
-      expires: "2026-12-01"
-      reason: "sanctions.clear: enforcement lands in PR (b) (money-path split of #15748, needs its threat-model entry and two approvals); delete this entry in that PR."
     openbank-sca-service:
       expires: "2027-03-10"
       reason: "device.revoke has a customer self-revocation path (device-self-revocation, ROLE_CUSTOMER) with no exemption; enforcing would park a customer revoking a lost device behind an operator approval."
@@ -1811,9 +1808,6 @@ four_eyes_enforcement:
     openbank-sepa-payment:
       expires: "2026-12-15"
       reason: "sepaPayment.transitionStatus: no admin-ui checker workbench for the sepa-payment approval queue and no maker retry with X-Approval-Id."
-    openbank-settlement-service:
-      expires: "2026-12-01"
-      reason: "settlement.create: enforcement lands in PR (b) (money-path split of #15748, needs its threat-model entry and two approvals); delete this entry in that PR."
     openbank-swift-service:
       expires: "2026-12-15"
       reason: "swift.send: no admin-ui checker workbench for the swift approval queue and no maker retry with X-Approval-Id."
@@ -3801,6 +3795,10 @@ authz:
     # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
     # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
     - card.details.read
+    # The queue of business customers under an ongoing sanctions-monitoring hold (#16028): who is
+    # being reviewed is itself sensitive (tipping-off). Granted to ROLE_KYC_REVIEWER by the matrix
+    # only; the generic operator/admin list rule must not reach it.
+    - kyb.monitoring.queue.list
   role_action_matrix:
     ROLE_OPERATOR:
       grant:
@@ -5431,3 +5429,21 @@ demo_only_flags:
       config_property: openbank.pension.stub-integrations.enabled
       reason: "Swaps the KYC, signature-verification (SCA), counterparty and fund-administration ports for stubs, so a signature check that never happened passes. %dev and %test only; unset in gitops."
       permitted_environments: [local]
+
+outgoing_payment_rails_screening:
+  # Every service that releases money to a counterparty outside the bank must screen the parties
+  # against the sanctions lists BEFORE release (ADR-0032, ADR-0353 D4): an outbound port whose
+  # interface name matches *Screening*Port, and a call site of the shared
+  # com.openbank.libs.fincrime.ScreeningPolicy so the verdict is the one fleet-wide copy.
+  # "Screening is expected upstream" is not an exemption: measured 2026-11-14, swift-service's
+  # docs said so while the upstream (transaction-service) screened nothing.
+  # Enforced by .github/scripts/check-rail-screening-port.py (gate rail-screening-port). Known
+  # gaps are baselined in .github/scripts/rail-screening-port-baseline.txt; a baselined service
+  # that becomes covered fails until its line is removed, so the baseline only shrinks.
+  services:
+    - openbank-domestic-payment
+    - openbank-sepa-payment
+    - openbank-sepa-instant
+    - openbank-fx-service
+    - openbank-swift-service
+    - openbank-sdd-service
