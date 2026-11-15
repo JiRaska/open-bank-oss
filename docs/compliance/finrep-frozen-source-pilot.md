@@ -147,3 +147,37 @@ processes also ran on the shared workstation, and the export phase was measured 
 run. These are diagnostic timings, with no attribution of the latency deltas to reporting alone
 and no HTTP measurements. To repeat the export-file phase against an existing synthetic fixture,
 pass `--reuse-input --measure-export-only` to the benchmark.
+
+## Customer Edge measurement
+
+Run `perf/k6/regulatory-customer-edge.js` against a dedicated synthetic environment exposed
+through a loopback endpoint. Provision three million clients and a representative payment history
+in the target. Keep the runner's synthetic fixture outside Git. Each JSON array element supplies
+`accountId`, `paymentId` and a short-lived `token` for the customer who owns both.
+Ensure the tokens cover the entire experiment and schedule rates and VUs from the agreed traffic
+profile. The scenarios read account detail, account balance and domestic payment status through
+Customer Edge at constant arrival rates. Run payment initiation load separately when it is part
+of the workload profile, using dedicated funded test data.
+
+```sh
+k6 run --out json=customer-edge.ndjson perf/k6/regulatory-customer-edge.js
+python3 perf/k6/summarize-regulatory-customer.py customer-edge.ndjson phase-windows.json
+```
+
+Set `EDGE_URL` to the Customer Edge API base (including its base path), `CUSTOMER_FIXTURE`
+to the fixture path, plus `RATE_PER_ENDPOINT`, `VUS_PER_ENDPOINT` and `DURATION`.
+Use one run spanning all four phases, with warm-up and a short buffer after catch-up. Record UTC
+start and end timestamps independently from the export and worker controllers as JSON arrays
+under `baseline`, `export`, `outage` and `catch_up`. End catch-up when the worker confirms
+the expected final checkpoint and reconciled output. The summarizer reports p50/p95/p99,
+non-200 or transport error rate and dropped iterations per route and window. Samples are
+attributed by request completion time. Compare the achieved arrivals with the scheduled rate
+for each window and account for dropped iterations before comparing latency.
+
+The source dependency is ADR-0380 C2/C3 and B2/C11. Product Catalog must provide an immutable
+approved market grant version. Account and loan origination must persist the consumed decision
+with the contract, and the posting producer must resolve that decision from trusted booking
+facts. Ledger cannot infer the approval from an account ID, caller role or requested branch.
+Cross-context journals also need approved inter-branch clearing and attribution rules before
+the journal-level pilot can be enabled for them. Once the source path is wired, build exports
+from reconciled scoped closes and run the drill before activation.
