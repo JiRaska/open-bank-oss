@@ -10,6 +10,7 @@ import com.openbank.account.application.port.out.PassportIntent
 import com.openbank.account.application.port.out.PassportOperation
 import com.openbank.account.domain.model.ProductRevisionPin
 import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -32,6 +33,7 @@ import java.util.UUID
 @RegisterRestClient(configKey = "product-catalog-api")
 @OidcClientFilter("m2m")
 @RegisterProvider(ProductCatalogHostHeaderFilter::class)
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Path("/api/v2/internal/passport-account-admissions")
 @Consumes(MediaType.APPLICATION_JSON)
 interface PassportAdmissionClient {

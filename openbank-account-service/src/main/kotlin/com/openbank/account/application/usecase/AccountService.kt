@@ -138,7 +138,7 @@ class AccountService(
         }
 
         val account = Account(
-            id = passportOperation?.accountId ?: UUID.randomUUID(),
+            id = passportOperation?.accountId ?: Ids.newId(),
             accountNumber = iban,
             accountType = command.accountType,
             partyId = command.partyId,
@@ -311,8 +311,8 @@ class AccountService(
         return passport.prepare(
             PassportIntent(
                 openingKey(command.idempotencyKey),
-                UUID.randomUUID(),
-                UUID.randomUUID(),
+                Ids.newId(),
+                Ids.newId(),
                 grant,
                 command.partyId,
                 PassportOperation.OPEN,
@@ -339,7 +339,7 @@ class AccountService(
         val intent = passport.prepare(
             PassportIntent(
                 "ACTIVATE:${account.id}",
-                UUID.randomUUID(),
+                Ids.newId(),
                 account.id,
                 opening.grantId,
                 account.partyId,
