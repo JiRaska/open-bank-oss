@@ -14,6 +14,7 @@ import tempfile
 import threading
 import unittest
 from unittest.mock import patch
+import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -431,6 +432,24 @@ def local_backend(redirect_to=None, redirect_code=302):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+class EvidenceErrorDiagnosticsTests(unittest.TestCase):
+    def test_http_error_names_status_and_path_but_not_query(self):
+        # #16187: a backfill failed as an opaque "unavailable" with no way to tell a 401 from a
+        # 403 rate limit from a 404; the status and path are what make it diagnosable.
+        def refuse(request, timeout):
+            raise urllib.error.HTTPError(request.full_url, 403, "Forbidden", {}, io.BytesIO(b"secret body"))
+
+        with patch.dict("os.environ", {"GH_TOKEN": "t"}), \
+                patch.object(urllib.request.OpenerDirector, "open", lambda self, request, timeout: refuse(request, timeout)):
+            with self.assertRaises(ValueError) as caught:
+                proof.GitHub().get(f"/repos/{REPO}/pulls/7?per_page=1")
+        message = str(caught.exception)
+        self.assertIn("HTTP 403", message)
+        self.assertIn(f"/repos/{REPO}/pulls/7", message)
+        self.assertNotIn("per_page", message)
+        self.assertNotIn("secret body", message)
 
 
 class BackendCredentialIsolationTests(unittest.TestCase):
