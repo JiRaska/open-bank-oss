@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pricing-service
     app.kubernetes.io/part-of: pricing
   annotations:
-    openbank.tech/policy-checksum: "5aa36c9318acf3e8"
+    openbank.tech/policy-checksum: "7401fcf03dfd7b04"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2233,6 +2233,7 @@ data:
             - kyb.monitoring.queue.list        # #16028: ongoing-monitoring holds queue
             - kyb.monitoring.exit.propose      # #16028: four-eyes exit, maker
             - kyb.monitoring.exit.confirm      # #16028: four-eyes exit, checker (code refuses checker == maker)
+            - kyb.monitoring.exit.withdraw     # #16028: the proposing person withdraws their own pending exit proposal
         ROLE_AUDITOR:
           grant:
             - audit.trail.inspect
