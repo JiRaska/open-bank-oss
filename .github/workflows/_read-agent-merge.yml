@@ -52,7 +52,9 @@ jobs:
         with:
           repository: JiRaska/open-bank-oss
           ref: main
-          fetch-depth: 1
+          # History without blobs: merge_pr_policy.py derives reviewed policy identities (#16187).
+          fetch-depth: 0
+          filter: blob:none
           persist-credentials: false
 
       - name: Validate bounded read request

@@ -8,7 +8,9 @@ import hashlib
 import gzip
 import importlib.util
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch, Mock
 
@@ -21,6 +23,31 @@ old = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(old)
 SOURCE = "EXCLUDED_BRANCH_PREFIXES = ('codex/',)\nOWNER_APPROVAL_CONTEXT = 'merge-train/owner-approval'\n" + policy._SUPPORTED_CHECK
 PARENT, ROOT, DIRECTORY, SCRIPTS = ('c' * 40, 'd' * 40, 'e' * 40, 'f' * 40)
+
+
+def git(repo, *args):
+    return subprocess.run(['git', '-C', str(repo), '-c', 'user.email=t@example.invalid', '-c', 'user.name=t',
+                           '-c', 'commit.gpgsign=false', *args], capture_output=True, text=True, check=True).stdout
+
+
+def commit_policy(repo, text):
+    if not Path(repo, '.git').exists():
+        git(repo, 'init', '-q', '-b', 'main')
+    target = Path(repo, policy.POLICY_PATH)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text)
+    git(repo, 'add', policy.POLICY_PATH)
+    git(repo, 'commit', '-q', '-m', 'policy')
+    return git(repo, 'rev-parse', f'HEAD:{policy.POLICY_PATH}').strip()
+
+
+def policy_changed_vs_main(repo=Path(__file__).resolve().parents[2], ref='origin/main'):
+    try:
+        base = git(repo, 'merge-base', ref, 'HEAD').strip()
+    except subprocess.CalledProcessError:
+        return True  # no main to compare against: check the structure rather than skip it
+    return bool(git(repo, 'diff', '--name-only', base, '--', policy.POLICY_PATH).strip()
+                or git(repo, 'status', '--porcelain', '--', policy.POLICY_PATH).strip())
 
 
 class PolicyGitHub(old.FakeGitHub):
@@ -254,15 +281,75 @@ class PolicyEvidenceTests(unittest.TestCase):
     def test_reviewed_231ad0e8_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('231ad0e824f57749b3cfa482ba10593557cbec2f')
 
-    def test_current_policy_source_is_within_bounds_and_reviewed(self):
+    def test_current_policy_source_is_within_bounds(self):
         # #16187: the controller outgrew the size bound and nothing noticed until merge records
-        # were already missing. This makes both conditions fail at PR time instead.
+        # were already missing. The size bound stays a PR-time check on the working tree.
         raw = Path(__file__).with_name('merge-train.py').read_bytes()
         self.assertLessEqual(len(raw), policy.MAX_POLICY_BLOB_BYTES)
-        sha = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
-        self.assertIn(sha, policy.REVIEWED_POLICY_BLOBS,
-                      f'merge-train.py blob {sha} is not reviewed: add it to REVIEWED_POLICY_BLOBS with a '
-                      f'fixture and a chain test in this PR, so reviewing this change reviews the policy')
+
+    def test_policy_change_keeps_structural_policy_diff_scoped(self):
+        # Only a PR that changes merge-train.py answers for its structure; an unrelated PR is never
+        # asked whether main's controller blob is in a hand list (that reddened every open PR).
+        if not policy_changed_vs_main():
+            self.skipTest('merge-train.py unchanged against origin/main merge-base')
+        source = Path(__file__).with_name('merge-train.py').read_text()
+        self.assertFalse(policy.requires_exact_head(source, 'agent/test', proof.CONTEXT))
+        self.assertTrue(policy.requires_exact_head(source, 'codex/test', proof.CONTEXT))
+
+    def test_blob_on_main_first_parent_history_is_reviewed_without_hand_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first = commit_policy(tmp, SOURCE)
+            later = commit_policy(tmp, SOURCE + '\n# main moved\n')
+            blobs = policy.main_policy_blobs(Path(tmp), 'main', 10)
+            self.assertEqual({first, later}, set(blobs))
+            self.assertNotIn(later, policy.REVIEWED_POLICY_BLOBS)
+
+    def test_blob_never_on_main_first_parent_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            commit_policy(tmp, SOURCE)
+            git(tmp, 'checkout', '-q', '-b', 'side')
+            side = commit_policy(tmp, SOURCE + '\n# side only\n')
+            git(tmp, 'checkout', '-q', 'main')
+            # The side commit is reachable from main, but never main's first-parent state.
+            git(tmp, 'merge', '-q', '--no-ff', '-s', 'ours', '-m', 'merge side', 'side')
+            self.assertNotIn(side, policy.main_policy_blobs(Path(tmp), 'main', 10))
+        github = PolicyGitHub()
+        with patch.object(policy, 'REVIEWED_POLICY_BLOBS', frozenset()), \
+                patch.object(policy, 'main_policy_blobs', lambda: frozenset({'0' * 40})):
+            with self.assertRaisesRegex(ValueError, 'unreviewed immutable policy blob'):
+                policy.premerge_policy_context(copy.deepcopy(github.pull), old.REPO, github, proof.CONTEXT)
+
+    def test_main_derived_blob_supplies_policy_context(self):
+        github = PolicyGitHub()
+        with patch.object(policy, 'REVIEWED_POLICY_BLOBS', frozenset()), \
+                patch.object(policy, 'main_policy_blobs', lambda: frozenset({github.blob_sha})):
+            context = policy.premerge_policy_context(copy.deepcopy(github.pull), old.REPO, github, proof.CONTEXT)
+        self.assertEqual(github.blob_sha, context['policyBlobSha'])
+
+    def test_unrelated_pr_stays_green_after_main_policy_moves(self):
+        # Main gains a new controller revision; a PR that never touched it must not need an edit.
+        with tempfile.TemporaryDirectory() as tmp:
+            commit_policy(tmp, SOURCE)
+            git(tmp, 'branch', 'unrelated')
+            moved = commit_policy(tmp, SOURCE + '\n# landed after the PR was cut\n')
+            git(tmp, 'checkout', '-q', 'unrelated')
+            Path(tmp, 'other.txt').write_text('x')
+            git(tmp, 'add', 'other.txt')
+            git(tmp, 'commit', '-q', '-m', 'unrelated')
+            self.assertFalse(policy_changed_vs_main(Path(tmp), 'main'))
+            self.assertIn(moved, policy.main_policy_blobs(Path(tmp), 'main', 10))
+        with tempfile.TemporaryDirectory() as tmp:
+            commit_policy(tmp, SOURCE)
+            git(tmp, 'checkout', '-q', '-b', 'touching')
+            commit_policy(tmp, SOURCE + '\n# edited by this PR\n')
+            self.assertTrue(policy_changed_vs_main(Path(tmp), 'main'))
+
+    def test_main_history_is_bounded_and_fails_closed_without_git(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for n in range(3):
+                commit_policy(tmp, SOURCE + f'\n# {n}\n')
+            self.assertEqual(2, len(policy.main_policy_blobs(Path(tmp), 'main', 2)))
+            self.assertEqual(frozenset(), policy.main_policy_blobs(Path(tmp), 'no-such-ref', 10))
 
     def test_base64_bound_admits_the_largest_allowed_blob(self):
         raw = b'x' * policy.MAX_POLICY_BLOB_BYTES

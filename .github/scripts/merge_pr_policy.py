@@ -8,7 +8,10 @@ nor a certificate that every other governance requirement was satisfied.
 import ast
 import base64
 import hashlib
+import functools
+from pathlib import Path
 import re
+import subprocess
 
 POLICY_PATH = '.github/scripts/merge-train.py'
 # A payload sanity bound, not a policy decision. It was 500_000 until merge-train.py passed it on
@@ -18,7 +21,8 @@ MAX_POLICY_BLOB_BYTES = 4_000_000
 MAX_POLICY_BLOB_BASE64 = (MAX_POLICY_BLOB_BYTES + 2) // 3 * 4 * 61 // 60 + 64
 # Deliberately bounded reconstruction, not a Python sandbox. Whole-source identities from
 # the canonical first parents of #13750, #13725, #13794 and #13770/#13847 were independently reviewed.
-# Any additional whole-source identity requires the same explicit review before extension.
+# Identities that sat at a first-parent commit of main are derived below and need no entry here;
+# add one only for a source that never landed on main, with the same explicit review.
 REVIEWED_POLICY_BLOBS = frozenset({
     '1cb6da5c76d3503d4361507a965dc17d28856d9c',
     '0943c6749913e153f4687df42b7e2a53592cf064',
@@ -78,6 +82,46 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '6df70b126a750a2a9f6e8fc658efc43b1cf2433a',  # after #16180
     '38c70e23111a78639f9aaae62b0494a90d3c0512',  # after #16105
 })
+# Every merge-train.py identity that canonical main itself carried at a first-parent commit was
+# reviewed by the PR that landed it: main admits nothing else. Deriving that set from history
+# replaces hand-adding each new blob above (#16187), which reddened every unrelated open PR and
+# failed merge records whenever main's controller moved. The hand list stays for identities that
+# never sat at a first-parent commit of main. Bounded: newest MAIN_HISTORY_DEPTH revisions only.
+MAIN_REF = 'origin/main'
+MAIN_HISTORY_DEPTH = 1000
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _git(repo, *args):
+    return subprocess.run(['git', '-C', str(repo), *args], capture_output=True, text=True,
+                          timeout=60, check=True).stdout
+
+
+@functools.lru_cache(maxsize=None)
+def main_policy_blobs(repo=_REPO_ROOT, ref=MAIN_REF, depth=MAIN_HISTORY_DEPTH):
+    """Blob ids of POLICY_PATH at the first-parent commits of `ref` that changed it.
+
+    Empty (fail closed to the hand list) when git, the ref or the history is unavailable.
+    """
+    try:
+        commits = _git(repo, 'log', '--first-parent', f'--max-count={int(depth)}', '--format=%H',
+                       ref, '--', POLICY_PATH).split()
+        if not commits:
+            return frozenset()
+        # One process for all lookups; a deleted path yields 'missing' and is skipped.
+        out = subprocess.run(['git', '-C', str(repo), 'cat-file', '--batch-check=%(objectname) %(objecttype)'],
+                             input=''.join(f'{c}:{POLICY_PATH}\n' for c in commits),
+                             capture_output=True, text=True, timeout=60, check=True).stdout
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return frozenset()
+    return frozenset(line.split()[0] for line in out.splitlines()
+                     if line.endswith(' blob') and _SHA.fullmatch(line.split()[0]))
+
+
+def is_reviewed_policy_blob(blob_sha):
+    return blob_sha in REVIEWED_POLICY_BLOBS or blob_sha in main_policy_blobs()
+
+
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
 _PROTECTED = _BINDINGS | {'owner_approval_valid', 'any', 'type', 'int', '__builtins__'}
@@ -194,7 +238,7 @@ def premerge_policy_context(pull, repo, github, expected_context):
         raise ValueError('pre-merge policy encoding is invalid') from error
     if len(raw) != blob['size'] or hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest() != blob_sha:
         raise ValueError('pre-merge policy blob digest disagrees')
-    if blob_sha not in REVIEWED_POLICY_BLOBS:
+    if not is_reviewed_policy_blob(blob_sha):
         raise ValueError('unreviewed immutable policy blob; explicit policy-source review required')
     if requires_exact_head(source, (pull.get('head') or {}).get('ref'), expected_context):
         raise ValueError('canonical branch requires exact-head owner authorization')
