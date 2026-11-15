@@ -7,6 +7,7 @@
 
 export const ROLES = {
   ADMIN:      "ROLE_ADMIN",
+  LEGAL_INBOX_VIEW: "ROLE_LEGAL_INBOX_VIEW",
   OPERATOR:   "ROLE_OPERATOR",
   VIEWER:     "ROLE_VIEWER",
   COMPLIANCE: "ROLE_COMPLIANCE",
@@ -243,6 +244,7 @@ export const PERMISSIONS = {
   // Sanctions service exposes viewer-tier reads, but reserves screening, list management and
   // four-eyes decisions for operators/admins. Keep this split separate from compliance:view so
   // the console never promises a mutation that the backend will reject.
+  "legal-inbox:view":     [ROLES.LEGAL_INBOX_VIEW],
   "sanctions:view":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER],
   "sanctions:screen":     [ROLES.ADMIN, ROLES.OPERATOR],
   "sanctions:manage":     [ROLES.ADMIN, ROLES.OPERATOR],
@@ -413,6 +415,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
       '/fx', '/fees', '/lending',
   ]],
   ['interest:view', ['/interest']],
+  ['legal-inbox:view', ['/legal-process/inbox', '/api/legal-inbox']],
   ['sanctions:view', ['/sanctions']],
   ['compliance:view', [
     '/aml', '/fraud', '/disputes', '/consents', '/customer-360',

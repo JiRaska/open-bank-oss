@@ -4,6 +4,7 @@
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.quarkus)
     id("openbank.static-analysis")
     id("openbank.dependency-vulnerability-pins")
 }
@@ -13,6 +14,17 @@ repositories {
 }
 
 dependencies {
+    implementation(enforcedPlatform(libs.quarkus.bom))
+    implementation(libs.quarkus.resteasy.reactive.jackson)
+    implementation(libs.quarkus.oidc)
+    implementation(libs.quarkus.agroal)
+    implementation(libs.quarkus.jdbc.postgresql)
+    implementation(libs.quarkus.flyway)
+    implementation("org.flywaydb:flyway-database-postgresql")
+    implementation(libs.bouncycastle.bcprov)
+    implementation(libs.bouncycastle.bcpkix)
+    testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.quarkus.test.security)
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.testcontainers.postgresql)

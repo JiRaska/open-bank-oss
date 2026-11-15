@@ -176,6 +176,7 @@ const paymentsNav: NavItem[] = [
 export const complianceNav: NavItem[] = [
   { nameCs: 'AML',                nameEn: 'AML',              href: '/aml',               icon: AlertOctagon,          permission: 'compliance:view', owner: 'aml' },
   { nameCs: 'Fraud',              nameEn: 'Fraud',            href: '/fraud',             icon: ShieldAlert,           permission: 'compliance:view', owner: 'fraud' },
+  { nameCs: 'Doručené právní zprávy', nameEn: 'Legal Inbox', href: '/legal-process/inbox', icon: Inbox, permission: 'legal-inbox:view' },
   { nameCs: 'Sankce',             nameEn: 'Sanctions',        href: '/sanctions',         icon: Shield,                permission: 'sanctions:view', owner: 'sanctions' },
   { nameCs: 'Spory',              nameEn: 'Disputes',         href: '/disputes',          icon: MessageSquareWarning,  permission: 'compliance:view', owner: 'dispute' },
   { nameCs: 'Customer 360',        nameEn: 'Customer 360',     href: '/customer-360',      icon: Users,                 permission: 'compliance:view' },

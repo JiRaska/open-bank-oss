@@ -9,6 +9,7 @@ export type AccessDescription = {
 }
 
 export const ROLE_DESCRIPTIONS = {
+  "ROLE_LEGAL_INBOX_VIEW": {"name": {"cs": "Pracovník právního inboxu", "en": "Legal inbox operator"}, "description": {"cs": "Zobrazení právního inboxu. Rozsah schránek určuje přidělené oprávnění.", "en": "Access to the legal inbox. Mailbox grants define the scope."}},
   "ROLE_ADMIN": {"name": {"cs": "Administrátor", "en": "Administrator"}, "description": {"cs": "Administrativní přístup podle jednotlivých pravidel UI.", "en": "Administrative access according to individual UI rules."}},
   "ROLE_OPERATOR": {"name": {"cs": "Operátor", "en": "Operator"}, "description": {"cs": "Každodenní zpracování bankovních operací.", "en": "Day-to-day processing of banking operations."}},
   "ROLE_VIEWER": {"name": {"cs": "Čtenář", "en": "Viewer"}, "description": {"cs": "Nahlížení do vybraných provozních přehledů.", "en": "Read access to selected operational views."}},
@@ -113,6 +114,7 @@ export const PERMISSION_DESCRIPTIONS = {
   "delegations:view": {"name": {"cs": "Prohlížení delegovaných přístupů", "en": "View delegated access"}, "description": {"cs": "Nahlížení do pověření a jejich stavu.", "en": "Inspect delegations and their status."}},
   "audit:view": {"name": {"cs": "Prohlížení auditních záznamů", "en": "View audit records"}, "description": {"cs": "Nahlížení do evidence provedených činností.", "en": "Inspect recorded activity evidence."}},
   "compliance:view": {"name": {"cs": "Prohlížení compliance agendy", "en": "View compliance workspace"}, "description": {"cs": "Přístup k přehledům kontrol a souladu.", "en": "Access compliance and control views."}},
+  "legal-inbox:view": {"name": {"cs": "Právní inbox", "en": "Legal inbox"}, "description": {"cs": "Zobrazení povolených datových schránek.", "en": "View permitted data mailboxes."}},
   "sanctions:view": {"name": {"cs": "Prohlížení sankční agendy", "en": "View sanctions workspace"}, "description": {"cs": "Nahlížení do sankčních kontrol a seznamů.", "en": "Inspect sanctions checks and lists."}},
   "sanctions:screen": {"name": {"cs": "Spuštění sankční kontroly", "en": "Run sanctions screening"}, "description": {"cs": "Prověření subjektu proti sankčním seznamům.", "en": "Screen a subject against sanctions lists."}},
   "sanctions:manage": {"name": {"cs": "Úpravy sankční agendy", "en": "Manage sanctions data"}, "description": {"cs": "Přístup k řízeným změnám sankčních podkladů.", "en": "Access controlled changes to sanctions data."}},

@@ -62,3 +62,32 @@ originály a stav k posouzení. Vydání a spotřeba povolení v Ledgeru jsou ov
 na PostgreSQL se syntetickou rezervací. Externí konformita ISDS, živý důkaz FOS C4,
 skutečná právní rezervace v Balance a průchod celou platební cestou jsou evidovány
 v [#16324](https://github.com/JiRaska/open-bank-oss/issues/16324).
+
+## První řez v repozitáři
+
+`/legal-process/inbox` používá session BFF `/api/legal-inbox` a předává token
+operátora do REST služby. Pro přístup musí token obsahovat `ROLE_LEGAL_INBOX_VIEW`
+a alespoň jednu roli `ROLE_LEGAL_MAILBOX_<namespace>`. K suffixu patří stejný
+namespace jako u konkrétního importéru. Schránky musí mít jedinečný namespace
+v rámci databáze i při rozdílném prostředí nebo bankovní entitě. Zobrazení vytěženého
+obsahu a stažení ZFO vyžaduje samostatné `ROLE_LEGAL_INBOX_EVIDENCE`. Přidělení
+vyžaduje `ROLE_LEGAL_INBOX_ASSIGN`. Tým v tomto řezu určuje vlastníka úkolu.
+Hranicí viditelnosti zůstává oprávnění ke schránce. Audit používá subjekt z tokenu
+ověřeného vůči nakonfigurovanému issueru a audience.
+
+Vytěžení čte věc, referenci odesílatele a počet příloh z uložené CMS obálky.
+Neznámá struktura nebo nesouhlas identifikátoru zprávy vede k ručnímu posouzení.
+Přílohy zůstávají v originálu. Ověření podpisového řetězce, OCR, rozhodování
+a aplikace právního účinku jsou další kroky. [Technická dokumentace ISDS](https://testrs.gov.cz/smlouva/soubor/303682/WS-manipulace-s-datovymi-zpravami.pdf)
+
+Pro lokální ověření z kořene repozitáře:
+
+```sh
+./gradlew :openbank-legal-process-service:test :openbank-legal-process-service:quarkusBuild
+(cd openbank-admin-ui && npm ci && npx playwright install chromium)
+bash openbank-admin-ui/e2e/run-legal-inbox-postgres.sh
+```
+
+HTTP testy zapisují testovací SOAP odpověď pomocí ISDS importéru. Browser scénář
+spustí izolovanou databázi, vloží syntetický ZFO originál a přes skutečný BFF ověří
+identické bajty, vytěžení, přidělení, obnovení stránky a následný audit v PostgreSQL.

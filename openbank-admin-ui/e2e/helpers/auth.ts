@@ -28,7 +28,12 @@ const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? 'e2e-test-secret'
 const SESSION_COOKIE_NAME = 'authjs.session-token'
 
 /** Signs a browser context in with an explicit role set, bypassing Keycloak. */
-export async function signInWithRoles(context: BrowserContext, baseURL: string, roles: string[]): Promise<void> {
+export async function signInWithRoles(
+  context: BrowserContext,
+  baseURL: string,
+  roles: string[],
+  accessToken = 'e2e-fake-access-token',
+): Promise<void> {
   const token = await encode({
     secret: NEXTAUTH_SECRET,
     salt: SESSION_COOKIE_NAME,
@@ -37,7 +42,7 @@ export async function signInWithRoles(context: BrowserContext, baseURL: string, 
       name: 'E2E Operator',
       email: 'e2e-operator@openbank.test',
       roles,
-      accessToken: 'e2e-fake-access-token',
+      accessToken,
       accessTokenExpires: Date.now() + 60 * 60 * 1000,
     },
   })

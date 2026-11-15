@@ -1,0 +1,162 @@
+openapi: 3.1.0
+info:
+  title: Legal Inbox
+  version: 1.0.0
+security:
+  - operatorToken: []
+paths:
+  /api/v1/legal-inbox:
+    get:
+      operationId: listLegalInbox
+      summary: List receipts visible to the operator
+      parameters:
+        - name: offset
+          in: query
+          schema: {type: integer, minimum: 0, default: 0}
+      responses:
+        "200":
+          description: A page of up to fifty visible receipts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, hasMore]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Receipt'}
+                  hasMore: {type: boolean}
+        "400": {description: Invalid offset}
+        "401": {description: Authentication required}
+        "403": {description: Inbox permission or mailbox grant missing}
+  /api/v1/legal-inbox/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ReceiptId'
+    get:
+      operationId: readLegalInboxReceipt
+      summary: Read receipt and any permitted draft metadata
+      responses:
+        "200":
+          description: Receipt and operator capabilities
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [receipt, draft, canReadEvidence, canAssign]
+                properties:
+                  receipt: {$ref: '#/components/schemas/Receipt'}
+                  draft:
+                    oneOf:
+                      - $ref: '#/components/schemas/Draft'
+                      - type: "null"
+                  canReadEvidence: {type: boolean}
+                  canAssign: {type: boolean}
+        "401": {description: Authentication required}
+        "403": {description: Inbox permission or mailbox grant missing}
+        "404": {description: Receipt unavailable to this operator}
+  /api/v1/legal-inbox/{id}/originals/{file}:
+    parameters:
+      - $ref: '#/components/parameters/ReceiptId'
+      - name: file
+        in: path
+        required: true
+        schema: {type: string, enum: [message, delivery]}
+    get:
+      operationId: downloadLegalInboxOriginal
+      summary: Download the stored ZFO byte for byte and record access
+      responses:
+        "200":
+          description: Original ZFO attachment
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "401": {description: Authentication required}
+        "403": {description: Evidence permission or mailbox grant missing}
+        "404": {description: Receipt unavailable to this operator}
+  /api/v1/legal-inbox/{id}/extract:
+    parameters:
+      - $ref: '#/components/parameters/ReceiptId'
+    post:
+      operationId: extractLegalInboxEnvelope
+      summary: Extract unverified envelope metadata from the stored original
+      responses:
+        "200": {$ref: '#/components/responses/Complete'}
+        "401": {description: Authentication required}
+        "403": {description: Evidence permission or mailbox grant missing}
+        "404": {description: Receipt unavailable to this operator}
+  /api/v1/legal-inbox/{id}/assignment:
+    parameters:
+      - $ref: '#/components/parameters/ReceiptId'
+    post:
+      operationId: assignLegalInboxReceipt
+      summary: Set the team if the observed assignment revision is still current
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [team, expectedRevision]
+              properties:
+                team: {$ref: '#/components/schemas/Team'}
+                expectedRevision: {type: integer, minimum: 0}
+      responses:
+        "200": {$ref: '#/components/responses/Complete'}
+        "400": {description: Missing or invalid assignment}
+        "401": {description: Authentication required}
+        "403": {description: Assignment permission or mailbox grant missing}
+        "404": {description: Receipt unavailable to this operator}
+        "409": {description: Assignment revision changed}
+components:
+  securitySchemes:
+    operatorToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ReceiptId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  responses:
+    Complete:
+      description: Operation completed or already applied at this revision
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [status]
+            properties:
+              status: {const: ok}
+  schemas:
+    Team:
+      type: string
+      enum: [ENFORCEMENT_CZ, LEGAL_REVIEW_CZ]
+    ExtractionStatus:
+      type: string
+      enum: [DRAFT, MANUAL_REVIEW]
+    Receipt:
+      type: object
+      required: [receiptId, deliveryId, recordedAt, revision, team, extractionStatus]
+      properties:
+        receiptId: {type: string, format: uuid}
+        deliveryId: {type: string}
+        recordedAt: {type: string, format: date-time}
+        revision: {type: integer, minimum: 0}
+        team:
+          oneOf:
+            - $ref: '#/components/schemas/Team'
+            - type: "null"
+        extractionStatus:
+          oneOf:
+            - $ref: '#/components/schemas/ExtractionStatus'
+            - type: "null"
+    Draft:
+      type: object
+      required: [status, subject, senderReference, attachmentCount]
+      properties:
+        status: {$ref: '#/components/schemas/ExtractionStatus'}
+        subject: {type: [string, "null"]}
+        senderReference: {type: [string, "null"]}
+        attachmentCount: {type: [integer, "null"], minimum: 0}
