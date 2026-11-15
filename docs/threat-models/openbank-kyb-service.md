@@ -103,6 +103,7 @@ while the monitoring switch is on.
 | T12 | **A poison record halts the channel, or a changed body is acked in silence** | A record typed as a finding that has no usable owner, finding id or subject reference is counted `malformed` and nacked; an infrastructure failure is retried and rethrown. The channel is configured with `failure-strategy: dead-letter-queue` and its own dead-letter topic, which exists as a `KafkaTopic` and is writable by the service's KafkaUser; `KybMonitoringFindingDeadLettered` reads that topic | A dead-lettered finding is a match nobody has reviewed until someone replays it |
 | T13 | **Elevation of privilege through the registry call** | The service's own client carries `ROLE_API` only; the registry operations are authorised with the action of the screen, which the same client already performs | The owner binding is as strong as the realm's client separation (sanctions-service threat model, M4) |
 | T14 | **A release boundary loses monitoring data.** Pods of two releases run side by side, or the release is rolled back, and the older code rewrites a case | Monitoring data is in tables and columns the previous release does not map: it cannot erase a reference, a finding or a decision by rewriting the case row or its JSON. What it can do is write a case without bringing the rows into step, which T1's version check repairs. The onboarding screen's identifiers and stored shape are unchanged, so the two releases read each other's cases | While only the previous release runs, nothing is registered, withdrawn or repaired; findings wait on the topic |
+| T15 | **A case that ends after SIGNED leaves its mandates live (#16015).** `SIGNED` is not terminal: the applicant can abandon, the idle timer can abandon and an operator can reject after `grantMandates` has given every signer a mandate on the entity party, so the case reads as ended while the signers can still act for the entity | party-service consumes `BUSINESS_ONBOARDING_ABANDONED` / `BUSINESS_ONBOARDING_REJECTED` from `openbank.kyb.events` (`KybCaseEventConsumer`, channel `kyb-events-in`) and revokes every ACTIVE mandate on the event's `entityPartyId` whose `evidenceRef` starts with `kyb-case:<caseId>:` (`KybCaseMandateRevocation`), each with a `PARTY_MANDATE_REVOKED` outbox row in the same transaction. A redelivery finds nothing ACTIVE and does nothing. A party-db failure is retried and rethrown into the explicit DLQ `openbank.dlq.party.kyb-events-in` (KafkaTopic + Write ACL). Event-driven on purpose: no service account gains a mandate-write grant. party-service's integration test (added with #16015) drives grant, then each ending event twice, against real Postgres and Redpanda, with a must-stay-ACTIVE mandate from another case; it runs in party-service's CI, so this row carries no kyb-run test evidence | Between the case ending and the event being consumed the mandates are still ACTIVE (outbox relay + consumer lag, seconds). A dead-lettered event leaves them ACTIVE until replayed, and no alert reads that DLQ yet. `grantMandate` upserts an existing ACTIVE mandate for the same principal, agent and role; when that mandate came from another source (a register, an operator, another case) it keeps its own `source` and `evidenceRef`, so this case's end does not revoke it (party-service unit test, run in its own CI). The flip side: such a signer's mandate outlives this case, because its authority never came from it. The topic carries no per-message signature: a principal with `Write` on `openbank.kyb.events` can end a case's mandates (the outcome is a revocation, never a grant) |
 
 ## 5. Residual risks accepted in this pass
 
@@ -131,12 +132,27 @@ themselves is a withdrawal per row, described in the rollback note of `V14__ongo
 
 The rest of the service predates this document and has no STRIDE pass here: register adapters and
 manual attestation, the signer invitation tokens, the representation attestation store, the
-agreement ceremony with document-service, mandate granting in party-service and the Temporal
-timers. Each has design notes in the service's `CLAUDE.md`; none of them is covered by the table
+agreement ceremony with document-service, mandate granting in party-service (its revocation when
+a case ends is T15) and the Temporal timers. Each has design notes in the service's `CLAUDE.md`; none of them is covered by the table
 above.
 
 ## 8. Change log
 
+- **2026-11-14** — Mandates granted at SIGNED are revoked when the case then ends ABANDONED or
+  REJECTED (T15, #16015): new inbound edge `openbank.kyb.events` → party-service, consumed with an
+  explicit dead-letter topic. kyb-service itself is unchanged.
+- **2026-11-14** — Related-party screens carry what the register knows besides the name. The
+  sanctions screen sent only the name, so a business was screened by legal name alone and a person
+  by name alone: a common-name match could not be ruled out on date of birth, and an entity
+  registered in a listed jurisdiction was not caught without a name match. The screen now sends the
+  entity's registration country (identifier scheme country, else registered address), a corporate
+  owner's filing country, and for persons the register's date of birth, nationality and country of
+  residence. **STRIDE-S/E (screening evasion):** narrowed; the jurisdiction check now applies to
+  every case. **STRIDE-I:** sanctions-service already receives these fields from other callers;
+  nothing new is stored in kyb, because the facts are re-derived from the extract on every screen
+  rather than written to `screening_json`. Trading names are not sent: no register adapter
+  produces them today. Evidence: `CaseScreeningTest`, `SanctionsRelatedPartyScreeningAdapterTest`
+  (red with the country mapping removed). No DB, event or API change. Rollback: revert the PR.
 - **2026-11-14** — Four-eyes on statutory representation publication: the staff member who
   publishes a rule must not be the principal recorded as its `attestedBy` (exact principal
   comparison); a same-person publish answers 403 `SEPARATION_OF_DUTIES`.

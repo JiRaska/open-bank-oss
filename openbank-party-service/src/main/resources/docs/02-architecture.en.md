@@ -8,6 +8,7 @@ The service follows the hexagonal (ports-and-adapters) layout mandated by [ADR 0
 graph LR
   admin[admin-ui]
   kyc[kyc-service]
+  kyb[kyb-service]
   aml[aml-service]
   acc[account-service]
   pid[pid-service]
@@ -18,6 +19,7 @@ graph LR
   kafkaOut[(Kafka<br/>openbank.party.events)]
   kafkaKyc[(Kafka<br/>openbank.kyc.events)]
   kafkaAml[(Kafka<br/>openbank.aml.events)]
+  kafkaKyb[(Kafka<br/>openbank.kyb.events)]
 
   admin -- "POST/GET/PATCH /parties" --> party
   kyc -- "PUT /kyc-status" --> party
@@ -27,6 +29,8 @@ graph LR
   aml -- "emits" --> kafkaAml
   kafkaKyc -- "consumed" --> party
   kafkaAml -- "consumed" --> party
+  kyb -- "emits" --> kafkaKyb
+  kafkaKyb -- "consumed" --> party
 
   party --> db
   party -- "outbox → publish" --> kafkaOut
@@ -85,7 +89,7 @@ com.openbank.party/
     ├── persistence/entity/          PartyEntity, PartyDocumentEntity, PartyOutboxEntity
     ├── persistence/repository/      *RepositoryImpl (Panache reactive)
     ├── outbox/                      PartyOutboxDispatcher (@Scheduled)
-    ├── kafka/                       KafkaPartyOutboxEventPublisher, KycAmlEventConsumer
+    ├── kafka/                       KafkaPartyOutboxEventPublisher, KycAmlEventConsumer, KybCaseEventConsumer
     └── flags/                       FlagdProducer (OpenFeature, ADR-0067)
 ```
 

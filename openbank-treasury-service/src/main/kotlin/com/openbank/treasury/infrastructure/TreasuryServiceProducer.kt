@@ -6,6 +6,7 @@ package com.openbank.treasury.infrastructure
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.treasury.application.port.`in`.CashFlowUseCase
+import com.openbank.treasury.application.port.`in`.NostroBreakResolutionUseCase
 import com.openbank.treasury.application.port.`in`.NostroBreakUseCase
 import com.openbank.treasury.application.port.`in`.NostroReconciliationUseCase
 import com.openbank.treasury.application.port.`in`.PortfolioStatementUseCase
@@ -26,6 +27,7 @@ import com.openbank.treasury.application.port.out.PortfolioStatementRepository
 import com.openbank.treasury.application.port.out.ReferenceRepository
 import com.openbank.treasury.application.usecase.BookCategories
 import com.openbank.treasury.application.usecase.CashFlowService
+import com.openbank.treasury.application.usecase.NostroBreakResolutionService
 import com.openbank.treasury.application.usecase.NostroBreakService
 import com.openbank.treasury.application.usecase.NostroReconciliationService
 import com.openbank.treasury.application.usecase.PortfolioStatementService
@@ -220,6 +222,20 @@ class TreasuryServiceProducer {
         config.accounts(),
         BreakAlertPolicy(config.breakAlertAgeDays(), config.breakAlertMinAmount()),
         objectMapper,
+        clock,
+    )
+
+    /** ADR-0369: four-eyes manual resolution of breaks that will never match. */
+    @Produces
+    @ApplicationScoped
+    fun nostroBreakResolutionUseCase(
+        breaks: NostroBreakRepository,
+        config: NostroConfig,
+        clock: Clock,
+    ): NostroBreakResolutionUseCase = NostroBreakResolutionService(
+        breaks,
+        config.accounts(),
+        BreakAlertPolicy(config.breakAlertAgeDays(), config.breakAlertMinAmount()),
         clock,
     )
 }

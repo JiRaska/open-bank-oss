@@ -1796,9 +1796,6 @@ four_eyes_enforcement:
     openbank-product-catalog:
       expires: "2027-01-29"
       reason: "catalog.publish/publish-ir: no ApprovalStore wired (maker != checker is enforced in-service by the revision-approval flow); enforcing answers 503 on every publish."
-    openbank-sanctions-service:
-      expires: "2026-12-01"
-      reason: "sanctions.clear: enforcement lands in PR (b) (money-path split of #15748, needs its threat-model entry and two approvals); delete this entry in that PR."
     openbank-sca-service:
       expires: "2027-03-10"
       reason: "device.revoke has a customer self-revocation path (device-self-revocation, ROLE_CUSTOMER) with no exemption; enforcing would park a customer revoking a lost device behind an operator approval."
@@ -1811,9 +1808,6 @@ four_eyes_enforcement:
     openbank-sepa-payment:
       expires: "2026-12-15"
       reason: "sepaPayment.transitionStatus: no admin-ui checker workbench for the sepa-payment approval queue and no maker retry with X-Approval-Id."
-    openbank-settlement-service:
-      expires: "2026-12-01"
-      reason: "settlement.create: enforcement lands in PR (b) (money-path split of #15748, needs its threat-model entry and two approvals); delete this entry in that PR."
     openbank-swift-service:
       expires: "2026-12-15"
       reason: "swift.send: no admin-ui checker workbench for the swift approval queue and no maker retry with X-Approval-Id."
@@ -3485,6 +3479,35 @@ enforcement_reachability:
         exists (#3615); ADR-0375 D1 retires the symbol instead, by moving the check into the
         ADR-0374 admission chain.
 
+# ADR-0375 D6 — exposure is delivered as a sealed artifact, never by decorating a live read.
+#
+# `DelegationGrant.exposure` (redactionRules, maxViews, watermark, allowDownload) is REFUSED on
+# every path that could create or revive authority, and that refusal is the DECLARED END STATE, not
+# a gap waiting to be closed: returning the original object bytes with a redaction or view-count
+# field merely echoed is a confidentiality defect that looks, from the grantor's screen, exactly
+# like an enforced control. A redacted, watermarked, view-counted share is a rendered sealed
+# artifact delivered as an `ExternalDisclosure`, whose view consumption is a locked
+# read-modify-write in one transaction — the atomicity a streaming route can never have.
+#
+# `referenced_in` is checked BOTH ways by check-delegation-exposure-sealed.py: a file that reads
+# grant exposure without an entry is a finding, and an entry whose file stopped referencing it is a
+# finding too. `role: enforcement` is refused outright — that is the one thing D6 forbids.
+delegation_exposure_delivery:
+  mechanism: external_disclosure
+  grant_level_exposure: refused
+  error_code: EXPOSURE_UNSUPPORTED
+  referenced_in:
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/domain/model/DelegationGrant.kt
+      role: model
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/application/usecase/DelegationService.kt
+      role: refusal
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/persistence/entity/DelegationGrantEntity.kt
+      role: historical_audit
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/rest/DelegationResource.kt
+      role: refusal
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/rest/dto/DelegationDtos.kt
+      role: historical_audit
+
 delegation_capability_enforcement:
   principle: >
     DelegationGrant.CAPABILITY_MATRIX says what a grantor may be OFFERED. Until this registry
@@ -3674,33 +3697,6 @@ delegation_capability_enforcement:
         ADR-0375 D7 correction. PUT /customer/v1/cards/{id}/controls toggles contactless, online,
         ATM and abroad — channels, not limits — and was gated on CAP_CARD_MANAGE_LIMITS. Now gated
         on CAP_CARD_MANAGE_CHANNELS. Same preset reasoning as CARD_MANAGE_STATUS.
-    - resource_type: PAYMENT
-      capability: OBJECT_READ
-      status: unenforced
-      issue: 3615
-      shared_capability: true
-      why: >
-        The matrix permits sharing a single payment; no route serves a shared payment to a grantee
-        (the edge's payment reads are owner-only IDOR guards). Measured: no production file names
-        both OBJECT_READ and PAYMENT. Scan-unverifiable because OBJECT_READ is enforced for
-        DOCUMENT — see scan_limit above.
-        ADR-0375 D5 gave DOCUMENT an ownership oracle and deliberately did NOT give one to PAYMENT:
-        a payment id resolves in no single service — six rails own payments and nothing maps an id
-        to its rail — so there is no owner to ask. The honest fix is to remove this pair from
-        CAPABILITY_MATRIX, which is a behaviour change (it refuses offers the app makes today) and
-        belongs with the offer-time refusal, not here.
-    - resource_type: STATEMENT
-      capability: OBJECT_READ
-      status: unenforced
-      issue: 3615
-      shared_capability: true
-      why: >
-        As PAYMENT/OBJECT_READ: statement-service has no delegation code, and no production file
-        names both OBJECT_READ and STATEMENT. It also has no oracle to build — measured
-        2026-11-12, every statement-service route is addressed by accountId and there is no
-        statement object carrying an id of its own, so a STATEMENT resourceId refers to nothing
-        the owning service can resolve. Remove from CAPABILITY_MATRIX with the refusal slice.
-
 readiness_attestations:
   principle: >
     openbank-libs/governance/attestations.yaml is the ONLY hand-entered input to the
@@ -3801,6 +3797,10 @@ authz:
     # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
     # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
     - card.details.read
+    # The queue of business customers under an ongoing sanctions-monitoring hold (#16028): who is
+    # being reviewed is itself sensitive (tipping-off). Granted to ROLE_KYC_REVIEWER by the matrix
+    # only; the generic operator/admin list rule must not reach it.
+    - kyb.monitoring.queue.list
   role_action_matrix:
     ROLE_OPERATOR:
       grant:
@@ -4731,6 +4731,8 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
       - "src/main/kotlin/com/openbank/swift/infrastructure/client/ClearingSimulatorClient.kt"
+      - "src/main/kotlin/com/openbank/swift/infrastructure/client/AmlServiceClient.kt"
+      - "src/main/kotlin/com/openbank/swift/infrastructure/client/SanctionsServiceClient.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
@@ -5431,3 +5433,21 @@ demo_only_flags:
       config_property: openbank.pension.stub-integrations.enabled
       reason: "Swaps the KYC, signature-verification (SCA), counterparty and fund-administration ports for stubs, so a signature check that never happened passes. %dev and %test only; unset in gitops."
       permitted_environments: [local]
+
+outgoing_payment_rails_screening:
+  # Every service that releases money to a counterparty outside the bank must screen the parties
+  # against the sanctions lists BEFORE release (ADR-0032, ADR-0353 D4): an outbound port whose
+  # interface name matches *Screening*Port, and a call site of the shared
+  # com.openbank.libs.fincrime.ScreeningPolicy so the verdict is the one fleet-wide copy.
+  # "Screening is expected upstream" is not an exemption: measured 2026-11-14, swift-service's
+  # docs said so while the upstream (transaction-service) screened nothing.
+  # Enforced by .github/scripts/check-rail-screening-port.py (gate rail-screening-port). Known
+  # gaps are baselined in .github/scripts/rail-screening-port-baseline.txt; a baselined service
+  # that becomes covered fails until its line is removed, so the baseline only shrinks.
+  services:
+    - openbank-domestic-payment
+    - openbank-sepa-payment
+    - openbank-sepa-instant
+    - openbank-fx-service
+    - openbank-swift-service
+    - openbank-sdd-service

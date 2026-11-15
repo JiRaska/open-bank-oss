@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
   annotations:
-    openbank.tech/policy-checksum: "8820dbe3a0656cee"
+    openbank.tech/policy-checksum: "2e2268bec2a44590"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -895,7 +895,7 @@ data:
 
     # amlCase.create by the payment/FX services' OWN machine principals (ROLE_API only), which open a
     # case when a screening gate refers a transfer (AmlServiceClient in domestic-payment, sepa-payment,
-    # sepa-instant and fx-service). Identity-gated, never a role: ROLE_API is held by every service
+    # sepa-instant, fx-service, sdd-service and swift-service). Identity-gated, never a role: ROLE_API is held by every service
     # account. The shared `service-account-openbank-services` is deliberately absent. Keep this set
     # equal to AML_CASE_CREATE_CALLERS in AmlCaseResource.kt (AmlCaseCreateCallerGuardTest pins it):
     # while AUTHZ_ENFORCE=false that Kotlin check is the enforcing half and this rule is the one the
@@ -907,6 +907,8 @@ data:
     		"service-account-openbank-sepa-payment",
     		"service-account-openbank-sepa-instant",
     		"service-account-openbank-fx",
+    		"service-account-openbank-sdd",
+    		"service-account-openbank-swift",
     	}
     	machine_named(named_client)
     	input.action == "amlCase.create"
@@ -2095,6 +2097,10 @@ data:
         # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
         # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
         - card.details.read
+        # The queue of business customers under an ongoing sanctions-monitoring hold (#16028): who is
+        # being reviewed is itself sensitive (tipping-off). Granted to ROLE_KYC_REVIEWER by the matrix
+        # only; the generic operator/admin list rule must not reach it.
+        - kyb.monitoring.queue.list
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

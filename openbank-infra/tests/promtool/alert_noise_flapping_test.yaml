@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# AlertRuleFlapping (prometheus-rules-alert-noise.yaml) counts FIRING ONSETS over 7d — what
+# reaches Alertmanager — not firing samples and not pending flickers. Falsified 2026-11-14 by
+# deleting the `unless ... offset 1m` clause: Steady (one 150-minute firing) then counts 150
+# and fires too.
+rule_files:
+  - prometheus-rules-alert-noise.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "AlertRuleFlapping counts firing onsets: 15 one-minute firings fire it, 1 long one does not"
+    input_series:
+      # Flappy: firing for 1 minute every 10 minutes, 15 times.
+      - series: 'ALERTS{alertname="Flappy",alertstate="firing",severity="warning"}'
+        values: '1 _x9 1 _x9 1 _x9 1 _x9 1 _x9 1 _x9 1 _x9 1 _x9 1 _x9 1 _x9 1 _x9 1 _x9 1 _x9 1 _x9 1 _x9'
+      # Steady: one 150-minute firing — long, but ONE notification.
+      - series: 'ALERTS{alertname="Steady",alertstate="firing",severity="critical"}'
+        values: '1x150'
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: AlertRuleFlapping
+        exp_alerts:
+          - exp_labels:
+              alert_name: Flappy
+              alert_severity: warning
+              severity: info
+              team: platform
+            exp_annotations:
+              summary: "Flappy (warning) fired 15 separate times in 7 days"
+              description: "More than two firing onsets a day on average. Each one reaches Alertmanager as a new notification, so a flapping rule trains on-call to ignore it and buries the real ones. Backtest a fix before changing the rule (openbank-infra/scripts/alert-backtest.py --calibrate), then retune (magnitude floor, longer for:, keep_firing_for over scrape gaps), demote to a recording rule plus dashboard, or fix the subject."
+              for_zero_reason: "the expression is already a 7-day count; a for: would only delay a weekly-scale signal"
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-infra/scripts/alert-backtest.py"
+              subject_period: continuous

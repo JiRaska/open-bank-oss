@@ -29,8 +29,10 @@ Když není dostupný rejstřík skutečných majitelů, žádný subjekt se nep
 
 Registru se pro každý subjekt posílá reference. Je to náhodné UUID, které vygeneruje databáze ve
 chvíli, kdy subjekt poprvé dlužíme registru. Není odvozená ze jména ani z identifikátoru, nikdy se
-nemění a případy ji nesdílejí. Prověrka při onboardingu se nemění: posílá stejné id subjektu a
-ukládá stejná data jako před touto funkcí.
+nemění a případy ji nesdílejí. Registr prověrku při onboardingu nemění: posílá stejné id subjektu
+jako dříve. Kromě jména posílá zemi, datum narození a státní příslušnost subjektu, jak je uvádí
+rejstřík (viz oddíl o prověrce v README); čtou se z výpisu při každé prověrce a na případu se
+neukládají.
 
 Důsledek: vyjasnění, které analytik zaznamená v sanctions-service k prověrce při onboardingu, je
 uloženo pod id prověrky, ne pod referencí v registru. První vyhodnocení subjektu registrem proto
