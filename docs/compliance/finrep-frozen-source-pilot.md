@@ -212,3 +212,15 @@ or authorization assignments. A published grant revision ID is the candidate for
 references, home/host compatibility, existence and suitability of the referenced product
 revision, and resolve a single eligible grant. C3 still needs to consume that decision
 atomically with revocation and preserve the evidence through account opening and booking.
+
+Catalog migration V17 adds an immutable booking receipt and a transactional consume operation.
+Call it in a short READ COMMITTED transaction with the durable account-opening operation ID,
+verified subject, pinned product revision and independently selected grant revision. It locks the
+grant row before checking the active interval and records the exact attributes and approval digest.
+Concurrent publication or effective-interval changes contend on that row. A committed retry returns
+the original receipt even after supersession, and a retry with different bound facts is rejected.
+
+This is the database operation for the trusted catalog adapter. C3 still needs the authenticated
+adapter, trusted grant selection, a durable pending account operation before consumption and
+completion/recovery after receipt persistence. For rollout, apply the additive migration first.
+For rollback, stop callers and retain the committed receipts.
