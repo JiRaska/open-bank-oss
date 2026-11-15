@@ -39,6 +39,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: gh-call-counter install
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh install
       - name: Self-test the watch
         run: python3 .github/scripts/merge-train-stall-watch.py --self-test
 
@@ -48,3 +51,7 @@ jobs:
           # The triggering run's settle log when it succeeded; otherwise the newest successful one.
           TRAIN_RUN_ID: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.id || '' }}
         run: python3 .github/scripts/merge-train-stall-watch.py --write
+      - name: gh-call-counter report
+        if: always()
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh report

@@ -186,6 +186,9 @@ export const complianceNav: NavItem[] = [
   { nameCs: 'Úvěrové compliance packy', nameEn: 'Credit Compliance Packs', href: '/lending/compliance-packs', icon: ShieldCheck, permission: 'lending:compliance:view', owner: 'lending' },
   { nameCs: 'Auditní záznamy',    nameEn: 'Audit Log',        href: '/audit',             icon: ScrollText,            permission: 'audit:view', owner: 'audit' },
   { nameCs: 'Regulatorní',        nameEn: 'Regulatory',       href: '/regulatory',        icon: FileText,              permission: 'regulatory:view', owner: 'finrep' },
+  // ADR-0336: the statutory-return workbench (GSFT, CEÚ). OPERATOR is the only role that can act
+  // on it and cannot open /regulatory, so the button inside that page never reached them.
+  { nameCs: 'Statutární výkazy',  nameEn: 'Statutory Returns', href: '/regulatory/statutory-returns', icon: Landmark, permission: 'statutory-returns:view', owner: 'tax-reporting' },
   // ADR-0286: warehouse-backed risk reporting via the governed query registry + embedded Grafana.
   { nameCs: 'Reporting (DWH)',    nameEn: 'Reporting (DWH)',  href: '/reporting',         icon: BarChart3,             permission: 'compliance:view' },
 ]

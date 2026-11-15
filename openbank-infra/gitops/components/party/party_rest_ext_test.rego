@@ -162,6 +162,17 @@ test_tax_reporting_false_or_bad_client_binding_denied if {
 	}
 }
 
+test_statutory_representation_separates_publisher_and_reader if {
+    delegation := {"service_account": true, "client_id": "openbank-delegation", "type": "HUMAN", "id": "service-account-openbank-delegation", "roles": ["ROLE_API"]}
+    allow.allow with input as {"principal": kyb, "action": "party.statutory-representation.publish"}
+    allow.allow with input as {"principal": delegation, "action": "party.statutory-representation.inspect"}
+    not allow.allow with input as {"principal": kyb, "action": "party.statutory-representation.inspect"}
+    not allow.allow with input as {"principal": delegation, "action": "party.statutory-representation.publish"}
+    every principal in {shared_api_only, other_api_sa, kyc_analyst, viewer} {
+        not allow.allow with input as {"principal": principal, "action": "party.statutory-representation.publish"}
+        not allow.allow with input as {"principal": principal, "action": "party.statutory-representation.inspect"}
+    }
+}
 
 test_party_pii_reveal_requires_kyc_or_admin_human if {
 	allow.allow with input as {"principal": kyc_analyst, "action": "party.pii.reveal"}

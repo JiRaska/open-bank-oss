@@ -13,6 +13,7 @@ import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseMonitoring
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.ExitCompletion
+import com.openbank.kyb.domain.model.ExitProposal
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.KybEvent
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
@@ -174,6 +175,7 @@ class BusinessOnboardingCaseRepositoryImpl(
         entityPartyActive = case.entityPartyActive
         requiredSignatures = case.requiredSignatures
         requiredSignerRoles = KybJson.writeStrings(case.requiredSignerRoles)
+        representationAttestationId = case.representationAttestationId
         signersJson = KybJson.writeSigners(case.signers)
         invitationTokens =
             case.signers.mapNotNull { it.invitationToken }.takeIf { it.isNotEmpty() }?.joinToString("|", "|", "|")
@@ -189,6 +191,13 @@ class BusinessOnboardingCaseRepositoryImpl(
         monitoringExitCompletedAt = case.monitoring.exitCompleted?.completedAt
         monitoringExitCompletedBy = case.monitoring.exitCompleted?.completedBy
         monitoringExitEvidence = case.monitoring.exitCompleted?.evidence
+        monitoringExitProposedAt = case.monitoring.exitProposal?.proposedAt
+        monitoringExitProposedBy = case.monitoring.exitProposal?.proposedBy
+        monitoringExitProposalEvidence = case.monitoring.exitProposal?.evidence
+        monitoringExitProposerPersonId = case.monitoring.exitProposal?.proposerPersonId
+        monitoringExitProposalExpiresAt = case.monitoring.exitProposal?.expiresAt
+        monitoringExitProposalWithdrawnBy = case.monitoring.exitProposal?.withdrawnBy
+        monitoringExitProposalWithdrawnAt = case.monitoring.exitProposal?.withdrawnAt
         monitoringSyncedVersion = syncedVersion
         updatedAt = case.updatedAt
     }
@@ -203,6 +212,7 @@ class BusinessOnboardingCaseRepositoryImpl(
         requiredSignatures = requiredSignatures,
         requiredSignerRoles = KybJson.readStrings(requiredSignerRoles),
         signers = KybJson.readSigners(signersJson),
+        representationAttestationId = representationAttestationId,
         reviewReason = reviewReason,
         entityPartyActive = entityPartyActive,
         questionnaire = questionnaireJson?.let { KybJson.readQuestionnaire(it) },
@@ -213,6 +223,17 @@ class BusinessOnboardingCaseRepositoryImpl(
             findings,
             monitoringExitCompletedAt?.let { at ->
                 ExitCompletion(at, monitoringExitCompletedBy.orEmpty(), monitoringExitEvidence.orEmpty())
+            },
+            monitoringExitProposedAt?.let { at ->
+                ExitProposal(
+                    at,
+                    monitoringExitProposedBy.orEmpty(),
+                    monitoringExitProposalEvidence.orEmpty(),
+                    proposerPersonId = monitoringExitProposerPersonId,
+                    expiresAt = monitoringExitProposalExpiresAt,
+                    withdrawnBy = monitoringExitProposalWithdrawnBy,
+                    withdrawnAt = monitoringExitProposalWithdrawnAt,
+                )
             },
         ),
         version = version,

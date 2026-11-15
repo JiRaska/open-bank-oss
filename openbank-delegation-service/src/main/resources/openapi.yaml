@@ -279,8 +279,10 @@ paths:
               something this platform grants by omission.
             * `APPROVAL_POLICY_UNSUPPORTED` — approvalPolicy other than SOLO; nothing counts approvals.
             * `EXPOSURE_UNSUPPORTED` — exposure is non-null. It remains readable on historical grants
-              for audit, but cannot authorize a raw object download until transformed-artifact delivery
-              can prove redaction, watermark and view-count enforcement.
+              for audit and never authorizes a raw object download. This is the declared end state
+              (ADR-0375 D6), not a pending gap: redaction, watermark and view counts are enforced by
+              issuing a sealed external disclosure over the document, whose view consumption is
+              atomic, and never by shaping a live read.
             * `RESOURCE_TYPE_NOT_OFFERABLE` — resourceType is PAYMENT or STATEMENT (ADR-0375 D5/D6).
               Neither has an ownership oracle nor a delivery mechanism, so neither can be offered.
               Share a statement as the DOCUMENT its render produces, or use

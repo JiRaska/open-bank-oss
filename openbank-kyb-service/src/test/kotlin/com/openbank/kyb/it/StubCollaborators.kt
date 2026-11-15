@@ -176,6 +176,14 @@ class StubAresAdapter : RegistryAdapter {
             "71000291" to "Ursula Nesouhlasná",
             "71000305" to "Václav Odůvodněný",
             "71000313" to "Wanda Souběžná",
+            "71000330" to "Xenie Čekající",
+            "71000348" to "Yvona Aktivovaná",
+            "71000356" to "Zbyněk Zadržený",
+            "71000364" to "Adéla Odvolaná",
+            "71000372" to "Bořek Vypínaný",
+            "71000381" to "Cyril Neodeslaný",
+            "71000399" to "Dalibor Odpojený",
+            "71000402" to "Edita Nikdy",
         )
     }
 
@@ -223,6 +231,11 @@ class StubPartyGateway : PartyGateway {
     val pep = ConcurrentHashMap<UUID, Boolean>()
 
     override suspend fun pepProfile(partyId: UUID): PepProfile? = PepProfile(pep[partyId], null)
+
+    /** Parties party-service records as CLOSED; none unless a test closes one. */
+    val closed: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
+
+    override suspend fun partyClosed(partyId: UUID): Boolean = partyId in closed
 }
 
 /**

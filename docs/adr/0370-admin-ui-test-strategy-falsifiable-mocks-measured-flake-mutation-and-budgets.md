@@ -2,7 +2,7 @@
 date: 2026-11-11
 decision-status: proposed
 delivery-status: partial
-followup: "#15685 — U1–U6 are built (U5 mutation and U6 perf runs advisory until baselined); U7–U8 are not"
+followup: "#15685 — U1–U7 are built (U5, U6 and U7 runs non-gating until baselined); U8 is not"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []

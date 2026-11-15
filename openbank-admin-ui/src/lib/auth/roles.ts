@@ -212,7 +212,7 @@ export const PERMISSIONS = {
   // VerificationCaseResource; KYC split roles and demo must not see a 403 cockpit.
   "identity-cases:view":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   "identity-cases:decide":[ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
-  // Business onboarding (ADR-0284). BOTH lines mirror kyb-service's own
+  // Business onboarding (ADR-0284). View and attest mirror kyb-service's own
   // @RolesAllowed(OPERATOR, ADMIN, KYC) — on the representation routes AND on `GET /cases`, which
   // additionally calls requireOperator(). COMPLIANCE is deliberately absent from `view` as well as
   // from `attest`: it appears on neither side, nor in rules.yaml's role_action_matrix for any
@@ -222,6 +222,7 @@ export const PERMISSIONS = {
   // Nav/route gating only: the BFF relays the operator's own bearer and kyb-service + OPA decide.
   "business-onboarding:view":   [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
   "business-onboarding:attest": [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
+  "business-onboarding:publish": [ROLES.ADMIN, ROLES.KYC],
   // Delegated access (ADR-0232 / ADR-0230). Mirrors delegation-service's own class-level
   // @RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN) minus ROLE_API, which is the M2M
   // identity and never a console session — listing it here would render a section for a

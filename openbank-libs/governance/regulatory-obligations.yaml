@@ -88,8 +88,8 @@ obligations:
     transport: SDAT
     personal_data: "yes"
     applicability: always
-    coverage: { status: missing, reports: [], services: [openbank-tax-reporting-service], tracking: ADR-0367 }
-    note: Registrový feed, ne součet za období — hlásí se delta stavu účtů a osob s nimi spojených. Syntetické klienty (ADR-0252) je nutné vyloučit.
+    coverage: { status: computed-preview, reports: [cz-ceu], services: [openbank-tax-reporting-service], tracking: ADR-0367 }
+    note: "Backend sestavuje denní přehled (katalog cz-ceu, CeuDailyOverviewScheduler); drátový soubor CEUSIFE10 se nevykresluje (XSD jen v SDAT, wireFormatVerified: false), podání je ruční a operátor zaznamená referenci. Viz openbank-tax-reporting-service/src/main/resources/docs/ceu-daily-account-register.md. Registrový feed, ne součet za období — hlásí se delta stavu účtů a osob s nimi spojených. Syntetické klienty (ADR-0252) je nutné vyloučit."
   - id: cnb-ceu-initial-load
     area: register
     name: { cs: CEÚ – úplné předání stavu, en: CEÚ – full snapshot }
@@ -104,7 +104,8 @@ obligations:
     transport: SDAT
     personal_data: "yes"
     applicability: always
-    coverage: { status: missing, reports: [], services: [openbank-tax-reporting-service], tracking: ADR-0367 }
+    coverage: { status: computed-preview, reports: [cz-ceu], services: [openbank-tax-reporting-service], tracking: ADR-0367 }
+    note: "Úplné předání je tatáž návratka cz-ceu s initial_load = 1; odmítnuta, dokud openbank.ceu.initial-load-attested není true. Roster seed neexistuje."
   - id: cnb-anacredit
     area: register
     name: { cs: AnaCredit – granulární údaje o úvěrech, en: AnaCredit granular credit data }
@@ -152,8 +153,8 @@ obligations:
     transport: "Dávka CSV (CP-1250) souborů DIW/DIC/DIA/DIL/DII, ZIP, šifrováno PGP nebo jiným dohodnutým způsobem (příloha vyhlášky 71/2011 Sb., bod 1.1.6)"
     personal_data: "yes"
     applicability: always
-    coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
-    note: Evidence pojištěných pohledávek na klienta (souhrn přes účty, limit 100 000 EUR, výjimky, dočasně vysoké zůstatky). Syntetické klienty nutno vyloučit — jinak by se vyplácela náhrada fiktivním osobám.
+    coverage: { status: computed-preview, reports: [cz-gsft], services: [openbank-tax-reporting-service], tracking: "#15356" }
+    note: Backend sestavuje a šifruje dávku (katalog cz-gsft, GSFT-DIW-TEST / GSFT-DIW-LIVE) — náhled, ne podání; kanál předání GSFT není modelován a produkční sestavení je odmítnuto, dokud jsou otevřené mezery ve zdrojích dat (#15356). Evidence pojištěných pohledávek na klienta (souhrn přes účty, limit 100 000 EUR, výjimky, dočasně vysoké zůstatky). Syntetické klienty nutno vyloučit — jinak by se vyplácela náhrada fiktivním osobám.
   - id: gsft-test-delivery
     area: deposit-insurance
     name: { cs: Testovací předání údajů GSFT, en: GSFT test deliveries }
@@ -168,7 +169,7 @@ obligations:
     transport: dávkové soubory pro GSFT
     personal_data: "yes"
     applicability: always
-    coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
+    coverage: { status: computed-preview, reports: [cz-gsft], services: [openbank-tax-reporting-service], tracking: "#15356" }
   - id: gsft-contribution-base
     area: deposit-insurance
     name: { cs: Podklady pro příspěvek do Fondu pojištění vkladů, en: Deposit insurance contribution base }
