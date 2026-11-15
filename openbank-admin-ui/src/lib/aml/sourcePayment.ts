@@ -6,8 +6,8 @@
 //
 // A case opened by a payment rail stores THAT rail's payment (or FX conversion) id in
 // `transactionId`, not a transaction-service id — so looking it up in transaction-service
-// answered 404 for every rail-opened case (seen live 2026-11-14). aml-service now records which
-// service opened the case (`sourceService`, taken from the authenticated caller); this maps it
+// answered 404 for every rail-opened case (seen live 2026-11-14). aml-service records which
+// service opened the case (`movementService`, taken from the authenticated caller); this maps it
 // to that service's read endpoint and projects the four response shapes onto one view.
 // Cases created before that field existed carry no source: those are tried against each rail
 // in turn, transaction-service first, and the first service that knows the id wins.
@@ -34,7 +34,7 @@ interface Source { kind: SourcePayment['kind']; path: (id: string) => string }
 /**
  * How each movement-owning service is read: its endpoint and response shape. Keyed by the k8s
  * service name, which is the module name without its `openbank-` prefix — the form aml-service
- * records in `sourceService` — so the key is derived, not a second hand-kept list of the fleet.
+ * records in `movementService` — so the key is derived, not a second hand-kept list of the fleet.
  */
 export const SOURCES: Record<string, Source> = {
   'domestic-payment': { kind: 'domestic', path: id => `/api/v1/domestic-payments/${id}` },
@@ -47,8 +47,8 @@ export const SOURCES: Record<string, Source> = {
 const MODULE_PREFIX = 'openbank-'
 
 /** `openbank-domestic-payment` → `domestic-payment`; null when the value names no module. */
-export function k8sServiceOf(sourceService: string): string | null {
-  return sourceService.startsWith(MODULE_PREFIX) ? sourceService.slice(MODULE_PREFIX.length) : null
+export function k8sServiceOf(movementService: string): string | null {
+  return movementService.startsWith(MODULE_PREFIX) ? movementService.slice(MODULE_PREFIX.length) : null
 }
 
 /** Lookup order for a case with no recorded source. */
@@ -82,9 +82,9 @@ export function projectSourcePayment(service: string, raw: unknown): SourcePayme
  * Resolve the case's movement. `null` = looked everywhere it could be and nothing answered.
  * A known source is asked alone: a 404 there is a real absence, not a reason to guess elsewhere.
  */
-export async function fetchSourcePayment(sourceService: string | null, id: string, signal?: AbortSignal): Promise<SourcePayment | null> {
-  const recorded = sourceService ? k8sServiceOf(sourceService) : null
-  const candidates = sourceService ? (recorded && SOURCES[recorded] ? [recorded] : []) : [...LEGACY_ORDER]
+export async function fetchSourcePayment(movementService: string | null, id: string, signal?: AbortSignal): Promise<SourcePayment | null> {
+  const recorded = movementService ? k8sServiceOf(movementService) : null
+  const candidates = movementService ? (recorded && SOURCES[recorded] ? [recorded] : []) : [...LEGACY_ORDER]
   for (const service of candidates) {
     const source = SOURCES[service]
     try {

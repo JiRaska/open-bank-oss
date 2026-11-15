@@ -76,7 +76,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "659f0348d327f732"
+        openbank.tech/policy-checksum: "92a98945008f0abb"
     spec:
       # Dedicated SA so EKS Pod Identity can hand the edge (and ONLY the edge) the
       # feedback-screenshots S3 role — ADR-0192, openbank-infra/aws/envs/sandbox-platform/
@@ -108,7 +108,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: customer-edge
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-0a26c26e@sha256:69d271cd2ef18721643113142bdcc447e8aaf21b076729d3f6ce62f790ca19af
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-ad881abd@sha256:58c9f80d0933989e3726e920101b2959f7e19f88529b9588b39af1c17260e4fc
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

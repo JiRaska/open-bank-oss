@@ -146,6 +146,8 @@ export const STATIC_ROUTE_INVENTORY: Record<string, { disposition: StaticRouteDi
   "/system/inventory": { disposition: "sidebar-navigation-smoke", path: "/system/inventory" },
   "/system/readiness": { disposition: "sidebar-navigation-smoke", path: "/system/readiness" },
   "/system/tests": { disposition: "sidebar-navigation-smoke", path: "/system/tests" },
+  "/system/tests/mobile": { disposition: "static-direct-load-smoke", path: "/system/tests/mobile" },
+  "/system/tests/web": { disposition: "static-direct-load-smoke", path: "/system/tests/web" },
   "/temporal/flow": { disposition: "sidebar-navigation-smoke", path: "/temporal/flow" },
   "/temporal": { disposition: "sidebar-navigation-smoke", path: "/temporal" },
   "/transactions": { disposition: "sidebar-navigation-smoke", path: "/transactions" },
