@@ -8,7 +8,6 @@ module that does not exist fails (a typo must not read as clean)."""
 import argparse
 import pathlib
 import re
-import shutil
 import sys
 import tempfile
 
