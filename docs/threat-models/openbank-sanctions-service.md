@@ -537,7 +537,7 @@ traffic rather than widening it.
 
 ## 2026-11-15 - New inbound caller: sdd-service screens collections before release (ADR-0032)
 
-sdd-service now calls `POST /api/v3/sanctions/screen` for the debtor and creditor of each
+sdd-service now calls `POST /api/v1/sanctions/screen` for the debtor and creditor of each
 collection before it is released. It calls over the private-CA mTLS listener (8443, client
 certificate required, TLSv1.3) with its own service-account bearer, not over the plain 8123 port;
 the sanctions-namespace NetworkPolicy admits the sdd namespace on the same ports as the other
@@ -548,8 +548,8 @@ which `m2m-sanctions-screening` already grants every `service-account-*`, so sdd
 call and nothing else. Information disclosure: the request carries party names the caller already
 holds, now encrypted in transit. Denial of service: sdd treats an unavailable screen as not screened
 and holds the collection (fail-closed), so an outage here stops collections rather than releasing
-them unscreened. Rollback: point `SANCTIONS_SERVICE_URL` away from this service and drop the sdd
-namespace from the ingress rule.
+them unscreened. Rollback: revert the sdd change and drop the sdd namespace from the ingress
+rule; unsetting `SANCTIONS_SERVICE_URL` alone would fail closed and hold every collection.
 
 ## 2026-11-15 - New inbound caller: swift-service screens MT103s before release (ADR-0032)
 
