@@ -144,6 +144,79 @@ class PartyServiceMandateTest {
         }
 
     @Test
+    fun `a kyb grant over a mandate held from elsewhere keeps its provenance and survives the case end`(): Unit =
+        runBlocking {
+            val caseId = UUID.randomUUID()
+            val otherCaseId = UUID.randomUUID()
+            listOf(
+                MandateSource.REGISTRY to "registry:revision-1",
+                MandateSource.MANUAL to null,
+                MandateSource.REGISTRY to "kyb-case:$otherCaseId:signature:${UUID.randomUUID()}",
+            ).forEach { (heldSource, heldRef) ->
+                val held = PartyMandate(
+                    id = UUID.randomUUID(), principalPartyId = company.id, agentPartyId = human.id,
+                    role = MandateRole.LEGAL_REPRESENTATIVE, authority = MandateAuthority.SOLE, requiredSignatures = 1,
+                    source = heldSource, status = MandateStatus.ACTIVE, evidenceRef = heldRef,
+                    validFrom = now, validTo = null, createdAt = now, updatedAt = now,
+                )
+                val mandates = mockk<PartyMandateRepository>()
+                coEvery { mandates.findActive(company.id, human.id, "LEGAL_REPRESENTATIVE") } returns held
+                val updated = slot<PartyMandate>()
+                coEvery { mandates.update(capture(updated), any()) } answers { firstArg() }
+
+                service(partyRepoWith(company, human), mandates).grantMandate(
+                    GrantMandateCommand(
+                        company.id,
+                        human.id,
+                        MandateRole.LEGAL_REPRESENTATIVE,
+                        MandateAuthority.SOLE,
+                        1,
+                        MandateSource.REGISTRY,
+                        "kyb-case:$caseId:signature:${UUID.randomUUID()}",
+                    ),
+                )
+
+                assertThat(updated.captured.evidenceRef).isEqualTo(heldRef)
+                assertThat(updated.captured.source).isEqualTo(heldSource)
+                coEvery { mandates.findByPrincipal(company.id) } returns listOf(updated.captured)
+                val revoked = KybCaseMandateRevocation(mandates, Clock.fixed(now, ZoneOffset.UTC))
+                    .revokeForEndedCase(company.id, caseId, "BUSINESS_ONBOARDING_ABANDONED")
+                assertThat(revoked).isEmpty()
+            }
+        }
+
+    @Test
+    fun `a kyb-case re-grant from the same case keeps the case ref, so the case end still revokes it`(): Unit =
+        runBlocking {
+            val caseId = UUID.randomUUID()
+            val ref = "kyb-case:$caseId:signature:${UUID.randomUUID()}"
+            val held = PartyMandate(
+                id = UUID.randomUUID(), principalPartyId = company.id, agentPartyId = human.id,
+                role = MandateRole.LEGAL_REPRESENTATIVE, authority = MandateAuthority.SOLE, requiredSignatures = 1,
+                source = MandateSource.REGISTRY, status = MandateStatus.ACTIVE, evidenceRef = ref,
+                validFrom = now, validTo = null, createdAt = now, updatedAt = now,
+            )
+            val mandates = mockk<PartyMandateRepository>()
+            coEvery { mandates.findActive(company.id, human.id, "LEGAL_REPRESENTATIVE") } returns held
+            val updated = slot<PartyMandate>()
+            coEvery { mandates.update(capture(updated), any()) } answers { firstArg() }
+
+            service(partyRepoWith(company, human), mandates).grantMandate(
+                GrantMandateCommand(
+                    company.id,
+                    human.id,
+                    MandateRole.LEGAL_REPRESENTATIVE,
+                    MandateAuthority.SOLE,
+                    1,
+                    MandateSource.REGISTRY,
+                    ref,
+                ),
+            )
+
+            assertThat(updated.captured.evidenceRef).isEqualTo(ref)
+        }
+
+    @Test
     fun `an individual cannot be a principal, an entity cannot be an agent, a closed party cannot take part`(): Unit =
         runBlocking {
             val mandates = mockk<PartyMandateRepository>(relaxed = true)
