@@ -97,11 +97,14 @@ function ControlCard({ control }: { control: TraceControl }) {
   )
 }
 
+type CitedRow = { ref: string; title: string; verdict?: Verdict; downgradeReason?: TraceControl['downgradeReason']; coverage?: string }
+
 function AskTrace() {
   const { t } = useLanguage()
+  const labels = useLabels()
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<{ answer: string; citations: string[] } | { error: string } | null>(null)
+  const [result, setResult] = useState<{ answer: string; rows: CitedRow[] } | { error: string } | null>(null)
 
   const submit = async () => {
     setBusy(true)
@@ -110,8 +113,8 @@ function AskTrace() {
       const response = await fetch('/api/compliance/ask', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }), cache: 'no-store',
       })
-      const body = await response.json() as { answer?: string; citations?: string[]; error?: string }
-      setResult(response.ok && body.answer ? { answer: body.answer, citations: body.citations ?? [] } : { error: body.error ?? 'error' })
+      const body = await response.json() as { answer?: string; rows?: CitedRow[]; error?: string }
+      setResult(response.ok && body.answer ? { answer: body.answer, rows: body.rows ?? [] } : { error: body.error ?? 'error' })
     } catch {
       setResult({ error: 'agent_unreachable' })
     } finally {
@@ -135,16 +138,28 @@ function AskTrace() {
         </button>
       </div>
       {result && 'answer' in result ? (
-        <div role="status" style={{ fontSize: '13px', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-          {result.answer}
-          <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '6px' }}>{t('Citace', 'Citations')}: {result.citations.join(', ')}</div>
+        <div role="status" style={{ display: 'grid', gap: '8px' }}>
+          <div style={{ fontSize: '12px', fontWeight: 600 }}>{t('Citované řádky (vypočteno, toto je důkaz)', 'Cited rows (computed; this is the evidence)')}</div>
+          <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '12px' }}>
+            {result.rows.map(row => (
+              <li key={row.ref}>
+                <code>{row.ref}</code> {row.title}
+                {row.verdict ? <> · {t('verdikt', 'verdict')} <strong>{labels.verdict(row.verdict)}</strong>{row.downgradeReason ? ` (${labels.reason(row.downgradeReason)})` : ''}</> : null}
+                {row.coverage ? <> · {t('pokrytí', 'coverage')} <code>{row.coverage}</code></> : null}
+              </li>
+            ))}
+          </ul>
+          <div style={{ fontSize: '12px', fontWeight: 600 }}>{t('Vysvětlení modelu (není důkaz)', 'Model explanation (not evidence)')}</div>
+          <div style={{ fontSize: '13px', lineHeight: 1.5, whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>{result.answer}</div>
         </div>
       ) : null}
       {result && 'error' in result ? (
         <p role="status" style={{ fontSize: '12px', color: 'var(--warning-text)', margin: 0 }}>
           {result.error === 'uncited_answer'
-            ? t('Odpověď nebyla zobrazena: necitovala žádný řádek trasy, nebo citovala neexistující.', 'The answer was not shown: it cited no trace row, or cited one that does not exist.')
-            : t('Asistent není dostupný.', 'The assistant is unavailable.')}
+            ? t('Odpověď nebyla zobrazena: některý odstavec necitoval řádek trasy, nebo citoval neexistující.', 'The answer was not shown: a paragraph cited no trace row, or cited one that does not exist.')
+            : result.error === 'contradicts_trace'
+              ? t('Odpověď nebyla zobrazena: uváděla jiný verdikt, než jaký kód vypočítal.', 'The answer was not shown: it stated a verdict other than the computed one.')
+              : t('Asistent není dostupný.', 'The assistant is unavailable.')}
         </p>
       ) : null}
     </section>

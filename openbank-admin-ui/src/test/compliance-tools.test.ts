@@ -66,7 +66,20 @@ describe('compliance MCP tools (ADR-0379 phase 3)', () => {
 describe('citation contract', () => {
   it('accepts an answer whose every citation resolves', () => {
     expect(checkCitations('Audit is enforced [[control:audit-trail]] for [[obligation:dora-major-ict-incident]].', trace))
-      .toEqual({ ok: true, cited: ['control:audit-trail', 'obligation:dora-major-ict-incident'], unknown: [] })
+      .toMatchObject({ ok: true, cited: ['control:audit-trail', 'obligation:dora-major-ict-incident'], unknown: [], uncitedParagraphs: 0, contradictions: [] })
+  })
+  it('rejects an answer that gives a cited control a verdict other than the computed one', () => {
+    expect(checkCitations('Fraud monitoring is fully enforced [[control:fraud-monitoring]].', trace))
+      .toMatchObject({ ok: false, contradictions: [{ ref: 'control:fraud-monitoring', actual: 'unverified' }] })
+    expect(checkCitations('Fraud monitoring is unverified [[control:fraud-monitoring]].', trace).ok).toBe(true)
+  })
+  it('rejects a real citation followed by an uncited paragraph', () => {
+    expect(checkCitations('Audit is enforced [[control:audit-trail]].\n\nEverything else is compliant too.', trace)).toMatchObject({ ok: false, uncitedParagraphs: 1 })
+  })
+  it('counts a near-miss token as unknown instead of letting it pass as prose', () => {
+    for (const forged of ['[[control:Audit-Trail]]', '[[control:audit_trail]]', '[[control:audit.trail]]']) {
+      expect(checkCitations(`See [[control:audit-trail]] and ${forged}.`, trace)).toMatchObject({ ok: false, unknown: [forged.slice(2, -2)] })
+    }
   })
   it('rejects an uncited answer', () => {
     expect(checkCitations('Everything is compliant.', trace).ok).toBe(false)
@@ -86,10 +99,16 @@ describe('compliance MCP and ask routes', () => {
   const rpc = (body: unknown) => new Request('http://localhost/api/compliance/mcp', { method: 'POST', body: JSON.stringify(body) })
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'staff-token' } } as never)
+    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'staff-token', roles: ['ROLE_COMPLIANCE'] } } as never)
     vi.mocked(loadComplianceTrace).mockResolvedValue({ status: 'available', missing: [], ...trace })
   })
   afterEach(() => vi.unstubAllGlobals())
+
+  it('refuses a signed-in caller without compliance:view on both routes', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'payments-token', roles: ['ROLE_PAYMENTS'] } } as never)
+    expect((await mcpPost(rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }))).status).toBe(403)
+    expect((await askPost(new Request('http://localhost/api/compliance/ask', { method: 'POST', body: '{"question":"x"}' }))).status).toBe(403)
+  })
 
   it('refuses an anonymous caller on both routes', async () => {
     vi.mocked(auth).mockResolvedValue(null as never)
@@ -103,7 +122,9 @@ describe('compliance MCP and ask routes', () => {
     const call = await (await mcpPost(rpc({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'compliance_list_gaps', arguments: {} } }))).json()
     expect(call.result.structuredContent.unverifiedControls[0].id).toBe('fraud-monitoring')
     const bad = await (await mcpPost(rpc({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'compliance_set_status', arguments: {} } }))).json()
-    expect(bad.result.isError).toBe(true)
+    expect(bad.error.code).toBe(-32602)
+    const badArg = await (await mcpPost(rpc({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'compliance_get_evidence', arguments: { controlId: 'nope' } } }))).json()
+    expect(badArg.result.isError).toBe(true)
     const missing = await (await mcpPost(rpc({ jsonrpc: '2.0', id: 4, method: 'resources/write' }))).json()
     expect(missing.error.code).toBe(-32601)
   })
@@ -113,17 +134,25 @@ describe('compliance MCP and ask routes', () => {
     vi.stubGlobal('fetch', relay)
     const ask = () => askPost(new Request('http://localhost/api/compliance/ask', { method: 'POST', body: JSON.stringify({ question: 'Is audit enforced?' }) }))
 
-    relay.mockResolvedValueOnce(Response.json({ reply: 'Yes [[control:audit-trail]].' }))
+    relay.mockResolvedValueOnce(Response.json({ reply: 'Audit trail is enforced [[control:audit-trail]].', toolsRestricted: true }))
     const ok = await ask()
     expect(ok.status).toBe(200)
-    expect(await ok.json()).toMatchObject({ citations: ['control:audit-trail'] })
+    expect(await ok.json()).toMatchObject({ citations: ['control:audit-trail'], rows: [{ ref: 'control:audit-trail', verdict: 'enforced' }] })
     const sent = JSON.parse(relay.mock.calls[0][1].body as string)
     expect(sent).toMatchObject({ allowTools: false })
     expect(sent.context).toContain('[[control:audit-trail]]')
 
-    relay.mockResolvedValueOnce(Response.json({ reply: 'All compliant.' }))
+    relay.mockResolvedValueOnce(Response.json({ reply: 'All compliant.', toolsRestricted: true }))
     const uncited = await ask()
     expect(uncited.status).toBe(422)
     expect(await uncited.json()).toMatchObject({ error: 'uncited_answer' })
+
+    relay.mockResolvedValueOnce(Response.json({ reply: 'Fraud monitoring is enforced [[control:fraud-monitoring]].', toolsRestricted: true }))
+    const forged = await ask()
+    expect(forged.status).toBe(422)
+    expect(await forged.json()).toMatchObject({ error: 'contradicts_trace' })
+
+    relay.mockResolvedValueOnce(Response.json({ reply: 'Audit trail is enforced [[control:audit-trail]].' }))
+    expect((await ask()).status).toBe(502)
   })
 })

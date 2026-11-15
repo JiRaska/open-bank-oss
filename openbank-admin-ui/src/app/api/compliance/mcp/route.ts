@@ -4,13 +4,14 @@
 // Read-only MCP server over the compliance trace (ADR-0379 phase 3): JSON-RPC 2.0 with
 // `initialize`, `tools/list` and `tools/call`. It lives in the BFF because the trace is joined
 // here (ADR-0056). The caller is the signed-in member of staff, under their own roles: the route
-// guard admits `/api/compliance` only with `compliance:view`, and the handler re-checks the
-// session. Every tool is a read. There is no write method to authorize.
+// guard admits `/api/compliance` only with `compliance:view`, and the handler re-checks both the
+// session and that permission. Every tool is a read. There is no write method to authorize.
 
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { loadComplianceTrace } from '@/lib/compliance/trace-server'
 import { COMPLIANCE_TOOLS, ToolInputError, callComplianceTool } from '@/lib/compliance/tools'
+import { hasPermission } from '@/lib/auth/roles'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +22,10 @@ const rpcError = (id: Id, code: number, message: string) => NextResponse.json({ 
 const rpcResult = (id: Id, result: unknown) => NextResponse.json({ jsonrpc: '2.0', id, result })
 
 export async function POST(request: Request) {
-  if (!(await auth())?.user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+  const session = await auth()
+  if (!session?.user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+  // The route guard already requires this; checked again so a guard regression cannot open it.
+  if (!hasPermission(session.user.roles ?? [], 'compliance:view')) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
 
   let msg: { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown }
   try {
@@ -51,6 +55,7 @@ export async function POST(request: Request) {
     case 'tools/call': {
       const params = (msg.params ?? {}) as { name?: unknown; arguments?: unknown }
       if (typeof params.name !== 'string') return rpcError(id, -32602, 'params.name is required')
+      if (!COMPLIANCE_TOOLS.some(t => t.name === params.name)) return rpcError(id, -32602, `unknown tool: ${params.name}`)
       const trace = await loadComplianceTrace()
       if (trace.status !== 'available') {
         return rpcResult(id, { isError: true, content: [{ type: 'text', text: `compliance trace unavailable: ${trace.missing.join(', ')}` }] })
@@ -60,7 +65,7 @@ export async function POST(request: Request) {
         return rpcResult(id, { content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result })
       } catch (error) {
         if (error instanceof ToolInputError) return rpcResult(id, { isError: true, content: [{ type: 'text', text: error.message }] })
-        throw error
+        return rpcError(id, -32603, 'internal error')
       }
     }
     default:

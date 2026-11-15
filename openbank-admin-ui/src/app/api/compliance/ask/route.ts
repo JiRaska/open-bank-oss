@@ -3,14 +3,16 @@
 
 // Cited question answering over the compliance trace (ADR-0379 phase 3). The question goes to
 // agent-service's governed chat (ADR-0031) with tool execution disabled and the trace rows as
-// context. The answer is returned only if it cites at least one trace row and every citation
-// resolves; otherwise the caller gets 422 and nothing is rendered. The model can explain the
-// trace but has no tool, no write path and no way to change a verdict.
+// context. The answer is returned only if every paragraph cites a trace row, every citation
+// resolves and no cited control is given a verdict other than its computed one; otherwise 422.
+// The response carries the cited rows' computed facts, which the page shows as the evidence.
+// The model can explain the trace but has no tool, no write path and no way to change a verdict.
 
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { loadComplianceTrace } from '@/lib/compliance/trace-server'
-import { buildCitationContext, checkCitations } from '@/lib/compliance/tools'
+import { buildCitationContext, checkCitations, citedRows } from '@/lib/compliance/tools'
+import { hasPermission } from '@/lib/auth/roles'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,6 +27,8 @@ export async function POST(request: Request) {
   const session = await auth()
   const accessToken = session?.user?.accessToken
   if (!accessToken) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+  // The route guard already requires this; checked again so a guard regression cannot open it.
+  if (!hasPermission(session.user?.roles ?? [], 'compliance:view')) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
 
   let question: unknown
   try {
@@ -40,9 +44,9 @@ export async function POST(request: Request) {
   if (trace.status !== 'available') return NextResponse.json({ error: 'trace_unavailable', missing: trace.missing }, { status: 503 })
 
   let reply = ''
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 30000)
   try {
-    const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 30000)
     const res = await fetch(`${agentBase()}/agent/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
@@ -54,16 +58,24 @@ export async function POST(request: Request) {
       signal: ctrl.signal,
       cache: 'no-store',
     })
-    clearTimeout(timer)
     if (!res.ok) return NextResponse.json({ error: 'agent_unreachable' }, { status: 502 })
-    reply = String(((await res.json()) as { reply?: unknown }).reply ?? '')
+    const body = (await res.json()) as { reply?: unknown; toolsRestricted?: unknown }
+    // allowTools:false is a request. Only the server's acknowledgement proves the model ran
+    // without tools; an agent-service that predates the flag would silently ignore it.
+    if (body.toolsRestricted !== true) return NextResponse.json({ error: 'tools_not_restricted' }, { status: 502 })
+    reply = String(body.reply ?? '')
   } catch {
     return NextResponse.json({ error: 'agent_unreachable' }, { status: 502 })
+  } finally {
+    clearTimeout(timer)
   }
 
   const citations = checkCitations(reply, trace)
   if (!citations.ok) {
-    return NextResponse.json({ error: 'uncited_answer', unknown: citations.unknown }, { status: 422 })
+    return NextResponse.json({
+      error: citations.contradictions.length ? 'contradicts_trace' : 'uncited_answer',
+      unknown: citations.unknown, uncitedParagraphs: citations.uncitedParagraphs, contradictions: citations.contradictions,
+    }, { status: 422 })
   }
-  return NextResponse.json({ answer: reply, citations: citations.cited, asOf: trace.asOf })
+  return NextResponse.json({ answer: reply, citations: citations.cited, rows: citedRows(trace, citations.cited), asOf: trace.asOf })
 }
