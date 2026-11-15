@@ -204,6 +204,10 @@ An unknown outbound outcome is reconciled using message identity/receipts before
 Report accepted, served, applied and remitted separately; a disabled connector or a
 stored document is never reported as successful compliance.
 
+The [Admin UI screen design](../design/legal-process-admin-ui.md) maps these states
+to inbox triage, assignment, enforcement and disclosure casework, connector
+operations, and read-only summaries on the Party and Account pages.
+
 ### 5. Deliver country packs with explicit capabilities and effective dates
 
 A jurisdiction pack contains legal source/version references, effective intervals,
