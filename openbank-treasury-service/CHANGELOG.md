@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.21.0...treasury-service-v0.22.0) (2026-11-15)
+
+
+### Features
+
+* **treasury:** close a never-matching nostro break by four-eyes manual resolution ([#15580](https://github.com/JiRaska/open-bank-oss/issues/15580)) ([cd462e4](https://github.com/JiRaska/open-bank-oss/commit/cd462e411b918a1e121a5e7b2736ab2ee201089a))
+
 ## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.4...treasury-service-v0.21.0) (2026-11-09)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.21.0...sanctions-service-v0.21.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **sanctions:** stop a shared given name from matching unrelated listed persons ([#16258](https://github.com/JiRaska/open-bank-oss/issues/16258)) ([4dba082](https://github.com/JiRaska/open-bank-oss/commit/4dba0828e08465f48d5f6be6197921bc49421166))
+
 ## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.20.0...sanctions-service-v0.21.0) (2026-11-14)
 
 
