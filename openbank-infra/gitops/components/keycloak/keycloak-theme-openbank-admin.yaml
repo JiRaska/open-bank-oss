@@ -51,8 +51,11 @@ data:
       display: grid;
       grid-template-columns: minmax(0, 46fr) minmax(0, 54fr);
       grid-template-areas: "explorer access";
+      align-content: stretch;
+      align-items: stretch;
       min-height: 100vh;
       min-height: 100svh;
+      padding: 0;
     }
 
     .openbank-admin-login .pf-v5-c-login::before {
@@ -132,7 +135,14 @@ data:
 
     .openbank-admin-login .pf-v5-c-form-control :is(input, select) {
       min-height: var(--ob-field-size);
+      border-radius: inherit;
       font-size: 1rem;
+    }
+
+    .openbank-admin-login .pf-v5-c-form-control::before,
+    .openbank-admin-login .pf-v5-c-form-control::after,
+    .openbank-admin-login #authenticateWebAuthnButton::after {
+      border-radius: inherit;
     }
 
     .openbank-admin-login .pf-v5-c-input-group:has([data-password-toggle]) {
