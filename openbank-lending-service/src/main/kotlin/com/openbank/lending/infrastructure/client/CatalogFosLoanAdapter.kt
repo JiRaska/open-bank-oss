@@ -74,10 +74,10 @@ class CatalogFosLoanAdapter(@RestClient private val client: CatalogFosLoanClient
     private fun conflict(error: Throwable): Boolean =
         error is WebApplicationException && error.response.status == HTTP_CONFLICT
 
-    private fun terminalRefusal(error: Throwable): Boolean =
-        error is WebApplicationException &&
-            error.response.status == HTTP_CONFLICT &&
-            error.response.getHeaderString("X-FOS-Decision") == "refused"
+    private fun terminalRefusal(error: Throwable): Boolean {
+        val response = (error as? WebApplicationException)?.response ?: return false
+        return response.status == HTTP_CONFLICT && response.getHeaderString("X-FOS-Decision") == "refused"
+    }
 
     private companion object {
         const val HTTP_CONFLICT = 409
