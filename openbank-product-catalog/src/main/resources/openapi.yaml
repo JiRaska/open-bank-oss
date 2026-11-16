@@ -961,6 +961,29 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: No matching consumed receipt }
+  /api/v2/internal/passport-commitments/route:
+    post:
+      tags: [Passport grants]
+      operationId: resolvePassportCommitmentRoute
+      summary: Read the approved FOS route for a verified subject and pinned revision
+      description: >-
+        Only the named lending-service principal can invoke this lookup. A result is planning
+        evidence, and creates no permit. A new commitment still requires authoritative admission.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PassportRouteRequest' }
+      responses:
+        '200':
+          description: Approved route scope for the exact subject and revision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PassportCommitmentRoute' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Route unavailable }
   /api/v2/events:
     get:
       tags: [Catalog Events]
@@ -1085,6 +1108,24 @@ components:
           pattern: '^[a-f0-9]{64}$'
           description: The pinned published catalogue revision content hash.
         binding: { type: string, pattern: '^[a-f0-9]{64}$' }
+        hostCountry: { type: string, pattern: '^[A-Z]{2}$' }
+        bankId: { type: string, format: uuid }
+        establishmentId: { type: string, format: uuid }
+        channel: { type: string, minLength: 1 }
+        customerSegment: { type: string, minLength: 1 }
+        packSetDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+    PassportRouteRequest:
+      type: object
+      required: [grantId, partyId, revisionId, revisionContentHash]
+      properties:
+        grantId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        revisionId: { type: string, format: uuid }
+        revisionContentHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+    PassportCommitmentRoute:
+      type: object
+      required: [hostCountry, bankId, establishmentId, channel, customerSegment, packSetDigest]
+      properties:
         hostCountry: { type: string, pattern: '^[A-Z]{2}$' }
         bankId: { type: string, format: uuid }
         establishmentId: { type: string, format: uuid }

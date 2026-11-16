@@ -157,3 +157,8 @@ configures the supported schema at the service-account boundary. Catalogue check
 customer segment and pack set against the grant. The admission locks the grant row shared with
 revocation and uses the same permit ledger as account commitments. A receipt lookup only reads the
 exact consumed operation. An earlier signature receipt cannot authorize a new disbursement.
+
+Lending can resolve a proposed route from the catalogue using its exact grant, verified subject
+and pinned product revision. The response contains the route's scope and pack-set digest.
+It excludes subject evidence details. Resolving the route performs no permit write. The
+commitment call rechecks eligibility under the revocation lock.

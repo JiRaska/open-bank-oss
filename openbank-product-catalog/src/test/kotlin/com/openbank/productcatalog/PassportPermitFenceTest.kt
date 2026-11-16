@@ -152,6 +152,46 @@ class PassportPermitFenceTest {
     }
 
     @Test
+    @TestSecurity(user = "service-account-openbank-lending", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-lending"),
+            Claim(key = "preferred_username", value = "service-account-openbank-lending"),
+        ],
+    )
+    fun `only an approved live route for the exact verified subject and revision is returned`() {
+        val request = seed("SIGN", issue = false)
+        callRoute(request).then().statusCode(409)
+        dataSource.connection.use { it.grantSubjectEvidence(request) }
+
+        val route = callRoute(request).then().statusCode(200).extract().jsonPath()
+        assertEquals(request.country, route.getString("hostCountry"))
+        assertEquals(request.bank.toString(), route.getString("bankId"))
+        assertEquals(request.establishment.toString(), route.getString("establishmentId"))
+        assertEquals("WEB", route.getString("channel"))
+        assertEquals("RETAIL", route.getString("customerSegment"))
+        assertEquals(HASH, route.getString("packSetDigest"))
+        callRoute(request.copy(contentHash = "2".repeat(64))).then().statusCode(409)
+        callRoute(request.copy(party = UUID.randomUUID())).then().statusCode(409)
+        dataSource.connection.use { db ->
+            val count = db.scalar("SELECT count(*) FROM passport_account_permits WHERE grant_id = ?", request.grant)
+            assertEquals(0L, count)
+            assertTrue(db.revoke(request.grant))
+        }
+        callRoute(request).then().statusCode(409)
+        callLoanAdmission(request, "", 409)
+    }
+
+    private fun callRoute(request: PermitRequest) = given().contentType("application/json").body(
+        mapOf(
+            "grantId" to request.grant,
+            "partyId" to request.party,
+            "revisionId" to request.revision,
+            "revisionContentHash" to request.contentHash,
+        ),
+    ).post("/api/v2/internal/passport-commitments/route")
+
+    @Test
     @TestSecurity(user = "service-account-openbank-account", roles = ["ROLE_API"])
     @OidcSecurity(
         claims = [
@@ -163,6 +203,7 @@ class PassportPermitFenceTest {
         val request = PermitRequest("SIGN")
         callLoanAdmission(request, "", 403)
         callLoanAdmission(request, "/receipt", 403)
+        callRoute(request).then().statusCode(403)
     }
 
     private fun callLoanAdmission(request: PermitRequest, suffix: String, status: Int) {

@@ -14,6 +14,7 @@ import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -30,7 +31,8 @@ class PassportCommitmentResource(
 ) {
     @POST
     suspend fun admit(request: PassportCommitmentRequest): Response {
-        requireLendingClient(request)
+        requireLendingClient()
+        validateCommitment(request)
         val receipt = pool.preparedQuery(ADMIT).execute(request.arguments().addString(schemaId))
             .awaitSuspending().first().getOffsetDateTime(0)
         if (receipt == null) throw CatalogConflictException("passport commitment refused")
@@ -40,19 +42,42 @@ class PassportCommitmentResource(
     @POST
     @Path("/receipt")
     suspend fun receipt(request: PassportCommitmentRequest): Response {
-        requireLendingClient(request)
+        requireLendingClient()
+        validateCommitment(request)
         val found = pool.preparedQuery(CONSUMED_RECEIPT).execute(request.arguments())
             .awaitSuspending().first().getBoolean(0)
         return if (found) Response.noContent().build() else Response.status(Response.Status.NOT_FOUND).build()
     }
 
-    private fun requireLendingClient(request: PassportCommitmentRequest) {
+    @POST
+    @Path("/route")
+    @Produces(MediaType.APPLICATION_JSON)
+    suspend fun route(request: PassportRouteRequest): PassportCommitmentRoute {
+        requireLendingClient()
+        require(DIGEST.matches(request.revisionContentHash))
+        val route = pool.preparedQuery(ROUTE)
+            .execute(Tuple.of(request.grantId, request.partyId, request.revisionId, request.revisionContentHash, schemaId))
+            .awaitSuspending().firstOrNull() ?: throw CatalogConflictException("passport route unavailable")
+        return PassportCommitmentRoute(
+            hostCountry = route.getString("host_country"),
+            bankId = route.getUUID("bank_id"),
+            establishmentId = route.getUUID("establishment_id"),
+            channel = route.getString("channel"),
+            customerSegment = route.getString("customer_segment"),
+            packSetDigest = route.getString("pack_set_digest"),
+        )
+    }
+
+    private fun requireLendingClient() {
         val token = identity.principal as? JsonWebToken
         if (token?.getClaim<String>("azp") != "openbank-lending" ||
             token.getClaim<String>("preferred_username") != "service-account-openbank-lending"
         ) {
             throw CatalogForbiddenException("the lending-service client is required")
         }
+    }
+
+    private fun validateCommitment(request: PassportCommitmentRequest) {
         require(request.operation in OPERATIONS && DIGEST.matches(request.binding))
         require(DIGEST.matches(request.revisionContentHash))
         require(COUNTRY.matches(request.hostCountry) && DIGEST.matches(request.packSetDigest))
@@ -72,6 +97,21 @@ class PassportCommitmentResource(
         val OPERATIONS = setOf("SIGN", "DISBURSE")
         val COUNTRY = Regex("^[A-Z]{2}$")
         val DIGEST = Regex("^[a-f0-9]{64}$")
+        val ROUTE = """
+            SELECT g.host_country::TEXT AS host_country, g.bank_id, g.establishment_id, g.channel,
+                g.customer_segment, g.pack_set_digest
+            FROM passport_grants g
+            JOIN passport_grant_subject_evidence e ON e.grant_id = g.id
+            JOIN catalog_offerings o ON o.id = g.offering_id
+            JOIN catalog_revisions r ON r.offering_id = g.offering_id
+            WHERE g.id = $1 AND e.party_id = $2 AND e.valid_until > statement_timestamp()
+                AND r.id = $3 AND r.content_hash::TEXT = $4 AND r.schema_id = $5
+                AND r.state = 'PUBLISHED' AND r.effective_from <= statement_timestamp()
+                AND (r.effective_to IS NULL OR r.effective_to > statement_timestamp())
+                AND g.mode = 'FOS' AND g.approved_by IS NOT NULL AND g.revoked_at IS NULL
+                AND g.effective_from <= statement_timestamp() AND g.effective_until > statement_timestamp()
+                AND o.market -> 'countries' ? g.host_country::TEXT
+        """.trimIndent()
         val CONSUMED_RECEIPT = """
             SELECT EXISTS (
                 SELECT 1 FROM passport_account_permits p
@@ -95,6 +135,22 @@ data class PassportCommitmentRequest(
     val revisionId: UUID,
     val revisionContentHash: String,
     val binding: String,
+    val hostCountry: String,
+    val bankId: UUID,
+    val establishmentId: UUID,
+    val channel: String,
+    val customerSegment: String,
+    val packSetDigest: String,
+)
+
+data class PassportRouteRequest(
+    val grantId: UUID,
+    val partyId: UUID,
+    val revisionId: UUID,
+    val revisionContentHash: String,
+)
+
+data class PassportCommitmentRoute(
     val hostCountry: String,
     val bankId: UUID,
     val establishmentId: UUID,
