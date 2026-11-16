@@ -64,6 +64,8 @@ class RedisApprovalStore(
     private val pendingIndex = "${prefix}pending"
     private val hashCommands by lazy { redis.hash(String::class.java) }
 
+    override val recordsOnBehalfOf: Boolean = true
+
     override suspend fun create(
         action: String,
         resourceId: String?,
@@ -82,12 +84,13 @@ class RedisApprovalStore(
             requestFingerprint = binding?.fingerprint,
             summary = binding?.summary,
             makerActorKind = makerActorKind,
+            onBehalfOf = binding?.onBehalfOf,
         )
         val created = redis.eval(
             CREATE_SCRIPT,
             listOf(key(approval.id), pendingIndex, makerIndex(prefix, action, makerId)),
             listOf(approval.id, clock.millis().toString(), ttlSeconds.toString(), maxPendingPerMakerAction.toString()) +
-                fields(approval),
+                fields(approval) + listOf(approval.onBehalfOf.orEmpty()),
         )
         if (created?.toInteger() != 1) throw ApprovalLimitExceededException(action, maxPendingPerMakerAction)
         return approval
@@ -188,7 +191,8 @@ class RedisApprovalStore(
             .orElse(DEFAULT_MAX_PENDING_PER_MAKER_ACTION)
 
         // KEYS: item, pending index, maker index.
-        // ARGV: id, nowMs, ttlSeconds, limit, action, resourceId, makerId, status, createdAt, fp, summary, actorKind.
+        // ARGV: id, nowMs, ttlSeconds, limit, action, resourceId, makerId, status, createdAt, fp, summary, actorKind,
+        //       onBehalfOf.
         private const val CREATE_SCRIPT = """
             local now = tonumber(ARGV[2])
             local ttl = tonumber(ARGV[3])
@@ -196,7 +200,7 @@ class RedisApprovalStore(
             if redis.call('ZCARD', KEYS[3]) >= tonumber(ARGV[4]) then return 0 end
             redis.call('HSET', KEYS[1], 'action', ARGV[5], 'resourceId', ARGV[6], 'makerId', ARGV[7],
                 'status', ARGV[8], 'createdAt', ARGV[9], 'fp', ARGV[10], 'summary', ARGV[11],
-                'actorKind', ARGV[12],
+                'actorKind', ARGV[12], 'obo', ARGV[13],
                 'makerIndex', KEYS[3])
             redis.call('EXPIRE', KEYS[1], ttl)
             local expiry = now + ttl * 1000
@@ -210,8 +214,9 @@ class RedisApprovalStore(
         // KEYS: item, pending index. ARGV: id, decidedBy, newStatus, decidedAt, decidedTtl.
         private const val DECIDE_SCRIPT = """
             if redis.call('EXISTS', KEYS[1]) == 0 then return {'MISSING'} end
-            local f = redis.call('HMGET', KEYS[1], 'makerId', 'status', 'makerIndex')
+            local f = redis.call('HMGET', KEYS[1], 'makerId', 'status', 'makerIndex', 'obo')
             if f[1] == ARGV[2] then return {'SELF', f[1]} end
+            if f[4] and f[4] ~= '' and f[4] == ARGV[2] then return {'SELF', f[4]} end
             if f[2] ~= 'PENDING' then return {'STATE', f[2]} end
             redis.call('HSET', KEYS[1], 'status', ARGV[3], 'decidedBy', ARGV[2], 'decidedAt', ARGV[4])
             redis.call('EXPIRE', KEYS[1], tonumber(ARGV[5]))
@@ -305,6 +310,7 @@ private fun decodeHash(id: String, f: Map<String, String>): PendingApproval? {
         summary = f["summary"]?.ifEmpty { null },
         makerActorKind = f["actorKind"]?.let { value -> MakerActorKind.entries.firstOrNull { it.name == value } }
             ?: MakerActorKind.UNKNOWN,
+        onBehalfOf = f["obo"]?.ifEmpty { null },
     )
 }
 

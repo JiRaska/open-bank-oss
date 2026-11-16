@@ -281,6 +281,9 @@ browser-provider hiding and the unchanged client-credentials fallback.
   the control rests on sanctions-service `AUTHZ_FOUR_EYES_ENFORCE="true"`; with it off the review would
   execute unapproved, so `AgentMachineGrantCharterAlignmentTest` fails unless the deployed value is
   `"true"`. **STRIDE-R:** maker is the agent identity (approval `makerActorKind`), checker the human id.
+  **Segregation of duties:** the tool forwards the verified person driving the MCP session as
+  `X-On-Behalf-Of` and refuses unattended (machine-caller) runs; sanctions-service binds that person to
+  the approval and refuses them as checker, so two distinct people are still required.
   Rollback: revert (drops the rego rule, the ROLE_API admission and the tool together).
 
 - **2026-11-15 (AML false-positive triage):** New MCP tool `aml_propose_case_decision`, capability

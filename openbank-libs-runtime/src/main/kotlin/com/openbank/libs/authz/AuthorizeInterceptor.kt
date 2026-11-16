@@ -4,6 +4,7 @@
 
 package com.openbank.libs.authz
 
+import com.openbank.libs.approval.ApprovalRequestBinding
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.MakerActorKind
@@ -180,6 +181,15 @@ class AuthorizeInterceptor {
      */
     @ConfigProperty(name = "authz.four-eyes.enforce", defaultValue = "false")
     var fourEyesEnforce: Boolean = false
+
+    /**
+     * Verified machine client ids that may only act as a four-eyes maker ON BEHALF OF a person
+     * (e.g. `openbank-agent`). Such a maker must send [ON_BEHALF_OF_HEADER]; the person is bound to
+     * the approval and refused as its checker, so the agent plus the human who instructed it can
+     * never satisfy four-eyes on their own. Empty (the default) changes nothing.
+     */
+    @ConfigProperty(name = "authz.four-eyes.on-behalf-of-makers")
+    var onBehalfOfMakers: java.util.Optional<List<String>> = java.util.Optional.empty()
 
     /**
      * [PolicyDecisionPoint.allow] and [ApprovalStore] calls suspend. The dispatch bridge must
@@ -364,15 +374,15 @@ class AuthorizeInterceptor {
             throw PolicyDecisionException("four-eyes approval store not configured")
         }
         val store = approvalStore.get()
-        val maker = query.principal.id
-        val resourceId = query.resource?.id
+        val (maker, resourceId) = query.principal.id to query.resource?.id
         val binding = ApprovalRequestBindings.of(ctx, annotation.action, resourceId, summaryRendererOrNull)
+            .copy(onBehalfOf = onBehalfOfPerson(maker, store))
 
         val approvalId = resolveApprovalIdHeader()
         if (approvalId != null) {
             val approval = store.find(approvalId)
             if (
-                approval.satisfies(annotation.action, resourceId, maker, binding.fingerprint) &&
+                approval.satisfies(annotation.action, resourceId, maker, binding) &&
                 store.markExecuted(approvalId) != null
             ) {
                 meters?.authzFourEyes(annotation.action, "approval_satisfied")
@@ -585,14 +595,47 @@ private fun makerActorKind(query: AuthzQuery, authenticatedIdentity: SecurityIde
     }
 }
 
+/** Header a configured machine maker uses to name the person it acts for (#16381). */
+const val ON_BEHALF_OF_HEADER = "X-On-Behalf-Of"
+
+/**
+ * The person a configured machine maker acts for, or `null` when [verifiedClient] is not one of
+ * [makers]. Fails closed: a configured maker without a person is refused (403), a person equal to
+ * the maker is refused, and a store that cannot record the person is a wiring fault (503) — the
+ * requirement must never be dropped silently.
+ */
+private fun AuthorizeInterceptor.onBehalfOfPerson(maker: String, store: ApprovalStore): String? {
+    val makers = onBehalfOfMakers.orElse(emptyList()).toSet()
+    if (makers.isEmpty()) return null
+    val verifiedClient = runCatching { ServiceAccountIdentity.verifiedClientId(identity.get()) }.getOrNull()
+    if (verifiedClient == null || verifiedClient !in makers) return null
+    val header = if (httpHeaders.isResolvable) {
+        httpHeaders.get().getRequestHeader(ON_BEHALF_OF_HEADER)?.firstOrNull()
+    } else {
+        null
+    }
+    val person = header?.trim()?.takeIf { it.isNotEmpty() && it != maker }
+        ?: throw WebApplicationException(
+            Response.status(Response.Status.FORBIDDEN)
+                .entity(mapOf("error" to "four-eyes maker '$verifiedClient' must act on behalf of a person"))
+                .type(MediaType.APPLICATION_JSON)
+                .build(),
+        )
+    if (!store.recordsOnBehalfOf) {
+        throw PolicyDecisionException("four-eyes approval store cannot record an on-behalf-of person")
+    }
+    return person
+}
+
 private fun PendingApproval?.satisfies(
     action: String,
     resourceId: String?,
     maker: String,
-    requestFingerprint: String,
+    binding: ApprovalRequestBinding,
 ): Boolean = this != null &&
     status == ApprovalStatus.APPROVED &&
     this.action == action &&
     this.resourceId == resourceId &&
     makerId == maker &&
-    this.requestFingerprint == requestFingerprint
+    this.requestFingerprint == binding.fingerprint &&
+    onBehalfOf == binding.onBehalfOf

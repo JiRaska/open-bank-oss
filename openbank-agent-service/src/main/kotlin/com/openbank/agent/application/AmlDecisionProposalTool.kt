@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.agent.application.port.`in`.CreateProposalUseCase
 import com.openbank.agent.application.port.out.DownstreamReadPort
+import com.openbank.agent.domain.ToolDefinition
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 
@@ -81,6 +82,25 @@ class AmlDecisionProposalTool {
         ?: throw IllegalArgumentException("Required field '$field' is missing or blank")
 
     companion object {
+        val DEFINITION = ToolDefinition(
+            name = "aml_propose_case_decision",
+            description = "Propose a decision on an AML case for human approval (HITL). Typical use: a " +
+                "fuzzy name-only SANCTIONS_HIT that is a false positive -> CLEARED. Has NO effect on the " +
+                "case: a compliance officer approves the proposal and records the decision under their " +
+                "own identity. A written rationale (what was compared, why it is or is not a match) is " +
+                "mandatory.",
+            inputSchema = mapOf(
+                "type" to "object",
+                "properties" to mapOf(
+                    "caseId" to prop("UUID of the AML case"),
+                    "targetStatus" to prop("One of CLEARED, BLOCKED, ESCALATED, UNDER_REVIEW"),
+                    "rationale" to prop("What was verified and why (min 10 chars)"),
+                ),
+                "required" to listOf("caseId", "targetStatus", "rationale"),
+            ),
+        )
+
+        private fun prop(description: String) = mapOf("type" to "string", "description" to description)
         const val NAME = "aml_propose_case_decision"
         const val MIN_RATIONALE_LENGTH = 10
         private val PROPOSABLE_STATUSES = setOf("CLEARED", "BLOCKED", "ESCALATED", "UNDER_REVIEW")

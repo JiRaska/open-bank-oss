@@ -162,6 +162,10 @@ authz:
   # this is a runbook-gated follow-up, not bundled with the ApprovalStore wiring itself.
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+    # #16381: agent-service may submit a review as four-eyes maker only ON BEHALF OF the person who
+    # instructed it (X-On-Behalf-Of); that person is bound to the approval and refused as its
+    # checker, so "agent + the human who asked" can never clear a hit on their own.
+    on-behalf-of-makers: openbank-agent
 
 openbank:
   api:

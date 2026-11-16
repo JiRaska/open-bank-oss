@@ -5,12 +5,15 @@
 package com.openbank.sanctions.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.sanctions.application.port.`in`.SanctionsUseCase
 import com.openbank.sanctions.application.port.`in`.ScreenEntityCommand
+import com.openbank.sanctions.domain.model.SanctionsCheck
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.POST
@@ -47,7 +50,18 @@ class SanctionsResourceV3(private val useCase: SanctionsUseCase) {
     // grants it sanctions.clear as four-eyes maker only, and four-eyes pauses it for a human checker.
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.clear", resource = "#cmd.checkId")
-    suspend fun review(cmd: ReviewRequest) = useCase.review(cmd.toCommand(identity))
+    suspend fun review(cmd: ReviewRequest): SanctionsCheck {
+        // The agent identity does false-positive triage only: it may never confirm or re-open a hit.
+        // Enforced here, server-side, not just in the agent's tool (#16381).
+        if (ServiceAccountIdentity.verifiedClientId(identity) == AGENT_CLIENT_ID &&
+            cmd.newStatus.name !in AGENT_REVIEW_TARGETS
+        ) {
+            throw ForbiddenException(
+                "the agent identity may only review towards ${AGENT_REVIEW_TARGETS.joinToString()}",
+            )
+        }
+        return useCase.review(cmd.toCommand(identity))
+    }
 
     @GET
     @Path("/{id}")
@@ -66,4 +80,9 @@ class SanctionsResourceV3(private val useCase: SanctionsUseCase) {
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.list", resource = "")
     suspend fun pending() = useCase.listPending()
+
+    private companion object {
+        const val AGENT_CLIENT_ID = "openbank-agent"
+        val AGENT_REVIEW_TARGETS = setOf("CLEAR", "WHITELISTED", "ESCALATED")
+    }
 }

@@ -228,7 +228,12 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
   paused until a distinct human approves it, so the decision of record is the human checker's.
   **Tampering/EoP risk:** if four-eyes enforcement were switched off, the agent's review would execute
   directly; pinned by agent-service `AgentMachineGrantCharterAlignmentTest`. v1 `/review` is unchanged
-  (human only). Rollback: revert.
+  (human only). **Segregation of duties (follow-up in the same PR):** the agent must name the person
+  who instructed it (`X-On-Behalf-Of`, required for client `openbank-agent` via
+  `authz.four-eyes.on-behalf-of-makers`, 403 without it); `AuthorizeInterceptor` binds that person to
+  the approval and `RedisApprovalStore.decide` refuses them as checker, so the agent plus the person
+  who asked it can never clear a hit alone. The status limit (CLEAR / WHITELISTED / ESCALATED only)
+  is enforced server-side in `SanctionsResourceV3`, not only in the agent tool. Rollback: revert.
 
 - **2026-11-14** — **Ongoing monitoring switched on in the sandbox deployment
   (`SANCTIONS_MONITORING_ENABLED=true`).** The surface of section 6b is now live there: the

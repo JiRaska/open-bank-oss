@@ -20,5 +20,6 @@ interface SanctionsReviewPort {
 
     fun getCheck(checkId: String): JsonNode
 
-    fun submitReview(checkId: String, newStatus: String, note: String, approvalId: String?): Outcome
+    /** [onBehalfOf] is the person the agent acts for; sanctions-service refuses them as checker. */
+    fun submitReview(checkId: String, newStatus: String, note: String, approvalId: String?, onBehalfOf: String): Outcome
 }
