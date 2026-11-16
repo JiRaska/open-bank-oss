@@ -4,16 +4,13 @@
 
 package com.openbank.audit.e2e
 
-import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.audit.domain.model.AuditEntry
 import com.openbank.audit.domain.model.OccurredAtSource
 import com.openbank.audit.infrastructure.persistence.AuditRepository
+import com.openbank.audit.integration.AuditAuthzWiringIT
 import com.openbank.libs.testing.containers.PostgresTestResource
-import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
@@ -25,13 +22,13 @@ import kotlinx.coroutines.Dispatchers
 import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasSize
+import org.hamcrest.Matchers.notNullValue
 import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.MethodOrderer.OrderAnnotation
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.TestMethodOrder
-import java.net.InetSocketAddress
 import java.time.Instant
 import java.util.UUID
 
@@ -49,54 +46,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
-@TestProfile(AuditInvestigationJourneyE2E.EnforcedAuthzProfile::class)
+@TestProfile(AuditAuthzWiringIT.EnforcedProfile::class)
 @TestMethodOrder(OrderAnnotation::class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AuditInvestigationJourneyE2E {
-
-    /** Enforced authz against a stub OPA that models the auditor grant (rest.rego is unit-tested). */
-    class EnforcedAuthzProfile : QuarkusTestProfile {
-        override fun getConfigOverrides() = mapOf("authz.enforce" to "true")
-        override fun testResources() = listOf(QuarkusTestProfile.TestResourceEntry(StubPolicyServer::class.java))
-    }
-
-    /**
-     * Faithful-enough model of the audit rules for this journey: the auditor role holds
-     * `audit.trail.inspect` / `audit.evidence.reconstruct` / `audit.verify`; the edge-proxied
-     * customer-transparency action `audit.customerRead` is granted to any authenticated
-     * principal (the edge is what narrows it); everything else is denied.
-     */
-    class StubPolicyServer : QuarkusTestResourceLifecycleManager {
-        private lateinit var server: HttpServer
-
-        override fun start(): Map<String, String> {
-            server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-            server.createContext("/v1/data/openbank/rest/allow") { exchange ->
-                exchange.use {
-                    val input = ObjectMapper().readTree(exchange.requestBody)["input"]
-                    val action = input["action"].asText()
-                    val roles = input["principal"]["roles"].map { it.asText() }
-                    val allowed = when {
-                        action == "audit.customerRead" -> true
-                        action in AUDITOR_ACTIONS -> "ROLE_AUDITOR" in roles
-                        else -> false
-                    }
-                    val response = "{\"result\":{\"allow\":$allowed}}".toByteArray()
-                    exchange.responseHeaders.add("Content-Type", "application/json")
-                    exchange.sendResponseHeaders(200, response.size.toLong())
-                    exchange.responseBody.write(response)
-                }
-            }
-            server.start()
-            return mapOf("opa.url" to "http://127.0.0.1:${server.address.port}")
-        }
-
-        override fun stop() = server.stop(0)
-
-        private companion object {
-            val AUDITOR_ACTIONS = setOf("audit.trail.inspect", "audit.evidence.reconstruct", "audit.verify")
-        }
-    }
 
     @Inject
     lateinit var repository: AuditRepository
@@ -228,8 +181,15 @@ class AuditInvestigationJourneyE2E {
     @Test
     @Order(4)
     @TestSecurity(user = "auditor-1", roles = ["ROLE_AUDITOR"])
-    fun `4 - the integrity walk confirms the whole chain is intact`() {
+    fun `4 - the integrity walk serves the auditor and the journey's own chain segment is intact`() {
+        // The full walk spans every class sharing this boot, including AuditEvidenceBundleIT's
+        // deliberately tampered row, so only its reachability is this journey's to assert; the
+        // segment this journey wrote is walked from its first entry.
         given().get("/api/v1/audit/integrity").then()
+            .statusCode(200)
+            .body("chainStatus", notNullValue())
+
+        given().queryParam("fromEventId", seeds[0].id.toString()).get("/api/v1/audit/integrity").then()
             .statusCode(200)
             .body("chainStatus", equalTo("INTACT"))
             .body("checkedCount", equalTo(seeds.size))
