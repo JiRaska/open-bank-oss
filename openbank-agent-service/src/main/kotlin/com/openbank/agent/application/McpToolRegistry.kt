@@ -469,11 +469,7 @@ class McpToolRegistry {
      * not data access), everything else is a downstream read resolved through [downstream].
      * Every outcome is audited exactly once (ADR-0031 D5).
      */
-    fun call(
-        toolName: String,
-        arguments: JsonNode?,
-        actorId: String = "unknown",
-    ): ToolCallResult {
+    fun call(toolName: String, arguments: JsonNode?, actorId: String = "unknown"): ToolCallResult {
         val args = arguments ?: objectMapper.createObjectNode()
         return try {
             when {
