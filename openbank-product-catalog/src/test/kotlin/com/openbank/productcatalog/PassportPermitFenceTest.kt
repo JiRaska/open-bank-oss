@@ -112,7 +112,7 @@ class PassportPermitFenceTest {
     fun `loan admission that owns the grant preserves only its exact receipt`(operation: String) {
         val request = seed(operation, issue = false)
         dataSource.connection.use { winner ->
-            assertNull(winner.admitLoan(request))
+            assertNull(winner.admitLoan(request.copy(operationId = UUID.randomUUID())))
             winner.grantSubjectEvidence(request)
             assertNull(winner.admitLoan(request.copy(country = "AT")))
             assertNull(winner.admitLoan(request.copy(establishment = UUID.randomUUID())))
@@ -190,6 +190,17 @@ class PassportPermitFenceTest {
             "revisionContentHash" to request.contentHash,
         ),
     ).post("/api/v2/internal/passport-commitments/route")
+
+    @Test
+    fun `an exact refusal does not become an admission when evidence arrives later`() {
+        val request = seed("SIGN", issue = false)
+        dataSource.connection.use { db ->
+            assertNull(db.admitLoan(request))
+            db.grantSubjectEvidence(request)
+            assertNull(db.admitLoan(request))
+            assertNotNull(db.admitLoan(request.copy(operationId = UUID.randomUUID())))
+        }
+    }
 
     @Test
     @TestSecurity(user = "service-account-openbank-account", roles = ["ROLE_API"])
