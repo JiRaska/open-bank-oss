@@ -4,6 +4,7 @@
 
 package com.openbank.account.domain.event
 
+import com.openbank.account.domain.model.AccountBookingReceipt
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.ProductRevisionPin
@@ -40,10 +41,21 @@ data class AccountCreatedEvent(
      * and later consumers can read the pin from here instead of resolving one themselves.
      */
     val productRevision: AccountProductRevision? = null,
+    val bookingContext: AccountBookingContextV1? = null,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Account"
     override val eventType = "AccountCreated"
 }
+
+/** Immutable booking attribution for payment consumers. Absent on unclassified openings. */
+data class AccountBookingContextV1(
+    val contextVersionId: UUID,
+    val legalEntityId: UUID,
+    val bookingBookId: UUID,
+    val operatingMode: AccountBookingReceipt.OperatingMode,
+    val establishmentId: UUID?,
+    val schemaVersion: Int = 1,
+)
 
 /** Wire form of [ProductRevisionPin] on [AccountCreatedEvent]. */
 data class AccountProductRevision(

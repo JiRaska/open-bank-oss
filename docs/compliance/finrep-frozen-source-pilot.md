@@ -246,3 +246,12 @@ hash when present. An interrupted call can resume the original operation using t
 grant and pin. Account Service's internal `openBookedAccount` use case consumes that durable operation
 and writes the receipt with the account. The trusted market-admission producer that selects
 and commits the operation, and onward propagation into payment and ledger, still need wiring.
+
+A booked opening includes `bookingContext` (schema version 1) in its transactional
+`AccountCreated` event. The grant revision UUID identifies the immutable context version.
+Attribution contains the legal entity, booking book, operating mode and optional establishment.
+The evidence digest stays in the account receipt. Existing and unclassified openings have no
+context. Payment must distinguish an unclassified account from a projection that has yet to
+receive its event and must preserve the resolved context before sending a journal. When
+both legs use different booking scopes, the journal needs approved clearing entries and
+attribution for each leg.

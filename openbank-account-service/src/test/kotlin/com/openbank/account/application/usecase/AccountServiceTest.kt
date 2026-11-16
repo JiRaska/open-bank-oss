@@ -145,12 +145,21 @@ class AccountServiceTest {
         coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns false
-        coEvery { accountRepository.saveBookedAccount(any(), any(), any(), any(), eq(receipt), any()) }
+        val eventFactory = slot<(Account) -> DomainEvent>()
+        coEvery { accountRepository.saveBookedAccount(any(), any(), any(), any(), eq(receipt), capture(eventFactory)) }
             .answers { firstArg() }
 
         val opened = service.openBookedAccount(command, operationId)
 
         assertThat(opened.productRevisionPin).isEqualTo(pin)
+        val event = eventFactory.captured(opened) as AccountCreatedEvent
+        val context = requireNotNull(event.bookingContext)
+        assertThat(context.schemaVersion).isEqualTo(1)
+        assertThat(context.contextVersionId).isEqualTo(pending.grantRevisionId)
+        assertThat(context.legalEntityId).isEqualTo(receipt.legalEntityId)
+        assertThat(context.bookingBookId).isEqualTo(receipt.bookingBookId)
+        assertThat(context.operatingMode).isEqualTo(mode)
+        assertThat(context.establishmentId).isEqualTo(receipt.establishmentId)
         coVerify(exactly = 1) { accountRepository.saveBookedAccount(opened, any(), any(), any(), eq(receipt), any()) }
         coVerify(exactly = 0) { productCatalog.resolvePublishedRevision(any(), any()) }
 
@@ -199,6 +208,7 @@ class AccountServiceTest {
             // The event is built from the persisted row and written to the outbox in the opening
             // transaction; nothing is sent directly to Kafka after the commit any more.
             val event = eventFactory.captured(result) as AccountCreatedEvent
+            assertThat(event.bookingContext).isNull()
             assertThat(event.aggregateId).isEqualTo(result.id)
             assertThat(event.accountNumber).isEqualTo(iban.value)
             assertThat(event.accountType).isEqualTo(command.accountType)

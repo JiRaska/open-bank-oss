@@ -30,6 +30,7 @@ import com.openbank.account.application.port.out.BalanceView
 import com.openbank.account.application.port.out.CurrencyPocketRepository
 import com.openbank.account.application.port.out.NotificationRequestPort
 import com.openbank.account.application.port.out.SanctionsScreenResult
+import com.openbank.account.domain.event.AccountBookingContextV1
 import com.openbank.account.domain.event.AccountClosedEvent
 import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.event.AccountProductRevision
@@ -179,16 +180,24 @@ class AccountService(
                     primaryPocketFor(account),
                     command.idempotencyKey,
                     command.requestHash,
-                    ::accountCreatedEvent,
+                    { saved -> accountCreatedEvent(saved) },
                 )
             } else {
+                val receipt = booking.consume(pending)
+                val context = AccountBookingContextV1(
+                    contextVersionId = pending.grantRevisionId,
+                    legalEntityId = receipt.legalEntityId,
+                    bookingBookId = receipt.bookingBookId,
+                    operatingMode = receipt.operatingMode,
+                    establishmentId = receipt.establishmentId,
+                )
                 accountRepository.saveBookedAccount(
                     account,
                     primaryPocketFor(account),
                     command.idempotencyKey,
                     pending.requestHash,
-                    booking.consume(pending),
-                    ::accountCreatedEvent,
+                    receipt,
+                    { saved -> accountCreatedEvent(saved, context) },
                 )
             }
         } catch (e: PersistenceException) {
@@ -215,7 +224,10 @@ class AccountService(
     }
 
     /** The event the opening transaction writes to the outbox, built from the row as persisted. */
-    private fun accountCreatedEvent(saved: Account) = AccountCreatedEvent(
+    private fun accountCreatedEvent(
+        saved: Account,
+        bookingContext: AccountBookingContextV1? = null,
+    ) = AccountCreatedEvent(
         aggregateId = saved.id,
         version = saved.version,
         accountNumber = saved.accountNumber.value,
@@ -226,6 +238,7 @@ class AccountService(
         occurredAt = saved.openedAt,
         sourceService = "account-service",
         productRevision = saved.productRevisionPin?.let(AccountProductRevision::of),
+        bookingContext = bookingContext,
     )
 
     override suspend fun closeAccount(command: CloseAccountCommand): Account {
