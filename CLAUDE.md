@@ -645,10 +645,11 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `data.openbank.rest.allow` per (principal, action), with a must-DENY and a must-ALLOW control in
   every run. Reading the rego cannot tell you which of several reasons actually fires (#3765/#3734).
 - **The three realm JSONs in this tree disagree about which roles the M2M accounts hold** — the
-  deployed gitops template gives `service-account-openbank-services` only `ROLE_API`, while the
-  docker and CI realms also give it `ROLE_OPERATOR`. Any statement of the form "the shared client
-  carries ROLE_OPERATOR" is environment-specific; take the union when reasoning about exposure, and
-  say which realm you read.
+  deployed gitops template and the docker realm give `service-account-openbank-services` only
+  `ROLE_API`, while the CI realm gives it `ROLE_OPERATOR` and `ROLE_COMPLIANCE` and no `ROLE_API`.
+  Any statement of the form "the shared client carries ROLE_OPERATOR" is environment-specific; take
+  the union when reasoning about exposure, and say which realm you read. Read the roles with `jq`
+  rather than from this bullet: an earlier wording put the docker realm on the wrong side.
 
 - **A backup that has never been configured reports the same "success" as one that works — CNPG's
   archiver is a NO-OP with a success exit code when no `barmanObjectStore` exists, and both

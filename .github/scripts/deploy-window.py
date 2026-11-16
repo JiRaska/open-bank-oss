@@ -28,6 +28,9 @@ moment a deploy PR's auto-merge is ARMED does:
                 also refused when build inputs changed after that image's source commit.
   * `verify`  — before either deploy workflow arms a GitOps PR, proves every image in its diff
                 still represents the current main build inputs. Unknown sources fail closed.
+  * `prune`   — the producer's per-pin form of `verify` (#15977): a stale pin is reverted on
+                the PR branch in one signed App commit and the fresh pins proceed; with no
+                fresh pin left the PR is closed. `select` applies the same rule in the flusher.
 
 NO LOST DEPLOY. A deferred deploy is an open PR: the same durable record the pipeline used
 before this change. Nothing here closes a PR; the only closer is supersede-deploy-prs.sh, which
@@ -37,6 +40,7 @@ newer one cover them.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -45,6 +49,7 @@ import sys
 import tempfile
 from collections.abc import Callable
 from functools import lru_cache
+from typing import NamedTuple
 
 DEFAULT_WINDOW_SECONDS = 1800
 DEPLOY_PREFIXES = ("chore/gitops-auto-deploy-", "chore/admin-ui-deploy-")
@@ -312,9 +317,122 @@ def verify_pins(diff: str, fresh: Callable[[str, str], bool],
     return []
 
 
-def select_candidate(cands: list[dict], verify: Callable[[dict], list[str]],
+class PinVerdict(NamedTuple):
+    """Per-pin freshness of one GitOps deploy PR (#15977).
+
+    `refuse` refuses the WHOLE PR — a false tag/digest pair, a missing digest, a diff with no
+    pins — because then the diff itself cannot be trusted to name the images it deploys.
+    Staleness is different: it is a fact about ONE image, so it removes only that pin.
+    """
+    refuse: list[str]
+    stale: list[tuple]
+    fresh: list[tuple]
+
+
+def _pin_label(t: tuple) -> str:
+    return f"{t[1].rsplit('/', 1)[-1]}:{t[4]} in {t[0]}"
+
+
+def classify_pins(diff: str, fresh: Callable[[str, str], bool],
+                  require_digest: bool = False) -> PinVerdict:
+    """Split a deploy diff into refusals, stale pins and fresh pins.
+
+    Same inputs and the same refusals as `verify_pins`, but a stale pin no longer refuses the
+    others: 2026-11-13 run 43387673867 built treasury, kyc and sepa-instant, #15960 moved kyc on
+    main mid-build, and the one stale kyc pin left the two fresh ones undeployed in #15977.
+    """
+    identity = pin_identity_failures(diff, require_digest)
+    if identity:
+        return PinVerdict(identity, [], [])
+    pins = pin_transitions(diff)
+    if not pins:
+        return PinVerdict(["no image pins found in the GitOps diff"], [], [])
+    stale, ok = [], []
+    for t in pins:
+        (ok if fresh(t[1], t[4]) else stale).append(t)
+    return PinVerdict([], stale, ok)
+
+
+def revert_pins(text: str, transitions: list[tuple]) -> str:
+    """Put each transition's OLD tag@digest back where its new one stands; refuse a miss.
+
+    Matched pin by pin (image, tag and digest all equal), never by substring, so reverting
+    `sandbox-abc` cannot touch `sandbox-abcd`. A pin the text does not hold raises: a prune
+    that silently reverted nothing would leave the stale image in the PR it claims to clean.
+    """
+    for _rel, image, old, old_digest, new, new_digest in transitions:
+        hits = 0
+
+        def swap(m, image=image, new=new, new_digest=new_digest, old=old, old_digest=old_digest):
+            nonlocal hits
+            if m["image"] == image and m["tag"] == new and m["digest"] == new_digest:
+                hits += 1
+                return f"{image}:{old}" + (f"@{old_digest}" if old_digest else "")
+            return m.group(0)
+
+        text = PIN_RE.sub(swap, text)
+        if hits == 0:
+            raise ValueError(f"{_pin_label((_rel, image, old, old_digest, new, new_digest))} not found to revert")
+    return text
+
+
+def _gh(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(["gh", *args], input=stdin, capture_output=True, text=True, check=False)
+
+
+def prune_stale_on_branch(repo: str, number: int, stale: list[tuple], gh=_gh) -> str:
+    """Revert the stale pins on the PR branch in ONE signed commit; return its oid.
+
+    `createCommitOnBranch` with the App token is the endpoint GitHub signs (the same one
+    create-pull-request's `sign-commits` uses), and `expectedHeadOid` makes it compare-and-set:
+    if anything moved the branch since we read it, the write is refused rather than merged.
+    """
+    view = gh("pr", "view", str(number), "--repo", repo,
+              "--json", "headRefName,headRefOid,state,isDraft,labels")
+    meta = json.loads(view.stdout) if view.returncode == 0 else None
+    if not meta or meta.get("state") != "OPEN":
+        raise RuntimeError(f"#{number} not readable or not open")
+    if meta.get("isDraft") or any(l.get("name") == "blocked" for l in meta.get("labels") or []):
+        raise RuntimeError(f"#{number} is held (draft or blocked) - an owner decision, not pruned")
+    branch, head = meta["headRefName"], meta["headRefOid"]
+    by_file: dict[str, list[tuple]] = {}
+    for t in stale:
+        by_file.setdefault(t[0], []).append(t)
+    additions = []
+    for rel, ts in sorted(by_file.items()):
+        got = gh("api", f"repos/{repo}/contents/{rel}?ref={head}", "--jq", ".content")
+        if got.returncode != 0:
+            raise RuntimeError(f"{rel} unreadable at {head[:8]} (gh rc {got.returncode})")
+        text = base64.b64decode(got.stdout).decode("utf-8")
+        additions.append({"path": rel, "contents": base64.b64encode(
+            revert_pins(text, ts).encode("utf-8")).decode("ascii")})
+    services = ", ".join(sorted({t[1].rsplit("/", 1)[-1] for t in stale}))
+    payload = {
+        "query": "mutation($input: CreateCommitOnBranchInput!) "
+                 "{ createCommitOnBranch(input: $input) { commit { oid } } }",
+        "variables": {"input": {
+            "branch": {"repositoryNameWithOwner": repo, "branchName": branch},
+            "expectedHeadOid": head,
+            "message": {"headline": f"chore(gitops): drop stale image pins ({services})",
+                        "body": "Main changed these services' build inputs after their images "
+                                "were built, so deploying them would run stale code. Only these "
+                                "pins are reverted; every other pin in this PR is current.\n\n"
+                                + "\n".join(_pin_label(t) for t in stale)},
+            "fileChanges": {"additions": additions},
+        }},
+    }
+    done = gh("api", "graphql", "--input", "-", "--jq", ".data.createCommitOnBranch.commit.oid",
+              stdin=json.dumps(payload))
+    oid = done.stdout.strip()
+    if done.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", oid):
+        raise RuntimeError(f"createCommitOnBranch refused on #{number}: {done.stderr.strip() or oid}")
+    return oid
+
+
+def select_candidate(cands: list[dict], verify: Callable[[dict], "list[str] | PinVerdict"],
                      supersede: Callable[[dict], int],
-                     close_stale: Callable[[dict, list[str]], None] | None = None) -> dict | None:
+                     close_stale: Callable[[dict, list[str]], None] | None = None,
+                     prune: Callable[[dict, list[tuple]], bool] | None = None) -> dict | None:
     """First candidate that passes freshness verify and supersede, or None.
 
     Any per-kind refusal falls through to the next kind: kinds are independent, and a refused
@@ -322,18 +440,36 @@ def select_candidate(cands: list[dict], verify: Callable[[dict], list[str]],
     pin, refused the gitops kind on every run while admin-ui was never tried.
 
     A stale pin is permanent: the check compares the image's source tree with main's, and main
-    only moves forward, so the PR can never go green on its head. `close_stale` closes it instead
+    only moves forward, so it can never go green on that head. Staleness is per IMAGE, so it is
+    removed per pin (#15977): with fresh pins left, `prune` reverts only the stale ones and the
+    PR is armed on a later tick, once its required checks have re-run on the pruned head (the
+    head this tick read is gone). With no fresh pin left, `close_stale` closes the PR instead
     of leaving it open as queue noise (2026-11-12: #15832, #15833 and #15846 sat red on exactly
-    this until a human closed them). An UNREADABLE diff is not evidence of staleness and never
-    closes anything.
+    this until a human closed them). An identity failure refuses the whole PR as before, and
+    an UNREADABLE diff is not evidence of staleness and never closes anything.
     """
     for c in cands:
-        stale = verify(c) if c["head"].startswith(DEPLOY_PREFIXES[0]) else []
-        if stale:
-            for pin in stale:
+        v = verify(c) if c["head"].startswith(DEPLOY_PREFIXES[0]) else PinVerdict([], [], [])
+        if isinstance(v, list):
+            v = PinVerdict(v, [], [])
+        if v.refuse:
+            for pin in v.refuse:
+                print(f"::error::GitOps deploy PR #{c['number']} refused: {pin}", file=sys.stderr)
+            if close_stale is not None and not any(r.startswith("diff of #") for r in v.refuse):
+                close_stale(c, v.refuse)
+        elif v.stale and not v.fresh:
+            labels = [_pin_label(t) for t in v.stale]
+            for pin in labels:
                 print(f"::error::stale GitOps image pin in #{c['number']}: {pin}", file=sys.stderr)
-            if close_stale is not None and not any(r.startswith("diff of #") for r in stale):
-                close_stale(c, stale)
+            if close_stale is not None:
+                close_stale(c, labels)
+        elif v.stale:
+            for t in v.stale:
+                print(f"::warning::stale GitOps image pin in #{c['number']} pruned, the rest kept: "
+                      f"{_pin_label(t)}", file=sys.stderr)
+            if prune is not None and prune(c, v.stale):
+                print(f"::notice::#{c['number']} pruned to {len(v.fresh)} fresh pin(s); armed on a "
+                      "later tick once its checks re-run", file=sys.stderr)
         else:
             rc = supersede(c)
             if rc == 0:
@@ -362,6 +498,49 @@ def last_deploy_by_kind(commits: list[dict]) -> dict[str, int | None]:
 
 
 # ── self-test ─────────────────────────────────────────────────────────────────────────────────
+def prune_command(repo: str, number: int, diff: str, require_digest: bool,
+                  fresh: Callable[[str, str], bool], gh=_gh, prune=prune_stale_on_branch) -> int:
+    """The producer's per-pin gate: 0 all fresh, 1 refused whole, 3 pruned, 4 every pin stale.
+
+    Exit 3 mirrors can-i-deploy's UnresolvedServicesError (#15955): the batch proceeds without
+    the members that failed, and says which. After pruning, the PR is read and classified again
+    and must come back all-fresh; anything else refuses, so a prune that did not take can never
+    be mistaken for one that did.
+    """
+    def read() -> PinVerdict | None:
+        got = gh("pr", "diff", str(number), "--repo", repo)
+        if got.returncode != 0:
+            print(f"::error::diff of #{number} unreadable (gh rc {got.returncode})", file=sys.stderr)
+            return None
+        return classify_pins(got.stdout, fresh, require_digest)
+
+    v = classify_pins(diff, fresh, require_digest)
+    for r in v.refuse:
+        print(f"::error::GitOps deploy PR #{number} refused: {r}", file=sys.stderr)
+    if v.refuse:
+        return 1
+    for t in v.stale:
+        print(f"::warning::stale GitOps image pin: {_pin_label(t)}", file=sys.stderr)
+    if not v.stale:
+        return 0
+    if not v.fresh:
+        print(f"::error::every image pin in #{number} is stale - nothing left to deploy", file=sys.stderr)
+        return 4
+    try:
+        oid = prune(repo, number, v.stale)
+    except (RuntimeError, ValueError) as e:
+        print(f"::error::could not prune #{number}: {e}", file=sys.stderr)
+        return 1
+    after = read()
+    if after is None or after.refuse or after.stale or not after.fresh:
+        print(f"::error::#{number} at {oid[:8]} is not all-fresh after pruning - refusing", file=sys.stderr)
+        return 1
+    for t in v.stale:
+        print(f"pruned={_pin_label(t)}")
+    print(f"::notice::#{number} pruned at {oid[:8]}; {len(after.fresh)} fresh pin(s) proceed", file=sys.stderr)
+    return 3
+
+
 def self_test() -> int:
     fails = []
 
@@ -622,6 +801,70 @@ def self_test() -> int:
               and open(aml).read() == f"image: {reg}/openbank-aml:sandbox-bbb{dg('b')}\n")
         check("verify refuses a diff without image pins", verify_pins("", lambda image, tag: True) != [])
 
+        # 6. #15977: kyc went stale mid-build; treasury and sepa-instant must still deploy.
+        def pin_hunk(svc, old, new):
+            return (f"--- a/g/{svc}.yaml\n+++ b/g/{svc}.yaml\n@@ -1 +1 @@\n"
+                    f"-image: {reg}/openbank-{svc}:{old}\n+image: {reg}/openbank-{svc}:{new}\n")
+        mixed = "".join(pin_hunk(s, f"sandbox-old{dg(o)}", f"sandbox-03f9ba58{dg(n)}")
+                        for s, o, n in (("treasury", "1", "2"), ("kyc", "3", "4"), ("sepa-instant", "5", "6")))
+        only_kyc_stale = lambda image, tag: not image.endswith("/openbank-kyc")
+        v = classify_pins(mixed, only_kyc_stale, require_digest=True)
+        check("mixed fresh + stale: only the stale pin is stale",
+              not v.refuse and [t[1].rsplit("/", 1)[-1] for t in v.stale] == ["openbank-kyc"]
+              and len(v.fresh) == 2)
+        pruned_diff = "".join(pin_hunk(s, f"sandbox-old{dg(o)}", f"sandbox-03f9ba58{dg(n)}")
+                              for s, o, n in (("treasury", "1", "2"), ("sepa-instant", "5", "6")))
+        kyc_text = f"a: {reg}/openbank-kyc:sandbox-03f9ba58{dg('4')}\nb: {reg}/openbank-kyc:sandbox-03f9ba58a{dg('4')}\n"
+        check("revert_pins restores the old tag@digest of exactly that pin",
+              revert_pins(kyc_text, v.stale) ==
+              f"a: {reg}/openbank-kyc:sandbox-old{dg('3')}\nb: {reg}/openbank-kyc:sandbox-03f9ba58a{dg('4')}\n")
+        try:
+            revert_pins("nothing here\n", v.stale)
+            check("revert_pins refuses a pin the file does not hold", False)
+        except ValueError:
+            check("revert_pins refuses a pin the file does not hold", True)
+
+        def fake_gh(after):
+            return lambda *args, stdin=None: subprocess.CompletedProcess(args, 0, after, "")
+        pruned_with = []
+        def fake_prune(repo, number, stale):
+            pruned_with.append([t[1].rsplit("/", 1)[-1] for t in stale])
+            return "a" * 40
+        rc = prune_command("o/r", 15977, mixed, True, only_kyc_stale, fake_gh(pruned_diff), fake_prune)
+        check("producer: mixed fresh + stale prunes ONLY the stale pin and proceeds (exit 3)",
+              rc == 3 and pruned_with == [["openbank-kyc"]])
+        pruned_with.clear()
+        rc = prune_command("o/r", 15977, mixed, True, lambda image, tag: False, fake_gh(mixed), fake_prune)
+        check("producer: every pin stale -> close the PR (exit 4), nothing pruned",
+              rc == 4 and pruned_with == [])
+        retagged = mixed + pin_hunk("aml", f"sandbox-aaa{dg('a')}", f"sandbox-bbb{dg('a')}")
+        rc = prune_command("o/r", 15977, retagged, True, only_kyc_stale, fake_gh(retagged), fake_prune)
+        check("producer: an identity failure still refuses the WHOLE PR (exit 1), nothing pruned",
+              rc == 1 and pruned_with == [])
+        rc = prune_command("o/r", 15977, mixed, True, only_kyc_stale, fake_gh(mixed), fake_prune)
+        check("producer: a prune that did not take refuses (exit 1)", rc == 1)
+        check("producer: all fresh -> exit 0, nothing pruned",
+              prune_command("o/r", 15977, mixed, True, always, fake_gh(mixed), fake_prune) == 0
+              and pruned_with == [["openbank-kyc"]])
+
+        closed.clear(); tried.clear(); pruned = []
+        def pruner(c, stale):
+            pruned.append((c["number"], [t[1].rsplit("/", 1)[-1] for t in stale]))
+            return True
+        got_pick = select_candidate([cand_g, cand_a], lambda c: classify_pins(mixed, only_kyc_stale, True),
+                                    sup({}), closer, pruner)
+        check("flusher: mixed fresh + stale prunes only the stale pin, closes nothing, arms the next kind",
+              pruned == [(12, ["openbank-kyc"])] and closed == [] and got_pick is cand_a and tried == [11])
+        pruned.clear()
+        select_candidate([cand_g, cand_a], lambda c: classify_pins(mixed, lambda i, t: False, True),
+                         sup({}), closer, pruner)
+        check("flusher: every pin stale closes the PR, prunes nothing", closed == [12] and pruned == [])
+        closed.clear()
+        select_candidate([cand_g, cand_a], lambda c: classify_pins(retagged, only_kyc_stale, True),
+                         sup({}), closer, pruner)
+        check("flusher: an identity failure refuses the whole PR, prunes nothing",
+              closed == [12] and pruned == [])
+
     if fails:
         print(f"self-test: FAILED ({len(fails)})")
         return 1
@@ -651,6 +894,11 @@ def main() -> int:
     v = sub.add_parser("verify")
     v.add_argument("--root", default=".")
     v.add_argument("--require-digest", action="store_true")
+    pr = sub.add_parser("prune", help="stdin: the PR diff. Per-pin freshness; reverts only stale pins. "
+                        "exit 0 all fresh, 1 refused whole, 3 stale pins pruned, 4 every pin stale")
+    pr.add_argument("--root", default=".")
+    pr.add_argument("--number", type=int, required=True)
+    pr.add_argument("--require-digest", action="store_true")
     for p in (d, f):
         p.add_argument("--now", type=int, required=True)
         p.add_argument("--window", type=int, default=int(os.environ.get("DEPLOY_WINDOW_SECONDS", DEFAULT_WINDOW_SECONDS)))
@@ -704,7 +952,17 @@ def main() -> int:
             if read.returncode != 0:
                 return [f"diff of #{c['number']} unreadable (gh rc {read.returncode})"]
             diff = read.stdout
-            return verify_pins(diff, lambda image, tag: image_source_is_current(a.root, image, tag))
+            return classify_pins(diff, lambda image, tag: image_source_is_current(a.root, image, tag),
+                                 require_digest=True)
+
+        def prune(c, stale):
+            try:
+                oid = prune_stale_on_branch(repo, c["number"], stale)
+            except (RuntimeError, ValueError) as e:
+                print(f"::error::could not prune #{c['number']}: {e}", file=sys.stderr)
+                return False
+            print(f"::notice::pruned #{c['number']} at {oid[:8]}", file=sys.stderr)
+            return True
 
         def supersede(c):
             prefix = next(x for x in DEPLOY_PREFIXES if c["head"].startswith(x))
@@ -731,12 +989,15 @@ def main() -> int:
                                    "--comment", body], stdout=sys.stderr)
             print(f"::notice::closed stale deploy PR #{c['number']} (rc {done.returncode})", file=sys.stderr)
 
-        pick = select_candidate(cands, verify, supersede, close_stale)
+        pick = select_candidate(cands, verify, supersede, close_stale, prune)
         if pick is None:
             print("::error::every deploy kind was refused - nothing armed.", file=sys.stderr)
             return 1
         print(f"arm={pick['number']}")
         return 0
+    if a.cmd == "prune":
+        return prune_command(os.environ["GITHUB_REPOSITORY"], a.number, sys.stdin.read(), a.require_digest,
+                             lambda image, tag: image_source_is_current(a.root, image, tag))
     if a.cmd == "verify":
         stale = verify_pins(sys.stdin.read(),
                             lambda image, tag: image_source_is_current(a.root, image, tag),

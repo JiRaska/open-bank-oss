@@ -14,8 +14,13 @@
         "body": {
           "accountId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
           "amount": 250.00,
+          "counterparty": {
+            "scheme": "IBAN",
+            "value": "DE89370400440532013000"
+          },
           "counterpartyId": null,
           "currency": "EUR",
+          "initiationMode": "CUSTOMER_PRESENT",
           "rail": "SCT_INST"
         },
         "headers": {
@@ -39,8 +44,13 @@
         "body": {
           "accountId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
           "amount": 250.00,
+          "counterparty": {
+            "scheme": "IBAN",
+            "value": "DE89370400440532013000"
+          },
           "counterpartyId": null,
           "currency": "EUR",
+          "initiationMode": "CUSTOMER_PRESENT",
           "rail": "SCT_INST"
         },
         "headers": {

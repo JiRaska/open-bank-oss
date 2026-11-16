@@ -40,7 +40,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: referral-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-referral-service:sandbox-548fa683@sha256:a15b130e52ab9826d0fcbead4b7a56fc95c020b5b18032d44225648c4bd7f53a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-referral-service:sandbox-e435ad0a@sha256:75b3ed6bbb1201800b0fd76afa31328780139b58c7c5bf3dd861daac889e896a
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -60,6 +60,10 @@ spec:
               value: "0.1"
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/referral-tls/tls.crt
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/referral-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT

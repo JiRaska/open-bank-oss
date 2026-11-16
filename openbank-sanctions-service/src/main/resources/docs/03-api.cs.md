@@ -125,6 +125,8 @@ profilu. Jen profil `CUSTOMER` vrací i jména se skóre 0,65–0,85, jako `POTE
 poslat k přezkumu. `PAYMENT` a prověření bez profilu pod 0,85 nehledají, takové jméno tam vyjde
 `CLEAR` — platba zatím nemá stav, ve kterém by na přezkum počkala (#15724).
 
+Pod 0,85 navíc porovnání po jednotlivých částech jména vyřadí kandidáty, kteří sdílí jen jednu část jména (třeba běžné křestní jméno s jiným příjmením). Skóre celého jména 0,85 a vyšší nikdy nesníží: takový kandidát zůstane `HIT` v každém profilu, včetně `CUSTOMER` a monitoringu změn (#16284).
+
 `/api/v1` je zmrazené: všechny tři vstupy odmítá s 400 a prověření vytvořené s nimi přes
 `/api/v1` nelze číst.
 
@@ -255,3 +257,37 @@ Topic: `openbank.sanctions.screening.event` (CloudEvents binding, JSON).
 | `sanctions.review.submitted.v1` | POST /review | checkId, reviewedBy, newStatus, reviewNote, reviewedAt |
 
 Eventy jsou append-only; následný přezkum vytváří nový event `sanctions.review.submitted.v1`, nepřepisuje původní event prověření.
+
+## Průběžný monitoring (ADR-0376)
+
+Dostupné od verze API kontraktu 3.4.0. Chráněno stejně jako `POST /api/v3/sanctions/screen`: role `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` a akce `sanctions.create`.
+
+### Registrace nebo aktualizace sledovaného subjektu
+
+```
+PUT /api/v3/sanctions/monitored-subjects/{subjectRef}
+```
+
+Vlastníkem registrace je volající služba, určená klientem, kterému byl vydán její service-account token (například `openbank-kyb`); žádná hodnota požadavku ho neurčuje, takže služba registruje, nahrazuje a maže jen své vlastní subjekty. Služba, která se dosud autentizuje sdíleným klientem flotily `openbank-services`, je odmítnuta a potřebuje nejprve vlastního klienta; v této situaci je dnes kyc-service. `subjectRef` je hodnota, kterou tato služba posílá jako `subjectId` při kontrole subjektu, a platí v rámci volajícího: stejná reference u dvou volajících jsou dva subjekty. Tělo nese `entityType`, `name` a volitelně `aliases`, `dateOfBirth`, `nationality`, `country`: stejné hodnoty jako při živé kontrole subjektu a žádné identifikátory dokladů.
+
+| Stav | Význam |
+|---|---|
+| 201 | Subjekt je nově sledován |
+| 200 | Už byl registrován; stejné atributy nic nemění, jiné nahradí uložené |
+| 400 | Neplatná hodnota v cestě nebo v těle (prázdné jméno, alias `null`, neplatný formát země, znak NUL) |
+| 403 | Volající není služba pod vlastním service accountem: token osoby, sdílený klient flotily, nebo žádný ověřený token |
+| 503 | Monitoring není v tomto prostředí zapnut; nic nebylo uloženo |
+
+Odpověď popisuje registraci (`ownerService`, `subjectRef`, `registeredAt`, `updatedAt`). Nikdy neříká, zda subjekt něčemu odpovídá.
+
+### Odregistrace sledovaného subjektu
+
+```
+DELETE /api/v3/sanctions/monitored-subjects/{subjectRef}
+```
+
+Smaže řádek registru volajícího i jeho nálezy. 204, ať volající subjekt registrován měl, nebo ne, a funguje i při vypnutém monitoringu; 403 jako u registrace. Subjektu, který pod stejnou referencí registrovala jiná služba, se nedotkne. Volá se při ukončení vztahu a při výmazu.
+
+### Událost nálezu
+
+`MONITORED_SUBJECT_MATCHED` na `openbank.sanctions.screening.event` (typ v hlavičce `ce-type`), verze schématu 1: `findingId`, `ownerService`, `subjectRef`, `entityType`, `matchKind` (`SANCTIONS`, `TERRORIST`, `PEP`, `JURISDICTION`), `listType`, `listEntryRef`, `listEntryVersion`, `matchScore`, `matchStatus`, `detection` (`LIST_DELTA`, `BASELINE_SWEEP`, `PERIODIC_SWEEP`), `occurredAt`, `sourceService`. Jméno klienta se nepřenáší. Žádná REST operace nálezy nevrací.

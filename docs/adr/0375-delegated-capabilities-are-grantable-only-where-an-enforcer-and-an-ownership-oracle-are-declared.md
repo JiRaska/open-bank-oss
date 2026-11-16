@@ -1,7 +1,8 @@
 ---
 date: 2026-11-12
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#16106 — D1 is bound on domestic-payment only (five rails unbuilt); ACCOUNT_MANAGE_BENEFICIARIES, ACCOUNT_MANAGE_LIMITS and CARD_VIEW_TRANSACTIONS stay unenforced; PAYMENT and STATEMENT object grants have no ownership oracle"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
@@ -202,6 +203,18 @@ ADR-0335 D2), consumed through a contract-generated client (ADR-0319). Fail-clos
 pairs become mintable in the order their oracle lands, and until then D4 keeps them off
 the grant screen instead of letting them be offered and refused.
 
+*Refinement, 2026-11-14 (D5a).* D5 reads as "object pairs become mintable in the order
+their oracle lands", which presumes an oracle is the only thing missing. For PAYMENT and
+STATEMENT it is not. D6 makes the rendered sealed artifact the one delivery mechanism for
+a shared object, and `ExternalDisclosureService.issue` requires `resourceType == DOCUMENT`
+— so even once an oracle existed, a grant over those two types could never be delivered;
+the mechanism refuses them by type. They are therefore not awaiting an oracle, they are
+out of scope: `OFFERABLE_RESOURCE_TYPES` omits them and `validateCandidate` refuses them
+with `RESOURCE_TYPE_NOT_OFFERABLE` before the ownership lookup, while `CAPABILITY_MATRIX`
+keeps them so historical grants still deserialise. Nothing is lost — a statement already
+renders as a document, so sharing one is a DOCUMENT grant over that artifact, and ongoing
+access to an account's statements is `ACCOUNT_DOWNLOAD_STATEMENTS` (D7). Tracked in #16106.
+
 **D6 — Exposure is never enforced by decorating a live read.** A redacted,
 watermarked, view-counted share is a **rendered sealed artifact** — document-service
 renders it, PAdES-signs it (ADR-0162), and it is shared as a counted disclosure in the
@@ -235,6 +248,32 @@ The general rule this yields: **before deciding whether an unenforced capability
 be built or dropped, check whether its route already exists and is gated on a neighbour.**
 A census that skips that step proposes product work for what is actually a one-line
 correction.
+
+Applied to the account side, that rule paid again. `GET /accounts/{id}` serves the account
+RECORD and asked for `ACCOUNT_READ_BALANCES`; balances have their own route, so
+`ACCOUNT_VIEW_DETAILS` was grantable and read by nothing. Both statement routes asked
+`ownsAccount` alone, so three presets handed out `ACCOUNT_DOWNLOAD_STATEMENTS` and every
+delegate who used it was refused. Both are corrections.
+
+Their blast radius is **not** zero, unlike the card pair, and that difference is the
+reason to measure rather than assume symmetry: the `Účetní` and `Pokladník` presets grant
+`ACCOUNT_READ_BALANCES` without `ACCOUNT_VIEW_DETAILS`, which is precisely why they could
+drill into the record at all. A forward migration corrects the preset catalog. Grants
+already minted are deliberately left alone — a grant carries what the grantor agreed to,
+and widening one after the fact would be the delegation service editing somebody's
+mandate — so an existing grantee of those two roles keeps balances and transactions and
+loses the drill-down until the grantor re-shares.
+
+What remains unenforced after this is the set that genuinely needs features rather than a
+corrected gate: `ACCOUNT_PROPOSE_PAYMENT`, `ACCOUNT_MANAGE_BENEFICIARIES`,
+`ACCOUNT_MANAGE_LIMITS`, `CARD_VIEW_TRANSACTIONS` and the two object types with no owner
+to ask. `ACCOUNT_MANAGE_LIMITS` is ADR-0374's Limits step and should not be built twice.
+`ACCOUNT_MANAGE_BENEFICIARIES` is the one with a design question rather than a missing
+route: payees are a PARTY-level book at the edge, not an account-scoped one, so an
+account grant does not map onto them without deciding whose payee list a delegate is
+managing. `DELEGATION_MANAGE` is a different case again — admin-ui already drops it from
+the preset picker by hand, with a comment stating this ADR's rule before the ADR existed,
+so the honest end state is that it stays unassignable until sub-delegation exists.
 
 **D8 — ADR-0223 is unchanged, and this says why.** OPA keeps deciding channel and role
 policy; `@Authorize` still runs first. The Authority step answers a different question

@@ -4,9 +4,12 @@ _service-ci.yml|job:publish-evidence|id-token
 admin-ui-deploy.yml|job:build-push|contents
 admin-ui-deploy.yml|job:build-push|id-token
 admin-ui-deploy.yml|job:build-push|pull-requests
+# ADR-0370 U8: opens or refreshes one tracking issue when the nightly Firefox/WebKit run fails.
+admin-ui-engines-nightly.yml|job:report|issues
 # Dataset-only OIDC publisher; IAM limits writes to Gate Health snapshots and its CAS selector.
 admin-ui-evidence.yml|job:publish|id-token
 agent-review.yml|job:review|pull-requests
+alert-noise-weekly.yml|job:report|issues
 alert-rca-weekly.yml|job:publish|contents
 alert-rca-weekly.yml|job:publish|issues
 alert-rca-weekly.yml|job:publish|pull-requests
@@ -42,6 +45,8 @@ dependabot-verification-metadata-push.yml|job:push|pull-requests
 dependency-submission.yml|job:raise-issue|issues
 # ADR-0361 drill: OIDC to a role that reads one SSM parameter (schedule/dispatch only); issues to post on #14163.
 deception-drill.yml|job:drill|id-token
+# Opens/refreshes one tracking issue on a CT/CAA finding or an unverifiable CT source (#16292).
+ct-caa-watch.yml|job:watch|issues
 # Opens/refreshes one tracking issue per class when a CI credential or apt pin needs action (#15483).
 date-driven-expiry-watch.yml|job:apt-pins|issues
 date-driven-expiry-watch.yml|job:credentials|issues
@@ -282,3 +287,5 @@ merge-train-wake.yml|job:wake|actions
 
 # Communication artifact producer: OIDC authenticates registry push and KMS attestations only.
 communication-image-only.yml|job:build-push|id-token
+# Standing-red sentinel: opens/refreshes/closes its own standing-red issues only.
+standing-red-sentinel.yml|job:sentinel|issues

@@ -10,6 +10,7 @@
 #   Read  + Describe: openbank.kyc.events      (KYC case-lifecycle gate, ADR-0267 §2)
 #   Read  + Describe: openbank.aml.events      (AML case-lifecycle gate, ADR-0267 §2)
 #   Read  + Describe: openbank.consent.events  (marketing-consent projection, ADR-0205 D4)
+#   Read  + Describe: openbank.kyb.events      (revoke an ended kyb case's mandates, #16015)
 #   Read:             group openbank-party-service
 #
 # Cert projection: Strimzi User Operator mints the keystore Secret in `messaging`;
@@ -65,6 +66,12 @@ spec:
         operations: [Read, Describe]
         host: "*"
       - resource:
+          type: topic
+          name: openbank.kyb.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
           type: group
           name: openbank-party-service
           patternType: literal
@@ -97,6 +104,13 @@ spec:
       - resource:
           type: topic
           name: openbank.dlq.party.kyc-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # #16015: SmallRye dead-letter topic for the `kyb-events-in` channel (same reasoning as above).
+      - resource:
+          type: topic
+          name: openbank.dlq.party.kyb-events-in
           patternType: literal
         operations: [Write, Describe]
         host: "*"

@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.21.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.21.1...sanctions-service-v0.21.2) (2026-11-15)
+
+
+### Bug Fixes
+
+* **sanctions:** never demote a whole-name HIT on token structure ([#16284](https://github.com/JiRaska/open-bank-oss/issues/16284)) ([a7b2cfb](https://github.com/JiRaska/open-bank-oss/commit/a7b2cfb02a51b10b44b0f79ca0a21c7b324e2702))
+
+## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.21.0...sanctions-service-v0.21.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **sanctions:** stop a shared given name from matching unrelated listed persons ([#16258](https://github.com/JiRaska/open-bank-oss/issues/16258)) ([4dba082](https://github.com/JiRaska/open-bank-oss/commit/4dba0828e08465f48d5f6be6197921bc49421166))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.20.0...sanctions-service-v0.21.0) (2026-11-14)
+
+
+### Features
+
+* **sanctions:** load FATF jurisdiction statements of October 2026 ([#16097](https://github.com/JiRaska/open-bank-oss/issues/16097)) ([4d7b4eb](https://github.com/JiRaska/open-bank-oss/commit/4d7b4eb09e18df7320e93069832a7f70e6153393))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.19.1...sanctions-service-v0.20.0) (2026-11-13)
+
+
+### Features
+
+* **sanctions:** ongoing monitoring by delta with a monitored-subject registry (off by default) ([#15897](https://github.com/JiRaska/open-bank-oss/issues/15897)) ([c0a0ea5](https://github.com/JiRaska/open-bank-oss/commit/c0a0ea5b80530c84a0fb1e4e7fd60b854a2b3bfd))
+
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.19.0...sanctions-service-v0.19.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **sanctions:** record the authenticated principal as reviewer, not a body field ([#15812](https://github.com/JiRaska/open-bank-oss/issues/15812)) ([416a88c](https://github.com/JiRaska/open-bank-oss/commit/416a88c0721936881d0ffaab274739ff1aac86b0)), closes [#15748](https://github.com/JiRaska/open-bank-oss/issues/15748)
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.6...sanctions-service-v0.19.0) (2026-11-12)
 
 

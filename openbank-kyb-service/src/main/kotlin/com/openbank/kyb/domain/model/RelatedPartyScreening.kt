@@ -6,6 +6,7 @@ package com.openbank.kyb.domain.model
 
 import java.security.MessageDigest
 import java.time.Instant
+import java.time.LocalDate
 
 /** Why a subject is on the case. A person who is both keeps the first role found; see [CaseScreening.subjectsOf]. */
 enum class ScreeningSubjectKind {
@@ -162,7 +163,12 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
         val known = subjects.associateBy { it.key }
         val freshKeys = fresh.map { it.key }.toSet()
         val now = fresh.map { known[it.key]?.copy(kind = it.kind, name = it.name, current = true) ?: it }
-        val leftWithFinding = subjects.filter { it.key !in freshKeys && it.finding }.map { it.copy(current = false) }
+        val absent = subjects.filter { it.key !in freshKeys }
+        // The ownership lookup could not be made, so a subject's absence from [fresh] proves
+        // nothing: NOBODY is treated as having left. An outage may add subjects, never remove one
+        // — a removal would also withdraw that person from ongoing monitoring.
+        if (ownerSource == UboSource.UNAVAILABLE) return CaseScreening(now + absent, ownerSource)
+        val leftWithFinding = absent.filter { it.finding }.map { it.copy(current = false) }
         return CaseScreening(now + leftWithFinding, ownerSource)
     }
 
@@ -177,11 +183,7 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
         reason: String,
         at: Instant,
     ): CaseScreening {
-        require(disposition != FindingDisposition.OPEN) { "a disposition must be CLEARED_FALSE_POSITIVE or CONFIRMED" }
-        require(operator.isNotBlank()) { "the deciding operator must be identified" }
-        require(reason.trim().length >= MIN_REASON) {
-            "a disposition needs a reason of at least $MIN_REASON characters"
-        }
+        val checked = DispositionRule.checked(disposition, operator, reason)
         val subject = subjects.firstOrNull { it.key == subjectKey }
             ?: throw IllegalArgumentException("no screened subject '$subjectKey' on this case")
         if (!subject.findingOpen) throw CaseTransitionException("subject '$subjectKey' has no open finding")
@@ -193,7 +195,7 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
                     it.copy(
                         disposition = disposition,
                         disposedBy = operator,
-                        dispositionReason = reason.trim(),
+                        dispositionReason = checked,
                         disposedAt = at,
                     )
                 }
@@ -203,7 +205,7 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
 
     companion object {
         private const val KEY_HEX_CHARS = 24
-        const val MIN_REASON = 10
+        const val MIN_REASON = DispositionRule.MIN_REASON
 
         /**
          * The people and the entity to screen. A beneficial owner that is itself a company is
@@ -232,6 +234,58 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
             return all.filter { it.name.isNotBlank() }.distinctBy { it.key }
         }
 
+        /**
+         * What the register says about each subject besides its name, keyed like [subjectsOf].
+         *
+         * Sent with the screen so a name match can be confirmed or ruled out on date of birth and
+         * nationality, and so an entity registered in a listed jurisdiction is caught without a
+         * name match at all. Deliberately NOT stored on [ScreeningSubject]: it is re-derived from
+         * the extract on every screen, so a persisted screening never disagrees with the register.
+         * A subject is keyed by its NAME, so two listings under one key may be one person (a
+         * director who is also an owner) or two people who share a name. Listings that do not
+         * contradict each other are merged, so complementary facts travel together; listings that
+         * DO contradict (a different country, date of birth or nationality) are kept apart and each
+         * is screened, because the screen cannot be sent two countries and dropping either one could
+         * drop a jurisdiction match. Every subject therefore maps to one or more identities.
+         */
+        fun identitiesOf(extract: RegistryExtract, owners: List<BeneficialOwner>): Map<String, List<SubjectIdentity>> {
+            val found = mutableMapOf<String, MutableList<SubjectIdentity>>()
+            fun put(name: String, organisation: Boolean, identity: SubjectIdentity) {
+                if (name.isBlank()) return
+                val list = found.getOrPut(keyOf(name, organisation)) { mutableListOf() }
+                val i = list.indexOfFirst { it.compatibleWith(identity) }
+                if (i < 0) list.add(identity) else list[i] = list[i].orElse(identity)
+            }
+            put(
+                extract.legalName,
+                !extract.isSoleTrader,
+                SubjectIdentity(country = extract.identifier.country ?: extract.registeredAddress?.countryCode),
+            )
+            extract.representatives.forEach {
+                put(
+                    it.fullName,
+                    false,
+                    SubjectIdentity(country = it.address?.countryCode, dateOfBirth = it.dateOfBirth),
+                )
+            }
+            owners.forEach {
+                put(
+                    it.fullName,
+                    it.corporate,
+                    if (it.corporate) {
+                        SubjectIdentity(country = it.countryRegistered)
+                    } else {
+                        SubjectIdentity(
+                            country = it.countryOfResidence,
+                            dateOfBirth = it.dateOfBirth,
+                            nationality = it.nationality,
+                        )
+                    },
+                )
+            }
+            return found
+        }
+
         private fun subject(kind: ScreeningSubjectKind, name: String, organisation: Boolean) = ScreeningSubject(
             key = keyOf(name, organisation),
             kind = kind,
@@ -251,4 +305,28 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
             return digest.joinToString("") { "%02x".format(it) }.take(KEY_HEX_CHARS)
         }
     }
+}
+
+/** Facts about a screened subject besides its name; every field is optional because registers differ. */
+data class SubjectIdentity(
+    /** ISO 3166-1 alpha-2: registration country of an entity, residence of a person. */
+    val country: String? = null,
+    val dateOfBirth: LocalDate? = null,
+    val nationality: String? = null,
+    val aliases: List<String> = emptyList(),
+) {
+    /** True when no field is set on both sides with different values, so both may describe one subject. */
+    fun compatibleWith(other: SubjectIdentity): Boolean = agrees(country, other.country) &&
+        agrees(dateOfBirth, other.dateOfBirth) &&
+        agrees(nationality, other.nationality)
+
+    private fun <T> agrees(a: T?, b: T?) = a == null || b == null || a == b
+
+    /** This identity, with gaps filled from [other]. */
+    fun orElse(other: SubjectIdentity) = SubjectIdentity(
+        country = country ?: other.country,
+        dateOfBirth = dateOfBirth ?: other.dateOfBirth,
+        nationality = nationality ?: other.nationality,
+        aliases = (aliases + other.aliases).distinct(),
+    )
 }

@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.12.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.11.1...customer-edge-v1.12.0) (2026-11-15)
+
+
+### Features
+
+* **customer-edge:** create delegated payments bound to their spend reservation ([#16166](https://github.com/JiRaska/open-bank-oss/issues/16166)) ([0369677](https://github.com/JiRaska/open-bank-oss/commit/03696770637439da5f1a61a58a5371acd1bfe047))
+
+## [1.11.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.11.0...customer-edge-v1.11.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **customer-edge:** gate account detail and statement reads on their own capability (ADR-0375 D7) ([#15879](https://github.com/JiRaska/open-bank-oss/issues/15879)) ([747573d](https://github.com/JiRaska/open-bank-oss/commit/747573dc3c8e3b90ca14fa3645bec80b48c846c9))
+
+## [1.11.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.10.0...customer-edge-v1.11.0) (2026-11-13)
+
+
+### Features
+
+* **customer-edge,transaction,ledger:** scope synthetic transfer canary ([#15669](https://github.com/JiRaska/open-bank-oss/issues/15669)) ([96f24f2](https://github.com/JiRaska/open-bank-oss/commit/96f24f28f5ac894be0821ef939a0d7019a19abc4))
+
 ## [1.10.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.9.0...customer-edge-v1.10.0) (2026-11-12)
 
 

@@ -32,6 +32,8 @@ dependencies {
 
     // NO framework dependencies here — same rule as openbank-libs-domain (ADR-0002, #3670).
 
+    // The original golden corpus is test-only and reuses this module's production runner.
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)

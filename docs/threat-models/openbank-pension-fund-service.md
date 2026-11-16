@@ -58,6 +58,13 @@ contact data.
    `compliance-read-any` lets the shared service-account reach it. Proven by `opa test` (must-ALLOW/must-DENY) and by `opa eval`
    on the materialised bundle, including the sabotage run with the exclusion removed (the shared
    account is then admitted by `operator-read-any`).
+   Transport (#12468): NetworkPolicy in `pension-fund` admits the `tax-reporting` namespace,
+   derived from tax-reporting's `PENSION_FUND_SERVICE_URL`, which targets the private-CA TLS
+   listener (8443, TLSv1.3; the caller trusts only `openbank-ca` and verifies the hostname).
+   Disclosure: aggregate fund figures only, no holdings or participant data. Elevation: the
+   principal holds no other grant here — not holdings, orders or NAV writes. 8443 requires a
+   client certificate (tax-reporting presents `tax-reporting-internal-tls`); the certificate is
+   transport authentication only and the OIDC bearer still identifies the caller.
 6. The REST exception mappers (#12442 observability) now count optimistic-lock conflicts on the
    unit holding (`optimisticLockConflict("unit_holding")`) before answering 409. The boundary
    itself is unchanged: same status, same body, no new route or caller; the metric carries a
@@ -226,3 +233,7 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
+
+The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `PENSION_FUND_SERVICE_URL=https://pension-fund-service.pension-fund.svc:8443`. This is the period-end fund aggregate read already admitted for `service-account-openbank-tax-reporting` alone. It is now reachable in the deployed pod. Transport is the 8443 client-auth-required listener (see "Required client authentication on the parallel TLS listener"), with the server hostname verified. Residual risk: none new.

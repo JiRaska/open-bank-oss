@@ -49,7 +49,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sanctions-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "1410a8048c8aca12"
+        openbank.tech/policy-checksum: "c6e6bef7aae51a3a"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -60,7 +60,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sanctions-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sanctions-service:sandbox-27e19a17@sha256:408436ba9b203ff2dfcc740a84f0a6786c40a4e289e2c0d9588730c4a4459e2c
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sanctions-service:sandbox-ab085d99@sha256:2655de7652e1a2d397b04268a0905eab3dee225f2cbf1c3e69908381c86de348
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -74,6 +74,10 @@ spec:
             # remains for existing callers until their independently reviewed migrations complete.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
@@ -157,6 +161,23 @@ spec:
             # in openbank.authz.decisions, none blocks) and restore the allowlist entry in
             # .github/scripts/check-authz-enforce-money-path.py.
             - name: AUTHZ_ENFORCE
+              value: "true"
+            # Four-eyes ENFORCED (ADR-0155, #15748): sanctions.clear (deciding a screening hit,
+            # rules.yaml four_eyes.verbs `clear`) answers 202 + approvalId until a DIFFERENT
+            # operator approves it; the maker's retry carries X-Approval-Id (admin-ui /sanctions
+            # review form + checker queue). Human-only: POST /review admits ROLE_OPERATOR/ADMIN
+            # and no rule grants sanctions.clear to a service-account, so no screening caller is
+            # paused (they call sanctions.create). Approvals live in the Redis above.
+            # Rollback: set "false". Gate: four-eyes-enforce-deployed.
+            - name: AUTHZ_FOUR_EYES_ENFORCE
+              value: "true"
+            # Ongoing monitoring of registered subjects (ADR-0376): re-screens the monitored
+            # registry against every committed list change (delta, every 60s, bounded per run)
+            # and sweeps each subject at the configured interval. It only opens the registry;
+            # subjects arrive from callers that enable their own registration switch, so turning
+            # this on alone produces no finding. SanctionsMonitoringCronIT drives the real cron.
+            # Rollback: set "false" (registration then answers 503; queued work is kept).
+            - name: SANCTIONS_MONITORING_ENABLED
               value: "true"
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"

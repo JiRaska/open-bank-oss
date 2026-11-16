@@ -75,6 +75,16 @@ Assets protected, in priority order:
    fraud-rate dataset RTS Art. 18 needs and the evidence for every verdict.
 4. **Behavioural aggregates** (Phase 2) — per-account/per-party velocity counters, known-payee
    sets, device history; derived from Kafka domain events.
+5. **Counterparty pseudonyms** (`payee_history.payee_identifier`, ADR-0377 D3) — rails send the
+   payee's normalised account identifier (IBAN or domestic account) on the authenticated
+   service-to-service scoring call. fraud-service keys it on arrival with HMAC-SHA-256 under a
+   service-held secret (`openbank.fraud.counterparty-hmac.key` + `key-id`, value `cp2:<keyId>:<hex>`)
+   and stores only that keyed pseudonym; the raw identifier is never persisted, logged or published.
+   An unkeyed hash would not do: the IBAN space per bank code is small enough to brute-force. The
+   pseudonym is still personal data (re-identifiable by the key holder), so key custody sits with
+   the service's secret store. With no key configured the counterparty is not used at all (metric
+   `openbank.fraud.counterparty.key.missing`) — there is no unkeyed fallback. Follow-up: rotation
+   as a dual-key read window (look up under the old and new key id, write under the new).
 
 ## 2. Data-flow diagram (textual)
 
@@ -388,3 +398,12 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+### Count-pack SHADOW epoch ledger
+
+Publishers submit signed exact replay evidence with independent approval. The ledger records the
+bounded envelope and artifact lineage in an append-only PostgreSQL table: the epoch primary key
+admits one writer per epoch, a predecessor foreign key with an `epoch - 1` check forbids gaps, a
+unique proposal id forbids reuse, and a trigger rejects every UPDATE and DELETE. Readers verify
+their selected envelope again and pin it for one evaluation. A rollback is a new approved signed
+epoch. The live threshold rules read their existing table.

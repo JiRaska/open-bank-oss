@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.39.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.39.0...account-service-v0.39.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **account,agent,aml:** reload outbound mTLS client certificates ([#16411](https://github.com/JiRaska/open-bank-oss/issues/16411)) ([13b220e](https://github.com/JiRaska/open-bank-oss/commit/13b220ea13a8f2ab089bb698d6e36bbb0d1a01de))
+
+## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.38.0...account-service-v0.39.0) (2026-11-13)
+
+
+### Features
+
+* **account:** serve the grant facts a rail decides authority from (ADR-0375 D1) ([#15948](https://github.com/JiRaska/open-bank-oss/issues/15948)) ([36ce5bb](https://github.com/JiRaska/open-bank-oss/commit/36ce5bb4cc46f8dbcb919fa13d1f68750011bd3e))
+
 ## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.37.0...account-service-v0.38.0) (2026-11-13)
 
 

@@ -72,6 +72,30 @@ class AmlCaseCreateCallerGuardTest {
     }
 
     @Test
+    fun `each named machine caller maps to the service the case comes from, staff to none`() {
+        val expected = mapOf(
+            "service-account-openbank-domestic-payment" to "openbank-domestic-payment",
+            "service-account-openbank-sepa-payment" to "openbank-sepa-payment",
+            "service-account-openbank-sepa-instant" to "openbank-sepa-instant",
+            "service-account-openbank-fx" to "openbank-fx-service",
+            "service-account-openbank-sdd" to "openbank-sdd-service",
+            "service-account-openbank-swift" to "openbank-swift-service",
+        )
+        assertThat(expected.keys).isEqualTo(AML_CASE_CREATE_CALLERS)
+        expected.forEach { (caller, source) ->
+            assertThat(requireNamedMachineCaller(identity(caller, "ROLE_API"))).describedAs(caller).isEqualTo(source)
+        }
+        listOf("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE").forEach { role ->
+            assertThat(requireNamedMachineCaller(jwtIdentity("openbank-admin-ui", "u-staff", role)))
+                .describedAs(role)
+                .isNull()
+        }
+        // An unknown ROLE_API caller is still refused rather than recorded as a source.
+        assertThatThrownBy { requireNamedMachineCaller(identity("service-account-openbank-mcp-service", "ROLE_API")) }
+            .isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
     fun `another service account holding ROLE_API is refused`() {
         val other = identity("service-account-openbank-mcp-service", "ROLE_API")
         assertThatThrownBy { requireNamedMachineCaller(other) }

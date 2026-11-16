@@ -33,6 +33,24 @@
 # depend on cluster-mesh reality are authored directly below instead, until
 # a real live probe exists.
 
+# evidence_refs (ADR-0379) — machine-checkable pointers to what demonstrates the
+# control, as opposed to `evidence` (prose) and `evidenceSource` (a hint). Each
+# entry is { kind, ref }:
+#   gate      a `.github/gates/gates.yaml` id — the strongest kind: it runs on
+#             every PR, and its mode (enforced/advisory) is shown with it
+#   workflow  a file under `.github/workflows/`
+#   test      a test file under a test source set (`*/src/test/`, `*/e2e/`)
+#   adr       a four-digit ADR number under `docs/adr/`
+#   path      a repo path (file or directory) that exists
+# Every ref must resolve — gate `compliance-trace` fails otherwise. The admin-ui
+# compliance hub computes a verdict from these: a control declared `enforced` or
+# `partial` with no gate, workflow or test behind it renders as `unverified`.
+#
+# max_evidence_age_days (optional) — the newest passing run of a cited gate must be
+# at most this old, read from the gate-health snapshot (ADR-0255). A gate whose
+# latest run failed does not count. Where the age cannot be read, a positive claim
+# renders `unverified` too: an unobservable age is not a fresh one.
+
 schema: openbank.compliance-controls/v1
 
 # Regulatory frameworks referenced by the controls below (for the legend).
@@ -61,6 +79,11 @@ controls:
     evidence: "Pod-scoped ingress allow-lists derived from declared GitOps edges (ADR-0081), every service namespace covered; VPC CNI enforcement via platform-tofu"
     evidenceSource: "openbank-infra/scripts/gen-network-policies.py"
     status: partial
+    evidence_refs:
+      - { kind: gate, ref: "gen-network-policies-drift-gate" }
+      - { kind: gate, ref: "netpol-coverage-kpi" }
+      - { kind: gate, ref: "network-policy-code-edges" }
+      - { kind: adr, ref: "0081" }
 
   - id: encryption-in-transit
     title: "Encryption in transit (mTLS everywhere)"
@@ -70,6 +93,10 @@ controls:
     evidence: "TLS terminated at ingress-nginx (cert-manager, letsencrypt-prod) for north-south traffic. East-west traffic between pods is NOT encrypted — no service mesh is deployed to the sandbox (openbank-infra/k8s/base/istio.yaml exists but is wired into neither ArgoCD nor Terraform; ADR-0098 notes explicitly that no mesh is deployed). In-cluster isolation today comes from NetworkPolicy default-deny (see net-segmentation), not from encryption."
     evidenceSource: "openbank-infra/gitops/components/*/ingress.yaml"
     status: planned
+    evidence_refs:
+      - { kind: gate, ref: "mtls-bearer-only" }
+      - { kind: gate, ref: "mtls-keeps-http-port" }
+      - { kind: adr, ref: "0137" }
 
   - id: strong-auth
     title: "Strong customer / service authentication"
@@ -79,6 +106,12 @@ controls:
     evidence: "Keycloak-issued JWT bearer tokens validated per-service via quarkus-oidc, wired to the openbank Keycloak realm fleet-wide (every service build.gradle.kts + application.yaml); sca-service for SCA. Not a mesh-edge check — no service mesh is deployed (see encryption-in-transit)"
     evidenceSource: "openbank-*-service/src/main/resources/application.yaml (oidc.auth-server-url)"
     status: enforced
+    evidence_refs:
+      - { kind: gate, ref: "oidc-client-configured" }
+      - { kind: gate, ref: "oidc-tls-verification-profile-scoped" }
+      - { kind: adr, ref: "0021" }
+      - { kind: adr, ref: "0086" }
+    max_evidence_age_days: 14
 
   - id: authz-least-privilege
     title: "Least-privilege authorization (default-deny)"
@@ -88,6 +121,12 @@ controls:
     evidence: "NetworkPolicy default-deny gates L3/L4 access fleet-wide (see net-segmentation); OPA fine-grained L7 authz is enforced on a subset of services, still advisory on others (ADR-0034 Phase 5) — not a mesh AuthorizationPolicy, no service mesh is deployed"
     evidenceSource: "openbank-infra/scripts/gen-network-policies.py + openbank-infra/opa/"
     status: partial
+    evidence_refs:
+      - { kind: gate, ref: "authz-enforce-money-path" }
+      - { kind: gate, ref: "authz-enforce-pdp-sidecar-parity" }
+      - { kind: gate, ref: "opa-bundle-parses" }
+      - { kind: adr, ref: "0034" }
+      - { kind: adr, ref: "0223" }
 
   - id: secrets-management
     title: "Centralised secrets management (no secrets in git)"
@@ -97,6 +136,12 @@ controls:
     evidence: "HashiCorp Vault (KMS auto-unseal) + External Secrets Operator; git holds only references"
     evidenceSource: "openbank-infra/gitops/apps/vault.yaml"
     status: enforced
+    evidence_refs:
+      - { kind: workflow, ref: "secret-scan.yml" }
+      - { kind: gate, ref: "appyaml-secret-literals" }
+      - { kind: adr, ref: "0007" }
+      - { kind: adr, ref: "0099" }
+    max_evidence_age_days: 14
 
   - id: supply-chain-integrity
     title: "Software supply-chain integrity (signed images)"
@@ -106,6 +151,10 @@ controls:
     evidence: "Kyverno Cosign image-signature verification + Rekor transparency log"
     evidenceSource: "openbank-infra/gitops/components/kyverno/verify-images-policy.yaml"
     status: audit
+    evidence_refs:
+      - { kind: gate, ref: "no-handrolled-cosign" }
+      - { kind: gate, ref: "fleet-attestation-classifier" }
+      - { kind: adr, ref: "0121" }
     derivedFrom: supplyChain.enforced
 
   - id: runtime-detection
@@ -116,6 +165,8 @@ controls:
     evidence: "Falco eBPF DaemonSet on app + observability nodes; stock ruleset, json events to Loki via Alloy"
     evidenceSource: "openbank-infra/gitops/apps/falco.yaml"
     status: audit
+    evidence_refs:
+      - { kind: path, ref: "openbank-infra/gitops/apps/falco.yaml" }
 
   - id: vuln-scanning
     title: "Vulnerability & secret scanning in CI"
@@ -125,6 +176,11 @@ controls:
     evidence: "Trivy (fs/config), CodeQL (SAST), Gitleaks (secrets) on every PR"
     evidenceSource: ".github/workflows/security.yml"
     status: enforced
+    evidence_refs:
+      - { kind: workflow, ref: "security.yml" }
+      - { kind: gate, ref: "vex-overlay-coverage" }
+      - { kind: adr, ref: "0030" }
+    max_evidence_age_days: 14
 
   - id: image-scanning
     title: "Container image scanning (deploy gate + registry re-scan)"
@@ -134,6 +190,9 @@ controls:
     evidence: "Trivy scan of pushed images gates the deploy pipeline (fixable CRITICAL blocks); ECR scan-on-push re-evaluates stored images on CVE-db refresh"
     evidenceSource: ".github/workflows/auto-deploy.yml"
     status: enforced
+    evidence_refs:
+      - { kind: workflow, ref: "auto-deploy.yml" }
+      - { kind: adr, ref: "0121" }
 
   - id: audit-trail
     title: "Immutable audit trail"
@@ -143,6 +202,11 @@ controls:
     evidence: "audit-service with transactional outbox; tamper-evident event stream"
     evidenceSource: "openbank-audit-service"
     status: enforced
+    evidence_refs:
+      - { kind: gate, ref: "audit-money-path-subscription" }
+      - { kind: gate, ref: "audit-anchor-offline-verifier-unit-test" }
+      - { kind: adr, ref: "0133" }
+    max_evidence_age_days: 14
 
   - id: sanctions-screening
     title: "Synchronous sanctions / AML screening gate"
@@ -152,6 +216,13 @@ controls:
     evidence: "sanctions-service synchronous screening gate in payment execution (ADR-0032)"
     evidenceSource: "docs/adr/0032-synchronous-sanctions-aml-screening-gate-in-payment-execution.md"
     status: enforced
+    evidence_refs:
+      - { kind: gate, ref: "rail-screening-port" }
+      - { kind: test, ref: "openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/it/SanctionsScreeningProfileIT.kt" }
+      - { kind: test, ref: "openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/application/usecase/ScreeningThresholdOrderingTest.kt" }
+      - { kind: adr, ref: "0032" }
+      - { kind: path, ref: "openbank-sanctions-service" }
+    max_evidence_age_days: 14
 
   - id: observability
     title: "Operational monitoring & telemetry"
@@ -161,6 +232,11 @@ controls:
     evidence: "Prometheus (metrics) + Tempo (traces) + Loki (logs), unified in Grafana"
     evidenceSource: "openbank-infra/gitops/apps/kube-prometheus-stack.yaml"
     status: enforced
+    evidence_refs:
+      - { kind: gate, ref: "dashboard-metric-emitted" }
+      - { kind: gate, ref: "alert-metric-emitted" }
+      - { kind: adr, ref: "0077" }
+    max_evidence_age_days: 14
 
   - id: data-classification
     title: "Data classification & retention"
@@ -170,6 +246,9 @@ controls:
     evidence: "Per-service data classification + retention policy in the governance manifest"
     evidenceSource: "openbank-admin-ui/src/lib/governance/manifest.ts"
     status: partial
+    evidence_refs:
+      - { kind: gate, ref: "governance-lineage-vs-code-audit" }
+      - { kind: adr, ref: "0118" }
 
   - id: threat-modelling
     title: "Threat modelling for critical services"
@@ -179,6 +258,10 @@ controls:
     evidence: "STRIDE threat models for money-path services (ADR-0030)"
     evidenceSource: "docs/threat-models/"
     status: partial
+    evidence_refs:
+      - { kind: gate, ref: "threat-model-coverage" }
+      - { kind: gate, ref: "threat-model-claims-resolve" }
+      - { kind: adr, ref: "0030" }
 
   - id: business-continuity
     title: "Business continuity & disaster recovery (RTO/RPO)"
@@ -188,6 +271,10 @@ controls:
     evidence: "Prioritised recovery plan, startup tiers, compliance gate (BCP)"
     evidenceSource: "openbank-admin-ui /docs/bcp"
     status: partial
+    evidence_refs:
+      - { kind: gate, ref: "cnpg-backup-declared-gate" }
+      - { kind: gate, ref: "dr-restore-orchestration" }
+      - { kind: adr, ref: "0134" }
 
   - id: fraud-monitoring
     title: "Transaction fraud monitoring (real-time risk scoring)"
@@ -197,6 +284,11 @@ controls:
     evidence: "openbank-fraud-service skeleton: deterministic versioned rule engine + POST /api/v1/fraud/score verdict contract + scoring audit trail (ADR-0084 Phase 1). Not yet wired into payment surfaces; behavioural velocity aggregates and surface integration are Phase 2."
     evidenceSource: "openbank-fraud-service/src/main/kotlin/com/openbank/fraud"
     status: partial
+    evidence_refs:
+      - { kind: test, ref: "openbank-fraud-service/src/test/kotlin/com/openbank/fraud/integration/FraudApiIT.kt" }
+      - { kind: test, ref: "openbank-fraud-service/src/test/kotlin/com/openbank/fraud/application/usecase/FraudScoringServiceTest.kt" }
+      - { kind: path, ref: "openbank-fraud-service" }
+      - { kind: adr, ref: "0084" }
 
   - id: complaints-handling
     title: "Complaints handling (statutory deadlines, register, reporting)"
@@ -206,6 +298,8 @@ controls:
     evidence: "Complaint aggregate with statutory deadline clock, register projection, root-cause loop (ADR-0085)"
     evidenceSource: "docs/adr/0085-complaints-handling.md"
     status: planned
+    evidence_refs:
+      - { kind: adr, ref: "0085" }
 
   - id: dast-fuzzing
     title: "Dynamic API security testing (contract-driven fuzzing)"
@@ -215,3 +309,7 @@ controls:
     evidence: "Weekly schemathesis fuzz of service OpenAPI surfaces — no-5xx property + uniform auth enforcement (unauthenticated v1)"
     evidenceSource: ".github/workflows/api-fuzz.yml"
     status: audit
+    evidence_refs:
+      - { kind: workflow, ref: "api-fuzz.yml" }
+      - { kind: workflow, ref: "dast-zap-baseline.yml" }
+      - { kind: gate, ref: "dast-zap-coverage-selftest" }

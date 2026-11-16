@@ -55,6 +55,8 @@ class FraudScorePactConsumerTest {
         rail = "FX",
         accountId = UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2"),
         counterpartyId = null,
+        // Own-account conversion: CounterpartyRef.Unknown, so no counterparty goes on the wire.
+        initiationMode = "CUSTOMER_PRESENT",
     )
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)

@@ -34,6 +34,7 @@ class SwiftService(
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
     private val redrive: SwiftSettlementRedrivePort,
+    private val screening: SwiftSanctionsScreening,
     @ConfigProperty(name = "openbank.swift.scheme-submission.enabled", defaultValue = "false")
     private val schemeSubmissionEnabled: Boolean,
 ) : SwiftUseCase {
@@ -49,6 +50,9 @@ class SwiftService(
          * list), so this is a live attribution upgrade, not a forward-looking one.
          */
         private const val SOURCE_SERVICE = "swift-service"
+
+        /** [SwiftMessage.rejectionReason] of a message the sanctions gate refused to release. */
+        const val SANCTIONS_REJECTION_REASON = "SANCTIONS_HIT"
     }
 
     private val log = Logger.getLogger(SwiftService::class.java)
@@ -118,6 +122,24 @@ class SwiftService(
     private suspend fun submitToScheme(message: SwiftMessage): SwiftMessage {
         if (!schemeSubmissionEnabled || message.messageType != SwiftMessageType.MT103) return message
         if (message.status != SwiftStatus.VALIDATED) return message
+
+        // ADR-0032: no MT103 leaves without both parties screened. HOLD keeps it VALIDATED (the
+        // fail-closed state the gateway-unavailable path already uses); REJECT is terminal.
+        when (screening.screen(message)) {
+            SwiftScreeningVerdict.RELEASE -> Unit
+            SwiftScreeningVerdict.HOLD -> {
+                log.warnf("SWIFT message %s held in VALIDATED by sanctions screening", message.id)
+                return message
+            }
+            SwiftScreeningVerdict.REJECT -> {
+                val rejected = message.copy(
+                    status = SwiftStatus.REJECTED,
+                    rejectionReason = SANCTIONS_REJECTION_REASON,
+                    updatedAt = Instant.now(clock),
+                )
+                return repo.saveWithOutbox(rejected, statusChangedEvent(rejected))
+            }
+        }
 
         return try {
             val outcome = schemeGatewayPort.submit(message)

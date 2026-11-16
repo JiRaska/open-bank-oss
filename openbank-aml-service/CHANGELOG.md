@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.21.2](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.21.1...aml-service-v0.21.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **account,agent,aml:** reload outbound mTLS client certificates ([#16411](https://github.com/JiRaska/open-bank-oss/issues/16411)) ([13b220e](https://github.com/JiRaska/open-bank-oss/commit/13b220ea13a8f2ab089bb698d6e36bbb0d1a01de))
+
+## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.21.0...aml-service-v0.21.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **swift:** screen debtor and beneficiary against sanctions before MT103 release ([#16219](https://github.com/JiRaska/open-bank-oss/issues/16219)) ([1936798](https://github.com/JiRaska/open-bank-oss/commit/19367984d9c563abd7e71a69ca7dd326655eb0bf))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.20.0...aml-service-v0.21.0) (2026-11-14)
+
+
+### Features
+
+* **aml:** record which service owns a case's movement, from the authenticated caller ([#16168](https://github.com/JiRaska/open-bank-oss/issues/16168)) ([6bdd3c8](https://github.com/JiRaska/open-bank-oss/commit/6bdd3c83dd0c78a9a0f1eea07c9a0e7b7432c989))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.19.0...aml-service-v0.20.0) (2026-11-14)
+
+
+### Features
+
+* **aml:** open a case per held payment behind its off switch ([#16041](https://github.com/JiRaska/open-bank-oss/issues/16041)) ([e521803](https://github.com/JiRaska/open-bank-oss/commit/e521803a345b5841f831ffe01e9e5ee781ec9b9a))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.18.0...aml-service-v0.19.0) (2026-11-13)
+
+
+### Features
+
+* **aml:** persist immutable shadow pack epochs ([#15684](https://github.com/JiRaska/open-bank-oss/issues/15684)) ([791cbf1](https://github.com/JiRaska/open-bank-oss/commit/791cbf15681415671b6f01ac8c6c2fa7659c2320))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.17.0...aml-service-v0.18.0) (2026-11-13)
+
+
+### Features
+
+* **aml:** four-eyes flag on cases and the outcome vocabulary endpoint ([#15947](https://github.com/JiRaska/open-bank-oss/issues/15947)) ([d9db9f4](https://github.com/JiRaska/open-bank-oss/commit/d9db9f466ec97ad6094b54327a373c6f44a2a7b0))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.16.0...aml-service-v0.17.0) (2026-11-13)
+
+
+### Features
+
+* **aml:** four-eyes monitoring dispositions and the suspicious-transaction report (ADR-0371 slice 3) ([#15742](https://github.com/JiRaska/open-bank-oss/issues/15742)) ([4ab7b54](https://github.com/JiRaska/open-bank-oss/commit/4ab7b54e9ed2a60e23c831cc8151ee72d55d62d0))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.15.0...aml-service-v0.16.0) (2026-11-12)
 
 

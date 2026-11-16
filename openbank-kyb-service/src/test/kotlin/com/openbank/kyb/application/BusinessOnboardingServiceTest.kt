@@ -80,10 +80,12 @@ import com.openbank.kyb.domain.model.RepresentationRule
 import com.openbank.kyb.domain.model.Representative
 import com.openbank.kyb.domain.model.ScreeningFindingException
 import com.openbank.kyb.domain.model.ScreeningPendingException
+import com.openbank.kyb.domain.model.ScreeningSubject
 import com.openbank.kyb.domain.model.ScreeningSubjectKind
 import com.openbank.kyb.domain.model.ScreeningVerdict
 import com.openbank.kyb.domain.model.SignerStatus
 import com.openbank.kyb.domain.model.SourceOfFunds
+import com.openbank.kyb.domain.model.SubjectIdentity
 import com.openbank.kyb.domain.model.UboFinding
 import com.openbank.kyb.domain.model.UboSource
 import com.openbank.kyb.infrastructure.registry.DemoEntity
@@ -155,6 +157,7 @@ class BusinessOnboardingServiceTest {
             it.status ==
                 status
         }
+        override suspend fun listMonitoringHolds(page: Int, size: Int) = store.values.filter { it.monitoring.hold }
     }
 
     private lateinit var service: BusinessOnboardingService
@@ -231,6 +234,11 @@ class BusinessOnboardingServiceTest {
     /** sanctions-service double: answers by NAME, records every request, and can be taken down. */
     private inner class FakeScreening : RelatedPartyScreeningPort {
         val answers = mutableMapOf<String, RelatedPartyScreeningResult>()
+        val answersByCountry = mutableMapOf<String, RelatedPartyScreeningResult>()
+        val replayed = mutableMapOf<String, RelatedPartyScreeningResult>()
+
+        /** Recorded by sanctions-service, but the reply never reaches this service. */
+        val lostReplyFor = mutableSetOf<String>()
         val requests = mutableListOf<RelatedPartyScreeningRequest>()
         var down = false
         val downFor = mutableSetOf<String>()
@@ -240,7 +248,16 @@ class BusinessOnboardingServiceTest {
             if (down || request.name in downFor) {
                 throw RelatedPartyScreeningUnavailableException(IllegalStateException("sanctions-service down"))
             }
-            return answers[request.name] ?: RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, false, null)
+            // Like sanctions-service: a key already answered replays the stored verdict.
+            val answer = replayed.getOrPut(request.idempotencyKey) {
+                request.identity.country?.let { answersByCountry[it] }
+                    ?: answers[request.name]
+                    ?: RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, false, null)
+            }
+            if (request.name in lostReplyFor) {
+                throw RelatedPartyScreeningUnavailableException(IllegalStateException("reply lost"))
+            }
+            return answer
         }
     }
 
@@ -1060,6 +1077,65 @@ class BusinessOnboardingServiceTest {
             assertThat(hitEvent).isEqualTo(ordinaryEvent)
             assertThat(CaseResponse.from(hit, initiator).screening).isNull()
         }
+
+    /**
+     * Subjects are keyed by name, so two different people sharing one are one subject. Their
+     * contradicting facts must not be merged first-wins: the second person's country would be
+     * dropped, and with it the jurisdiction match that only that country produces.
+     */
+    @Test
+    fun `two owners sharing a name are each screened, and the worse answer decides`(): Unit = runBlocking {
+        screeningOn()
+        uboOwners += owner("Jan Dvořák", corporate = false).copy(countryOfResidence = "CZ")
+        uboOwners += owner("Jan Dvořák", corporate = false).copy(countryOfResidence = "IR")
+        screeningPort.answersByCountry["IR"] = RelatedPartyScreeningResult(ScreeningVerdict.HIT, false, "IR")
+        val id = soleCaseReadyToSign()
+        readyToSign(id, initiator)
+
+        val sent = screeningPort.requests.filter { it.name == "Jan Dvořák" }
+        assertThat(sent.map { it.identity.country }).containsExactlyInAnyOrder("CZ", "IR")
+        assertThat(sent.map { it.idempotencyKey }.toSet()).hasSize(2)
+        val subject = service.get(id).screening!!.subjects.single { it.name == "Jan Dvořák" }
+        assertThat(subject.sanctions).isEqualTo(ScreeningVerdict.HIT)
+    }
+
+    /**
+     * sanctions-service replays by idempotency key. A screen recorded CLEAR whose reply was lost
+     * must not answer for the subject once the register reports different facts about it.
+     */
+    @Test
+    fun `a changed identity is screened afresh instead of replaying the verdict stored for the old one`(): Unit =
+        runBlocking {
+            screeningOn()
+            val dvorak = owner("Jan Dvořák", corporate = false).copy(countryOfResidence = "CZ")
+            uboOwners += dvorak
+            screeningPort.answersByCountry["IR"] = RelatedPartyScreeningResult(ScreeningVerdict.HIT, false, "IR")
+            screeningPort.lostReplyFor += "Jan Dvořák"
+            val id = soleCaseReadyToSign()
+            readyToSign(id, initiator)
+            assertThat(service.get(id).screening!!.subjects.single { it.name == "Jan Dvořák" }.sanctions)
+                .isEqualTo(ScreeningVerdict.PENDING)
+
+            uboOwners[uboOwners.indexOf(dvorak)] = dvorak.copy(countryOfResidence = "IR")
+            screeningPort.lostReplyFor.clear()
+            val after = service.screening.screened(service.get(id))
+            assertThat(after.screening!!.subjects.single { it.name == "Jan Dvořák" }.sanctions)
+                .isEqualTo(ScreeningVerdict.HIT)
+        }
+
+    @Test
+    fun `an unchanged identity keeps its idempotency key, so a retry replays`() {
+        val caseId = UUID.randomUUID()
+        val subject = ScreeningSubject("k", ScreeningSubjectKind.BENEFICIAL_OWNER, "Jan Dvořák", organisation = false)
+        val cz = SubjectIdentity(country = "CZ", dateOfBirth = java.time.LocalDate.of(1970, 1, 1))
+        val key = RelatedPartyScreeningService.screenKey(caseId, subject, cz)
+        assertThat(RelatedPartyScreeningService.screenKey(caseId, subject, cz.copy(country = " cz "))).isEqualTo(key)
+        assertThat(RelatedPartyScreeningService.screenKey(caseId, subject, cz.copy(country = "IR"))).isNotEqualTo(key)
+        assertThat(
+            RelatedPartyScreeningService.screenKey(caseId, subject, cz.copy(nationality = "CZ")),
+        ).isNotEqualTo(key)
+        assertThat(key).startsWith("kyb-screen:$caseId:${subject.key}:")
+    }
 
     /** Completeness is about who is on the case NOW, not who was on it when the screen ran. */
     @Test

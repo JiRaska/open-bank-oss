@@ -20,8 +20,9 @@ class AmlCaseEntity : PanacheEntity() {
     @Column(name = "idempotency_key", nullable = false, unique = true)
     lateinit var idempotencyKey: String
 
-    @Column(name = "party_id", nullable = false)
-    lateinit var partyId: UUID
+    /** Null while the owning party is not established (V15); see `AmlCase.partyId`. */
+    @Column(name = "party_id")
+    var partyId: UUID? = null
 
     @Column(name = "account_id")
     var accountId: UUID? = null
@@ -74,4 +75,44 @@ class AmlCaseEntity : PanacheEntity() {
     /** #10916: request fingerprint the case was created under; null for rows predating V9. */
     @Column(name = "request_hash", length = 64)
     var requestHash: String? = null
+
+    /** `CaseOrigin` name; null for rows written before V15 or by a pod that predates it. */
+    @Column(name = "origin", length = 32)
+    var origin: String? = null
+
+    /** Service that opened the case, from its authenticated caller; null for manual cases and rows before V17. */
+    @Column(name = "movement_service", length = 64)
+    var movementService: String? = null
+
+    /** When the resolution sweep last tried and failed to find this case's party; orders the sweep. */
+    @Column(name = "party_resolution_attempted_at")
+    var partyResolutionAttemptedAt: Instant? = null
+
+    // V18, ADR-0374 point 3: the four-eyes proposal of a held payment's case. Nullable and written
+    // only by the hold-decision routes; a pod without these mappings never reads or writes them.
+    @Column(name = "hold_proposal_outcome", length = 16)
+    var holdProposalOutcome: String? = null
+
+    @Column(name = "hold_proposal_reason")
+    var holdProposalReason: String? = null
+
+    @Column(name = "hold_proposed_by")
+    var holdProposedBy: String? = null
+
+    @Column(name = "hold_proposed_at")
+    var holdProposedAt: Instant? = null
+
+    // V19: the proposer's PERSON (four-eyes compares persons, not accounts), the proposal's expiry,
+    // and its withdrawal by the proposer.
+    @Column(name = "hold_proposer_person_id", length = 64)
+    var holdProposerPersonId: String? = null
+
+    @Column(name = "hold_proposal_expires_at")
+    var holdProposalExpiresAt: Instant? = null
+
+    @Column(name = "hold_proposal_withdrawn_by")
+    var holdProposalWithdrawnBy: String? = null
+
+    @Column(name = "hold_proposal_withdrawn_at")
+    var holdProposalWithdrawnAt: Instant? = null
 }

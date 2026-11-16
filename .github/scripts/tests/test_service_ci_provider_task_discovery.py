@@ -285,6 +285,15 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
                 self.assertIn('"pactbroker.consumerversionselectors.rawjson"', init_script)
                 self.assertIn('[[consumer: consumer, mainBranch: true]]', init_script)
                 self.assertIn('"pactbroker.includeWipPactsSince": ""', init_script)
+                # Gradle 9 rejects resolving a configuration from a
+                # projectsEvaluated listener (IllegalResolutionException:
+                # "attempted without an exclusive lock"), so the classpath
+                # may be read only inside an execution-time action.
+                evaluated = init_script[init_script.index("gradle.projectsEvaluated"):]
+                configuration_time = evaluated.split("task.doFirst {", 1)
+                self.assertEqual(len(configuration_time), 2, "jar check must run in task.doFirst")
+                self.assertNotIn(".classpath", configuration_time[0])
+                self.assertIn("task.classpath.files", configuration_time[1].split("\n    }\n", 1)[0])
 
     def test_scoped_transaction_replay_requires_reviewed_provider_fixture(self):
         with tempfile.TemporaryDirectory() as tmp:
