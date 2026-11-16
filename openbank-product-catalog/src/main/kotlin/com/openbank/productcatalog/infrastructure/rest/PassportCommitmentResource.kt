@@ -55,8 +55,14 @@ class PassportCommitmentResource(
     suspend fun route(request: PassportRouteRequest): PassportCommitmentRoute {
         requireLendingClient()
         require(DIGEST.matches(request.revisionContentHash))
-        val route = pool.preparedQuery(ROUTE)
-            .execute(Tuple.of(request.grantId, request.partyId, request.revisionId, request.revisionContentHash, schemaId))
+        val arguments = Tuple.of(
+            request.grantId,
+            request.partyId,
+            request.revisionId,
+            request.revisionContentHash,
+            schemaId,
+        )
+        val route = pool.preparedQuery(ROUTE).execute(arguments)
             .awaitSuspending().firstOrNull() ?: throw CatalogConflictException("passport route unavailable")
         return PassportCommitmentRoute(
             hostCountry = route.getString("host_country"),
