@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.8.0...domestic-payment-v1.8.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **delegation,domestic-payment,finrep:** reload outbound mTLS client certificates ([#16413](https://github.com/JiRaska/open-bank-oss/issues/16413)) ([cbd1aeb](https://github.com/JiRaska/open-bank-oss/commit/cbd1aeb831abe581bfd0d317808ca6d49cbf3d11))
+
 ## [1.8.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.7.0...domestic-payment-v1.8.0) (2026-11-14)
 
 

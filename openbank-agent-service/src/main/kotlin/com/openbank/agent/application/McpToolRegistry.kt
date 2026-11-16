@@ -168,7 +168,20 @@ class McpToolRegistry {
                 "(match score), matchedEntity, and the last decision with its rationale.",
             inputSchema = schema("caseId" to (stringProp("UUID of the AML case") to true)),
         ),
-        AmlDecisionProposalTool.DEFINITION,
+        ToolDefinition(
+            name = AML_PROPOSE_DECISION,
+            description = "Propose a decision on an AML case for human approval (HITL). Typical use: a " +
+                "fuzzy name-only SANCTIONS_HIT that is a false positive -> CLEARED. Has NO effect on the " +
+                "case: a compliance officer approves the proposal and records the decision under their " +
+                "own identity. A written rationale (what was compared, why it is or is not a match) is " +
+                "mandatory.",
+            inputSchema = schema(
+                "caseId" to (stringProp("UUID of the AML case") to true),
+                "targetStatus" to (stringProp("One of CLEARED, BLOCKED, ESCALATED, UNDER_REVIEW") to true),
+                "rationale" to
+                    (stringProp("What was verified and why (min $MIN_RATIONALE_LENGTH chars)") to true),
+            ),
+        ),
         // ── Sanctions (compliance) ────────────────────────────────────────────
         SanctionsReviewTool.DEFINITION,
         ToolDefinition(

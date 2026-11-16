@@ -165,3 +165,12 @@ Re-drive: `submitToScheme` znovu vstoupí pro platbu v `PROCESSING` s otevřený
 SCT vs SCT_INST: požadavek na settlement nese rozlišení v `rail` (`SEPA_CT` / `SEPA_INST`), nejen v `description`. Žádné poplatkové pravidlo ani reporting schématu ho z bookingu nečte: billing nemá poplatek podle railu, transaction-service rozhoduje o zaúčtování týž den podle strany příjemce, ne podle railu (`SettlementScope`), a clearing-service má vlastní enum railů. Na drátě nese pacs.008 z `SchemeGatewayAdapter` blok `PmtTpInf`, jak vyžadují pravidla EPC: `SvcLvl/Cd=SEPA` pro oba typy a navíc `LclInstrm/Cd=INST` pro `SCT_INST`. Mapování je úplný `when` přes `SepaPaymentType`, takže nový typ si musí zvolit vlastní hodnotu. Simulátor clearingu blok validuje proti sdílenému XSD a čte ho (`ReceivedCreditTransfer.isInstant`), ale nerozhoduje podle něj. Okamžité platby běží v `openbank-sepa-instant`, který posílá stejný blok `SEPA` + `INST`.
 
 Automatické opětovné zaúčtování: protože `submitToScheme` znovu vstupuje pro zadrženou platbu, jakýkoli Temporal retry této aktivity (workflow povoluje 3 pokusy během 10 minut, např. po restartu workeru nebo timeoutu po zápisu PROCESSING) teď zavolá settlement sám. Klíč zůstává stejný a datum valuty je pevně dané datem přijetí (`booking_first_due_at`), takže požadavek je stejný jako při prvním pokusu. Každý takový neúspěšný pokus započítá `openbank_payment_unsettled_total`.
+
+## Obnova klientského certifikátu (odchozí mTLS)
+
+Každá pojmenovaná konfigurace `quarkus.tls.<name>`, kterou se služba prokazuje vůči
+naslouchání 8443 jiné služby, nastavuje `reload-period: 1h`. cert-manager klientský certifikát
+obnoví před expirací; bez této volby by proces dál předkládal ten starý, dokud by ho protistrana
+neodmítla, zatímco všechny signály expirace měřily obnovený Secret a hlásily zelenou. Po obnově
+se nový certifikát použije do hodiny, bez restartu. Gate `tls-certificate-reload` hlídá, aby
+žádná taková konfigurace nevypadla.

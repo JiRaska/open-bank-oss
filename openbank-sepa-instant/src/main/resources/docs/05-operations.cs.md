@@ -103,3 +103,12 @@ XML schématu ověří výslednou zprávu před voláním brány.
 Mění se odchozí zpráva schématu, nikoli platební API, účetní klíče či pravidla opakování.
 Použijte běžný revidovaný release a znovu sestavte konzumenty sdílené knihovny; zdrojový kód
 a lokální testy simulátoru nedokládají přijetí zprávy nasazenou externí bránou schématu.
+
+## Obnova klientského certifikátu (odchozí mTLS)
+
+Každá pojmenovaná konfigurace `quarkus.tls.<name>`, kterou se služba prokazuje vůči
+naslouchání 8443 jiné služby, nastavuje `reload-period: 1h`. cert-manager klientský certifikát
+obnoví před expirací; bez této volby by proces dál předkládal ten starý, dokud by ho protistrana
+neodmítla, zatímco všechny signály expirace měřily obnovený Secret a hlásily zelenou. Po obnově
+se nový certifikát použije do hodiny, bez restartu. Gate `tls-certificate-reload` hlídá, aby
+žádná taková konfigurace nevypadla.

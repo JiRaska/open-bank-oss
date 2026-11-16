@@ -333,6 +333,8 @@ mp:
     # under %prod: the client certificate only exists in the cluster.
     tls:
       catalog-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -343,6 +345,8 @@ mp:
             certs: /mnt/catalog-tls/ca.crt
         protocols: TLSv1.3
       ledger-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -355,6 +359,8 @@ mp:
       # Same client certificate (one identity, one private CA), separate bucket per upstream so
       # each one's paths name the service it authenticates to. #999 withholding-tax remittance.
       transaction-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -368,6 +374,8 @@ mp:
       # (8443, client auth REQUIRED), the shape account/delegation use. Same client identity,
       # separate bucket naming the upstream.
       party-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:

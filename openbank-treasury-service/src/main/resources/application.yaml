@@ -338,6 +338,8 @@ authz:
     # treasury-internal-tls certificate is mounted at /mnt/ledger-tls in the cluster only.
     tls:
       ledger-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -351,6 +353,8 @@ authz:
       # treasury-internal-tls client certificate and the same openbank-ca trust, its own bucket so
       # each edge names what it trusts.
       risk-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
