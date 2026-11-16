@@ -302,7 +302,6 @@ class RiskResource {
         @QueryParam("bookId") bookId: String?,
         @QueryParam("confidence") confidence: String?,
         @QueryParam("horizonDays") horizonDays: String?,
-        @QueryParam("includePlanned") includePlanned: String?,
     ): Response {
         val c = confidence?.takeIf { it.isNotBlank() }?.let {
             requireNotNull(it.trim().toBigDecimalOrNull()) { "query parameter 'confidence' must be a decimal number" }
