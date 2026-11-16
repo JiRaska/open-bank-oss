@@ -13,6 +13,7 @@ import type { MeasuredCert } from './status'
 
 const CERT_MANAGER = 'certmanager_certificate_expiration_timestamp_seconds'
 const STRIMZI = 'strimzi_certificate_expiration_timestamp_ms'
+const SEAL = 'openbank_document_seal_certificate_expiry_timestamp_seconds'
 
 interface PromSeries { metric?: Record<string, unknown>; value?: [number, string] }
 
@@ -62,6 +63,23 @@ export function projectStrimzi(series: PromSeries[]): MeasuredCert[] {
   return out
 }
 
+/**
+ * document-service's seal certificate gauge. `name` carries the identity (`keystore` for the
+ * organizational certificate, `ephemeral` for the DEV-ONLY fallback); any other value is dropped.
+ * Every replica reports the same certificate, so dedup by certKey collapses them per namespace.
+ */
+export function projectSeal(series: PromSeries[]): MeasuredCert[] {
+  const out: MeasuredCert[] = []
+  for (const s of series) {
+    const m = s.metric ?? {}
+    const identity = label(m, 'identity')
+    const v = Number(s.value?.[1])
+    if ((identity !== 'keystore' && identity !== 'ephemeral') || !Number.isFinite(v) || v <= 0) continue
+    out.push({ source: 'seal', namespace: label(m, 'namespace') ?? '', name: identity, issuer: '', notAfter: Math.floor(v) })
+  }
+  return out
+}
+
 export function certKey(c: MeasuredCert): string {
   return `${c.source}/${c.namespace}/${c.name}/${c.issuer}`
 }
@@ -86,15 +104,23 @@ async function instant(base: string, query: string, fetchImpl: FetchLike): Promi
 export interface Measurement {
   certs: MeasuredCert[]
   /** Which metric families answered. A family that did not answer is not "empty". */
-  reachable: { certManager: boolean; strimzi: boolean }
+  reachable: { certManager: boolean; strimzi: boolean; seal: boolean }
 }
 
 export async function measure(base: string | null, fetchImpl: FetchLike = fetch): Promise<Measurement> {
-  if (!base) return { certs: [], reachable: { certManager: false, strimzi: false } }
-  const [cm, sz] = await Promise.all([instant(base, CERT_MANAGER, fetchImpl), instant(base, STRIMZI, fetchImpl)])
+  if (!base) return { certs: [], reachable: { certManager: false, strimzi: false, seal: false } }
+  const [cm, sz, se] = await Promise.all([
+    instant(base, CERT_MANAGER, fetchImpl),
+    instant(base, STRIMZI, fetchImpl),
+    instant(base, SEAL, fetchImpl),
+  ])
   // The same target scraped by two configs yields duplicate series; one certificate counts once.
   const seen = new Set<string>()
-  const certs = [...(cm ? projectCertManager(cm) : []), ...(sz ? projectStrimzi(sz) : [])].filter((c) => {
+  const certs = [
+    ...(cm ? projectCertManager(cm) : []),
+    ...(sz ? projectStrimzi(sz) : []),
+    ...(se ? projectSeal(se) : []),
+  ].filter((c) => {
     const k = certKey(c)
     if (seen.has(k)) return false
     seen.add(k)
@@ -102,7 +128,11 @@ export async function measure(base: string | null, fetchImpl: FetchLike = fetch)
   })
   return {
     certs,
-    reachable: { certManager: cm !== null && cm.length > 0, strimzi: sz !== null && sz.length > 0 },
+    reachable: {
+      certManager: cm !== null && cm.length > 0,
+      strimzi: sz !== null && sz.length > 0,
+      seal: se !== null && se.length > 0,
+    },
   }
 }
 

@@ -20,6 +20,8 @@ export type KeyStatus =
   | 'expired'     // measured, in the past
   | 'short-lived' // minutes-long certificates issued on demand; nothing to expire
   | 'rotation'    // no expiry by design; rotation is the control
+  | 'dev-only'    // only a DEV-ONLY stand-in exists (ephemeral seal); not evidence, not healthy
+  | 'revocation'  // does not expire by itself; revocation is the risk
   | 'untracked'   // exists, expiry not observable today
   | 'unknown'     // should be observable, but the measurement is missing
 
@@ -28,7 +30,7 @@ export const CRITICAL_DAYS = 7
 
 /** One measured certificate, as projected from operator metrics. Public metadata only. */
 export interface MeasuredCert {
-  source: 'cert-manager' | 'strimzi'
+  source: 'cert-manager' | 'strimzi' | 'seal'
   namespace: string
   name: string
   issuer: string
@@ -64,6 +66,7 @@ export function matches(source: ExpirySource, cert: MeasuredCert): boolean {
   if (source.type === 'strimzi') {
     return cert.source === 'strimzi' && cert.name === source.ca
   }
+  if (source.type === 'seal') return cert.source === 'seal'
   return false
 }
 
@@ -71,9 +74,17 @@ export function entryStatus(entry: KeyEntry, certs: readonly MeasuredCert[], now
   const src = entry.expiry
   if (src.type === 'short-lived') return { id: entry.id, status: 'short-lived', daysLeft: null, count: 0 }
   if (src.type === 'no-expiry') return { id: entry.id, status: 'rotation', daysLeft: null, count: 0 }
+  if (src.type === 'revocation') return { id: entry.id, status: 'revocation', daysLeft: null, count: 0 }
   if (src.type === 'untracked') return { id: entry.id, status: 'untracked', daysLeft: null, count: 0 }
-  const matched = certs.filter((c) => matches(src, c))
+  let matched = certs.filter((c) => matches(src, c))
   if (matched.length === 0) return { id: entry.id, status: 'unknown', daysLeft: null, count: 0 }
+  if (src.type === 'seal') {
+    // An ephemeral seal's expiry is meaningless as evidence: it must never read as a healthy
+    // countdown. Only organizational-keystore certificates are measured.
+    const real = matched.filter((c) => c.name === 'keystore')
+    if (real.length === 0) return { id: entry.id, status: 'dev-only', daysLeft: null, count: matched.length }
+    matched = real
+  }
   // A matched Certificate with notAfter 0 has no valid certificate at all: that is the worst
   // state, so it decides the entry no matter how healthy its siblings are.
   if (matched.some((c) => c.notAfter === 0)) return { id: entry.id, status: 'expired', daysLeft: null, count: matched.length }
@@ -88,7 +99,7 @@ export function allStatuses(certs: readonly MeasuredCert[], nowSeconds: number):
 
 /** Order for the "needs attention" list: worst first, then soonest. Unknown ranks with critical. */
 const SEVERITY: Record<KeyStatus, number> = {
-  expired: 0, critical: 1, unknown: 2, attention: 3, untracked: 4, ok: 5, rotation: 6, 'short-lived': 7,
+  expired: 0, critical: 1, unknown: 2, attention: 3, 'dev-only': 4, untracked: 5, revocation: 6, ok: 7, rotation: 8, 'short-lived': 9,
 }
 
 export function byUrgency(a: EntryStatus, b: EntryStatus): number {

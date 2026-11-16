@@ -8,7 +8,7 @@ import { allStatuses, matches, statusForDays, type EntryStatus, type KeyStatus }
 
 export interface ExpertCert {
   entryId: string | null
-  source: 'cert-manager' | 'strimzi'
+  source: 'cert-manager' | 'strimzi' | 'seal'
   namespace: string
   name: string
   issuer: string
@@ -44,7 +44,9 @@ export function buildKeysReport(m: Measurement, nowSeconds: number, expert: bool
           name: c.name,
           issuer: c.issuer,
           daysLeft: missing ? null : days,
-          status: missing ? 'expired' as const : statusForDays((c.notAfter - nowSeconds) / 86400),
+          status: c.source === 'seal' && c.name === 'ephemeral'
+            ? 'dev-only' as const
+            : missing ? 'expired' as const : statusForDays((c.notAfter - nowSeconds) / 86400),
         }
       })
       .sort((a, b) => (a.daysLeft ?? -Infinity) - (b.daysLeft ?? -Infinity))

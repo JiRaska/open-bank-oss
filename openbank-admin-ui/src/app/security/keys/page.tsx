@@ -32,6 +32,8 @@ const TONE: Record<KeyStatus, { color: string; bg: string; border: string }> = {
   expired:       { color: 'var(--danger-text)',  bg: 'var(--danger-bg)',  border: 'var(--danger-border)' },
   unknown:       { color: 'var(--text-secondary)', bg: 'var(--surface-3)', border: 'var(--border-strong)' },
   untracked:     { color: 'var(--text-secondary)', bg: 'var(--surface-3)', border: 'var(--border-strong)' },
+  'dev-only':    { color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)' },
+  revocation:    { color: 'var(--info-text)',    bg: 'var(--info-bg)',    border: 'var(--info-border)' },
   rotation:      { color: 'var(--info-text)',    bg: 'var(--info-bg)',    border: 'var(--info-border)' },
   'short-lived': { color: 'var(--info-text)',    bg: 'var(--info-bg)',    border: 'var(--info-border)' },
 }
@@ -68,6 +70,8 @@ export default function KeysAndCertificatesPage() {
     expired: t('Vypršel', 'Expired'),
     unknown: t('Neověřeno', 'Not verified'),
     untracked: t('Nesledováno', 'Not tracked'),
+    'dev-only': t('Jen vývojová pečeť', 'Development seal only'),
+    revocation: t('Nevyprší, hrozí zneplatnění', 'No expiry, can be revoked'),
     rotation: t('Bez expirace, rotuje se', 'No expiry, rotated'),
     'short-lived': t('Krátkodobé (minuty)', 'Short-lived (minutes)'),
   }[s])
@@ -77,7 +81,7 @@ export default function KeysAndCertificatesPage() {
     ? t(`před ${-s.daysLeft} dny`, `${-s.daysLeft} days ago`)
     : t(`${s.daysLeft} dní`, `${s.daysLeft} days`))
 
-  const urgent = [...(report?.entries ?? [])].filter((s) => ['expired', 'critical', 'attention', 'unknown'].includes(s.status)).sort(byUrgency)
+  const urgent = [...(report?.entries ?? [])].filter((s) => ['expired', 'critical', 'attention', 'unknown', 'dev-only'].includes(s.status)).sort(byUrgency)
   const counts = (report?.entries ?? []).reduce<Record<string, number>>((acc, s) => ({ ...acc, [s.status]: (acc[s.status] ?? 0) + 1 }), {})
   const roots = KEY_CATALOG.filter((e) => !e.parent && KEY_CATALOG.some((c) => c.parent === e.id))
   const blast = selected ? dependents(selected) : []
@@ -133,6 +137,7 @@ export default function KeysAndCertificatesPage() {
                   {t('Změřeno', 'Measured')}: {new Date(report.measuredAt).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}
                   {' · '}cert-manager: {report.reachable.certManager ? t('odpovídá', 'reachable') : t('NEODPOVÍDÁ', 'NOT REACHABLE')}
                   {' · '}Kafka CA: {report.reachable.strimzi ? t('odpovídá', 'reachable') : t('NEODPOVÍDÁ', 'NOT REACHABLE')}
+                  {' · '}{t('Pečeť', 'Seal')}: {report.reachable.seal ? t('odpovídá', 'reachable') : t('NEODPOVÍDÁ', 'NOT REACHABLE')}
                 </p>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -209,7 +214,7 @@ export default function KeysAndCertificatesPage() {
                     </header>
                     {days(st) && <div style={{ fontSize: 24, fontWeight: 700, color: st ? TONE[st.status].color : undefined }}>{days(st)}</div>}
                     <p style={{ margin: 0, fontSize: 13 }}><strong>{t('K čemu: ', 'What for: ')}</strong>{language === 'cs' ? e.purposeCs : e.purposeEn}</p>
-                    <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}><strong>{t('Když vyprší: ', 'If it expires: ')}</strong>{language === 'cs' ? e.impactCs : e.impactEn}</p>
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}><strong>{e.expiry.type === 'revocation' ? t('Když je zneplatněn: ', 'If it is revoked: ') : t('Když vyprší: ', 'If it expires: ')}</strong>{language === 'cs' ? e.impactCs : e.impactEn}</p>
                     <Can permission="agent:view"><KeyCustodianExplain entryId={e.id} /></Can>
                     <footer style={{ marginTop: 'auto', fontSize: 12, color: 'var(--text-tertiary)' }}>
                       {t('Vlastník', 'Owner')}: {e.owner} · {e.algorithm}
