@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.49.1...lending-service-v0.49.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **lending,notification,pension-fund:** reload outbound mTLS client certificates ([#16415](https://github.com/JiRaska/open-bank-oss/issues/16415)) ([6ca4700](https://github.com/JiRaska/open-bank-oss/commit/6ca470012614bd5b0d4f5497352088d25655464a))
+
 ## [0.49.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.49.0...lending-service-v0.49.1) (2026-11-13)
 
 

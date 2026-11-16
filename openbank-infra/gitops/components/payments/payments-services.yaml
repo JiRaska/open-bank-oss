@@ -455,7 +455,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-2b7f5173@sha256:4eff6d29c763005b3d2a62fc06468d953d98bd2e1379960f1c59d0cd1cfc3bf9
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-44fff644@sha256:9fba769ef8ab40d6830fc46c7fc6aba07d6a9537cc1e6d557389c3158d02d8d6
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1251,7 +1251,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-2b7f5173@sha256:b38fdba07224e8c35c1412d7534a91cb14766979d8137085732115cb57b3076a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-44fff644@sha256:2395a1f1b1e7f24dd52cbc48dfcc940813440dba4539aa0412829f8677576e69
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1590,7 +1590,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-548fa683@sha256:c7b9dd80cfba44398edcec7b264fd3eddb104c67f7dff8e0c431e63c9bf4ce4a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-44fff644@sha256:5119d729a791b3083ad38d6a9193d7b4cf85af261a825bb6c2e19d30d9c720e6
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
