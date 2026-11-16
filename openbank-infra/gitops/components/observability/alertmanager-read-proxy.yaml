@@ -1,0 +1,211 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# GET-only relay in front of Alertmanager for the in-cluster standing-critical digest
+# (issue #6432, ADR-0382).
+#
+# WHY IT EXISTS
+#   Alertmanager has no authentication of its own: anything that can open a TCP connection to
+#   :9093 can POST /api/v2/silences and mute the estate. `alertmanager-ingress-allow-list`
+#   (networkpolicy-tools-gate.yaml) is therefore the ONLY thing protecting its write API, and it
+#   is L4 — it cannot tell a GET from a POST. Admitting a new caller to it means admitting a new
+#   writer. So the digest is NOT admitted there. It is admitted only to this relay, and this
+#   relay can do exactly one thing upstream: GET one fixed URL.
+#
+# WHAT MAKES THE WRITE IMPOSSIBLE (which layer, precisely)
+#   1. The digest's namespace (`alert-digest`) is absent from Alertmanager's ingress allow-list,
+#      so a direct POST from the digest pod is DROPPED by the CNI before Alertmanager sees it.
+#   2. This relay never forwards the caller's method, path, query, headers or body. Whatever
+#      arrives, the only upstream request it can construct is
+#      `GET <UPSTREAM_BASE>/api/v2/alerts?filter=severity="critical"`. Every non-GET verb is
+#      answered 405 locally, without reading the body, and opens no upstream connection.
+#   3. The relay's own egress allow-list (networkpolicy-alert-digest.yaml) reaches DNS and
+#      Alertmanager :9093 only, so even a compromised relay cannot exfiltrate.
+#   Layer 1 alone would be enough for the digest pod today; layer 2 is what keeps it true when a
+#   future edit admits a second caller here. Both are exercised by
+#   openbank-infra/scripts/alert_digest_readonly_test.py, which also asserts the code below is the
+#   code it tests (it extracts `relay.py` from THIS file).
+#
+# WHY A SEPARATE POD AND NOT A SIDECAR
+#   A NetworkPolicy selects a POD. A GET-only sidecar in the digest pod would share the pod's
+#   network identity, so the main container could bypass it and talk to :9093 directly the moment
+#   the digest namespace were admitted. A relay only constrains a caller if it is the caller's
+#   only path, which requires a different pod.
+#
+# Image: the same digest-pinned alpine/k8s used by public-status-export (python3 is all it needs);
+# no new image enters the supply chain.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alertmanager-read-proxy
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: alertmanager-read-proxy
+    app.kubernetes.io/part-of: observability
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-read-proxy
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: alertmanager-read-proxy
+    app.kubernetes.io/part-of: observability
+data:
+  relay.py: |
+    """GET-only, fixed-target relay for Alertmanager /api/v2/alerts (ADR-0382)."""
+    import http.server
+    import os
+    import urllib.error
+    import urllib.request
+
+    # The upstream PATH and QUERY are constants, not configuration: nothing a caller sends and
+    # nothing in the environment can turn this into a request for /api/v2/silences.
+    UPSTREAM_PATH = "/api/v2/alerts?filter=severity%3D%22critical%22"
+    MAX_BYTES = 8 * 1024 * 1024
+
+    def upstream_url():
+        return os.environ["UPSTREAM_BASE"].rstrip("/") + UPSTREAM_PATH
+
+    class Relay(http.server.BaseHTTPRequestHandler):
+        server_version = "alertmanager-read-proxy"
+        sys_version = ""
+
+        def _reply(self, status, body=b"", ctype="text/plain"):
+            self.send_response(status)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+            self.close_connection = True
+
+        def do_GET(self):
+            path = self.path.split("?", 1)[0]
+            if path == "/healthz":
+                return self._reply(200, b"ok\n")
+            if path != "/api/v2/alerts":
+                return self._reply(404, b"only GET /api/v2/alerts is relayed\n")
+            request = urllib.request.Request(
+                upstream_url(), method="GET", headers={"Accept": "application/json"})
+            try:
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    body = response.read(MAX_BYTES + 1)
+                    status = response.status
+            except urllib.error.HTTPError as exc:
+                return self._reply(502, f"upstream HTTP {exc.code}\n".encode())
+            except OSError as exc:
+                return self._reply(502, f"upstream unreachable: {type(exc).__name__}\n".encode())
+            if len(body) > MAX_BYTES:
+                return self._reply(502, b"upstream response too large\n")
+            return self._reply(status, body, "application/json")
+
+        def _refuse(self):
+            # Deliberately does not read the request body and opens no upstream connection.
+            self._reply(405, b"read-only relay: method not allowed\n")
+
+        do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = do_TRACE = do_CONNECT = _refuse
+        do_HEAD = _refuse
+
+        def log_message(self, fmt, *args):
+            print("%s %s" % (self.command, self.path.split("?", 1)[0]), flush=True)
+
+    def serve(port):
+        server = http.server.ThreadingHTTPServer(("0.0.0.0", port), Relay)
+        server.daemon_threads = True
+        return server
+
+    if __name__ == "__main__":
+        serve(int(os.environ.get("PORT", "8080"))).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager-read-proxy
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: alertmanager-read-proxy
+    app.kubernetes.io/part-of: observability
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager-read-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: alertmanager-read-proxy
+        app.kubernetes.io/part-of: observability
+    spec:
+      serviceAccountName: alertmanager-read-proxy
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: relay
+          image: docker.io/alpine/k8s:1.34.12@sha256:d50424976a0a888d2531f13035dce45c004ec2b6f877f233005ba35c0d61be5d
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "-I", "/app/relay.py"]
+          env:
+            - name: UPSTREAM_BASE
+              value: http://kube-prometheus-stack-alertmanager.observability.svc:9093/tools/alertmanager
+            - name: PORT
+              value: "8080"
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 60
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 5m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 96Mi
+          volumeMounts:
+            - name: relay
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: relay
+          configMap:
+            name: alertmanager-read-proxy
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager-read-proxy
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: alertmanager-read-proxy
+    app.kubernetes.io/part-of: observability
+spec:
+  selector:
+    app.kubernetes.io/name: alertmanager-read-proxy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

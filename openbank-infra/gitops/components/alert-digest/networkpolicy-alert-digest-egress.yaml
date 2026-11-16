@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Egress allow-list for the standing-critical digest CronJob (ADR-0382).
+#   - DNS;
+#   - the GET-only relay in `observability` on :8080 — its ONLY in-cluster destination;
+#   - TCP 443 to non-private addresses: the public GitHub clone of the digest script, S3 (the
+#     envelope's destination) and the Slack webhook. A NetworkPolicy cannot name an FQDN, so
+#     this is the narrowest form the CNI can express (same trade as
+#     analytics/networkpolicy-gate-health-puller-egress.yaml), with the VPC and the other
+#     RFC 1918 ranges carved out so the rule cannot reach any in-cluster or in-VPC listener.
+# Alertmanager :9093 is reachable by neither rule, and Alertmanager's own ingress allow-list
+# does not admit this namespace either — two independent drops for the direct path.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: standing-critical-digest-egress-allow-list
+  namespace: alert-digest
+  labels:
+    app.kubernetes.io/part-of: alert-digest
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: standing-critical-digest
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alertmanager-read-proxy
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

@@ -1,0 +1,156 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# In-cluster producer of the daily standing-critical digest (issue #6432, ADR-0382, ADR-0241 D3).
+#
+# WHY HERE AND NOT IN CI
+#   Alertmanager is reachable from outside the cluster only through the admin-ui cookie gate, and
+#   admitting the CI runner pool to it was rejected because Alertmanager's API also accepts
+#   POST /api/v2/silences. So the OBSERVATION happens here, through a GET-only relay
+#   (observability/alertmanager-read-proxy.yaml), and the ANALYSIS stays repo code: this job runs
+#   the committed `.github/scripts/standing-critical-digest.py`, cloned unauthenticated from the
+#   public repo exactly as argocd-sync-verifier runs its checker. No second copy to drift.
+#
+# HOW THE WEEKLY RCA GETS THE ENVELOPE (nobody in CI touches the cluster)
+#   The envelope `{observedAt, alerts}` is written to S3 under observations/<UTC date>/ with an
+#   EKS Pod Identity role whose only grant is s3:PutObject on that prefix
+#   (aws/envs/sandbox-platform/alert-digest.tf). alert-rca-weekly.yml reads it back with a GitHub
+#   OIDC role whose only grant is List/Get on the same prefix. No long-lived credential exists on
+#   either side: no PAT, no GitHub App private key, no static AWS key.
+#
+# FAIL-CLOSED ORDER
+#   `set -e`: the script exits non-zero on any Alertmanager failure and writes no envelope, so a
+#   failed run uploads NOTHING — the weekly review then counts a missing day instead of folding an
+#   empty observation as "everything resolved". Upload happens before the Slack courtesy post, so
+#   a Slack failure can never cost the envelope.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: standing-critical-digest
+  namespace: alert-digest
+  labels:
+    app.kubernetes.io/name: standing-critical-digest
+    app.kubernetes.io/part-of: alert-digest
+# No Kubernetes API access is needed at all; the AWS credential comes from the Pod Identity agent.
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: standing-critical-digest
+  namespace: alert-digest
+  labels:
+    app.kubernetes.io/name: standing-critical-digest
+    app.kubernetes.io/part-of: alert-digest
+  annotations:
+    # Budget for CronJobSuccessStale: two missed daily runs plus slack.
+    openbank.tech/max-success-age-seconds: "180000"
+spec:
+  # 08:30 UTC — the slot the disabled GitHub schedule used (ADR-0241 D3).
+  schedule: "30 8 * * *"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  startingDeadlineSeconds: 1800
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 172800
+      activeDeadlineSeconds: 600
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: standing-critical-digest
+            app.kubernetes.io/part-of: alert-digest
+        spec:
+          serviceAccountName: standing-critical-digest
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: digest
+              image: docker.io/alpine/k8s:1.34.12@sha256:d50424976a0a888d2531f13035dce45c004ec2b6f877f233005ba35c0d61be5d
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  set -eu
+                  mkdir -p /tmp/out
+                  git clone --depth 1 --single-branch --branch main --quiet \
+                    https://github.com/JiRaska/open-bank-oss.git /tmp/repo
+                  cd /tmp/repo
+                  python3 -I .github/scripts/standing-critical-digest.py --self-test
+                  python3 -I .github/scripts/standing-critical-digest.py
+                  day="$(date -u +%Y-%m-%d)"
+                  for f in alert-observation.json standing-critical-digest.md; do
+                    aws s3api put-object \
+                      --bucket "$DIGEST_BUCKET" \
+                      --key "observations/${day}/${f}" \
+                      --body "/tmp/out/${f}" \
+                      --server-side-encryption AES256 \
+                      --region "$AWS_REGION" >/dev/null
+                  done
+                  echo "envelope uploaded: observations/${day}/alert-observation.json"
+                  if [ -z "${SLACK_WEBHOOK:-}" ]; then
+                    echo "WARNING: digest-slack Secret absent — envelope uploaded, Slack copy NOT sent."
+                    exit 0
+                  fi
+                  python3 -I - <<'PY'
+                  import json, os, urllib.request
+                  body = open('/tmp/out/standing-critical-digest.md', encoding='utf-8').read()
+                  request = urllib.request.Request(os.environ['SLACK_WEBHOOK'], data=json.dumps({'text': body}).encode(), headers={'Content-Type': 'application/json'})
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      if response.status >= 300: raise SystemExit(f'Slack returned HTTP {response.status}')
+                  PY
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                # The relay, never Alertmanager itself (ADR-0382). The relay needs no token.
+                - name: ALERTMANAGER_URL
+                  value: http://alertmanager-read-proxy.observability.svc:8080
+                - name: ALERTMANAGER_AUTH
+                  value: none
+                - name: DIGEST_OUTPUT
+                  value: /tmp/out/standing-critical-digest.md
+                - name: DIGEST_ALERTS_OUTPUT
+                  value: /tmp/out/alert-observation.json
+                - name: DIGEST_BUCKET
+                  value: openbank-sandbox-alert-digest
+                - name: AWS_REGION
+                  value: eu-north-1
+                # optional: true is a deliberate trade (openbank-infra/CLAUDE.md): the envelope
+                # is the control and must not be blocked by an unseeded courtesy channel. The
+                # absence is printed in the job log on every run, not silent.
+                - name: SLACK_WEBHOOK
+                  valueFrom:
+                    secretKeyRef:
+                      name: digest-slack
+                      key: SLACK_WEBHOOK
+                      optional: true
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}
