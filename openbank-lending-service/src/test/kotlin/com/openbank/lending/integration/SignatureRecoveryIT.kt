@@ -28,6 +28,8 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.smallrye.mutiny.Uni
 import jakarta.inject.Inject
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.sql.ResultSet
 import java.time.Duration
@@ -36,8 +38,6 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.sql.DataSource
-import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
 
 @QuarkusTest
 @QuarkusTestResource(LendingOutboxWriteIT.InMemoryKafkaResource::class)
