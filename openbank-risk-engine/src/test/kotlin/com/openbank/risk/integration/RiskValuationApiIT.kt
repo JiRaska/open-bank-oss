@@ -187,6 +187,7 @@ class RiskValuationApiIT {
         ledger.inputs = Fixtures.tiedOut()
         val original = snapshot()
         val curveSetId = uploadCurveSet()
+        assertPinnedTreasuryRevision(original, curveSetId)
         fun forecast(id: String) = "/api/v1/risk/snapshots/$id/liquidity-forecast?curveSetId=$curveSetId"
         val runoff = read("${forecast(original)}&includePlanned=false")
         assertThat(json.readTree(runoff)["assumptions"].map { it["key"].asText() })
@@ -214,6 +215,35 @@ class RiskValuationApiIT {
             .isNotEqualTo(json.readTree(runoff)["currencies"])
         assertThat(read("${forecast(original)}&includePlanned=false")).isEqualTo(runoff)
         given().`when`().get("${forecast(original)}&includePlanned=unknown").then().statusCode(400)
+    }
+
+    private fun assertPinnedTreasuryRevision(snapshot: String, curveSet: String) {
+        val capture = UUID.randomUUID()
+        val deal = UUID.randomUUID()
+        val revisions = "treasury_deal_cash_flow_revision"
+        try {
+            TestDb.execute(
+                "INSERT INTO $revisions (deal_id, deal_version, schedule_hash, flows) VALUES ('$deal', 1, 'h1', '[]')",
+            )
+            TestDb.query(
+                "SELECT capture_planning_inputs('$capture', '$snapshot', '$curveSet', " +
+                    "ARRAY(SELECT revision_id FROM $revisions WHERE deal_id = '$deal'))",
+            ) { assertThat(it).isEqualTo(capture.toString()) }
+            TestDb.execute(
+                "INSERT INTO $revisions (deal_id, deal_version, schedule_hash, flows) VALUES ('$deal', 2, 'h2', '[]')",
+            )
+            TestDb.query(
+                "SELECT r.deal_version FROM planning_input_capture_treasury t " +
+                    "JOIN $revisions r USING (revision_id) WHERE t.capture_id = '$capture'",
+            ) { assertThat(it).isEqualTo("1") }
+            assertThat(
+                TestDb.count("SELECT count(*) FROM planning_input_capture_treasury WHERE capture_id = '$capture'"),
+            ).isEqualTo(1)
+        } finally {
+            TestDb.execute("DELETE FROM planning_input_capture_treasury WHERE capture_id = '$capture'")
+            TestDb.execute("DELETE FROM planning_input_capture WHERE id = '$capture'")
+            TestDb.execute("DELETE FROM $revisions WHERE deal_id = '$deal'")
+        }
     }
 
     private fun event(id: UUID, product: String, rate: BigDecimal?, legs: String?, bookId: String?, kind: DealKind) =
