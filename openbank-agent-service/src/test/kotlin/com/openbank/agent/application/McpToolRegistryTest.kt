@@ -131,7 +131,7 @@ class McpToolRegistryTest {
                 it.startsWith("interest_") ||
                 it.startsWith("dispute_") ||
                 it.startsWith("sepa_instant_")
-        }
+        }.filterNot { it == "aml_propose_case_decision" } // the one deliberate write_proposal, pinned below
         assertThat(newTools).isNotEmpty()
         newTools.forEach { tool ->
             val cap = registry.capabilityOf(tool)
@@ -154,9 +154,11 @@ class McpToolRegistryTest {
         val writeCaps = registry.tools.map { it.name }
             .filter { tool ->
                 val cap = registry.capabilityOf(tool) ?: return@filter false
-                cap.contains("write") || cap == "draft.ticket"
+                cap.contains("write") || cap == "draft.ticket" || cap.startsWith("propose.")
             }
-        assertThat(writeCaps).containsExactlyInAnyOrder("draft_ticket", "flip_feature_flag")
+        assertThat(
+            writeCaps,
+        ).containsExactlyInAnyOrder("draft_ticket", "flip_feature_flag", "aml_propose_case_decision")
     }
 
     @Test

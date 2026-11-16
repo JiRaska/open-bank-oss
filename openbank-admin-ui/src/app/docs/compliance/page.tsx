@@ -36,7 +36,14 @@ function useLabels() {
       'enforced-gate': t('Blokující CI gate', 'Blocking CI gate'), ci: t('Běh v CI', 'CI run'),
       documented: t('Jen dokumentace', 'Documentation only'), none: t('Bez důkazu', 'No evidence'),
     })[l],
-    kind: (k: TraceEvidence['kind']) => ({ gate: 'gate', workflow: 'workflow', adr: 'ADR', path: t('soubor', 'path') })[k],
+    kind: (k: TraceEvidence['kind']) => ({ gate: 'gate', workflow: 'workflow', test: 'test', adr: 'ADR', path: t('soubor', 'path') })[k],
+    reason: (r: NonNullable<TraceControl['downgradeReason']>) => ({
+      'no-machine-evidence': t('tvrzení nepodpírá žádný strojově opakovaný důkaz', 'no machine-repeated evidence backs the claim'),
+      'failing-gate': t('jeden z citovaných gatů v posledním běhu selhal', 'a cited gate failed in its latest run'),
+      'stale-evidence': t('poslední úspěšný běh gatu je starší než povolené stáří', 'the newest passing gate run is older than the allowed age'),
+      'evidence-age-unknown': t('stáří důkazu nelze zjistit (chybí snímek běhů gatů)', 'the evidence age cannot be established (no gate-run snapshot)'),
+    })[r],
+    age: (iso: string | null) => iso ? t(`poslední úspěšný běh ${iso.slice(0, 10)}`, `last pass ${iso.slice(0, 10)}`) : t('běh nepozorován', 'no run observed'),
   }
 }
 
@@ -57,6 +64,9 @@ function EvidenceList({ refs }: { refs: TraceEvidence[] }) {
               {' '}· {r.gateMode === 'enforced' ? t('blokuje', 'blocking') : r.gateMode === 'advisory' ? t('jen hlásí', 'advisory') : t('nenalezen', 'not found')}
             </span>
           ) : null}
+          {r.kind === 'gate' && r.gateStatus === 'failed'
+            ? <span style={{ color: 'var(--danger-text)' }}> · {t('poslední běh selhal', 'latest run failed')}</span>
+            : r.kind === 'gate' ? <span style={{ color: 'var(--text-tertiary)' }}> · {labels.age(r.lastOkAt ?? null)}</span> : null}
         </li>
       ))}
     </ul>
@@ -74,14 +84,92 @@ function ControlCard({ control }: { control: TraceControl }) {
       </div>
       <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
         {t('Deklarováno', 'Declared')}: {labels.verdict(control.declaredStatus)} · {t('Síla důkazu', 'Evidence strength')}: {labels.level(control.evidenceLevel)}
-        {control.downgradeReason === 'no-machine-evidence'
-          ? <> · <span style={{ color: 'var(--danger-text)' }}>{t('tvrzení nepodpírá žádný strojově opakovaný důkaz', 'no machine-repeated evidence backs the claim')}</span></>
+        {control.maxEvidenceAgeDays ? <> · {t(`max. stáří ${control.maxEvidenceAgeDays} dní`, `max age ${control.maxEvidenceAgeDays} days`)}</> : null}
+        {control.newestEvidenceAt ? <> · {t(`nejnovější důkaz ${control.newestEvidenceAt.slice(0, 10)}`, `newest evidence ${control.newestEvidenceAt.slice(0, 10)}`)}</> : null}
+        {control.downgradeReason
+          ? <> · <span style={{ color: 'var(--danger-text)' }}>{labels.reason(control.downgradeReason)}</span></>
           : null}
       </div>
       <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.5 }}>{control.evidence}</p>
       <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{control.frameworks.join(' · ')}{control.references.length ? ` — ${control.references.join(', ')}` : ''}</div>
       <EvidenceList refs={control.evidenceRefs} />
     </article>
+  )
+}
+
+type SelectedRow = {
+  ref: string
+  kind: 'control' | 'obligation'
+  title: string
+  titleCs?: string
+  verdict?: Verdict
+  declaredStatus?: Verdict
+  downgradeReason?: TraceControl['downgradeReason']
+  evidence?: string
+  coverage?: string
+  legalBasis?: string
+}
+
+function AskTrace() {
+  const { t, language } = useLanguage()
+  const labels = useLabels()
+  const [question, setQuestion] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ rows: SelectedRow[]; truncated: number } | { error: string } | null>(null)
+
+  const submit = async () => {
+    setBusy(true)
+    setResult(null)
+    try {
+      const response = await fetch('/api/compliance/ask', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }), cache: 'no-store',
+      })
+      const body = await response.json() as { rows?: SelectedRow[]; truncated?: number; error?: string }
+      setResult(response.ok && body.rows ? { rows: body.rows, truncated: body.truncated ?? 0 } : { error: body.error ?? 'error' })
+    } catch {
+      setResult({ error: 'agent_unreachable' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card" style={{ padding: '14px', display: 'grid', gap: '8px', marginTop: '20px' }} aria-label={t('Najít v trase', 'Find in the trace')}>
+      <h2 style={{ fontSize: '15px', margin: 0 }}>{t('Najít v trase', 'Find in the trace')}</h2>
+      <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
+        {t('AI jen vybere relevantní řádky trasy. Nic sama nepíše ani netvrdí: vše níže jsou vypočtená data a texty z registrů.', 'The AI only picks the relevant trace rows. It writes and claims nothing itself: everything below is computed data and text from the registers.')}
+      </p>
+      <label style={{ fontSize: '12px', display: 'grid', gap: '4px' }}>
+        {t('Otázka', 'Question')}
+        <textarea className="input" rows={2} maxLength={1000} value={question} onChange={e => setQuestion(e.target.value)} />
+      </label>
+      <div>
+        <button type="button" className="btn btn-secondary" disabled={busy || !question.trim()} onClick={() => void submit()}>
+          {busy ? t('Hledám…', 'Searching…') : t('Najít', 'Find')}
+        </button>
+      </div>
+      {result && 'rows' in result ? (
+        <ul role="status" style={{ margin: 0, paddingLeft: '16px', fontSize: '12px', display: 'grid', gap: '6px' }}>
+          {result.rows.map(row => (
+            <li key={row.ref}>
+              <strong>{row.kind === 'obligation' && language === 'cs' && row.titleCs ? row.titleCs : row.title}</strong> <code>{row.ref}</code>
+              {row.verdict ? <> · {t('verdikt', 'verdict')} <strong>{labels.verdict(row.verdict)}</strong>{row.downgradeReason ? ` (${labels.reason(row.downgradeReason)})` : ''}</> : null}
+              {row.coverage ? <> · {t('pokrytí', 'coverage')} <code>{row.coverage}</code></> : null}
+              {row.evidence ? <div style={{ color: 'var(--text-secondary)' }}>{row.evidence}</div> : null}
+              {row.legalBasis ? <div style={{ color: 'var(--text-tertiary)' }}>{row.legalBasis}</div> : null}
+            </li>
+          ))}
+          {result.truncated > 0 ? <li style={{ color: 'var(--text-tertiary)' }}>{t(`a ${result.truncated} dalších řádků nad limit zobrazení`, `and ${result.truncated} more rows beyond the display limit`)}</li> : null}
+        </ul>
+      ) : null}
+      {result && 'error' in result ? (
+        <p role="status" style={{ fontSize: '12px', color: 'var(--warning-text)', margin: 0 }}>
+          {result.error === 'not_tokens_only' || result.error === 'no_rows'
+            ? t('Výsledek nebyl zobrazen: model neodpověděl jen platnými řádky trasy.', 'Nothing was shown: the model did not reply with valid trace rows only.')
+            : t('Asistent není dostupný.', 'The assistant is unavailable.')}
+        </p>
+      ) : null}
+    </section>
   )
 }
 
@@ -149,8 +237,8 @@ export default function CompliancePage() {
         <Info size={14} style={{ color: 'var(--info-text)', flexShrink: 0, marginTop: '1px' }} />
         <div style={{ fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
           {t(
-            'Verdikt počítá kód, ne člověk ani AI: kontrola nesmí tvrdit víc, než ukáže její důkaz. Tvrzení „vynuceno“ nebo „částečně“ bez CI gate či workflow se zobrazí jako neověřené. Stránka neprokazuje právní shodu; ukazuje, co platforma deklaruje a čím to dokládá.',
-            'The verdict is computed by code, not by a person or an AI: a control may claim no more than its evidence shows. An "enforced" or "partial" claim with no CI gate or workflow behind it renders as unverified. This page does not establish legal compliance; it shows what the platform declares and what backs it.',
+            'Verdikt počítá kód, ne člověk ani AI: kontrola nesmí tvrdit víc, než ukáže její důkaz. Tvrzení „vynuceno“ nebo „částečně“ bez CI gate, workflow či testu, nebo s důkazem z gatu starším, než kontrola povoluje, se zobrazí jako neověřené. Stránka neprokazuje právní shodu; ukazuje, co platforma deklaruje a čím to dokládá.',
+            'The verdict is computed by code, not by a person or an AI: a control may claim no more than its evidence shows. An "enforced" or "partial" claim with no CI gate, workflow or test behind it, or whose gate evidence is older than the control allows, renders as unverified. This page does not establish legal compliance; it shows what the platform declares and what backs it.',
           )}
         </div>
       </div>
@@ -178,6 +266,8 @@ export default function CompliancePage() {
         <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 12px' }}>
           {t('Snímek k commitu', 'Snapshot as of commit')}: <code>{trace.asOf.commit ?? t('neznámý', 'unknown')}</code>
           {trace.asOf.postureCollectedAt ? <> · {t('signály manifestů', 'manifest signals')} {trace.asOf.postureCollectedAt}</> : null}
+          {' · '}{t('běhy gatů', 'gate runs')} {trace.asOf.gateHealthCollectedAt ?? t('nedostupné', 'unavailable')}
+          {trace.asOf.gateHealthCollectedAt && !trace.asOf.gateHealthCurrent ? <span style={{ color: 'var(--warning-text)' }}> ({t('starší než 2 h, nepoužito', 'older than 2 h, not used')})</span> : null}
         </p>
 
         <Tabs<View>
@@ -262,6 +352,7 @@ export default function CompliancePage() {
             </section>
           ) : null}
         </div>
+        <AskTrace />
       </>) : null}
     </div>
   )

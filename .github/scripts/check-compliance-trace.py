@@ -18,9 +18,11 @@ keeps the literal from returning.
 What it checks
 --------------
 1. Every control in `compliance-controls.yaml` declares at least one `evidence_refs` entry, each
-   `{kind, ref}` with kind in gate | workflow | adr | path.
+   `{kind, ref}` with kind in gate | workflow | test | adr | path.
 2. Every ref resolves: a gate id in `.github/gates/gates.yaml`, a file in `.github/workflows/`,
-   a `docs/adr/NNNN-*.md`, or an existing repo path.
+   an existing test file under a test source set, a `docs/adr/NNNN-*.md`, or an existing repo path.
+   A `max_evidence_age_days`, where declared, is a positive integer on a control that cites at
+   least one gate, the only kind whose run age the hub can observe.
 3. Every `controls:` id on an obligation in `regulatory-obligations.yaml` names a real control.
 4. The hub page carries no hand-written requirement literal (`COMPLIANCE_AREAS` or a
    `{ req: [...] }` row).
@@ -49,7 +51,10 @@ CONTROLS = "openbank-libs/governance/compliance-controls.yaml"
 OBLIGATIONS = "openbank-libs/governance/regulatory-obligations.yaml"
 GATES = ".github/gates/gates.yaml"
 PAGE = "openbank-admin-ui/src/app/docs/compliance/page.tsx"
-KINDS = ("gate", "workflow", "adr", "path")
+KINDS = ("gate", "workflow", "test", "adr", "path")
+TEST_DIRS = ("/src/test/", "/src/androidTest/")
+# A test ref is CI-level evidence, so it must name a test, not just any file in a test tree.
+TEST_FILE = re.compile(r"(Test|IT|Spec)\.kt$|\.(test|spec)\.(ts|tsx|mjs)$")
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
@@ -79,11 +84,15 @@ def _resolves(repo: pathlib.Path, kind: str, ref: str, gate_ids: set[str]) -> bo
         return ref in gate_ids
     if kind == "workflow":
         return "/" not in ref and (repo / ".github" / "workflows" / ref).is_file()
+    if kind == "test":
+        parts = pathlib.PurePosixPath(ref).parts
+        in_test_tree = any(d in f"/{ref}" for d in TEST_DIRS) or (len(parts) > 2 and parts[1] == "e2e")
+        return (not ref.startswith("/") and ".." not in parts and in_test_tree
+                and bool(TEST_FILE.search(ref)) and (repo / ref).is_file())
     if kind == "adr":
         return bool(re.fullmatch(r"\d{4}", ref)) and any((repo / "docs" / "adr").glob(f"{ref}-*.md"))
     if kind == "path":
-        target = (repo / ref).resolve()
-        return ".." not in pathlib.PurePosixPath(ref).parts and target.exists()
+        return not ref.startswith("/") and ".." not in pathlib.PurePosixPath(ref).parts and (repo / ref).exists()
     return False
 
 
@@ -115,6 +124,12 @@ def check(repo: pathlib.Path) -> tuple[list[str], int]:
                 errs.append(f"{CONTROLS}: control {cid} evidence kind {kind!r} is not one of {', '.join(KINDS)}")
             elif not _resolves(repo, kind, ref, gate_ids):
                 errs.append(f"{CONTROLS}: control {cid} evidence {kind}:{ref} does not resolve")
+        if "max_evidence_age_days" in c:
+            age = c["max_evidence_age_days"]
+            if not isinstance(age, int) or isinstance(age, bool) or age < 1:
+                errs.append(f"{CONTROLS}: control {cid} max_evidence_age_days must be a positive integer")
+            elif not any(isinstance(r, dict) and r.get("kind") == "gate" for r in refs):
+                errs.append(f"{CONTROLS}: control {cid} declares max_evidence_age_days but cites no gate whose age could be observed")
 
     for o in register.get("obligations") or []:
         linked = o.get("controls")
@@ -148,6 +163,11 @@ def _fixture(root: pathlib.Path) -> None:
     (root / GATES).write_text("gates:\n  - id: g1\n    mode: enforced\n")
     (root / ".github/workflows/w.yml").write_text("on: push\n")
     (root / "docs/adr/0001-x.md").write_text("# x\n")
+    (root / "svc/src/test").mkdir(parents=True)
+    (root / "svc/src/test/TTest.kt").write_text("class TTest\n")
+    (root / "svc/src/test/Helper.kt").write_text("class Helper\n")
+    (root / "svc/src/main").mkdir(parents=True)
+    (root / "svc/src/main/M.kt").write_text("class M\n")
     (root / CONTROLS).write_text(
         "controls:\n"
         "  - id: c1\n"
@@ -155,7 +175,9 @@ def _fixture(root: pathlib.Path) -> None:
         "      - { kind: gate, ref: g1 }\n"
         "      - { kind: workflow, ref: w.yml }\n"
         "      - { kind: adr, ref: '0001' }\n"
-        "      - { kind: path, ref: docs/adr }\n")
+        "      - { kind: path, ref: docs/adr }\n"
+        "      - { kind: test, ref: svc/src/test/TTest.kt }\n"
+        "    max_evidence_age_days: 7\n")
     (root / OBLIGATIONS).write_text("obligations:\n  - id: o1\n    controls: [c1]\n  - id: o2\n")
     (root / PAGE).write_text("export default function Page() { return null }\n")
 
@@ -172,6 +194,13 @@ def self_test() -> int:
         "missing workflow": (CONTROLS, "ref: w.yml", "ref: gone.yml"),
         "missing adr": (CONTROLS, "ref: '0001'", "ref: '0999'"),
         "path escapes repo": (CONTROLS, "ref: docs/adr", "ref: ../etc"),
+        "test is main code": (CONTROLS, "ref: svc/src/test/TTest.kt", "ref: svc/src/main/M.kt"),
+        "test tree non-test file": (CONTROLS, "ref: svc/src/test/TTest.kt", "ref: svc/src/test/Helper.kt"),
+        "absolute test path": (CONTROLS, "ref: svc/src/test/TTest.kt", "ref: {ABS_TEST}"),
+        "absolute path ref": (CONTROLS, "ref: docs/adr", "ref: /etc"),
+        "missing test": (CONTROLS, "ref: svc/src/test/TTest.kt", "ref: svc/src/test/GoneTest.kt"),
+        "age not positive": (CONTROLS, "max_evidence_age_days: 7", "max_evidence_age_days: 0"),
+        "age without gate": (CONTROLS, "      - { kind: gate, ref: g1 }\n", ""),
         "bad kind": (CONTROLS, "kind: path", "kind: vibes"),
         "no evidence": (CONTROLS, "    evidence_refs:\n", "    evidence_refs: []\n    x:\n"),
         "duplicate key": (CONTROLS, "  - id: c1\n", "  - id: c1\n    id: c2\n"),
@@ -184,13 +213,17 @@ def self_test() -> int:
         base = pathlib.Path(tmp) / "ok"
         _fixture(base)
         errs, n = check(base)
-        if errs or n != 5:
+        if errs or n != 6:
             print(f"SELF-TEST FAIL: clean fixture -> {errs} subjects={n}")
             failures += 1
         for name, (rel, old, new) in negatives.items():
             root = pathlib.Path(tmp) / name.replace(" ", "-")
             _fixture(root)
-            mutate(root, rel, old, new)
+            # An absolute ref must point at a file that EXISTS, or the case passes without the guard.
+            outside = pathlib.Path(tmp) / "outside" / "src" / "test"
+            outside.mkdir(parents=True, exist_ok=True)
+            (outside / "XTest.kt").write_text("class XTest\n")
+            mutate(root, rel, old, new.replace("{ABS_TEST}", str(outside / "XTest.kt")))
             errs, _ = check(root)
             if not errs:
                 print(f"SELF-TEST FAIL: {name} was not detected")

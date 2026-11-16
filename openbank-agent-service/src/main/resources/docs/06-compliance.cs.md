@@ -11,7 +11,7 @@
 | **EU AI Act** | AI systém operující uvnitř banky — potřebuje lidský dohled, logování, transparentnost | deny-by-default policy gate; AI-atribuovaný audit každého volání modelu i nástroje; HITL přes detekci návrhů (D4); per-agent kill-switch (D7, přes `agents.yaml`/OPA) |
 | **DORA** (Nař. (EU) 2022/2554) | ICT/operační odolnost interní služby | health probes, fail-closed PDP, ladná degradace při výpadku modelu, audit důkazy, SLO/runbooky ([05 — Provoz](./05-operations.md)) |
 | **GDPR** | Asistent může číst zákaznická data přes nástroje | charter je `pii: masked`; gateway ukládá jen SHA-256 `prompt_hash`, nikdy syrové prompty; žádné PII perzistované v klidu (žádné úložiště) |
-| **PSD2 / AML** | Asistent může *číst* AML/sanctions/payments povrchy | pouze read-only capabilities (`query.compliance.readonly`, `query.payments.readonly`); nikdy zapisovací/rozhodovací nástroj; **není** systém záznamu pro SAR/screening |
+| **PSD2 / AML** | Asistent může *číst* AML/sanctions/payments povrchy | pouze read-only capabilities (`query.compliance.readonly`, `query.payments.readonly`); nikdy zapisovací/rozhodovací nástroj (`aml_propose_case_decision`, jen compliance-officer, zakládá HITL návrh a nic nerozhoduje); **není** systém záznamu pro SAR/screening |
 | **NIS2** | Síťová a informační bezpečnost | OIDC příchozí, least-privilege `openbank-services` Bearer odchozí, mTLS v clusteru (Istio), bezpečnostní response hlavičky |
 | **ADR-0030 SSDLC** | Dodavatelský řetězec / bezpečný SDLC | podepsané commity, governance závislostí, žádný lock-in na third-party agent SDK (otevřený runtime, ADR-0031 D6) |
 
