@@ -5,9 +5,9 @@
 package com.openbank.vop.e2e
 
 import com.openbank.vop.PostgresTestResource
+import com.openbank.vop.VopVerifyTraceContractIT
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
@@ -35,19 +35,15 @@ import java.time.temporal.ChronoUnit
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @QuarkusTestResource(PostgresTestResource::class)
 @QuarkusTestResource(NameLookupHttpServerResource::class)
-@TestProfile(VopVerifyPayeeJourneyE2E.JourneyProfile::class)
+@TestProfile(VopVerifyTraceContractIT.VopTraceProfile::class)
 class VopVerifyPayeeJourneyE2E {
 
-    /**
-     * Own boot (own container DB + Valkey), mirroring the ITs' isolation. No OPA sidecar in
-     * the test: advisory mode (`authz.enforce=false`), the same choice VopRateLimitHttpIT
-     * documents — the journey asserts RBAC via `@RolesAllowed`, not the fine-grained PEP.
-     */
-    class JourneyProfile : QuarkusTestProfile {
-        override fun getConfigOverrides(): Map<String, String> = mapOf(
-            "authz.enforce" to "false",
-        )
-    }
+    // Deliberately NO profile of its own: every distinct @TestProfile is one more Quarkus boot in
+    // the same test JVM (Kover-instrumented). Measured: with a fourth boot the module's test heap
+    // ran out and starved the NEXT class's event loop (VopRateLimitHttpIT timed out, then OOM);
+    // with three, the whole suite is green. VopTraceProfile already carries the one key
+    // this journey needs (`authz.enforce=false`: no OPA sidecar, RBAC asserted via @RolesAllowed),
+    // and Quarkus orders same-profile classes together, so the journey shares that boot.
 
     @Test
     @Order(1)
