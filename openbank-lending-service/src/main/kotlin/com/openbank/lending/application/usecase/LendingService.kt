@@ -856,7 +856,7 @@ class LendingService @Inject constructor(
                 }
                 if (lacksDecision(current)) throw decisionMissing(current)
                 commitSignature(current, OriginationState.SIGNED, intent.artefactHash, intent.actor)
-                    .call { signatureIntents.complete(intent.id) }
+                    .call { _ -> signatureIntents.complete(intent.id) }
                     .map { it to true }
             }
         }.call { (application, changed) ->

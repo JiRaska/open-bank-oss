@@ -42,7 +42,7 @@ class SignatureRecoveryScheduler(
                             intent.id,
                             failure.javaClass.simpleName,
                         )
-                    }.recoverWithNull().awaitSuspending()
+                    }.recoverWithItem { _: Throwable -> null }.awaitSuspending()
             }
         }
         liveness.recordSuccess()
