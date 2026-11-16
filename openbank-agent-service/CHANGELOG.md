@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.34.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.5...agent-service-v1.34.0) (2026-11-16)
+
+
+### Features
+
+* **agent:** AML decision proposal MCP tool for false-positive triage ([#16382](https://github.com/JiRaska/open-bank-oss/issues/16382)) ([fb27502](https://github.com/JiRaska/open-bank-oss/commit/fb275027dd2fa83866e520d44adfa50e38fbde43))
+
 ## [1.33.5](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.4...agent-service-v1.33.5) (2026-11-16)
 
 

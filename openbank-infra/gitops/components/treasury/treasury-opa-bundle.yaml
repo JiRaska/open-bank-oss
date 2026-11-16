@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: treasury-service
     app.kubernetes.io/part-of: treasury
   annotations:
-    openbank.tech/policy-checksum: "eea88f36f8b5b0f7"
+    openbank.tech/policy-checksum: "c0f4a9a9d398764d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1431,6 +1431,7 @@ data:
       - product.explain
       write_proposal:
       - draft.ticket
+      - propose.aml.decision
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1460,6 +1461,7 @@ data:
         - query.disputes.readonly
         - query.observability.readonly
         - flags.write
+        - propose.aml.decision
         deny:
         - money.*
         - gh.pr.*

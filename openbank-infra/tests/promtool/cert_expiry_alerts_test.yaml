@@ -44,3 +44,23 @@ tests:
     expr: ALERTS{alertname="KafkaCaExpiryMetricsAbsent",alertstate="firing"}
   name: leaf at 5d fires renewal-failing, CA at 30d fires CA alert, healthy 80d leaf
     and critical stay silent, missing Strimzi metric fires absent
+- input_series:
+  - series: openbank_document_seal_certificate_expiry_timestamp_seconds{namespace="documents",pod="document-service-a",identity="keystore"}
+    values: 2592000x120
+  - series: openbank_document_seal_certificate_expiry_timestamp_seconds{namespace="documents",pod="document-service-b",identity="keystore"}
+    values: 2592000x120
+  # The DEV-ONLY ephemeral identity, 1 day out: must NOT fire.
+  - series: openbank_document_seal_certificate_expiry_timestamp_seconds{namespace="sandbox",pod="document-service-c",identity="ephemeral"}
+    values: 86400x120
+  # A healthy organizational seal 200 days out: must NOT fire.
+  - series: openbank_document_seal_certificate_expiry_timestamp_seconds{namespace="healthy",pod="document-service-d",identity="keystore"}
+    values: 17280000x120
+  interval: 1m
+  promql_expr_test:
+  - eval_time: 90m
+    exp_samples:
+    - labels: ALERTS{alertname="SealCertificateExpiring",alertstate="firing",namespace="documents",severity="warning"}
+      value: 1
+    expr: ALERTS{alertname="SealCertificateExpiring",alertstate="firing"}
+  name: seal certificate at 30d fires once per namespace across replicas, ephemeral and
+    200d seals stay silent
