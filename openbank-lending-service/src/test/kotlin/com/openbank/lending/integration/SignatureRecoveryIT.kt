@@ -208,8 +208,10 @@ class SignatureRecoveryIT {
     private fun status(application: UUID) =
         scalar("SELECT status::text FROM loan_application WHERE id = ?", application)
 
-    private fun disburse(application: UUID): Int =
-        given().post("/api/v1/lending/applications/$application/disburse").statusCode
+    private fun disburse(application: UUID): Int = given()
+        .contentType("application/json")
+        .post("/api/v1/lending/applications/$application/disburse")
+        .statusCode
 
     private fun recoverFos(application: UUID, action: FosAction) {
         execute(
