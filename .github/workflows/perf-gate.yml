@@ -73,6 +73,7 @@ jobs:
               "openbank-sepa-instant",
               "openbank-sepa-payment",
               "openbank-sanctions-service",
+              "openbank-standing-order-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)

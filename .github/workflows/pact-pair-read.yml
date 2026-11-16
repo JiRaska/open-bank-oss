@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Read exact Pact pair
+on:
+  workflow_dispatch:
+    inputs:
+      consumer:
+        description: Consumer module name
+        required: true
+        type: string
+      consumer_version:
+        description: Consumer full commit SHA
+        required: true
+        type: string
+      provider:
+        description: Provider module name
+        required: true
+        type: string
+      provider_version:
+        description: Provider full commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  read-matrix:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Read the version pair from the broker
+        env:
+          PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
+          PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
+          PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+          CONSUMER: ${{ inputs.consumer }}
+          CONSUMER_VERSION: ${{ inputs.consumer_version }}
+          PROVIDER: ${{ inputs.provider }}
+          PROVIDER_VERSION: ${{ inputs.provider_version }}
+        run: |
+          python3 .github/scripts/read_pact_pair.py \
+            "$CONSUMER" "$CONSUMER_VERSION" "$PROVIDER" "$PROVIDER_VERSION"
