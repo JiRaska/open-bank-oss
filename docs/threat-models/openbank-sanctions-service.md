@@ -239,7 +239,10 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
   (2) a human remains the final approver of every agent-made clear, nothing executes on the agent's
   word alone; (3) the agent is limited to `CLEAR` server-side and never holds
   `sanctions.approval.decide`. **Revisit** before any environment with more than one operator or real
-  customer data: reintroduce the on-behalf-of checker refusal (see the reverted commit on #16455).
+  customer data: bind the instructing person to the approval and refuse them as its checker.
+  **Known ordering:** the CLEAR-only check runs in the resource body, after `AuthorizeInterceptor`
+  has created the pending approval, so a non-CLEAR agent request still appears in the checker queue;
+  approving it changes nothing (the call then answers 403 and the check keeps its status).
   Rollback: revert.
 
 - **2026-11-14** — **Ongoing monitoring switched on in the sandbox deployment
