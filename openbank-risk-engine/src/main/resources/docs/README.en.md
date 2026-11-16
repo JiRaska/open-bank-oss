@@ -26,6 +26,8 @@ bearer token. The role restrictions above still apply.
 
 All reads hang off a snapshot run: `GET /api/v1/risk/snapshots/{id}/...` — `positions`, `instruments`, `cash-flows`, `irrbb`, `liquidity`, `liquidity-forecast`, `capital`, `min-reserves`, `limits`. A run that is not TIED_OUT answers 409; an unknown run or curve set answers 404.
 
+For planning runoff, call `liquidity-forecast` with an explicit `curveSetId` and `includePlanned=false` to use the selected snapshot without the live planned treasury flows. The default includes those flows.
+
 ## IRRBB (`GET /snapshots/{id}/irrbb`)
 
 Repricing gap, ΔEVE under the six BCBS d368 scenarios, ΔNII over 12 months under parallel up/down, the worst case and the assumptions behind them.
