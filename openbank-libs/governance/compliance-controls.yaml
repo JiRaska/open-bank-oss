@@ -69,6 +69,10 @@ frameworks:
     name: "EBA Guidelines on ICT and security risk management"
   - id: PCI-DSS
     name: "PCI DSS"
+  - id: CNB
+    name: "Czech National Bank rules (payments, accounts)"
+  - id: FATCA-CRS
+    name: "FATCA / CRS tax information exchange"
 
 controls:
   - id: net-segmentation
@@ -313,3 +317,453 @@ controls:
       - { kind: workflow, ref: "api-fuzz.yml" }
       - { kind: workflow, ref: "dast-zap-baseline.yml" }
       - { kind: gate, ref: "dast-zap-coverage-selftest" }
+
+  # ── Regulatory requirements (ADR-0379) ─────────────────────────────────────────────
+  # The requirement list the compliance page used to hard-code, each now a control with its
+  # evidence. Declared status from an evidence audit of origin/main on 2026-11-15: `enforced`
+  # where a test or gate was opened and confirmed to assert the behaviour, `partial` where the
+  # evidence covers part of it or was not fully confirmed, `planned` where nothing exists. The
+  # displayed verdict is still computed from evidence_refs, never taken from these lines.
+  - id: req-psd2-sca-30eur
+    title: "SCA for payments over 30 EUR"
+    category: "Payments and PSD2"
+    frameworks: [PSD2]
+    references: []
+    evidence: "No machine-checkable evidence found. No low-value exemption or 30 EUR threshold in sca/psd2/ap2 code; ap2 KDoc says exemption is decided elsewhere, nothing does."
+    status: planned
+    evidence_refs:
+      - { kind: path, ref: "openbank-sca-service/src/main/kotlin/com/openbank/sca/application/usecase/ScaService.kt" }
+  - id: req-psd2-consent
+    title: "Consent management (AIS/PIS/CBPII)"
+    category: "Payments and PSD2"
+    frameworks: [PSD2]
+    references: []
+    evidence: "consent create/validate/revoke lifecycle; isActive/hasScope/coversAccount semantics AIS/PIS covered; CBPII scope not separately confirmed."
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-consent-service/src/test/kotlin/com/openbank/consent/application/usecase/ConsentServiceTest.kt" }
+      - { kind: test, ref: "openbank-consent-service/src/test/kotlin/com/openbank/consent/domain/model/ConsentTest.kt" }
+    # relates to control `strong-auth`
+  - id: req-psd2-tpp
+    title: "TPP registration and validation"
+    category: "Payments and PSD2"
+    frameworks: [PSD2]
+    references: []
+    evidence: "missing TPP cert -> 401 CERTIFICATE_MISSING; payments path requires PISP role; unauthorized when TPP unknown, not ACTIVE, or missing role QWAC chain validation itself not seen tested; identity taken from header/SSL DN."
+    status: partial
+    evidence_refs:
+      - { kind: test, ref: "openbank-psd2-service/src/test/kotlin/com/openbank/psd2/infrastructure/rest/filter/EidasMtlsFilterTest.kt" }
+      - { kind: test, ref: "openbank-tpp-registry-service/src/test/kotlin/com/openbank/tppregistry/application/usecase/TppRegistryServiceTest.kt" }
+  - id: req-psd2-berlin-group
+    title: "Berlin Group NextGenPSD2 API"
+    category: "Payments and PSD2"
+    frameworks: [PSD2]
+    references: []
+    evidence: "maps every upstream consent status to its Berlin Group equivalent Partial: status mapping only; no full NextGenPSD2 spec conformance test seen."
+    status: partial
+    evidence_refs:
+      - { kind: test, ref: "openbank-psd2-service/src/test/kotlin/com/openbank/psd2/application/usecase/Psd2ServicesTest.kt" }
+  - id: req-psd2-redirect-uri
+    title: "Redirect URI in the consent record"
+    category: "Payments and PSD2"
+    frameworks: [PSD2]
+    references: []
+    evidence: "entity round-trip asserts redirectUri preserved"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-consent-service/src/test/kotlin/com/openbank/consent/infrastructure/persistence/entity/ConsentEntityTest.kt" }
+  - id: req-sepa-charge-bearer
+    title: "Charge bearer SLEV for SEPA"
+    category: "Payments and PSD2"
+    frameworks: [PSD2]
+    references: []
+    evidence: "pacs.008 built with ChargeBearer.SLEV against golden XML containing <ChrgBr>SLEV</ChrgBr> Framework label: SEPA mapped to PSD2 bucket for lack of a SEPA option."
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-libs-iso20022/src/test/kotlin/com/openbank/libs/iso20022/Pacs008BuilderTest.kt" }
+  - id: req-sepa-e2e-id
+    title: "End-to-end ID in SEPA payments"
+    category: "Payments and PSD2"
+    frameworks: [PSD2]
+    references: []
+    evidence: "asserts <EndToEndId> in XML; asserts endToEndId in confirmation document"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-libs-iso20022/src/test/kotlin/com/openbank/libs/iso20022/Camt054BuilderTest.kt" }
+      - { kind: test, ref: "openbank-sepa-payment/src/test/kotlin/com/openbank/sepa/application/usecase/PaymentConfirmationMapperTest.kt" }
+  - id: req-aml-pep
+    title: "PEP screening of customers"
+    category: "AML"
+    frameworks: [AMLD]
+    references: []
+    evidence: "CLEAR and MATCH PEP results passed through to KYC case"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-kyc-service/src/test/kotlin/com/openbank/kyc/application/PepScreeningServiceTest.kt" }
+    # relates to control `sanctions-screening`
+  - id: req-aml-sanctions
+    title: "Sanctions list screening of customers"
+    category: "AML"
+    frameworks: [AMLD]
+    references: []
+    evidence: "remote screening statuses map to local match status; sanctions match -> MANUAL_REVIEW at VERY_HIGH tier"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-domestic-payment/src/test/kotlin/com/openbank/domestic/infrastructure/client/SanctionsScreeningAdapterTest.kt" }
+      - { kind: test, ref: "openbank-kyc-service/src/test/kotlin/com/openbank/kyc/application/CustomerScreeningServiceTest.kt" }
+    # relates to control `sanctions-screening`
+  - id: req-aml-sar
+    title: "SAR filing tracking"
+    category: "AML"
+    frameworks: [AMLD]
+    references: []
+    evidence: "drafter cannot approve own report; only approved report can be filed; STR lifecycle over REST/DB IT opened by name only; unit test assertions confirmed."
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-aml-service/src/test/kotlin/com/openbank/aml/domain/report/SuspiciousTransactionReportTest.kt" }
+      - { kind: test, ref: "openbank-aml-service/src/test/kotlin/com/openbank/aml/it/SuspiciousTransactionReportIT.kt" }
+  - id: req-aml-mlro
+    title: "MLRO escalation"
+    category: "AML"
+    frameworks: [AMLD]
+    references: []
+    evidence: "No machine-checkable evidence found. Only a migration column escalated_to_mlro and a diagram; no Kotlin reader (#2370 pattern)."
+    status: planned
+    evidence_refs:
+      - { kind: path, ref: "openbank-aml-service/src/main/resources/db/migration/V2__compliance_fields.sql" }
+  - id: req-aml-false-positive
+    title: "False positive documentation"
+    category: "AML"
+    frameworks: [AMLD]
+    references: []
+    evidence: "FALSE_POSITIVE_EXPLAINED_ACTIVITY outcome proposed, four-eyes, stored in decision_reason with actor"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-aml-service/src/test/kotlin/com/openbank/aml/it/TransactionMonitoringDecisionIT.kt" }
+  - id: req-aml-tx-screening
+    title: "AML screening of transactions"
+    category: "AML"
+    frameworks: [AMLD]
+    references: []
+    evidence: "transaction monitoring rule evaluation; monitoring alert decision flow MonitoringEvaluatorTest content not opened line by line."
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-aml-service/src/test/kotlin/com/openbank/aml/application/monitoring/MonitoringEvaluatorTest.kt" }
+      - { kind: test, ref: "openbank-aml-service/src/test/kotlin/com/openbank/aml/it/TransactionMonitoringDecisionIT.kt" }
+    # relates to control `fraud-monitoring`
+  - id: req-aml-risk-rating
+    title: "Customer risk rating"
+    category: "AML"
+    frameworks: [AMLD]
+    references: []
+    evidence: "riskLevel tier raised to HIGH/VERY_HIGH on matches; risk factors PEP/HIGH_RISK_COUNTRY derived and published"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-kyc-service/src/test/kotlin/com/openbank/kyc/application/CustomerScreeningServiceTest.kt" }
+      - { kind: test, ref: "openbank-party-service/src/test/kotlin/com/openbank/party/application/usecase/PartyAmlProfileServiceTest.kt" }
+  - id: req-kyc-dd-level
+    title: "Due diligence level (SDD/CDD/EDD)"
+    category: "KYC / CDD"
+    frameworks: [AMLD]
+    references: []
+    evidence: "reviewStatus STANDARD vs ENHANCED_DUE_DILIGENCE asserted No SIMPLIFIED level seen."
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-party-service/src/test/kotlin/com/openbank/party/integration/PartyAmlProfileApiIT.kt" }
+  - id: req-kyc-source-of-funds
+    title: "Source of funds declaration"
+    category: "KYC / CDD"
+    frameworks: [AMLD]
+    references: []
+    evidence: "AML disclosures incl. sourceOfFunds validated Business (KYB) only; retail party profile not confirmed."
+    status: partial
+    evidence_refs:
+      - { kind: test, ref: "openbank-kyb-service/src/test/kotlin/com/openbank/kyb/domain/AmlDisclosuresTest.kt" }
+  - id: req-kyc-purpose
+    title: "Business purpose of the relationship"
+    category: "KYC / CDD"
+    frameworks: [AMLD]
+    references: []
+    evidence: "RelationshipPurpose in disclosures KYB only."
+    status: partial
+    evidence_refs:
+      - { kind: test, ref: "openbank-kyb-service/src/test/kotlin/com/openbank/kyb/domain/AmlDisclosuresTest.kt" }
+  - id: req-kyc-periodic-review
+    title: "Periodic KYC review scheduling"
+    category: "KYC / CDD"
+    frameworks: [AMLD]
+    references: []
+    evidence: "No machine-checkable evidence found. Code says true periodic re-screening is not built (operator re-screen endpoint only)."
+    status: planned
+    evidence_refs:
+      - { kind: path, ref: "openbank-kyc-service/src/main/kotlin/com/openbank/kyc/application/KycService.kt" }
+  - id: req-kyc-pep-self-declaration
+    title: "PEP self-declaration"
+    category: "KYC / CDD"
+    frameworks: [AMLD]
+    references: []
+    evidence: "PepDeclaration validation: category required when isPep, empty otherwise"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-party-service/src/test/kotlin/com/openbank/party/domain/model/PartyAmlProfileTest.kt" }
+  - id: req-kyc-ubo
+    title: "Beneficial owner tracking"
+    category: "KYC / CDD"
+    frameworks: [AMLD]
+    references: []
+    evidence: "UBO register mapping; UBO screening in case"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-kyb-service/src/test/kotlin/com/openbank/kyb/infrastructure/registry/UboMappingTest.kt" }
+      - { kind: test, ref: "openbank-kyb-service/src/test/kotlin/com/openbank/kyb/domain/CaseScreeningTest.kt" }
+  - id: req-kyc-expected-turnover
+    title: "Expected turnover"
+    category: "KYC / CDD"
+    frameworks: [AMLD]
+    references: []
+    evidence: "expectedMonthlyTurnover in disclosures KYB only."
+    status: partial
+    evidence_refs:
+      - { kind: test, ref: "openbank-kyb-service/src/test/kotlin/com/openbank/kyb/domain/AmlDisclosuresTest.kt" }
+  - id: req-gdpr-consent-ts
+    title: "Explicit consent timestamp"
+    category: "Data protection"
+    frameworks: [GDPR]
+    references: []
+    evidence: "No machine-checkable evidence found. Consent records carry createdAt, but no test asserting a consent-given timestamp was found. Unsure."
+    status: partial
+    evidence_refs:
+      - { kind: adr, ref: "0379" }
+  - id: req-gdpr-marketing
+    title: "Marketing consent"
+    category: "Data protection"
+    frameworks: [GDPR]
+    references: []
+    evidence: "granted sets consent_marketing; revoked/expired clears it"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-party-service/src/test/kotlin/com/openbank/party/application/usecase/MarketingConsentProjectionServiceTest.kt" }
+  - id: req-gdpr-erasure
+    title: "Right to erasure (anonymise and cascade)"
+    category: "Data protection"
+    frameworks: [GDPR]
+    references: []
+    evidence: "PARTY_ERASED anonymises legalName; failure dead-letters; erased party's case stored anonymised, race-safe"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-account-service/src/test/kotlin/com/openbank/account/infrastructure/kafka/PartyEventConsumerTest.kt" }
+      - { kind: test, ref: "openbank-aml-service/src/test/kotlin/com/openbank/aml/it/CaseForErasedPartyIT.kt" }
+  - id: req-gdpr-retention
+    title: "Data retention policy"
+    category: "Data protection"
+    frameworks: [GDPR]
+    references: []
+    evidence: "anonymises card PII past retention; dry-run is no-op; outbox SENT row retention Per-store; no single fleet policy test."
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-card-issuance-service/src/test/kotlin/com/openbank/cardissuance/infrastructure/retention/CardPiiRetentionSchedulerTest.kt" }
+      - { kind: gate, ref: "outbox-sent-retention" }
+    # relates to control `data-classification`
+  - id: req-gdpr-classification
+    title: "Data sensitivity classification"
+    category: "Data protection"
+    frameworks: [GDPR]
+    references: []
+    evidence: "manifest schema requires dataClassification enum per service (governance-schema.mjs) Gate inferred from schema; gate script internals not fully read."
+    status: partial
+    evidence_refs:
+      - { kind: gate, ref: "governance-manifest" }
+    # relates to control `data-classification`
+  - id: req-gdpr-dpa
+    title: "GDPR data processing agreement"
+    category: "Data protection"
+    frameworks: [GDPR]
+    references: []
+    evidence: "No machine-checkable evidence found. No DPA artefact or check found."
+    status: planned
+    evidence_refs:
+      - { kind: adr, ref: "0379" }
+  - id: req-gdpr-access
+    title: "Right of access (Art. 15)"
+    category: "Data protection"
+    frameworks: [GDPR]
+    references: []
+    evidence: "Art 15 export scoped to caller's own party; edge may fetch Art 15 export for header subject"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-customer-edge/src/test/kotlin/com/openbank/customeredge/integration/GdprSelfServiceExportIT.kt" }
+      - { kind: test, ref: "openbank-party-service/src/test/kotlin/com/openbank/party/integration/GdprSubjectAccessViaEdgeIT.kt" }
+  - id: req-gdpr-portability
+    title: "Data portability (Art. 20)"
+    category: "Data protection"
+    frameworks: [GDPR]
+    references: []
+    evidence: "Art 20 export assembles accounts+transactions; 401 fails hard"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-party-service/src/test/kotlin/com/openbank/party/infrastructure/gdpr/PortabilityAggregationAdapterTest.kt" }
+  - id: req-ict-immutable-audit
+    title: "Immutable audit log"
+    category: "Audit and ICT"
+    frameworks: [EBA-ICT]
+    references: []
+    evidence: "verifyChain confirms consecutive hash links; edited digest detected despite valid signature; offline anchor verifier rejection paths; every money-path topic reaches the audit trail"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-audit-service/src/test/kotlin/com/openbank/audit/integration/AuditChainRoundTripIT.kt" }
+      - { kind: test, ref: "openbank-audit-service/src/test/kotlin/com/openbank/audit/application/AuditAnchorCheckpointConsistencyTest.kt" }
+      - { kind: gate, ref: "audit-anchor-offline-verifier-unit-test" }
+      - { kind: gate, ref: "audit-money-path-subscription" }
+    # relates to control `audit-trail`
+  - id: req-ict-audit-retention
+    title: "10-year audit retention"
+    category: "Audit and ICT"
+    frameworks: [EBA-ICT]
+    references: []
+    evidence: "COMPLIANCE object-lock with retain-until = +10y WORM adapter is in analytics-sink (anchor/bronze), not audit-service rows themselves. Unsure it covers the audit table."
+    status: partial
+    evidence_refs:
+      - { kind: test, ref: "openbank-analytics-sink/src/test/kotlin/com/openbank/analytics/infrastructure/worm/S3WormArchiveTest.kt" }
+    # relates to control `audit-trail`
+  - id: req-ict-security-events
+    title: "Security event flagging"
+    category: "Audit and ICT"
+    frameworks: [EBA-ICT]
+    references: []
+    evidence: "No machine-checkable evidence found. No security-event flag on audit records found."
+    status: planned
+    evidence_refs:
+      - { kind: adr, ref: "0379" }
+    # relates to control `runtime-detection`
+  - id: req-ict-actor-id
+    title: "Actor ID in the audit record"
+    category: "Audit and ICT"
+    frameworks: [EBA-ICT]
+    references: []
+    evidence: "actor id read from producer; ABSENT/SYSTEM/DECLARED classification"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-audit-service/src/test/kotlin/com/openbank/audit/application/AuditActorProvenanceTest.kt" }
+    # relates to control `audit-trail`
+  - id: req-ict-ip
+    title: "IP address logging"
+    category: "Audit and ICT"
+    frameworks: [EBA-ICT]
+    references: []
+    evidence: "consent entity round-trip preserves ipAddress Only PSU IP on consent is tested; audit session-log ipAddress is code-only."
+    status: partial
+    evidence_refs:
+      - { kind: test, ref: "openbank-consent-service/src/test/kotlin/com/openbank/consent/infrastructure/persistence/entity/ConsentEntityTest.kt" }
+  - id: req-ict-session
+    title: "Session tracking"
+    category: "Audit and ICT"
+    frameworks: [EBA-ICT]
+    references: []
+    evidence: "sessionId carried onto stored audit entry"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-audit-service/src/test/kotlin/com/openbank/audit/application/AuditConsumerTest.kt" }
+    # relates to control `audit-trail`
+  - id: req-ict-correlation
+    title: "Correlation ID"
+    category: "Audit and ICT"
+    frameworks: [EBA-ICT]
+    references: []
+    evidence: "propagates/generates correlation ids, clears MDC; correlationId stored on audit entry; Alloy extracts correlation ids from log path"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-libs-runtime/src/test/kotlin/com/openbank/libs/web/CorrelationIdFilterTest.kt" }
+      - { kind: test, ref: "openbank-audit-service/src/test/kotlin/com/openbank/audit/application/AuditConsumerTest.kt" }
+      - { kind: gate, ref: "log-trace-id-path" }
+    # relates to control `observability`
+  - id: req-cnb-constant-symbol
+    title: "Constant symbol (payment system)"
+    category: "Czech payment and account rules"
+    frameworks: [CNB]
+    references: []
+    evidence: "constantSymbol mapped into command"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-domestic-payment/src/test/kotlin/com/openbank/domestic/infrastructure/rest/dto/DomesticPaymentDtosTest.kt" }
+  - id: req-cnb-specific-symbol
+    title: "Specific symbol"
+    category: "Czech payment and account rules"
+    frameworks: [CNB]
+    references: []
+    evidence: "specificSymbol mapped into command"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-domestic-payment/src/test/kotlin/com/openbank/domestic/infrastructure/rest/dto/DomesticPaymentDtosTest.kt" }
+  - id: req-cnb-reporting-code
+    title: "CNB reporting code"
+    category: "Czech payment and account rules"
+    frameworks: [CNB]
+    references: []
+    evidence: "No machine-checkable evidence found. No reporting-code field found."
+    status: planned
+    evidence_refs:
+      - { kind: adr, ref: "0379" }
+  - id: req-cnb-dormancy
+    title: "Dormancy monitoring"
+    category: "Czech payment and account rules"
+    frameworks: [CNB]
+    references: []
+    evidence: "DORMANT standing: credit allowed, debit blocked DORMANT status is tested, but nothing detects inactivity or moves accounts to it (no monitoring)."
+    status: partial
+    evidence_refs:
+      - { kind: test, ref: "openbank-account-service/src/test/kotlin/com/openbank/account/domain/model/AccountTest.kt" }
+  - id: req-cnb-iban
+    title: "IBAN allocation"
+    category: "Czech payment and account rules"
+    frameworks: [CNB]
+    references: []
+    evidence: "mod-97, 24-char CZ IBAN, mod-11 BBAN"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-account-service/src/test/kotlin/com/openbank/account/application/usecase/IbanGeneratorTest.kt" }
+  - id: req-cnb-records-10y
+    title: "Records kept 10 years after closure"
+    category: "Czech payment and account rules"
+    frameworks: [CNB]
+    references: []
+    evidence: "object-lock retain-until +10y Retention from write, not from account closure. Unsure."
+    status: partial
+    evidence_refs:
+      - { kind: test, ref: "openbank-analytics-sink/src/test/kotlin/com/openbank/analytics/infrastructure/worm/S3WormArchiveTest.kt" }
+  - id: req-fatca-status
+    title: "Customer FATCA status"
+    category: "Tax information exchange"
+    frameworks: [FATCA-CRS]
+    references: []
+    evidence: "fatcaStatus exposed/asserted on AML profile Assertion seen is the null (undeclared) case; NON_US asserted in pact provider fixture."
+    status: partial
+    evidence_refs:
+      - { kind: test, ref: "openbank-party-service/src/test/kotlin/com/openbank/party/integration/PartyAmlProfileApiIT.kt" }
+  - id: req-crs-status
+    title: "Customer CRS status"
+    category: "Tax information exchange"
+    frameworks: [FATCA-CRS]
+    references: []
+    evidence: "CRS lines per non-CZ residency Derived from tax residencies; no explicit crsStatus assertion seen."
+    status: partial
+    evidence_refs:
+      - { kind: test, ref: "openbank-tax-reporting-service/src/test/kotlin/com/openbank/tax/infrastructure/returns/crsfatca/CrsFatcaReturnDataAdapterTest.kt" }
+  - id: req-us-person
+    title: "US person identification"
+    category: "Tax information exchange"
+    frameworks: [FATCA-CRS]
+    references: []
+    evidence: "usPerson forwarded; FATCA lines only for US persons"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-customer-edge/src/test/kotlin/com/openbank/customeredge/CustomerAmlProfileResourceTest.kt" }
+      - { kind: test, ref: "openbank-tax-reporting-service/src/test/kotlin/com/openbank/tax/infrastructure/returns/crsfatca/CrsFatcaReturnDataAdapterTest.kt" }
+  - id: req-crs-reporting
+    title: "CRS reporting"
+    category: "Tax information exchange"
+    frameworks: [FATCA-CRS]
+    references: []
+    evidence: "CRS return lines + totals; domestic parties emit nothing"
+    status: enforced
+    evidence_refs:
+      - { kind: test, ref: "openbank-tax-reporting-service/src/test/kotlin/com/openbank/tax/infrastructure/returns/crsfatca/CrsFatcaReturnDataAdapterTest.kt" }
