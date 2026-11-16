@@ -93,6 +93,7 @@ class AccountServiceLifecycleTest {
                 metrics,
                 Clock.fixed(fixedInstant, ZoneOffset.UTC),
                 notificationRequestPort,
+                mockk(),
             )
     }
 

@@ -6,6 +6,7 @@ package com.openbank.account.application.port.out
 
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountAuthorization
+import com.openbank.account.domain.model.AccountBookingReceipt
 import com.openbank.account.domain.model.CurrencyPocket
 import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.event.DomainEvent
@@ -59,6 +60,17 @@ interface AccountRepository {
          */
         createdEvent: (Account) -> DomainEvent,
     ): Account
+
+    suspend fun saveBookedAccount(
+        account: Account,
+        primaryPocket: CurrencyPocket,
+        idempotencyKey: String,
+        requestHash: String,
+        receipt: AccountBookingReceipt,
+        createdEvent: (Account) -> DomainEvent,
+    ): Account
+
+    suspend fun findBookingOperationId(accountId: UUID): UUID?
 
     /** The account opened under this idempotency key, or null if the key is unused. */
     suspend fun findByIdempotencyKey(idempotencyKey: String): Account?

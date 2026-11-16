@@ -8,7 +8,9 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
+import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -16,6 +18,8 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
+import java.time.OffsetDateTime
+import java.util.UUID
 
 // product-catalog now authenticates its callers (issue #401, #743): reads require a valid
 // token (@Authenticated). This comment previously said "unauthenticated, public reference
@@ -80,3 +84,41 @@ data class CatalogRevisionContent(val behaviour: CatalogBehaviour? = null)
 /** Only `irVersion` of the product IR document (ADR-0352 §1); the IR itself is read by consumers by hash. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class CatalogBehaviour(val irVersion: Int? = null)
+
+@RegisterRestClient(configKey = "product-catalog-api")
+@RegisterProvider(SyntheticTaintClientFilter::class)
+@OidcClientFilter("m2m")
+@RegisterProvider(ProductCatalogHostHeaderFilter::class)
+@Path("/api/v2/booking-grant-receipts")
+@Consumes(MediaType.APPLICATION_JSON)
+@Produces(MediaType.APPLICATION_JSON)
+interface ProductCatalogBookingClient {
+    @POST
+    fun consume(request: BookingGrantRequest): Uni<BookingGrantResponse>
+}
+
+data class BookingGrantRequest(
+    val operationId: UUID,
+    val subjectId: UUID,
+    val productRevisionId: UUID,
+    val grantRevisionId: UUID,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class BookingGrantResponse(
+    val operationId: UUID,
+    val subjectId: UUID,
+    val productRevisionId: UUID,
+    val grantRevisionId: UUID,
+    val approvalDigest: String,
+    val bookedContext: BookedContextResponse,
+    val consumedAt: OffsetDateTime,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class BookedContextResponse(
+    val legalEntityId: UUID,
+    val bookingBookId: UUID,
+    val mode: String,
+    val establishmentId: UUID? = null,
+)

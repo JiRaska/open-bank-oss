@@ -10,6 +10,7 @@ import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.GsftAccountRosterRepository
 import com.openbank.account.application.usecase.AccountUpdateConflictException
 import com.openbank.account.domain.model.Account
+import com.openbank.account.domain.model.AccountBookingReceipt
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.CurrencyPocket
@@ -25,6 +26,7 @@ import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
@@ -153,6 +155,34 @@ class AccountRepositoryImpl(
         idempotencyKey: String,
         requestHash: String?,
         createdEvent: (Account) -> DomainEvent,
+    ): Account = persistOpening(account, primaryPocket, idempotencyKey, requestHash, null, createdEvent)
+
+    override suspend fun saveBookedAccount(
+        account: Account,
+        primaryPocket: CurrencyPocket,
+        idempotencyKey: String,
+        requestHash: String,
+        receipt: AccountBookingReceipt,
+        createdEvent: (Account) -> DomainEvent,
+    ): Account = persistOpening(account, primaryPocket, idempotencyKey, requestHash, receipt, createdEvent)
+
+    override suspend fun findBookingOperationId(accountId: UUID): UUID? = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery(
+                "SELECT operation_id FROM account_booking_receipts WHERE account_id = :accountId",
+                UUID::class.java,
+            ).setParameter("accountId", accountId).singleResultOrNull
+        }
+    }.awaitSuspending()
+
+    @Suppress("LongParameterList")
+    private suspend fun persistOpening(
+        account: Account,
+        primaryPocket: CurrencyPocket,
+        idempotencyKey: String,
+        requestHash: String?,
+        receipt: AccountBookingReceipt?,
+        createdEvent: (Account) -> DomainEvent,
     ): Account {
         val entity = account.toEntity()
         // Audit timestamps come from the injected Clock here, same as save() (ADR-0100 / #540):
@@ -169,10 +199,39 @@ class AccountRepositoryImpl(
             persist(entity)
                 .flatMap { pocketRepository.persistInTransaction(primaryPocket) }
                 .flatMap { idempotencyRepository.persistInTransaction(idempotencyKey, entity.id, requestHash) }
+                .flatMap {
+                    receipt?.let { persistBookingReceipt(entity.id, it) } ?: Uni.createFrom().voidItem()
+                }
                 .flatMap { outboxRepository.persistInTransaction(outboxMessage(createdEvent(entity.toDomain()))) }
                 .replaceWith(entity)
         }.awaitSuspending().toDomain()
     }
+
+    private fun persistBookingReceipt(accountId: UUID, receipt: AccountBookingReceipt): Uni<Void> =
+        Panache.getSession().flatMap { session ->
+            session.flush().flatMap {
+                session.createNativeMutationQuery(
+                    """
+                    INSERT INTO account_booking_receipts (
+                        account_id, operation_id, legal_entity_id, booking_book_id, operating_mode,
+                        establishment_id, approval_digest, consumed_at
+                    ) VALUES (
+                        :accountId, :operationId, :company, :book, :mode,
+                        CAST(:branch AS uuid), :approval, :consumedAt
+                    )
+                    """.trimIndent(),
+                ).setParameter("accountId", accountId)
+                    .setParameter("operationId", receipt.operationId)
+                    .setParameter("company", receipt.legalEntityId)
+                    .setParameter("book", receipt.bookingBookId)
+                    .setParameter("mode", receipt.operatingMode.name)
+                    .setParameter("branch", receipt.establishmentId?.toString())
+                    .setParameter("approval", receipt.approvalDigest)
+                    .setParameter("consumedAt", receipt.consumedAt)
+                    .executeUpdate()
+                    .replaceWithVoid()
+            }
+        }
 
     private fun outboxMessage(event: DomainEvent) = OutboxMessage(
         aggregateId = event.aggregateId,

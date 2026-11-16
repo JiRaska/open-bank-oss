@@ -6,6 +6,7 @@ import com.openbank.account.application.port.`in`.ListAccountsQuery
 import com.openbank.account.application.port.`in`.ListActiveAccountsQuery
 import com.openbank.account.application.port.`in`.OpenAccountCommand
 import com.openbank.account.application.port.`in`.SearchAccountsQuery
+import com.openbank.account.application.port.out.AccountBookingPort
 import com.openbank.account.application.port.out.AccountEventPublisher
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
@@ -14,6 +15,7 @@ import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.CatalogProduct
 import com.openbank.account.application.port.out.CurrencyPocketRepository
 import com.openbank.account.application.port.out.NotificationRequestPort
+import com.openbank.account.application.port.out.PendingAccountBooking
 import com.openbank.account.application.port.out.PinOutcome
 import com.openbank.account.application.port.out.ProductCatalogPort
 import com.openbank.account.application.port.out.ProductLookupResult
@@ -23,8 +25,10 @@ import com.openbank.account.application.port.out.RevisionResolution
 import com.openbank.account.application.port.out.SanctionsScreenResult
 import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.model.Account
+import com.openbank.account.domain.model.AccountBookingReceipt
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
+import com.openbank.account.domain.model.ProductRevisionPin
 import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.event.DomainEvent
@@ -42,6 +46,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.ValueSource
 import java.time.Clock
 import java.time.Instant
@@ -59,6 +64,7 @@ class AccountServiceTest {
     private lateinit var productCatalog: ProductCatalogPort
     private val pinOutcomes = mutableListOf<PinOutcome>()
     private lateinit var metrics: DomainMetrics
+    private val booking: AccountBookingPort = mockk()
     private lateinit var notificationRequestPort: NotificationRequestPort
     private lateinit var service: AccountService
 
@@ -93,7 +99,67 @@ class AccountServiceTest {
                 metrics,
                 Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC),
                 notificationRequestPort,
+                booking,
             )
+    }
+
+    @ParameterizedTest
+    @EnumSource(AccountBookingReceipt.OperatingMode::class)
+    fun `trusted booking opening commits the consumed context with the pinned IR`(
+        mode: AccountBookingReceipt.OperatingMode,
+    ): Unit = runBlocking {
+        val command = openAccountCommand().copy(requestHash = "a".repeat(64))
+        val operationId = UUID.randomUUID()
+        val iban = Iban.of("CZ6508000000192000145399")
+        val pin = ProductRevisionPin(
+            offeringId = UUID.randomUUID(),
+            productCode = "CURRENT_STANDARD",
+            revisionId = UUID.randomUUID(),
+            revisionNumber = 3,
+            contentHash = "a".repeat(64),
+            irRevisionHash = "b".repeat(64),
+            irVersion = 1,
+            pinnedAt = Instant.parse("2024-01-14T00:00:00Z"),
+        )
+        val pending = PendingAccountBooking(
+            operationId,
+            command.idempotencyKey,
+            requireNotNull(command.requestHash),
+            command.partyId,
+            command.productId,
+            UUID.randomUUID(),
+            pin,
+        )
+        val receipt = AccountBookingReceipt(
+            operationId,
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            mode,
+            UUID.randomUUID().takeIf { mode == AccountBookingReceipt.OperatingMode.BRANCH },
+            "c".repeat(64),
+            pin.pinnedAt,
+        )
+        coEvery { booking.findPending(operationId) } returns pending
+        coEvery { booking.consume(pending) } returns receipt
+        coEvery { accountRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        every { ibanGenerator.generate(command.currency) } returns iban
+        coEvery { accountRepository.existsByIban(iban) } returns false
+        coEvery { accountRepository.saveBookedAccount(any(), any(), any(), any(), eq(receipt), any()) }
+            .answers { firstArg() }
+
+        val opened = service.openBookedAccount(command, operationId)
+
+        assertThat(opened.productRevisionPin).isEqualTo(pin)
+        coVerify(exactly = 1) { accountRepository.saveBookedAccount(opened, any(), any(), any(), eq(receipt), any()) }
+        coVerify(exactly = 0) { productCatalog.resolvePublishedRevision(any(), any()) }
+
+        coEvery { accountRepository.findByIdempotencyKey(command.idempotencyKey) } returns opened
+        coEvery { accountRepository.findBookingOperationId(opened.id) } returns operationId
+        coEvery { accountRepository.findIdempotencyRequestHash(command.idempotencyKey) } returns command.requestHash
+
+        assertThat(service.openBookedAccount(command, operationId)).isEqualTo(opened)
+        coVerify(exactly = 1) { booking.consume(pending) }
     }
 
     @Test

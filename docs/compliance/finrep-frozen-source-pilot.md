@@ -243,4 +243,6 @@ calling the catalog. Complete the account, idempotency record, booking receipt a
 AccountCreated outbox row in the existing account-opening transaction. The receipt insert
 checks the party, request fingerprint and pinned product revision, including the signed IR
 hash when present. An interrupted call can resume the original operation using the same
-grant and pin. The account-opening caller and payment propagation still need wiring.
+grant and pin. Account Service's internal `openBookedAccount` use case consumes that durable operation
+and writes the receipt with the account. The trusted market-admission producer that selects
+and commits the operation, and onward propagation into payment and ledger, still need wiring.

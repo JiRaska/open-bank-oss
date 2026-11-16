@@ -21,6 +21,7 @@ import com.openbank.account.application.port.`in`.ResolvePocketQuery
 import com.openbank.account.application.port.`in`.SearchAccountsQuery
 import com.openbank.account.application.port.`in`.UnfreezeAccountCommand
 import com.openbank.account.application.port.`in`.UpdateSavingsGoalCommand
+import com.openbank.account.application.port.out.AccountBookingPort
 import com.openbank.account.application.port.out.AccountEventPublisher
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
@@ -75,6 +76,7 @@ class AccountService(
      * CDI bean's constructor parameter makes Arc fail to resolve the bean, silently.
      */
     private val notificationRequestPort: NotificationRequestPort,
+    private val booking: AccountBookingPort,
 ) : AccountUseCase {
 
     private suspend fun screenForOpening(command: OpenAccountCommand): SanctionsScreenResult {
@@ -97,11 +99,29 @@ class AccountService(
         return screening
     }
 
-    override suspend fun openAccount(command: OpenAccountCommand): Account {
+    override suspend fun openAccount(command: OpenAccountCommand): Account = openAccount(command, null)
+
+    /** Only the trusted market admission workflow supplies this durable operation id. */
+    suspend fun openBookedAccount(command: OpenAccountCommand, operationId: UUID): Account =
+        openAccount(command, operationId)
+
+    private suspend fun openAccount(command: OpenAccountCommand, operationId: UUID?): Account {
         // Idempotent replay (#465): a repeated key returns the original account and never opens
         // a second one. The Redis record in the REST layer is only a response cache — this DB
         // check (and the transactional key insert in saveNewAccount) is the source of truth.
-        accountRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return replayOrRefuse(it, command) }
+        accountRepository.findByIdempotencyKey(command.idempotencyKey)?.let {
+            return replayOpening(it, command, operationId)
+        }
+        val pending = operationId?.let {
+            val selected = requireNotNull(booking.findPending(it)) { "Unknown account booking operation" }
+            require(
+                selected.idempotencyKey == command.idempotencyKey &&
+                    selected.requestHash == command.requestHash &&
+                    selected.partyId == command.partyId &&
+                    selected.productId == command.productId,
+            ) { "Booking operation belongs to another account opening" }
+            selected
+        }
 
         val screening = screenForOpening(command)
 
@@ -110,7 +130,7 @@ class AccountService(
         // ineligible product, no published revision or an unreachable catalog each refuse the
         // opening before anything is written (issue #668 replaced; it used to proceed on an outage).
         val now = Instant.now(clock)
-        val pin = productRevisionPinning.pinFor(command.productId, command.currency.code, now)
+        val pin = pending?.pin ?: productRevisionPinning.pinFor(command.productId, command.currency.code, now)
 
         // #9044: a TERM_DEPOSIT must never open without a record of the terms version it was
         // opened under — the terms carry the early-withdrawal penalty and the notice period, and
@@ -153,17 +173,28 @@ class AccountService(
         // the same contract as the sequential replay above: return the winner's account,
         // publish no second event, count no second metric.
         val saved = try {
-            accountRepository.saveNewAccount(
-                account,
-                primaryPocketFor(account),
-                command.idempotencyKey,
-                command.requestHash,
-                ::accountCreatedEvent,
-            )
+            if (pending == null) {
+                accountRepository.saveNewAccount(
+                    account,
+                    primaryPocketFor(account),
+                    command.idempotencyKey,
+                    command.requestHash,
+                    ::accountCreatedEvent,
+                )
+            } else {
+                accountRepository.saveBookedAccount(
+                    account,
+                    primaryPocketFor(account),
+                    command.idempotencyKey,
+                    pending.requestHash,
+                    booking.consume(pending),
+                    ::accountCreatedEvent,
+                )
+            }
         } catch (e: PersistenceException) {
-            return replayOrRefuse(recoverConcurrentReplay(e, command.idempotencyKey), command)
+            return replayOpening(recoverConcurrentReplay(e, command.idempotencyKey), command, operationId)
         } catch (e: PgException) {
-            return replayOrRefuse(recoverConcurrentReplay(e, command.idempotencyKey), command)
+            return replayOpening(recoverConcurrentReplay(e, command.idempotencyKey), command, operationId)
         }
 
         // Operational money lives in the balance-service (N3 / ADR-0024). Balance init is
@@ -506,6 +537,15 @@ class AccountService(
         closedAt = null,
         version = 0L,
     )
+
+    private suspend fun replayOpening(existing: Account, command: OpenAccountCommand, operationId: UUID?): Account {
+        if (operationId != null) {
+            require(accountRepository.findBookingOperationId(existing.id) == operationId) {
+                "Idempotency key belongs to another booking operation"
+            }
+        }
+        return replayOrRefuse(existing, command)
+    }
 
     /**
      * #10916: the durable half of the Idempotency-Key check. The Redis record expires (or is
