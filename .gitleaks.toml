@@ -72,6 +72,13 @@ paths = [
   # numeric image tags do; the files hold no free text. The scheduled full-history scan (`--all`)
   # reaches them on the bot's state branch and reddened main with 267 such findings (2026-11-09).
   '''(^|/)\.main-red-watch/[0-9]+\.json$''',
+  # GENERATED consumer-driven contracts (pacts/*.json), written by the consumer Pact tests under
+  # src/test — test vectors by definition, the same class `.*test.*` already allows at the source.
+  # Their synthetic account numbers (e.g. 2000145399) match the rod-cislo heuristic, and the
+  # scheduled full-history scan reddened main on two pact commits (2026-11-16), which froze the
+  # merge train. Real customer data never reaches a pact: the broker and committed files only
+  # ever carry fixture values the consumer test itself constructs.
+  '''(^|/)pacts/[a-z0-9-]+\.json$''',
   # Build/cache directories — these are gitignored, but `--no-git` scans the FS directly.
   # Skipping them prevents thousands of false positives from minified JS / compiled artifacts.
   '''(^|/)node_modules/''',
