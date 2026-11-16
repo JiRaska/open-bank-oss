@@ -7,7 +7,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { KEY_CATALOG, catalogEntry } from '@/lib/security/keys/catalog'
 import { allStatuses, byUrgency, dependents, entryStatus, statusForDays, type MeasuredCert } from '@/lib/security/keys/status'
-import { measure, projectCertManager, projectStrimzi } from '@/lib/security/keys/prometheus'
+import { measure, projectCertManager, projectSeal, projectStrimzi } from '@/lib/security/keys/prometheus'
 import { buildKeysReport } from '@/lib/security/keys/report'
 import { hasPermission, permissionForPath, ROLES } from '@/lib/auth/roles'
 
@@ -81,10 +81,23 @@ describe('status', () => {
 
   it('non-measurable kinds are explicit, not healthy', () => {
     const statuses = Object.fromEntries(allStatuses([], NOW).map((s) => [s.id, s.status]))
-    expect(statuses['pades-seal']).toBe('untracked')
+    expect(statuses['pades-seal']).toBe('unknown')
+    expect(statuses['push-credentials']).toBe('revocation')
     expect(statuses['cosign-kms']).toBe('rotation')
     expect(statuses['pki-agent']).toBe('short-lived')
     expect(Object.values(statuses)).not.toContain('ok')
+  })
+
+  it('the seal counts down only for the organizational keystore certificate', () => {
+    const seal = catalogEntry('pades-seal')!
+    const sc = (name: string, days: number): MeasuredCert => ({ source: 'seal', namespace: 'documents', name, issuer: '', notAfter: NOW + days * DAY })
+    expect(entryStatus(seal, [sc('keystore', 20)], NOW)).toMatchObject({ status: 'attention', daysLeft: 20 })
+    // the DEV-ONLY fallback never reads as a healthy countdown, however far its date
+    expect(entryStatus(seal, [sc('ephemeral', 3650)], NOW)).toMatchObject({ status: 'dev-only', daysLeft: null })
+    // a real certificate decides the entry even next to an ephemeral replica
+    expect(entryStatus(seal, [sc('ephemeral', 3650), sc('keystore', 5)], NOW).status).toBe('critical')
+    // a cert-manager certificate is not the seal
+    expect(entryStatus(seal, [cm('documents', 'x-tls', 'openbank-ca', 80)], NOW).status).toBe('unknown')
   })
 
   it('urgency puts unknown before attention', () => {
@@ -125,6 +138,24 @@ describe('prometheus projection', () => {
       .toMatchObject({ name: 'clients', notAfter: NOW })
   })
 
+  it('the seal gauge projects only a known identity', () => {
+    expect(projectSeal([
+      { metric: { namespace: 'documents', identity: 'keystore', subject: 'LEAK' }, value: [0, String(NOW)] },
+      { metric: { namespace: 'documents', identity: 'mystery' }, value: [0, String(NOW)] },
+      { metric: { namespace: 'documents', identity: 'ephemeral' }, value: [0, '0'] },
+    ])).toEqual([{ source: 'seal', namespace: 'documents', name: 'keystore', issuer: '', notAfter: NOW }])
+  })
+
+  it('two replicas reporting the same seal count once', async () => {
+    const replica = (pod: string) => ({ metric: { namespace: 'documents', pod, identity: 'keystore' }, value: [0, String(NOW)] })
+    const m = await measure('http://prom', async (url) => new Response(JSON.stringify({
+      status: 'success',
+      data: { result: String(url).includes('document_seal') ? [replica('a'), replica('b')] : [] },
+    })))
+    expect(m.certs).toHaveLength(1)
+    expect(m.reachable.seal).toBe(true)
+  })
+
   it('a target scraped twice counts once', async () => {
     const series = { metric: { namespace: 'a', name: 'x-tls', issuer_name: 'openbank-ca' }, value: [0, String(NOW)] }
     const body = { status: 'success', data: { result: [series, series] } }
@@ -135,13 +166,13 @@ describe('prometheus projection', () => {
 
   it('an unreachable Prometheus reports unreachable, not empty-and-fine', async () => {
     const m = await measure('http://prom', async () => { throw new Error('down') })
-    expect(m).toEqual({ certs: [], reachable: { certManager: false, strimzi: false } })
+    expect(m).toEqual({ certs: [], reachable: { certManager: false, strimzi: false, seal: false } })
     expect((await measure(null)).reachable.certManager).toBe(false)
   })
 })
 
 describe('report and permissions', () => {
-  const m = { certs: [cm('accounts', 'account-service-internal-tls', 'openbank-ca', 40)], reachable: { certManager: true, strimzi: false } }
+  const m = { certs: [cm('accounts', 'account-service-internal-tls', 'openbank-ca', 40)], reachable: { certManager: true, strimzi: false, seal: false } }
 
   it('the per-certificate list is built only for keys:expert', () => {
     expect(buildKeysReport(m, NOW, false).expert).toBeUndefined()
