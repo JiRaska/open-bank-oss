@@ -141,7 +141,7 @@ class PassportPermitFenceTest {
         dataSource.connection.use { it.grantSubjectEvidence(signature) }
         callLoanAdmission(signature, "/receipt", 404)
         val differentPin = signature.copy(contentHash = "2".repeat(64))
-        callLoanAdmission(differentPin, "", 409)
+        callLoanAdmission(differentPin, "", 409).header("X-FOS-Decision", org.hamcrest.Matchers.nullValue())
         callLoanAdmission(signature, "", 204)
         callLoanAdmission(signature, "/receipt", 204)
         callLoanAdmission(differentPin, "/receipt", 404)
@@ -179,7 +179,7 @@ class PassportPermitFenceTest {
             assertTrue(db.revoke(request.grant))
         }
         callRoute(request).then().statusCode(409)
-        callLoanAdmission(request, "", 409)
+        callLoanAdmission(request, "", 409).header("X-FOS-Decision", "refused")
     }
 
     private fun callRoute(request: PermitRequest) = given().contentType("application/json").body(
@@ -217,7 +217,7 @@ class PassportPermitFenceTest {
         callRoute(request).then().statusCode(403)
     }
 
-    private fun callLoanAdmission(request: PermitRequest, suffix: String, status: Int) {
+    private fun callLoanAdmission(request: PermitRequest, suffix: String, status: Int) =
         given().contentType("application/json").body(
             mapOf(
                 "grantId" to request.grant,
@@ -235,7 +235,6 @@ class PassportPermitFenceTest {
                 "packSetDigest" to HASH,
             ),
         ).post("/api/v2/internal/passport-commitments$suffix").then().statusCode(status)
-    }
 
     private fun Connection.grantSubjectEvidence(request: PermitRequest) = execute(
         """

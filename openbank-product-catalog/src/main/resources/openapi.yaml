@@ -944,7 +944,12 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: Admission refused }
+        '409':
+          description: Admission refused
+          headers:
+            X-FOS-Decision:
+              description: Present with value refused when the exact refusal has been retained.
+              schema: { type: string, enum: [refused] }
   /api/v2/internal/passport-commitments/receipt:
     post:
       tags: [Passport Grants]
