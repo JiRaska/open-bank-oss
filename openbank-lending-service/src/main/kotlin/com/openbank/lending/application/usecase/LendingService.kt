@@ -55,6 +55,7 @@ import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.lending.infrastructure.compliance.OriginationConfig
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
@@ -790,7 +791,7 @@ class LendingService @Inject constructor(
     private fun LoanApplication.signatureIntent(request: SignApplicationRequest, actor: String): SignatureIntent {
         val pin = checkNotNull(catalogSnapshot)
         return SignatureIntent(
-            UUID.randomUUID(),
+            Ids.newId(),
             id,
             pin.revisionId,
             pin.contentHash,
