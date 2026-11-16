@@ -8,8 +8,6 @@ import com.openbank.document.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.junit.QuarkusTestProfile
-import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
@@ -58,7 +56,6 @@ import java.util.UUID
 @QuarkusTestResource(PostgresRedisTestResource::class)
 @QuarkusTestResource(SidecarStubResource::class)
 @QuarkusTestResource(DocumentTemplateRenderSignJourneyE2E.InMemoryKafkaResource::class)
-@TestProfile(DocumentTemplateRenderSignJourneyE2E.JourneyProfile::class)
 class DocumentTemplateRenderSignJourneyE2E {
 
     /** The document-generated event rides the in-memory connector — no broker in this JVM. */
@@ -67,13 +64,6 @@ class DocumentTemplateRenderSignJourneyE2E {
             InMemoryConnector.switchOutgoingChannelsToInMemory("document-events-out")
 
         override fun stop() = InMemoryConnector.clear()
-    }
-
-    /** RBAC is asserted through `@RolesAllowed`; the advisory OPA PEP has no sidecar in tests. */
-    class JourneyProfile : QuarkusTestProfile {
-        override fun getConfigOverrides(): Map<String, String> = mapOf(
-            "authz.enforce" to "false",
-        )
     }
 
     @Test
