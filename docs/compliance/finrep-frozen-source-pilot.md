@@ -195,6 +195,14 @@ controls and an approval digest. The exporter does not verify the close or appro
 
 ## Booking grant in Product Catalog
 
+Product behaviour comes from Product as Code (ADR-0352). Account opening already pins
+the published Product Catalog revision and records its canonical signed IR revision hash
+when present. Use that pin's revision ID as the grant's `productRevisionId`. Persist the
+product pin and booking receipt together when completing the account. The receipt records
+the separate compliance and accounting decision for that exact revision. Payments use the
+account's persisted attribution so a later product release cannot reclassify historical
+bookings.
+
 The opt-in `market-booking` pack registers version 1 of
 `org.openbank.market.booking-grant` through the existing Catalog v2 revision lifecycle.
 A draft binds a legal entity, booking book, product revision, operating mode and approval
@@ -220,7 +228,11 @@ grant row before checking the active interval and records the exact attributes a
 Concurrent publication or effective-interval changes contend on that row. A committed retry returns
 the original receipt even after supersession, and a retry with different bound facts is rejected.
 
-This is the database operation for the trusted catalog adapter. C3 still needs the authenticated
-adapter, trusted grant selection, a durable pending account operation before consumption and
-completion/recovery after receipt persistence. For rollout, apply the additive migration first.
-For rollback, stop callers and retain the committed receipts.
+The account service can obtain the receipt via `POST /api/v2/booking-grant-receipts`. In the
+catalog deployment set `openbank.catalog.booking.account-client` and
+`openbank.catalog.booking.account-subject` to the issuing OAuth client's ID and the dedicated
+service account's subject. Both must match the verified bearer. With either setting absent,
+the endpoint rejects the caller. Apply the additive migration before configuring access.
+C3 still needs trusted grant selection and an account-opening operation that persists its inputs
+before consumption and resumes from the original receipt after a restart. For rollback, stop
+callers and retain the committed receipts.

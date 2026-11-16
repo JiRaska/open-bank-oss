@@ -14,7 +14,7 @@ info:
   # dry-run of the same parser a revision write runs; stores nothing.
   # 2.10.0 -> 2.11.0 (#12078): correction. The six v1 404s also document the ApiError body the
   # disabled banking-compatibility routes answer with; served behaviour is unchanged.
-  version: 2.11.0
+  version: 2.12.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -50,6 +50,8 @@ tags:
     description: Independent role-qualified approval evidence for schemas whose pack declares an approval policy
   - name: Pension Approvals
     description: Deprecated alias of Revision Approvals (#13429)
+  - name: Booking Grants
+    description: Service-account consumption of approved market booking grants
 security:
   - bearerAuth: []
 paths:
@@ -851,6 +853,38 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/booking-grant-receipts:
+    post:
+      tags: [Booking Grants]
+      operationId: consumeBookingGrant
+      summary: Commit or replay the booking decision for a durable account-opening operation
+      description: Requires the configured account-service OAuth client and service-account subject.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BookingGrantConsumption' }
+      responses:
+        '200':
+          description: Immutable receipt, including on exact replay
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BookingGrantReceipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Booking grant is unavailable or operation is already bound to different facts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code]
+                properties:
+                  code:
+                    type: string
+                    enum: [BOOKING_GRANT_UNAVAILABLE, BOOKING_OPERATION_CONFLICT]
+
 components:
   securitySchemes:
     bearerAuth:
@@ -923,6 +957,23 @@ components:
       description: Strong optimistic-concurrency token for this product representation.
       schema: { type: string, pattern: '^"[0-9]+"$' }
   schemas:
+    BookingGrantConsumption:
+      type: object
+      required: [operationId, subjectId, productRevisionId, grantRevisionId]
+      properties:
+        operationId: { type: string, format: uuid }
+        subjectId: { type: string, format: uuid }
+        productRevisionId: { type: string, format: uuid }
+        grantRevisionId: { type: string, format: uuid }
+    BookingGrantReceipt:
+      allOf:
+        - $ref: '#/components/schemas/BookingGrantConsumption'
+        - type: object
+          required: [approvalDigest, bookedContext, consumedAt]
+          properties:
+            approvalDigest: { type: string, pattern: '^[0-9a-f]{64}$' }
+            bookedContext: { type: object, additionalProperties: true }
+            consumedAt: { type: string, format: date-time }
     RevisionApprovalRequest:
       type: object
       additionalProperties: false
