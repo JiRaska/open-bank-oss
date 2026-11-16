@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test
 import java.util.UUID
 
 /**
- * #16381: the agent identity may submit a review only towards CLEAR / WHITELISTED / ESCALATED.
+ * #16381: the agent identity may submit a review only towards CLEAR.
  * Enforced here, server-side — the agent tool's own check is not a control a compromised
  * agent-service would honour.
  */
@@ -50,10 +50,13 @@ class SanctionsResourceV3AgentReviewTest {
         ReviewRequest(UUID.randomUUID(), "Name-only fuzzy match; DOB differs.", status)
 
     @Test
-    fun `the agent identity cannot confirm a hit`() {
+    fun `the agent identity is refused every status except CLEAR`() {
         caller("openbank-agent", "service-account-openbank-agent")
-        assertThatThrownBy { runBlocking { resource.review(request(SanctionsCheckStatus.HIT)) } }
-            .isInstanceOf(ForbiddenException::class.java)
+        SanctionsCheckStatus.entries.filter { it != SanctionsCheckStatus.CLEAR }.forEach { status ->
+            assertThatThrownBy { runBlocking { resource.review(request(status)) } }
+                .describedAs(status.name)
+                .isInstanceOf(ForbiddenException::class.java)
+        }
         coVerify(exactly = 0) { useCase.review(any()) }
     }
 

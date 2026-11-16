@@ -51,7 +51,7 @@ class SanctionsResourceV3(private val useCase: SanctionsUseCase) {
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.clear", resource = "#cmd.checkId")
     suspend fun review(cmd: ReviewRequest): SanctionsCheck {
-        // The agent identity does false-positive triage only: it may never confirm or re-open a hit.
+        // The agent identity does false-positive triage only: CLEAR, nothing else (owner decision, #16455).
         // Enforced here, server-side, not just in the agent's tool (#16381).
         if (ServiceAccountIdentity.verifiedClientId(identity) == AGENT_CLIENT_ID &&
             cmd.newStatus.name !in AGENT_REVIEW_TARGETS
@@ -83,6 +83,6 @@ class SanctionsResourceV3(private val useCase: SanctionsUseCase) {
 
     private companion object {
         const val AGENT_CLIENT_ID = "openbank-agent"
-        val AGENT_REVIEW_TARGETS = setOf("CLEAR", "WHITELISTED", "ESCALATED")
+        val AGENT_REVIEW_TARGETS = setOf("CLEAR")
     }
 }

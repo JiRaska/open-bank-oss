@@ -75,7 +75,7 @@ class SanctionsReviewToolTest {
     fun `confirming a hit, a thin note or a check not awaiting review never reach the service`() {
         every { port.getCheck(checkId) } returns check("CLEAR")
         assertThatThrownBy {
-            tool.review(args(newStatus = "HIT"), "officer-1")
+            tool.review(args(newStatus = "WHITELISTED"), "officer-1")
         }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy {
             tool.review(args(note = "fp"), "officer-1")

@@ -19,8 +19,7 @@ import jakarta.inject.Inject
  * the store refuses self-approval. The agent then retries the IDENTICAL request with the approvalId;
  * the approval is bound to the request fingerprint, so a changed status or note mints a new approval.
  *
- * Only a check awaiting review (HIT / POTENTIAL_HIT) may be submitted, and only towards CLEAR,
- * WHITELISTED or ESCALATED — the agent's job is false-positive triage, not confirming a hit.
+ * Only a check awaiting review (HIT / POTENTIAL_HIT) may be submitted, and only towards CLEAR — the agent's job is false-positive triage, not confirming a hit.
  */
 @ApplicationScoped
 class SanctionsReviewTool {
@@ -75,8 +74,9 @@ class SanctionsReviewTool {
     companion object {
         val DEFINITION = ToolDefinition(
             name = "sanctions_review_check",
-            description = "Submit a sanctions hit review (HIT / POTENTIAL_HIT -> CLEAR, WHITELISTED or " +
-                "ESCALATED) as the four-eyes MAKER, on behalf of the signed-in person driving the session. " +
+            description =
+            "Submit a sanctions hit review (HIT / POTENTIAL_HIT -> CLEAR only) as the four-eyes MAKER, " +
+                "on behalf of the signed-in person driving the session. " +
                 "Typical use: a name-only fuzzy match whose DOB/nationality differ. The first call returns " +
                 "pending_approval + approvalId and changes nothing; after a DIFFERENT person approves it, call " +
                 "again with the SAME checkId, newStatus and note plus the approvalId.",
@@ -84,7 +84,7 @@ class SanctionsReviewTool {
                 "type" to "object",
                 "properties" to mapOf(
                     "checkId" to prop("UUID of the sanctions check"),
-                    "newStatus" to prop("CLEAR, WHITELISTED or ESCALATED"),
+                    "newStatus" to prop("CLEAR (the only status the agent may submit)"),
                     "note" to prop("What was compared and why it is (not) a match, min 10 chars"),
                     "approvalId" to prop("Approval id from the first call, only on the retry"),
                 ),
@@ -97,7 +97,7 @@ class SanctionsReviewTool {
         const val MIN_NOTE_LENGTH = 10
         private const val HTTP_ACCEPTED = 202
         private val HTTP_OK_RANGE = 200..299
-        private val REVIEWABLE_TARGETS = setOf("CLEAR", "WHITELISTED", "ESCALATED")
+        private val REVIEWABLE_TARGETS = setOf("CLEAR")
         private val AWAITING_REVIEW = setOf("HIT", "POTENTIAL_HIT")
     }
 }

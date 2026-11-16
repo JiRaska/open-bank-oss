@@ -277,7 +277,7 @@ browser-provider hiding and the unchanged client-credentials fallback.
   `sanctions.approval.decide`, and self-approval is refused by the approval store, so a human is always
   the checker. **STRIDE-E:** an injected prompt can at most queue pending approvals (bounded by the
   store's per-maker pending limit) that a human must approve one by one; the tool refuses to confirm a
-  hit (targets CLEAR / WHITELISTED / ESCALATED only) and any check not awaiting review. **Dependency:**
+  hit (target CLEAR only) and any check not awaiting review. **Dependency:**
   the control rests on sanctions-service `AUTHZ_FOUR_EYES_ENFORCE="true"`; with it off the review would
   execute unapproved, so `AgentMachineGrantCharterAlignmentTest` fails unless the deployed value is
   `"true"`. **STRIDE-R:** maker is the agent identity (approval `makerActorKind`), checker the human id.

@@ -232,7 +232,7 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
   who instructed it (`X-On-Behalf-Of`, required for client `openbank-agent` via
   `authz.four-eyes.on-behalf-of-makers`, 403 without it); `AuthorizeInterceptor` binds that person to
   the approval and `RedisApprovalStore.decide` refuses them as checker, so the agent plus the person
-  who asked it can never clear a hit alone. The status limit (CLEAR / WHITELISTED / ESCALATED only)
+  who asked it can never clear a hit alone. The status limit (CLEAR only)
   is enforced server-side in `SanctionsResourceV3`, not only in the agent tool. Rollback: revert.
 
 - **2026-11-14** — **Ongoing monitoring switched on in the sandbox deployment
