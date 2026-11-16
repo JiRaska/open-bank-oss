@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: flaky-test-hunter
     app.kubernetes.io/part-of: flaky-test-hunter
   annotations:
-    openbank.tech/policy-checksum: "b80bac0dc9e4b4b4"
+    openbank.tech/policy-checksum: "1a322d1f1ac3d3f1"
 data:
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -318,6 +318,7 @@ data:
       - product.explain
       write_proposal:
       - draft.ticket
+      - propose.aml.decision
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -347,6 +348,7 @@ data:
         - query.disputes.readonly
         - query.observability.readonly
         - flags.write
+        - propose.aml.decision
         deny:
         - money.*
         - gh.pr.*
