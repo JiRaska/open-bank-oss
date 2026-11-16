@@ -88,9 +88,10 @@ Pro lokální ověření z kořene repozitáře:
 bash openbank-admin-ui/e2e/run-legal-inbox-postgres.sh
 ```
 
-HTTP testy zapisují testovací SOAP odpověď pomocí ISDS importéru. Browser scénář
-spustí izolovanou databázi, vloží syntetický ZFO originál a přes skutečný BFF ověří
-identické bajty, vytěžení, přidělení, obnovení stránky a následný audit v PostgreSQL.
+Browser scénář začíná prázdnou databází. Spustí lokální SOAP simulátor a stejný
+cyklus workeru, který volá plánovač. Worker vyčte seznam a stáhne originál i
+doručenku. Přes skutečný BFF test ověří identické bajty, vytěžení, přidělení a
+obnovení stránky. Tentýž test ověří také digest a audit přidělení v PostgreSQL.
 
 ## Vyčítání veřejného testu ISDS
 

@@ -39,3 +39,19 @@ tasks.test {
 }
 
 kotlin { jvmToolchain(25) }
+
+tasks.register("prepareSimulatedIsdsInboxPoll") {
+    group = "verification"
+    description = "Prepares the JVM arguments for the Admin UI simulated ISDS E2E test."
+    dependsOn(tasks.testClasses)
+    val testRuntime = sourceSets["test"].runtimeClasspath
+    val arguments = layout.buildDirectory.file("simulated-isds-inbox-poll.args")
+    inputs.files(testRuntime)
+    outputs.file(arguments)
+    doLast {
+        val classpath = testRuntime.asPath.replace("\\", "\\\\").replace("\"", "\\\"")
+        arguments.get().asFile.writeText(
+            "-cp\n\"$classpath\"\ncom.openbank.legalprocess.isds.SimulatedIsdsInboxPoll\n",
+        )
+    }
+}

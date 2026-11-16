@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
+import { Client } from 'pg'
 import { signInWithRoles } from './helpers/auth'
 
 const bearer = process.env.LEGAL_INBOX_E2E_BEARER
@@ -11,10 +14,19 @@ const receipt = process.env.LEGAL_INBOX_E2E_RECEIPT
 const subject = process.env.LEGAL_INBOX_E2E_SUBJECT
 const mailbox = process.env.LEGAL_INBOX_E2E_MAILBOX
 const live = process.env.LEGAL_INBOX_E2E_LIVE_ISDS === 'true'
+const jdbcUrl = process.env.LEGAL_INBOX_E2E_JDBC_URL
+const password = process.env.LEGAL_INBOX_E2E_DB_PASSWORD
+const pollArgs = process.env.LEGAL_INBOX_E2E_POLL_ARGS
 
-test('opens a stored ISDS original and assigns its extracted draft through the live BFF', async ({ page, baseURL }) => {
-  test.skip(!bearer || !deliveryId || !original || !receipt || !subject || !mailbox || !baseURL, 'Requires a PostgreSQL-backed legal process service and expected originals')
-  test.setTimeout(120_000)
+test('polls ISDS, downloads the stored originals and assigns the extracted draft', async ({ page, baseURL }) => {
+  test.skip(!bearer || !deliveryId || !original || !receipt || !subject || !mailbox || !baseURL || !jdbcUrl || !password, 'Requires a PostgreSQL-backed legal process service and expected originals')
+  test.setTimeout(180_000)
+  if (!live) {
+    await test.step('Read the simulated ISDS mailbox into empty PostgreSQL', async () => {
+      expect(pollArgs, 'Prepared simulator arguments').toBeTruthy()
+      await promisify(execFile)('java', ['@' + pollArgs], { timeout: 30_000 })
+    })
+  }
   await signInWithRoles(page.context(), baseURL!, ['ROLE_LEGAL_INBOX_VIEW'], bearer)
   await page.goto('/legal-process/inbox')
   await page.getByRole('button', { name: deliveryId, exact: true }).click()
@@ -47,7 +59,36 @@ test('opens a stored ISDS original and assigns its extracted draft through the l
     .filter({ hasText: /Seznam uložen|Discovery saved/ })
   await expect(scanned.first()).toBeVisible()
   if (!live) {
-    await expect(scanned.first()).toContainText(/Zprávy čekají na import|Messages pending import/)
-    await expect(page.getByText('another-fixture', { exact: true })).toHaveCount(0)
+    await expect(scanned.first()).toContainText(/Dokončeno|Complete/)
   }
+
+  await test.step('Verify the originals digest and assignment audit in PostgreSQL', async () => {
+    const target = new URL(jdbcUrl!.replace(/^jdbc:/, ''))
+    const db = new Client({
+      host: target.hostname, port: Number(target.port), database: target.pathname.slice(1),
+      user: 'postgres', password,
+    })
+    await db.connect()
+    try {
+      const result = await db.query(
+        "SELECT array_agg(a.action ORDER BY a.id) AS actions, " +
+        "count(*) FILTER (WHERE a.action = 'ASSIGN' AND a.previous_team IS NULL " +
+        "AND a.next_team = 'LEGAL_REVIEW_CZ' AND a.review_revision = 1)::integer AS assigned, " +
+        "bool_and(r.team = 'LEGAL_REVIEW_CZ' AND r.revision = 1 AND trim(i.content_sha256) = " +
+        "encode(sha256(int4send(octet_length(e.signed_message)) || e.signed_message || e.signed_delivery_info), 'hex')) AS verified " +
+        "FROM legal_inbox_audit a JOIN legal_delivery_inbox i USING (receipt_id) " +
+        "JOIN legal_inbox_review r USING (receipt_id) " +
+        "JOIN legal_isds_evidence e ON i.evidence_id = e.evidence_id " +
+        "WHERE a.actor_subject = 'synthetic-browser-operator' AND i.source_namespace = $1 AND i.delivery_id = $2",
+        ['isds:' + mailbox, deliveryId],
+      )
+      expect(result.rows).toEqual([{
+        actions: ['DOWNLOAD_MESSAGE', 'DOWNLOAD_DELIVERY', 'EXTRACT', 'READ_DRAFT', 'ASSIGN', 'READ_DRAFT', 'READ_DRAFT'],
+        assigned: 1,
+        verified: true,
+      }])
+    } finally {
+      await db.end()
+    }
+  })
 })

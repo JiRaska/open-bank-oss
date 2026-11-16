@@ -37,6 +37,13 @@ service="$repo/openbank-legal-process-service/build/quarkus-app/quarkus-run.jar"
 cd "$repo/openbank-admin-ui"
 [[ -x node_modules/.bin/playwright ]] || { echo 'Run npm ci first.' >&2; exit 1; }
 
+poll_args=
+if [[ "$live" == false ]]; then
+  (cd "$repo" && ./gradlew --offline --configure-on-demand --max-workers=3 \
+    :openbank-legal-process-service:prepareSimulatedIsdsInboxPoll)
+  poll_args="$repo/openbank-legal-process-service/build/simulated-isds-inbox-poll.args"
+fi
+
 probe=$(mktemp -d)
 chmod 700 "$probe"
 backend_pid=
@@ -60,7 +67,13 @@ if [[ "$live" == false ]]; then
 XML
   openssl cms -sign -binary -nodetach -in "$probe/message.xml" -signer "$probe/cert.pem" \
     -inkey "$probe/key.pem" -outform DER -out "$probe/message.zfo"
-  printf '\x07\x09' > "$probe/delivery.zfo"
+  cat > "$probe/delivery.xml" <<'XML'
+<GetDeliveryInfoResponse xmlns="http://isds.czebox.cz/v20/delivery">
+  <dmDelivery><dmID>910231</dmID><dmAcceptanceTime>2026-01-01T12:01:00Z</dmAcceptanceTime></dmDelivery>
+</GetDeliveryInfoResponse>
+XML
+  openssl cms -sign -binary -nodetach -in "$probe/delivery.xml" -signer "$probe/cert.pem" \
+    -inkey "$probe/key.pem" -outform DER -out "$probe/delivery.zfo"
 fi
 public_key=$(openssl pkey -in "$probe/key.pem" -pubout -outform DER | openssl base64 -A)
 bearer=$(node --input-type=module - "$probe/key.pem" "$mailbox" <<'JS'
@@ -109,27 +122,7 @@ WHERE i.source_namespace = :'scope' AND i.delivery_id = :'delivery_id';
 SQL
 }
 
-if [[ "$live" == false ]]; then
-  message=$(xxd -p < "$probe/message.zfo" | tr -d '\n')
-  docker exec -i "$database" psql -q -U postgres -v ON_ERROR_STOP=1 -v original="$message" <<'SQL'
-BEGIN;
-INSERT INTO legal_isds_evidence (evidence_id, signed_message, signed_delivery_info)
-VALUES ('10000000-0000-4000-8000-000000000001', decode(:'original', 'hex'), decode('0709', 'hex'));
-INSERT INTO legal_delivery_inbox (receipt_id, source_namespace, delivery_id, route_country, evidence_id, content_sha256)
-VALUES ('10000000-0000-4000-8000-000000000002', 'isds:browser-fixture', '910231', 'CZ',
-        '10000000-0000-4000-8000-000000000001',
-        encode(sha256(int4send(octet_length(decode(:'original', 'hex'))) || decode(:'original', 'hex') || decode('0709', 'hex')), 'hex'));
-INSERT INTO legal_isds_poll_run
-    (id, mailbox, window_from, window_through, discovered_at, finished_at, status, discovered_count, imported_count, pending_count)
-VALUES
-    ('10000000-0000-4000-8000-000000000003', 'browser-fixture', now() - interval '5 minutes', now(),
-       now(), now(), 'INCOMPLETE', 2, 1, 1),
-    ('10000000-0000-4000-8000-000000000004', 'another-fixture', now() - interval '5 minutes', now(),
-       now(), now(), 'COMPLETE', 0, 0, 0);
-COMMIT;
-SQL
-
-else
+if [[ "$live" == true ]]; then
   echo 'Waiting for discovery and signed originals from the public ISDS test.'
   for _ in {1..190}; do
     copy_evidence signed_message | xxd -r -p > "$probe/message.zfo"
@@ -143,11 +136,9 @@ else
     echo 'The requested message was not imported within the test interval.' >&2
     exit 1
   fi
+  copy_evidence signed_delivery_info | xxd -r -p > "$probe/delivery.zfo"
 fi
-
-copy_evidence signed_message | xxd -r -p > "$probe/message.zfo"
-copy_evidence signed_delivery_info | xxd -r -p > "$probe/delivery.zfo"
-[[ -s "$probe/delivery.zfo" ]]
+[[ -s "$probe/message.zfo" && -s "$probe/delivery.zfo" ]]
 openssl cms -verify -noverify -nosigs -binary -inform DER -in "$probe/message.zfo" \
   -out "$probe/signed-message.xml" 2>/dev/null
 python3 - "$probe/signed-message.xml" <<'PYTHON'
@@ -164,29 +155,14 @@ for namespace in namespaces:
 else:
     raise SystemExit("The signed message contains no acceptance timestamp with an offset.")
 PYTHON
-echo 'Stored envelope contains an acceptance timestamp.'
+echo 'Expected message envelope contains an acceptance timestamp.'
 
 LEGAL_PROCESS_SERVICE_URL="http://127.0.0.1:$backend_port" \
   LEGAL_INBOX_E2E_BEARER="$bearer" LEGAL_INBOX_E2E_DELIVERY_ID="$delivery_id" \
   LEGAL_INBOX_E2E_SUBJECT="$expected_subject" LEGAL_INBOX_E2E_MAILBOX="$mailbox" \
+  LEGAL_INBOX_E2E_JDBC_URL="jdbc:postgresql://127.0.0.1:$db_port/postgres" \
+  LEGAL_INBOX_E2E_DB_PASSWORD="$db_password" LEGAL_INBOX_E2E_POLL_ARGS="$poll_args" \
   LEGAL_INBOX_E2E_LIVE_ISDS="$live" LEGAL_INBOX_E2E_RECEIPT="$probe/delivery.zfo" \
   LEGAL_INBOX_E2E_ORIGINAL="$probe/message.zfo" OPENBANK_E2E_SERVER=development \
   OPENBANK_E2E_PORT="${LEGAL_INBOX_E2E_UI_PORT:-39192}" \
   node_modules/.bin/playwright test --config=playwright.legal-inbox.config.ts
-
-audit=$(docker exec -i "$database" psql -At -U postgres -v ON_ERROR_STOP=1 \
-  -v source_namespace="isds:$mailbox" -v delivery_id="$delivery_id" <<'SQL'
-SELECT string_agg(a.action, ',' ORDER BY a.id),
-       count(*) FILTER (WHERE a.action = 'ASSIGN' AND a.previous_team IS NULL
-                        AND a.next_team = 'LEGAL_REVIEW_CZ' AND a.review_revision = 1),
-       bool_and(r.team = 'LEGAL_REVIEW_CZ' AND r.revision = 1 AND i.content_sha256 =
-           encode(sha256(int4send(octet_length(e.signed_message)) || e.signed_message || e.signed_delivery_info), 'hex'))
-FROM legal_inbox_audit a JOIN legal_delivery_inbox i USING (receipt_id)
-JOIN legal_inbox_review r USING (receipt_id)
-JOIN legal_isds_evidence e ON i.evidence_id = e.evidence_id
-WHERE a.actor_subject = 'synthetic-browser-operator'
-  AND i.source_namespace = :'source_namespace' AND i.delivery_id = :'delivery_id';
-SQL
-)
-[[ "$audit" == 'DOWNLOAD_MESSAGE,DOWNLOAD_DELIVERY,EXTRACT,READ_DRAFT,ASSIGN,READ_DRAFT,READ_DRAFT|1|t' ]]
-echo 'PostgreSQL evidence digest and assignment audit match the browser sequence.'
