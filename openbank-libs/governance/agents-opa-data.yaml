@@ -38,6 +38,7 @@ tool_tiers:
   - product.explain
   write_proposal:
   - draft.ticket
+  - propose.aml.decision
   - gh.pr.open
   - draft.adr
   - git.branch
@@ -67,6 +68,7 @@ agents:
     - query.disputes.readonly
     - query.observability.readonly
     - flags.write
+    - propose.aml.decision
     deny:
     - money.*
     - gh.pr.*
