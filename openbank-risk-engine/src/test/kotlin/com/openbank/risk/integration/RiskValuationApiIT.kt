@@ -19,6 +19,7 @@ import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.catchThrowableOfType
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -188,6 +189,7 @@ class RiskValuationApiIT {
         val original = snapshot()
         val curveSetId = uploadCurveSet()
         assertPinnedTreasuryRevision(original, curveSetId)
+        assertCaptureRejections(original, curveSetId)
         fun forecast(id: String) = "/api/v1/risk/snapshots/$id/liquidity-forecast?curveSetId=$curveSetId"
         val runoff = read("${forecast(original)}&includePlanned=false")
         assertThat(json.readTree(runoff)["assumptions"].map { it["key"].asText() })
@@ -242,6 +244,63 @@ class RiskValuationApiIT {
         } finally {
             TestDb.execute("DELETE FROM planning_input_capture_treasury WHERE capture_id = '$capture'")
             TestDb.execute("DELETE FROM planning_input_capture WHERE id = '$capture'")
+            TestDb.execute("DELETE FROM $revisions WHERE deal_id = '$deal'")
+        }
+    }
+
+    /**
+     * Every rejection the capture claims, each asserted by SQLState AND by the absence of any row the
+     * failed call could have written: the header insert precedes the revision insert, so a rejection
+     * that left the header behind would be a partial capture, not a rejection.
+     */
+    private fun assertCaptureRejections(snapshot: String, curveSet: String) {
+        val revisions = "treasury_deal_cash_flow_revision"
+        val deal = UUID.randomUUID()
+        val untied = UUID.randomUUID()
+        val foreignCurves = UUID.randomUUID()
+        val captures = mutableListOf<UUID>()
+        fun rejected(snapshotKey: String, curveKey: String, array: String, sqlState: String) {
+            val capture = UUID.randomUUID().also { captures += it }
+            val error = catchThrowableOfType(java.sql.SQLException::class.java) {
+                TestDb.query("SELECT capture_planning_inputs('$capture', '$snapshotKey', '$curveKey', $array)") { }
+            }
+            // A null error (the call succeeded) fails here too: null is never the expected SQLState.
+            assertThat(error?.sqlState).describedAs("capture with $array: ${error?.message}").isEqualTo(sqlState)
+            assertThat(TestDb.count("SELECT count(*) FROM planning_input_capture WHERE id = '$capture'")).isZero()
+            assertThat(
+                TestDb.count("SELECT count(*) FROM planning_input_capture_treasury WHERE capture_id = '$capture'"),
+            ).isZero()
+        }
+        val both = "ARRAY(SELECT revision_id FROM $revisions WHERE deal_id = '$deal' ORDER BY deal_version)"
+        val first = "ARRAY(SELECT revision_id FROM $revisions WHERE deal_id = '$deal' AND deal_version = 1)"
+        try {
+            TestDb.execute(
+                "INSERT INTO $revisions (deal_id, deal_version, schedule_hash, flows) VALUES " +
+                    "('$deal', 1, 'h1', '[]'), ('$deal', 2, 'h2', '[]')",
+            )
+            TestDb.execute(
+                "INSERT INTO snapshot_run (id, as_of, recorded_at, input_hash, provenance, status, " +
+                    "position_count, mismatch_count) SELECT '$untied', as_of, now(), repeat('f', 64), provenance, " +
+                    "'UNTIED', position_count, 1 FROM snapshot_run WHERE id = '$snapshot'",
+            )
+            TestDb.execute(
+                "INSERT INTO curve_set (id, as_of, provenance, source, recorded_at) SELECT '$foreignCurves', as_of, " +
+                    "CASE provenance WHEN 'synthetic' THEN 'production' ELSE 'synthetic' END, 'it', now() " +
+                    "FROM curve_set WHERE id = '$curveSet'",
+            )
+            rejected(snapshot, foreignCurves.toString(), first, "23514") // mixed provenance
+            rejected(untied.toString(), curveSet, first, "23514") // untied snapshot
+            rejected(snapshot, curveSet, both, "23505") // two revisions of one deal
+            rejected(snapshot, curveSet, "ARRAY[-1]::BIGINT[]", "23502") // revision that does not exist
+            rejected(snapshot, curveSet, "NULL::BIGINT[]", "23514") // NULL array
+            rejected(snapshot, curveSet, "ARRAY[NULL]::BIGINT[]", "23514") // NULL element
+        } finally {
+            captures.forEach {
+                TestDb.execute("DELETE FROM planning_input_capture_treasury WHERE capture_id = '$it'")
+                TestDb.execute("DELETE FROM planning_input_capture WHERE id = '$it'")
+            }
+            TestDb.execute("DELETE FROM snapshot_run WHERE id = '$untied'")
+            TestDb.execute("DELETE FROM curve_set WHERE id = '$foreignCurves'")
             TestDb.execute("DELETE FROM $revisions WHERE deal_id = '$deal'")
         }
     }
