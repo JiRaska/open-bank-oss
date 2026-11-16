@@ -96,7 +96,7 @@ class PassportPermitFenceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["SIGN_LOAN", "DISBURSE_LOAN"])
+    @ValueSource(strings = ["SIGN", "DISBURSE"])
     fun `revocation that owns the grant prevents a new loan admission`(operation: String) {
         val request = seed(operation, issue = false)
         dataSource.connection.use { winner ->
@@ -108,7 +108,7 @@ class PassportPermitFenceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["SIGN_LOAN", "DISBURSE_LOAN"])
+    @ValueSource(strings = ["SIGN", "DISBURSE"])
     fun `loan admission that owns the grant preserves only its exact receipt`(operation: String) {
         val request = seed(operation, issue = false)
         dataSource.connection.use { winner ->
@@ -136,12 +136,15 @@ class PassportPermitFenceTest {
         ],
     )
     fun `only exact consumed loan operations return receipts`() {
-        val signature = seed("SIGN_LOAN", issue = false)
-        val disbursement = signature.copy(operation = "DISBURSE_LOAN", operationId = UUID.randomUUID())
+        val signature = seed("SIGN", issue = false)
+        val disbursement = signature.copy(operation = "DISBURSE", operationId = UUID.randomUUID())
         dataSource.connection.use { it.grantSubjectEvidence(signature) }
         callLoanAdmission(signature, "/receipt", 404)
+        val differentPin = signature.copy(contentHash = "2".repeat(64))
+        callLoanAdmission(differentPin, "", 409)
         callLoanAdmission(signature, "", 204)
         callLoanAdmission(signature, "/receipt", 204)
+        callLoanAdmission(differentPin, "/receipt", 404)
         callLoanAdmission(signature.copy(country = "AT"), "/receipt", 404)
         callLoanAdmission(disbursement, "/receipt", 404)
         callLoanAdmission(disbursement, "", 204)
@@ -157,7 +160,7 @@ class PassportPermitFenceTest {
         ],
     )
     fun `account principal cannot admit a loan or read its receipt`() {
-        val request = PermitRequest("SIGN_LOAN")
+        val request = PermitRequest("SIGN")
         callLoanAdmission(request, "", 403)
         callLoanAdmission(request, "/receipt", 403)
     }
@@ -170,6 +173,7 @@ class PassportPermitFenceTest {
                 "operationId" to request.operationId,
                 "partyId" to request.party,
                 "revisionId" to request.revision,
+                "revisionContentHash" to request.contentHash,
                 "binding" to HASH,
                 "hostCountry" to request.country,
                 "bankId" to request.bank,
@@ -178,7 +182,7 @@ class PassportPermitFenceTest {
                 "customerSegment" to "RETAIL",
                 "packSetDigest" to HASH,
             ),
-        ).post("/api/v2/internal/passport-loan-admissions$suffix").then().statusCode(status)
+        ).post("/api/v2/internal/passport-commitments$suffix").then().statusCode(status)
     }
 
     private fun Connection.grantSubjectEvidence(request: PermitRequest) = execute(
@@ -190,10 +194,10 @@ class PassportPermitFenceTest {
         request.party,
     )
 
-    private fun PermitRequest.otherLoanOperation() = if (operation == "SIGN_LOAN") "DISBURSE_LOAN" else "SIGN_LOAN"
+    private fun PermitRequest.otherLoanOperation() = if (operation == "SIGN") "DISBURSE" else "SIGN"
 
     private fun Connection.admitLoan(request: PermitRequest): Any? = scalar(
-        "SELECT admit_passport_loan(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "SELECT admit_passport_commitment(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         request.grant,
         request.operation,
         request.operationId,
@@ -206,6 +210,8 @@ class PassportPermitFenceTest {
         "WEB",
         "RETAIL",
         HASH,
+        request.contentHash,
+        "org.openbank.banking.loan",
     )
 
     @Test
@@ -377,7 +383,7 @@ class PassportPermitFenceTest {
         dataSource.connection.use { db ->
             val offering = UUID.randomUUID()
             val specification = UUID.randomUUID()
-            db.seedSpecification(specification, operation.endsWith("_LOAN"))
+            db.seedSpecification(specification, operation in setOf("SIGN", "DISBURSE"))
             db.execute(
                 """
                 INSERT INTO catalog_offerings (id, specification_id, code, market)
@@ -390,13 +396,14 @@ class PassportPermitFenceTest {
             db.execute(
                 """
                 INSERT INTO catalog_revisions (id, offering_id, revision_no, schema_id, schema_version,
-                    state, content, effective_from, maker_id, checker_id, created_at, updated_at)
-                SELECT ?, ?, 1, schema_id, schema_version, 'PUBLISHED', '{}', CURRENT_TIMESTAMP - interval '1 day',
+                    state, content, content_hash, effective_from, maker_id, checker_id, created_at, updated_at)
+                SELECT ?, ?, 1, schema_id, schema_version, 'PUBLISHED', '{}', ?, CURRENT_TIMESTAMP - interval '1 day',
                     'synthetic_maker', 'synthetic_checker', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                     FROM catalog_specifications WHERE id = ?
                 """.trimIndent(),
                 request.revision,
                 offering,
+                request.contentHash,
                 specification,
             )
             db.execute(
@@ -493,6 +500,7 @@ class PassportPermitFenceTest {
         val operationId: UUID = UUID.randomUUID(),
         val party: UUID = UUID.randomUUID(),
         val revision: UUID = UUID.randomUUID(),
+        val contentHash: String = "1".repeat(64),
         val bank: UUID = UUID.randomUUID(),
         val establishment: UUID = UUID.randomUUID(),
         val country: String = "SK",

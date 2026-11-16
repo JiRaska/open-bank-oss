@@ -928,33 +928,33 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: No matching consumed receipt }
-  /api/v2/internal/passport-loan-admissions:
+  /api/v2/internal/passport-commitments:
     post:
       tags: [Passport grants]
-      operationId: admitPassportLoan
-      summary: Consume passport admission for a persisted loan signature or disbursement
+      operationId: admitPassportCommitment
+      summary: Consume passport admission for a persisted product commitment
       description: Only the named lending-service principal can invoke this operation.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/PassportLoanAdmissionRequest' }
+            schema: { $ref: '#/components/schemas/PassportCommitmentRequest' }
       responses:
         '204': { description: Operation admitted or exact receipt replayed }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: Admission refused }
-  /api/v2/internal/passport-loan-admissions/receipt:
+  /api/v2/internal/passport-commitments/receipt:
     post:
       tags: [Passport Grants]
-      summary: Check an exact already-consumed loan admission without creating one
-      operationId: getPassportLoanAdmissionReceipt
+      summary: Check an exact already-consumed commitment without creating one
+      operationId: getPassportCommitmentReceipt
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/PassportLoanAdmissionRequest' }
+            schema: { $ref: '#/components/schemas/PassportCommitmentRequest' }
       responses:
         '204': { description: Exact consumed receipt exists }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -1070,16 +1070,20 @@ components:
         partyId: { type: string, format: uuid }
         revisionId: { type: string, format: uuid }
         binding: { type: string, pattern: '^[a-f0-9]{64}$' }
-    PassportLoanAdmissionRequest:
+    PassportCommitmentRequest:
       type: object
-      required: [grantId, operation, operationId, partyId, revisionId, binding, hostCountry, bankId,
+      required: [grantId, operation, operationId, partyId, revisionId, revisionContentHash, binding, hostCountry, bankId,
         establishmentId, channel, customerSegment, packSetDigest]
       properties:
         grantId: { type: string, format: uuid }
-        operation: { type: string, enum: [SIGN_LOAN, DISBURSE_LOAN] }
+        operation: { type: string, enum: [SIGN, DISBURSE] }
         operationId: { type: string, format: uuid }
         partyId: { type: string, format: uuid }
         revisionId: { type: string, format: uuid }
+        revisionContentHash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: The pinned published catalogue revision content hash.
         binding: { type: string, pattern: '^[a-f0-9]{64}$' }
         hostCountry: { type: string, pattern: '^[A-Z]{2}$' }
         bankId: { type: string, format: uuid }
