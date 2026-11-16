@@ -81,7 +81,7 @@ class NameLookupHttpServerResource : QuarkusTestResourceLifecycleManager {
         const val UNKNOWN_IBAN = "CZ6508000000192000145981"
         const val ACCOUNT_ID = "11111111-2222-4333-8444-555555555555"
         const val PARTY_ID = "66666666-7777-4888-8999-aaaaaaaaaaaa"
-        const val HOLDER_NAME = "Jiří Raška"
+        const val HOLDER_NAME = "Jiřina Nováčková"
         val outboundCalls = AtomicInteger()
     }
 }

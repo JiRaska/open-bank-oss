@@ -12,13 +12,14 @@ import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import org.hamcrest.Matchers.equalTo
-import org.hamcrest.Matchers.notNullValue
 import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.TestMethodOrder
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 /**
  * The payer journey over the real HTTP surface (ADR-0171, money path): a payments caller verifies
@@ -52,20 +53,24 @@ class VopVerifyPayeeJourneyE2E {
     @Order(1)
     @TestSecurity(user = "vop-e2e-payments", roles = ["ROLE_PAYMENTS"])
     fun `1 - the exact holder name verifies as a match without disclosing it`() {
-        verify(NameLookupHttpServerResource.KNOWN_IBAN, "Jiri Raska").then()
+        // Truncated: the server may persist at a coarser precision than this clock reads.
+        val before = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+        val verifiedAt = verify(NameLookupHttpServerResource.KNOWN_IBAN, "Jirina Novackova").then()
             .statusCode(200)
             .body("status", equalTo("match"))
             // ADR-0171 §6: matchedName is disclosed ONLY for close_match, never echoed on a
             // plain match — that asymmetry is what stops VoP being a name-disclosure oracle.
             .body("matchedName", nullValue())
-            .body("verifiedAt", notNullValue())
+            .extract().path<String>("verifiedAt")
+        // A non-null check passes against Instant.EPOCH; "when" fields need a recency check.
+        org.assertj.core.api.Assertions.assertThat(Instant.parse(verifiedAt)).isBetween(before, Instant.now())
     }
 
     @Test
     @Order(2)
     @TestSecurity(user = "vop-e2e-payments", roles = ["ROLE_PAYMENTS"])
     fun `2 - a near miss discloses the holder name so the payer can fix the spelling`() {
-        verify(NameLookupHttpServerResource.KNOWN_IBAN, "Raška Jiří").then()
+        verify(NameLookupHttpServerResource.KNOWN_IBAN, "Nováčková Jiřina").then()
             .statusCode(200)
             .body("status", equalTo("close_match"))
             .body("matchedName", equalTo(NameLookupHttpServerResource.HOLDER_NAME))
@@ -85,7 +90,7 @@ class VopVerifyPayeeJourneyE2E {
     @Order(4)
     @TestSecurity(user = "vop-e2e-payments", roles = ["ROLE_PAYMENTS"])
     fun `4 - an IBAN the bank does not hold is no data`() {
-        verify(NameLookupHttpServerResource.UNKNOWN_IBAN, "Jiri Raska").then()
+        verify(NameLookupHttpServerResource.UNKNOWN_IBAN, "Jirina Novackova").then()
             .statusCode(200)
             .body("status", equalTo("no_data"))
             .body("reason", equalTo("account_not_found"))
@@ -112,7 +117,7 @@ class VopVerifyPayeeJourneyE2E {
     fun `6 - the surface fails closed on a blank IBAN and a blank name`() {
         verify("CZ6508000000192000145399", "  ").then().statusCode(400)
         given().contentType("application/json")
-            .body("""{"creditorIban":"  ","creditorName":"Jiri Raska"}""")
+            .body("""{"creditorIban":"  ","creditorName":"Jirina Novackova"}""")
             .post("/api/v1/vop/verify").then()
             .statusCode(400)
     }
@@ -121,7 +126,7 @@ class VopVerifyPayeeJourneyE2E {
     @Order(7)
     @TestSecurity(user = "vop-e2e-auditor", roles = ["ROLE_AUDITOR"])
     fun `7 - a caller without a VoP role is refused`() {
-        verify(NameLookupHttpServerResource.KNOWN_IBAN, "Jiri Raska").then()
+        verify(NameLookupHttpServerResource.KNOWN_IBAN, "Jirina Novackova").then()
             .statusCode(403)
     }
 
