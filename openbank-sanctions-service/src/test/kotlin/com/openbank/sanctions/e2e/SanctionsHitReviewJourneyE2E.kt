@@ -14,7 +14,6 @@ import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasSize
-import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.MethodOrderer
@@ -22,6 +21,8 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.TestMethodOrder
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -139,13 +140,16 @@ class SanctionsHitReviewJourneyE2E {
     @Order(5)
     @TestSecurity(user = "sanctions-e2e-analyst", roles = ["ROLE_OPERATOR"])
     fun `5 - an analyst whitelists the reviewed hit and clearance carries an expiry`() {
-        given().contentType("application/json")
+        val before = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+        val clearanceExpiresAt = given().contentType("application/json")
             .body("""{"checkId":"$checkId","note":"verified false positive by E2E","newStatus":"WHITELISTED"}""")
             .post("/api/v3/sanctions/review").then()
             .statusCode(200)
             .body("status", equalTo("WHITELISTED"))
             .body("reviewedBy", equalTo("sanctions-e2e-analyst"))
-            .body("clearanceExpiresAt", notNullValue())
+            .extract().path<String>("clearanceExpiresAt")
+        // An expiry must lie in the future of the review; non-null would pass against EPOCH.
+        org.assertj.core.api.Assertions.assertThat(Instant.parse(clearanceExpiresAt)).isAfter(before)
 
         given().get("/api/v3/sanctions/$checkId").then()
             .statusCode(200)
