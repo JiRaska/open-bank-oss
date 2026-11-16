@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.2](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.25.1...delegation-service-v0.25.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **delegation,domestic-payment,finrep:** reload outbound mTLS client certificates ([#16413](https://github.com/JiRaska/open-bank-oss/issues/16413)) ([cbd1aeb](https://github.com/JiRaska/open-bank-oss/commit/cbd1aeb831abe581bfd0d317808ca6d49cbf3d11))
+
 ## [0.25.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.25.0...delegation-service-v0.25.1) (2026-11-15)
 
 
