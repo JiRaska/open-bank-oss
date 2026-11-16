@@ -421,7 +421,7 @@ paths:
         - name: includePlanned
           in: query
           required: false
-          description: Include live planned treasury deal flows. Set false for runoff based on the selected snapshot.
+          description: Include live planned treasury deal flows. Set false for runoff based on the selected snapshot. The response then includes the planned-treasury-flows-excluded assumption.
           schema:
             type: boolean
             default: true

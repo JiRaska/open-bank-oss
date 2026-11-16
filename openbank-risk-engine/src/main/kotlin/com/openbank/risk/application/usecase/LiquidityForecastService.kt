@@ -11,6 +11,7 @@ import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.domain.cashflow.BehaviouralModel
 import com.openbank.risk.domain.cashflow.CashFlow
 import com.openbank.risk.domain.curve.CurveSet
+import com.openbank.risk.domain.liquidity.ForecastAssumption
 import com.openbank.risk.domain.liquidity.LiquidityForecast
 import com.openbank.risk.domain.liquidity.LiquidityParameters
 import java.time.LocalDate
@@ -47,21 +48,26 @@ class LiquidityForecastService(
         require(curveSet.asOf == run.asOf) {
             "curve set ${curveSet.id} is as of ${curveSet.asOf} but run ${run.id} is as of ${run.asOf}"
         }
-        return LiquidityForecastAnalysis(
-            run,
+        val result = LiquidityForecast.ofSnapshot(
+            positions,
+            instruments,
+            run.asOf,
             curveSet,
             model,
             parameters,
-            LiquidityForecast.ofSnapshot(
-                positions,
-                instruments,
-                run.asOf,
-                curveSet,
-                model,
-                parameters,
-                horizonDays,
-                if (includePlanned) planned?.invoke(run.asOf, curveSet).orEmpty() else emptyList(),
-            ),
+            horizonDays,
+            if (includePlanned) planned?.invoke(run.asOf, curveSet).orEmpty() else emptyList(),
         )
+        val forecast = if (includePlanned) {
+            result
+        } else {
+            result.copy(
+                assumptions = result.assumptions + ForecastAssumption(
+                    "planned-treasury-flows-excluded",
+                    "Live planned treasury flows are excluded.",
+                ),
+            )
+        }
+        return LiquidityForecastAnalysis(run, curveSet, model, parameters, forecast)
     }
 }

@@ -189,6 +189,8 @@ class RiskValuationApiIT {
         val curveSetId = uploadCurveSet()
         fun forecast(id: String) = "/api/v1/risk/snapshots/$id/liquidity-forecast?curveSetId=$curveSetId"
         val runoff = read("${forecast(original)}&includePlanned=false")
+        assertThat(json.readTree(runoff)["assumptions"].map { it["key"].asText() })
+            .contains("planned-treasury-flows-excluded")
 
         runBlocking {
             book.apply(event(plannedDeal, "MM_PLACEMENT", BigDecimal("3.60"), null, null, DealKind.PLANNED))
