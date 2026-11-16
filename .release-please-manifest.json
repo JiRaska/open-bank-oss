@@ -1,6 +1,6 @@
 {
   "openbank-account-service": "0.39.1",
-  "openbank-admin-ui": "4.19.0",
+  "openbank-admin-ui": "4.19.1",
   "openbank-agent-service": "1.34.0",
   "openbank-aml-service": "0.21.2",
   "openbank-anacredit-service": "0.11.0",
@@ -29,7 +29,7 @@
   "openbank-fraud-service": "0.20.0",
   "openbank-fx-service": "0.21.2",
   "openbank-governance-auditor": "0.6.6",
-  "openbank-interest-service": "0.29.1",
+  "openbank-interest-service": "0.29.2",
   "openbank-kyc-service": "0.19.1",
   "openbank-ledger-service": "1.46.0",
   "openbank-lending-service": "0.49.2",
@@ -66,7 +66,7 @@
   "openbank-loyalty-service": "0.4.3",
   "openbank-wealth-service": "0.3.2",
   "openbank-context-service": "0.5.1",
-  "openbank-risk-engine": "0.31.0",
+  "openbank-risk-engine": "0.32.0",
   "openbank-treasury-service": "0.22.1",
   "openbank-card-processing-service": "0.8.0",
   "openbank-products": "0.5.0"

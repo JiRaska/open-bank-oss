@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.31.0...risk-engine-v0.32.0) (2026-11-16)
+
+
+### Features
+
+* **risk-engine:** archive accepted treasury cash-flow revisions ([#16459](https://github.com/JiRaska/open-bank-oss/issues/16459)) ([e41f8cc](https://github.com/JiRaska/open-bank-oss/commit/e41f8cc163d45fffddf8f74912c608a2894ec3eb)), closes [#16390](https://github.com/JiRaska/open-bank-oss/issues/16390)
+
 ## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.30.1...risk-engine-v0.31.0) (2026-11-16)
 
 
