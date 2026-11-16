@@ -49,6 +49,7 @@ Tools are grouped by the charter capability they require (`McpToolRegistry`):
 | `query.ledger.readonly` | `get_account`, `get_account_by_iban`, `get_account_balance`, `list_transactions`, `get_transaction`, `get_balance_holds`, `list_ledger_journals`, `get_trial_balance` |
 | `read.catalog` | `list_products`, `get_product`, `get_product_fees` |
 | `query.compliance.readonly` | `aml_list_cases`, `aml_get_case`, `sanctions_list_checks`, `sanctions_get_check`, `sanctions_list_pending` |
+| `propose.aml.decision` | `aml_propose_case_decision` — HITL proposal only; the case changes when a human records the decision |
 | `query.payments.readonly` | `fx_list_rates`, `fx_get_rate`, `clearing_list_batches`, `clearing_get_batch`, `clearing_get_batch_items`, `sepa_instant_list`, `sepa_instant_get`, `sepa_instant_list_by_debtor` |
 | `query.interest.readonly` | `interest_list_accruals`, `interest_get_accruals`, `interest_accrual_summary` |
 | `query.disputes.readonly` | `dispute_list`, `dispute_get`, `dispute_list_by_account`, `dispute_get_timeline` |

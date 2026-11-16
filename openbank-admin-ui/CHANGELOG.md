@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.19.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.18.1...admin-ui-v4.19.0) (2026-11-16)
+
+
+### Features
+
+* **risk-engine:** expose snapshot-only liquidity runoff ([#16407](https://github.com/JiRaska/open-bank-oss/issues/16407)) ([69dc401](https://github.com/JiRaska/open-bank-oss/commit/69dc401972dbfda994d5f1e9c53723c7fa869b88))
+
 ## [4.18.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.18.0...admin-ui-v4.18.1) (2026-11-16)
 
 

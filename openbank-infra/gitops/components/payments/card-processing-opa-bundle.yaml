@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: card-processing-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "4b65d924c247df78"
+    openbank.tech/policy-checksum: "9a35f9b23c9ca719"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1222,6 +1222,7 @@ data:
       - product.explain
       write_proposal:
       - draft.ticket
+      - propose.aml.decision
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1251,6 +1252,7 @@ data:
         - query.disputes.readonly
         - query.observability.readonly
         - flags.write
+        - propose.aml.decision
         deny:
         - money.*
         - gh.pr.*

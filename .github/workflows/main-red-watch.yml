@@ -98,6 +98,9 @@ on:
       - "Evals - copilot proposal quality"
       - "Evals - fraud review"
       - "Fleet lint"
+      # Enforced JMH allocation baseline. Its red on main means a merged commit moved an
+      # allocation past the baseline; without this it surfaced on the next unrelated libs PR.
+      - "Libs benchmarks"
       - "Label sync"
       - "Pact drift check"
       - "Product Catalog Native Build (T1 enabler smoke test)"

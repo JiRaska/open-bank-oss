@@ -73,6 +73,7 @@ jobs:
               "openbank-sca-service",
               "openbank-sepa-instant",
               "openbank-sepa-payment",
+              "openbank-sanctions-service",
               "openbank-standing-order-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
@@ -272,6 +273,14 @@ jobs:
           # Every registrar follows `openbank.<service>.worker.enabled`, so the switch is
           # derived from the module's own source instead of a per-service list.
           EXTRA_PROPS=(-Dquarkus.kafka.devservices.enabled=false -Dkafka.bootstrap.servers=localhost:9092)
+          # No OPA sidecar exists in the throwaway stack. Services whose base default is
+          # AUTHZ_ENFORCE:true (e.g. sanctions-service) would fail every @Authorize route
+          # closed with 503 POLICY_DECISION_POINT_UNAVAILABLE and the lane would measure
+          # rejection latency — which the 200-only response callback already refuses. The
+          # lane measures handler latency, not policy, and dev-mode auth is disabled above,
+          # so enforce goes off here. No-op for the advisory-default services
+          # (AUTHZ_ENFORCE:false).
+          EXTRA_PROPS+=(-Dauthz.enforce=false)
           while read -r switch; do
             [ -n "$switch" ] && EXTRA_PROPS+=("-D${switch}=false")
           done < <(grep -rhoE '"openbank\.[a-z-]+\.worker\.enabled"' "${SERVICE}/src/main" | tr -d '"' | sort -u || true)
