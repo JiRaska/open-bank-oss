@@ -236,3 +236,11 @@ the endpoint rejects the caller. Apply the additive migration before configuring
 C3 still needs trusted grant selection and an account-opening operation that persists its inputs
 before consumption and resumes from the original receipt after a restart. For rollback, stop
 callers and retain the committed receipts.
+
+Account Service migration V35 adds the storage for that sequence. Commit the pending
+operation with the idempotency key, verified party, product pin and selected grant before
+calling the catalog. Complete the account, idempotency record, booking receipt and
+AccountCreated outbox row in the existing account-opening transaction. The receipt insert
+checks the party, request fingerprint and pinned product revision, including the signed IR
+hash when present. An interrupted call can resume the original operation using the same
+grant and pin. The account-opening caller and payment propagation still need wiring.
