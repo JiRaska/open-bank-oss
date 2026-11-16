@@ -98,6 +98,11 @@ class SignatureRecoveryIT {
 
         execute("UPDATE loan_application SET status = 'READY_TO_DISBURSE' WHERE id = ?", application)
         assertThat(disburse(application)).isEqualTo(409)
+        assertThat(status(application)).isEqualTo("READY_TO_DISBURSE")
+        assertThat(payments).isEmpty()
+        assertThat(receipts.values).containsExactly(FosAction.SIGN)
+        releaseFosLease(application, FosAction.DISBURSE)
+        awaitCondition { payments.isNotEmpty() }
         assertThat(status(application)).isEqualTo("DISBURSED")
         recoverFos(application, FosAction.DISBURSE)
         assertThat(disburse(application)).isEqualTo(201)
@@ -119,11 +124,15 @@ class SignatureRecoveryIT {
     private fun installCatalogue(): Map<UUID, FosAction> {
         val receipts = ConcurrentHashMap<UUID, FosAction>()
         val lostSignatureResponse = AtomicBoolean()
+        val outageBeforeDisbursement = AtomicBoolean()
         val catalogue = mockk<CatalogFosLoanAdapter>()
         every { catalogue.resolve(GRANT, PARTY, REVISION) } returns Uni.createFrom().item(ROUTE)
         every { catalogue.admit(any(), any(), PARTY, REVISION) } answers {
             val operation = firstArg<com.openbank.lending.application.port.out.FosOperation>()
             check(secondArg<com.openbank.lending.application.port.out.FosRoutePin>().grantId == GRANT)
+            if (operation.action == FosAction.DISBURSE && outageBeforeDisbursement.compareAndSet(false, true)) {
+                return@answers Uni.createFrom().failure(IllegalStateException("synthetic unavailable catalogue"))
+            }
             check(receipts.putIfAbsent(operation.id, operation.action).let { it == null || it == operation.action })
             if (operation.action == FosAction.SIGN && lostSignatureResponse.compareAndSet(false, true)) {
                 Uni.createFrom().failure(IllegalStateException("synthetic lost catalogue response"))
@@ -213,13 +222,17 @@ class SignatureRecoveryIT {
         .post("/api/v1/lending/applications/$application/disburse")
         .statusCode
 
-    private fun recoverFos(application: UUID, action: FosAction) {
+    private fun releaseFosLease(application: UUID, action: FosAction) {
         execute(
             "UPDATE lending_fos_operation SET next_attempt_at = clock_timestamp() " +
                 "WHERE application_id = ? AND action = ?",
             application,
             action.name,
         )
+    }
+
+    private fun recoverFos(application: UUID, action: FosAction) {
+        releaseFosLease(application, action)
         val sql = """
             SELECT completed_at IS NOT NULL FROM lending_fos_operation
             WHERE application_id = ? AND action = '${action.name}'
@@ -241,9 +254,13 @@ class SignatureRecoveryIT {
     }
 
     private fun awaitCompletion(sql: String, application: UUID) {
+        awaitCondition { scalar(sql, application) == true }
+    }
+
+    private fun awaitCondition(condition: () -> Boolean) {
         val deadline = System.nanoTime() + Duration.ofSeconds(35).toNanos()
-        while (scalar(sql, application) != true && System.nanoTime() < deadline) Thread.sleep(50)
-        assertThat(scalar(sql, application)).isEqualTo(true)
+        while (!condition() && System.nanoTime() < deadline) Thread.sleep(50)
+        assertThat(condition()).isTrue()
     }
 
     private fun assertAtomicCompletion(application: UUID) {
