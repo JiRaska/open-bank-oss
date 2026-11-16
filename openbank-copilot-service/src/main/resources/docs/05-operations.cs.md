@@ -51,3 +51,12 @@ výsledku, `X-AI-Generated: true` a `X-AI-Disclosure` (stejný český text, UTF
 první událostí (API kontrakt 1.7.0, aditivní). Použity jsou hlavičky, protože stávající klienti streamu
 zobrazují každý řádek `data:` jako text odpovědi, takže vložený prvek by viděl zákazník, kdežto nečtená
 hlavička se ignoruje. Zatím nehotovo: lokalizace textu a čtení hlaviček v mobilní aplikaci.
+
+## Obnova klientského certifikátu (odchozí mTLS)
+
+Každá pojmenovaná konfigurace `quarkus.tls.<name>`, kterou se služba prokazuje vůči
+naslouchání 8443 jiné služby, nastavuje `reload-period: 1h`. cert-manager klientský certifikát
+obnoví před expirací; bez této volby by proces dál předkládal ten starý, dokud by ho protistrana
+neodmítla, zatímco všechny signály expirace měřily obnovený Secret a hlásily zelenou. Po obnově
+se nový certifikát použije do hodiny, bez restartu. Gate `tls-certificate-reload` hlídá, aby
+žádná taková konfigurace nevypadla.

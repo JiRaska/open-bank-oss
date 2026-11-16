@@ -414,6 +414,8 @@ openbank:
     # stays under %prod: the client certificate only exists in the cluster.
     tls:
       party-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:

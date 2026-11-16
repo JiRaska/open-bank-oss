@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.9](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.12.8...statement-service-v0.12.9) (2026-11-16)
+
+
+### Bug Fixes
+
+* **statement,swift,tax-reporting:** reload outbound mTLS client certificates ([#16418](https://github.com/JiRaska/open-bank-oss/issues/16418)) ([037fffa](https://github.com/JiRaska/open-bank-oss/commit/037fffa983a283517805c7858c3fb01c2219468a))
+
 ## [0.12.8](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.12.7...statement-service-v0.12.8) (2026-10-14)
 
 
