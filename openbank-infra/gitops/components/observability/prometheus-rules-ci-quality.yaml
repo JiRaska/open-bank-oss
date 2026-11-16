@@ -31,9 +31,20 @@ spec:
         # answered 200 to CI while every remote write to Prometheus timed out and was dropped (a
         # NetworkPolicy that admitted the pod IP but not the Service VIP). CiMetricsAbsent would
         # say "no data" a day later without naming the hop; this names it within 15 minutes.
+        # The second arm is load-bearing: the collector creates the failure counter LAZILY, at its
+        # first failure, already at the dropped count. increase() needs a prior sample, so for a
+        # counter born at 30 it answers 0 and the first arm alone never fired (measured
+        # 2026-11-16: 30 points dropped at 15:33Z, rule `inactive` all day). A series that is
+        # non-zero now and did not exist 30m ago is a failure that started within the window.
         - alert: CiMetricsGatewayExportFailing
           expr: |
-            increase(otelcol_exporter_send_failed_metric_points{job="ci-metrics-gateway", exporter="prometheusremotewrite"}[30m]) > 0
+            (increase(otelcol_exporter_send_failed_metric_points{job="ci-metrics-gateway", exporter="prometheusremotewrite"}[30m]) > 0)
+            or
+            (
+              otelcol_exporter_send_failed_metric_points{job="ci-metrics-gateway", exporter="prometheusremotewrite"} > 0
+              unless
+              otelcol_exporter_send_failed_metric_points{job="ci-metrics-gateway", exporter="prometheusremotewrite"} offset 30m
+            )
           for: 15m
           labels:
             severity: warning

@@ -6,6 +6,9 @@
 #   failing  send_failed grows steadily            -> fires after for: 15m
 #   healthy  send_failed flat at a historic value  -> quiet (a past failure is not a current one)
 #   other    another collector's failures          -> quiet (scoped to job="ci-metrics-gateway")
+#   born     counter first appears AT its failure count, then flat (the real 2026-11-16 shape:
+#            the collector creates the series lazily, so increase() has no prior sample)
+#                                                   -> fires; quiet again once the burst is >30m old
 rule_files:
   - prometheus-rules-ci-quality.yaml
 
@@ -43,5 +46,31 @@ tests:
         values: '0+5x120'
     alert_rule_test:
       - eval_time: 90m
+        alertname: CiMetricsGatewayExportFailing
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'otelcol_exporter_send_failed_metric_points{job="ci-metrics-gateway",exporter="prometheusremotewrite"}'
+        values: '_x60 30x120'
+    alert_rule_test:
+      - eval_time: 55m
+        alertname: CiMetricsGatewayExportFailing
+        exp_alerts: []
+      - eval_time: 80m
+        alertname: CiMetricsGatewayExportFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              service: openbank-app-ci
+              job: ci-metrics-gateway
+              exporter: prometheusremotewrite
+            exp_annotations:
+              summary: "CI metrics gateway accepts pushes but fails to write them to Prometheus"
+              description: "otelcol_exporter_send_failed_metric_points rose in the last 30m: OTLP ingest answers 200 while remote write drops the data. Check the gateway NetworkPolicy egress and its logs for 'Exporting failed'."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/ci-metrics-gateway.md#cimetricsgatewayexportfailing"
+              subject_period: continuous
+      - eval_time: 150m
         alertname: CiMetricsGatewayExportFailing
         exp_alerts: []
