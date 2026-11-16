@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: campaign-service
     app.kubernetes.io/part-of: campaign
   annotations:
-    openbank.tech/policy-checksum: "d00fd57f14edaeba"
+    openbank.tech/policy-checksum: "1d6aa878801703c0"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1198,6 +1198,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1228,6 +1229,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

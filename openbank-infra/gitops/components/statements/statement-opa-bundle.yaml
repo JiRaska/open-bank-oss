@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: statement-service
     app.kubernetes.io/part-of: statements
   annotations:
-    openbank.tech/policy-checksum: "0ea0e2520add2ed5"
+    openbank.tech/policy-checksum: "43e50f207e8b3e67"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1248,6 +1248,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1278,6 +1279,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

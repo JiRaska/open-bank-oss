@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pid-service
     app.kubernetes.io/part-of: pid
   annotations:
-    openbank.tech/policy-checksum: "f7e81017258234d6"
+    openbank.tech/policy-checksum: "ca5f0fb088cbb7ce"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1229,6 +1229,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1259,6 +1260,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

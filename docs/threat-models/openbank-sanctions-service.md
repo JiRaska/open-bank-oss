@@ -10,7 +10,7 @@ ADR-0032 documents the synchronous AML/sanctions screening gate. Reviewed in PR.
 
 - **Status:** Draft (first pass, written alongside the real-feed-registration wiring; §6 added
   with the review-path persistence fix)
-- **Last reviewed:** 2026-10-29
+- **Last reviewed:** 2026-11-16 (agent as four-eyes maker on sanctions.clear)
 - **Owner:** sanctions/AML CODEOWNERS
 - **Related ADRs:** ADR-0002 (hexagonal), ADR-0032 (synchronous AML/sanctions screening gate),
   ADR-0100 (injected Clock, Layer 1 determinism), ADR-0116 (KYC engine — `SANCTIONS_SCREENING`
@@ -217,6 +217,18 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
 | M10 | **A disabled feature read as a working one** | Registration is refused with 503 while disabled; a disabled run reports `DISABLED`, counted apart from `completed`; the registry gauges read NaN until a run has observed the registry | None known |
 
 ## 7. Change log
+
+- **2026-11-16 (#16381):** Trust-boundary change. `POST /api/v3/sanctions/review` (`sanctions.clear`)
+  now admits `ROLE_API` at the `@RolesAllowed` layer so that ONE machine principal,
+  `service-account-openbank-agent`, reaches OPA, which grants it `sanctions.clear` only (rule
+  `service-agent-sanctions-review-maker`), never `sanctions.approval.decide`, `.update` or `.trigger`.
+  Every other `ROLE_API` service-account is still denied by OPA (measured with `opa eval` on the
+  regenerated bundle: agent clear = allow with `four_eyes_required`; agent decide/update/trigger and
+  another service-account's clear = deny). With `AUTHZ_FOUR_EYES_ENFORCE="true"` the agent's review is
+  paused until a distinct human approves it, so the decision of record is the human checker's.
+  **Tampering/EoP risk:** if four-eyes enforcement were switched off, the agent's review would execute
+  directly; pinned by agent-service `AgentMachineGrantCharterAlignmentTest`. v1 `/review` is unchanged
+  (human only). Rollback: revert.
 
 - **2026-11-14** — **Ongoing monitoring switched on in the sandbox deployment
   (`SANCTIONS_MONITORING_ENABLED=true`).** The surface of section 6b is now live there: the

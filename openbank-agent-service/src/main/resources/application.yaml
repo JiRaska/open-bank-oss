@@ -380,6 +380,7 @@ agent:
           - draft.ticket
           - query.compliance.readonly
           - propose.aml.decision
+          - sanctions.review.maker
           - query.payments.readonly
           - query.disputes.readonly
           - query.observability.readonly

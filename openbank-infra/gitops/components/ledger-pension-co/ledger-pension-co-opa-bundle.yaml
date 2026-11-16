@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger-pension-co
   annotations:
-    openbank.tech/policy-checksum: "73637bdf9bb3bb3c"
+    openbank.tech/policy-checksum: "3a91b07c8ec6aba9"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1584,6 +1584,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1614,6 +1615,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

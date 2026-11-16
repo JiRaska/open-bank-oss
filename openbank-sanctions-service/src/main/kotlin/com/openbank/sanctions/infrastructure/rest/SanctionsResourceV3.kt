@@ -43,7 +43,9 @@ class SanctionsResourceV3(private val useCase: SanctionsUseCase) {
 
     @POST
     @Path("/review")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    // ROLE_API admits the agent identity (service-account-openbank-agent) to the OPA decision; OPA
+    // grants it sanctions.clear as four-eyes maker only, and four-eyes pauses it for a human checker.
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.clear", resource = "#cmd.checkId")
     suspend fun review(cmd: ReviewRequest) = useCase.review(cmd.toCommand(identity))
 

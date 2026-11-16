@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sdd-service
     app.kubernetes.io/part-of: sdd
   annotations:
-    openbank.tech/policy-checksum: "29c6dc4d1468ed8b"
+    openbank.tech/policy-checksum: "08c6cd1bd9dc975b"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1261,6 +1261,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1291,6 +1292,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

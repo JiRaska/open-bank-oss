@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: risk-engine
     app.kubernetes.io/part-of: risk
   annotations:
-    openbank.tech/policy-checksum: "f58bdf1aefce147f"
+    openbank.tech/policy-checksum: "30c91cb4f70a1b24"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1211,6 +1211,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1241,6 +1242,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

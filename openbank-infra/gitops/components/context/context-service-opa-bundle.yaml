@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: context-service
     app.kubernetes.io/part-of: context
   annotations:
-    openbank.tech/policy-checksum: "06c4bb6f61655728"
+    openbank.tech/policy-checksum: "f4a2e0667404020b"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2011,6 +2011,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -2041,6 +2042,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

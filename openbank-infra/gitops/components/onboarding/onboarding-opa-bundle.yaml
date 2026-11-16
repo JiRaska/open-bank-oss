@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: onboarding-service
     app.kubernetes.io/part-of: onboarding
   annotations:
-    openbank.tech/policy-checksum: "38081140818650b0"
+    openbank.tech/policy-checksum: "7f35d3f7dac7ea8e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1171,6 +1171,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1201,6 +1202,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

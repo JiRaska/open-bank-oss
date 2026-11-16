@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: tpp-registry-service
     app.kubernetes.io/part-of: tpp-registry
   annotations:
-    openbank.tech/policy-checksum: "53ebdb05ebbc8a3e"
+    openbank.tech/policy-checksum: "58596201bcc598f1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1170,6 +1170,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1200,6 +1201,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

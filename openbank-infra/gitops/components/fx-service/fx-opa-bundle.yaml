@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "5545faaf278cc1c9"
+    openbank.tech/policy-checksum: "1f89f96275523b01"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1263,6 +1263,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1293,6 +1294,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

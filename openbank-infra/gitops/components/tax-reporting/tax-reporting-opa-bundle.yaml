@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: tax-reporting-service
     app.kubernetes.io/part-of: tax-reporting
   annotations:
-    openbank.tech/policy-checksum: "38379da0df1c5772"
+    openbank.tech/policy-checksum: "c6d8142bec5d5f57"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1242,6 +1242,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1272,6 +1273,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

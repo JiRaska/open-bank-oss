@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: clearing-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "48adee195378f7be"
+    openbank.tech/policy-checksum: "015b05331ef1d9f7"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1221,6 +1221,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1251,6 +1252,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

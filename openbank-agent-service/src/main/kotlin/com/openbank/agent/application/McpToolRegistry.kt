@@ -44,6 +44,8 @@ class McpToolRegistry {
 
     @Inject lateinit var amlDecisions: AmlDecisionProposalTool
 
+    @Inject lateinit var sanctionsReview: SanctionsReviewTool
+
     @Inject lateinit var objectMapper: ObjectMapper
 
     @Inject lateinit var auditPublisher: AuditEventPublisher
@@ -181,6 +183,19 @@ class McpToolRegistry {
             ),
         ),
         // ── Sanctions (compliance) ────────────────────────────────────────────
+        ToolDefinition(
+            name = SanctionsReviewTool.NAME,
+            description = "Submit a sanctions hit review (HIT / POTENTIAL_HIT -> CLEAR, WHITELISTED or ESCALATED) " +
+                "as the four-eyes MAKER. Typical use: a name-only fuzzy match whose DOB/nationality differ. The " +
+                "first call returns pending_approval + approvalId and changes nothing; after a different human " +
+                "approves it, call again with the SAME checkId, newStatus and note plus the approvalId.",
+            inputSchema = schema(
+                "checkId" to (stringProp("UUID of the sanctions check") to true),
+                "newStatus" to (stringProp("CLEAR, WHITELISTED or ESCALATED") to true),
+                "note" to (stringProp("What was compared and why it is (not) a match, min 10 chars") to true),
+                "approvalId" to (stringProp("Approval id from the first call, only on the retry") to false),
+            ),
+        ),
         ToolDefinition(
             name = "sanctions_list_checks",
             description = "List recent sanctions screening checks.",
@@ -432,6 +447,8 @@ class McpToolRegistry {
         "aml_get_case" to "query.compliance.readonly",
         // The AML disposition proposal — a write_proposal capability, never a direct decision.
         AML_PROPOSE_DECISION to "propose.aml.decision",
+        // Sanctions hit review as the four-eyes MAKER (ADR-0155): no effect until a distinct human approves.
+        SanctionsReviewTool.NAME to "sanctions.review.maker",
         "sanctions_list_checks" to "query.compliance.readonly",
         "sanctions_get_check" to "query.compliance.readonly",
         "sanctions_list_pending" to "query.compliance.readonly",
@@ -484,6 +501,7 @@ class McpToolRegistry {
                 toolName == "flip_feature_flag" -> flipFeatureFlag(args, actorId)
                 toolName == "draft_ticket" -> succeed(toolName, actorId, draftTicket(args, actorId))
                 toolName == AML_PROPOSE_DECISION -> succeed(toolName, actorId, amlDecisions.propose(args, actorId))
+                toolName == SanctionsReviewTool.NAME -> succeed(toolName, actorId, sanctionsReview.review(args))
                 toolName in ProductAuthoringTools.READ_TOOLS -> productResult(
                     toolName,
                     actorId,

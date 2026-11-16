@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: consent-service
     app.kubernetes.io/part-of: consent
   annotations:
-    openbank.tech/policy-checksum: "a5e32e74e43461f9"
+    openbank.tech/policy-checksum: "4d6fea8cdd8722aa"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1295,6 +1295,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1325,6 +1326,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

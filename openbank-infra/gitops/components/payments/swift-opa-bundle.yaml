@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: swift-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "293c58679656d9c1"
+    openbank.tech/policy-checksum: "ae8c37cbaac75180"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1183,6 +1183,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1213,6 +1214,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

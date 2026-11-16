@@ -105,9 +105,12 @@ class McpEndpointRoutingIT {
         list(null)
             .body("result.tools.name", hasItem("aml_propose_case_decision"))
             .body("result.tools.find { it.name == 'aml_propose_case_decision' }.service", equalTo("aml-service"))
+            .body("result.tools.name", hasItem("sanctions_review_check"))
+            .body("result.tools.find { it.name == 'sanctions_review_check' }.service", equalTo("sanctions-service"))
         // The pentest-hardened ui-assistant has no compliance capability at all (FIND-S4-05).
         list("ui-assistant")
             .body("result.tools.name", hasItem("get_catalog_revision"))
             .body("result.tools.name", not(hasItem("aml_propose_case_decision")))
+            .body("result.tools.name", not(hasItem("sanctions_review_check")))
     }
 }

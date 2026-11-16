@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: psd2-service
     app.kubernetes.io/part-of: psd2
   annotations:
-    openbank.tech/policy-checksum: "f6215121f4e0306e"
+    openbank.tech/policy-checksum: "45e98dce42235e4f"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1262,6 +1262,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1292,6 +1293,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pension-fund-service
     app.kubernetes.io/part-of: pension-fund
   annotations:
-    openbank.tech/policy-checksum: "49d6fffcb22c15e7"
+    openbank.tech/policy-checksum: "135f8aca3522db05"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1232,6 +1232,7 @@ data:
       write_proposal:
       - draft.ticket
       - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1262,6 +1263,7 @@ data:
         - query.observability.readonly
         - flags.write
         - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*
