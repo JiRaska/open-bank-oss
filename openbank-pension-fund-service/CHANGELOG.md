@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/JiRaska/open-bank-oss/compare/pension-fund-service-v2.1.0...pension-fund-service-v2.1.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **lending,notification,pension-fund:** reload outbound mTLS client certificates ([#16415](https://github.com/JiRaska/open-bank-oss/issues/16415)) ([6ca4700](https://github.com/JiRaska/open-bank-oss/commit/6ca470012614bd5b0d4f5497352088d25655464a))
+
 ## [2.1.0](https://github.com/JiRaska/open-bank-oss/compare/pension-fund-service-v2.0.1...pension-fund-service-v2.1.0) (2026-11-09)
 
 
