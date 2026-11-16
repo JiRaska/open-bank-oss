@@ -28,6 +28,8 @@ import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
+import com.openbank.lending.application.port.out.SignatureIntent
+import com.openbank.lending.application.port.out.SignatureIntents
 import com.openbank.lending.application.port.out.TimerArmingOutcome
 import com.openbank.lending.domain.model.AccrualOutcome
 import com.openbank.lending.domain.model.ApplicationStateSummary
@@ -70,6 +72,7 @@ import com.openbank.libs.lending.origination.OriginationStateMachine
 import com.openbank.libs.lending.origination.OriginationTransition
 import com.openbank.libs.lending.origination.OriginationTransitionResult
 import com.openbank.libs.market.MarketCountry
+import com.openbank.libs.messaging.SyntheticTaintKafkaRail
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -135,6 +138,9 @@ class LendingService @Inject constructor(
 
     @Inject
     lateinit var accrualProgress: com.openbank.lending.application.port.out.AccrualProgressPort
+
+    @Inject
+    lateinit var signatureIntents: SignatureIntents
 
     private val log = Logger.getLogger(LendingService::class.java)
 
@@ -748,6 +754,8 @@ class LendingService @Inject constructor(
             when {
                 existing == null ->
                     Uni.createFrom().failure(IllegalArgumentException("Application not found: $id"))
+                existing.signatureRecordedAt != null && existing.supportsDurableSignature() ->
+                    replaySignature(existing, request, signedBy)
                 existing.status != OriginationState.AWAITING_SIGNATURE ->
                     Uni.createFrom().failure(
                         IllegalStateException("Application is not awaiting signature: ${existing.status}"),
@@ -767,10 +775,89 @@ class LendingService @Inject constructor(
                     is OriginationTransitionResult.Rejected ->
                         Uni.createFrom().failure(IllegalStateException(result.reason))
                     is OriginationTransitionResult.Applied ->
-                        recordSignature(existing, result.newState, request, signedBy)
+                        if (existing.supportsDurableSignature()) {
+                            stageSignature(existing, request, signedBy)
+                        } else {
+                            recordSignature(existing, result.newState, request, signedBy)
+                        }
                 }
             }
         }
+
+    private fun LoanApplication.supportsDurableSignature(): Boolean =
+        jurisdiction == DOMESTIC_MARKET.code && catalogSnapshot != null
+
+    private fun LoanApplication.signatureIntent(request: SignApplicationRequest, actor: String): SignatureIntent {
+        val pin = checkNotNull(catalogSnapshot)
+        return SignatureIntent(
+            UUID.randomUUID(),
+            id,
+            pin.revisionId,
+            pin.contentHash,
+            request.artefactHash,
+            actor,
+            SyntheticTaintKafkaRail.currentlyTainted(),
+        )
+    }
+
+    private fun stageSignature(
+        existing: LoanApplication,
+        request: SignApplicationRequest,
+        actor: String,
+    ): Uni<LoanApplication> = applications.withLocked(existing.id) { locked ->
+        val current = locked ?: throw signatureClaimLost(existing)
+        if (current.status != existing.status && current.signatureRecordedAt == null) {
+            throw signatureClaimLost(existing)
+        }
+        if (lacksDecision(current)) throw decisionMissing(current)
+        val candidate = current.signatureIntent(request, actor)
+        val stored = if (current.signatureRecordedAt == null) {
+            signatureIntents.stage(candidate).map<SignatureIntent?> { it }
+        } else {
+            signatureIntents.find(current.id)
+        }
+        stored.map { intent ->
+            check(intent != null && intent.matches(candidate)) { "A different signature request is already recorded" }
+            intent
+        }
+    }.flatMap(::finishSignatureIntent)
+
+    private fun replaySignature(
+        application: LoanApplication,
+        request: SignApplicationRequest,
+        actor: String,
+    ): Uni<LoanApplication> = signatureIntents.find(application.id).map { stored ->
+        check(
+            stored != null && application.signatureArtefactHash == stored.artefactHash &&
+                stored.matches(application.signatureIntent(request, actor)),
+        ) {
+            "The signature request does not match the recorded operation"
+        }
+        application
+    }
+
+    fun finishSignatureIntent(intent: SignatureIntent): Uni<LoanApplication> =
+        applications.withLocked(intent.applicationId) { current ->
+            checkNotNull(current) { "Signature application no longer exists" }
+            val pin = current.catalogSnapshot
+            check(
+                current.supportsDurableSignature() && pin != null && pin.revisionId == intent.revisionId &&
+                    pin.contentHash == intent.revisionContentHash,
+            ) { "Signature product revision changed" }
+            if (current.signatureRecordedAt != null) {
+                check(current.signatureArtefactHash == intent.artefactHash) { "Signature artefact changed" }
+                Uni.createFrom().item(current to false)
+            } else {
+                check(current.status == OriginationState.AWAITING_SIGNATURE) { "Application is no longer awaiting signature" }
+                if (lacksDecision(current)) throw decisionMissing(current)
+                commitSignature(current, OriginationState.SIGNED, intent.artefactHash, intent.actor)
+                    .call { signatureIntents.complete(intent.id) }
+                    .map { it to true }
+            }
+        }.call { (application, changed) ->
+            if (changed) armTimers(application.id, application.status, reflectionDaysFor(application))
+            else Uni.createFrom().nullItem<TimerArmingOutcome>()
+        }.map { it.first }
 
     private fun recordSignature(
         existing: LoanApplication,
@@ -781,21 +868,30 @@ class LendingService @Inject constructor(
         val current = locked ?: throw signatureClaimLost(existing)
         if (current.status != existing.status) throw signatureClaimLost(existing)
         if (lacksDecision(current)) throw decisionMissing(current)
+        commitSignature(current, state, request.artefactHash, signedBy)
+    }.signalWorkflow()
+
+    private fun commitSignature(
+        current: LoanApplication,
+        state: OriginationState,
+        artefactHash: String,
+        signedBy: String,
+    ): Uni<LoanApplication> {
         val signed = current.copy(
             status = state,
-            signatureArtefactHash = request.artefactHash,
+            signatureArtefactHash = artefactHash,
             signatureRecordedAt = OffsetDateTime.now(clock).truncatedTo(ChronoUnit.MICROS),
         )
-        applications.compareAndSetSignature(signed, existing.status).map { claimed ->
-            if (claimed == 0) throw signatureClaimLost(existing)
+        return applications.compareAndSetSignature(signed, current.status).map { claimed ->
+            if (claimed == 0) throw signatureClaimLost(current)
             signed
         }.emitEvidence(
-            existing.status.name,
+            current.status.name,
             signedBy,
             OriginationActorKind.HUMAN,
-            "customer signature received (artefact ${request.artefactHash})",
+            "customer signature received (artefact $artefactHash)",
         )
-    }.signalWorkflow()
+    }
 
     private fun signatureClaimLost(existing: LoanApplication) = IllegalStateException(
         "Concurrent modification: application ${existing.id} is no longer in ${existing.status}",

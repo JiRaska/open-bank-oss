@@ -1141,3 +1141,11 @@ The authorizing boundary is the lending application service. The adapter validat
 with `openbank-libs-market`. Tests cover a foreign-only offering leaving no application, malformed
 catalogue country codes, and the existing unscoped application path. Cross-border origination still
 requires the catalogue commitment fence and verified subject evidence.
+
+### Durable catalogue-backed signature (ADR-0380)
+
+The signature endpoint records an intent for the authenticated signer against the application's
+pinned product revision. Taking over work from PostgreSQL never reconstructs actor, artefact or
+product evidence from a new caller. A row lock serializes the signature transition with other
+origination state changes. The signature, outbox and completion marker commit together.
+The scheduler restores the stored synthetic taint before publishing evidence.
