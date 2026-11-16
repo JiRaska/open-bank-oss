@@ -59,7 +59,8 @@ class SignatureIntentRepository(private val sessions: Mutiny.SessionFactory) : S
     )
 
     private companion object {
-        const val COLUMNS = "operation_id, application_id, revision_id, revision_content_hash, artefact_hash, actor, synthetic"
+        const val COLUMNS =
+            "operation_id, application_id, revision_id, revision_content_hash, artefact_hash, actor, synthetic"
         const val LOAD = "SELECT $COLUMNS FROM lending_signature_intent WHERE application_id = :application"
         const val INSERT = """
             INSERT INTO lending_signature_intent ($COLUMNS)

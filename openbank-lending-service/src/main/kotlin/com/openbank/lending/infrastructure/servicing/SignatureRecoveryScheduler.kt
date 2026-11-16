@@ -40,7 +40,11 @@ class SignatureRecoveryScheduler(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: RuntimeException) {
-                log.warnf("Signature recovery could not complete operation %s (%s)", intent.id, failure.javaClass.simpleName)
+                log.warnf(
+                    "Signature recovery could not complete operation %s (%s)",
+                    intent.id,
+                    failure.javaClass.simpleName,
+                )
             }
         }
         liveness.recordSuccess()

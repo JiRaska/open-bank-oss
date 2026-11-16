@@ -828,7 +828,8 @@ class LendingService @Inject constructor(
         actor: String,
     ): Uni<LoanApplication> = signatureIntents.find(application.id).map { stored ->
         check(
-            stored != null && application.signatureArtefactHash == stored.artefactHash &&
+            stored != null &&
+                application.signatureArtefactHash == stored.artefactHash &&
                 stored.matches(application.signatureIntent(request, actor)),
         ) {
             "The signature request does not match the recorded operation"
@@ -841,22 +842,29 @@ class LendingService @Inject constructor(
             checkNotNull(current) { "Signature application no longer exists" }
             val pin = current.catalogSnapshot
             check(
-                current.supportsDurableSignature() && pin != null && pin.revisionId == intent.revisionId &&
+                current.supportsDurableSignature() &&
+                    pin != null &&
+                    pin.revisionId == intent.revisionId &&
                     pin.contentHash == intent.revisionContentHash,
             ) { "Signature product revision changed" }
             if (current.signatureRecordedAt != null) {
                 check(current.signatureArtefactHash == intent.artefactHash) { "Signature artefact changed" }
                 Uni.createFrom().item(current to false)
             } else {
-                check(current.status == OriginationState.AWAITING_SIGNATURE) { "Application is no longer awaiting signature" }
+                check(current.status == OriginationState.AWAITING_SIGNATURE) {
+                    "Application is no longer awaiting signature"
+                }
                 if (lacksDecision(current)) throw decisionMissing(current)
                 commitSignature(current, OriginationState.SIGNED, intent.artefactHash, intent.actor)
                     .call { signatureIntents.complete(intent.id) }
                     .map { it to true }
             }
         }.call { (application, changed) ->
-            if (changed) armTimers(application.id, application.status, reflectionDaysFor(application))
-            else Uni.createFrom().nullItem<TimerArmingOutcome>()
+            if (changed) {
+                armTimers(application.id, application.status, reflectionDaysFor(application))
+            } else {
+                Uni.createFrom().nullItem<TimerArmingOutcome>()
+            }
         }.map { it.first }
 
     private fun recordSignature(
