@@ -71,7 +71,9 @@ class FosLoanRepository(private val sessions: Mutiny.SessionFactory, private val
     }
 
     private companion object {
-        const val INSERT_ROUTE = "INSERT INTO lending_fos_route VALUES (:id, CAST(:payload AS jsonb))"
+        const val INSERT_ROUTE = """
+            INSERT INTO lending_fos_route (application_id, route) VALUES (:id, CAST(CAST(:payload AS text) AS jsonb))
+        """
         const val LOAD_ROUTE = "SELECT CAST(route AS text) FROM lending_fos_route WHERE application_id = :id"
         const val LOAD_OPERATION = """
             SELECT CAST(to_jsonb(o) AS text) FROM lending_fos_operation o
@@ -79,7 +81,7 @@ class FosLoanRepository(private val sessions: Mutiny.SessionFactory, private val
         """
         const val INSERT_OPERATION = """
             INSERT INTO lending_fos_operation (operation_id, application_id, action, command)
-            VALUES (:operation, :id, :action, CAST(:command AS jsonb))
+            VALUES (:operation, :id, :action, CAST(CAST(:command AS text) AS jsonb))
         """
         const val MARK_ADMITTED = """
             UPDATE lending_fos_operation SET admitted_at = coalesce(admitted_at, clock_timestamp())
