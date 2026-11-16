@@ -416,6 +416,7 @@ class PerformanceStageTests(unittest.TestCase):
             "openbank-product-catalog-product-catalog-smoke",
             "openbank-flaky-test-hunter-flaky-test-hunter-smoke",
             "openbank-ledger-service-ledger-read-baseline",
+            "openbank-account-service-account-read-baseline",
             "openbank-balance-service-balance-read-baseline",
             "openbank-transaction-service-transaction-read-baseline",
             "openbank-consent-service-consent-read-baseline",

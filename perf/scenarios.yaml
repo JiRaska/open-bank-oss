@@ -36,11 +36,11 @@ scenarios:
   # target or synthetic-data teardown — only a least-privilege read identity.
   - id: account-read-baseline
     definition: openbank-account-service/src/test/k6/account-read-baseline.js
-    execution_mode: planned-read-only-sandbox
-    safety_boundary: Read-only by construction — every request is a GET against openbank-account-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
-    target_schedule: "0 5 * * *"
-    blocker: Needs a booted openbank-account-service target and a least-privilege read identity (PERF_READ_TOKEN); the scenario is wired into the perf-baseline.yml module-read-baselines matrix and runs whenever PERF_ACCOUNT_URL plus PERF_READ_TOKEN are set; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
-    assertions: Exercises account list (partyId, cursor), account detail, account balance, trigram IBAN search. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-account-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope. The id-scoped probes (list by party, account detail) need seeded rows to answer 200, so the module ships src/test/k6/fixtures.sql, which the gate loads into the throwaway database after boot; verified locally end to end. The account balance read is deliberately excluded from this lane — GET /{id}/balance proxies to balance-service via BalanceServiceClient, which the single-service lane does not boot, and that read path is covered by the balance-service lane instead. The perf-baseline.yml leg remains for the shared-sandbox mode (PERF_ACCOUNT_URL plus the PERF_READ_TOKEN secret); a 401 there is rejection evidence, not a handler baseline.
+    assertions: Exercises account list (partyId, limit), account detail and trigram IBAN search. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
 
   - id: sanctions-read-baseline
     definition: openbank-sanctions-service/src/test/k6/sanctions-read-baseline.js
