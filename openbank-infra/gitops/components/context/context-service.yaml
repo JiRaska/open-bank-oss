@@ -14,7 +14,7 @@ spec:
   selector: { matchLabels: { app.kubernetes.io/name: context-service } }
   template:
     metadata:
-      annotations: { openbank.tech/policy-checksum: "03015a5ae22d3b07" }
+      annotations: { openbank.tech/policy-checksum: "06c4bb6f61655728" }
       labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
     spec:
       securityContext:
@@ -25,7 +25,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: context-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-context-service:sandbox-1bb10d20@sha256:c2084671d9a56cb09a90e4045f4fc923a87fdd8d9df4bf274e147ce3ddfe158b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-context-service:sandbox-44fff644@sha256:9f3ce8a56fb9cbf442685edf5bd7e686414372a80ed2bfd7cc3b1db8392c4df0
           imagePullPolicy: IfNotPresent
           ports:
             - { name: http, containerPort: 8149 }

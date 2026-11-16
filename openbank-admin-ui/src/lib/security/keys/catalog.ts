@@ -25,6 +25,13 @@ export type ExpirySource =
   | { type: 'short-lived'; ttl: string }
   /** A key with no expiry by design (KMS, transit, HMAC). Rotation, not expiry, is the control. */
   | { type: 'no-expiry'; rotation: string }
+  /** The institutional PAdES seal certificate, exported by document-service. */
+  | { type: 'seal' }
+  /**
+   * A provider credential that does not expire by itself (APNs .p8, FCM service-account key);
+   * the risk is that the provider or we REVOKE it. Shown as such, never as healthy.
+   */
+  | { type: 'revocation'; signal: string }
   /** Exists, but nothing the platform runs can observe its expiry today. */
   | { type: 'untracked'; reason: string }
 
@@ -212,13 +219,13 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     nameEn: 'Bank electronic seal (PAdES)',
     purposeCs: 'Pečetí PDF výpisy a smlouvy, aby šlo prokázat, že je vydala banka a nikdo je nezměnil.',
     purposeEn: 'Seals PDF statements and contracts so it can be proven the bank issued them and nobody altered them.',
-    impactCs: 'Bez platné pečeti jsou dokumenty jako důkaz bezcenné. Expiraci dnes nic nesleduje.',
-    impactEn: 'Without a valid seal documents are worthless as evidence. Nothing tracks its expiry today.',
+    impactCs: 'Bez platné pečeti jsou dokumenty jako důkaz bezcenné. Obnova je ruční, proto varujeme 45 dní předem.',
+    impactEn: 'Without a valid seal documents are worthless as evidence. Renewal is manual, so the warning starts 45 days ahead.',
     owner: 'documents',
     algorithm: 'PKCS#12 keystore',
     quantum: 'signature',
     agility: 'ceremony',
-    expiry: { type: 'untracked', reason: 'keystore is read once at start; its notAfter is not exported' },
+    expiry: { type: 'seal' },
     definedIn: 'openbank-infra/gitops/components/document-service/es-document-service-signing-keystore.yaml',
     runbook: 'docs/runbooks/0008-openbao-document-signing-pki.md',
   },
@@ -285,7 +292,7 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     algorithm: 'ES256 provider key',
     quantum: 'signature',
     agility: 'routine',
-    expiry: { type: 'untracked', reason: 'static credential; tracked only by its rotation-deadline annotation' },
+    expiry: { type: 'revocation', signal: 'provider rejects pushes with an invalid-credential error' },
     definedIn: 'openbank-infra/gitops/components/notifications/apns-externalsecret.yaml',
   },
 ] as const

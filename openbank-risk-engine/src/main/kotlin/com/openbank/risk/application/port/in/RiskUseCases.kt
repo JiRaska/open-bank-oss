@@ -147,7 +147,12 @@ data class LiquidityForecastAnalysis(
 
 interface LiquidityForecastUseCase {
     /** Same 404 / 409 / 400 rules as [CashFlowUseCase.project]; a horizon outside 1..365 is a 400. */
-    suspend fun forecast(runId: UUID, curveSetId: UUID, horizonDays: Int): LiquidityForecastAnalysis
+    suspend fun forecast(
+        runId: UUID,
+        curveSetId: UUID,
+        horizonDays: Int,
+        includePlanned: Boolean = true,
+    ): LiquidityForecastAnalysis
 }
 
 /** ČNB minimum reserve requirement of a run under a versioned parameter set (ADR-0313, ADR-0315). */

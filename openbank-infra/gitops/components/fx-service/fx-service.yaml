@@ -22,7 +22,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-fx-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "8fac015cd4197115"
+        openbank.tech/policy-checksum: "5545faaf278cc1c9"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -32,7 +32,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: fx-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fx-service:sandbox-e435ad0a@sha256:3b5a8cfdfd2910df90eb8b3e3f10b001dd03bf26efb42c6f57d77943d106da9e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fx-service:sandbox-44fff644@sha256:661f66c1692b4acad756bdcecfe1ec9f67de592dfad7fc5fda9e22f18ef2e725
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8119}
