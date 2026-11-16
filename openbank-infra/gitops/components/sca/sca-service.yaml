@@ -39,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sca-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sca-service:sandbox-548fa683@sha256:4f1f9e956e1075f3f42410a8a732c4f4a1855e1f3f42488f90f44d75a9159724
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sca-service:sandbox-9f9c9265@sha256:14c63526141fb37cc50f8b63529987974191b40bc7ee0e96c327a3161da71bf6
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

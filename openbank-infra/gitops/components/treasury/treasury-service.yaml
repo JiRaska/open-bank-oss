@@ -51,7 +51,7 @@ spec:
           # First build lands via auto-deploy on the merge that adds openbank-treasury-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha. Until then
           # the tag is the declared placeholder (fleet-attestation-placeholders.txt).
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-treasury-service:sandbox-cd462e41@sha256:74e083655c3df3f0e4d771c4691b9acca81f80ab24b3181443b6da84e651a565
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-treasury-service:sandbox-ce623cfa@sha256:b1b184f8cf5375c4d5cf864810f4f869748913fd18f974fd71291113ef97f0b0
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8160 and management 8090 — both read off the service's own application.yaml
