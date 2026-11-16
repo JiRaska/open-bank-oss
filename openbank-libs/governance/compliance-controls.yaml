@@ -320,7 +320,7 @@ controls:
 
   # ── Regulatory requirements (ADR-0379) ─────────────────────────────────────────────
   # The requirement list the compliance page used to hard-code, each now a control with its
-  # evidence. Declared status from an evidence audit of origin/main on 2026-11-15: `enforced`
+  # evidence. Declared status from an evidence audit of origin/main on 2026-11-15, corrected after an independent spot check of 25 items: `enforced`
   # where a test or gate was opened and confirmed to assert the behaviour, `partial` where the
   # evidence covers part of it or was not fully confirmed, `planned` where nothing exists. The
   # displayed verdict is still computed from evidence_refs, never taken from these lines.
@@ -338,8 +338,8 @@ controls:
     category: "Payments and PSD2"
     frameworks: [PSD2]
     references: []
-    evidence: "consent create/validate/revoke lifecycle; isActive/hasScope/coversAccount semantics AIS/PIS covered; CBPII scope not separately confirmed."
-    status: enforced
+    evidence: "PARTIAL: AIS/PIS lifecycle tested; the CBPII (FUNDS_CONFIRMATION) scope has no test. consent create/validate/revoke lifecycle; isActive/hasScope/coversAccount semantics AIS/PIS covered; CBPII scope not separately confirmed."
+    status: partial
     evidence_refs:
       - { kind: test, ref: "openbank-consent-service/src/test/kotlin/com/openbank/consent/application/usecase/ConsentServiceTest.kt" }
       - { kind: test, ref: "openbank-consent-service/src/test/kotlin/com/openbank/consent/domain/model/ConsentTest.kt" }
@@ -377,10 +377,10 @@ controls:
     category: "Payments and PSD2"
     frameworks: [PSD2]
     references: []
-    evidence: "pacs.008 built with ChargeBearer.SLEV against golden XML containing <ChrgBr>SLEV</ChrgBr> Framework label: SEPA mapped to PSD2 bucket for lack of a SEPA option."
+    evidence: "The SCT pacs.008 output is compared byte for byte with a golden file that carries <ChrgBr>SLEV</ChrgBr>."
     status: enforced
     evidence_refs:
-      - { kind: test, ref: "openbank-libs-iso20022/src/test/kotlin/com/openbank/libs/iso20022/Pacs008BuilderTest.kt" }
+      - { kind: test, ref: "openbank-libs-iso20022/src/test/kotlin/com/openbank/libs/iso20022/Pacs008PaymentTypeInformationTest.kt" }
   - id: req-sepa-e2e-id
     title: "End-to-end ID in SEPA payments"
     category: "Payments and PSD2"
@@ -466,8 +466,8 @@ controls:
     category: "KYC / CDD"
     frameworks: [AMLD]
     references: []
-    evidence: "reviewStatus STANDARD vs ENHANCED_DUE_DILIGENCE asserted No SIMPLIFIED level seen."
-    status: enforced
+    evidence: "PARTIAL: STANDARD and ENHANCED_DUE_DILIGENCE tested; no SIMPLIFIED level exists. reviewStatus STANDARD vs ENHANCED_DUE_DILIGENCE asserted No SIMPLIFIED level seen."
+    status: partial
     evidence_refs:
       - { kind: test, ref: "openbank-party-service/src/test/kotlin/com/openbank/party/integration/PartyAmlProfileApiIT.kt" }
   - id: req-kyc-source-of-funds
@@ -558,8 +558,8 @@ controls:
     category: "Data protection"
     frameworks: [GDPR]
     references: []
-    evidence: "anonymises card PII past retention; dry-run is no-op; outbox SENT row retention Per-store; no single fleet policy test."
-    status: enforced
+    evidence: "PARTIAL: retention is tested for card PII and outbox rows only; no fleet-wide retention policy test. anonymises card PII past retention; dry-run is no-op; outbox SENT row retention Per-store; no single fleet policy test."
+    status: partial
     evidence_refs:
       - { kind: test, ref: "openbank-card-issuance-service/src/test/kotlin/com/openbank/cardissuance/infrastructure/retention/CardPiiRetentionSchedulerTest.kt" }
       - { kind: gate, ref: "outbox-sent-retention" }
@@ -681,8 +681,8 @@ controls:
     category: "Czech payment and account rules"
     frameworks: [CNB]
     references: []
-    evidence: "constantSymbol mapped into command"
-    status: enforced
+    evidence: "PARTIAL: DTO to command mapping tested; the KS emission on the wire has no test. constantSymbol mapped into command"
+    status: partial
     evidence_refs:
       - { kind: test, ref: "openbank-domestic-payment/src/test/kotlin/com/openbank/domestic/infrastructure/rest/dto/DomesticPaymentDtosTest.kt" }
   - id: req-cnb-specific-symbol
@@ -690,8 +690,8 @@ controls:
     category: "Czech payment and account rules"
     frameworks: [CNB]
     references: []
-    evidence: "specificSymbol mapped into command"
-    status: enforced
+    evidence: "PARTIAL: DTO to command mapping tested; the VS/SS emission on the wire has no test. specificSymbol mapped into command"
+    status: partial
     evidence_refs:
       - { kind: test, ref: "openbank-domestic-payment/src/test/kotlin/com/openbank/domestic/infrastructure/rest/dto/DomesticPaymentDtosTest.kt" }
   - id: req-cnb-reporting-code
@@ -699,7 +699,7 @@ controls:
     category: "Czech payment and account rules"
     frameworks: [CNB]
     references: []
-    evidence: "No machine-checkable evidence found. No reporting-code field found."
+    evidence: "A cnb_reporting_code column exists in the domestic-payment migration (V2__compliance_fields.sql), but no code reads or writes it, so nothing is reported."
     status: planned
     evidence_refs:
       - { kind: adr, ref: "0379" }
