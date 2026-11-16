@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.lending.application.port.out.CatalogLoanProfile
 import com.openbank.lending.application.port.out.FosAction
 import com.openbank.lending.application.port.out.FosRoute
+import com.openbank.lending.application.port.out.FosRoutePin
 import com.openbank.lending.domain.model.CatalogLoanSnapshot
 import com.openbank.lending.infrastructure.client.CatalogFosLoanAdapter
 import com.openbank.lending.infrastructure.client.RestCatalogLoanProfilePort
@@ -48,6 +49,9 @@ import javax.sql.DataSource
 class SignatureRecoveryIT {
     @Inject
     lateinit var dataSource: DataSource
+
+    @Inject
+    lateinit var mapper: ObjectMapper
 
     @Test
     @TestSecurity(user = SIGNER, roles = ["ROLE_LENDING_OFFICER", "ROLE_ADMIN"])
@@ -187,7 +191,7 @@ class SignatureRecoveryIT {
         val id = UUID.fromString(response.extract().jsonPath().getString("id"))
         assertThat(scalar("SELECT jurisdiction FROM loan_application WHERE id = ?", id)).isEqualTo("SK")
         val route = scalar("SELECT CAST(route AS text) FROM lending_fos_route WHERE application_id = ?", id)
-        assertThat(ObjectMapper().readTree(route as String).path("grantId").asText()).isEqualTo(GRANT.toString())
+        assertThat(mapper.readValue(route as String, FosRoutePin::class.java)).isEqualTo(FosRoutePin(GRANT, ROUTE))
         return id
     }
 
