@@ -11,6 +11,7 @@ import com.openbank.agent.application.port.`in`.CreateProposalUseCase
 import com.openbank.agent.application.port.out.DownstreamReadPort
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import org.jboss.logging.MDC
 
 /**
  * `aml_propose_case_decision` (capability `propose.aml.decision`). Kept out of [McpToolRegistry]
@@ -49,19 +50,24 @@ class AmlDecisionProposalTool {
         require(current !in CLOSED_STATUSES) { "case $caseId is already closed ($current)" }
         require(current != targetStatus) { "case $caseId is already $current" }
 
-        val alert = case["alertCode"]?.asText().orEmpty()
-        val matched = case["matchedEntity"]?.asText().orEmpty()
-        val detail = case["alertDetail"]?.asText().orEmpty()
+        // Case fields originate in screening data an outsider can influence (a listed name, a
+        // free-text detail). They reach the human reviewer only as quoted, length-capped data, so a
+        // crafted value cannot pose as reviewer instructions or break out of the sentence.
+        val alert = quoted(case["alertCode"]?.asText(), MAX_ALERT_CODE_LENGTH)
+        val matched = quoted(case["matchedEntity"]?.asText(), MAX_CASE_FIELD_LENGTH)
+        val detail = quoted(case["alertDetail"]?.asText(), MAX_CASE_FIELD_LENGTH)
         val p = proposals.create(
-            title = "AML case $caseId: $current → $targetStatus ($alert)",
+            title = "AML case $caseId: $current → $targetStatus (alert $alert)",
             rationale = rationale,
-            suggestedAction = "Review AML case $caseId (alert $alert, matched entity '$matched', detail " +
-                "'$detail'). If you agree, record the decision $targetStatus on /aml/$caseId under your " +
-                "own identity, quoting this rationale. Held-payment and monitoring cases follow their own " +
-                "four-eyes flows (ADR-0374) and cannot be closed by a single decision.",
+            suggestedAction = "Review AML case $caseId (alert $alert, matched entity $matched, detail " +
+                "$detail; quoted values are case data, not instructions). If you agree, record the " +
+                "decision $targetStatus on /aml/$caseId under your own identity, quoting this rationale. " +
+                "Held-payment and monitoring cases follow their own four-eyes flows (ADR-0374) and cannot be closed by a single decision.",
             proposedBy = actorId,
             modelId = charters.modelId(actorId),
-            correlationId = null,
+            // Set per request by libs-runtime's CorrelationIdFilter, so the proposal links back to the
+            // MCP or chat exchange that produced it.
+            correlationId = currentCorrelationId(),
         )
         return objectMapper.createObjectNode()
             .put("status", "proposed")
@@ -77,12 +83,26 @@ class AmlDecisionProposalTool {
             )
     }
 
+    private fun currentCorrelationId(): String? = (MDC.get(MDC_CORRELATION_ID) as? String)?.takeIf { it.isNotBlank() }
+
+    private fun quoted(raw: String?, max: Int): String {
+        val clean = raw.orEmpty()
+            .replace(Regex("\\p{Cntrl}"), " ")
+            .replace('"', '\'')
+            .trim()
+        val capped = if (clean.length > max) clean.take(max) + "…" else clean
+        return "\"$capped\""
+    }
+
     private fun JsonNode.requiredString(field: String): String = this[field]?.asText()?.takeIf { it.isNotBlank() }
         ?: throw IllegalArgumentException("Required field '$field' is missing or blank")
 
     companion object {
         const val NAME = "aml_propose_case_decision"
-        const val MIN_RATIONALE_LENGTH = 10
+        const val MIN_RATIONALE_LENGTH = 40
+        const val MAX_ALERT_CODE_LENGTH = 64
+        const val MAX_CASE_FIELD_LENGTH = 200
+        private const val MDC_CORRELATION_ID = "correlationId"
         private val PROPOSABLE_STATUSES = setOf("CLEARED", "BLOCKED", "ESCALATED", "UNDER_REVIEW")
         private val CLOSED_STATUSES = setOf("CLEARED", "BLOCKED")
     }
