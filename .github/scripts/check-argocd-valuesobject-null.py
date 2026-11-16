@@ -5,12 +5,11 @@
 
 Kubernetes drops null fields when it stores an object, so an Application whose desired
 `spec.source.helm.valuesObject` disables a chart default with `key: null` can never equal its
-live copy: the parent app (here `root`) stays OutOfSync forever, self-heal re-applies every
-cycle, and the standing OutOfSync hides any real drift in the same app. `ci-metrics-gateway`
-and `rum-gateway` held root OutOfSync that way from 2026-11-12. Write such a block as the
+live copy: the parent app stays OutOfSync forever, self-heal re-applies every cycle, and the
+standing OutOfSync hides any real drift in the same app. Write such a block as the
 `values: |` string instead — Helm reads the same content and a string keeps its nulls.
 
-  check-argocd-valuesobject-null.py [ROOT]     scan ROOT/openbank-infra/gitops/apps
+  check-argocd-valuesobject-null.py [ROOT]     scan every Application under ROOT/openbank-infra/gitops
   check-argocd-valuesobject-null.py --self-test
 """
 from __future__ import annotations
@@ -22,7 +21,8 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import gatelib  # noqa: E402
 
-APPS = pathlib.Path("openbank-infra/gitops/apps")
+GITOPS = pathlib.Path("openbank-infra/gitops")
+APPS = GITOPS / "apps"  # self-test fixture location
 
 
 def null_paths(node, path=""):
@@ -38,8 +38,12 @@ def null_paths(node, path=""):
 
 def scan(root: pathlib.Path) -> tuple[int, list[str]]:
     checked, findings = 0, []
-    for f in sorted((root / APPS).glob("*.yaml")):
-        for doc in gatelib.load_yaml_all(f):
+    for f in sorted((root / GITOPS).rglob("*.yaml")):
+        try:
+            docs = gatelib.load_yaml_all(f)
+        except Exception:  # Helm templates / non-YAML under gitops: not an Application manifest
+            continue
+        for doc in docs:
             if not isinstance(doc, dict) or doc.get("kind") != "Application":
                 continue
             spec = doc.get("spec") or {}

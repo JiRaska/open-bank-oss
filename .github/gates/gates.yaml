@@ -6181,9 +6181,9 @@ gates:
       python3 .github/scripts/check-helm-values-keys.py
 
   # Kubernetes drops null fields from a stored object, so an Application whose
-  # helm.valuesObject disables a chart default with `key: null` can never match its live copy:
-  # root stayed OutOfSync from 2026-11-12 (ci-metrics-gateway, rum-gateway) and the standing
-  # diff hid any real drift there. The string form `values: |` keeps nulls. ENFORCED.
+  # helm.valuesObject disables a chart default with `key: null` can never match its live copy,
+  # so the parent app is OutOfSync forever and the standing diff hides any real drift there.
+  # The string form `values: |` keeps nulls. Scans every Application under gitops/. ENFORCED.
   - id: argocd-valuesobject-no-null
     name: "Argo CD helm.valuesObject carries no null (permanent OutOfSync, enforced)"
     group: gitops
@@ -6193,7 +6193,7 @@ gates:
     selftest: python3 .github/scripts/check-argocd-valuesobject-null.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-argocd-valuesobject-null.py"]
-    min_subjects: 15   # 21 Helm sources with a valuesObject on 2026-11-17
+    min_subjects: 15   # Helm sources with a valuesObject under gitops/
     budget_seconds: 30
     run: |
       python3 .github/scripts/check-argocd-valuesobject-null.py
