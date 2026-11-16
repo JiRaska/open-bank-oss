@@ -56,6 +56,7 @@ function SnapshotLiquidityForecast({ id }: { id: string }) {
   const [chosenSetId, setChosenSetId] = useState('')
   const curveSetId = curveSets.some(s => s.id === chosenSetId) ? chosenSetId : (curveSets[0]?.id ?? '')
   const [horizon, setHorizon] = useState<number>(90)
+  const [includePlanned, setIncludePlanned] = useState(true)
   const [data, setData] = useState<LiquidityForecast | null>(null)
   const [kind, setKind] = useState<UnavailableKind | null>(null)
   // The forecast's one scenario is its behavioural model (deposit run-off, no new business).
@@ -68,14 +69,28 @@ function SnapshotLiquidityForecast({ id }: { id: string }) {
     let cancelled = false
     void (async () => {
       const res = await getJson(
-        riskUrl(`/api/v1/risk/snapshots/${encodeURIComponent(id)}/liquidity-forecast`, { curveSetId, horizonDays: String(horizon) }),
+        riskUrl(`/api/v1/risk/snapshots/${encodeURIComponent(id)}/liquidity-forecast`, {
+          curveSetId,
+          horizonDays: String(horizon),
+          ...(!includePlanned && { includePlanned: 'false' }),
+        }),
         liquidityForecastSchema,
       )
       if (cancelled) return
-      if (res.ok) { setData(res.data); setKind(null) } else { setData(null); setKind(res.kind) }
+      if (!res.ok) {
+        setData(null)
+        setKind(res.kind)
+      } else if (!includePlanned && !res.data.assumptions.some(a => a.key === 'planned-treasury-flows-excluded')) {
+        // Older engines can ignore unknown query parameters.
+        setData(null)
+        setKind('no_data')
+      } else {
+        setData(res.data)
+        setKind(null)
+      }
     })()
     return () => { cancelled = true }
-  }, [id, curveSetId, horizon])
+  }, [id, curveSetId, horizon, includePlanned])
 
   const back = (
     <Link href={`/balance-sheet/snapshots/${encodeURIComponent(id)}`} className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -101,6 +116,14 @@ function SnapshotLiquidityForecast({ id }: { id: string }) {
           <select className="input" value={horizon} onChange={e => setHorizon(Number(e.target.value))} aria-label={t('Horizont prognózy', 'Forecast horizon')}>
             {HORIZONS.map(h => <option key={h} value={h}>{t(`${h} dní`, `${h} days`)}</option>)}
           </select>
+        </label>
+        <label>
+          <input type="checkbox" checked={includePlanned} onChange={e => {
+            setData(null)
+            setKind(null)
+            setIncludePlanned(e.target.checked)
+          }} />{' '}
+          {t('Zahrnout plánované treasury toky', 'Include planned treasury flows')}
         </label>
         {data && <ProvenanceBadge provenance={data.provenance} />}
       </div>
