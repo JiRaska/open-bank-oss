@@ -1,7 +1,8 @@
 ---
 date: 2026-11-12
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#16106 — D1 is bound on domestic-payment only (five rails unbuilt); ACCOUNT_MANAGE_BENEFICIARIES, ACCOUNT_MANAGE_LIMITS and CARD_VIEW_TRANSACTIONS stay unenforced; PAYMENT and STATEMENT object grants have no ownership oracle"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
@@ -201,6 +202,18 @@ ADR-0335 D2), consumed through a contract-generated client (ADR-0319). Fail-clos
 `UNVERIFIABLE` is unchanged — it is correct and this ADR does not touch it. Object
 pairs become mintable in the order their oracle lands, and until then D4 keeps them off
 the grant screen instead of letting them be offered and refused.
+
+*Refinement, 2026-11-14 (D5a).* D5 reads as "object pairs become mintable in the order
+their oracle lands", which presumes an oracle is the only thing missing. For PAYMENT and
+STATEMENT it is not. D6 makes the rendered sealed artifact the one delivery mechanism for
+a shared object, and `ExternalDisclosureService.issue` requires `resourceType == DOCUMENT`
+— so even once an oracle existed, a grant over those two types could never be delivered;
+the mechanism refuses them by type. They are therefore not awaiting an oracle, they are
+out of scope: `OFFERABLE_RESOURCE_TYPES` omits them and `validateCandidate` refuses them
+with `RESOURCE_TYPE_NOT_OFFERABLE` before the ownership lookup, while `CAPABILITY_MATRIX`
+keeps them so historical grants still deserialise. Nothing is lost — a statement already
+renders as a document, so sharing one is a DOCUMENT grant over that artifact, and ongoing
+access to an account's statements is `ACCOUNT_DOWNLOAD_STATEMENTS` (D7). Tracked in #16106.
 
 **D6 — Exposure is never enforced by decorating a live read.** A redacted,
 watermarked, view-counted share is a **rendered sealed artifact** — document-service

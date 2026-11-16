@@ -8,6 +8,7 @@ import com.openbank.kyb.application.port.out.RelatedPartyScreeningRequest
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningResult
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningUnavailableException
 import com.openbank.kyb.domain.model.ScreeningVerdict
+import com.openbank.kyb.domain.model.SubjectIdentity
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -50,6 +51,27 @@ class SanctionsRelatedPartyScreeningAdapterTest {
 
         screen(person.copy(name = "Příklad s.r.o.", organisation = true))
         assertThat(body.captured.entityType).isEqualTo("ORGANIZATION")
+    }
+
+    @Test
+    fun `the request carries what the register knows besides the name`() {
+        val body = slot<SanctionsScreenBody>()
+        every { client.screen(capture(body)) } returns Uni.createFrom().item(SanctionsScreenResponse(status = "CLEAR"))
+
+        screen(
+            person.copy(
+                identity = SubjectIdentity(
+                    country = "cz",
+                    dateOfBirth = java.time.LocalDate.of(1980, 1, 2),
+                    nationality = "SK",
+                    aliases = listOf("Jana N.", " "),
+                ),
+            ),
+        )
+        assertThat(body.captured.country).isEqualTo("CZ")
+        assertThat(body.captured.dateOfBirth).isEqualTo("1980-01-02")
+        assertThat(body.captured.nationality).isEqualTo("SK")
+        assertThat(body.captured.aliases).containsExactly("Jana N.")
     }
 
     @Test

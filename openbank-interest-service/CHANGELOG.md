@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.29.0...interest-service-v0.29.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **fx,interest,kyb:** reload outbound mTLS client certificates ([#16414](https://github.com/JiRaska/open-bank-oss/issues/16414)) ([afceb60](https://github.com/JiRaska/open-bank-oss/commit/afceb607acaadd6a5d4e44619795f5fabf18f63c))
+
 ## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.28.0...interest-service-v0.29.0) (2026-11-09)
 
 

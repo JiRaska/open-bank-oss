@@ -40,8 +40,11 @@ import java.util.UUID
  * `sdd.collection.authorised` for the ledger/payment path to execute (§C).
  */
 @ApplicationScoped
-class SddMandateService(private val mandates: SddMandateRepository, private val outbox: SddOutbox) :
-    RegisterMandateUseCase,
+class SddMandateService(
+    private val mandates: SddMandateRepository,
+    private val outbox: SddOutbox,
+    private val screening: CollectionScreeningGate,
+) : RegisterMandateUseCase,
     ConfirmMandateUseCase,
     ManageMandateUseCase,
     AmendMandateUseCase,
@@ -118,11 +121,22 @@ class SddMandateService(private val mandates: SddMandateRepository, private val 
                     if (mandate!!.lastCollectionDate == instruction.dueDate) {
                         return@flatMap Uni.createFrom().item(result)
                     }
-                    // Stamp the settled collection and emit for the downstream posting path.
-                    val stamped = MandateLifecycle.recordCollection(mandate, instruction.dueDate)
-                    mandates.save(stamped)
-                        .flatMap { saved -> outbox.append(collectionAuthorisedEvent(saved, instruction)).map { saved } }
-                        .map { result }
+                    // Sanctions gate (ADR-0032): debtor and creditor are screened BEFORE the
+                    // collection is stamped and released. A non-CLEAR verdict (or no verdict at
+                    // all) is a Reject, so no authorised event is emitted and no debit is booked.
+                    screening.screen(mandate, instruction).flatMap { held ->
+                        if (held != null) {
+                            Uni.createFrom().item(held)
+                        } else {
+                            // Stamp the settled collection and emit for the downstream posting path.
+                            val stamped = MandateLifecycle.recordCollection(mandate, instruction.dueDate)
+                            mandates.save(stamped)
+                                .flatMap { saved ->
+                                    outbox.append(collectionAuthorisedEvent(saved, instruction)).map { saved }
+                                }
+                                .map { result }
+                        }
+                    }
                 }
                 else -> Uni.createFrom().item(result)
             }

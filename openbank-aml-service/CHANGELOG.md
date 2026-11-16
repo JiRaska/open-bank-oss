@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.21.2](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.21.1...aml-service-v0.21.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **account,agent,aml:** reload outbound mTLS client certificates ([#16411](https://github.com/JiRaska/open-bank-oss/issues/16411)) ([13b220e](https://github.com/JiRaska/open-bank-oss/commit/13b220ea13a8f2ab089bb698d6e36bbb0d1a01de))
+
+## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.21.0...aml-service-v0.21.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **swift:** screen debtor and beneficiary against sanctions before MT103 release ([#16219](https://github.com/JiRaska/open-bank-oss/issues/16219)) ([1936798](https://github.com/JiRaska/open-bank-oss/commit/19367984d9c563abd7e71a69ca7dd326655eb0bf))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.20.0...aml-service-v0.21.0) (2026-11-14)
+
+
+### Features
+
+* **aml:** record which service owns a case's movement, from the authenticated caller ([#16168](https://github.com/JiRaska/open-bank-oss/issues/16168)) ([6bdd3c8](https://github.com/JiRaska/open-bank-oss/commit/6bdd3c83dd0c78a9a0f1eea07c9a0e7b7432c989))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.19.0...aml-service-v0.20.0) (2026-11-14)
 
 

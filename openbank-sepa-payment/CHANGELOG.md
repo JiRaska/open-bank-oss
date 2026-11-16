@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.20.0...sepa-payment-v0.20.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **sdd,sepa-instant,sepa-payment:** reload outbound mTLS client certificates ([#16417](https://github.com/JiRaska/open-bank-oss/issues/16417)) ([ed923ee](https://github.com/JiRaska/open-bank-oss/commit/ed923ee0ce431dcd37a2b5a35c899e9184752632))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.19.3...sepa-payment-v0.20.0) (2026-11-14)
+
+
+### Features
+
+* **sepa-payment,sepa-instant,fx:** send the payee to fraud scoring through the typed risk context (ADR-0377 D3) ([#16034](https://github.com/JiRaska/open-bank-oss/issues/16034)) ([d889ed6](https://github.com/JiRaska/open-bank-oss/commit/d889ed6b793c20480902cf0951df792c68267e98))
+
 ## [0.19.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.19.2...sepa-payment-v0.19.3) (2026-10-26)
 
 

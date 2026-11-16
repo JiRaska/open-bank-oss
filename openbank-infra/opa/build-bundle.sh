@@ -94,7 +94,13 @@ assert "unknown agent denied by default" \
 # against the REAL agents-opa-data.yaml: if the charter's write_proposal/github-pr grant is
 # removed or re-tiered, the drift guard fails here, not in the running service.
 assert "flaky-test-hunter may open a proposal PR on github-pr (charter tier grant)" \
-	'{"agent":"flaky-test-hunter","tool":"gh.pr.open","resource":"github-pr","tier":"write_proposal"}' true
+	'{"agent":"flaky-test-hunter","tool":"gh.pr.open","resource":"github-pr","tier":"write_proposal","base_ref":"main"}' true
+assert "flaky-test-hunter may open a PR into the seeded qualification branch (ADR-0031 D9 2026-11-14)" \
+	'{"agent":"flaky-test-hunter","tool":"gh.pr.open","resource":"github-pr","tier":"write_proposal","base_ref":"qualification/flaky-test-hunter"}' true
+assert "flaky-test-hunter may not open a PR into an ungranted ref" \
+	'{"agent":"flaky-test-hunter","tool":"gh.pr.open","resource":"github-pr","tier":"write_proposal","base_ref":"release/ledger"}' false
+assert "flaky-test-hunter may not open a PR without naming its target ref" \
+	'{"agent":"flaky-test-hunter","tool":"gh.pr.open","resource":"github-pr","tier":"write_proposal"}' false
 assert "flaky-test-hunter PR grant does not extend to other resources" \
 	'{"agent":"flaky-test-hunter","tool":"gh.pr.open","resource":"some-other-repo","tier":"write_proposal"}' false
 assert "flaky-test-hunter may not merge/approve (segregation of duties, hard tier)" \

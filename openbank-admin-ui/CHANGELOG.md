@@ -1,5 +1,65 @@
 # Changelog
 
+## [4.18.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.18.0...admin-ui-v4.18.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **admin-ui:** attribute six live simulation scenarios in Test Intelligence ([#16409](https://github.com/JiRaska/open-bank-oss/issues/16409)) ([6b177b6](https://github.com/JiRaska/open-bank-oss/commit/6b177b624d7bb2d89632b5ae130a14e9ff54ea92)), closes [#14366](https://github.com/JiRaska/open-bank-oss/issues/14366)
+
+## [4.18.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.17.1...admin-ui-v4.18.0) (2026-11-15)
+
+
+### Features
+
+* **admin-ui:** derive /docs/compliance from the obligation-control-evidence trace ([#16164](https://github.com/JiRaska/open-bank-oss/issues/16164)) ([d582cd8](https://github.com/JiRaska/open-bank-oss/commit/d582cd8cc81560f8d3d2441d45733f46cab0fe3d))
+
+## [4.17.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.17.0...admin-ui-v4.17.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **admin-ui:** filter regulatory obligations and preserve filing entities ([#16362](https://github.com/JiRaska/open-bank-oss/issues/16362)) ([cf461e6](https://github.com/JiRaska/open-bank-oss/commit/cf461e6a42e0e0864e7748b07d4a95029873441e))
+
+## [4.17.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.16.0...admin-ui-v4.17.0) (2026-11-15)
+
+
+### Features
+
+* **admin-ui:** Keys & Certificates section with a tool-free AI custodian ([#16312](https://github.com/JiRaska/open-bank-oss/issues/16312)) ([b246048](https://github.com/JiRaska/open-bank-oss/commit/b2460489f552e123739d7a5b4f3e45e63144f807))
+
+
+### Bug Fixes
+
+* **admin-ui:** show statutory returns (GSFT, CEU) in navigation and the regulatory catalogue ([#16259](https://github.com/JiRaska/open-bank-oss/issues/16259)) ([aa277de](https://github.com/JiRaska/open-bank-oss/commit/aa277de8cb6b41e64fb7b045d20378e1ae74052b))
+* **simulation:** project fx/card/pension scenarios in Test Intelligence; drop duplicate dependency ([#16314](https://github.com/JiRaska/open-bank-oss/issues/16314)) ([b777e9d](https://github.com/JiRaska/open-bank-oss/commit/b777e9d9d639800aa26f4b391d68c34ac5e90392)), closes [#14366](https://github.com/JiRaska/open-bank-oss/issues/14366)
+
+## [4.16.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.15.0...admin-ui-v4.16.0) (2026-11-15)
+
+
+### Features
+
+* **admin-ui:** explain the mobile app and admin portal test stacks under Test Intelligence ([#16189](https://github.com/JiRaska/open-bank-oss/issues/16189)) ([b29b058](https://github.com/JiRaska/open-bank-oss/commit/b29b058d43bd2d2144ee8ace89a30220efa0343f))
+
+
+### Bug Fixes
+
+* **admin-ui:** read the AML case movement owner as movementService ([#16188](https://github.com/JiRaska/open-bank-oss/issues/16188)) ([43eab06](https://github.com/JiRaska/open-bank-oss/commit/43eab06fb7188deac71b367151eef56fd87dee55)), closes [#15939](https://github.com/JiRaska/open-bank-oss/issues/15939)
+
+## [4.15.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.14.1...admin-ui-v4.15.0) (2026-11-14)
+
+
+### Features
+
+* **admin-ui:** show statutory-return catalogues and operate their lifecycle ([#16154](https://github.com/JiRaska/open-bank-oss/issues/16154)) ([90412dc](https://github.com/JiRaska/open-bank-oss/commit/90412dc9f6b5b80268ba5feaa71a7a13b0b858c4))
+* **flaky-test-hunter:** target a seeded qualification branch for the phase-3 write proof ([#16131](https://github.com/JiRaska/open-bank-oss/issues/16131)) ([819a4a9](https://github.com/JiRaska/open-bank-oss/commit/819a4a91439a570435b52c47dbd28ed26d7174f5))
+* **kyb:** publish verified statutory representation rules ([#15662](https://github.com/JiRaska/open-bank-oss/issues/15662)) ([3e1956f](https://github.com/JiRaska/open-bank-oss/commit/3e1956fab5bc3cc9c83adffcc5351ddf1172289e))
+
+
+### Bug Fixes
+
+* **admin-ui:** what the AML screens got wrong with live data ([#16167](https://github.com/JiRaska/open-bank-oss/issues/16167)) ([e8816d3](https://github.com/JiRaska/open-bank-oss/commit/e8816d3d6753e7d97084856af8fdadd58edd084a))
+
 ## [4.14.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.14.0...admin-ui-v4.14.1) (2026-11-14)
 
 
