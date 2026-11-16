@@ -16,6 +16,8 @@ Tuto dokumentaci publikuje služba na management endpointu `/q/openbank/docs` (D
 
 Všechna čtení visí na snapshot runu: `GET /api/v1/risk/snapshots/{id}/...` — `positions`, `instruments`, `cash-flows`, `irrbb`, `liquidity`, `liquidity-forecast`, `capital`, `min-reserves`, `limits`. Run, který není TIED_OUT, vrací 409; neznámý run nebo sada křivek vrací 404.
 
+Pro výpočet doběhu portfolia použijte `liquidity-forecast` s výslovně zadaným `curveSetId` a `includePlanned=false`. Výpočet použije zvolený snapshot bez aktuálně plánovaných treasury toků. Výchozí režim tyto toky zahrnuje.
+
 ## IRRBB (`GET /snapshots/{id}/irrbb`)
 
 Repricingová mezera, ΔEVE v šesti scénářích BCBS d368, ΔNII za 12 měsíců při paralelním posunu nahoru/dolů, nejhorší případ a předpoklady, ze kterých čísla vznikla.
