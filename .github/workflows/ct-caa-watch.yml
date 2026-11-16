@@ -63,6 +63,13 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/ct.txt"
           echo "code=$code" >> "$GITHUB_OUTPUT"
+          # Name the answer (watch_outcome.py). Exit codes below are unchanged: a finding stays red
+          # and "could not verify" stays a warning plus its own tracking issue.
+          case "$code" in
+            0) python3 .github/scripts/watch_outcome.py CLEAN "CAA matches and no foreign-issuer certificate" ;;
+            2) python3 .github/scripts/watch_outcome.py FOUND "CAA drift or foreign-issuer certificate" ;;
+            *) python3 .github/scripts/watch_outcome.py UNREADABLE "CT or DNS could not be verified (exit $code)" || true ;;
+          esac
           case "$code" in
             0) ;;
             2) echo "::error::CAA drift or a certificate from a CA that CAA does not allow - investigate now."; exit 2 ;;
