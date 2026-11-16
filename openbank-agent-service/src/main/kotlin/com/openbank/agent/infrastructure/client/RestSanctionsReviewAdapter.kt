@@ -37,11 +37,10 @@ class RestSanctionsReviewAdapter : SanctionsReviewPort {
         newStatus: String,
         note: String,
         approvalId: String?,
-        onBehalfOf: String,
     ): SanctionsReviewPort.Outcome {
         val body = mapOf("checkId" to checkId, "newStatus" to newStatus, "note" to note)
         val response = try {
-            reviewClient.review(body, approvalId, onBehalfOf)
+            reviewClient.review(body, approvalId)
         } catch (e: WebApplicationException) {
             e.response
         }

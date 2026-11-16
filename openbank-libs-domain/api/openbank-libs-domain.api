@@ -370,16 +370,13 @@ public final class com/openbank/libs/approval/ApprovalMaker {
 public final class com/openbank/libs/approval/ApprovalRequestBinding {
 	public static final field Companion Lcom/openbank/libs/approval/ApprovalRequestBinding$Companion;
 	public static final field MAX_SUMMARY_LENGTH I
-	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
-	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component2 ()Ljava/lang/String;
-	public final fun component3 ()Ljava/lang/String;
-	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/approval/ApprovalRequestBinding;
-	public static synthetic fun copy$default (Lcom/openbank/libs/approval/ApprovalRequestBinding;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/approval/ApprovalRequestBinding;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/approval/ApprovalRequestBinding;
+	public static synthetic fun copy$default (Lcom/openbank/libs/approval/ApprovalRequestBinding;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/approval/ApprovalRequestBinding;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getFingerprint ()Ljava/lang/String;
-	public final fun getOnBehalfOf ()Ljava/lang/String;
 	public final fun getSummary ()Ljava/lang/String;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
@@ -415,14 +412,12 @@ public abstract interface class com/openbank/libs/approval/ApprovalStore {
 	public abstract fun find (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public abstract fun findPending (ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public static synthetic fun findPending$default (Lcom/openbank/libs/approval/ApprovalStore;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
-	public fun getRecordsOnBehalfOf ()Z
 	public abstract fun markExecuted (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public final class com/openbank/libs/approval/ApprovalStore$DefaultImpls {
 	public static synthetic fun create$default (Lcom/openbank/libs/approval/ApprovalStore;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;JLcom/openbank/libs/approval/ApprovalRequestBinding;Lcom/openbank/libs/approval/MakerActorKind;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
 	public static synthetic fun findPending$default (Lcom/openbank/libs/approval/ApprovalStore;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
-	public static fun getRecordsOnBehalfOf (Lcom/openbank/libs/approval/ApprovalStore;)Z
 }
 
 public final class com/openbank/libs/approval/InvalidApprovalStateException : java/lang/IllegalStateException {
@@ -441,12 +436,11 @@ public final class com/openbank/libs/approval/MakerActorKind : java/lang/Enum {
 }
 
 public final class com/openbank/libs/approval/PendingApproval {
-	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/ApprovalStatus;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/MakerActorKind;Ljava/lang/String;)V
-	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/ApprovalStatus;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/MakerActorKind;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/ApprovalStatus;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/MakerActorKind;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/ApprovalStatus;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/MakerActorKind;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component10 ()Ljava/lang/String;
 	public final fun component11 ()Lcom/openbank/libs/approval/MakerActorKind;
-	public final fun component12 ()Ljava/lang/String;
 	public final fun component2 ()Ljava/lang/String;
 	public final fun component3 ()Ljava/lang/String;
 	public final fun component4 ()Ljava/lang/String;
@@ -455,8 +449,8 @@ public final class com/openbank/libs/approval/PendingApproval {
 	public final fun component7 ()Ljava/lang/String;
 	public final fun component8 ()Ljava/time/OffsetDateTime;
 	public final fun component9 ()Ljava/lang/String;
-	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/ApprovalStatus;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/MakerActorKind;Ljava/lang/String;)Lcom/openbank/libs/approval/PendingApproval;
-	public static synthetic fun copy$default (Lcom/openbank/libs/approval/PendingApproval;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/ApprovalStatus;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/MakerActorKind;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/approval/PendingApproval;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/ApprovalStatus;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/MakerActorKind;)Lcom/openbank/libs/approval/PendingApproval;
+	public static synthetic fun copy$default (Lcom/openbank/libs/approval/PendingApproval;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/ApprovalStatus;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/approval/MakerActorKind;ILjava/lang/Object;)Lcom/openbank/libs/approval/PendingApproval;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAction ()Ljava/lang/String;
 	public final fun getCreatedAt ()Ljava/time/OffsetDateTime;
@@ -465,7 +459,6 @@ public final class com/openbank/libs/approval/PendingApproval {
 	public final fun getId ()Ljava/lang/String;
 	public final fun getMakerActorKind ()Lcom/openbank/libs/approval/MakerActorKind;
 	public final fun getMakerId ()Ljava/lang/String;
-	public final fun getOnBehalfOf ()Ljava/lang/String;
 	public final fun getRequestFingerprint ()Ljava/lang/String;
 	public final fun getResourceId ()Ljava/lang/String;
 	public final fun getStatus ()Lcom/openbank/libs/approval/ApprovalStatus;

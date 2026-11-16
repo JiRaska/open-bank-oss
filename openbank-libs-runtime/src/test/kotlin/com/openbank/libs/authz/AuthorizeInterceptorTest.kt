@@ -876,66 +876,6 @@ class AuthorizeInterceptorTest {
             .containsExactly(MakerActorKind.AI_AGENT, MakerActorKind.SERVICE_ACCOUNT)
     }
 
-    private fun asAgentServiceAccount(onBehalfOf: String?) {
-        every { identity.roles } returns setOf("ROLE_API")
-        every { sc.userPrincipal } returns JavaPrincipal { "service-account-openbank-agent" }
-        every { identity.principal } returns mockk<JsonWebToken> {
-            every { subject } returns "service-subject-id"
-            every { getClaim<String>("preferred_username") } returns "service-account-openbank-agent"
-            every { getClaim<String>("azp") } returns "openbank-agent"
-        }
-        interceptor.onBehalfOfMakers = java.util.Optional.of(listOf("openbank-agent"))
-        interceptor.httpHeaders = mockk {
-            every { isResolvable } returns true
-            every { get() } returns mockk {
-                every { getRequestHeader("X-Approval-Id") } returns null
-                every { getRequestHeader("X-On-Behalf-Of") } returns onBehalfOf?.let { listOf(it) }
-            }
-        }
-    }
-
-    @Test
-    fun `a configured machine maker binds its person to the pending approval`() {
-        val store = InMemoryApprovalStore()
-        wirePdpAndStore(store)
-        asAgentServiceAccount(onBehalfOf = "officer-1")
-
-        val ex = catchThrowableOfType(WebApplicationException::class.java) {
-            interceptor.authorize(makeCtx(annotatedMethod))
-        }
-
-        assertThat(ex.response.status).isEqualTo(202)
-        assertThat(store.created.single().onBehalfOf).isEqualTo("officer-1")
-    }
-
-    @Test
-    fun `a configured machine maker without a person is refused and creates nothing`() {
-        val store = InMemoryApprovalStore()
-        wirePdpAndStore(store)
-        asAgentServiceAccount(onBehalfOf = null)
-
-        val ex = catchThrowableOfType(WebApplicationException::class.java) {
-            interceptor.authorize(makeCtx(annotatedMethod))
-        }
-
-        assertThat(ex.response.status).isEqualTo(403)
-        assertThat(store.created).isEmpty()
-    }
-
-    @Test
-    fun `a store that cannot record the person fails closed`() {
-        val inner = InMemoryApprovalStore()
-        val store = object : ApprovalStore by inner {
-            override val recordsOnBehalfOf: Boolean = false
-        }
-        wirePdpAndStore(store)
-        asAgentServiceAccount(onBehalfOf = "officer-1")
-
-        assertThatThrownBy { interceptor.authorize(makeCtx(annotatedMethod)) }
-            .isInstanceOf(PolicyDecisionException::class.java)
-        assertThat(inner.created).isEmpty()
-    }
-
     @Test
     fun `four-eyes records an authenticated customer as customer party`() {
         every { identity.roles } returns setOf("ROLE_CUSTOMER")

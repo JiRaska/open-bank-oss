@@ -40,20 +40,13 @@ data class PendingApproval(
     /** Bounded, human-readable description of the paused request for the checker; `null` when unbound. */
     val summary: String? = null,
     val makerActorKind: MakerActorKind = MakerActorKind.UNKNOWN,
-    /** The person a machine maker acted for (see [ApprovalRequestBinding.onBehalfOf]); never the checker. */
-    val onBehalfOf: String? = null,
 )
 
 /**
  * What a [PendingApproval] is bound to. [fingerprint] is compared for equality on execution;
  * [summary] is informational only and is never used for the comparison.
  */
-/**
- * @property onBehalfOf the person a machine maker acts for (an agent's instructing human), when the
- *   PEP is configured to require one for that maker. A store that records it MUST also refuse that
- *   person as checker, so "agent + the human who asked it" can never satisfy four-eyes alone.
- */
-data class ApprovalRequestBinding(val fingerprint: String, val summary: String?, val onBehalfOf: String? = null) {
+data class ApprovalRequestBinding(val fingerprint: String, val summary: String?) {
     init {
         require(fingerprint.isNotBlank()) { "fingerprint must not be blank" }
         require(summary == null || summary.length <= MAX_SUMMARY_LENGTH) {
@@ -89,13 +82,6 @@ class InvalidApprovalStateException(id: String, expected: ApprovalStatus, actual
 
 interface ApprovalStore {
     /**
-     * Whether this store persists [ApprovalRequestBinding.onBehalfOf] AND refuses that person as
-     * checker. A PEP that requires an on-behalf-of person for a maker must refuse (fail closed) when
-     * its store answers `false`, or the requirement would be silently dropped. Default `false`.
-     */
-    val recordsOnBehalfOf: Boolean get() = false
-
-    /**
      * Records a new PENDING approval.
      *
      * @param binding the request this approval may later execute; `null` for an approval that
@@ -128,8 +114,7 @@ interface ApprovalStore {
      * status and maker and the write are one atomic step, so of two concurrent decisions exactly
      * one succeeds and the other gets [InvalidApprovalStateException].
      *
-     * @throws SelfApprovalNotAllowedException if [decidedBy] is the original maker, or the person
-     *   that maker acted for ([PendingApproval.onBehalfOf]) —
+     * @throws SelfApprovalNotAllowedException if [decidedBy] is the original maker —
      *   enforced here, not just by the caller's REST layer, so segregation of duties
      *   holds even if a service's endpoint forgets to re-check it.
      * @throws InvalidApprovalStateException if the approval is not currently PENDING —

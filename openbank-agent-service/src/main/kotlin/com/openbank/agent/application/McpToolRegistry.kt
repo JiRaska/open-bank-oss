@@ -473,7 +473,6 @@ class McpToolRegistry {
         toolName: String,
         arguments: JsonNode?,
         actorId: String = "unknown",
-        onBehalfOf: String? = null,
     ): ToolCallResult {
         val args = arguments ?: objectMapper.createObjectNode()
         return try {
@@ -484,7 +483,7 @@ class McpToolRegistry {
                 toolName == SanctionsReviewTool.NAME -> succeed(
                     toolName,
                     actorId,
-                    sanctionsReview.review(args, onBehalfOf),
+                    sanctionsReview.review(args),
                 )
                 toolName in ProductAuthoringTools.READ_TOOLS -> productResult(
                     toolName,

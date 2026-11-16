@@ -78,25 +78,6 @@ abstract class ApprovalStoreContractTest {
     }
 
     @Test
-    fun `the person a machine maker acted for is refused as checker`(): Unit = runBlocking {
-        val store = newStore()
-        assertThat(store.recordsOnBehalfOf).isTrue()
-        val pending = store.create(
-            "sanctions.clear",
-            resourceId = "check-1",
-            makerId = "service-account-openbank-agent",
-            binding = ApprovalRequestBinding("fp-1", "summary", onBehalfOf = "officer-1"),
-        )
-        assertThat(store.find(pending.id)?.onBehalfOf).isEqualTo("officer-1")
-
-        assertThatThrownBy { runBlocking { store.decide(pending.id, decidedBy = "officer-1", approve = true) } }
-            .isInstanceOf(SelfApprovalNotAllowedException::class.java)
-        assertThat(store.find(pending.id)?.status).isEqualTo(ApprovalStatus.PENDING)
-        assertThat(store.decide(pending.id, decidedBy = "officer-2", approve = true)?.status)
-            .isEqualTo(ApprovalStatus.APPROVED)
-    }
-
-    @Test
     fun `a refused self-approval leaves the approval PENDING and undecided`(): Unit = runBlocking {
         val store = newStore()
         val pending = store.create("sanctions.clear", resourceId = "check-1", makerId = "operator-1")

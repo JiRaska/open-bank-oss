@@ -240,7 +240,6 @@ interface SanctionsReviewClient {
     fun review(
         body: Map<String, String>,
         @HeaderParam("X-Approval-Id") approvalId: String?,
-        @HeaderParam("X-On-Behalf-Of") onBehalfOf: String,
     ): jakarta.ws.rs.core.Response
 }
 

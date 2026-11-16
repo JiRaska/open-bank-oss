@@ -40,54 +40,47 @@ class SanctionsReviewToolTest {
     @Test
     fun `first submission is paused for a human checker and says so`() {
         every { port.getCheck(checkId) } returns check("POTENTIAL_HIT")
-        every { port.submitReview(checkId, "CLEAR", note, null, "officer-1") } returns SanctionsReviewPort.Outcome(
+        every { port.submitReview(checkId, "CLEAR", note, null) } returns SanctionsReviewPort.Outcome(
             202,
             mapper.createObjectNode().put("status", "PENDING_APPROVAL").put("approvalId", "appr-1"),
         )
 
-        val out = tool.review(args(), "officer-1")
+        val out = tool.review(args())
 
         assertThat(out["status"].asText()).isEqualTo("pending_approval")
         assertThat(out["approvalId"].asText()).isEqualTo("appr-1")
-        assertThat(out["message"].asText()).contains("OTHER than officer-1")
+        assertThat(out["message"].asText()).contains("human must approve")
     }
 
     @Test
     fun `retry forwards the approval id and reports the review`() {
         every { port.getCheck(checkId) } returns check("POTENTIAL_HIT")
-        every { port.submitReview(checkId, "CLEAR", note, "appr-1", "officer-1") } returns
+        every { port.submitReview(checkId, "CLEAR", note, "appr-1") } returns
             SanctionsReviewPort.Outcome(200, check("CLEAR"))
 
-        val out = tool.review(args(approvalId = "appr-1"), "officer-1")
+        val out = tool.review(args(approvalId = "appr-1"))
 
         assertThat(out["status"].asText()).isEqualTo("reviewed")
-        verify(exactly = 1) { port.submitReview(checkId, "CLEAR", note, "appr-1", "officer-1") }
+        verify(exactly = 1) { port.submitReview(checkId, "CLEAR", note, "appr-1") }
     }
 
     @Test
     fun `an upstream refusal is an error, never a success`() {
         every { port.getCheck(checkId) } returns check("HIT")
-        every { port.submitReview(any(), any(), any(), any(), any()) } returns SanctionsReviewPort.Outcome(403, null)
-        assertThatThrownBy { tool.review(args(), "officer-1") }.hasMessageContaining("HTTP 403")
+        every { port.submitReview(any(), any(), any(), any()) } returns SanctionsReviewPort.Outcome(403, null)
+        assertThatThrownBy { tool.review(args()) }.hasMessageContaining("HTTP 403")
     }
 
     @Test
     fun `confirming a hit, a thin note or a check not awaiting review never reach the service`() {
         every { port.getCheck(checkId) } returns check("CLEAR")
         assertThatThrownBy {
-            tool.review(args(newStatus = "WHITELISTED"), "officer-1")
+            tool.review(args(newStatus = "WHITELISTED"))
         }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy {
-            tool.review(args(note = "fp"), "officer-1")
+            tool.review(args(note = "fp"))
         }.isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { tool.review(args(), "officer-1") }.hasMessageContaining("not awaiting review")
-        verify(exactly = 0) { port.submitReview(any(), any(), any(), any(), any()) }
-    }
-
-    @Test
-    fun `without a signed-in person the tool refuses before touching the service`() {
-        assertThatThrownBy { tool.review(args(), null) }.hasMessageContaining("signed-in person")
-        verify(exactly = 0) { port.getCheck(any()) }
-        verify(exactly = 0) { port.submitReview(any(), any(), any(), any(), any()) }
+        assertThatThrownBy { tool.review(args()) }.hasMessageContaining("not awaiting review")
+        verify(exactly = 0) { port.submitReview(any(), any(), any(), any()) }
     }
 }

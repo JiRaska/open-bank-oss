@@ -228,12 +228,19 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
   paused until a distinct human approves it, so the decision of record is the human checker's.
   **Tampering/EoP risk:** if four-eyes enforcement were switched off, the agent's review would execute
   directly; pinned by agent-service `AgentMachineGrantCharterAlignmentTest`. v1 `/review` is unchanged
-  (human only). **Segregation of duties (follow-up in the same PR):** the agent must name the person
-  who instructed it (`X-On-Behalf-Of`, required for client `openbank-agent` via
-  `authz.four-eyes.on-behalf-of-makers`, 403 without it); `AuthorizeInterceptor` binds that person to
-  the approval and `RedisApprovalStore.decide` refuses them as checker, so the agent plus the person
-  who asked it can never clear a hit alone. The status limit (CLEAR only)
-  is enforced server-side in `SanctionsResourceV3`, not only in the agent tool. Rollback: revert.
+  (human only). The agent identity may only submit `CLEAR`: `SanctionsResourceV3` answers 403 for any
+  other status from `service-account-openbank-agent`, server-side, independent of the agent tool.
+
+  **ACCEPTED RISK (decided by the owner, 2026-11-16): four-eyes = agent service account as maker +
+  ONE human checker.** The person who instructed the agent can approve that same agent-made review,
+  so a single person can clear a hit. An on-behalf-of binding that refused the instructing person as
+  checker was implemented and reverted: the sandbox has a sole human operator, so it would leave
+  every agent review unapprovable. Rationale for accepting: (1) one human operator in the sandbox;
+  (2) a human remains the final approver of every agent-made clear, nothing executes on the agent's
+  word alone; (3) the agent is limited to `CLEAR` server-side and never holds
+  `sanctions.approval.decide`. **Revisit** before any environment with more than one operator or real
+  customer data: reintroduce the on-behalf-of checker refusal (see the reverted commit on #16455).
+  Rollback: revert.
 
 - **2026-11-14** — **Ongoing monitoring switched on in the sandbox deployment
   (`SANCTIONS_MONITORING_ENABLED=true`).** The surface of section 6b is now live there: the

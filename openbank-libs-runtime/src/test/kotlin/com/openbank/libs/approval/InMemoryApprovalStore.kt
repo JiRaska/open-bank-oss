@@ -38,8 +38,6 @@ class InMemoryApprovalStore(
 
     private fun key(id: String) = "$namespace:$id"
 
-    override val recordsOnBehalfOf: Boolean = true
-
     override suspend fun create(
         action: String,
         resourceId: String?,
@@ -61,7 +59,6 @@ class InMemoryApprovalStore(
             requestFingerprint = binding?.fingerprint,
             summary = binding?.summary,
             makerActorKind = makerActorKind,
-            onBehalfOf = binding?.onBehalfOf,
         )
         created += approval
         backing[key(approval.id)] = approval
@@ -81,7 +78,6 @@ class InMemoryApprovalStore(
             // Segregation of duties, checked BEFORE the status guard — same order as RedisApprovalStore,
             // and the contract test asserts that order rather than assuming it.
             if (decidedBy == approval.makerId) throw SelfApprovalNotAllowedException(approval.makerId)
-            if (decidedBy == approval.onBehalfOf) throw SelfApprovalNotAllowedException(decidedBy)
             if (approval.status != ApprovalStatus.PENDING) {
                 throw InvalidApprovalStateException(id, ApprovalStatus.PENDING, approval.status)
             }
