@@ -49,16 +49,24 @@ class SignatureIntentRepository(private val sessions: Mutiny.SessionFactory) : S
     }
 
     private fun Array<Any>.toIntent() = SignatureIntent(
-        this[0] as UUID,
-        LoanApplicationId(this[1] as UUID),
-        this[2] as UUID,
-        this[3] as String,
-        this[4] as String,
-        this[5] as String,
-        this[6] as Boolean,
+        this[OPERATION_COLUMN] as UUID,
+        LoanApplicationId(this[APPLICATION_COLUMN] as UUID),
+        this[REVISION_COLUMN] as UUID,
+        this[CONTENT_HASH_COLUMN] as String,
+        this[ARTEFACT_COLUMN] as String,
+        this[ACTOR_COLUMN] as String,
+        this[SYNTHETIC_COLUMN] as Boolean,
     )
 
     private companion object {
+        const val OPERATION_COLUMN = 0
+        const val APPLICATION_COLUMN = 1
+        const val REVISION_COLUMN = 2
+        const val CONTENT_HASH_COLUMN = 3
+        const val ARTEFACT_COLUMN = 4
+        const val ACTOR_COLUMN = 5
+        const val SYNTHETIC_COLUMN = 6
+
         const val COLUMNS =
             "operation_id, application_id, revision_id, revision_content_hash, artefact_hash, actor, synthetic"
         const val LOAD = "SELECT $COLUMNS FROM lending_signature_intent WHERE application_id = :application"

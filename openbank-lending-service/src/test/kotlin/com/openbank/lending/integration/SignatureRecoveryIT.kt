@@ -15,6 +15,7 @@ import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.sql.ResultSet
 import java.time.Duration
 import java.util.UUID
 import javax.sql.DataSource
@@ -133,9 +134,11 @@ class SignatureRecoveryIT {
     private fun scalar(sql: String, id: UUID): Any? = dataSource.connection.use { connection ->
         connection.prepareStatement(sql).use { statement ->
             statement.setObject(1, id)
-            statement.executeQuery().use { rows -> if (rows.next()) rows.getObject(1) else null }
+            statement.executeQuery().use(::firstColumn)
         }
     }
+
+    private fun firstColumn(rows: ResultSet): Any? = if (rows.next()) rows.getObject(1) else null
 
     private companion object {
         const val SIGNER = "synthetic-signature-operator"

@@ -33,18 +33,16 @@ class SignatureRecoveryScheduler(
     suspend fun recover() {
         val pending = intents.claimDue(BATCH_SIZE).awaitSuspending()
         pending.forEach { intent ->
-            try {
-                SyntheticTaintKafkaRail.withTaint(intent.synthetic) {
-                    lending.finishSignatureIntent(intent).awaitSuspending()
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: RuntimeException) {
-                log.warnf(
-                    "Signature recovery could not complete operation %s (%s)",
-                    intent.id,
-                    failure.javaClass.simpleName,
-                )
+            SyntheticTaintKafkaRail.withTaint(intent.synthetic) {
+                lending.finishSignatureIntent(intent)
+                    .onFailure { failure -> failure is RuntimeException && failure !is CancellationException }
+                    .invoke { failure ->
+                        log.warnf(
+                            "Signature recovery could not complete operation %s (%s)",
+                            intent.id,
+                            failure.javaClass.simpleName,
+                        )
+                    }.recoverWithNull().awaitSuspending()
             }
         }
         liveness.recordSuccess()
