@@ -55,6 +55,11 @@ class AmlDecisionProposalToolTest {
         registry.objectMapper = mapper
         registry.charters = charters()
         registry.proposals = proposals
+        registry.amlDecisions = AmlDecisionProposalTool().also {
+            it.objectMapper = mapper
+            it.charters = registry.charters
+            it.proposals = proposals
+        }
         registry.auditPublisher = object : AuditEventPublisher {
             override suspend fun publish(event: AuditEvent) = Unit
         }
@@ -86,7 +91,7 @@ class AmlDecisionProposalToolTest {
 
     @Test
     fun `an open case yields a HITL proposal and nothing else`() {
-        registry.downstream = liveCase("OPEN")
+        registry.amlDecisions.downstream = liveCase("OPEN")
 
         val result = call(args())
 
@@ -109,7 +114,7 @@ class AmlDecisionProposalToolTest {
 
     @Test
     fun `a short rationale is refused before any proposal`() {
-        registry.downstream = liveCase("OPEN")
+        registry.amlDecisions.downstream = liveCase("OPEN")
         val result = call(args(rationale = "fp"))
         assertThat(result.isError).isTrue()
         assertThat(result.content.single().text).contains("rationale")
@@ -118,14 +123,14 @@ class AmlDecisionProposalToolTest {
 
     @Test
     fun `an unknown target status is refused`() {
-        registry.downstream = liveCase("OPEN")
+        registry.amlDecisions.downstream = liveCase("OPEN")
         assertThat(call(args(target = "SAR_FILED")).isError).isTrue()
         verify(exactly = 0) { proposals.create(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `an already closed case is refused`() {
-        registry.downstream = liveCase("CLEARED")
+        registry.amlDecisions.downstream = liveCase("CLEARED")
         val result = call(args(target = "BLOCKED"))
         assertThat(result.isError).isTrue()
         assertThat(result.content.single().text).contains("already closed")

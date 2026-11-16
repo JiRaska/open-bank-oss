@@ -42,6 +42,8 @@ class McpToolRegistry {
 
     @Inject lateinit var proposals: CreateProposalUseCase
 
+    @Inject lateinit var amlDecisions: AmlDecisionProposalTool
+
     @Inject lateinit var objectMapper: ObjectMapper
 
     @Inject lateinit var auditPublisher: AuditEventPublisher
@@ -481,7 +483,7 @@ class McpToolRegistry {
             when {
                 toolName == "flip_feature_flag" -> flipFeatureFlag(args, actorId)
                 toolName == "draft_ticket" -> succeed(toolName, actorId, draftTicket(args, actorId))
-                toolName == AML_PROPOSE_DECISION -> succeed(toolName, actorId, proposeAmlDecision(args, actorId))
+                toolName == AML_PROPOSE_DECISION -> succeed(toolName, actorId, amlDecisions.propose(args, actorId))
                 toolName in ProductAuthoringTools.READ_TOOLS -> productResult(
                     toolName,
                     actorId,
@@ -667,56 +669,6 @@ class McpToolRegistry {
             )
     }
 
-    /**
-     * HITL proposal for an AML case decision. The agent never decides: the decider of record on an
-     * AML case must be an authenticated human (aml-service records the caller as `decidedBy`), so
-     * this tool only checks the proposal is applicable to the live case and queues it. The case is
-     * read through the same read path as `aml_get_case`, so a proposal naming an unknown or already
-     * closed case fails here instead of reaching the queue.
-     */
-    private fun proposeAmlDecision(args: JsonNode, actorId: String): JsonNode {
-        val caseId = args.requiredString("caseId")
-        val targetStatus = args.requiredString("targetStatus").uppercase()
-        val rationale = args.requiredString("rationale").trim()
-        require(targetStatus in AML_PROPOSABLE_STATUSES) {
-            "targetStatus must be one of ${AML_PROPOSABLE_STATUSES.joinToString()}"
-        }
-        require(rationale.length >= MIN_RATIONALE_LENGTH) {
-            "rationale must be at least $MIN_RATIONALE_LENGTH characters — describe what was verified"
-        }
-        val case = downstream.read("aml_get_case", objectMapper.createObjectNode().put("caseId", caseId))
-        val current = case["status"]?.asText().orEmpty()
-        require(current !in AML_CLOSED_STATUSES) { "case $caseId is already closed ($current)" }
-        require(current != targetStatus) { "case $caseId is already $current" }
-
-        val alert = case["alertCode"]?.asText().orEmpty()
-        val matched = case["matchedEntity"]?.asText().orEmpty()
-        val detail = case["alertDetail"]?.asText().orEmpty()
-        val p = proposals.create(
-            title = "AML case $caseId: $current → $targetStatus ($alert)",
-            rationale = rationale,
-            suggestedAction = "Review AML case $caseId (alert $alert, matched entity '$matched', detail " +
-                "'$detail'). If you agree, record the decision $targetStatus on /aml/$caseId under your " +
-                "own identity, quoting this rationale. Held-payment and monitoring cases follow their own " +
-                "four-eyes flows (ADR-0374) and cannot be closed by a single decision.",
-            proposedBy = actorId,
-            modelId = charters.modelId(actorId),
-            correlationId = null,
-        )
-        return objectMapper.createObjectNode()
-            .put("status", "proposed")
-            .put("caseId", caseId)
-            .put("currentStatus", current)
-            .put("targetStatus", targetStatus)
-            .put("proposalId", p.id.toString())
-            .put("state", p.state.name)
-            .put(
-                "message",
-                "AML decision proposal recorded (HITL). The case is unchanged until a compliance " +
-                    "officer approves and records the decision under their own identity.",
-            )
-    }
-
     /** ADR-0067 §5/§7: the flip's own audit event, distinct from the tool-execution outcome. */
     private fun auditFlip(actorId: String, flagKey: String, result: AuditResult, payload: Map<String, Any?>) {
         runBlocking {
@@ -782,10 +734,8 @@ class McpToolRegistry {
     }
 
     private companion object {
-        const val AML_PROPOSE_DECISION = "aml_propose_case_decision"
-        const val MIN_RATIONALE_LENGTH = 10
-        val AML_PROPOSABLE_STATUSES = setOf("CLEARED", "BLOCKED", "ESCALATED", "UNDER_REVIEW")
-        val AML_CLOSED_STATUSES = setOf("CLEARED", "BLOCKED")
+        const val AML_PROPOSE_DECISION = AmlDecisionProposalTool.NAME
+        const val MIN_RATIONALE_LENGTH = AmlDecisionProposalTool.MIN_RATIONALE_LENGTH
 
         /**
          * Flags no approval can ever flip. Mirrors `rules.yaml:feature_flags` and the OPA
