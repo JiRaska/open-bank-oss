@@ -27,6 +27,23 @@ spec:
   groups:
     - name: openbank.ci-quality.heartbeat
       rules:
+        # The gateway accepting a push is not the push being stored: on 2026-11-15 the OTLP receiver
+        # answered 200 to CI while every remote write to Prometheus timed out and was dropped (a
+        # NetworkPolicy that admitted the pod IP but not the Service VIP). CiMetricsAbsent would
+        # say "no data" a day later without naming the hop; this names it within 15 minutes.
+        - alert: CiMetricsGatewayExportFailing
+          expr: |
+            increase(otelcol_exporter_send_failed_metric_points{job="ci-metrics-gateway", exporter="prometheusremotewrite"}[30m]) > 0
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+            service: openbank-app-ci
+          annotations:
+            summary: "CI metrics gateway accepts pushes but fails to write them to Prometheus"
+            description: "otelcol_exporter_send_failed_metric_points rose in the last 30m: OTLP ingest answers 200 while remote write drops the data. Check the gateway NetworkPolicy egress and its logs for 'Exporting failed'."
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/ci-metrics-gateway.md#cimetricsgatewayexportfailing"
+            subject_period: continuous
         # No main-branch ci_* sample from openbank-app for 26h (nightly + merges push daily):
         # exporter broken, token rotated on one side only, or the exporter disarmed (it exits 0
         # with a warning when CI_METRICS_OTLP_ENDPOINT / CI_METRICS_TOKEN are unset). Weakness: any

@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.2.0...transaction-service-v2.2.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **transaction,treasury:** reload outbound mTLS client certificates ([#16419](https://github.com/JiRaska/open-bank-oss/issues/16419)) ([ce623cf](https://github.com/JiRaska/open-bank-oss/commit/ce623cfa01cb3214502c196bba6dafb7c28546e3))
+
 ## [2.2.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.1.0...transaction-service-v2.2.0) (2026-11-13)
 
 

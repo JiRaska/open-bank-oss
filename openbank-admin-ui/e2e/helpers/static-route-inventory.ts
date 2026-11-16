@@ -130,6 +130,7 @@ export const STATIC_ROUTE_INVENTORY: Record<string, { disposition: StaticRouteDi
   "/sanctions": { disposition: "sidebar-navigation-smoke", path: "/sanctions" },
   "/sdd": { disposition: "sidebar-navigation-smoke", path: "/sdd" },
   "/security/excellence": { disposition: "sidebar-navigation-smoke", path: "/security/excellence" },
+  "/security/keys": { disposition: "sidebar-navigation-smoke", path: "/security/keys" },
   "/security/incidents": { disposition: "static-direct-load-smoke", path: "/security/incidents" },
   "/security": { disposition: "sidebar-navigation-smoke", path: "/security" },
   "/segments/new": { disposition: "static-direct-load-smoke", path: "/segments/new" },

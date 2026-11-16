@@ -79,6 +79,10 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '31799f5c2ec415da6f968b5b0e8c725ccbd82b7e',  # after #16148
     '6df70b126a750a2a9f6e8fc658efc43b1cf2433a',  # after #16180
     '38c70e23111a78639f9aaae62b0494a90d3c0512',  # after #16105
+    # merge-train.py of #16290 (disjoint judge members share a strict carrier), reviewed with that PR.
+    'd6740b723531449f329c61dd26120e8840e3652d',
+    # merge-train.py of the #16290 follow-up (cross-module test reads are not shareable).
+    'bc0c3a48a9c1508194982f8538e3efd1ba2b94f9',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
