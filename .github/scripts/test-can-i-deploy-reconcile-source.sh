@@ -19,6 +19,22 @@ cat > "$tmp/bin/python3" <<'STUB'
 if [ "${1:-}" = ".github/scripts/verify-successful-service-ci.py" ]; then
   if [ "${2:-}" = "--resolve-reconcile-sources" ]; then
     echo "$*" >> "$SERVICE_CI_LOG"
+    if [ "${RESOLVER_MODE:-}" = quota ]; then
+      # The real resolver's exit 4: GitHub refused a read for quota (403 + remaining=0).
+      echo "::warning::reconcile source not evaluated: API quota exhausted, retry later" >&2
+      exit 4
+    fi
+    if [ "${RESOLVER_MODE:-}" = contract-free ]; then
+      # Every asked service proven at RESOLVER_SHA with no Pact version: no committed pact
+      # names it, so the resolver marks it contract_free instead of refusing.
+      resolved='{}'
+      for svc in $(jq -r '.[]' <<< "${3:?}"); do
+        resolved="$(jq -cn --argjson old "$resolved" --arg svc "$svc" --arg sha "$RESOLVER_SHA" \
+          '$old + {($svc): {sha: $sha, run_id: "fixture-run", attempt: 1, contract_free: true}}')"
+      done
+      printf '%s\n' "$resolved"
+      exit 0
+    fi
     if [ "${RESOLVER_MODE:-}" = partial ]; then
       # The real resolver read every run and proved some services only: exit 3, proven half
       # on stdout. RESOLVER_UNRESOLVED names the services it found no source for.
@@ -149,6 +165,14 @@ else
   case "$url" in
     */environments) echo '{"_embedded":{"environments":[{"name":"sandbox"}]}}' ;;
     */latest-version/main) echo "{\"number\":\"${LATEST_MAIN_SHA:-${OLDER_SHA:-}}\"}" ;;
+    */integrations)
+      case "${INTEGRATIONS_MODE:-none}" in
+        none) echo '{"_embedded":{"integrations":[{"consumer":{"name":"openbank-a"},"provider":{"name":"openbank-b"}}]}}' ;;
+        some) echo '{"_embedded":{"integrations":[{"consumer":{"name":"openbank-a"},"provider":{"name":"openbank-stray-service"}}]}}' ;;
+        malformed) echo '{"integrations":"nope"}' ;;
+        *) exit 22 ;;
+      esac
+      ;;
     *) echo '{}' ;;
   esac
 fi
@@ -610,6 +634,56 @@ echo "PASS: mid-history source recovery selects exact successful CI/Pact SHA ove
     exit 1
   fi
   echo "PASS: budget-exhausted remainder is refused per member as not-reached; the proven peer deploys"
+
+  # API quota (run 43687091057, 2026-11-15): the resolver could not READ the evidence. Still
+  # deploy nothing, but say "not evaluated, retry later", never "no verified source".
+  : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"; : > "$SERVICE_CI_LOG"
+  if RESOLVER_MODE=quota PACT_CLI_MODE=success \
+       bash .github/scripts/can-i-deploy-gate.sh >"$tmp/quota-log" 2>&1 || \
+     ! grep -q '^deployable=\[\]$' "$GITHUB_OUTPUT" || \
+     ! grep -q '^source_transient=true$' "$GITHUB_OUTPUT" || \
+     ! grep -q '^GATE_VERDICT=NOT_EVALUATED$' "$tmp/quota-log" || \
+     ! grep -q 'reconcile source NOT EVALUATED: the GitHub API quota ran out' "$tmp/quota-log" || \
+     ! grep -q 'retry later' "$GITHUB_STEP_SUMMARY" || \
+     grep -q 'no verified historical Services CI source' "$tmp/quota-log" || \
+     grep -q '^can-i-deploy ' "$PACT_CLI_LOG"; then
+    echo "FAIL: an API-quota refusal was reported as a missing source, or deployed something" >&2
+    cat "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY" "$tmp/quota-log" >&2
+    exit 1
+  fi
+  echo "PASS: API-quota refusal is NOT_EVALUATED / retry later, deploys nothing, and never claims no source"
+
+  # Contract-free service (openbank-anacredit-service, 2026-11-14..15): no committed pact names
+  # it, so Services CI never publishes a Pact version and the exact-version rule refused it on
+  # every tick. The resolver marks it contract_free; the gate deploys it only if the broker,
+  # re-read now, holds no integration for it either. No can-i-deploy question exists to ask.
+  export SERVICES='["openbank-stray-service"]' BROKER_MODE=known RESOLVER_SHA="$CURRENT_SHA"
+  export IMAGE_TAGS="{\"openbank-stray-service\":\"sandbox-${CURRENT_SHA:0:8}\"}"
+  export IMAGE_DIGESTS='{"openbank-stray-service":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
+  : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"; : > "$SERVICE_CI_LOG"
+  if ! RESOLVER_MODE=contract-free INTEGRATIONS_MODE=none PACT_CLI_MODE=failure \
+       bash .github/scripts/can-i-deploy-gate.sh >"$tmp/contract-free-log" 2>&1 || \
+     ! grep -q '^deployable=\["openbank-stray-service"\]$' "$GITHUB_OUTPUT" || \
+     ! grep -q 'openbank-stray-service has no integration in the broker' "$tmp/contract-free-log" || \
+     grep -q -- '--pacticipant openbank-stray-service' "$PACT_CLI_LOG"; then
+    echo "FAIL: a proven contract-free service was not deployed, or was asked a Pact question" >&2
+    cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$tmp/contract-free-log" >&2
+    exit 1
+  fi
+  echo "PASS: contract-free service with green CI and no broker integration deploys without a Pact version"
+  for integ in some malformed fail; do
+    : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"; : > "$SERVICE_CI_LOG"
+    RESOLVER_MODE=contract-free INTEGRATIONS_MODE="$integ" PACT_CLI_MODE=success \
+      bash .github/scripts/can-i-deploy-gate.sh >"$tmp/contract-free-$integ-log" 2>&1 || true
+    if grep -q '^deployable=\["openbank-stray-service"\]$' "$GITHUB_OUTPUT" || \
+       ! grep -q 'reconcile source refused for openbank-stray-service: contract-free source' "$tmp/contract-free-$integ-log"; then
+      echo "FAIL: contract-free source deployed although the broker integrations answer was '$integ'" >&2
+      cat "$GITHUB_OUTPUT" "$tmp/contract-free-$integ-log" >&2
+      exit 1
+    fi
+  done
+  echo "PASS: contract-free source is refused when the broker names it, answers malformed, or fails"
+  export SERVICES='["openbank-demo-service","openbank-stray-service"]' RESOLVER_SHA="$OLDER_SHA"
 
   # A partial answer that does not exactly partition the request is not trusted.
   : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"; : > "$SERVICE_CI_LOG"

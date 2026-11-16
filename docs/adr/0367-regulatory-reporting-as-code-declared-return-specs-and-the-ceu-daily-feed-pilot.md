@@ -6,14 +6,16 @@ authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
-followup: "#15292, #15356 — CEU daily filing and GSFT depositor data are still in open PRs; the obligations register and its gate ship here"
+followup: "#16356 — isolated execution, source contracts and multi-context workbench; family delivery also tracked by #15356 and #7144"
 tags: [regulatory-reporting, compliance, governance, ai-agents]
-summary: "Every regulatory return is a declared spec in the repo, computed only in a backend and filed on the ADR-0336 lifecycle; the admin-ui catalogue derives from specs. AI explains and drafts, never files. CEÚ daily feed is the pilot."
+summary: "Return specs and entity/regime contexts govern reproducible backend filings. Reporting uses isolated data and bounded workers, with customer-SLO evidence before rollout. The officer workbench derives coverage from specs; AI never files."
 ---
 
 # ADR-0367 — Regulatory reporting as code: declared return specs and the CEÚ daily feed pilot
 
 ## Context
+
+### Original assessment (2026-11-08)
 
 ADR-0097 decided that FINREP/COREP are derived from the attested close by a stateless
 `openbank-finrep-service`. ADR-0180 decided that a statutory filing is a system of record in
@@ -91,6 +93,157 @@ every surface is derived from it.**
 The ECB BIRD dictionary as an intermediate semantic layer is a **direction, not a decision** here:
 specs carry a `semantic_ref` field so a later ADR can map to it without rewriting specs.
 
+## Amendment — operational isolation and reporting workbench (2026-11-15)
+
+### Critical assessment and current delivery
+
+Backend computation alone does not protect customer services. Moving a synchronous account scan
+from the BFF into a backend merely moves the load. A separate cluster also leaves shared databases,
+brokers, storage, networking and authentication as possible contention points. Isolation must cover
+the complete source-to-artifact path and be demonstrated under failure, not inferred from topology.
+
+The UI catalogue currently lists 11 report families; the obligations register contains 70 duties.
+These are different units, not a coverage fraction. The statutory catalogue also includes pension
+returns, whose presence does not establish applicability to a banking entity. Existing BFF generators
+scan operational APIs, cap account rosters and use current account state for historical requests.
+These previews are not evidence of a complete, reproducible filing for three million clients.
+The CEÚ projection and attested ledger snapshots are reusable foundations, not proof of fleet-wide
+isolation. The return-spec catalogue and checker in the original decision remain incomplete.
+
+### Binding constraints
+
+8. **Separate reporting data and execution.** Keep domain ownership in existing services, but run
+   ingestion, computation and export workers with independent deployment, bounded queues, database
+   pools and CPU/memory/IO budgets. Customer requests must never wait for reporting. No report job,
+   preview, export or drill-down may fall back to a synchronous scan of operational services.
+   Low-priority scheduling is additional protection, not sufficient isolation.
+9. **Bounded asynchronous acquisition.** Reuse transactional outbox/domain events where they carry
+   the required facts; declare a versioned source contract for missing fields. Measure the overhead
+   of publication too. Backfills and initial snapshots use a bounded, resumable extraction path,
+   separately budgeted and paused when client-service headroom is exhausted. A stopped consumer must
+   not retain unbounded WAL/outbox data on the operational database. Specify retention, disk budgets,
+   quotas and an independent replay archive. If retention is exceeded, mark the reporting dataset
+   incomplete and rebuild through that bounded path; never silently skip a gap or block banking.
+10. **Reproducible evidence.** Freeze each run against an immutable snapshot with per-source
+    watermarks, completeness checks and reconciliation to the ledger/control totals. Preserve valid
+    and recorded times for historical corrections. Store spec/taxonomy/rule versions, source offsets,
+    snapshot and artifact hashes, rounding and FX policy, exclusion counts and validation results.
+    Money uses decimal arithmetic with explicit currency; missing data is unknown, never zero.
+    Retries are idempotent; corrections create new revisions. Ingestion lag is shown separately from
+    business as-of time. A completeness or reconciliation failure blocks attestation and filing.
+11. **Least privilege and lifecycle.** Long-running jobs use scoped service identities, not the
+    initiating operator's token. Authorize job creation and every artifact download separately;
+    enforce entity boundaries, four-eyes approval and auditable access. Reporting copies have explicit
+    retention, encryption and erasure/legal-retention treatment under ADR-0118. AI cannot certify
+    completeness or bypass a failing validation.
+12. **Explicit identity and status.** Distinguish obligation, return definition, applicability
+    (entity, solo/consolidated scope, effective dates), reporting period, filing and revision.
+    Keep implementation capability, data readiness, deadline verification and submission/ACK state
+    independent. Latest-revision selection always includes entity. Unknown applicability remains
+    visible; it is not equivalent to not applicable. Do not derive deadlines from display frequency.
+13. **Officer workbench.** Default to compact tables with search, combined authority/area/coverage/
+    verification filters, bounded pages and accessible controls. Subsequent filing views add entity,
+    period, owner and lifecycle filters, saved views and explicit missing-data states. Preview the
+    actual artifact's sheets/cells and validation findings, with separate metadata and lineage tabs.
+    XLSX is an officer working format; it does not replace the authority's required wire format.
+    Large exports run asynchronously with progress/cancellation, expire under retention policy, and
+    read the same frozen dataset as the preview. Never send millions of client rows to the browser.
+
+### Multiple institutions, FOS and foreign branches
+
+Reuse ADR-0380's `BankLegalEntityId`, `EstablishmentId`, `MarketKey` and `BookingContext`;
+do not invent a parallel bank/branch registry. Its initial CZ-to-EU scope is narrower than this
+reporting model: reporting must represent multiple licensed companies, incoming foreign-bank
+branches and outgoing operations. EU/EEA passporting and third-country branch authorisation must
+not share an implicit permission rule. Third-country and EEA applicability require explicit review.
+A branch is an establishment of a legal entity, not automatically a new legal entity; a subsidiary
+with its own licence is a separate entity. FOS and BRANCH may coexist in the same host country.
+
+A versioned `ReportingContext` references the legal entity, establishment where relevant,
+reporting-unit identifier, home/host jurisdictions, operating mode (domestic/FOS/branch), authority,
+solo/sub-consolidated/consolidated perimeter and its version, and effective interval. A reporting
+unit may be a bank, branch or approved group perimeter. Bind it to the applicable reviewed country
+pack and return-spec version. The reporting model consumes these facts; it does not grant a licence.
+An applicability decision stores applicable/not-applicable/unknown, rule/evidence versions, reason,
+reviewer and as-of time. Both applicable home and host obligations can attach to one business flow.
+Do not assume FOS means no host reporting: CESOP is one documented counterexample; each return
+needs its own reviewed applicability rule.
+
+The durable filing identity includes reporting context, return/spec, period or event window and
+revision. Deduplication, idempotency, snapshot lookup, caches, artifact paths, authorization and
+latest-revision selection must use that identity. The first UI fix preserves today's `entityId`;
+it does **not** claim that the current API already distinguishes two regimes of the same entity.
+The next backend slice must version the API and persist the context before enabling those regimes.
+Legacy records retain their original identity and display context as unknown until an evidenced
+mapping is approved; never silently assign domestic/solo or rewrite historical filings.
+
+Keep historical booking context on source facts. A transfer from FOS to a branch requires
+an effective-dated, evidenced reassignment and reconciled opening/closing balances. Re-running
+an earlier period uses that period's context. Consolidation explicitly versions membership and
+eliminations; it does not sum already overlapping bank and branch filings. Deposit-guarantee
+aggregation follows the applicable legal-bank/scheme perimeter, not a UI branch filter.
+
+The workbench will select reporting context before assembly and show company, unit, mode,
+home/host state and perimeter on each filing and artifact. Tenant/permission boundaries apply
+server-side, with per-institution quotas and fair scheduling so one entity's backfill cannot starve
+another's deadline. Filters improve navigation; they are not authorization controls.
+
+Required scenario tests: two banks using the same return code/period; one bank simultaneously
+using FOS and a branch in one host; an incoming EU branch versus a third-country branch; a
+mid-period route transfer and historical correction; solo and consolidated runs with overlapping
+members; unknown legacy context; cross-context job/artifact access denial. Freeze reviewed source
+references and applicable dates in each country pack before enabling a regime.
+
+Sources for applicability review (not a complete inventory):
+- [ČNB: reporting duties of banks and foreign-bank branches](https://www.cnb.cz/cs/statistika/vykaznictvi-sber-dat/vykaznictvi-banky-PZB/index.html).
+- [Czech Financial Administration: CESOP, including providers without a local branch](https://financnisprava.gov.cz/cs/mezinarodni-spoluprace/mezinarodni-spoluprace-a-dph/cesop/zakladni-informace-k-cesop).
+
+### Source contracts before additional report implementation
+
+| Family | Authoritative input and acquisition | Required proof before filing |
+| --- | --- | --- |
+| FINREP / COREP / liquidity | Attested ledger close; risk, capital and treasury snapshots owned by their services | Balance reconciliation, taxonomy and scope; existing templates are partial coverage |
+| SDAT / payment statistics | Versioned settled-payment facts, reversals and instrument/channel classifications in reporting projections | Authority definitions, period boundaries, complete populations and deduplication |
+| Deposits / GSFT | Historical account and party relationships, balances, accrued interest and eligibility | As-of joins, depositor aggregation, FX and exclusion rules, mandated file validation |
+| CEÚ / credit registers | Bitemporal account/party/mandate or credit projections | Event completeness, corrections, initial-load reconciliation and authority acknowledgement |
+| CRS / FATCA | Effective-dated tax residency, reportability evidence, account balances and income | Missing tax profiles block affected scope; currency conversion and schema validation |
+| AML / DORA incidents | Case-management and incident lifecycle records with regulatory classification | Authorized classification and event-specific deadlines; severity labels alone are insufficient |
+| DORA information register | Contract, supplier, ICT service and dependency records | Complete entity relationships and versioned authority templates |
+
+For each concrete return, the owning team must record exact source fields/endpoints/events, keys,
+history and retention, units/currencies, data owner, quality checks, lawful access and missing inputs
+in its return spec before implementing calculations. This table identifies source domains, not a
+claim that all necessary contracts or legally complete mappings already exist.
+
+### Delivery sequence and acceptance
+
+1. Workbench foundation: table/filter the obligations register and preserve entity identity when
+   choosing latest revisions. This delivers presentation correctness only; it adds no isolation.
+2. Source-contract pilot: select one return with bounded scope and existing immutable inputs;
+   document missing fields, implement independent ingestion/snapshot manifests and reconciliations.
+3. Isolated execution: deploy queued workers, artifact storage, quotas, cancellation, liveness and
+   backlog/deadline monitoring. No production switch before load and failure evidence is reviewed.
+4. Shadow comparison: compare snapshot output to approved reference fixtures and independent control
+   totals, test corrections/replay/duplicates and synthetic exclusions. Preserve the old artifacts;
+   rollback stops new workers and filing rather than re-enabling operational scans.
+5. Expand family by family; derive the catalogue from versioned specs and retire BFF arithmetic only
+   after each replacement has passed reconciliation and lifecycle tests.
+
+Three million clients is a population target, not a capacity specification. Record accounts/client,
+transactions/day and peak rate, history depth, correction rate, concurrent jobs, export size and
+regulatory deadline windows. Run realistic peak customer traffic concurrently with reporting peak,
+backfill and replay. Test reporting database/worker/broker-consumer outages, full reporting disks,
+source lag and recovery/catch-up. Capture baseline and loaded customer latency percentiles, errors,
+availability and source resource saturation against agreed existing service SLOs and explicit
+incremental resource budgets. Reporting recovery must also meet its own deadlines; protect capacity
+for urgent filings rather than allowing permanent starvation. Until measured, capacity and
+non-interference are **unproven**. Absolute zero resource cost and absolute availability are not
+credible guarantees; enforce bounded overhead and contain reporting failures to reporting.
+
+Delivery remains `partial`. UI tests cannot certify source accuracy, regulatory completeness or
+operational isolation. Those require separate contracts, reconciliations, deployed controls and
+reviewed load/failure evidence.
+
 ## Alternatives considered
 
 - **Keep the catalogue in the UI and add CEÚ as one more BFF-generated report.** Smallest change
@@ -108,9 +261,9 @@ specs carry a `semantic_ref` field so a later ADR can map to it without rewritin
 
 ## Consequences
 
-**Positive**
+**Intended benefits (subject to the delivery checks below)**
 - A return that exists in the UI provably has a backend, an owner and a deadline gauge.
-- CEÚ — a daily statutory duty with no implementation — gets one, without fictitious accounts.
+- CEÚ provides a daily filing lifecycle with evidenced synthetic exclusions.
 - Regulatory change becomes a reviewed diff to a spec, which is what lets an AI agent draft it.
 
 **Negative**
@@ -119,7 +272,7 @@ specs carry a `semantic_ref` field so a later ADR can map to it without rewritin
   tax-reporting-service, deliberately, as a reporting copy fed by events (ADR-0009).
 
 **Neutral**
-- Enforcement: a new checker `check-regulatory-return-specs.py` (gate
+- Planned enforcement (not yet shipped): a new checker `check-regulatory-return-specs.py` (gate
   `regulatory-return-specs`) fails when a catalogue entry has no spec, a spec has no owning
   service directory, a granular or event spec lacks `synthetic_policy`, or the derived catalogue
   differs from the specs. It starts advisory with a `target_enforce_date` per ADR-0144.
@@ -139,8 +292,9 @@ sandbox filing record carries a ČNB acknowledgement reference.
 ## Compliance impact
 
 - PCI DSS: not applicable — no cardholder data enters any return in scope.
-- DORA: not applicable to this decision; the DORA incident and register-of-information returns are
-  only catalogued as return kinds here.
+- DORA: reporting isolation, recovery and dependency controls contribute to operational resilience;
+  their implementation and failure-test evidence remain pending. Incident and register-of-information
+  filings still require their own reviewed classification, applicability and submission rules.
 - GDPR: the CEÚ feed transfers personal data of account holders, disposers and beneficial owners
   to ČNB under a legal obligation; the register projection is subject to the ADR-0118 retention
   and erasure model.

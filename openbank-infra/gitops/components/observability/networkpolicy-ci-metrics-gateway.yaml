@@ -56,8 +56,18 @@ spec:
         - protocol: TCP
           port: 53
     # Prometheus remote-write receiver (kube-prometheus-stack-prometheus service -> prometheus pod).
+    # The namespaceSelector is LOAD-BEARING, not redundant. Measured 2026-11-15: with a bare
+    # podSelector the AWS VPC CNI policy agent put only the Prometheus POD IP into this pod's
+    # PolicyEndpoint and never the Service ClusterIP, so every remote write to the Service name
+    # timed out ("context deadline exceeded", exporter dropping data) while the OTLP receiver kept
+    # answering 200 to CI. The pod IP answered, the ClusterIP did not, from this pod's netns.
+    # Sibling rules that carry a namespaceSelector (DNS here, rum-gateway's egress) get the
+    # Service VIP added. CiMetricsGatewayExportFailing alerts if this regresses.
     - to:
-        - podSelector:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
             matchLabels:
               app.kubernetes.io/name: prometheus
               app.kubernetes.io/instance: kube-prometheus-stack-prometheus

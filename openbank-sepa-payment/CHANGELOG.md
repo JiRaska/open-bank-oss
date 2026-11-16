@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.20.0...sepa-payment-v0.20.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **sdd,sepa-instant,sepa-payment:** reload outbound mTLS client certificates ([#16417](https://github.com/JiRaska/open-bank-oss/issues/16417)) ([ed923ee](https://github.com/JiRaska/open-bank-oss/commit/ed923ee0ce431dcd37a2b5a35c899e9184752632))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.19.3...sepa-payment-v0.20.0) (2026-11-14)
 
 

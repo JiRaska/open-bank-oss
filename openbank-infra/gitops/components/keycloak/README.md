@@ -188,6 +188,25 @@ as username-field autofill (conditional UI) and as a button.
 - The template is imported on cold start only (see above). On a running realm, apply the same
   attributes with `kcadm.sh update realms/openbank -s webAuthnPolicyPasswordlessPasskeysEnabled=true ...`.
 
+## Admin UI login theme
+
+`openbank-admin-ui` selects `openbank-admin` through its `login_theme` client attribute.
+Keycloak uses the shared `openbank` theme for clients without an override. The Admin UI
+theme inherits Keycloak's PatternFly 5 templates, including the password and WebAuthn
+forms. The theme bundles Czech and English copy. The language selector follows the realm's
+localization settings.
+
+Run `bash gen-theme-configmap.sh` from this directory after changing theme sources or
+the Prague lion in `openbank-admin-ui/public/brand/`. The generated checksum rolls the
+Keycloak pod. Verify the mount paths, asset and client scope with
+`python3 openbank-infra/scripts/keycloak_theme_configmap_test.py` from the repository root.
+
+After the reviewed GitOps change syncs and Keycloak is ready, set `attributes.login_theme`
+to `openbank-admin` on the existing Admin UI client in the staff realm. Preserve the other
+client attributes. An existing realm skips startup import, so apply the same attribute to
+the disaster-recovery import through [runbook 0009](../../../../docs/runbooks/0009-keycloak-realm-import-reconcile.md).
+To roll back the running client, remove the attribute so it inherits the realm theme.
+
 ## Relocated prose
 
 The five comments removed from `customers-realm-template.json`, by path.
