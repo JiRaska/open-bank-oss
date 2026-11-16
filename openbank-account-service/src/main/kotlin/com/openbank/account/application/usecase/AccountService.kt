@@ -224,22 +224,20 @@ class AccountService(
     }
 
     /** The event the opening transaction writes to the outbox, built from the row as persisted. */
-    private fun accountCreatedEvent(
-        saved: Account,
-        bookingContext: AccountBookingContextV1? = null,
-    ) = AccountCreatedEvent(
-        aggregateId = saved.id,
-        version = saved.version,
-        accountNumber = saved.accountNumber.value,
-        accountType = saved.accountType,
-        partyId = saved.partyId,
-        productId = saved.productId,
-        currency = saved.currency.code,
-        occurredAt = saved.openedAt,
-        sourceService = "account-service",
-        productRevision = saved.productRevisionPin?.let(AccountProductRevision::of),
-        bookingContext = bookingContext,
-    )
+    private fun accountCreatedEvent(saved: Account, bookingContext: AccountBookingContextV1? = null) =
+        AccountCreatedEvent(
+            aggregateId = saved.id,
+            version = saved.version,
+            accountNumber = saved.accountNumber.value,
+            accountType = saved.accountType,
+            partyId = saved.partyId,
+            productId = saved.productId,
+            currency = saved.currency.code,
+            occurredAt = saved.openedAt,
+            sourceService = "account-service",
+            productRevision = saved.productRevisionPin?.let(AccountProductRevision::of),
+            bookingContext = bookingContext,
+        )
 
     override suspend fun closeAccount(command: CloseAccountCommand): Account {
         val account = requireAccount(command.accountId)
