@@ -8,9 +8,10 @@
 #   writer — EKS Pod Identity for alert-digest/standing-critical-digest; s3:PutObject on
 #            observations/* only. No Get, no List, no Delete: it cannot read back or erase
 #            history, only add a day.
-#   reader — GitHub OIDC, main of this repo, alert-rca-weekly.yml only; List + Get on
-#            observations/* only. It cannot write, so a CI job cannot forge an observation.
+#   reader — GitHub OIDC, main of this repo, alert-rca-weekly.yml only; Get on
+#            observations/* only (no List). It cannot write, so a CI job cannot forge an observation.
 #
+# Versioned: an overwrite by the writer is recoverable for 400 days (noncurrent expiry).
 # Retention 120 days: the weekly review reads 7, and the extra margin lets a stalled review be
 # replayed later. The ledger it folds into lives in the repo, so expiry loses no history.
 # ---------------------------------------------------------------------------
@@ -18,9 +19,23 @@
 resource "aws_s3_bucket" "alert_digest" {
   # Must equal DIGEST_BUCKET in gitops/components/alert-digest/standing-critical-digest.yaml
   # and in .github/workflows/alert-rca-weekly.yml.
-  bucket        = "${local.cluster_name}-alert-digest"
-  force_destroy = true # sandbox only — prod must never set this
+  bucket = "${local.cluster_name}-alert-digest"
+  # false: an observation is the evidence the weekly RCA counts, so a `tofu destroy` must not
+  # silently take the history with it.
+  force_destroy = false
   tags          = { Project = "openbank", ManagedBy = "opentofu", Adr = "0382", Issue = "6432" }
+}
+
+# Versioning: the writer holds s3:PutObject, which can OVERWRITE a day's envelope. With versioning
+# an overwrite leaves the prior version recoverable; noncurrent versions expire after 400 days.
+# Object Lock (precedent: modules/audit-baseline) was considered and not used — the envelope is a
+# derived observation re-folded into a ledger that lives in the repo, not an evidentiary record,
+# and the writer has no Delete grant, so versioning already makes every write reversible.
+resource "aws_s3_bucket_versioning" "alert_digest" {
+  bucket = aws_s3_bucket.alert_digest.id
+  versioning_configuration {
+    status = "Enabled"
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "alert_digest" {
@@ -76,10 +91,14 @@ resource "aws_s3_bucket_lifecycle_configuration" "alert_digest" {
     expiration {
       days = 120
     }
+    noncurrent_version_expiration {
+      noncurrent_days = 400
+    }
     abort_incomplete_multipart_upload {
       days_after_initiation = 1
     }
   }
+  depends_on = [aws_s3_bucket_versioning.alert_digest]
 }
 
 # ─── writer: the in-cluster CronJob (Pod Identity) ─────────────────────────
@@ -154,16 +173,9 @@ resource "aws_iam_role" "alert_digest_reader" {
 }
 
 data "aws_iam_policy_document" "alert_digest_reader" {
-  statement {
-    sid       = "ListObservations"
-    actions   = ["s3:ListBucket"]
-    resources = [aws_s3_bucket.alert_digest.arn]
-    condition {
-      test     = "StringLike"
-      variable = "s3:prefix"
-      values   = ["observations/*"]
-    }
-  }
+  # No s3:ListBucket: the workflow addresses each day by exact key (head-object/get-object).
+  # Without List a missing key answers 403 instead of 404; the workflow treats both as "no
+  # envelope for that day", so behaviour is unchanged and the reader cannot enumerate the bucket.
   statement {
     sid       = "ReadObservations"
     actions   = ["s3:GetObject"]

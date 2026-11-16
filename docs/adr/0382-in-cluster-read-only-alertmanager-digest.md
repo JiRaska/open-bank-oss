@@ -50,11 +50,14 @@ envelope to CI through **S3**.
   path, query, headers or body: the only upstream request it can construct is a GET of one constant
   URL (`/api/v2/alerts?filter=severity="critical"`). Every other verb is answered 405 locally
   without opening an upstream connection; every other path is 404. Its egress is DNS and
-  Alertmanager :9093 only.
-- **The digest CronJob** runs the committed `.github/scripts/standing-critical-digest.py`, cloned
-  from the public repo, against the relay (`ALERTMANAGER_AUTH=none`, an explicit opt-out; a merely
+  Alertmanager :9093 only. Its ingress (fleet NetworkPolicy generator) admits `alert-digest`,
+  `admin-ui` and same-namespace pods on :8080 — harmless, because whoever is admitted can only
+  ever cause that one GET.
+- **The digest CronJob** runs the committed `.github/scripts/standing-critical-digest.py`, shipped
+  as a ConfigMap mounted read-only (a test fails on any byte of drift from the canonical script;
+  nothing is fetched at runtime), against the relay (`ALERTMANAGER_AUTH=none`, an explicit opt-out; a merely
   missing token still fails closed). Its egress is DNS, the relay :8080, and TCP 443 to non-private
-  addresses (GitHub clone, S3, Slack).
+  addresses (S3, Slack).
 - **Which layer prevents the write.** For the digest pod, the L4 drop: its namespace is not in
   `alertmanager-ingress-allow-list` and its own egress reaches no :9093, so a direct POST never
   arrives. The relay is the only path, and it is L7 GET-only, so a relayed POST is impossible by
@@ -62,7 +65,8 @@ envelope to CI through **S3**.
   pod's network identity and could be bypassed.
 - **Hand-off.** The CronJob writes `observations/<date>/alert-observation.json` with an EKS Pod
   Identity role granting only `s3:PutObject` on that prefix; `alert-rca-weekly.yml` reads it with a
-  GitHub OIDC role (main, that workflow only) granting only List/Get on that prefix. No PAT, GitHub
+  GitHub OIDC role (main, that workflow only) granting only Get on that prefix (no List). The bucket is versioned, so an
+  overwrite by the writer stays recoverable. No PAT, GitHub
   App key or static AWS key exists on either side.
 - The GitHub `standing-critical-digest.yml` stays dispatch-only until the in-cluster path is proven
   live; the weekly workflow's S3 step is inert until the reader role variable is set.

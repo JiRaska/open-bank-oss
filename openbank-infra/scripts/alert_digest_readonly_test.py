@@ -24,6 +24,7 @@ import http.server
 import importlib.util
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -40,6 +41,7 @@ RELAY_EGRESS = GITOPS / "observability" / "networkpolicy-alertmanager-read-proxy
 AM_INGRESS = GITOPS / "observability" / "networkpolicy-tools-gate.yaml"
 DIGEST_DIR = GITOPS / "alert-digest"
 DIGEST_SCRIPT = ROOT / ".github" / "scripts" / "standing-critical-digest.py"
+DIGEST_SCRIPT_CM = GITOPS / "alert-digest" / "configmap-digest-script.yaml"
 DIGEST_NS = "alert-digest"
 
 ALERTS = [{"labels": {"severity": "critical", "alertname": "LedgerDown", "service": "ledger"},
@@ -151,6 +153,31 @@ class RelayRefusesWrites(unittest.TestCase):
                 self.assertEqual(status, 404)
         self.assertEqual(FakeAlertmanager.seen, [])
 
+    def test_pipelined_write_after_read_on_one_connection_never_reaches_alertmanager(self):
+        # http.client cannot pipeline; a raw socket can. A relay that parsed only the FIRST
+        # request line of a keep-alive connection would forward the trailing POST verbatim.
+        silence = json.dumps({"matchers": [{"name": "alertname", "value": ".*", "isRegex": True}],
+                              "createdBy": "x", "comment": "mute"}).encode()
+        payload = (b"GET /api/v2/alerts HTTP/1.1\r\nHost: relay\r\n\r\n"
+                   b"POST /api/v2/silences HTTP/1.1\r\nHost: relay\r\n"
+                   b"Content-Type: application/json\r\nContent-Length: "
+                   + str(len(silence)).encode() + b"\r\nConnection: close\r\n\r\n" + silence)
+        with socket.create_connection(("127.0.0.1", self.port), timeout=10) as sock:
+            sock.sendall(payload)
+            received = b""
+            while True:
+                try:
+                    chunk = sock.recv(65536)
+                except (ConnectionResetError, socket.timeout):
+                    break
+                if not chunk:
+                    break
+                received += chunk
+        self.assertTrue(received.startswith(b"HTTP/1."), received[:80])
+        methods = [m for m, _ in FakeAlertmanager.seen]
+        self.assertNotIn("POST", methods, f"pipelined POST reached Alertmanager: {FakeAlertmanager.seen}")
+        self.assertTrue(all(path.startswith("/tools/alertmanager/api/v2/alerts") for _, path in FakeAlertmanager.seen))
+
     def test_real_digest_script_produces_the_envelope_through_the_relay(self):
         with tempfile.TemporaryDirectory() as tmp:
             env = {k: v for k, v in os.environ.items() if not k.startswith("ALERTMANAGER")}
@@ -223,6 +250,27 @@ class NetworkLayerBlocksTheDirectPath(unittest.TestCase):
         self.assertEqual(env["ALERTMANAGER_URL"], "http://alertmanager-read-proxy.observability.svc:8080")
         self.assertNotIn("ALERTMANAGER_DIGEST_TOKEN", env)
         self.assertEqual(cron["metadata"]["namespace"], DIGEST_NS)
+
+    def test_digest_configmap_is_byte_identical_to_the_canonical_script(self):
+        shipped = find(DIGEST_SCRIPT_CM, "ConfigMap", "standing-critical-digest-script")["data"][
+            "standing-critical-digest.py"]
+        canonical = DIGEST_SCRIPT.read_text(encoding="utf-8")
+        self.assertEqual(shipped, canonical,
+                         "configmap-digest-script.yaml drifted from .github/scripts/standing-critical-digest.py"
+                         " — copy the canonical script in, indented by four spaces")
+
+    def test_digest_runs_the_mounted_configmap_and_fetches_no_code(self):
+        cron = find(DIGEST_DIR / "standing-critical-digest.yaml", "CronJob", "standing-critical-digest")
+        spec = cron["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+        container = spec["containers"][0]
+        script = "\n".join(container["args"])
+        self.assertIn("python3 -I /app/standing-critical-digest.py", script)
+        for forbidden in ("git clone", "github.com", "curl ", "wget ", "pip install"):
+            self.assertNotIn(forbidden, script)
+        mount = next(m for m in container["volumeMounts"] if m["mountPath"] == "/app")
+        self.assertTrue(mount.get("readOnly"))
+        volume = next(v for v in spec["volumes"] if v["name"] == mount["name"])
+        self.assertEqual(volume["configMap"]["name"], "standing-critical-digest-script")
 
     def test_relay_runs_the_tested_configmap(self):
         dep = find(RELAY_YAML, "Deployment", "alertmanager-read-proxy")

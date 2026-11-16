@@ -8,8 +8,11 @@
 #   admitting the CI runner pool to it was rejected because Alertmanager's API also accepts
 #   POST /api/v2/silences. So the OBSERVATION happens here, through a GET-only relay
 #   (observability/alertmanager-read-proxy.yaml), and the ANALYSIS stays repo code: this job runs
-#   the committed `.github/scripts/standing-critical-digest.py`, cloned unauthenticated from the
-#   public repo exactly as argocd-sync-verifier runs its checker. No second copy to drift.
+#   the committed `.github/scripts/standing-critical-digest.py`, shipped as the ConfigMap
+#   `standing-critical-digest-script` (configmap-digest-script.yaml) and mounted read-only. The
+#   pod holds S3-write + Slack credentials, so it must not execute code fetched at runtime from a
+#   moving branch; Argo syncs the reviewed copy instead, and alert_digest_readonly_test.py fails
+#   if that copy differs from the canonical script by a single byte.
 #
 # HOW THE WEEKLY RCA GETS THE ENVELOPE (nobody in CI touches the cluster)
 #   The envelope `{observedAt, alerts}` is written to S3 under observations/<UTC date>/ with an
@@ -83,11 +86,8 @@ spec:
                 - |
                   set -eu
                   mkdir -p /tmp/out
-                  git clone --depth 1 --single-branch --branch main --quiet \
-                    https://github.com/JiRaska/open-bank-oss.git /tmp/repo
-                  cd /tmp/repo
-                  python3 -I .github/scripts/standing-critical-digest.py --self-test
-                  python3 -I .github/scripts/standing-critical-digest.py
+                  python3 -I /app/standing-critical-digest.py --self-test
+                  python3 -I /app/standing-critical-digest.py
                   day="$(date -u +%Y-%m-%d)"
                   for f in alert-observation.json standing-critical-digest.md; do
                     aws s3api put-object \
@@ -151,6 +151,13 @@ spec:
               volumeMounts:
                 - name: tmp
                   mountPath: /tmp
+                - name: script
+                  mountPath: /app
+                  readOnly: true
           volumes:
             - name: tmp
               emptyDir: {}
+            - name: script
+              configMap:
+                name: standing-critical-digest-script
+                defaultMode: 0444
