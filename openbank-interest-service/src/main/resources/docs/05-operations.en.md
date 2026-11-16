@@ -194,3 +194,12 @@ Persisted job ownership survives a cron change: setting capitalization to `off` 
 
 
 Observed due-job obligations are now retained separately from actual run receipts. Disabling or moving a scheduler after a missing-work refusal cannot remove that obligation, including after restart. Only a real completed run or an attributable ledger waiver can resolve it. Observations do not fabricate completed jobs or reconstruct schedules that were never observed. Rollback retains both obligation and run tables.
+
+## Client certificate reload (outbound mTLS)
+
+Every named `quarkus.tls.<name>` configuration that presents a client certificate to a peer's
+8443 listener sets `reload-period: 1h`. cert-manager renews the mounted client certificate
+before it expires; without a reload period the process would keep presenting the old one until
+the peer rejects it, while every expiry signal measured the renewed Secret and read healthy.
+After a renewal the new certificate is in use within an hour, with no restart. The
+`tls-certificate-reload` gate keeps every such configuration covered.

@@ -1263,6 +1263,29 @@ gates:
       python3 .github/scripts/check-otel-exporter-endpoint.py --self-test
     run: |
       python3 .github/scripts/check-otel-exporter-endpoint.py
+  # #16292. cert-manager renews an internal leaf 15 days before expiry and rewrites the mounted
+  # Secret; Quarkus reads QUARKUS_HTTP_SSL_CERTIFICATE_FILES once at start unless a reload period
+  # is set. A pod that outlives the renewal window serves the old leaf until it expires while the
+  # Certificate, the Secret and the expiry metric all report a fresh one. 24 of 26 serving
+  # containers had no reload period on 2026-11-15. Per container, not per file. The same holds
+  # for the outbound identity: a named quarkus.tls.<name> config with a key-store needs its own
+  # reload-period (45 of 49 lacked one the same day).
+  - id: tls-certificate-reload
+    name: "mounted TLS certificates are reloaded, server and client side (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      A renewed certificate that the process never re-reads is an outage on a timer that every
+      expiry signal reports as healthy, because they all measure the Secret, not the listener.
+    review_after: 2027-05-15
+    min_subjects: 60   # 26 serving containers + 49 named client TLS configs today (2026-11-15)
+    budget_seconds: 20
+    selftest_inputs: [".github/scripts/check-tls-certificate-reload.py"]
+    selftest: |
+      python3 .github/scripts/check-tls-certificate-reload.py --self-test
+    run: |
+      python3 .github/scripts/check-tls-certificate-reload.py
+
   - id: entity-column-names
     name: "JPA entity columns are named explicitly where nothing converts them (enforced)"
     group: gitops
