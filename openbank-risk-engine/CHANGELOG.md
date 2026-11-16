@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.32.0...risk-engine-v0.33.0) (2026-11-16)
+
+
+### Features
+
+* **risk-engine:** persist planning source revision references ([#16488](https://github.com/JiRaska/open-bank-oss/issues/16488)) ([f28b338](https://github.com/JiRaska/open-bank-oss/commit/f28b338b8a4aac3eff54b355355d45c1c827f486))
+
 ## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.31.0...risk-engine-v0.32.0) (2026-11-16)
 
 
