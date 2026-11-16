@@ -148,3 +148,12 @@ Deployment config binds each authority to the scope and realm role a token must 
 
 Gate `catalog-kernel-industry-neutral` keeps industry vocabulary out of the kernel. It also pins the
 frozen `/api/v1` enum values.
+
+### FOS loan commitment receipts
+
+The lending service can request a one-time passport admission for a signature or disbursement. The
+request identifies a durable operation and its exact binding, the pinned loan revision, and the FOS
+route. Catalogue checks the named service principal, bank, establishment, host country, channel,
+customer segment and pack set against the grant. The admission locks the grant row shared with
+revocation and uses the same permit ledger as account commitments. A receipt lookup only reads the
+exact consumed operation. An earlier signature receipt cannot authorize a new disbursement.
