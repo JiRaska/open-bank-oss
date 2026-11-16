@@ -75,10 +75,14 @@ github:
         []
   unprovisioned:
     - kind: secret
+      names: [SECURITY_KPI_DEPENDABOT_READ_TOKEN]
+      reason: "repository-scoped Dependabot alerts read access awaits owner provisioning; only CVE Remediation degrades until then"
+      issue: 16492
+      review_by: 2026-12-16
+    - kind: secret
       names:
         - GLITCHTIP_AUTH_TOKEN
         - AGENT_REVIEW_ANTHROPIC_API_KEY
-        - METADATA_REFRESH_PAT
       reason: "optional; each consumer degrades by design without it (see the issue, one line per name)"
       issue: 16206
       review_by: 2027-02-15
