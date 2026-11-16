@@ -13,7 +13,8 @@ import path from 'path'
 import { loadComplianceCatalog, type ComplianceControl } from '@/lib/governance/compliance'
 import { loadAdrRegistry } from '@/lib/governance/docs'
 import { getRegulatoryObligations } from '@/lib/regulatory/obligations'
-import { buildComplianceTrace, type ComplianceTrace, type DeclaredStatus, type TraceInputGate } from './trace'
+import { createGateHealthSnapshotReader, validateGateHealthSnapshotData, type GateHealthSnapshotData } from '@/lib/evidence/gateHealthSnapshot'
+import { buildComplianceTrace, type ComplianceTrace, type DeclaredStatus, type TraceInputGate, type TraceInputs } from './trace'
 
 export type TraceSnapshot =
   | ({ status: 'available'; missing: string[] } & ComplianceTrace)
@@ -27,6 +28,35 @@ function loadGateCatalog(): { gates: TraceInputGate[]; ref: string | null } | nu
     return { gates: parsed.gates ?? [], ref }
   } catch {
     return null
+  }
+}
+
+const gateHealthReader = createGateHealthSnapshotReader()
+
+/**
+ * The published runtime snapshot when it is `ready`, else the copy baked into the image. Either one
+ * is still discarded by `currentGateHealth` once it is older than two hours. A snapshot that fails validation is treated as absent, which makes every
+ * age-bound claim `evidence-age-unknown` rather than trusting an unreadable file.
+ */
+async function loadGateHealth(): Promise<TraceInputs['gateHealth']> {
+  let data: GateHealthSnapshotData | null = null
+  try {
+    const runtime = await gateHealthReader.read()
+    // Only a `ready` snapshot. A `stale` one (expired pointer, old data or a failed refresh) would
+    // let a gate that turned red since look green.
+    if (runtime.status === 'ready' && runtime.snapshot) data = runtime.snapshot
+  } catch { /* fall through to the bundled copy */ }
+  if (!data) {
+    try {
+      const file = process.env.OPENBANK_GATE_HEALTH_REPORT ?? path.resolve(process.cwd(), 'gate-health.json')
+      const parsed: unknown = JSON.parse(readFileSync(file, 'utf-8'))
+      if (validateGateHealthSnapshotData(parsed)) data = parsed
+    } catch { /* absent */ }
+  }
+  if (!data) return null
+  return {
+    collectedAt: data.collectedAt,
+    gates: Object.fromEntries(data.gates.map(g => [g.id, { status: g.status, lastOkAt: g.lastOk?.createdAt ?? null }])),
   }
 }
 
@@ -53,10 +83,12 @@ export async function loadComplianceTrace(): Promise<TraceSnapshot> {
   if (!register.available) missing.push('regulatory-obligations.json')
   const gateCatalog = loadGateCatalog()
   if (!gateCatalog) missing.push('gate-catalog.json')
+  const gateHealth = await loadGateHealth()
+  if (!gateHealth) missing.push('gate-health.json')
 
   const trace = buildComplianceTrace({
     frameworks: catalog.frameworks,
-    controls: catalog.controls.map((c: ComplianceControl & { evidence_refs?: { kind: string; ref: string }[] }) => ({
+    controls: catalog.controls.map((c: ComplianceControl & { evidence_refs?: { kind: string; ref: string }[]; max_evidence_age_days?: number }) => ({
       id: c.id,
       title: c.title,
       category: c.category,
@@ -66,6 +98,7 @@ export async function loadComplianceTrace(): Promise<TraceSnapshot> {
       declaredStatus: c.declaredStatus as DeclaredStatus,
       signalState: c.signalState,
       evidenceRefs: c.evidence_refs ?? [],
+      maxEvidenceAgeDays: typeof c.max_evidence_age_days === 'number' ? c.max_evidence_age_days : undefined,
     })),
     obligations: register.obligations,
     areas: register.areas,
@@ -73,6 +106,8 @@ export async function loadComplianceTrace(): Promise<TraceSnapshot> {
     commit: gateCatalog?.ref ?? null,
     postureCollectedAt: catalog.posture?.collectedAt ?? null,
     adrSlugs: await adrSlugs(),
+    gateHealth,
+    now: new Date().toISOString(),
   })
   return { status: 'available', missing, ...trace }
 }

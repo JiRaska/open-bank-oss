@@ -177,6 +177,45 @@ class RiskValuationApiIT {
             .`when`().post("/api/v1/risk/pricing").then().statusCode(400)
     }
 
+    @Test
+    @TestSecurity(user = "ops", roles = ["ROLE_OPERATOR"])
+    fun `snapshot runoff replays despite a planned deal and a later ledger correction`() {
+        fun snapshot(): String = given().contentType("application/json").body("""{"asOf":"$asOf"}""")
+            .`when`().post("/api/v1/risk/snapshots")
+            .then().statusCode(org.hamcrest.Matchers.oneOf(200, 201)).extract().path("id")
+
+        ledger.inputs = Fixtures.tiedOut()
+        val original = snapshot()
+        val curveSetId = uploadCurveSet()
+        fun forecast(id: String) = "/api/v1/risk/snapshots/$id/liquidity-forecast?curveSetId=$curveSetId"
+        val runoff = read("${forecast(original)}&includePlanned=false")
+        assertThat(json.readTree(runoff)["assumptions"].map { it["key"].asText() })
+            .contains("planned-treasury-flows-excluded")
+
+        runBlocking {
+            book.apply(event(plannedDeal, "MM_PLACEMENT", BigDecimal("3.60"), null, null, DealKind.PLANNED))
+        }
+        assertThat(read(forecast(original))).isNotEqualTo(runoff)
+        assertThat(read("${forecast(original)}&includePlanned=false")).isEqualTo(runoff)
+
+        ledger.inputs = Fixtures.tiedOut().copy(
+            trialBalance = listOf(
+                Fixtures.tb("1001", "ASSET", "CZK", "1600.00", "0"),
+                Fixtures.tb("2100", "LIABILITY", "CZK", "0", "1600.00"),
+            ),
+            subLedger = listOf(
+                Fixtures.sl(Fixtures.ALICE, "CZK", "0", "1100.00"),
+                Fixtures.sl(Fixtures.BOB, "CZK", "0", "500.00"),
+            ),
+        )
+        val revised = snapshot()
+        assertThat(revised).isNotEqualTo(original)
+        assertThat(json.readTree(read("${forecast(revised)}&includePlanned=false"))["currencies"])
+            .isNotEqualTo(json.readTree(runoff)["currencies"])
+        assertThat(read("${forecast(original)}&includePlanned=false")).isEqualTo(runoff)
+        given().`when`().get("${forecast(original)}&includePlanned=unknown").then().statusCode(400)
+    }
+
     private fun event(id: UUID, product: String, rate: BigDecimal?, legs: String?, bookId: String?, kind: DealKind) =
         TreasuryDealEvent(
             state = "BOOKED",
@@ -196,6 +235,7 @@ class RiskValuationApiIT {
 
     @AfterEach
     fun cleanup() {
+        ledger.inputs = Fixtures.tiedOut()
         listOf(irsDeal, legacyDeal, plannedDeal).forEach {
             TestDb.execute("DELETE FROM treasury_deal WHERE deal_id = '$it'")
         }

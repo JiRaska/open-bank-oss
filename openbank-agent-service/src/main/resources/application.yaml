@@ -379,6 +379,7 @@ agent:
           - read.governance
           - draft.ticket
           - query.compliance.readonly
+          - propose.aml.decision
           - query.payments.readonly
           - query.disputes.readonly
           - query.observability.readonly

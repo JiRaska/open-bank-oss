@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
   annotations:
-    openbank.tech/policy-checksum: "2e2268bec2a44590"
+    openbank.tech/policy-checksum: "ca1fc2aa67d6aa27"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1266,6 +1266,7 @@ data:
       - product.explain
       write_proposal:
       - draft.ticket
+      - propose.aml.decision
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1295,6 +1296,7 @@ data:
         - query.disputes.readonly
         - query.observability.readonly
         - flags.write
+        - propose.aml.decision
         deny:
         - money.*
         - gh.pr.*

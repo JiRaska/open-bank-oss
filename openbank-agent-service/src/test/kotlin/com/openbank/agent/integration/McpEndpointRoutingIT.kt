@@ -89,4 +89,25 @@ class McpEndpointRoutingIT {
                 equalTo(ToolServiceCatalog.domainOf("get_catalog_revision")),
             )
     }
+
+    @Test
+    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
+    fun `MCP serves the AML decision proposal tool but not to the ui-assistant charter`() {
+        fun list(agent: String?) = given()
+            .contentType(ContentType.JSON)
+            .apply { if (agent != null) header("X-Agent-Id", agent).header("X-Agent-Plane", "control") }
+            .body("""{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}""")
+            .`when`().post("/mcp")
+            .then()
+            .statusCode(200)
+
+        // No agent binding: the full registered catalog (the call path still gates per charter).
+        list(null)
+            .body("result.tools.name", hasItem("aml_propose_case_decision"))
+            .body("result.tools.find { it.name == 'aml_propose_case_decision' }.service", equalTo("aml-service"))
+        // The pentest-hardened ui-assistant has no compliance capability at all (FIND-S4-05).
+        list("ui-assistant")
+            .body("result.tools.name", hasItem("get_catalog_revision"))
+            .body("result.tools.name", not(hasItem("aml_propose_case_decision")))
+    }
 }
