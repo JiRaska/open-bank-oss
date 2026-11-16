@@ -100,6 +100,29 @@ class EvidenceChainTest {
     }
 
     @Test
+    fun `recordHash is stable across a timestamptz database round trip`() {
+        // Postgres TIMESTAMPTZ stores microsecond precision normalised to UTC. A stamped evidence
+        // item carries OffsetDateTime.now() with nanoseconds and a zone offset (e.g. +01:00); the
+        // row read back carries the same instant as a UTC microsecond value. The hashed form must
+        // be identical for both, or verify() reports an intact chain as broken.
+        val stampedAt = OffsetDateTime.parse("2026-11-16T10:59:21.846637891+01:00")
+        val stamped = EvidenceChain.append(
+            rawEvidence("customer", "STATEMENT").copy(submittedAt = stampedAt),
+            previous = null,
+        )
+
+        val asReadBackFromPostgres = stamped.copy(
+            submittedAt = stampedAt.toInstant().atOffset(ZoneOffset.UTC),
+        )
+
+        assertThat(EvidenceChain.recordHash(asReadBackFromPostgres))
+            .isEqualTo(EvidenceChain.recordHash(stamped))
+        assertThat(
+            EvidenceChain.verify(disputeId, listOf(asReadBackFromPostgres)).intact,
+        ).isTrue()
+    }
+
+    @Test
     fun `empty chain is trivially intact`() {
         val result = EvidenceChain.verify(disputeId, emptyList())
 
