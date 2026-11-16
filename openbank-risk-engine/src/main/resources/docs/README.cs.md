@@ -123,3 +123,5 @@ zaúčtované ACTUAL obchody; plánované a hypotetické se ignorují. Zaúčtov
 sestavit, se vykáže jako mezera v datech, nikdy se tiše nevynechá. Požadavky na ocenění, citlivost a
 VaR mají omezenou velikost. Treasury čte seznam snímků a ocenění pod vlastní strojovou identitou;
 žádný jiný service-account tato čtení nemá.
+
+Risk Engine uchovává každou odlišnou přijatou revizi treasury cash flow a fixingu. Stávající čtení nadále vrací poslední stav. Historie začíná stavem zachyceným při migraci.
