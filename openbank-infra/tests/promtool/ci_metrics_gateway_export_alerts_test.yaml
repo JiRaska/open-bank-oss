@@ -9,6 +9,7 @@
 #   born     counter first appears AT its failure count, then flat (the real 2026-11-16 shape:
 #            the collector creates the series lazily, so increase() has no prior sample)
 #                                                   -> fires; quiet again once the burst is >30m old
+#   gap      flat historic count, scrape gap spanning t-30m, then reappears -> quiet
 rule_files:
   - prometheus-rules-ci-quality.yaml
 
@@ -72,5 +73,14 @@ tests:
               runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/ci-metrics-gateway.md#cimetricsgatewayexportfailing"
               subject_period: continuous
       - eval_time: 150m
+        alertname: CiMetricsGatewayExportFailing
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'otelcol_exporter_send_failed_metric_points{job="ci-metrics-gateway",exporter="prometheusremotewrite"}'
+        values: '30x40 _x50 30x60'
+    alert_rule_test:
+      - eval_time: 120m
         alertname: CiMetricsGatewayExportFailing
         exp_alerts: []
