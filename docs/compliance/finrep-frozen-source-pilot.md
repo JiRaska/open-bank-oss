@@ -255,3 +255,16 @@ context. Payment must distinguish an unclassified account from a projection that
 receive its event and must preserve the resolved context before sending a journal. When
 both legs use different booking scopes, the journal needs approved clearing entries and
 attribution for each leg.
+
+Transaction Service projects the account event by account identity and synthetic origin.
+An identical Kafka replay is idempotent. A conflicting replay reaches the channel's DLQ.
+A row with a null booking context records an observed unclassified opening. An absent row
+signals incomplete projection and stops pilot posting. Two account legs may share one journal
+only when their complete contexts agree. Attributed clearing for different contexts is still open.
+
+Keep `ACCOUNT_BOOKING_PROJECTION_ENABLED` and
+`openbank.transaction.booking-posting.enabled` off until a dedicated rehearsal. Bring up the
+consumer first, load and reconcile accounts whose original Kafka events aged out, and verify
+consumer lag and DLQ before enabling posting. Route pilot traffic to a cohort with reconciled
+source and target account coverage. Drain in-flight payment activities before switching posting
+mode. A dated copy of the ledger feeds reporting with separate compute and storage limits.

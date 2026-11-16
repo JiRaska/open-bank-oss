@@ -41,9 +41,29 @@ interface LedgerRestClient {
     ): Uni<JournalResponse>
 
     @POST
+    @Path("/booked")
+    fun postBookedJournal(
+        request: BookedJournalRequest,
+        @HeaderParam(SyntheticTaint.KAFKA_HEADER) taint: String?,
+    ): Uni<JournalResponse>
+
+    @POST
     @Path("/{journalId}/reverse")
     fun reverseJournal(@PathParam("journalId") journalId: UUID, request: ReverseJournalRequest): Uni<JournalResponse>
 }
+
+data class BookedJournalRequest(
+    val journal: PostJournalRequest,
+    val booking: JournalBookingInput,
+    val synthetic: Boolean,
+)
+
+data class JournalBookingInput(
+    val contextVersionId: UUID,
+    val legalEntityId: UUID,
+    val operatingMode: String,
+    val establishmentId: UUID?,
+)
 
 data class PostJournalRequest(
     val idempotencyKey: String,
