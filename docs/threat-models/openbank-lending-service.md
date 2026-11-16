@@ -1149,3 +1149,12 @@ pinned product revision. Taking over work from PostgreSQL never reconstructs act
 product evidence from a new caller. A row lock serializes the signature transition with other
 origination state changes. The signature, outbox and completion marker commit together.
 The scheduler restores the stored synthetic taint before publishing evidence.
+
+### FOS loan authorization
+
+Application clients can supply a grant selector. The catalogue returns the verified route only for
+the party and exact published revision. Lending persists it atomically. Each staged action has a
+distinct catalogue operation and checks permission before writing the signature or loan.
+The application database blocks concurrent withdrawal or expiry while a matching commitment can
+still succeed. Recovery keeps the operation ID, audit actor, destination and economic date.
+The catalogue preserves exact refusals and the ledger and borrower credit use stable references.
