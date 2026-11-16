@@ -72,13 +72,14 @@ spec:
           # The institutional PAdES seal certificate (document-service, #16292). Renewal is a manual
           # ceremony, not automatic, so the warning starts early. The DEV-ONLY ephemeral identity is
           # excluded: its expiry carries no evidential meaning.
-          expr: min by (namespace) ((openbank_document_seal_certificate_expiry_timestamp_seconds{identity="keystore"} - time()) / 86400) < 45
+          # Seconds, not a days ratio: 45 days = 3888000 s.
+          expr: min by (namespace) (openbank_document_seal_certificate_expiry_timestamp_seconds{identity="keystore"}) - time() < 3888000
           for: 1h
           labels:
             severity: warning
           annotations:
             runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/key-ceremonies/certificate-expiry.md
-            summary: "Bank electronic seal certificate expires in {{ $value | printf \"%.0f\" }} days"
+            summary: "Bank electronic seal certificate expires in {{ $value | humanizeDuration }}"
             description: "Documents sealed after the seal certificate expires carry an invalid seal and are worthless as evidence. Obtain the renewed organizational certificate and replace the keystore (docs/runbooks/0008-openbao-document-signing-pki.md)."
         - alert: CertManagerExpiryMetricsAbsent
           expr: absent(certmanager_certificate_expiration_timestamp_seconds)
