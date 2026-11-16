@@ -5,6 +5,7 @@
 package com.openbank.dispute.domain.model
 
 import java.security.MessageDigest
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -38,18 +39,24 @@ object EvidenceChain {
      * must already carry the [DisputeEvidence.sequence], [DisputeEvidence.prevHash], and
      * [DisputeEvidence.submittedAt] it will be persisted with — [recordHash] does not stamp them,
      * it only hashes what is passed in.
+     *
+     * [DisputeEvidence.submittedAt] is hashed in a **round-trip-canonical** form: the UTC instant
+     * truncated to microseconds. Stamping hashes `OffsetDateTime.toString()` verbatim is a latent
+     * defect — Postgres `TIMESTAMPTZ` stores microsecond precision normalised to UTC, so a row
+     * read back carries a different string (`+01:00` nanosecond form vs `Z` microsecond form)
+     * and the recomputed hash no longer matches the stored one, which makes `verify` report an
+     * intact chain as broken. See #16473.
      */
     fun recordHash(evidence: DisputeEvidence): String {
         val canonical = listOf(
             evidence.prevHash ?: GENESIS_HASH,
             evidence.disputeId.toString(),
             evidence.sequence.toString(),
-            evidence.id.toString(),
             evidence.submittedBy,
             evidence.evidenceType,
             evidence.description ?: "",
             evidence.fileReference ?: "",
-            evidence.submittedAt?.toString() ?: "",
+            evidence.submittedAt?.toInstant()?.truncatedTo(ChronoUnit.MICROS)?.toString() ?: "",
         ).joinToString("|")
         return sha256Hex(canonical)
     }
