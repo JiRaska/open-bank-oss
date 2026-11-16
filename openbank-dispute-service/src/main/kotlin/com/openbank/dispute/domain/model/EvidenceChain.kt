@@ -46,12 +46,18 @@ object EvidenceChain {
      * read back carries a different string (`+01:00` nanosecond form vs `Z` microsecond form)
      * and the recomputed hash no longer matches the stored one, which makes `verify` report an
      * intact chain as broken. See #16473.
+     *
+     * [DisputeEvidence.id] is hashed: it is assigned in the domain (`UUID.randomUUID()`) before
+     * [append] stamps the item and persisted verbatim (no `@GeneratedValue`, the V1 column
+     * default is never used), so the stamp-time id equals the read-back id and hashing it costs
+     * no round-trip stability while making an id swap detectable.
      */
     fun recordHash(evidence: DisputeEvidence): String {
         val canonical = listOf(
             evidence.prevHash ?: GENESIS_HASH,
             evidence.disputeId.toString(),
             evidence.sequence.toString(),
+            evidence.id.toString(),
             evidence.submittedBy,
             evidence.evidenceType,
             evidence.description ?: "",

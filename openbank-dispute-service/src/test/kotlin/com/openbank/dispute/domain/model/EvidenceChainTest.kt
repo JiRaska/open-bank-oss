@@ -123,6 +123,20 @@ class EvidenceChainTest {
     }
 
     @Test
+    fun `verify detects a swapped evidence id on a stored item`() {
+        val first = EvidenceChain.append(rawEvidence("customer", "STATEMENT"), previous = null)
+        val second = EvidenceChain.append(rawEvidence("ops", "TRANSACTION_REF"), previous = first)
+        val swapped = second.copy(id = UUID.randomUUID())
+
+        assertThat(EvidenceChain.recordHash(swapped)).isNotEqualTo(second.recordHash)
+        val result = EvidenceChain.verify(disputeId, listOf(first, swapped))
+
+        assertThat(result.intact).isFalse()
+        assertThat(result.itemsChecked).isEqualTo(1)
+        assertThat(result.firstBrokenEvidenceId).isEqualTo(swapped.id)
+    }
+
+    @Test
     fun `empty chain is trivially intact`() {
         val result = EvidenceChain.verify(disputeId, emptyList())
 
