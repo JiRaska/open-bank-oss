@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.33.5](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.4...agent-service-v1.33.5) (2026-11-16)
+
+
+### Bug Fixes
+
+* **account,agent,aml:** reload outbound mTLS client certificates ([#16411](https://github.com/JiRaska/open-bank-oss/issues/16411)) ([13b220e](https://github.com/JiRaska/open-bank-oss/commit/13b220ea13a8f2ab089bb698d6e36bbb0d1a01de))
+
 ## [1.33.4](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.3...agent-service-v1.33.4) (2026-11-13)
 
 

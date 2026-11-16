@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.3](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.40.2...notification-service-v0.40.3) (2026-11-16)
+
+
+### Bug Fixes
+
+* **lending,notification,pension-fund:** reload outbound mTLS client certificates ([#16415](https://github.com/JiRaska/open-bank-oss/issues/16415)) ([6ca4700](https://github.com/JiRaska/open-bank-oss/commit/6ca470012614bd5b0d4f5497352088d25655464a))
+
 ## [0.40.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.40.1...notification-service-v0.40.2) (2026-11-12)
 
 
