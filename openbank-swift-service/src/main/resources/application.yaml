@@ -293,6 +293,8 @@ authz:
     # swift-service-internal-tls, mounted at /mnt/aml-tls.
     tls:
       aml-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
