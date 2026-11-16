@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.18.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.18.0...admin-ui-v4.18.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **admin-ui:** attribute six live simulation scenarios in Test Intelligence ([#16409](https://github.com/JiRaska/open-bank-oss/issues/16409)) ([6b177b6](https://github.com/JiRaska/open-bank-oss/commit/6b177b624d7bb2d89632b5ae130a14e9ff54ea92)), closes [#14366](https://github.com/JiRaska/open-bank-oss/issues/14366)
+
 ## [4.18.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.17.1...admin-ui-v4.18.0) (2026-11-15)
 
 
