@@ -111,3 +111,12 @@ and direction form the daily idempotency key. The Edge sends that key as `Idempo
 and Transaction rejects any mismatch. A new outbound booking closes 305 seconds before bank
 midnight, allowing the 300-second canary deadline plus a 5-second HTTP call. Same-day
 returns can still book in that window. The durable origin controls the synthetic ledger route.
+
+## Client certificate reload (outbound mTLS)
+
+Every named `quarkus.tls.<name>` configuration that presents a client certificate to a peer's
+8443 listener sets `reload-period: 1h`. cert-manager renews the mounted client certificate
+before it expires; without a reload period the process would keep presenting the old one until
+the peer rejects it, while every expiry signal measured the renewed Secret and read healthy.
+After a renewal the new certificate is in use within an hour, with no restart. The
+`tls-certificate-reload` gate keeps every such configuration covered.

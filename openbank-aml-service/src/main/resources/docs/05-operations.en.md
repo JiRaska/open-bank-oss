@@ -162,3 +162,12 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 - Metric: `openbank_aml_payment_held_events_total{outcome}` with `case_opened`, `ignored` (another event type) and `rejected`.
 - Before turning the channel on: every running aml-service pod must be on a build that can read a case without a party, and every consumer of `openbank.aml.events` must be on a build that accepts `partyId: null`. With the channel off, no case is stored without a party and nothing on the topic differs from before.
 - Switch it on together with the rail's chain, never the rail alone: a hold whose case is never opened ends by expiry, in rejection.
+
+## Client certificate reload (outbound mTLS)
+
+Every named `quarkus.tls.<name>` configuration that presents a client certificate to a peer's
+8443 listener sets `reload-period: 1h`. cert-manager renews the mounted client certificate
+before it expires; without a reload period the process would keep presenting the old one until
+the peer rejects it, while every expiry signal measured the renewed Secret and read healthy.
+After a renewal the new certificate is in use within an hour, with no restart. The
+`tls-certificate-reload` gate keeps every such configuration covered.

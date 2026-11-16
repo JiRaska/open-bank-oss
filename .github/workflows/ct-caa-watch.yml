@@ -1,0 +1,116 @@
+# -----------------------------------------------------------------------------
+# Certificate Transparency + CAA watch (#16292).
+#
+# Daily: does the published CAA set equal the one OpenTofu declares, and has any CA logged an
+# unexpired certificate for the public domain from an issuer CAA does not allow? Reasoning,
+# and why an empty CT answer is never treated as clean, live in the script header.
+#
+# Verdicts: 0 clean; 2 finding (red + high-severity tracking issue); 3 could not verify
+# (warning + its own tracking issue, so a blind source is visible without a daily red run).
+# PR lane: self-test + offline CAA derivation only, no network probes.
+# -----------------------------------------------------------------------------
+name: CT and CAA watch
+
+on:
+  schedule:
+    - cron: "25 6 * * *"
+  pull_request:
+    paths:
+      - ".github/scripts/check-ct-caa.py"
+      - ".github/workflows/ct-caa-watch.yml"
+      - "openbank-infra/aws/modules/dns/main.tf"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ct-caa-watch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: ct-caa
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Self-test the verdicts
+        run: python3 .github/scripts/check-ct-caa.py --self-test
+
+      - name: Derive the expected CAA set from OpenTofu (offline)
+        run: python3 .github/scripts/check-ct-caa.py --offline
+
+      # crt.sh's free public Postgres interface is the CT source (no account, no key). The
+      # hosted image normally ships psql; install it only if it is missing.
+      - name: Ensure psql
+        if: ${{ github.event_name != 'pull_request' }}
+        run: command -v psql >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q postgresql-client; }
+
+      - name: Ask DNS and Certificate Transparency
+        id: probe
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          set +e
+          python3 .github/scripts/check-ct-caa.py > "$RUNNER_TEMP/ct.txt"
+          code=$?
+          set -e
+          cat "$RUNNER_TEMP/ct.txt"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          # Name the answer (watch_outcome.py). Exit codes below are unchanged: a finding stays red
+          # and "could not verify" stays a warning plus its own tracking issue.
+          case "$code" in
+            0) python3 .github/scripts/watch_outcome.py CLEAN "CAA matches and no foreign-issuer certificate" ;;
+            2) python3 .github/scripts/watch_outcome.py FOUND "CAA drift or foreign-issuer certificate" ;;
+            *) python3 .github/scripts/watch_outcome.py UNREADABLE "CT or DNS could not be verified (exit $code)" || true ;;
+          esac
+          case "$code" in
+            0) ;;
+            2) echo "::error::CAA drift or a certificate from a CA that CAA does not allow - investigate now."; exit 2 ;;
+            3) echo "::warning::CT or DNS could not be verified - this is NOT a clean verdict." ;;
+            # Any other code is the watch itself breaking (e.g. the dns module changed shape):
+            # report it as "could not verify" so it opens an issue instead of a silent red run.
+            *) echo "code=3" >> "$GITHUB_OUTPUT"; echo "::error::The watch failed (exit $code) - not a verdict."; exit "$code" ;;
+          esac
+
+      - name: Open or refresh the tracking issue
+        if: ${{ always() && github.event_name != 'pull_request' && (steps.probe.outputs.code == '2' || steps.probe.outputs.code == '3') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODE: ${{ steps.probe.outputs.code }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$CODE" = "2" ]; then
+            title="Certificate Transparency or CAA finding for the public domain"
+            severity="severity:high"
+            lead="The daily watch found CAA drift or an unexpired certificate from a CA that CAA does not allow. Treat it as a possible mis-issuance until proven otherwise."
+          else
+            title="Certificate Transparency watch cannot verify - CT source blind"
+            severity="severity:medium"
+            lead="The daily watch could not verify CT or DNS: crt.sh did not answer, or it contains none of the certificates our own hosts serve, so it could not see a foreign one either. The output below names the reason. Usually transient (crt.sh sheds guest connections under load); if it persists for days, investigate the source."
+          fi
+          body="$RUNNER_TEMP/issue-body.md"
+          {
+            echo "$lead"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/ct.txt"
+            echo '```'
+            echo
+            echo "Probe: \`.github/scripts/check-ct-caa.py\`. Expected CAA is derived from \`openbank-infra/aws/modules/dns/main.tf\`."
+            echo "Run: $RUN_URL"
+          } > "$body"
+          status_file="$RUNNER_TEMP/resolve-status"
+          issue=$(bash .github/scripts/resolve-tracking-issue.sh --title "$title" \
+            --create-body-file "$body" --create-label security --create-label "$severity" \
+            --status-file "$status_file")
+          if [ "$(cat "$status_file")" = "existing" ]; then
+            gh issue edit "$issue" -R "$GH_REPO" --body-file "$body"
+          fi
+          echo "Tracking issue: #$issue"
