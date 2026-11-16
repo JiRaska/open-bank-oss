@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.TestMethodOrder
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -135,14 +137,18 @@ class KycCaseApprovalJourneyE2E {
     @Order(5)
     @TestSecurity(user = REVIEWER, roles = ["ROLE_KYC_REVIEWER"])
     fun `5 - approving from UNDER_REVIEW records the approver identity and the reason`() {
-        given().contentType("application/json")
+        // Truncated: the server may persist at a coarser precision than this clock reads.
+        val before = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+        val reviewedAt = given().contentType("application/json")
             .body("""{"reason": "all mandatory checks passed, onboarding approved"}""")
             .post("/api/v1/kyc/cases/$caseId/approve").then()
             .statusCode(200)
             .body("status", equalTo("APPROVED"))
             .body("reviewedBy", equalTo(REVIEWER))
-            .body("reviewedAt", notNullValue())
             .body("notes", equalTo("all mandatory checks passed, onboarding approved"))
+            .extract().path<String>("reviewedAt")
+        // A non-null check passes against Instant.EPOCH; "when" fields need a recency check.
+        org.assertj.core.api.Assertions.assertThat(Instant.parse(reviewedAt)).isBetween(before, Instant.now())
 
         // Read-back: an approval that is not persisted is not an approval — the ČNB audit
         // trail obligation (§8) is about what a later review can actually retrieve.
