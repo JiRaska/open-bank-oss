@@ -131,6 +131,13 @@ metadata:
 spec:
   replicas: 1
   revisionHistoryLimit: 2
+  # Surge, never gap: the new pod must be Ready before the old one goes. A daily reader tolerates
+  # a short outage, but there is no reason to take one.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: alertmanager-read-proxy
