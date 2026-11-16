@@ -39,11 +39,17 @@
 #   gate      a `.github/gates/gates.yaml` id — the strongest kind: it runs on
 #             every PR, and its mode (enforced/advisory) is shown with it
 #   workflow  a file under `.github/workflows/`
+#   test      a test file under a test source set (`*/src/test/`, `*/e2e/`)
 #   adr       a four-digit ADR number under `docs/adr/`
 #   path      a repo path (file or directory) that exists
 # Every ref must resolve — gate `compliance-trace` fails otherwise. The admin-ui
 # compliance hub computes a verdict from these: a control declared `enforced` or
-# `partial` with no gate or workflow behind it renders as `unverified`.
+# `partial` with no gate, workflow or test behind it renders as `unverified`.
+#
+# max_evidence_age_days (optional) — the newest passing run of a cited gate must be
+# at most this old, read from the gate-health snapshot (ADR-0255). A gate whose
+# latest run failed does not count. Where the age cannot be read, a positive claim
+# renders `unverified` too: an unobservable age is not a fresh one.
 
 schema: openbank.compliance-controls/v1
 
@@ -105,6 +111,7 @@ controls:
       - { kind: gate, ref: "oidc-tls-verification-profile-scoped" }
       - { kind: adr, ref: "0021" }
       - { kind: adr, ref: "0086" }
+    max_evidence_age_days: 14
 
   - id: authz-least-privilege
     title: "Least-privilege authorization (default-deny)"
@@ -134,6 +141,7 @@ controls:
       - { kind: gate, ref: "appyaml-secret-literals" }
       - { kind: adr, ref: "0007" }
       - { kind: adr, ref: "0099" }
+    max_evidence_age_days: 14
 
   - id: supply-chain-integrity
     title: "Software supply-chain integrity (signed images)"
@@ -172,6 +180,7 @@ controls:
       - { kind: workflow, ref: "security.yml" }
       - { kind: gate, ref: "vex-overlay-coverage" }
       - { kind: adr, ref: "0030" }
+    max_evidence_age_days: 14
 
   - id: image-scanning
     title: "Container image scanning (deploy gate + registry re-scan)"
@@ -197,6 +206,7 @@ controls:
       - { kind: gate, ref: "audit-money-path-subscription" }
       - { kind: gate, ref: "audit-anchor-offline-verifier-unit-test" }
       - { kind: adr, ref: "0133" }
+    max_evidence_age_days: 14
 
   - id: sanctions-screening
     title: "Synchronous sanctions / AML screening gate"
@@ -207,8 +217,12 @@ controls:
     evidenceSource: "docs/adr/0032-synchronous-sanctions-aml-screening-gate-in-payment-execution.md"
     status: enforced
     evidence_refs:
+      - { kind: gate, ref: "rail-screening-port" }
+      - { kind: test, ref: "openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/it/SanctionsScreeningProfileIT.kt" }
+      - { kind: test, ref: "openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/application/usecase/ScreeningThresholdOrderingTest.kt" }
       - { kind: adr, ref: "0032" }
       - { kind: path, ref: "openbank-sanctions-service" }
+    max_evidence_age_days: 14
 
   - id: observability
     title: "Operational monitoring & telemetry"
@@ -222,6 +236,7 @@ controls:
       - { kind: gate, ref: "dashboard-metric-emitted" }
       - { kind: gate, ref: "alert-metric-emitted" }
       - { kind: adr, ref: "0077" }
+    max_evidence_age_days: 14
 
   - id: data-classification
     title: "Data classification & retention"
@@ -270,6 +285,8 @@ controls:
     evidenceSource: "openbank-fraud-service/src/main/kotlin/com/openbank/fraud"
     status: partial
     evidence_refs:
+      - { kind: test, ref: "openbank-fraud-service/src/test/kotlin/com/openbank/fraud/integration/FraudApiIT.kt" }
+      - { kind: test, ref: "openbank-fraud-service/src/test/kotlin/com/openbank/fraud/application/usecase/FraudScoringServiceTest.kt" }
       - { kind: path, ref: "openbank-fraud-service" }
       - { kind: adr, ref: "0084" }
 

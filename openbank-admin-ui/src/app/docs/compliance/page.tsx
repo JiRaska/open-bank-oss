@@ -36,7 +36,14 @@ function useLabels() {
       'enforced-gate': t('Blokující CI gate', 'Blocking CI gate'), ci: t('Běh v CI', 'CI run'),
       documented: t('Jen dokumentace', 'Documentation only'), none: t('Bez důkazu', 'No evidence'),
     })[l],
-    kind: (k: TraceEvidence['kind']) => ({ gate: 'gate', workflow: 'workflow', adr: 'ADR', path: t('soubor', 'path') })[k],
+    kind: (k: TraceEvidence['kind']) => ({ gate: 'gate', workflow: 'workflow', test: 'test', adr: 'ADR', path: t('soubor', 'path') })[k],
+    reason: (r: NonNullable<TraceControl['downgradeReason']>) => ({
+      'no-machine-evidence': t('tvrzení nepodpírá žádný strojově opakovaný důkaz', 'no machine-repeated evidence backs the claim'),
+      'failing-gate': t('jeden z citovaných gatů v posledním běhu selhal', 'a cited gate failed in its latest run'),
+      'stale-evidence': t('poslední úspěšný běh gatu je starší než povolené stáří', 'the newest passing gate run is older than the allowed age'),
+      'evidence-age-unknown': t('stáří důkazu nelze zjistit (chybí snímek běhů gatů)', 'the evidence age cannot be established (no gate-run snapshot)'),
+    })[r],
+    age: (iso: string | null) => iso ? t(`poslední úspěšný běh ${iso.slice(0, 10)}`, `last pass ${iso.slice(0, 10)}`) : t('běh nepozorován', 'no run observed'),
   }
 }
 
@@ -57,6 +64,9 @@ function EvidenceList({ refs }: { refs: TraceEvidence[] }) {
               {' '}· {r.gateMode === 'enforced' ? t('blokuje', 'blocking') : r.gateMode === 'advisory' ? t('jen hlásí', 'advisory') : t('nenalezen', 'not found')}
             </span>
           ) : null}
+          {r.kind === 'gate' && r.gateStatus === 'failed'
+            ? <span style={{ color: 'var(--danger-text)' }}> · {t('poslední běh selhal', 'latest run failed')}</span>
+            : r.kind === 'gate' ? <span style={{ color: 'var(--text-tertiary)' }}> · {labels.age(r.lastOkAt ?? null)}</span> : null}
         </li>
       ))}
     </ul>
@@ -74,8 +84,10 @@ function ControlCard({ control }: { control: TraceControl }) {
       </div>
       <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
         {t('Deklarováno', 'Declared')}: {labels.verdict(control.declaredStatus)} · {t('Síla důkazu', 'Evidence strength')}: {labels.level(control.evidenceLevel)}
-        {control.downgradeReason === 'no-machine-evidence'
-          ? <> · <span style={{ color: 'var(--danger-text)' }}>{t('tvrzení nepodpírá žádný strojově opakovaný důkaz', 'no machine-repeated evidence backs the claim')}</span></>
+        {control.maxEvidenceAgeDays ? <> · {t(`max. stáří ${control.maxEvidenceAgeDays} dní`, `max age ${control.maxEvidenceAgeDays} days`)}</> : null}
+        {control.newestEvidenceAt ? <> · {t(`nejnovější důkaz ${control.newestEvidenceAt.slice(0, 10)}`, `newest evidence ${control.newestEvidenceAt.slice(0, 10)}`)}</> : null}
+        {control.downgradeReason
+          ? <> · <span style={{ color: 'var(--danger-text)' }}>{labels.reason(control.downgradeReason)}</span></>
           : null}
       </div>
       <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.5 }}>{control.evidence}</p>
@@ -149,8 +161,8 @@ export default function CompliancePage() {
         <Info size={14} style={{ color: 'var(--info-text)', flexShrink: 0, marginTop: '1px' }} />
         <div style={{ fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
           {t(
-            'Verdikt počítá kód, ne člověk ani AI: kontrola nesmí tvrdit víc, než ukáže její důkaz. Tvrzení „vynuceno“ nebo „částečně“ bez CI gate či workflow se zobrazí jako neověřené. Stránka neprokazuje právní shodu; ukazuje, co platforma deklaruje a čím to dokládá.',
-            'The verdict is computed by code, not by a person or an AI: a control may claim no more than its evidence shows. An "enforced" or "partial" claim with no CI gate or workflow behind it renders as unverified. This page does not establish legal compliance; it shows what the platform declares and what backs it.',
+            'Verdikt počítá kód, ne člověk ani AI: kontrola nesmí tvrdit víc, než ukáže její důkaz. Tvrzení „vynuceno“ nebo „částečně“ bez CI gate, workflow či testu, nebo s důkazem z gatu starším, než kontrola povoluje, se zobrazí jako neověřené. Stránka neprokazuje právní shodu; ukazuje, co platforma deklaruje a čím to dokládá.',
+            'The verdict is computed by code, not by a person or an AI: a control may claim no more than its evidence shows. An "enforced" or "partial" claim with no CI gate, workflow or test behind it, or whose gate evidence is older than the control allows, renders as unverified. This page does not establish legal compliance; it shows what the platform declares and what backs it.',
           )}
         </div>
       </div>
@@ -178,6 +190,8 @@ export default function CompliancePage() {
         <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 12px' }}>
           {t('Snímek k commitu', 'Snapshot as of commit')}: <code>{trace.asOf.commit ?? t('neznámý', 'unknown')}</code>
           {trace.asOf.postureCollectedAt ? <> · {t('signály manifestů', 'manifest signals')} {trace.asOf.postureCollectedAt}</> : null}
+          {' · '}{t('běhy gatů', 'gate runs')} {trace.asOf.gateHealthCollectedAt ?? t('nedostupné', 'unavailable')}
+          {trace.asOf.gateHealthCollectedAt && !trace.asOf.gateHealthCurrent ? <span style={{ color: 'var(--warning-text)' }}> ({t('starší než 2 h, nepoužito', 'older than 2 h, not used')})</span> : null}
         </p>
 
         <Tabs<View>
