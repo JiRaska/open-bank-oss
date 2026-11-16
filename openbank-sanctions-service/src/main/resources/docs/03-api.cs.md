@@ -125,6 +125,8 @@ profilu. Jen profil `CUSTOMER` vrací i jména se skóre 0,65–0,85, jako `POTE
 poslat k přezkumu. `PAYMENT` a prověření bez profilu pod 0,85 nehledají, takové jméno tam vyjde
 `CLEAR` — platba zatím nemá stav, ve kterém by na přezkum počkala (#15724).
 
+Pod 0,85 navíc porovnání po jednotlivých částech jména vyřadí kandidáty, kteří sdílí jen jednu část jména (třeba běžné křestní jméno s jiným příjmením). Skóre celého jména 0,85 a vyšší nikdy nesníží: takový kandidát zůstane `HIT` v každém profilu, včetně `CUSTOMER` a monitoringu změn (#16284).
+
 `/api/v1` je zmrazené: všechny tři vstupy odmítá s 400 a prověření vytvořené s nimi přes
 `/api/v1` nelze číst.
 

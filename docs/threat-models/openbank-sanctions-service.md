@@ -301,8 +301,11 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
   (`NameTokenScore.decide`, never raises a score). Fail-closed: a candidate is removed only when
   the structure score is below the review floor; between that floor and a HIT-floor profile's
   search floor the trigram HIT stands, so PAYMENT cannot be softened from BLOCK to REVIEW/CLEAR;
-  and a trigram score at or above the HIT threshold is never removed at all, only held at the
-  caller's search floor, because the part score under-scores some real variants. Particles are
+  and a trigram score at or above the HIT threshold is never removed nor lowered below that
+  threshold on ANY profile, because the part score under-scores some real variants (a short
+  part under the part floor: `Choe Ryong He`/`Choe Ryong Hae`, trigram 0.857, structure 0.67).
+  Until #16258's follow-up such a name was held at CUSTOMER's 0.65 search floor, so a HIT was
+  reported as `POTENTIAL_HIT`. Particles are
   scored both separate and fused (`bin Laden`/`Binladen`, `Abd el Aziz`/`Abdelaziz`).
   **Clearances (STRIDE-E):** an analyst's `WHITELISTED` decision used to cover every match
   identity on the check, and a jurisdiction match was identified by list and country only — so
