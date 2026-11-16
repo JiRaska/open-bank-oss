@@ -227,6 +227,8 @@ mp:
     # same shape as sca-service and delegation-service. Local/test fixtures speak plain HTTP.
     tls:
       party-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -239,6 +241,8 @@ mp:
       # account-service's private-CA mTLS listener (8443), for the #3413 party-resolution sweep.
       # Same client certificate (aml-internal-tls): both listeners trust the one private CA.
       account-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:

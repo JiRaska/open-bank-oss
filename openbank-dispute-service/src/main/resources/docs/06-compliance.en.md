@@ -39,6 +39,10 @@
 
 No data leaves the EU/EEA region.
 
+### Tamper-evident evidence chain (ADR-0117)
+
+Each evidence entry is chained by hashing its identity, the previous entry's hash and its `submittedAt` timestamp. The timestamp enters the hash in **round-trip-canonical form** — the UTC instant truncated to microseconds, which is exactly what the Postgres `TIMESTAMPTZ` column stores and returns. Hashing the application-side `OffsetDateTime.toString()` verbatim is a latent defect: nanosecond precision and a `+01:00`/`+02:00` offset do not survive a database round trip, so `GET /api/v1/disputes/{id}/evidence/verify` would recompute a different hash and report an intact chain as broken. Canonicalising at record time keeps the chain verifiable over the real persistence path (#16473).
+
 ### Retention (Art. 5(1)(e))
 
 | Record | Retention |

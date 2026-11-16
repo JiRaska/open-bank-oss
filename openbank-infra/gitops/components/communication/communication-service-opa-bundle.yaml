@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: communication-service
     app.kubernetes.io/part-of: communication
   annotations:
-    openbank.tech/policy-checksum: "50f7c042c28b68ad"
+    openbank.tech/policy-checksum: "09c533029d501b4a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1916,6 +1916,7 @@ data:
       - product.explain
       write_proposal:
       - draft.ticket
+      - propose.aml.decision
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1945,6 +1946,7 @@ data:
         - query.disputes.readonly
         - query.observability.readonly
         - flags.write
+        - propose.aml.decision
         deny:
         - money.*
         - gh.pr.*

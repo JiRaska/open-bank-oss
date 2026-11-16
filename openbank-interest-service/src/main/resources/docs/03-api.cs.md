@@ -109,7 +109,8 @@ Resources aktuálně překládají doménová selhání na generické tělo:
 | 401 | chybějící / neplatný token |
 | 403 | chybí role pro endpoint |
 | 404 | konfigurace sazby / odvod nenalezen |
-| 500 | doménové selhání (recovered na `{error: ...}`) — např. žádná aktivní sazba, žádné accrualy ke kapitalizaci |
+| 422 | pro požadovaný accrual se nenašla žádná aktivní sazba — volající musí nejdřív sazbu nakonfigurovat (`RateConfigNotFound`); viz `InterestAccrualCapitalizationE2E` |
+| 500 | doménové selhání (recovered na `{error: ...}`) — např. žádné accrualy ke kapitalizaci |
 
 > Jednotné RFC-9457 problem-detail tělo (`openbank-libs.api.ApiError`) je platformový směr; tato služba ve v1 používá jednodušší tvar `{error}`.
 

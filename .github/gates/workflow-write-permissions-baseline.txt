@@ -45,6 +45,8 @@ dependabot-verification-metadata-push.yml|job:push|pull-requests
 dependency-submission.yml|job:raise-issue|issues
 # ADR-0361 drill: OIDC to a role that reads one SSM parameter (schedule/dispatch only); issues to post on #14163.
 deception-drill.yml|job:drill|id-token
+# Opens/refreshes one tracking issue on a CT/CAA finding or an unverifiable CT source (#16292).
+ct-caa-watch.yml|job:watch|issues
 # Opens/refreshes one tracking issue per class when a CI credential or apt pin needs action (#15483).
 date-driven-expiry-watch.yml|job:apt-pins|issues
 date-driven-expiry-watch.yml|job:credentials|issues

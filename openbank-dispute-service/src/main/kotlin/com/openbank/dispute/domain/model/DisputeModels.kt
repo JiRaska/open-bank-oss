@@ -79,8 +79,9 @@ data class DisputeEvidence(
     /** The [recordHash] of the previous evidence item for this dispute, or the chain genesis
      * constant for the first item. Stamped by the application layer. */
     val prevHash: String? = null,
-    /** SHA-256 over `(prevHash, disputeId, sequence, submittedBy, evidenceType, description,
-     * fileReference, submittedAt)` — see `EvidenceChain.recordHash`. Stamped by the application
+    /** SHA-256 over `(prevHash, disputeId, sequence, id, submittedBy, evidenceType, description,
+     * fileReference, submittedAt)` — see `EvidenceChain.recordHash`; the timestamp enters in
+     * round-trip-canonical form (UTC instant, microsecond precision). Stamped by the application
      * layer; never recomputed on read except by the verify endpoint. */
     val recordHash: String? = null,
 )

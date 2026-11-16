@@ -10,7 +10,7 @@ the money path; the `deny` tool tier (`money.transfer`, `money.post.ledger`, `gh
 `gh.pr.approve`, `secrets.read.raw`) is hard-forbidden for every charter.
 
 - **Status:** Draft (first pass; opened with the ADR-0031 D3 identity-binding change)
-- **Last reviewed:** 2026-10-24 (merge-execution evidence boundary)
+- **Last reviewed:** 2026-11-15 (AML decision proposal tool)
 - **Owner:** agent-service CODEOWNERS
 - **Related ADRs:** ADR-0031 (AI agent governance — this service), ADR-0080 (security hardening /
   pentest follow-ups), ADR-0034 (unified OPA authz), ADR-0002 (hexagonal), ADR-0008 (OTel),
@@ -269,6 +269,18 @@ browser-provider hiding and the unchanged client-credentials fallback.
   yet — that is a separate, later decision (registry entry + ADR-0148 evals), not this change.
 
 ## 4. Change log
+
+- **2026-11-15 (AML false-positive triage):** New MCP tool `aml_propose_case_decision`, capability
+  `propose.aml.decision` (tier `write_proposal`), granted to the `compliance-officer` charter only.
+  It reads the case through the existing `aml_get_case` path, refuses an unknown target status, a
+  closed case, a no-op transition or a rationale under 10 characters, and queues an agent-service
+  HITL proposal. **No new trust boundary and no new upstream grant:** agent-service holds no AML
+  write client, aml-service is not called with a write, and `shared_m2m_matrix_write_grants` is
+  unchanged. **STRIDE-E:** an injected prompt can at most create a proposal; the AML decider of
+  record stays the authenticated human who approves and records it (aml-service `decidedBy`), and
+  held-payment / monitoring cases keep their own four-eyes flows (ADR-0374). **STRIDE-R:** every
+  call is audited as `agent.mcp.tool_exec` with the charter model id; the proposal carries the
+  agent's rationale. `ui-assistant` is not granted the capability (FIND-S4-05). Rollback: revert.
 
 - **2026-11-11 (#15758 item 5):** `AgentPolicyGate` fails closed when the policy decision point errors in
   `block` mode (EU AI Act Art. 14). New outcome `pdp_unavailable_denied`. Rollback: revert the commit.

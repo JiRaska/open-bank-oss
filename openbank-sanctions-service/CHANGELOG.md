@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.21.1...sanctions-service-v0.21.2) (2026-11-15)
+
+
+### Bug Fixes
+
+* **sanctions:** never demote a whole-name HIT on token structure ([#16284](https://github.com/JiRaska/open-bank-oss/issues/16284)) ([a7b2cfb](https://github.com/JiRaska/open-bank-oss/commit/a7b2cfb02a51b10b44b0f79ca0a21c7b324e2702))
+
 ## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.21.0...sanctions-service-v0.21.1) (2026-11-15)
 
 

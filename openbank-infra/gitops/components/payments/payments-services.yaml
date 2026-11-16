@@ -42,7 +42,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-transaction-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "7e8e1682f3461947" # transaction-opa-bundle
+        openbank.tech/policy-checksum: "0d1691f385c5e6d2" # transaction-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -69,6 +69,10 @@ spec:
             # migrations; same shape as account-service's and ledger-service's 8443 listeners.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
@@ -424,7 +428,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-payment-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "5c085573ed836ba2"
+        openbank.tech/policy-checksum: "084c2dc76f970e23"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -451,7 +455,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-2b7f5173@sha256:4eff6d29c763005b3d2a62fc06468d953d98bd2e1379960f1c59d0cd1cfc3bf9
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-44fff644@sha256:9fba769ef8ab40d6830fc46c7fc6aba07d6a9537cc1e6d557389c3158d02d8d6
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -827,7 +831,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-domestic-payment-opa-bundle.sh via the trailing marker
         # comment (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "ba90cb9967a1e0a5" # domestic-payment-opa-bundle
+        openbank.tech/policy-checksum: "e7d7799fc0fa1898" # domestic-payment-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -853,6 +857,10 @@ spec:
           env:
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: "/mnt/internal-tls/tls.crt"
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: "/mnt/internal-tls/tls.key"
             - name: QUARKUS_HTTP_SSL_PORT
@@ -1230,7 +1238,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-instant-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "824f6de7450d7f40"
+        openbank.tech/policy-checksum: "e204b1879ce2dcc2"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1243,7 +1251,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-2b7f5173@sha256:b38fdba07224e8c35c1412d7534a91cb14766979d8137085732115cb57b3076a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-44fff644@sha256:2395a1f1b1e7f24dd52cbc48dfcc940813440dba4539aa0412829f8677576e69
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1571,7 +1579,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-clearing-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "e1e7c02eabad5634" # clearing-opa-bundle
+        openbank.tech/policy-checksum: "48adee195378f7be" # clearing-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1582,7 +1590,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-548fa683@sha256:c7b9dd80cfba44398edcec7b264fd3eddb104c67f7dff8e0c431e63c9bf4ce4a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-44fff644@sha256:5119d729a791b3083ad38d6a9193d7b4cf85af261a825bb6c2e19d30d9c720e6
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1902,7 +1910,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (ADR-0034). Value is stamped by
         # gen-standing-order-opa-bundle.sh — do not hand-edit.
-        openbank.tech/policy-checksum: "5f59f981dc940afa" # standing-order-opa-bundle
+        openbank.tech/policy-checksum: "a9cc37bd33abe302" # standing-order-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1925,6 +1933,10 @@ spec:
           env:
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: "/mnt/internal-tls/tls.crt"
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: "/mnt/internal-tls/tls.key"
             - name: QUARKUS_HTTP_SSL_PORT
@@ -2217,7 +2229,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-issuance-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "7217316a3caf46d7"
+        openbank.tech/policy-checksum: "cf0728b16468e474"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2517,7 +2529,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-processing-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "4b65d924c247df78"
+        openbank.tech/policy-checksum: "9a35f9b23c9ca719"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2787,7 +2799,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-settlement-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "555399879627118c" # settlement-opa-bundle
+        openbank.tech/policy-checksum: "9306ab5028d9f67c" # settlement-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -3259,7 +3271,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-swift-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "b83be68c95530531"
+        openbank.tech/policy-checksum: "293c58679656d9c1"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -3601,7 +3613,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-vop-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "fa4998e199fbcbd7"
+        openbank.tech/policy-checksum: "54fa5871fae6a688"
     spec:
       securityContext:
         runAsNonRoot: true
