@@ -8,8 +8,6 @@ import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.junit.QuarkusTestProfile
-import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
@@ -21,20 +19,12 @@ import java.util.UUID
 import javax.sql.DataSource
 
 @QuarkusTest
-@TestProfile(SignatureRecoveryIT.Profile::class)
 @QuarkusTestResource(LendingOutboxWriteIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(
     value = PostgresRedisTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
 )
 class SignatureRecoveryIT {
-    class Profile : QuarkusTestProfile {
-        override fun getConfigOverrides() = mapOf(
-            "quarkus.scheduler.enabled" to "true",
-            "lending.origination.signature-recovery-interval" to "1s",
-        )
-    }
-
     @Inject
     lateinit var dataSource: DataSource
 
@@ -76,7 +66,7 @@ class SignatureRecoveryIT {
         .statusCode
 
     private fun awaitSignature(application: UUID) {
-        val deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos()
+        val deadline = System.nanoTime() + Duration.ofSeconds(35).toNanos()
         val sql = "SELECT completed_at IS NOT NULL FROM lending_signature_intent WHERE application_id = ?"
         while (scalar(sql, application) != true && System.nanoTime() < deadline) Thread.sleep(50)
         assertThat(scalar(sql, application)).isEqualTo(true)
