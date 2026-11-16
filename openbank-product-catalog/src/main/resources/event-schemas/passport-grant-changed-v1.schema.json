@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Passport grant change v1 payload",
+  "type": "object",
+  "required": ["grantId", "version", "state", "bankId", "establishmentId", "hostCountry", "mode", "offeringId", "channel", "customerSegment", "packSetDigest", "effectiveFrom", "effectiveUntil"],
+  "properties": {
+    "grantId": {"type": "string", "format": "uuid"},
+    "version": {"type": "integer", "minimum": 1},
+    "state": {"enum": ["PROPOSED", "APPROVED", "REVOKED"]},
+    "bankId": {"type": "string", "format": "uuid"},
+    "establishmentId": {"type": "string", "format": "uuid"},
+    "hostCountry": {"type": "string", "pattern": "^[A-Z]{2}$"},
+    "mode": {"enum": ["FOS", "BRANCH"]},
+    "offeringId": {"type": "string", "format": "uuid"},
+    "channel": {"type": "string"},
+    "customerSegment": {"type": "string"},
+    "packSetDigest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "effectiveFrom": {"type": "string", "format": "date-time"},
+    "effectiveUntil": {"type": "string", "format": "date-time"}
+  }
+}

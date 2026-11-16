@@ -5,16 +5,16 @@
 package com.openbank.lending.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.lending.application.port.out.BorrowerAccountLookupPort
-import com.openbank.lending.application.port.out.BorrowerCreditPort
-import com.openbank.lending.application.port.out.CatalogFosLoanPort
 import com.openbank.lending.application.port.out.CatalogLoanProfile
-import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.application.port.out.FosAction
 import com.openbank.lending.application.port.out.FosRoute
-import com.openbank.lending.application.port.out.LedgerPostingPort
 import com.openbank.lending.domain.model.CatalogLoanSnapshot
+import com.openbank.lending.infrastructure.client.CatalogFosLoanAdapter
+import com.openbank.lending.infrastructure.client.RestCatalogLoanProfilePort
 import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
+import com.openbank.lending.it.TestBorrowerAccountLookupPort
+import com.openbank.lending.it.TestBorrowerCreditPort
+import com.openbank.lending.it.TestRecordingLedgerPostingPort
 import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.libs.market.OfferingMarkets
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
@@ -28,8 +28,6 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.smallrye.mutiny.Uni
 import jakarta.inject.Inject
-import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.sql.ResultSet
 import java.time.Duration
@@ -38,6 +36,8 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.sql.DataSource
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
 
 @QuarkusTest
 @QuarkusTestResource(LendingOutboxWriteIT.InMemoryKafkaResource::class)
@@ -115,7 +115,7 @@ class SignatureRecoveryIT {
     private fun installCatalogue(): Map<UUID, FosAction> {
         val receipts = ConcurrentHashMap<UUID, FosAction>()
         val lostSignatureResponse = AtomicBoolean()
-        val catalogue = mockk<CatalogFosLoanPort>()
+        val catalogue = mockk<CatalogFosLoanAdapter>()
         every { catalogue.resolve(GRANT, PARTY, REVISION) } returns Uni.createFrom().item(ROUTE)
         every { catalogue.admit(any(), any(), PARTY, REVISION) } answers {
             val operation = firstArg<com.openbank.lending.application.port.out.FosOperation>()
@@ -127,8 +127,8 @@ class SignatureRecoveryIT {
                 Uni.createFrom().item(Unit)
             }
         }
-        QuarkusMock.installMockForType(catalogue, CatalogFosLoanPort::class.java)
-        val profiles = mockk<CatalogLoanProfilePort>()
+        QuarkusMock.installMockForType(catalogue, CatalogFosLoanAdapter::class.java)
+        val profiles = mockk<RestCatalogLoanProfilePort>()
         every { profiles.resolvePublished(REVISION.offeringId) } returns Uni.createFrom().item(
             CatalogLoanProfile(
                 REVISION,
@@ -142,7 +142,7 @@ class SignatureRecoveryIT {
                 "INSTALLMENT_LOAN",
             ),
         )
-        QuarkusMock.installMockForType(profiles, CatalogLoanProfilePort::class.java)
+        QuarkusMock.installMockForType(profiles, RestCatalogLoanProfilePort::class.java)
         val guard = mockk<CompliancePackGuard>(relaxed = true)
         every { guard.resolveOriginationPack("SK", "CONSUMER_CREDIT") } returns mockk(relaxed = true)
         QuarkusMock.installMockForType(guard, CompliancePackGuard::class.java)
@@ -151,13 +151,13 @@ class SignatureRecoveryIT {
 
     private fun installCashBackends(): Map<String, LocalDate> {
         val payments = ConcurrentHashMap<String, LocalDate>()
-        val accounts = mockk<BorrowerAccountLookupPort>()
+        val accounts = mockk<TestBorrowerAccountLookupPort>()
         every { accounts.findCurrentAccount(PARTY, "CZK") } returns Uni.createFrom().item(ACCOUNT)
-        QuarkusMock.installMockForType(accounts, BorrowerAccountLookupPort::class.java)
-        val ledger = mockk<LedgerPostingPort>()
+        QuarkusMock.installMockForType(accounts, TestBorrowerAccountLookupPort::class.java)
+        val ledger = mockk<TestRecordingLedgerPostingPort>()
         every { ledger.postConfirmedDisbursement(any()) } returns Uni.createFrom().item(Unit)
-        QuarkusMock.installMockForType(ledger, LedgerPostingPort::class.java)
-        val credit = mockk<BorrowerCreditPort>()
+        QuarkusMock.installMockForType(ledger, TestRecordingLedgerPostingPort::class.java)
+        val credit = mockk<TestBorrowerCreditPort>()
         every { credit.creditOn(any(), ACCOUNT, any(), any()) } answers {
             val date = arg<LocalDate>(3)
             val prior = payments.putIfAbsent(firstArg(), date)
@@ -168,7 +168,7 @@ class SignatureRecoveryIT {
                 Uni.createFrom().item(Unit)
             }
         }
-        QuarkusMock.installMockForType(credit, BorrowerCreditPort::class.java)
+        QuarkusMock.installMockForType(credit, TestBorrowerCreditPort::class.java)
         return payments
     }
 

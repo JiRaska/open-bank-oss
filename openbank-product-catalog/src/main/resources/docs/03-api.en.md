@@ -216,3 +216,16 @@ The legacy-product published-revision response may include `marketCountries` fro
 offering. Account-service uses the field to reject explicitly foreign-only offerings on the
 Czech domestic route. An empty set is legacy unscoped metadata. The field can be null on other
 revision responses. It is distribution metadata, separate from a passport grant.
+
+### Passport grant changes
+
+`GET /api/v2/events` publishes `com.openbank.catalog.passport-grant.changed` version 1 from the
+transaction that writes the grant. Each event contains a full grant snapshot. The first snapshot
+a replica receives can already be approved or revoked, including when bootstrapping existing
+grants. Apply a snapshot only if its version is greater than the version stored for that grant.
+Advance the cursor after all writes for its page commit. A replica is for discovery; the catalogue
+database remains authoritative for new commitments.
+
+Account-service can check an already-consumed permit with
+`POST /api/v2/internal/passport-account-admissions/receipt`. The same bound request used for
+admission returns 204 for an exact receipt and 404 otherwise. The lookup never creates a permit.
