@@ -28,7 +28,6 @@ import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
 import com.openbank.mcp.infrastructure.read.StubMarketingReachPort
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.params.ParameterizedTest
@@ -383,9 +382,6 @@ class McpToolCallFuzzTest {
 
     // -- known deviations (disabled; see PR body) ---------------------------------------------------
 
-    @Disabled(
-        "Deviation F1 (#16628): the unmapped tool name and the unknown method are echoed verbatim into the response, so a 1 MiB name yields a >1 MiB response",
-    )
     @Test
     fun `a megabyte tool name does not amplify into the response`() {
         val h = Harness(mapper)
@@ -394,9 +390,6 @@ class McpToolCallFuzzTest {
         assertThat(violations(h, case)).isEmpty()
     }
 
-    @Disabled(
-        "Deviation F2 (#16628): list_transactions forwards `limit` verbatim - zero, negative, int-overflow-wrapped and enormous values reach the transaction port",
-    )
     @Test
     fun `list_transactions never forwards a non-positive or unbounded limit`() {
         val h = Harness(mapper)
@@ -410,9 +403,6 @@ class McpToolCallFuzzTest {
         assertThat(h.ports.limits).`as`("limits forwarded downstream").allMatch { it in 1..MAX_SANE_LIMIT }
     }
 
-    @Disabled(
-        "Deviation F3 (#16628): argument KEY names are copied unbounded into the audit event, so a 1 MiB key becomes a >1 MiB audit record",
-    )
     @Test
     fun `audit events stay bounded whatever the caller names its arguments`() {
         val h = Harness(mapper)

@@ -18,7 +18,6 @@ import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 
@@ -194,9 +193,6 @@ class McpToolCallWireFuzzIT {
         assertThat(resp.statusCode).isBetween(400, 499)
     }
 
-    @Disabled(
-        "Deviation W1 (#16628): the fleet NUL guard (#5913) hooks the String deserializer, but McpEndpoint binds the body as a JsonNode tree, so U+0000 in any argument is accepted (HTTP 200) and flows to the tool, the downstream request and the audit record",
-    )
     @Test
     fun `a NUL in any argument is refused before the endpoint runs`() {
         val nul = FuzzPayloads.all.first { it.label == "nul" }

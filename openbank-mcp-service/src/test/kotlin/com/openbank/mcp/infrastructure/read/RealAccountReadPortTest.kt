@@ -39,11 +39,15 @@ class RealAccountReadPortTest {
 
     @Test
     fun `listAccounts returns only the granted IBANs, resolved to account records`() {
-        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01", "CZ02"))
+        val consent =
+            FakeConsentValidateClient(
+                valid = true,
+                grantedAccounts = listOf("CZ6508000000192000145399", "CZ3808000000192000145400"),
+            )
         val accounts = accountServiceStub(
             mapOf(
-                "CZ01" to accountJson(A1, "CZ01"),
-                "CZ02" to accountJson(A2, "CZ02"),
+                "CZ6508000000192000145399" to accountJson(A1, "CZ6508000000192000145399"),
+                "CZ3808000000192000145400" to accountJson(A2, "CZ3808000000192000145400"),
             ),
         )
         val port =
@@ -57,8 +61,12 @@ class RealAccountReadPortTest {
 
     @Test
     fun `getBalance resolves the IBAN and returns the balance`() {
-        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"))
-        val accounts = accountServiceStub(mapOf("CZ01" to accountJson(A1, "CZ01")))
+        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ6508000000192000145399"))
+        val accounts = accountServiceStub(
+            mapOf(
+                "CZ6508000000192000145399" to accountJson(A1, "CZ6508000000192000145399"),
+            ),
+        )
         val balances = FakeBalanceServiceClient(
             byAccountId = mapOf(
                 A1 to mapper.createObjectNode().put("available", "100.00"),
@@ -66,16 +74,16 @@ class RealAccountReadPortTest {
         )
         val port = RealAccountReadPort(consent, accounts, balances, FakeTransactionServiceClient(), mapper)
 
-        val result = port.getBalance(ctx, "CZ01")
+        val result = port.getBalance(ctx, "CZ6508000000192000145399")
 
         assertThat(result.path("available").asText()).isEqualTo("100.00")
         assertThat(consent.lastRequest?.requiredScope).isEqualTo(ConsentScopes.BALANCES_READ)
-        assertThat(consent.lastRequest?.accountIban).isEqualTo("CZ01")
+        assertThat(consent.lastRequest?.accountIban).isEqualTo("CZ6508000000192000145399")
     }
 
     @Test
     fun `getBalance denies an account outside the granted scope`() {
-        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"))
+        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ6508000000192000145399"))
         val port = RealAccountReadPort(
             consent,
             accountServiceStub(emptyMap()),
@@ -84,7 +92,7 @@ class RealAccountReadPortTest {
             mapper,
         )
 
-        assertThatThrownBy { port.getBalance(ctx, "CZ99-not-granted") }
+        assertThatThrownBy { port.getBalance(ctx, "CZ8108000000192000145499") }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("not within the granted consent scope")
     }
@@ -100,7 +108,7 @@ class RealAccountReadPortTest {
             mapper,
         )
 
-        assertThatThrownBy { port.getBalance(ctx, "CZ01") }
+        assertThatThrownBy { port.getBalance(ctx, "CZ6508000000192000145399") }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("consent revoked")
     }
@@ -108,11 +116,15 @@ class RealAccountReadPortTest {
     @Test
     fun `a null grantedAccounts (all of the party's accounts) allows any account`() {
         val consent = FakeConsentValidateClient(valid = true, grantedAccounts = null)
-        val accounts = accountServiceStub(mapOf("CZ07" to accountJson(A7, "CZ07")))
+        val accounts = accountServiceStub(
+            mapOf(
+                "CZ4308000000192000145407" to accountJson(A7, "CZ4308000000192000145407"),
+            ),
+        )
         val transactions = FakeTransactionServiceClient(byAccountId = mapOf(A7 to mapper.createArrayNode()))
         val port = RealAccountReadPort(consent, accounts, FakeBalanceServiceClient(), transactions, mapper)
 
-        assertThat(port.listTransactions(ctx, "CZ07", limit = 10)).isNotNull
+        assertThat(port.listTransactions(ctx, "CZ4308000000192000145407", limit = 10)).isNotNull
     }
 
     @Test
@@ -132,7 +144,12 @@ class RealAccountReadPortTest {
 
     @Test
     fun `listConsents reports the presented consent's own live validation`() {
-        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"), frequencyPerDay = 4)
+        val consent =
+            FakeConsentValidateClient(
+                valid = true,
+                grantedAccounts = listOf("CZ6508000000192000145399"),
+                frequencyPerDay = 4,
+            )
         val port = RealAccountReadPort(
             consent,
             accountServiceStub(emptyMap()),

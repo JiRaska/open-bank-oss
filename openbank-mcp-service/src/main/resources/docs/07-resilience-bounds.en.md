@@ -37,3 +37,18 @@ Configured values:
 - `max-size: 20`
 
 
+
+## JSON-RPC input bounds
+
+Every caller-supplied value on `POST /mcp` is bounded before it is reflected, audited or
+forwarded (`McpInputBounds`, #16628):
+
+- U+0000 anywhere in the decoded body (keys or values, any depth) → HTTP 400, JSON-RPC
+  `-32602`, before dispatch. Not audited; logged without the payload.
+- Tool names, unknown methods and invalid ids are echoed at most 64 characters, then
+  `...[truncated]`.
+- `list_transactions.limit`: integer in `1..500`, default `50` when absent; anything else
+  is `-32602`.
+- Audit `argument_keys`: at most 32 keys, each at most 64 characters.
+- `accountId` on `get_balance` / `list_transactions` must be a valid IBAN (shape and
+  mod-97) before consent-service is called; otherwise `-32602`.

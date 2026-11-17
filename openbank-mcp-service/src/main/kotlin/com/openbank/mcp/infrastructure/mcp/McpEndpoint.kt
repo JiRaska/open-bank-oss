@@ -12,6 +12,7 @@ import com.openbank.libs.authz.AuthzQuery
 import com.openbank.libs.authz.PolicyDecisionPoint
 import com.openbank.libs.authz.Principal
 import com.openbank.mcp.application.McpCallAuditor
+import com.openbank.mcp.application.McpInputBounds
 import com.openbank.mcp.application.McpToolRegistry
 import com.openbank.mcp.application.McpUntrustedData
 import com.openbank.mcp.application.PolicyFilteredToolCatalog
@@ -117,6 +118,20 @@ class McpEndpoint(
     @POST
     @Suppress("ReturnCount")
     fun handle(body: JsonNode): Response {
+        // Fleet NUL rule (#5913, #16628): refused before dispatch, so no tool, consent call, metric
+        // tag or audit write ever sees the raw value. The id is echoed only if it is NUL-free.
+        if (McpInputBounds.containsNul(body)) {
+            log.warn("refused JSON-RPC request containing U+0000")
+            val safeId = body.path("id").takeUnless { it.isMissingNode || McpInputBounds.containsNul(it) }
+            return Response.status(Response.Status.BAD_REQUEST)
+                .entity(
+                    McpResponse(
+                        id = safeId ?: NullNode.instance,
+                        error = McpError(McpErrorCode.INVALID_PARAMS, NUL_REFUSED),
+                    ),
+                )
+                .build()
+        }
         val id = body.path("id").let { if (it.isMissingNode) NullNode.instance else it }
         val method = body.path("method").asText("")
         val params = body.path("params")
@@ -139,7 +154,7 @@ class McpEndpoint(
             "ping" -> mapOf("pong" to true)
             "tools/list" -> return handleToolsList(id)
             "tools/call" -> return handleToolCall(id, params)
-            else -> return error(id, McpErrorCode.METHOD_NOT_FOUND, "Method not found: $method")
+            else -> return error(id, McpErrorCode.METHOD_NOT_FOUND, "Method not found: ${McpInputBounds.echo(method)}")
         }
         return Response.ok(McpResponse(id = id, result = result)).build()
     }
@@ -217,11 +232,12 @@ class McpEndpoint(
     @Suppress("ReturnCount")
     private fun handleToolCall(id: JsonNode, params: JsonNode): Response {
         val startedAt = System.nanoTime()
-        val toolName = params.path("name").asText("")
+        // Bounded for every reflection below — response text, audit record and log line (#16628).
+        val toolName = McpInputBounds.echo(params.path("name").asText(""))
         val arguments = params.path("arguments").let { if (it.isMissingNode) mapper.createObjectNode() else it }
         // Argument KEY names only — the values are customer data and must never enter the audit
-        // trail (McpCallAuditor KDoc).
-        val argumentKeys = arguments.fieldNames().asSequence().sorted().toList()
+        // trail (McpCallAuditor KDoc); count and length are bounded (#16628).
+        val argumentKeys = McpInputBounds.auditKeys(arguments)
         // Bounded before it becomes a tag: an unmapped tool name is caller-supplied, so it is
         // reported as the single "unmapped" value rather than as itself (cardinality contract). The
         // audit event still carries the exact name — that is a per-call record, not a label.
@@ -319,7 +335,7 @@ class McpEndpoint(
         // Deny-by-default: no capability mapping ⇒ no OPA action ⇒ refuse.
         if (capability == null) {
             audit(null, McpCallAuditor.Decision.DENY, AuditResult.DENIED, "no capability mapping")
-            return toolError(id, "Tool not permitted: $toolName")
+            return toolError(id, "Tool not permitted: ${McpInputBounds.echo(toolName)}")
         }
 
         // Gate on the SHARED ADR-0034 PDP (input.action = the capability). The principal class
@@ -425,6 +441,8 @@ class McpEndpoint(
     private companion object {
         /** JSON-RPC implementation-defined server error range (-32000..-32099): request throttled. */
         const val RATE_LIMITED = -32029
+
+        const val NUL_REFUSED = "Invalid params: U+0000 is not permitted in any string"
 
         /**
          * The JSON-RPC methods this server implements. Used ONLY to bound the `method` metric tag —

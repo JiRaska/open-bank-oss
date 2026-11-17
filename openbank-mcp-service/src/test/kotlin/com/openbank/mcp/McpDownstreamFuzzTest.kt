@@ -18,7 +18,6 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
@@ -75,9 +74,6 @@ class McpDownstreamFuzzTest {
         assertThat(consentCalls.get()).isEqualTo(1)
     }
 
-    @Disabled(
-        "Deviation F4 (#16628): an invalid paymentId is echoed verbatim into the IllegalArgumentException message that McpEndpoint relays as the JSON-RPC error, so the error grows with the input",
-    )
     @Test
     fun `an invalid paymentId is not reflected into the error message`() {
         val huge = "P".repeat(FuzzPayloads.MEGABYTE)
@@ -91,9 +87,6 @@ class McpDownstreamFuzzTest {
         assertThat(consentCalls.get()).isEqualTo(1)
     }
 
-    @Disabled(
-        "Deviation F5 (#16628): accountId is not syntax-checked before the consent-service call, so IBAN-shaped garbage (incl. 10 KB strings) is shipped downstream",
-    )
     @Test
     fun `an accountId that is not an IBAN never reaches consent-service`() {
         FuzzPayloads.ibanShapedGarbage.forEach { p ->

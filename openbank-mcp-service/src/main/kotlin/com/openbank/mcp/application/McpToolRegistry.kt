@@ -183,7 +183,7 @@ class McpToolRegistry(
                 accounts.listTransactions(
                     ctx,
                     arguments.reqText("accountId"),
-                    arguments.path("limit").asInt(DEFAULT_TX_LIMIT),
+                    McpInputBounds.transactionLimit(arguments.path("limit")),
                 )
             "list_consents" -> accounts.listConsents(ctx)
             "get_statement" -> statements.getStatementSummary(
@@ -209,7 +209,10 @@ class McpToolRegistry(
                 ProposePaymentArgs.validate(arguments)
                 ProposedOnly.enforce(proposals.proposePayment(ctx, arguments))
             }
-            else -> return ToolCallResult(listOf(ToolContent(text = "Unknown tool: $toolName")), isError = true)
+            else -> return ToolCallResult(
+                listOf(ToolContent(text = "Unknown tool: ${McpInputBounds.echo(toolName)}")),
+                isError = true,
+            )
         }
         // Two orthogonal controls, both applied HERE — one response-shaping step every tool passes
         // through, so a new tool cannot forget either of them (#2412).
@@ -232,9 +235,5 @@ class McpToolRegistry(
         put("type", "object")
         put("properties", props)
         if (required.isNotEmpty()) put("required", required)
-    }
-
-    private companion object {
-        const val DEFAULT_TX_LIMIT = 50
     }
 }
