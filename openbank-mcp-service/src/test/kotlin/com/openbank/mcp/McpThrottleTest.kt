@@ -89,7 +89,11 @@ class McpThrottleTest {
     }
 
     private fun agentJwt() = TestJsonWebToken(
-        mapOf("sub" to AGENT_ID, "consent_id" to "11111111-1111-1111-1111-111111111111"),
+        mapOf(
+            "sub" to AGENT_ID,
+            "aud" to "openbank-mcp-service",
+            "consent_id" to "11111111-1111-1111-1111-111111111111",
+        ),
     )
 
     private fun rpc(method: String, params: Map<String, Any?> = emptyMap()): JsonNode =

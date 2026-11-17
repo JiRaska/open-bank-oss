@@ -34,6 +34,35 @@ another hand-written domain map. Redeploy or roll back through the normal signed
 and GitOps workflow. No database migration, consent grant, event replay, capability
 change or payment execution is part of this ownership correction.
 
+## Conformance and fuzz test layers
+
+The module carries two test layers for the MCP surface (issue #16617). Protocol
+conformance (`McpSpecConformanceTest` in process, `McpHttpConformanceIT` over HTTP) checks
+the JSON-RPC envelope, `initialize`, `tools/list` and tool error semantics against the MCP
+specification. Fuzzing (`McpToolCallFuzzTest`, `McpDownstreamFuzzTest` and the wire-level
+`McpToolCallWireFuzzIT`) replays a fixed hostile corpus over every `tools/call` argument:
+NUL, lone surrogates, megabyte strings, deep nesting, wrong JSON types, huge numbers and
+IBAN-shaped garbage. The invariants are no HTTP 500, no stack trace or internal class name,
+a bounded response, and no downstream call for invalid input.
+
+The test JVM heap is set to 2g in the module build because the corpus sends 1 MiB and
+11 MiB bodies; the default worker heap runs out of memory inside the HTTP test client. This
+affects test execution only, not the service image.
+
+Known deviations from the specification are kept as named disabled tests rather than fixed
+here. Input hardening (NUL handling, reflected input, argument bounds) is tracked in #16628;
+specification revision 2026-07-28 and the HTTP authorization behaviour are tracked in #16629.
+
+## Token audience on /mcp
+
+`/mcp` accepts a bearer token only when its `aud` claim contains `openbank-mcp-service` (RFC 8707, ADR-0383 D1, #16622). A token issued for any other resource, or one with no audience, is refused with HTTP 401 and `WWW-Authenticate: Bearer error="invalid_token"` on every JSON-RPC method, before tools are listed or called. A refused `tools/call` is still audited as DENIED with reason `token audience mismatch`, and the `caller_identity` meter counts it as a resolution failure. A call with no token at all is unchanged: it is answered without tools, as before.
+
+The check lives in `McpEndpoint` and again in `CallerContextResolver`, not in `quarkus.oidc.token.audience`. That setting applies to the whole tenant, and `/api/v1/mcp/sessions` is called with the operator's own token, whose audience is not this server.
+
+The only caller in the tree today is admin-ui's OBO route, which exchanges for `audience=openbank-mcp-service` and so already carries it. No realm client mints `agent:` tokens yet; an issuer that starts to must add an audience mapper for `openbank-mcp-service`, or its tokens will get 401.
+
+If the OIDC issuer cannot be reached, Quarkus OIDC fails a presented token with HTTP 500 rather than 401. That is fail-closed (nothing reaches the endpoint) and is left as is here.
+
 ## Throttling and request bounds (ADR-0383)
 
 `McpRateLimiter` runs BEFORE the policy decision, so a flood of calls that would be denied anyway costs no PDP round trip.
