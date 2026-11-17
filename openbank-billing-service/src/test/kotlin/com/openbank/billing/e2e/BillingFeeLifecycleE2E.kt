@@ -25,6 +25,8 @@ import io.restassured.RestAssured.given
 import io.restassured.response.Response
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeout
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.notNullValue
 import org.hamcrest.Matchers.nullValue
@@ -96,6 +98,11 @@ class BillingFeeLifecycleE2E {
             // BillingOutboxAtomicityIT). Port 0 lets the OS assign a free one; Quarkus
             // rewrites the property to the bound port, so RestAssured still finds it.
             "quarkus.http.test-port" to "0",
+            // One event loop: the HTTP requests and the dispatcher's ledger call then always
+            // share a thread, so any fake that BLOCKS that thread (instead of suspending)
+            // hangs the next request deterministically rather than only when the scheduler
+            // happens to pick the same loop as RestAssured's connection.
+            "quarkus.vertx.event-loops-pool-size" to "1",
         )
     }
 
@@ -142,6 +149,11 @@ class BillingFeeLifecycleE2E {
      * The ledger boundary: records every command, returns a deterministic journal id, and
      * blocks the compensating reversal on a latch the test releases once the
      * idempotent-replay assertions have observed REVERSAL_PENDING.
+     *
+     * The hold must SUSPEND, never block: the dispatcher calls this on a Vert.x event loop,
+     * and a parked loop thread cannot serve the HTTP requests the test sends while the
+     * reversal is held — they time out (`SocketTimeoutException`) whenever they land on
+     * the same loop, which is what made this journey flaky on unrelated PRs.
      */
     @Mock
     @ApplicationScoped
@@ -149,7 +161,7 @@ class BillingFeeLifecycleE2E {
         val posted = CopyOnWriteArrayList<FeeJournalCommand>()
         val reversals = CopyOnWriteArrayList<FeeReversalCommand>()
         val reversalRecorded = CountDownLatch(1)
-        val releaseReversal = CountDownLatch(1)
+        val releaseReversal = CompletableDeferred<Unit>()
 
         override suspend fun post(command: FeeJournalCommand): UUID {
             posted.add(command)
@@ -159,7 +171,7 @@ class BillingFeeLifecycleE2E {
         override suspend fun postReversal(command: FeeReversalCommand): UUID {
             reversals.add(command)
             reversalRecorded.countDown()
-            releaseReversal.await(60, TimeUnit.SECONDS)
+            withTimeout(TimeUnit.SECONDS.toMillis(60)) { releaseReversal.await() }
             return UUID.randomUUID()
         }
     }
@@ -288,7 +300,7 @@ class BillingFeeLifecycleE2E {
             .isEqualTo(key)
 
         // Release the held ledger call; the dispatcher completes the flip.
-        ledger.releaseReversal.countDown()
+        ledger.releaseReversal.complete(Unit)
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
         var status: String? = null
         while (System.nanoTime() < deadline) {
