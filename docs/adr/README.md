@@ -387,7 +387,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0380](0380-eu-passporting-common-foundation-and-country-packs.md) | EU passporting through a common foundation and country packs | Accepted | Planned | architecture,compliance,regulatory-reporting,libs | — |
 | [0381](0381-bank-business-planning-and-stress-scenarios.md) | Bank business planning and stress scenarios on shared treasury and risk engines | Proposed | Planned | architecture,admin-ui,regulatory-reporting,analytics | — |
 | [0382](0382-in-cluster-read-only-alertmanager-digest.md) | In-cluster read-only producer for the standing-critical alert digest | Proposed | Planned | observability,security,networking,kubernetes | — |
-| [0383](0383-customer-authorised-mcp-channel-dpop-bound-delegation-layered-throttling-propose-only-writes-confirmed-by-sca-in-the-app.md) | Customer-authorised MCP channel: DPoP-bound delegation, layered throttling, propose-only writes confirmed by SCA in the app | Proposed | Planned | ai-agents,authn,security,payments | — |
+| [0383](0383-customer-authorised-mcp-channel-dpop-bound-delegation-layered-throttling-propose-only-writes-confirmed-by-sca-in-the-app.md) | Customer-authorised MCP channel: DPoP-bound delegation, layered throttling, propose-only writes confirmed by SCA in the app | Proposed | Partial | ai-agents,authn,security,payments | — |
 
 ## By tag
 
