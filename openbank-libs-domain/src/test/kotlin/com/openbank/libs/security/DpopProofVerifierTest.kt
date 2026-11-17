@@ -188,6 +188,12 @@ class DpopProofVerifierTest {
     }
 
     @Test
+    fun `RATE_LIMITED for a key over its quota, distinct from REPLAY_STORE_UNAVAILABLE`() {
+        val overQuota = DpopReplayStore { _, _, _, _ -> ReplayClaim.QUOTA_EXCEEDED }
+        assertThat(run(store = overQuota)).isEqualTo(DpopResult.RATE_LIMITED)
+    }
+
+    @Test
     fun `REPLAY_STORE_UNAVAILABLE is distinct from REPLAYED`() {
         val down = DpopReplayStore { _, _, _, _ -> ReplayClaim.UNAVAILABLE }
         assertThat(run(store = down)).isEqualTo(DpopResult.REPLAY_STORE_UNAVAILABLE)

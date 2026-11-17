@@ -14,10 +14,12 @@ import java.util.PriorityQueue
  *
  * - An entry is live through `now + ttl` INCLUSIVE, and it expires only once the caller's `now` is
  *   strictly after that. Time is the verifier's `now`, never a clock of its own.
- * - Capacity: at most [maxEntries] live entries in total, and at most [maxEntriesPerKey] per `jkt`.
- *   Either limit answers [ReplayClaim.UNAVAILABLE] and never evicts a live entry, because evicting
- *   one would reopen its replay window. The per-key quota stops one key from exhausting the global
- *   cap for everyone else. It does NOT replace a rate limiter, which must run before the claim.
+ * - Capacity: at most [maxEntries] live entries in total ([ReplayClaim.UNAVAILABLE] beyond it) and
+ *   at most [maxEntriesPerKey] per `jkt` ([ReplayClaim.QUOTA_EXCEEDED] beyond it). Neither limit
+ *   evicts a live entry, because evicting one would reopen its replay window.
+ * - The per-key default of 5000 live entries over the default 365 s TTL is a ceiling of about
+ *   13.7 proofs/s sustained per key. It stops ONE key from filling the global cap; many keys still
+ *   can, so a per-(party, client) rate limiter MUST run before the replay claim.
  * - Expired entries leave from the head of an expiry-ordered queue on each call: O(log n) per
  *   entry, no full scan under the lock. [size] is O(1).
  *
@@ -46,7 +48,8 @@ class InMemoryDpopReplayStore(
         evictExpired(now)
         return when {
             live.containsKey(key) -> ReplayClaim.REPLAYED
-            live.size >= maxEntries || (perKey[jkt] ?: 0) >= maxEntriesPerKey -> ReplayClaim.UNAVAILABLE
+            (perKey[jkt] ?: 0) >= maxEntriesPerKey -> ReplayClaim.QUOTA_EXCEEDED
+            live.size >= maxEntries -> ReplayClaim.UNAVAILABLE
             else -> {
                 val entry = Entry(jkt, key, now.plus(ttl))
                 live[key] = entry
@@ -75,6 +78,6 @@ class InMemoryDpopReplayStore(
 
     private companion object {
         const val DEFAULT_MAX_ENTRIES = 100_000
-        const val DEFAULT_MAX_ENTRIES_PER_KEY = 1_000
+        const val DEFAULT_MAX_ENTRIES_PER_KEY = 5_000
     }
 }

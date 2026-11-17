@@ -4885,6 +4885,7 @@ public final class com/openbank/libs/security/DpopResult : java/lang/Enum {
 	public static final field MALFORMED Lcom/openbank/libs/security/DpopResult;
 	public static final field MISSING_PROOF Lcom/openbank/libs/security/DpopResult;
 	public static final field PRIVATE_KEY_IN_JWK Lcom/openbank/libs/security/DpopResult;
+	public static final field RATE_LIMITED Lcom/openbank/libs/security/DpopResult;
 	public static final field REPLAYED Lcom/openbank/libs/security/DpopResult;
 	public static final field REPLAY_STORE_UNAVAILABLE Lcom/openbank/libs/security/DpopResult;
 	public static final field VALID Lcom/openbank/libs/security/DpopResult;
@@ -5057,6 +5058,7 @@ public final class com/openbank/libs/security/PiiMask {
 
 public final class com/openbank/libs/security/ReplayClaim : java/lang/Enum {
 	public static final field FIRST_USE Lcom/openbank/libs/security/ReplayClaim;
+	public static final field QUOTA_EXCEEDED Lcom/openbank/libs/security/ReplayClaim;
 	public static final field REPLAYED Lcom/openbank/libs/security/ReplayClaim;
 	public static final field UNAVAILABLE Lcom/openbank/libs/security/ReplayClaim;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;

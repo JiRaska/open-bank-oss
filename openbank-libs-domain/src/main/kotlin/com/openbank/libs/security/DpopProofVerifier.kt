@@ -32,12 +32,15 @@ enum class DpopResult {
     REPLAYED,
     PRIVATE_KEY_IN_JWK,
 
-    /** The replay store could not answer (full, over a key's quota, or backend down): map to 503. */
+    /** The replay store could not answer (global capacity or backend down): map to 503. */
     REPLAY_STORE_UNAVAILABLE,
+
+    /** This key holds too many live proofs (the store's per-key quota): map to 429, not 503. */
+    RATE_LIMITED,
 }
 
 /** Answer of a [DpopReplayStore] claim. */
-enum class ReplayClaim { FIRST_USE, REPLAYED, UNAVAILABLE }
+enum class ReplayClaim { FIRST_USE, REPLAYED, QUOTA_EXCEEDED, UNAVAILABLE }
 
 /**
  * A DPoP proof JWT after JOSE parsing, before any decision. Produced by a [DpopProofParser]; every
@@ -69,11 +72,13 @@ fun interface DpopProofParser {
 /**
  * `jti` replay port. Shaped for a `SET key 1 NX PX ttl` store: [firstUse] answers
  * [ReplayClaim.FIRST_USE] exactly once per (`jkt`, `jti`) while the entry is live — through
- * `now + ttl` INCLUSIVE — and [ReplayClaim.REPLAYED] after that. A store that cannot answer
- * (capacity, per-key quota, backend down) answers [ReplayClaim.UNAVAILABLE]; never FIRST_USE.
+ * `now + ttl` INCLUSIVE — and [ReplayClaim.REPLAYED] after that. A key over the store's per-key
+ * quota answers [ReplayClaim.QUOTA_EXCEEDED]; a store that cannot answer at all (global capacity,
+ * backend down) answers [ReplayClaim.UNAVAILABLE]. Neither is ever FIRST_USE.
  *
- * Every claim writes an entry, so a caller must rate-limit per client/key BEFORE the replay claim
- * (ADR-0320 P4 rate limit) or a flood of valid fresh proofs fills the store.
+ * Every claim writes an entry, and a per-key quota bounds one key, not many: enough distinct keys
+ * fill any global cap. A per-(party, client) rate limiter MUST therefore run BEFORE the replay
+ * claim (ADR-0320 P4 rate limit; the customer MCP channel's layered throttling, #16590).
  */
 fun interface DpopReplayStore {
     suspend fun firstUse(jkt: String, jti: String, ttl: Duration, now: Instant): ReplayClaim
@@ -175,6 +180,7 @@ class DpopProofVerifier(
         when (replayStore.firstUse(checkNotNull(proof.jwkThumbprint), checkNotNull(proof.jti), policy.replayTtl, now)) {
             ReplayClaim.FIRST_USE -> DpopResult.VALID
             ReplayClaim.REPLAYED -> DpopResult.REPLAYED
+            ReplayClaim.QUOTA_EXCEEDED -> DpopResult.RATE_LIMITED
             ReplayClaim.UNAVAILABLE -> DpopResult.REPLAY_STORE_UNAVAILABLE
         }
 

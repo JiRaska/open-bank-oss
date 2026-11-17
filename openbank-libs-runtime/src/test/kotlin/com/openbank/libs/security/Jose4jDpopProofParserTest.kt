@@ -198,6 +198,30 @@ class Jose4jDpopProofParserTest {
     }
 
     @Test
+    fun `per-key quota surfaces as RATE_LIMITED, other keys unaffected`() {
+        val store = InMemoryDpopReplayStore(maxEntriesPerKey = 1)
+        assertThat(verify(proof(), store = store)).isEqualTo(DpopResult.VALID)
+        assertThat(verify(proof(), store = store)).isEqualTo(DpopResult.RATE_LIMITED)
+        val other = EcJwkGenerator.generateJwk(EllipticCurves.P256)
+        assertThat(verify(proof(key = other), boundJkt = jkt(other), store = store)).isEqualTo(DpopResult.VALID)
+    }
+
+    @Test
+    fun `onCurve is true for a valid P-256 point and false for an off-curve one`() {
+        val valid = ecKey.publicKey as java.security.interfaces.ECPublicKey
+        assertThat(parser.onCurve(valid)).isTrue()
+        val offCurvePoint = java.security.spec.ECPoint(valid.w.affineX, valid.w.affineY.add(java.math.BigInteger.ONE))
+        val offCurve = object : java.security.interfaces.ECPublicKey {
+            override fun getW() = offCurvePoint
+            override fun getParams() = valid.params
+            override fun getAlgorithm() = "EC"
+            override fun getFormat() = "X.509"
+            override fun getEncoded() = ByteArray(0)
+        }
+        assertThat(parser.onCurve(offCurve)).isFalse()
+    }
+
+    @Test
     fun `store exhaustion surfaces as REPLAY_STORE_UNAVAILABLE`() {
         val store = InMemoryDpopReplayStore(maxEntries = 1)
         assertThat(verify(proof(), store = store)).isEqualTo(DpopResult.VALID)

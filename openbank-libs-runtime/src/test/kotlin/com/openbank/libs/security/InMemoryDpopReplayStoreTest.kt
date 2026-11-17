@@ -45,7 +45,7 @@ class InMemoryDpopReplayStoreTest {
     fun `per-key quota rejects the flooding key only`(): Unit = runBlocking {
         val store = InMemoryDpopReplayStore(maxEntries = 100, maxEntriesPerKey = 3)
         repeat(3) { assertThat(store.firstUse("flood", "j$it", ttl, t0)).isEqualTo(ReplayClaim.FIRST_USE) }
-        assertThat(store.firstUse("flood", "j3", ttl, t0)).isEqualTo(ReplayClaim.UNAVAILABLE)
+        assertThat(store.firstUse("flood", "j3", ttl, t0)).isEqualTo(ReplayClaim.QUOTA_EXCEEDED)
         assertThat(store.firstUse("honest", "j0", ttl, t0)).isEqualTo(ReplayClaim.FIRST_USE)
         assertThat(store.firstUse("flood", "j3", ttl, t0.plus(ttl).plusSeconds(1))).isEqualTo(ReplayClaim.FIRST_USE)
     }
@@ -58,5 +58,13 @@ class InMemoryDpopReplayStoreTest {
         assertThat(store.firstUse("k", "x", ttl, t0.plusSeconds(11))).isEqualTo(ReplayClaim.FIRST_USE)
         assertThat(store.size()).isEqualTo(2)
         assertThat(store.firstUse("k", "long", ttl, t0.plusSeconds(11))).isEqualTo(ReplayClaim.REPLAYED)
+    }
+
+    @Test
+    fun `default per-key quota is 5000`(): Unit = runBlocking {
+        val store = InMemoryDpopReplayStore()
+        repeat(5000) { assertThat(store.firstUse("k", "j$it", ttl, t0)).isEqualTo(ReplayClaim.FIRST_USE) }
+        assertThat(store.firstUse("k", "j5000", ttl, t0)).isEqualTo(ReplayClaim.QUOTA_EXCEEDED)
+        assertThat(store.firstUse("other", "j0", ttl, t0)).isEqualTo(ReplayClaim.FIRST_USE)
     }
 }

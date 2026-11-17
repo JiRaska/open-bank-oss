@@ -34,7 +34,9 @@ import java.time.Instant
  *   `htm`/`htu`/`jti`/`ath` or a non-numeric `iat` all parse to `null` (MALFORMED).
  * - The key must suit the algorithm: ES256 needs an on-curve EC P-256 key, PS256 an RSA key of at
  *   least 2048 bits, EdDSA an OKP Ed25519 key (Ed448 is refused). Any mismatch leaves
- *   `signatureValid=false` (BAD_SIGNATURE).
+ *   `signatureValid=false` (BAD_SIGNATURE). The Ed25519-only rule is load-bearing (jose4j would
+ *   verify an Ed448 signature under EdDSA). The RSA-size and the ES256 key-type/curve rules are
+ *   defence in depth: jose4j's own key validation already refuses those keys at verification.
  * - jose4j's algorithm constraints PERMIT only [DpopProofVerifier.ALLOWED_ALGORITHMS] at all times.
  *
  * Never throws: every parse or crypto failure yields `null` or `signatureValid=false`.
@@ -99,8 +101,12 @@ class Jose4jDpopProofParser : DpopProofParser {
         else -> false
     }
 
-    /** y² ≡ x³ + ax + b (mod p): an off-curve point is the invalid-curve attack's input. */
-    private fun onCurve(key: ECPublicKey): Boolean {
+    /**
+     * y² ≡ x³ + ax + b (mod p): an off-curve point is the invalid-curve attack's input. `internal`
+     * so it is unit-tested directly; JDK key factories may already refuse such a point, which would
+     * leave an end-to-end test unable to reach this check.
+     */
+    internal fun onCurve(key: ECPublicKey): Boolean {
         val params = key.params
         val p = (params.curve.field as? ECFieldFp)?.p ?: return false
         val x = key.w.affineX
