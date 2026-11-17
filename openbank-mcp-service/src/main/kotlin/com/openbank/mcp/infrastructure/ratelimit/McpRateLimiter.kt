@@ -5,6 +5,7 @@
 package com.openbank.mcp.infrastructure.ratelimit
 
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
 import java.time.Instant
@@ -49,28 +50,24 @@ import java.util.concurrent.atomic.AtomicLong
  * with N replicas the effective caps are N times the configured values.
  */
 @ApplicationScoped
-class McpRateLimiter {
+class McpRateLimiter @Inject constructor(
+    @ConfigProperty(name = "openbank.mcp.rate-limit.enabled", defaultValue = "true")
+    var enabled: Boolean,
+    @ConfigProperty(name = "openbank.mcp.rate-limit.calls-per-minute", defaultValue = DEFAULT_PER_MINUTE_STR)
+    var callsPerMinute: Int,
+    /** Mirrors the `mcp-anonymous` charter's `limits.runs_per_day` (agents.yaml). */
+    @ConfigProperty(name = "openbank.mcp.rate-limit.calls-per-day", defaultValue = DEFAULT_PER_DAY_STR)
+    var callsPerDay: Int,
+    /** Small shared per-minute budget for requests with no resolvable caller (all of them, together). */
+    @ConfigProperty(name = "openbank.mcp.rate-limit.anonymous-calls-per-minute", defaultValue = DEFAULT_ANON_STR)
+    var anonymousCallsPerMinute: Int,
+    /** Max concurrent in-flight tool calls per caller; the excess is throttled like a burst. */
+    @ConfigProperty(name = "openbank.mcp.rate-limit.max-in-flight", defaultValue = DEFAULT_IN_FLIGHT_STR)
+    var maxInFlight: Int,
+) {
 
     /** Not injected: no `Clock` producer bean exists in this service. Overridden by tests. */
     var clock: Clock = Clock.systemUTC()
-
-    @ConfigProperty(name = "openbank.mcp.rate-limit.enabled", defaultValue = "true")
-    var enabled: Boolean = true
-
-    @ConfigProperty(name = "openbank.mcp.rate-limit.calls-per-minute", defaultValue = DEFAULT_PER_MINUTE_STR)
-    var callsPerMinute: Int = DEFAULT_PER_MINUTE
-
-    /** Mirrors the `mcp-anonymous` charter's `limits.runs_per_day` (agents.yaml). */
-    @ConfigProperty(name = "openbank.mcp.rate-limit.calls-per-day", defaultValue = DEFAULT_PER_DAY_STR)
-    var callsPerDay: Int = DEFAULT_PER_DAY
-
-    /** Small shared per-minute budget for requests with no resolvable caller (all of them, together). */
-    @ConfigProperty(name = "openbank.mcp.rate-limit.anonymous-calls-per-minute", defaultValue = DEFAULT_ANON_STR)
-    var anonymousCallsPerMinute: Int = DEFAULT_ANON
-
-    /** Max concurrent in-flight tool calls per caller; the excess is throttled like a burst. */
-    @ConfigProperty(name = "openbank.mcp.rate-limit.max-in-flight", defaultValue = DEFAULT_IN_FLIGHT_STR)
-    var maxInFlight: Int = DEFAULT_IN_FLIGHT
 
     private val counters = ConcurrentHashMap<String, AtomicLong>()
     private val inFlight = ConcurrentHashMap<String, Int>()
@@ -167,6 +164,15 @@ class McpRateLimiter {
     val inFlightReason: String get() = "too many concurrent calls"
 
     companion object {
+        /** The documented defaults, for code that builds a limiter outside CDI (tests). */
+        fun withDefaults() = McpRateLimiter(
+            enabled = true,
+            callsPerMinute = DEFAULT_PER_MINUTE,
+            callsPerDay = DEFAULT_PER_DAY,
+            anonymousCallsPerMinute = DEFAULT_ANON,
+            maxInFlight = DEFAULT_IN_FLIGHT,
+        )
+
         /**
          * A judgement call with no production traffic behind it — tune from the tool-call metrics,
          * not from taste. An agent answering one user question makes single-digit tool calls; 60/min

@@ -41,7 +41,7 @@ class McpThrottleTest {
     private val mapper = jacksonObjectMapper()
     private val audit = Recorder()
     private val meters = SimpleMeterRegistry()
-    private val limiter = McpRateLimiter()
+    private val limiter = McpRateLimiter.withDefaults()
     private val accounts = mockk<AccountReadPort>(relaxed = true).also {
         every { it.listAccounts(any()) } returns mapper.createArrayNode()
     }

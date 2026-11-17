@@ -14,7 +14,7 @@ class McpRateLimiterTest {
 
     private val start = Instant.parse("2026-07-26T10:00:00Z")
 
-    private fun limiterAt(now: Instant) = McpRateLimiter().apply {
+    private fun limiterAt(now: Instant) = McpRateLimiter.withDefaults().apply {
         clock = Clock.fixed(now, ZoneOffset.UTC)
     }
 
@@ -55,7 +55,7 @@ class McpRateLimiterTest {
 
     @Test
     fun `disabling the limiter is an explicit config choice, not the default`() {
-        assertThat(McpRateLimiter().enabled).isTrue()
+        assertThat(McpRateLimiter.withDefaults().enabled).isTrue()
 
         val limiter = limiterAt(start)
         limiter.enabled = false
