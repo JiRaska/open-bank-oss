@@ -3255,7 +3255,7 @@ class CustomerEdgeResource(
         val id = runCatching { UUID.fromString(paymentId) }.getOrNull()
             ?: return notFound("Payment not found")
         val resp = upstream.get("$domesticPaymentServiceUrl/api/v1/domestic-payments/$id", customer.partyId.toString())
-        if (resp.status in 502..504) {
+        if (resp.status in Response.Status.BAD_GATEWAY.statusCode..Response.Status.GATEWAY_TIMEOUT.statusCode) {
             return Response.status(Response.Status.SERVICE_UNAVAILABLE)
                 .type(MediaType.APPLICATION_JSON)
                 .entity(mapOf("error" to "Payment status temporarily unavailable"))
