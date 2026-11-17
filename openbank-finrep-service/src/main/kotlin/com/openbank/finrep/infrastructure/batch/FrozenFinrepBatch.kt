@@ -8,6 +8,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.F0101Mapper
 import com.openbank.finrep.domain.model.FinrepTemplate
+import com.openbank.libs.domain.booking.BookingOperatingMode
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
@@ -15,11 +16,7 @@ import java.security.MessageDigest
 import java.time.LocalDate
 import java.util.HexFormat
 
-internal enum class OperatingMode {
-    DOMESTIC,
-    FOS,
-    BRANCH,
-}
+internal typealias OperatingMode = BookingOperatingMode
 
 internal data class ReportingScope(
     val contextId: String,

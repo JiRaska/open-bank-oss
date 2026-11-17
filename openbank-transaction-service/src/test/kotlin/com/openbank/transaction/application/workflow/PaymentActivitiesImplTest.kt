@@ -4,6 +4,7 @@
 
 package com.openbank.transaction.application.workflow
 
+import com.openbank.libs.domain.booking.BookingOperatingMode
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.transaction.application.port.out.BalanceCoverPort
@@ -165,7 +166,7 @@ class PaymentActivitiesImplTest {
     @ParameterizedTest
     @ValueSource(strings = ["DOMESTIC", "FOS", "BRANCH"])
     fun `postJournal uses the attributed ledger endpoint`(modeName: String): Unit = runBlocking {
-        val mode = AccountBookingContext.Mode.valueOf(modeName)
+        val mode = BookingOperatingMode.valueOf(modeName)
         val tx = transaction(sourceAccountId = UUID.randomUUID())
         val receipt = AccountBookingContext(
             schemaVersion = 1,
@@ -173,7 +174,7 @@ class PaymentActivitiesImplTest {
             legalEntityId = UUID.randomUUID(),
             bookingBookId = UUID.randomUUID(),
             operatingMode = mode,
-            establishmentId = UUID.randomUUID().takeIf { mode == AccountBookingContext.Mode.BRANCH },
+            establishmentId = UUID.randomUUID().takeIf { mode == BookingOperatingMode.BRANCH },
         )
         val journalId = UUID.randomUUID()
         val request = slot<BookedJournalRequest>()

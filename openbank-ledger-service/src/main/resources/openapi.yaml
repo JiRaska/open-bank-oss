@@ -380,6 +380,13 @@ paths:
       summary: Post an attributed journal from the transaction workload
       operationId: postBookedJournal
       parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must match journal.idempotencyKey; reused for retries.
+          schema:
+            type: string
+            minLength: 1
         - name: x-openbank-synthetic
           in: header
           required: false

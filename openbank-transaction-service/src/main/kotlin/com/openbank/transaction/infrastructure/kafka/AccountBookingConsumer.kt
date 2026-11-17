@@ -2,6 +2,7 @@
 
 package com.openbank.transaction.infrastructure.kafka
 
+import com.openbank.libs.domain.booking.BookingOperatingMode
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.messaging.EventRetry
@@ -97,10 +98,9 @@ internal data class AccountBookingContext(
     val contextVersionId: UUID,
     val legalEntityId: UUID,
     val bookingBookId: UUID,
-    val operatingMode: Mode,
+    val operatingMode: BookingOperatingMode,
     val establishmentId: UUID?,
 ) {
-    enum class Mode { DOMESTIC, FOS, BRANCH }
 }
 
 internal fun parseAccountBookingContext(node: JsonNode): AccountBookingContext {
@@ -108,9 +108,9 @@ internal fun parseAccountBookingContext(node: JsonNode): AccountBookingContext {
     require(node.isObject && version.isIntegralNumber && version.canConvertToInt() && version.intValue() == 1) {
         "Unsupported account booking context schema"
     }
-    val mode = AccountBookingContext.Mode.valueOf(node.path("operatingMode").asText())
+    val mode = BookingOperatingMode.valueOf(node.path("operatingMode").asText())
     val establishmentId = node.get("establishmentId")?.takeUnless(JsonNode::isNull)?.asText()?.let(UUID::fromString)
-    require((mode == AccountBookingContext.Mode.BRANCH) == (establishmentId != null)) {
+    require((mode == BookingOperatingMode.BRANCH) == (establishmentId != null)) {
         "Branch mode and establishment identifier must agree"
     }
     return AccountBookingContext(

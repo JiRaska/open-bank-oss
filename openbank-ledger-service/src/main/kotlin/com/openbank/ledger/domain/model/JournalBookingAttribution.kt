@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.ledger.domain.model
 
+import com.openbank.libs.domain.booking.BookingOperatingMode
 import java.util.UUID
 
 /** Immutable reference to the approval version applicable when the journal was booked. */
@@ -17,8 +18,4 @@ data class JournalBookingAttribution(
     }
 }
 
-enum class JournalBookingMode {
-    DOMESTIC,
-    FOS,
-    BRANCH,
-}
+typealias JournalBookingMode = BookingOperatingMode

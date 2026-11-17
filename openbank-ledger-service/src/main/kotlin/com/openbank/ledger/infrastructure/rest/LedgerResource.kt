@@ -38,6 +38,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -229,6 +230,7 @@ class LedgerResource(
     @Operation(summary = "Post an attributed journal from the transaction workload")
     suspend fun postBookedJournal(
         request: BookedJournalRequest?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @Context requestContext: ContainerRequestContext,
     ): Response {
         val token = callerIdentity.principal as? JsonWebToken ?: throw ForbiddenException()
@@ -238,6 +240,10 @@ class LedgerResource(
             throw ForbiddenException()
         }
         requireNotNull(request) { "a booked journal body is required" }
+        requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
+        require(idempotencyKey.isNotBlank() && idempotencyKey == request.journal.idempotencyKey) {
+            "Idempotency-Key must match the journal idempotency key"
+        }
         val synthetic = isSynthetic(requestContext)
         val suppliedOrigin = requireNotNull(request.synthetic) { "synthetic is required" }
         if (suppliedOrigin != synthetic) throw ForbiddenException("Journal origin does not match the trusted origin")

@@ -44,6 +44,7 @@ interface LedgerRestClient {
     @Path("/booked")
     fun postBookedJournal(
         request: BookedJournalRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String,
         @HeaderParam(SyntheticTaint.KAFKA_HEADER) taint: String?,
     ): Uni<JournalResponse>
 

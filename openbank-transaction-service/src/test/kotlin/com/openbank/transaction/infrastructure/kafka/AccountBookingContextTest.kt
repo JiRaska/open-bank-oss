@@ -2,6 +2,7 @@
 
 package com.openbank.transaction.infrastructure.kafka
 
+import com.openbank.libs.domain.booking.BookingOperatingMode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.transaction.infrastructure.persistence.repository.singleBookingContext
 import org.assertj.core.api.Assertions.assertThat
@@ -29,7 +30,7 @@ class AccountBookingContextTest {
             UUID.randomUUID(),
             UUID.randomUUID(),
             UUID.randomUUID(),
-            AccountBookingContext.Mode.FOS,
+            BookingOperatingMode.FOS,
             null,
         )
         val b = a.copy(legalEntityId = UUID.randomUUID())

@@ -79,7 +79,17 @@ class LedgerResourceAuthzTest {
             }
         """.trimIndent()
         fun post(payload: String) = given().contentType("application/json")
+            .header("Idempotency-Key", "workflow-$tx-ledger")
             .body(payload).post("/api/v1/journals/booked")
+
+        assertThat(
+            given().contentType("application/json").body(body)
+                .post("/api/v1/journals/booked").statusCode,
+        ).isEqualTo(400)
+        assertThat(
+            given().contentType("application/json").header("Idempotency-Key", "different")
+                .body(body).post("/api/v1/journals/booked").statusCode,
+        ).isEqualTo(400)
 
         val created = post(body)
         assertThat(created.statusCode).describedAs(created.body.asString()).isEqualTo(201)

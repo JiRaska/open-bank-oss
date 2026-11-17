@@ -5,6 +5,7 @@
 package com.openbank.libs.authz
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.security.BoundedBodyHandlers
 import com.openbank.libs.security.HttpExchangeDeadline
 import kotlinx.coroutines.CancellationException
@@ -16,7 +17,6 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
-import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
@@ -84,7 +84,7 @@ class OpaSidecarPolicyDecisionPoint(
 
     private class ExchangeTiming {
         private val start = System.nanoTime()
-        val id: String = UUID.randomUUID().toString()
+        val id: String = Ids.randomId().toString()
         private var exchangeStart: Long? = null
 
         @Volatile
