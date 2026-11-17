@@ -216,3 +216,8 @@ delegace, zmocněnec, účet plátce, částka, měna i `Idempotency-Key` musí 
 `RESERVATION_NOT_RESERVED`, `RESERVATION_MISMATCH` (neutrální) nebo `IDEMPOTENCY_KEY_REUSED`;
 `503 ACCOUNT_AUTHORITY_UNAVAILABLE` lze opakovat. Opakování se stejným klíčem vrátí tutéž platbu.
 Události platby nesou `delegationId` a `reservationId`.
+
+Kontrola oprávnění při vytvoření (ADR-0375 D1) odpoví `409 DELEGATION_AUTHORITY_WITHDRAWN`, když
+byla delegace odvolána nebo už účet nepokrývá. Odmítá jen NOVOU platbu: opakování s klíčem platby,
+která je k rezervaci už navázaná, vrátí tuto platbu, protože peníze odešly ještě za platné delegace.
+Nový klíč proti navázané rezervaci se dál odmítne.

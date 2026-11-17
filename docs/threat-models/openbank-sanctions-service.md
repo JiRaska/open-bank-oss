@@ -10,7 +10,7 @@ ADR-0032 documents the synchronous AML/sanctions screening gate. Reviewed in PR.
 
 - **Status:** Draft (first pass, written alongside the real-feed-registration wiring; §6 added
   with the review-path persistence fix)
-- **Last reviewed:** 2026-10-29
+- **Last reviewed:** 2026-11-16 (agent as four-eyes maker on sanctions.clear)
 - **Owner:** sanctions/AML CODEOWNERS
 - **Related ADRs:** ADR-0002 (hexagonal), ADR-0032 (synchronous AML/sanctions screening gate),
   ADR-0100 (injected Clock, Layer 1 determinism), ADR-0116 (KYC engine — `SANCTIONS_SCREENING`
@@ -217,6 +217,38 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
 | M10 | **A disabled feature read as a working one** | Registration is refused with 503 while disabled; a disabled run reports `DISABLED`, counted apart from `completed`; the registry gauges read NaN until a run has observed the registry | None known |
 
 ## 7. Change log
+
+- **2026-11-16 (#16381):** Trust-boundary change. `POST /api/v3/sanctions/review` (`sanctions.clear`)
+  now admits `ROLE_API` at the `@RolesAllowed` layer so that ONE machine principal,
+  `service-account-openbank-agent`, reaches OPA, which grants it `sanctions.clear` only (rule
+  `service-agent-sanctions-review-maker`), never `sanctions.approval.decide`, `.update` or `.trigger`.
+  Every other `ROLE_API` service-account is still denied by OPA (measured with `opa eval` on the
+  regenerated bundle: agent clear = allow with `four_eyes_required`; agent decide/update/trigger and
+  another service-account's clear = deny). With `AUTHZ_FOUR_EYES_ENFORCE="true"` the agent's review is
+  paused until a distinct human approves it, so the decision of record is the human checker's.
+  **Tampering/EoP risk:** if four-eyes enforcement were switched off, the agent's review would execute
+  directly; pinned by agent-service `AgentMachineGrantCharterAlignmentTest`. v1 `/review` is unchanged
+  (human only). The agent identity may only submit `CLEAR`: `SanctionsResourceV3` answers 403 for any
+  other status from `service-account-openbank-agent`, server-side, independent of the agent tool.
+
+  **ACCEPTED RISK (decided by the owner, 2026-11-16): four-eyes = agent service account as maker +
+  ONE human checker.** The person who instructed the agent can approve that same agent-made review,
+  so a single person can clear a hit. An on-behalf-of binding that refused the instructing person as
+  checker was implemented and reverted: the sandbox has a sole human operator, so it would leave
+  every agent review unapprovable. Rationale for accepting: (1) one human operator in the sandbox;
+  (2) a human remains the final approver of every agent-made clear, nothing executes on the agent's
+  word alone; (3) the agent is limited to `CLEAR` server-side and never holds
+  `sanctions.approval.decide`. **Revisit** before any environment with more than one operator or real
+  customer data: bind the instructing person to the approval and refuse them as its checker.
+  **Guard placement (#16455 review):** `AgentReviewGuard` (a JAX-RS `ReaderInterceptor`) refuses the
+  agent identity while the body is read, BEFORE `@Authorize`: any `newStatus` other than CLEAR, and
+  every request while `authz.four-eyes.enforce` is not `true` (the code default is `false`, so the
+  agent path fails closed without relying on the gitops value). A refused agent request therefore
+  never creates a pending approval; `AgentReviewGuardHttpTest` proves the order over real HTTP (403
+  where reaching the interceptor would have answered 503). The resource repeats both checks at the
+  point of effect. **Reviewer of record:** on an approved agent review, `reviewedBy` is the HUMAN
+  checker who approved it (read from the approval store), and the note records the agent as maker.
+  Rollback: revert.
 
 - **2026-11-14** — **Ongoing monitoring switched on in the sandbox deployment
   (`SANCTIONS_MONITORING_ENABLED=true`).** The surface of section 6b is now live there: the

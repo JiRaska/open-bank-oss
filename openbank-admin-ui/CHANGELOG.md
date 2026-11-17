@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.20.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.19.1...admin-ui-v4.20.0) (2026-11-17)
+
+
+### Features
+
+* **infra:** produce the standing-critical digest in-cluster behind a GET-only Alertmanager relay ([#16557](https://github.com/JiRaska/open-bank-oss/issues/16557)) ([a1c1b84](https://github.com/JiRaska/open-bank-oss/commit/a1c1b8423cc79e5331d8f4302e60ee10114b5518))
+
+
+### Security
+
+* **sanctions:** agent as four-eyes maker on behalf of a person, human checker ([#16455](https://github.com/JiRaska/open-bank-oss/issues/16455)) ([5748892](https://github.com/JiRaska/open-bank-oss/commit/57488924909878bba2957fdf4a787e8dfaedde2b))
+
 ## [4.19.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.19.0...admin-ui-v4.19.1) (2026-11-16)
 
 

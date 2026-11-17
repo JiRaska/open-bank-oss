@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-audit-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "44913c6eb89972b5"
+        openbank.tech/policy-checksum: "bfb98ec092f1ccaa"
     spec:
       serviceAccountName: audit-service
       securityContext:

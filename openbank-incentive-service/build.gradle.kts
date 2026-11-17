@@ -23,6 +23,7 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    testImplementation("org.awaitility:awaitility") // Quarkus BOM; async outbox-dispatch delivery assertions.
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)

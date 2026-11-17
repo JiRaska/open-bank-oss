@@ -1066,6 +1066,9 @@ reservation.
   bound path. The grant state and the account owner come from one lookup, before any write. A
   revoked grant, or one that does not cover the debtor account, is
   `409 DELEGATION_AUTHORITY_WITHDRAWN`, which writes no payment and leaves the reservation PENDING.
+  A retry of a payment already BOUND to the reservation, under the same idempotency key, skips
+  this step and takes the fingerprint-checked replay: revocation refuses the next debit, never
+  the report of one that already committed. A new key against a BOUND reservation is still decided.
   A lookup outage is a retryable `503`, never a refusal.
 
 ## 2026-11-11 - Label key domain rename (no reach change)
