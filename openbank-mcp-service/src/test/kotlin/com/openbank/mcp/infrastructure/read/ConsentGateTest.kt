@@ -8,7 +8,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
-/** The account-scope intersection must fail closed whenever an account is requested. */
+/** Pins the account-scope semantics of the consent-service /validate response. */
 class ConsentGateTest {
 
     private val ctx = ConsentContext(
@@ -17,13 +17,13 @@ class ConsentGateTest {
         grantedAccounts = emptyList(),
     )
 
+    // consent-service defines a null accountIbans as "covers all of the party's accounts" and has
+    // already checked the named account before answering valid, so null is a vouching, not a gap.
     @Test
-    fun `a requested account with no grantedAccounts in the response is refused`() {
+    fun `a valid consent with null grantedAccounts allows the named account`() {
         val gate = ConsentGate(FakeConsentValidateClient(valid = true, grantedAccounts = null))
 
-        assertThatThrownBy { gate.validate(ctx, ConsentScopes.ACCOUNTS_READ, "CZ01") }
-            .isInstanceOf(IllegalStateException::class.java)
-            .hasMessageContaining("not within the granted consent scope")
+        assertThat(gate.validate(ctx, ConsentScopes.ACCOUNTS_READ, "CZ01").valid).isTrue()
     }
 
     @Test

@@ -114,6 +114,18 @@ class McpRateLimiter {
         inFlight.computeIfPresent(agentId) { _, held -> if (held <= 1) null else held - 1 }
     }
 
+    /**
+     * True for the FIRST throttled request of [agentId] (null = the anonymous bucket) in the current
+     * minute, so a flood writes at most one audit row per window per bucket; every request is still
+     * metered by the caller. This keeps a throttled flood from becoming an unbounded audit-write
+     * amplifier.
+     */
+    fun shouldAuditThrottle(agentId: String?): Boolean {
+        val now = Instant.now(clock).epochSecond
+        val key = agentId?.let { "c:$it" } ?: ANONYMOUS_KEY
+        return hit("$key|t|${now / SECONDS_PER_MINUTE}") == 1L
+    }
+
     private fun consume(key: String, perMinute: Int): Outcome {
         if (!enabled) return Outcome.ALLOWED
         val now = Instant.now(clock).epochSecond
@@ -141,7 +153,8 @@ class McpRateLimiter {
         if (counters.size <= MAX_TRACKED_WINDOWS) return
         val liveMinute = "|m|${now / SECONDS_PER_MINUTE}"
         val liveDay = "|d|${now / SECONDS_PER_DAY}"
-        counters.keys.removeIf { !it.endsWith(liveMinute) && !it.endsWith(liveDay) }
+        val liveThrottle = "|t|${now / SECONDS_PER_MINUTE}"
+        counters.keys.removeIf { !it.endsWith(liveMinute) && !it.endsWith(liveDay) && !it.endsWith(liveThrottle) }
     }
 
     enum class Outcome(val reason: String?) {

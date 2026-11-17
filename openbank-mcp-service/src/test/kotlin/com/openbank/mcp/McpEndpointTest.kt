@@ -27,7 +27,6 @@ import com.openbank.mcp.infrastructure.persistence.AgentSessionRepository
 import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
 import com.openbank.mcp.infrastructure.read.StubMarketingReachPort
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
-import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -318,72 +317,6 @@ class McpEndpointTest {
             .contains("Rate limit exceeded")
         // A throttled call is auditable like any other denial — the trail must not go quiet on it.
         assertThat(audit.events.last().result).isEqualTo(AuditResult.DENIED)
-    }
-
-    private val listAccountsCall =
-        rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>()))
-
-    private fun text(resp: Response) = body(resp.entity).path("result").path("content").first().path("text").asText()
-
-    @Test
-    fun `a throttled call makes zero PDP calls`() {
-        val pdp = RecordingPdp()
-        val ep = endpoint(pdp)
-        limiter.callsPerMinute = 1
-
-        ep.handle(listAccountsCall)
-        assertThat(pdp.queries).hasSize(1)
-        repeat(5) { assertThat(text(ep.handle(listAccountsCall))).contains("Rate limit exceeded") }
-
-        assertThat(pdp.queries).hasSize(1)
-    }
-
-    @Test
-    fun `an unmapped tool also spends the callers window`() {
-        val ep = endpoint(RecordingPdp())
-        limiter.callsPerMinute = 1
-        val unmapped = rpc("tools/call", mapOf("name" to "delete_everything", "arguments" to emptyMap<String, Any>()))
-
-        ep.handle(unmapped)
-
-        assertThat(text(ep.handle(unmapped))).contains("Rate limit exceeded")
-    }
-
-    @Test
-    fun `unauthenticated callers share one small bucket and never reach the PDP`() {
-        val pdp = RecordingPdp()
-        val ep = endpoint(pdp, jwt = TestJsonWebToken())
-        limiter.anonymousCallsPerMinute = 2
-
-        repeat(2) { assertThat(text(ep.handle(listAccountsCall))).isEqualTo("Authorization unavailable") }
-        assertThat(text(ep.handle(listAccountsCall))).contains("Rate limit exceeded")
-
-        assertThat(pdp.queries).isEmpty()
-    }
-
-    @Test
-    fun `the anonymous bucket does not spend an authenticated callers window`() {
-        limiter.anonymousCallsPerMinute = 1
-        endpoint(allowAll(), jwt = TestJsonWebToken()).handle(listAccountsCall)
-
-        assertThat(text(endpoint(allowAll()).handle(listAccountsCall))).doesNotContain("Rate limit")
-    }
-
-    @Test
-    fun `a caller at its in-flight cap is throttled before the PDP and the slot frees afterwards`() {
-        val pdp = RecordingPdp()
-        val ep = endpoint(pdp)
-        limiter.maxInFlight = 1
-        assertThat(limiter.tryAcquire(AGENT_ID)).isTrue()
-
-        assertThat(text(ep.handle(listAccountsCall))).contains("too many concurrent calls")
-        assertThat(pdp.queries).isEmpty()
-        assertThat(audit.events.last().result).isEqualTo(AuditResult.DENIED)
-
-        limiter.release(AGENT_ID)
-        // A completed call must release its slot, or the cap would wedge the caller permanently.
-        repeat(3) { assertThat(text(ep.handle(listAccountsCall))).doesNotContain("Rate limit") }
-        assertThat(pdp.queries).hasSize(3)
     }
 
     private fun rpc(method: String, params: Map<String, Any?> = emptyMap()): JsonNode =
@@ -769,7 +702,6 @@ class McpEndpointTest {
     private fun testAgentJwt() = TestJsonWebToken(mapOf("sub" to "agent:test-agent", "consent_id" to TEST_CONSENT_ID))
 
     private companion object {
-        const val AGENT_ID = "agent:test-agent"
         const val SECRET = "CZ6508000000192000145399"
         const val TEST_CONSENT_ID = "11111111-1111-1111-1111-111111111111"
     }

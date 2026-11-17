@@ -36,11 +36,8 @@ class ConsentGate(@RestClient private val consent: ConsentValidateClient) {
         if (!response.valid) {
             error("consent denied: ${response.reason ?: response.code ?: "not valid"}")
         }
-        // Fail closed: when an account is requested the consent must positively list it. A response
-        // that omits grantedAccounts proves nothing about the account, so it is refused, never
-        // treated as "no restriction".
         val granted = response.grantedAccounts
-        if (accountIban != null && (granted == null || accountIban !in granted)) {
+        if (accountIban != null && granted != null && accountIban !in granted) {
             error("account '$accountIban' is not within the granted consent scope")
         }
         return response

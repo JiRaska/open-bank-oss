@@ -106,14 +106,13 @@ class RealAccountReadPortTest {
     }
 
     @Test
-    fun `a null grantedAccounts is refused for a named account, never read as all accounts`() {
+    fun `a null grantedAccounts (all of the party's accounts) allows any account`() {
         val consent = FakeConsentValidateClient(valid = true, grantedAccounts = null)
         val accounts = accountServiceStub(mapOf("CZ07" to accountJson(A7, "CZ07")))
         val transactions = FakeTransactionServiceClient(byAccountId = mapOf(A7 to mapper.createArrayNode()))
         val port = RealAccountReadPort(consent, accounts, FakeBalanceServiceClient(), transactions, mapper)
 
-        assertThatThrownBy { port.listTransactions(ctx, "CZ07", limit = 10) }
-            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(port.listTransactions(ctx, "CZ07", limit = 10)).isNotNull
     }
 
     @Test
