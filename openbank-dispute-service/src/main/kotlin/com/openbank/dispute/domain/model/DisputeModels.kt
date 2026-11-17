@@ -79,10 +79,16 @@ data class DisputeEvidence(
     /** The [recordHash] of the previous evidence item for this dispute, or the chain genesis
      * constant for the first item. Stamped by the application layer. */
     val prevHash: String? = null,
-    /** SHA-256 over `(prevHash, disputeId, sequence, submittedBy, evidenceType, description,
-     * fileReference, submittedAt)` — see `EvidenceChain.recordHash`. Stamped by the application
+    /** SHA-256 over `(prevHash, disputeId, sequence, id, submittedBy, evidenceType, description,
+     * fileReference, submittedAt)` — see `EvidenceChain.recordHash`; the timestamp enters in
+     * round-trip-canonical form (UTC instant, microsecond precision). Stamped by the application
      * layer; never recomputed on read except by the verify endpoint. */
     val recordHash: String? = null,
+    /** Canonical hash form [recordHash] was computed under (`EvidenceChain.HASH_VERSION_ID_MICROS`
+     * for every row written since V12). `null` marks a legacy row stamped before the column
+     * existed — kept as stored, never re-stamped, and reported by `EvidenceChain.verify` as
+     * unverifiable rather than verified. The value is itself part of the hashed input. */
+    val hashVersion: Short? = null,
 )
 
 data class DisputeTimelineEvent(
@@ -131,6 +137,10 @@ data class ResolveDisputeRequest(
 data class EvidenceChainVerification(
     val disputeId: UUID,
     val intact: Boolean,
+    /** Items whose [DisputeEvidence.recordHash] was recomputed and matched. */
     val itemsChecked: Int,
     val firstBrokenEvidenceId: UUID? = null,
+    /** Legacy items (no hash version) in the chain's prefix: linkage-checked, content NOT
+     * verified. [intact] never vouches for their content — see `EvidenceChain.verify`. */
+    val legacyItems: Int = 0,
 )

@@ -197,3 +197,12 @@ Re-drive: `submitToScheme` re-enters for a `PROCESSING` payment whose booking cl
 SCT vs SCT_INST: the settlement request carries the distinction in `rail` (`SEPA_CT` / `SEPA_INST`), not only in `description`. No fee rule or scheme report reads it from the booking: billing has no rail-keyed fee, transaction-service decides same-day booking by the payee leg and not by the rail (`SettlementScope`), and clearing-service keeps its own rail enum. On the wire the pacs.008 that `SchemeGatewayAdapter` builds carries `PmtTpInf` as the EPC rulebooks require: `SvcLvl/Cd=SEPA` for both types, plus `LclInstrm/Cd=INST` for `SCT_INST`. The mapping is an exhaustive `when` over `SepaPaymentType`, so a new type must choose its own. The clearing simulator validates the block against the shared XSD and reads it (`ReceivedCreditTransfer.isInstant`), but does not decide on it. Instant payments run on `openbank-sepa-instant`, which sends the same `SEPA` + `INST` block.
 
 Automatic re-settlement: because `submitToScheme` re-enters for a held payment, any Temporal retry of that activity (the workflow allows 3 attempts within 10 minutes, e.g. after a worker restart or a timeout following the PROCESSING write) now calls settlement again on its own. The key stays the same and the value date is pinned to the acceptance date (`booking_first_due_at`), so the request is identical to the first attempt. Each such attempt is counted in `openbank_payment_unsettled_total` if it does not settle.
+
+## Client certificate reload (outbound mTLS)
+
+Every named `quarkus.tls.<name>` configuration that presents a client certificate to a peer's
+8443 listener sets `reload-period: 1h`. cert-manager renews the mounted client certificate
+before it expires; without a reload period the process would keep presenting the old one until
+the peer rejects it, while every expiry signal measured the renewed Secret and read healthy.
+After a renewal the new certificate is in use within an hour, with no restart. The
+`tls-certificate-reload` gate keeps every such configuration covered.

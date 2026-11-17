@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.21.3](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.21.2...sanctions-service-v0.21.3) (2026-11-17)
+
+
+### Security
+
+* **sanctions:** agent as four-eyes maker on behalf of a person, human checker ([#16455](https://github.com/JiRaska/open-bank-oss/issues/16455)) ([5748892](https://github.com/JiRaska/open-bank-oss/commit/57488924909878bba2957fdf4a787e8dfaedde2b))
+
+## [0.21.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.21.1...sanctions-service-v0.21.2) (2026-11-15)
+
+
+### Bug Fixes
+
+* **sanctions:** never demote a whole-name HIT on token structure ([#16284](https://github.com/JiRaska/open-bank-oss/issues/16284)) ([a7b2cfb](https://github.com/JiRaska/open-bank-oss/commit/a7b2cfb02a51b10b44b0f79ca0a21c7b324e2702))
+
+## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.21.0...sanctions-service-v0.21.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **sanctions:** stop a shared given name from matching unrelated listed persons ([#16258](https://github.com/JiRaska/open-bank-oss/issues/16258)) ([4dba082](https://github.com/JiRaska/open-bank-oss/commit/4dba0828e08465f48d5f6be6197921bc49421166))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.20.0...sanctions-service-v0.21.0) (2026-11-14)
+
+
+### Features
+
+* **sanctions:** load FATF jurisdiction statements of October 2026 ([#16097](https://github.com/JiRaska/open-bank-oss/issues/16097)) ([4d7b4eb](https://github.com/JiRaska/open-bank-oss/commit/4d7b4eb09e18df7320e93069832a7f70e6153393))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.19.1...sanctions-service-v0.20.0) (2026-11-13)
 
 

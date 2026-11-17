@@ -1,0 +1,463 @@
+{
+  "events": [
+    {
+      "eventId": "1",
+      "eventTime": "2026-11-13T16:06:45.045Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED",
+      "workflowExecutionStartedEventAttributes": {
+        "workflowType": {
+          "name": "SepaPaymentWorkflow"
+        },
+        "taskQueue": {
+          "name": "sepa-history-recording"
+        },
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSI\u003d"
+            }
+          ]
+        },
+        "workflowExecutionTimeout": "315360000s",
+        "workflowRunTimeout": "315360000s",
+        "workflowTaskTimeout": "10s",
+        "originalExecutionRunId": "c1af6a93-0093-4191-9b67-d086335ffc0c",
+        "identity": "sepa-history-recorder",
+        "firstExecutionRunId": "c1af6a93-0093-4191-9b67-d086335ffc0c",
+        "attempt": 1,
+        "header": {}
+      }
+    },
+    {
+      "eventId": "2",
+      "eventTime": "2026-11-13T16:06:45.045Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "sepa-history-recording"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "3",
+      "eventTime": "2026-11-13T16:06:45.078Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "sepa-history-recorder"
+      }
+    },
+    {
+      "eventId": "4",
+      "eventTime": "2026-11-13T16:06:45.439Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "sepa-history-recorder",
+        "sdkMetadata": {
+          "langUsedFlags": [
+            1
+          ]
+        },
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "5",
+      "eventTime": "2026-11-13T16:06:45.439Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "2a563313-1abc-368f-ac92-368739a9c807",
+        "activityType": {
+          "name": "ScreenPayment"
+        },
+        "taskQueue": {
+          "name": "sepa-history-recording"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSI\u003d"
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "600s",
+        "scheduleToStartTimeout": "600s",
+        "startToCloseTimeout": "600s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "3",
+        "retryPolicy": {
+          "initialInterval": "2s",
+          "backoffCoefficient": 2.0,
+          "maximumInterval": "200s",
+          "maximumAttempts": 3
+        }
+      }
+    },
+    {
+      "eventId": "6",
+      "eventTime": "2026-11-13T16:06:45.470Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "5",
+        "identity": "sepa-history-recorder",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "7",
+      "eventTime": "2026-11-13T16:06:45.841Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IkNMRUFSIg\u003d\u003d"
+            }
+          ]
+        },
+        "scheduledEventId": "5",
+        "startedEventId": "6",
+        "identity": "sepa-history-recorder"
+      }
+    },
+    {
+      "eventId": "8",
+      "eventTime": "2026-11-13T16:06:45.841Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "sepa-history-recording"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "9",
+      "eventTime": "2026-11-13T16:06:45.842Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "8",
+        "identity": "sepa-history-recorder"
+      }
+    },
+    {
+      "eventId": "10",
+      "eventTime": "2026-11-13T16:06:45.860Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "8",
+        "identity": "sepa-history-recorder",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "11",
+      "eventTime": "2026-11-13T16:06:45.860Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "5ac58d2d-25d3-3f93-8af3-9014b7a50f57",
+        "activityType": {
+          "name": "ValidatePayment"
+        },
+        "taskQueue": {
+          "name": "sepa-history-recording"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSI\u003d"
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "600s",
+        "scheduleToStartTimeout": "600s",
+        "startToCloseTimeout": "600s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "9",
+        "retryPolicy": {
+          "initialInterval": "2s",
+          "backoffCoefficient": 2.0,
+          "maximumInterval": "200s",
+          "maximumAttempts": 3
+        }
+      }
+    },
+    {
+      "eventId": "12",
+      "eventTime": "2026-11-13T16:06:45.861Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "11",
+        "identity": "sepa-history-recorder",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "13",
+      "eventTime": "2026-11-13T16:06:45.877Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {},
+        "scheduledEventId": "11",
+        "startedEventId": "12",
+        "identity": "sepa-history-recorder"
+      }
+    },
+    {
+      "eventId": "14",
+      "eventTime": "2026-11-13T16:06:45.877Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "sepa-history-recording"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "15",
+      "eventTime": "2026-11-13T16:06:45.877Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "14",
+        "identity": "sepa-history-recorder"
+      }
+    },
+    {
+      "eventId": "16",
+      "eventTime": "2026-11-13T16:06:45.885Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "14",
+        "identity": "sepa-history-recorder",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "17",
+      "eventTime": "2026-11-13T16:06:45.885Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "ae4c6ec8-9bbd-3074-be96-e41152c5d430",
+        "activityType": {
+          "name": "ShadowFraudScore"
+        },
+        "taskQueue": {
+          "name": "sepa-history-recording"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSI\u003d"
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "600s",
+        "scheduleToStartTimeout": "600s",
+        "startToCloseTimeout": "600s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "15",
+        "retryPolicy": {
+          "initialInterval": "2s",
+          "backoffCoefficient": 2.0,
+          "maximumInterval": "200s",
+          "maximumAttempts": 3
+        }
+      }
+    },
+    {
+      "eventId": "18",
+      "eventTime": "2026-11-13T16:06:45.885Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "17",
+        "identity": "sepa-history-recorder",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "19",
+      "eventTime": "2026-11-13T16:06:45.892Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {},
+        "scheduledEventId": "17",
+        "startedEventId": "18",
+        "identity": "sepa-history-recorder"
+      }
+    },
+    {
+      "eventId": "20",
+      "eventTime": "2026-11-13T16:06:45.892Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "sepa-history-recording"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "21",
+      "eventTime": "2026-11-13T16:06:45.892Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "20",
+        "identity": "sepa-history-recorder"
+      }
+    },
+    {
+      "eventId": "22",
+      "eventTime": "2026-11-13T16:06:45.897Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "20",
+        "identity": "sepa-history-recorder",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "23",
+      "eventTime": "2026-11-13T16:06:45.897Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "353efe1b-745d-3ccd-8faa-5c9887d8dad2",
+        "activityType": {
+          "name": "SubmitToScheme"
+        },
+        "taskQueue": {
+          "name": "sepa-history-recording"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSI\u003d"
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "600s",
+        "scheduleToStartTimeout": "600s",
+        "startToCloseTimeout": "600s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "21",
+        "retryPolicy": {
+          "initialInterval": "2s",
+          "backoffCoefficient": 2.0,
+          "maximumInterval": "200s",
+          "maximumAttempts": 3
+        }
+      }
+    },
+    {
+      "eventId": "24",
+      "eventTime": "2026-11-13T16:06:45.897Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "23",
+        "identity": "sepa-history-recorder",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "25",
+      "eventTime": "2026-11-13T16:06:45.916Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IkNPTVBMRVRFRCI\u003d"
+            }
+          ]
+        },
+        "scheduledEventId": "23",
+        "startedEventId": "24",
+        "identity": "sepa-history-recorder"
+      }
+    },
+    {
+      "eventId": "26",
+      "eventTime": "2026-11-13T16:06:45.916Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "sepa-history-recording"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "27",
+      "eventTime": "2026-11-13T16:06:45.916Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "26",
+        "identity": "sepa-history-recorder"
+      }
+    },
+    {
+      "eventId": "28",
+      "eventTime": "2026-11-13T16:06:45.947Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "26",
+        "identity": "sepa-history-recorder",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "29",
+      "eventTime": "2026-11-13T16:06:45.947Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED",
+      "workflowExecutionCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg\u003d\u003d"
+              },
+              "data": "IkNPTVBMRVRFRCI\u003d"
+            }
+          ]
+        },
+        "workflowTaskCompletedEventId": "27"
+      }
+    }
+  ]
+}

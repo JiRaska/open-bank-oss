@@ -72,4 +72,31 @@ class AgentMachineGrantCharterAlignmentTest {
         ).readText()
         assertThat(interestRego).doesNotContain("service-account-openbank-agent")
     }
+
+    /**
+     * #16381: the agent identity's only sanctions WRITE is `sanctions.clear` as the four-eyes maker.
+     * That is safe only while (a) a charter actually holds the capability the tool needs, (b) the
+     * identity is never granted the checker's verb, and (c) the deployed four-eyes enforcement is on —
+     * with it off the review would execute unapproved, so this test is the guard on that env value.
+     */
+    @Test
+    fun `the sanctions review maker grant is charter-backed, checker-free and four-eyes enforced`() {
+        assertThat(registry.capabilityOf("sanctions_review_check")).isEqualTo("sanctions.review.maker")
+        assertThat(allowedByAnyCharter).contains("sanctions.review.maker")
+
+        val gen = File("../openbank-infra/gitops/components/sanctions-service/gen-sanctions-opa-bundle.sh").readText()
+        val makerRule = gen.substringAfter("allowed_reasons contains \"service-agent-sanctions-review-maker\" if {")
+            .substringBefore("}")
+        assertThat(makerRule).contains("machine_named(\"service-account-openbank-agent\")")
+        assertThat(makerRule).contains("input.action == \"sanctions.clear\"")
+        // Every rule naming the agent identity: none may reach the checker's decide verb.
+        val agentRules = gen.split("allowed_reasons contains").drop(1).map { it.substringBefore("\n}") }
+            .filter { "service-account-openbank-agent\")" in it }
+        assertThat(agentRules).hasSize(2)
+        agentRules.forEach { assertThat(it).doesNotContain("approval.decide").doesNotContain("startswith(") }
+
+        val rollout = File("../openbank-infra/gitops/components/sanctions-service/sanctions-service.yaml").readText()
+        val enforce = Regex("""name: AUTHZ_FOUR_EYES_ENFORCE\s+value: "([^"]*)"""").find(rollout)?.groupValues?.get(1)
+        assertThat(enforce).describedAs("sanctions AUTHZ_FOUR_EYES_ENFORCE").isEqualTo("true")
+    }
 }

@@ -344,16 +344,6 @@
       "p95_seconds": 0.87,
       "max_seconds": 0.97
     },
-    "compliance-matrix": {
-      "n": 30,
-      "p95_seconds": 0.37,
-      "max_seconds": 0.38
-    },
-    "compliance-page-evidence": {
-      "n": 30,
-      "p95_seconds": 2.1,
-      "max_seconds": 2.11
-    },
     "configproperty-kotlin-defaults": {
       "n": 30,
       "p95_seconds": 0.4,

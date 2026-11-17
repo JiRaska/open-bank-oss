@@ -265,6 +265,61 @@ class AgentChatServiceTest {
     }
 
     @Test
+    fun `the oversight sweep is never offered and cannot run the four-eyes maker tool`() {
+        runBlocking {
+            val args = mapper.createObjectNode().put("checkId", "c-1").put("newStatus", "CLEAR")
+            coEvery { gateway.complete(any(), any(), any(), any()) } returnsMany listOf(
+                ModelResponse(
+                    toolInvocations = listOf(ToolInvocation("1", "sanctions_review_check", args)),
+                    stopReason = StopReason.TOOL_USE,
+                    modelId = "mock-echo",
+                ),
+                ModelResponse(content = "done", stopReason = StopReason.END, modelId = "mock-echo"),
+            )
+            val makerRegistry = mockk<McpToolRegistry>(relaxed = true).also {
+                every { it.tools } returns listOf(
+                    ToolDefinition("get_account", "get account", emptyMap()),
+                    ToolDefinition("sanctions_review_check", "maker", emptyMap()),
+                )
+                every { it.capabilityOf("get_account") } returns "query.ledger.readonly"
+                every { it.capabilityOf("sanctions_review_check") } returns "sanctions.review.maker"
+            }
+            val gate = mockk<AgentPolicyGate>()
+            val service = AgentChatService().apply {
+                this.gateway = this@AgentChatServiceTest.gateway
+                this.registry = makerRegistry
+                this.policyGate = gate
+                this.rateLimiter = mockk<CharterRateLimiter>().also {
+                    every { it.checkRunsPerDay(any()) } returns null
+                    every { it.checkTokensPerRun(any(), any()) } returns null
+                }
+                this.charterRegistry = mockk {
+                    every { allowedCapabilities(any()) } returns
+                        setOf("query.ledger.readonly", "sanctions.review.maker")
+                }
+                this.runAuditor = this@AgentChatServiceTest.runAuditor
+                this.injectionGuard = passThroughGuard
+                this.contentSafety = passThroughContentSafety
+                this.killSwitch = noHaltKillSwitch
+            }
+
+            val result = service.run(
+                identity = com.openbank.agent.domain.policy.AgentIdentity("compliance-officer", plane = "control"),
+                systemPrompt = "oversight sweep",
+                history = listOf(ChatMessage(ChatRole.USER, "sweep")),
+                modelId = null,
+                trigger = "oversight_sweep",
+                sensitive = true,
+                proposalExpected = true,
+            )
+
+            assertThat(result.toolCalls.single().allowed).isFalse()
+            assertThat(result.toolCalls.single().resultPreview).contains("not offered")
+            io.mockk.verify(exactly = 0) { makerRegistry.call("sanctions_review_check", any(), any(), any()) }
+        }
+    }
+
+    @Test
     fun `a rate-limited run never touches the model and audits DENIED`() {
         runBlocking {
             val service = AgentChatService().apply {

@@ -161,3 +161,23 @@ takže delegáta z presetu se to nedotkne; mění se případ ručně složenéh
 
 Routa s transakcemi karty tu neexistuje, a proto `CARD_VIEW_TRANSACTIONS` pořád nemá enforcera —
 nemá co hlídat, spíš než že by hlídalo špatně.
+
+### Čtení účtu se řídí stejným pravidlem (ADR-0375 D7)
+
+| čtení | capability, na kterou se ptá |
+|---|---|
+| `GET /accounts/{id}` — záznam účtu | `ACCOUNT_VIEW_DETAILS` |
+| `GET /balances/{id}` | `ACCOUNT_READ_BALANCES` |
+| `GET /accounts/{id}/transactions` | `ACCOUNT_READ_TRANSACTIONS` |
+| `GET /statements/{id}` a render jednoho výpisu | `ACCOUNT_DOWNLOAD_STATEMENTS` |
+
+Detail se do 12. 11. 2026 ptal na `ACCOUNT_READ_BALANCES`, takže záznam účtu byl dosažitelný
+autoritou pro zůstatky. Obě routy s výpisy se ptaly jen na vlastnictví, takže delegát, který
+capability pro výpisy dostal, byl pokaždé odmítnut; teď sdílí jeden helper `mayReadStatements`,
+protože výpis seznamu i render jsou tatáž autorita a dvě kopie téhož testu jsou dvě věci, co se
+rozejdou.
+
+Pozor na asymetrii oproti opravě u karet: **tahle není zadarmo.** Presety „Účetní" a „Pokladník"
+udělují `ACCOUNT_READ_BALANCES` bez `ACCOUNT_VIEW_DETAILS` — a právě proto se do záznamu dostaly.
+Katalog presetů opravuje dopředná migrace; už vystavené granty si nesou, co dostaly, a o detail
+přijdou, dokud je poskytovatel nesdílí znovu.

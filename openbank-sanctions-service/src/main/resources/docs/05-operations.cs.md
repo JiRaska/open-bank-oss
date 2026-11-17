@@ -102,6 +102,24 @@ spuštěném podu a alert restartem nezmizí. Jak jej uzavřít:
    `published_on` a nahrazeným řádkům nastaví `active = false`.
 3. Pokud se nezměnilo, přidej migraci, která jen posune `verified_on` pro daný `source_list`.
 
+#### Seznamy FATF: odkud jsou a kdy je další aktualizace
+
+fatf-gafi.org odmítá automatizované stažení (kontrola botů, kterou se nikdy nepokoušíme obejít).
+V24 proto vychází z **oficiálního vládního převzetí** obou prohlášení z 30. 10. 2026 — prozatímních
+překladů japonského ministerstva financí (URL příloh a SHA-256 v hlavičce V24) — ověřeného proti
+tiskové zprávě amerického FinCEN ze stejného dne. Je to jediná povolená výjimka z pravidla
+„nikdy z druhotného shrnutí": oficiální vládní kopie se zaznamenaným hashem, ověřená druhým
+vládním zdrojem. Řádek šedého seznamu je `RISK_FACTOR` a výsledek prověření nikdy nemění; řádek
+výzvy k akci je `HIGH_RISK` (přezkum), nikdy `EMBARGO`.
+
+- **Alert stáří ověření:** `JurisdictionReferenceDataNotReverified` se pro oba seznamy FATF spustí
+  **13. 4. 2027** (ověřeno 14. 11. 2026 + 150 dní; seznam EU, ověřený 11. 11. 2026, 10. 4. 2027).
+- **Další povinná aktualizace:** po **plenárním zasedání FATF v únoru 2027** — prohlášení čekejte ve
+  druhé polovině února 2027 (okno 15. 2. – 6. 3. 2027; data ověřte v kalendáři FATF). Načtěte je do
+  dvou týdnů od zveřejnění, nejpozději před 13. 4. 2027. Prohlášení z října 2026 uvádí, že FATF
+  zváží protiopatření vůči Myanmaru, pokud do února 2027 nedojde k pokroku — to je změna opatření
+  k posouzení, ne běžné přeověření.
+
 ### Velký backlog přezkumů POTENTIAL_HIT
 
 1. Zkontroluj frontu čekajících: `GET /api/v1/sanctions/pending`

@@ -193,6 +193,23 @@ Events are **append-only**; corrections are made by a new status-changed event, 
 - **Event evolution:** additive (new optional fields) only on the existing topic; a breaking change means a new topic.
 - **OpenAPI diff** is gated in CI against `main`.
 
+## Reservation-bound delegated create (#16000)
+
+`POST /api/v1/domestic-payments/delegated` is for the verified customer-edge service account only
+(every other caller gets 403). The body carries `reservationId`, `delegationId`, `actingPartyId` and
+the payment fields. The rail checks them against its projection of delegation-service's reservation
+stream: the reservation must be RESERVED, and the delegation, delegate, debtor account, amount,
+currency and `Idempotency-Key` must match it. Refusals are `409` with a `code`:
+`RESERVATION_PROJECTION_PENDING` (retryable, `Retry-After`), `RESERVATION_NOT_RESERVED`,
+`RESERVATION_MISMATCH` (neutral) or `IDEMPOTENCY_KEY_REUSED`; `503 ACCOUNT_AUTHORITY_UNAVAILABLE` is
+retryable. A retry with the same key replays the one payment. The payment's events carry
+`delegationId` and `reservationId`.
+
+The create-time authority re-check (ADR-0375 D1) answers `409 DELEGATION_AUTHORITY_WITHDRAWN`
+when the grant was revoked or no longer covers the account. It refuses a NEW debit only: a retry
+with the key of the payment already bound to the reservation replays that payment, because the
+money moved while the grant was live. A new key against a bound reservation is still refused.
+
 ## Customer submission lookup
 
 `POST /api/v1/domestic-payments/submissions/lookup` is a read-only operation reserved for

@@ -6,7 +6,7 @@
 
 | Regulace | Vztah ke službě | Implementace |
 |---|---|---|
-| **AMLD** (směrnice proti praní špinavých peněz) | SWIFT wire jsou AML-citlivé; sankční screening očekáván výše v toku před uvolněním | 10letá retence (`governance.yaml`); downstream lineage na `aml-service`; reject workflow |
+| **AMLD** (směrnice proti praní špinavých peněz) | SWIFT wire jsou AML-citlivé; obě strany každé MT103 sankčně prověřeny před uvolněním (`SwiftSanctionsScreening`, fail-closed) | 10letá retence (`governance.yaml`); downstream lineage na `aml-service`; reject workflow |
 | **CTF / Sankce (EU 2015/847 — info o převodu prostředků)** | Info o ordering/beneficiary musí cestovat s převodem ("travel rule") | pole `orderingCustomer*` + `beneficiary*` zachycena na každé zprávě |
 | **GDPR** | Jména klientů, IBANy, text remitence jsou PII | `dataClassification: confidential`; maskovat PII v logu; AML retence přebíjí výmaz |
 | **PSD2** (Reg. (EU) 2015/2366) | Přeshraniční úhradové převody | charge kódy (OUR/SHA/BEN), value date, pole transparentnosti |
@@ -68,7 +68,7 @@ sequenceDiagram
   participant AML as aml-service
   participant GW as SWIFT brána / protistrana
 
-  Note over Ops,Swift: Sankční screening očekáván VÝŠE v toku před uvolněním
+  Note over Ops,Swift: Plátce + příjemce prověřeni (sanctions-service) před uvolněním#59; zásah = REJECTED + AML případ
   Ops->>Swift: POST /api/v1/swift (validace → VALIDATED)
   Swift->>AML: událost (screens) přes Kafka
   Swift-->>GW: dispatch (SENT)
@@ -85,7 +85,7 @@ Hlavní body threat modelu (STRIDE):
 - **Repudiation** — AuditEvent per create/ack/reject s aktérem + id zprávy.
 - **EoP** — oddělené role; **four-eyes (MakerChecker) pro vysokohodnotové sendy silně doporučeno** (ADR-0034).
 
-Reziduální rizika: autenticita na úrovni zprávy (signing) je dominantní kontrola; sankční screening je předpokládán výše v toku; four-eyes na vysokohodnotových sendech je doporučeno, ale v této službě zatím nevynuceno.
+Reziduální rizika: autenticita na úrovni zprávy (signing) je dominantní kontrola; sankční screening MT103 je ve službě (ADR-0032), ale MT202 institucionální převody nesou jen BIC a zde se jménem neprověřují; four-eyes na vysokohodnotových sendech je doporučeno, ale v této službě zatím nevynuceno.
 
 ## Autorizace (ADR-0034)
 

@@ -6,6 +6,249 @@
     {
       "contents": {
         "delegationId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "newStatus": "CANCELLED",
+        "occurredAt": "2026-09-01T08:00:00Z",
+        "paymentId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "previousStatus": "VALIDATED",
+        "reservationId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "sourceService": "domestic-payment"
+      },
+      "description": "a delegated domestic payment CANCELLED event",
+      "generators": {
+        "body": {
+          "$.delegationId": {
+            "type": "Uuid"
+          },
+          "$.paymentId": {
+            "type": "Uuid"
+          },
+          "$.reservationId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.delegationId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.occurredAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.paymentId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.previousStatus": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.reservationId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "ce-type": "domestic.payment.status-changed",
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a delegated domestic payment has become CANCELLED"
+        }
+      ]
+    },
+    {
+      "contents": {
+        "delegationId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "newStatus": "REJECTED",
+        "occurredAt": "2026-09-01T08:00:00Z",
+        "paymentId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "previousStatus": "VALIDATED",
+        "reservationId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "sourceService": "domestic-payment"
+      },
+      "description": "a delegated domestic payment REJECTED event",
+      "generators": {
+        "body": {
+          "$.delegationId": {
+            "type": "Uuid"
+          },
+          "$.paymentId": {
+            "type": "Uuid"
+          },
+          "$.reservationId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.delegationId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.occurredAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.paymentId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.previousStatus": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.reservationId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "ce-type": "domestic.payment.status-changed",
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a delegated domestic payment has become REJECTED"
+        }
+      ]
+    },
+    {
+      "contents": {
+        "delegationId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "newStatus": "RETURNED",
+        "occurredAt": "2026-09-01T08:00:00Z",
+        "paymentId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "previousStatus": "SENT_TO_CLEARING",
+        "reservationId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "sourceService": "domestic-payment"
+      },
+      "description": "a delegated domestic payment RETURNED event",
+      "generators": {
+        "body": {
+          "$.delegationId": {
+            "type": "Uuid"
+          },
+          "$.paymentId": {
+            "type": "Uuid"
+          },
+          "$.reservationId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.delegationId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.occurredAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.paymentId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.previousStatus": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.reservationId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "ce-type": "domestic.payment.status-changed",
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a delegated domestic payment has become RETURNED"
+        }
+      ]
+    },
+    {
+      "contents": {
+        "delegationId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
         "eventType": "DOMESTIC_PAYMENT_STATUS_CHANGED",
         "newStatus": "SETTLED",
         "occurredAt": "2026-09-01T08:00:00Z",
@@ -76,6 +319,7 @@
         }
       },
       "metaData": {
+        "ce-type": "domestic.payment.status-changed",
         "contentType": "application/json"
       },
       "providerStates": [
@@ -231,6 +475,7 @@
         }
       },
       "metaData": {
+        "ce-type": "domestic.delegated-spend.finalized-absent",
         "contentType": "application/json"
       },
       "providerStates": [

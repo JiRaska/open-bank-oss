@@ -4,6 +4,7 @@
 
 package com.openbank.domestic.contract
 
+import au.com.dius.pact.provider.MessageAndMetadata
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -11,9 +12,12 @@ import com.openbank.domestic.domain.event.toStatusChangedEvent
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
+import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import java.math.BigDecimal
+import java.nio.charset.StandardCharsets
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -32,12 +36,27 @@ object DomesticPaymentStatusPactFixture {
         .registerModule(JavaTimeModule())
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
 
-    fun payload(): String {
-        val previous = payment(DomesticPaymentStatus.SENT_TO_CLEARING)
-        val current = previous.copy(
-            status = DomesticPaymentStatus.SETTLED,
-            settledAt = occurredAt,
-            updatedAt = occurredAt,
+    /** The outbox `eventType` every status transition is written with, i.e. the `ce-type` header. */
+    const val CE_TYPE = "domestic.payment.status-changed"
+
+    fun payload(): String = payload(DomesticPaymentStatus.SENT_TO_CLEARING, DomesticPaymentStatus.SETTLED)
+
+    /**
+     * A real transition through the domain (`DomesticPayment.transitionTo` refuses an illegal one)
+     * serialised by the same mapper as the outbox payload, with the outbox's `ce-type` header.
+     */
+    fun message(previousStatus: DomesticPaymentStatus, newStatus: DomesticPaymentStatus): MessageAndMetadata =
+        MessageAndMetadata(
+            payload(previousStatus, newStatus).toByteArray(StandardCharsets.UTF_8),
+            mapOf(OutboxKafkaHeaders.HEADER_EVENT_TYPE to CE_TYPE),
+        )
+
+    fun payload(previousStatus: DomesticPaymentStatus, newStatus: DomesticPaymentStatus): String {
+        val previous = payment(previousStatus)
+        val current = previous.transitionTo(
+            newStatus,
+            reason = if (newStatus == DomesticPaymentStatus.REJECTED) DomesticRejectReason.INSUFFICIENT_FUNDS else null,
+            clock = Clock.fixed(occurredAt, ZoneOffset.UTC),
         )
         return mapper.writeValueAsString(
             current.toStatusChangedEvent(previous, Clock.fixed(occurredAt, ZoneOffset.UTC)),

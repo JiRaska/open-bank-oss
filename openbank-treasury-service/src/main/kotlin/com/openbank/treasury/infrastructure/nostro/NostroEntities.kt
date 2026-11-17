@@ -133,4 +133,30 @@ class NostroBreakEntity : PanacheEntity() {
 
     @Column(name = "alerted_at")
     var alertedAt: Instant? = null
+
+    /** MATCHED or MANUAL once resolved (V33); null while open. */
+    @Column(name = "resolution_kind")
+    var resolutionKind: String? = null
+
+    @Column(name = "resolution_reason")
+    var resolutionReason: String? = null
+
+    @Column(name = "resolved_by")
+    var resolvedBy: String? = null
+
+    @Column(name = "resolved_at")
+    var resolvedAt: Instant? = null
+
+    @Column(name = "proposed_by")
+    var proposedBy: String? = null
+
+    @Column(name = "proposed_at")
+    var proposedAt: Instant? = null
+
+    /**
+     * Compare-and-set token (V33): every write to an existing break is `... WHERE version = <read>`,
+     * so a sweep's stale copy can never overwrite a manual resolution step committed after it read.
+     */
+    @Column(name = "version", nullable = false)
+    var version: Long = 0
 }

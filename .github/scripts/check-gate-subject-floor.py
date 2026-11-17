@@ -151,7 +151,6 @@ DEBT = {
     "api-contract-gate": DEBT_MARKER,
     "asvs-l3-mechanical-subset": DEBT_MARKER,
     "authz-enforce-pdp-sidecar-parity": DEBT_MARKER,
-    "compliance-page-evidence": DEBT_MARKER,
     "configproperty-kotlin-defaults": DEBT_MARKER,
     "critical-alert-egress": DEBT_MARKER,
     # Diff-scoped: the corpus is "yaml files this PR ADDS", legitimately empty on most PRs.

@@ -9,6 +9,17 @@ export interface AmlCase {
   alertCode: string; alertDetail: string | null; matchedEntity: string | null
   decisionReason: string | null; assignedAnalyst: string | null; decidedBy: string | null
   screenedAt: string; decidedAt: string | null; createdAt: string; updatedAt: string
+  /**
+   * The case closes only through a four-eyes disposition (aml-service ADR-0371 §5). Absent on an
+   * aml-service older than openapi 1.5.0, which reads as false: the direct decision is then offered
+   * and the service still refuses it for a pack-monitoring case, so the fallback is safe.
+   */
+  requiresFourEyesDisposition: boolean
+  /**
+   * The service that opened the case, recorded by aml-service from the authenticated caller
+   * (openapi 1.7.0). Null for staff-created cases and for every case created before the field.
+   */
+  movementService: string | null
 }
 
 const record = (value: unknown): Record<string, unknown> => {
@@ -35,20 +46,84 @@ const optionalInstant = (value: unknown, field: string): string | null =>
 
 export function parseAmlCases(raw: unknown): AmlCase[] {
   if (!Array.isArray(raw)) throw new Error('Invalid AML cases response')
-  return raw.map((value) => {
-    const item = record(value)
-    return {
-      id: string(item.id, 'id'), partyId: string(item.partyId, 'partyId'),
-      accountId: optionalString(item.accountId, 'accountId'), transactionId: optionalString(item.transactionId, 'transactionId'),
-      customerReference: string(item.customerReference, 'customerReference'),
-      screeningType: enumValue(item.screeningType, SCREENING_TYPES, 'screeningType'),
-      riskLevel: enumValue(item.riskLevel, AML_RISK_LEVELS, 'riskLevel'),
-      status: enumValue(item.status, AML_STATUSES, 'status'), alertCode: string(item.alertCode, 'alertCode'),
-      alertDetail: optionalString(item.alertDetail, 'alertDetail'), matchedEntity: optionalString(item.matchedEntity, 'matchedEntity'),
-      decisionReason: optionalString(item.decisionReason, 'decisionReason'),
-      assignedAnalyst: optionalString(item.assignedAnalyst, 'assignedAnalyst'), decidedBy: optionalString(item.decidedBy, 'decidedBy'),
-      screenedAt: instant(item.screenedAt, 'screenedAt'), decidedAt: optionalInstant(item.decidedAt, 'decidedAt'),
-      createdAt: instant(item.createdAt, 'createdAt'), updatedAt: instant(item.updatedAt, 'updatedAt'),
-    }
-  })
+  return raw.map(parseAmlCase)
+}
+
+/** One case, as `GET /api/v1/aml/cases/{id}` answers it. Same fail-fast contract as the list. */
+export function parseAmlCase(value: unknown): AmlCase {
+  const item = record(value)
+  return {
+    id: string(item.id, 'id'), partyId: string(item.partyId, 'partyId'),
+    accountId: optionalString(item.accountId, 'accountId'), transactionId: optionalString(item.transactionId, 'transactionId'),
+    customerReference: string(item.customerReference, 'customerReference'),
+    screeningType: enumValue(item.screeningType, SCREENING_TYPES, 'screeningType'),
+    riskLevel: enumValue(item.riskLevel, AML_RISK_LEVELS, 'riskLevel'),
+    status: enumValue(item.status, AML_STATUSES, 'status'), alertCode: string(item.alertCode, 'alertCode'),
+    alertDetail: optionalString(item.alertDetail, 'alertDetail'), matchedEntity: optionalString(item.matchedEntity, 'matchedEntity'),
+    decisionReason: optionalString(item.decisionReason, 'decisionReason'),
+    assignedAnalyst: optionalString(item.assignedAnalyst, 'assignedAnalyst'), decidedBy: optionalString(item.decidedBy, 'decidedBy'),
+    screenedAt: instant(item.screenedAt, 'screenedAt'), decidedAt: optionalInstant(item.decidedAt, 'decidedAt'),
+    createdAt: instant(item.createdAt, 'createdAt'), updatedAt: instant(item.updatedAt, 'updatedAt'),
+    requiresFourEyesDisposition: item.requiresFourEyesDisposition === true,
+    movementService: optionalString(item.movementService, 'movementService'),
+  }
+}
+
+export type AmlStatus = AmlCase['status']
+
+/**
+ * Mirror of `AmlCase.canTransitionTo` in aml-service. The service is the authority and refuses an
+ * illegal move with 400; the UI only uses this to avoid OFFERING a button the service would refuse,
+ * so a mismatch degrades to an error message, never to a wrong decision.
+ */
+const TRANSITIONS: Record<AmlStatus, readonly AmlStatus[]> = {
+  OPEN: ['UNDER_REVIEW', 'CLEARED', 'BLOCKED', 'ESCALATED'],
+  UNDER_REVIEW: ['CLEARED', 'BLOCKED', 'ESCALATED'],
+  ESCALATED: ['UNDER_REVIEW', 'CLEARED', 'BLOCKED'],
+  CLEARED: [],
+  BLOCKED: [],
+}
+
+export function allowedTransitions(status: AmlStatus): readonly AmlStatus[] {
+  return TRANSITIONS[status]
+}
+
+export const isOpenAmlStatus = (status: AmlStatus): boolean => TRANSITIONS[status].length > 0
+
+/**
+ * Reason is mandatory for every DECISION in the UI, not only for BLOCKED (the one the service
+ * enforces): a cleared or escalated AML case without a written rationale is not defensible to a
+ * supervisor or the FAU. Taking a case into review is a workflow step, not a decision.
+ */
+export const requiresReason = (target: AmlStatus): boolean => target !== 'UNDER_REVIEW'
+
+/** Display name for a party as party-service projects it to staff; null when it carries none. */
+export function partyDisplayName(party: { legalName?: string | null; tradingName?: string | null } | null | undefined): string | null {
+  const name = party?.legalName?.trim() || party?.tradingName?.trim()
+  return name ? name : null
+}
+
+/** Whole hours a case has been open; the SLA signal an officer triages by. */
+export function caseAgeHours(createdAt: string, now: Date = new Date()): number {
+  return Math.max(0, Math.floor((now.getTime() - Date.parse(createdAt)) / 3_600_000))
+}
+
+const RISK_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 } as const
+const STATUS_RANK = { ESCALATED: 0, OPEN: 1, UNDER_REVIEW: 1, BLOCKED: 2, CLEARED: 2 } as const
+
+/**
+ * The officer's work queue: cases still needing a decision before closed ones; among those,
+ * escalations first, then by RISK (a critical sanctions hit under review outranks a medium
+ * open alert), then oldest first. Status alone used to win, which put medium "screening
+ * unavailable" cases above a critical sanctions hit (seen live 2026-11-14).
+ */
+export function compareWorkQueue(a: AmlCase, b: AmlCase): number {
+  return STATUS_RANK[a.status] - STATUS_RANK[b.status]
+    || RISK_RANK[a.riskLevel] - RISK_RANK[b.riskLevel]
+    || Date.parse(a.createdAt) - Date.parse(b.createdAt)
+}
+
+/** "5 h" under two days, then whole days: "3388 h" is unreadable at a glance. */
+export function formatCaseAge(hours: number, t: (cs: string, en: string) => string): string {
+  return hours < 48 ? `${hours} h` : `${Math.floor(hours / 24)} ${t('dní', 'days')}`
 }

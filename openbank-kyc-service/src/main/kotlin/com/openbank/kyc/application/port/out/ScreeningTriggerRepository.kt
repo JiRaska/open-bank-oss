@@ -28,6 +28,14 @@ interface ScreeningTriggerRepository {
      */
     suspend fun insertIfAbsent(trigger: ScreeningTrigger): Boolean
 
+    /**
+     * Records a DEFERRED trigger — the master switch is off, so no open is attempted: state
+     * DEFERRED (invisible to pre-#15961 code), attempts 0, due at once. Coalesced to one per party (V14 partial unique index) and
+     * still deduplicated on (publication, party); returns true when the row was inserted. The
+     * retry job claims it once the switch is on.
+     */
+    suspend fun recordDeferred(trigger: ScreeningTrigger): Boolean
+
     /** Marks [trigger] OPENED with the coordinator's case id (201, or 409 already-exists). */
     suspend fun recordOpened(trigger: ScreeningTrigger, coordinatorCaseId: String?, at: Instant)
 
@@ -51,8 +59,8 @@ interface ScreeningTriggerRepository {
     suspend fun claim(trigger: ScreeningTrigger, now: Instant, leaseUntil: Instant): Boolean
 
     /**
-     * The re-screening backlog as the table holds it right now: rows still PENDING or
-     * OPEN_FAILED (retrying or parked), i.e. list changes that have not yet reached the customer
+     * The re-screening backlog as the table holds it right now: rows still PENDING,
+     * OPEN_FAILED (retrying or parked) or DEFERRED (recorded while the loop was off), i.e. list changes that have not yet reached the customer
      * as an opened case. One bounded aggregate; the age is computed by the DATABASE clock from
      * `created_at` (the moment the trigger was enqueued), never from `next_attempt_at`, which a
      * retry pushes forward and would make a perpetually failing row look young.
