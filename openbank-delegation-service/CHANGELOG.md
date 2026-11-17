@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.25.2...delegation-service-v0.26.0) (2026-11-17)
+
+
+### Features
+
+* **delegation:** add MCP_CLIENT grantee class restricted to reads and propose (ADR-0383 D3) ([#16599](https://github.com/JiRaska/open-bank-oss/issues/16599)) ([494ed22](https://github.com/JiRaska/open-bank-oss/commit/494ed222ecdd9c26a2b355f199bd7cb53b9f912c))
+
 ## [0.25.2](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.25.1...delegation-service-v0.25.2) (2026-11-16)
 
 
