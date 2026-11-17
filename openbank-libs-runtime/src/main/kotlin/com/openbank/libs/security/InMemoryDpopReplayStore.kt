@@ -4,48 +4,77 @@
 
 package com.openbank.libs.security
 
-import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.util.PriorityQueue
 
 /**
  * Bounded, single-pod [DpopReplayStore] — ADR-0320 P2. Correct only while one replica serves the
  * audience; a multi-replica service needs the shared (Valkey) store, which is a later slice.
  *
- * At [maxEntries] live entries it FAILS CLOSED: [firstUse] answers false (the proof is treated as
- * replayed) rather than evicting a live entry, because evicting one would re-open its replay window.
+ * - An entry is live through `now + ttl` INCLUSIVE, and it expires only once the caller's `now` is
+ *   strictly after that. Time is the verifier's `now`, never a clock of its own.
+ * - Capacity: at most [maxEntries] live entries in total, and at most [maxEntriesPerKey] per `jkt`.
+ *   Either limit answers [ReplayClaim.UNAVAILABLE] and never evicts a live entry, because evicting
+ *   one would reopen its replay window. The per-key quota stops one key from exhausting the global
+ *   cap for everyone else. It does NOT replace a rate limiter, which must run before the claim.
+ * - Expired entries leave from the head of an expiry-ordered queue on each call: O(log n) per
+ *   entry, no full scan under the lock. [size] is O(1).
+ *
  * Plain class, no CDI annotation, like [Jose4jDpopProofParser].
  */
 class InMemoryDpopReplayStore(
     private val maxEntries: Int = DEFAULT_MAX_ENTRIES,
-    private val clock: Clock = Clock.systemUTC(),
+    private val maxEntriesPerKey: Int = DEFAULT_MAX_ENTRIES_PER_KEY,
 ) : DpopReplayStore {
     init {
         require(maxEntries > 0) { "maxEntries must be positive" }
+        require(maxEntriesPerKey > 0) { "maxEntriesPerKey must be positive" }
     }
 
-    private val expiries = LinkedHashMap<String, Instant>()
+    private class Entry(val jkt: String, val key: String, val expiresAt: Instant)
 
-    override suspend fun firstUse(jkt: String, jti: String, ttl: Duration): Boolean = claim("$jkt:$jti", ttl)
+    private val live = HashMap<String, Entry>()
+    private val perKey = HashMap<String, Int>()
+    private val byExpiry = PriorityQueue<Entry>(compareBy { it.expiresAt })
+
+    override suspend fun firstUse(jkt: String, jti: String, ttl: Duration, now: Instant): ReplayClaim =
+        claim(jkt, "$jkt:$jti", ttl, now)
 
     @Synchronized
-    private fun claim(key: String, ttl: Duration): Boolean {
-        val now = clock.instant()
-        val existing = expiries[key]
-        if (existing != null && existing.isAfter(now)) return false
-        if (existing == null && expiries.size >= maxEntries) {
-            expiries.entries.removeIf { !it.value.isAfter(now) }
-            if (expiries.size >= maxEntries) return false
+    private fun claim(jkt: String, key: String, ttl: Duration, now: Instant): ReplayClaim {
+        evictExpired(now)
+        return when {
+            live.containsKey(key) -> ReplayClaim.REPLAYED
+            live.size >= maxEntries || (perKey[jkt] ?: 0) >= maxEntriesPerKey -> ReplayClaim.UNAVAILABLE
+            else -> {
+                val entry = Entry(jkt, key, now.plus(ttl))
+                live[key] = entry
+                perKey.merge(jkt, 1, Int::plus)
+                byExpiry.add(entry)
+                ReplayClaim.FIRST_USE
+            }
         }
-        expiries[key] = now.plus(ttl)
-        return true
     }
 
-    /** Live entries, for tests and a future gauge. */
+    private fun evictExpired(now: Instant) {
+        while (true) {
+            val head = byExpiry.peek() ?: return
+            if (!head.expiresAt.isBefore(now)) return
+            byExpiry.poll()
+            if (live[head.key] === head) {
+                live.remove(head.key)
+                perKey.computeIfPresent(head.jkt) { _, n -> if (n > 1) n - 1 else null }
+            }
+        }
+    }
+
+    /** Entries held, live as of the last claim. For tests and a future gauge. */
     @Synchronized
-    fun size(): Int = expiries.count { it.value.isAfter(clock.instant()) }
+    fun size(): Int = live.size
 
     private companion object {
         const val DEFAULT_MAX_ENTRIES = 100_000
+        const val DEFAULT_MAX_ENTRIES_PER_KEY = 1_000
     }
 }

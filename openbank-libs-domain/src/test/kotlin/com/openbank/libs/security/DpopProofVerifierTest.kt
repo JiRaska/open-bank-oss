@@ -46,9 +46,9 @@ class DpopProofVerifierTest {
         val seen = mutableSetOf<String>()
         var calls = 0
 
-        override suspend fun firstUse(jkt: String, jti: String, ttl: Duration): Boolean {
+        override suspend fun firstUse(jkt: String, jti: String, ttl: Duration, now: Instant): ReplayClaim {
             calls++
-            return seen.add("$jkt:$jti")
+            return if (seen.add("$jkt:$jti")) ReplayClaim.FIRST_USE else ReplayClaim.REPLAYED
         }
     }
 
@@ -179,12 +179,49 @@ class DpopProofVerifierTest {
     fun `replay TTL covers the whole acceptance window`() {
         var ttl: Duration? = null
         runBlocking {
-            DpopProofVerifier({ valid }, { _, _, t ->
+            DpopProofVerifier({ valid }, { _, _, t, _ ->
                 ttl = t
-                true
+                ReplayClaim.FIRST_USE
             }).verify(request, now)
         }
-        assertThat(ttl).isEqualTo(Duration.ofSeconds(360))
+        assertThat(ttl).isEqualTo(Duration.ofSeconds(365))
+    }
+
+    @Test
+    fun `REPLAY_STORE_UNAVAILABLE is distinct from REPLAYED`() {
+        val down = DpopReplayStore { _, _, _, _ -> ReplayClaim.UNAVAILABLE }
+        assertThat(run(store = down)).isEqualTo(DpopResult.REPLAY_STORE_UNAVAILABLE)
+    }
+
+    @Test
+    fun `a parser that throws reads as MALFORMED, cancellation still propagates`() {
+        val store = RecordingStore()
+        val throwing = DpopProofParser { error("parser defect") }
+        assertThat(
+            runBlocking {
+                DpopProofVerifier(throwing, store).verify(request, now)
+            },
+        ).isEqualTo(DpopResult.MALFORMED)
+        val cancelling = DpopProofParser { throw kotlin.coroutines.cancellation.CancellationException("stop") }
+        assertThatThrownBy { runBlocking { DpopProofVerifier(cancelling, store).verify(request, now) } }
+            .isInstanceOf(kotlin.coroutines.cancellation.CancellationException::class.java)
+        assertThat(store.calls).isZero()
+    }
+
+    @Test
+    fun `htu percent-encoding is normalised per RFC 3986 section 6_2_2`() {
+        assertThat(DpopProofVerifier.normaliseHtu("https://h.example/a%7eb%2fc%2Fd%41"))
+            .isEqualTo("https://h.example/a~b%2Fc%2FdA")
+        assertThat(DpopProofVerifier.normaliseHtu("https://h.example/bad%zz")).isNull()
+        assertThat(DpopProofVerifier.normaliseHtu("https://h.example/trunc%4")).isNull()
+        assertThat(
+            run(proof = valid.copy(htu = "https://resource.example.org/protected%72esource")),
+        ).isEqualTo(DpopResult.VALID)
+    }
+
+    @Test
+    fun `non-ASCII host is not comparable`() {
+        assertThat(DpopProofVerifier.normaliseHtu("https://bänk.example/x")).isNull()
     }
 
     @Test

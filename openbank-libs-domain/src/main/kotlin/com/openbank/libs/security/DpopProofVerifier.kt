@@ -11,9 +11,10 @@ import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
- * Outcome of checking one DPoP proof (RFC 9449) against one request — ADR-0320 P2, ADR-0383 D2.
+ * Outcome of checking one DPoP proof (RFC 9449) against one request — ADR-0320 P2 (customer MCP channel, #16590).
  * Exactly one value is [VALID]; every other value is a rejection and the caller answers 401 with
  * `WWW-Authenticate: DPoP error="invalid_dpop_proof"` (or `invalid_token` for [JKT_MISMATCH]).
  */
@@ -30,7 +31,13 @@ enum class DpopResult {
     JKT_MISMATCH,
     REPLAYED,
     PRIVATE_KEY_IN_JWK,
+
+    /** The replay store could not answer (full, over a key's quota, or backend down): map to 503. */
+    REPLAY_STORE_UNAVAILABLE,
 }
+
+/** Answer of a [DpopReplayStore] claim. */
+enum class ReplayClaim { FIRST_USE, REPLAYED, UNAVAILABLE }
 
 /**
  * A DPoP proof JWT after JOSE parsing, before any decision. Produced by a [DpopProofParser]; every
@@ -60,12 +67,16 @@ fun interface DpopProofParser {
 }
 
 /**
- * `jti` replay port. Shaped for a `SET key 1 NX PX ttl` store: [firstUse] returns true exactly once
- * per (`jkt`, `jti`) within [ttl], and false on every later call — including when the store cannot
- * answer, so an unavailable store rejects (fail closed).
+ * `jti` replay port. Shaped for a `SET key 1 NX PX ttl` store: [firstUse] answers
+ * [ReplayClaim.FIRST_USE] exactly once per (`jkt`, `jti`) while the entry is live — through
+ * `now + ttl` INCLUSIVE — and [ReplayClaim.REPLAYED] after that. A store that cannot answer
+ * (capacity, per-key quota, backend down) answers [ReplayClaim.UNAVAILABLE]; never FIRST_USE.
+ *
+ * Every claim writes an entry, so a caller must rate-limit per client/key BEFORE the replay claim
+ * (ADR-0320 P4 rate limit) or a flood of valid fresh proofs fills the store.
  */
 fun interface DpopReplayStore {
-    suspend fun firstUse(jkt: String, jti: String, ttl: Duration): Boolean
+    suspend fun firstUse(jkt: String, jti: String, ttl: Duration, now: Instant): ReplayClaim
 }
 
 /**
@@ -81,11 +92,13 @@ data class DpopPolicy(
         require(!maxAge.isNegative && !maxAge.isZero) { "maxAge must be positive" }
     }
 
-    val replayTtl: Duration get() = maxAge.plus(futureSkew)
+    /** `maxAge + futureSkew` plus a grace period, so an entry outlives every acceptable `iat`. */
+    val replayTtl: Duration get() = maxAge.plus(futureSkew).plus(REPLAY_GRACE)
 
     private companion object {
         const val DEFAULT_SKEW_SECONDS = 60L
         const val DEFAULT_MAX_AGE_SECONDS = 300L
+        val REPLAY_GRACE: Duration = Duration.ofSeconds(5)
     }
 }
 
@@ -119,8 +132,18 @@ class DpopProofVerifier(
         val values = request.dpopHeaderValues
         if (values.isEmpty() || values.all { it.isBlank() }) return DpopResult.MISSING_PROOF
         if (values.size != 1) return DpopResult.MALFORMED
-        val proof = parser.parse(values.single().trim()) ?: return DpopResult.MALFORMED
-        return structural(proof) ?: binding(proof, request, now) ?: replay(proof)
+        val proof = parseSafely(values.single().trim()) ?: return DpopResult.MALFORMED
+        return structural(proof) ?: binding(proof, request, now) ?: replay(proof, now)
+    }
+
+    /** A parser that throws despite its contract still fails closed; cancellation propagates. */
+    @Suppress("TooGenericExceptionCaught") // deliberate: any parser defect must read as MALFORMED, never escape
+    private fun parseSafely(compact: String): DpopProof? = try {
+        parser.parse(compact)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
     }
 
     private fun structural(proof: DpopProof): DpopResult? = when {
@@ -148,10 +171,12 @@ class DpopProofVerifier(
         }
     }
 
-    private suspend fun replay(proof: DpopProof): DpopResult {
-        val first = replayStore.firstUse(checkNotNull(proof.jwkThumbprint), checkNotNull(proof.jti), policy.replayTtl)
-        return if (first) DpopResult.VALID else DpopResult.REPLAYED
-    }
+    private suspend fun replay(proof: DpopProof, now: Instant): DpopResult =
+        when (replayStore.firstUse(checkNotNull(proof.jwkThumbprint), checkNotNull(proof.jti), policy.replayTtl, now)) {
+            ReplayClaim.FIRST_USE -> DpopResult.VALID
+            ReplayClaim.REPLAYED -> DpopResult.REPLAYED
+            ReplayClaim.UNAVAILABLE -> DpopResult.REPLAY_STORE_UNAVAILABLE
+        }
 
     companion object {
         const val TYP = "dpop+jwt"
@@ -173,7 +198,10 @@ class DpopProofVerifier(
 
         /**
          * RFC 9449 §4.3 comparison form: absolute http(s) URI, scheme and host lower-cased, default
-         * port dropped, empty path as `/`, query and fragment removed. Null when not comparable.
+         * port dropped, empty path as `/`, query and fragment removed, and the path's percent-encoding
+         * normalised per RFC 3986 §6.2.2 (hex upper-cased, unreserved characters decoded). Null when
+         * not comparable — including a non-ASCII (IDN) host, which `java.net.URI` does not parse as a
+         * server authority; a client must send the A-label (punycode) form.
          */
         fun normaliseHtu(uri: String): String? {
             val parsed = try {
@@ -186,12 +214,40 @@ class DpopProofVerifier(
             if (scheme !in HTU_SCHEMES || host.isNullOrEmpty() || parsed.rawUserInfo != null) return null
             val defaultPort = if (scheme == "https") HTTPS_DEFAULT_PORT else HTTP_DEFAULT_PORT
             val port = parsed.port.takeUnless { it == -1 || it == defaultPort }
-            val path = parsed.rawPath.takeUnless { it.isNullOrEmpty() } ?: "/"
+            val path = normalisePercentEncoding(parsed.rawPath.takeUnless { it.isNullOrEmpty() } ?: "/") ?: return null
             return buildString {
                 append(scheme).append("://").append(host)
                 if (port != null) append(':').append(port)
                 append(path)
             }
+        }
+
+        private const val UNRESERVED_PUNCTUATION = "-._~"
+        private const val PERCENT_TRIPLET = 3
+        private const val HEX_RADIX = 16
+        private const val ASCII_LIMIT = 0x80
+
+        private fun normalisePercentEncoding(path: String): String? {
+            val out = StringBuilder(path.length)
+            var i = 0
+            while (i < path.length) {
+                val c = path[i]
+                if (c != '%') {
+                    out.append(c)
+                    i++
+                    continue
+                }
+                if (i + PERCENT_TRIPLET > path.length) return null
+                val code = path.substring(i + 1, i + PERCENT_TRIPLET).toIntOrNull(HEX_RADIX) ?: return null
+                val decoded = code.toChar()
+                if (decoded.isLetterOrDigit() && code < ASCII_LIMIT || decoded in UNRESERVED_PUNCTUATION) {
+                    out.append(decoded)
+                } else {
+                    out.append('%').append(path.substring(i + 1, i + PERCENT_TRIPLET).uppercase())
+                }
+                i += PERCENT_TRIPLET
+            }
+            return out.toString()
         }
 
         private fun constantTimeEquals(a: String?, b: String?): Boolean {

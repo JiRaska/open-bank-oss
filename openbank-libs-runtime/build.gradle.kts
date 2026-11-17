@@ -106,7 +106,7 @@ dependencies {
     //
     // Keep Quarkus API coordinates aligned with the service platform catalog.
     compileOnly("com.fasterxml.jackson.core:jackson-databind:2.22.3")
-    // ADR-0320 P2 / ADR-0383 D2: Jose4jDpopProofParser compiles against jose4j, which services get
+    // ADR-0320 P2 (#16590): Jose4jDpopProofParser compiles against jose4j, which services get
     // transitively from quarkus-oidc (67 of 68 modules). compileOnly, so libs-runtime ships no JOSE
     // runtime dependency; the parser is a plain class a service constructs only when it opts in.
     // Version = what the current Quarkus BOM resolves (already in verification-metadata.xml).

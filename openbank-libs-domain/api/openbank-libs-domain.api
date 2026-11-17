@@ -4852,7 +4852,7 @@ public final class com/openbank/libs/security/DpopProofVerifier$Companion {
 }
 
 public abstract interface class com/openbank/libs/security/DpopReplayStore {
-	public abstract fun firstUse (Ljava/lang/String;Ljava/lang/String;Ljava/time/Duration;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun firstUse (Ljava/lang/String;Ljava/lang/String;Ljava/time/Duration;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public final class com/openbank/libs/security/DpopRequest {
@@ -4886,6 +4886,7 @@ public final class com/openbank/libs/security/DpopResult : java/lang/Enum {
 	public static final field MISSING_PROOF Lcom/openbank/libs/security/DpopResult;
 	public static final field PRIVATE_KEY_IN_JWK Lcom/openbank/libs/security/DpopResult;
 	public static final field REPLAYED Lcom/openbank/libs/security/DpopResult;
+	public static final field REPLAY_STORE_UNAVAILABLE Lcom/openbank/libs/security/DpopResult;
 	public static final field VALID Lcom/openbank/libs/security/DpopResult;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/security/DpopResult;
@@ -5052,6 +5053,15 @@ public final class com/openbank/libs/security/PiiMask {
 	public final fun nationalId (Ljava/lang/String;)Ljava/lang/String;
 	public final fun pan (Ljava/lang/String;)Ljava/lang/String;
 	public final fun phone (Ljava/lang/String;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/security/ReplayClaim : java/lang/Enum {
+	public static final field FIRST_USE Lcom/openbank/libs/security/ReplayClaim;
+	public static final field REPLAYED Lcom/openbank/libs/security/ReplayClaim;
+	public static final field UNAVAILABLE Lcom/openbank/libs/security/ReplayClaim;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/security/ReplayClaim;
+	public static fun values ()[Lcom/openbank/libs/security/ReplayClaim;
 }
 
 public final class com/openbank/libs/security/Roles {

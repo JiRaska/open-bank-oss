@@ -18,10 +18,8 @@ import org.jose4j.keys.EllipticCurves
 import org.jose4j.keys.HmacKey
 import org.jose4j.lang.HashUtil
 import org.junit.jupiter.api.Test
-import java.time.Clock
 import java.time.Duration
 import java.time.Instant
-import java.time.ZoneOffset
 import java.util.Base64
 import java.util.UUID
 
@@ -69,13 +67,34 @@ class Jose4jDpopProofParserTest {
         method: String = "POST",
         requestUri: String = "$uri?cursor=2",
         accessToken: String = token,
-        store: DpopReplayStore = InMemoryDpopReplayStore(clock = Clock.fixed(now, ZoneOffset.UTC)),
+        store: DpopReplayStore = InMemoryDpopReplayStore(),
+        at: Instant = now,
     ): DpopResult = runBlocking {
         DpopProofVerifier(parser, store).verify(
             DpopRequest(listOfNotNull(compact), method, requestUri, accessToken, boundJkt),
-            now,
+            at,
         )
     }
+
+    private fun b64(json: String) = Base64.getUrlEncoder().withoutPadding().encodeToString(json.toByteArray())
+
+    /** Sign arbitrary header/payload JSON text (keeps duplicate members, odd types) with [ecKey]. */
+    private fun rawSigned(header: String, payload: String, alg: String = "SHA256withECDSA"): String {
+        val input = b64(header) + "." + b64(payload)
+        val der = java.security.Signature.getInstance(alg).run {
+            initSign(ecKey.privateKey)
+            update(input.toByteArray())
+            sign()
+        }
+        val concat = org.jose4j.jws.EcdsaUsingShaAlgorithm.convertDerToConcatenated(der, EC_P256_SIG_HALF)
+        return input + "." + Base64.getUrlEncoder().withoutPadding().encodeToString(concat)
+    }
+
+    private fun goodHeader() = """{"typ":"dpop+jwt","alg":"ES256","jwk":${ecKey.toJson()}}"""
+
+    private fun goodPayload(extra: String = "") =
+        """{"htm":"POST","htu":"$uri","iat":${now.epochSecond},"jti":"${UUID.randomUUID()}",""" +
+            """"ath":"${DpopProofVerifier.accessTokenHash(token)}"$extra}"""
 
     @Test
     fun `RFC 9449 section 6_1 thumbprint vector`() {
@@ -159,14 +178,108 @@ class Jose4jDpopProofParserTest {
 
     @Test
     fun `REPLAYED on the second presentation of one proof`() {
-        val store = InMemoryDpopReplayStore(clock = Clock.fixed(now, ZoneOffset.UTC))
+        val store = InMemoryDpopReplayStore()
         val compact = proof()
         assertThat(verify(compact, store = store)).isEqualTo(DpopResult.VALID)
         assertThat(verify(compact, store = store)).isEqualTo(DpopResult.REPLAYED)
     }
 
+    @Test
+    fun `raw signing helper produces a VALID proof (control for the raw negatives)`() {
+        assertThat(verify(rawSigned(goodHeader(), goodPayload()))).isEqualTo(DpopResult.VALID)
+    }
+
+    @Test
+    fun `replay boundary - iat at +60 accepted, replay at exactly +360 is REPLAYED`() {
+        val store = InMemoryDpopReplayStore()
+        val compact = proof(iat = now.plusSeconds(60))
+        assertThat(verify(compact, store = store)).isEqualTo(DpopResult.VALID)
+        assertThat(verify(compact, store = store, at = now.plusSeconds(360))).isEqualTo(DpopResult.REPLAYED)
+    }
+
+    @Test
+    fun `store exhaustion surfaces as REPLAY_STORE_UNAVAILABLE`() {
+        val store = InMemoryDpopReplayStore(maxEntries = 1)
+        assertThat(verify(proof(), store = store)).isEqualTo(DpopResult.VALID)
+        assertThat(verify(proof(), store = store)).isEqualTo(DpopResult.REPLAY_STORE_UNAVAILABLE)
+    }
+
+    @Test
+    fun `key must suit the algorithm`() {
+        // jose4j will not SIGN ES256 with a non-P-256 key, so these carry a real P-256 signature
+        // under a header whose jwk is the wrong key type or curve.
+        val signature = proof().substringAfterLast('.')
+        fun es256WithJwk(jwk: PublicJsonWebKey) =
+            b64("""{"typ":"dpop+jwt","alg":"ES256","jwk":${jwk.toJson()}}""") + "." + b64(goodPayload()) + "." +
+                signature
+        val rsa = RsaJwkGenerator.generateJwk(RSA_BITS)
+        assertThat(verify(es256WithJwk(rsa), boundJkt = jkt(rsa)))
+            .describedAs("ES256 header + RSA key").isEqualTo(DpopResult.BAD_SIGNATURE)
+        val p384 = EcJwkGenerator.generateJwk(EllipticCurves.P384)
+        assertThat(verify(es256WithJwk(p384), boundJkt = jkt(p384)))
+            .describedAs("ES256 + P-384 key").isEqualTo(DpopResult.BAD_SIGNATURE)
+        assertThat(verify(proof(alg = AlgorithmIdentifiers.RSA_PSS_USING_SHA256, signingKey = rsa.privateKey)))
+            .describedAs("PS256 header + EC key").isEqualTo(DpopResult.BAD_SIGNATURE)
+        val weak = RsaJwkGenerator.generateJwk(WEAK_RSA_BITS)
+        assertThat(verify(proof(key = weak, alg = AlgorithmIdentifiers.RSA_PSS_USING_SHA256), boundJkt = jkt(weak)))
+            .describedAs("RSA < 2048").isEqualTo(DpopResult.BAD_SIGNATURE)
+        val edPair = java.security.KeyPairGenerator.getInstance("Ed448").generateKeyPair()
+        val ed448 = PublicJsonWebKey.Factory.newPublicJwk(edPair.public).apply { privateKey = edPair.private }
+        assertThat(verify(proof(key = ed448, alg = AlgorithmIdentifiers.EDDSA), boundJkt = jkt(ed448)))
+            .describedAs("Ed448 under EdDSA").isEqualTo(DpopResult.BAD_SIGNATURE)
+    }
+
+    @Test
+    fun `crit header is MALFORMED`() {
+        val header = """{"typ":"dpop+jwt","alg":"ES256","crit":["exp"],"exp":1,"jwk":${ecKey.toJson()}}"""
+        assertThat(verify(rawSigned(header, goodPayload()))).isEqualTo(DpopResult.MALFORMED)
+    }
+
+    @Test
+    fun `duplicate header or claim members are MALFORMED`() {
+        val dupHeader = """{"typ":"dpop+jwt","alg":"ES256","alg":"ES256","jwk":${ecKey.toJson()}}"""
+        assertThat(verify(rawSigned(dupHeader, goodPayload()))).isEqualTo(DpopResult.MALFORMED)
+        assertThat(verify(rawSigned(goodHeader(), goodPayload(""","htm":"GET"""")))).isEqualTo(DpopResult.MALFORMED)
+    }
+
+    @Test
+    fun `non-string htm or htu and non-numeric iat are MALFORMED`() {
+        val base = """"jti":"${UUID.randomUUID()}","ath":"${DpopProofVerifier.accessTokenHash(token)}""""
+        listOf(
+            """{"htm":1,"htu":"$uri","iat":${now.epochSecond},$base}""",
+            """{"htm":"POST","htu":["$uri"],"iat":${now.epochSecond},$base}""",
+            """{"htm":"POST","htu":"$uri","iat":"${now.epochSecond}",$base}""",
+        ).forEach { assertThat(verify(rawSigned(goodHeader(), it))).describedAs(it).isEqualTo(DpopResult.MALFORMED) }
+    }
+
+    @Test
+    fun `off-curve EC jwk is never VALID`() {
+        val params = ecKey.toParams(JsonWebKey.OutputControlLevel.PUBLIC_ONLY).toMutableMap()
+        val y = java.math.BigInteger(
+            1,
+            Base64.getUrlDecoder().decode(params["y"] as String),
+        ).add(java.math.BigInteger.ONE)
+        val yBytes = y.toByteArray().let {
+            if (it.size >
+                EC_COORD_BYTES
+            ) {
+                it.copyOfRange(it.size - EC_COORD_BYTES, it.size)
+            } else {
+                it
+            }
+        }
+        params["y"] =
+            Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(EC_COORD_BYTES - yBytes.size) + yBytes)
+        val header = """{"typ":"dpop+jwt","alg":"ES256","jwk":${org.jose4j.json.JsonUtil.toJson(params)}}"""
+        assertThat(verify(rawSigned(header, goodPayload()), boundJkt = null))
+            .isIn(DpopResult.MALFORMED, DpopResult.BAD_SIGNATURE)
+    }
+
     private companion object {
         const val RSA_BITS = 2048
         const val HMAC_KEY_BYTES = 32
+        const val WEAK_RSA_BITS = 1024
+        const val EC_P256_SIG_HALF = 32
+        const val EC_COORD_BYTES = 32
     }
 }
