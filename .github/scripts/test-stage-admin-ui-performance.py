@@ -427,6 +427,7 @@ class PerformanceStageTests(unittest.TestCase):
             "openbank-sepa-payment-sepa-payment-read-baseline",
             "openbank-sanctions-service-sanctions-read-baseline",
             "openbank-standing-order-service-standing-order-read-baseline",
+            "openbank-sdd-service-sdd-read-baseline",
         })
 
     def test_ambiguous_baseline_definition_is_never_attributed(self):
