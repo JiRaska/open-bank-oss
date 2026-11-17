@@ -10,6 +10,8 @@ admin-ui-engines-nightly.yml|job:report|issues
 admin-ui-evidence.yml|job:publish|id-token
 agent-review.yml|job:review|pull-requests
 alert-noise-weekly.yml|job:report|issues
+# ADR-0382: OIDC to a List/Get-only role on the in-cluster digest envelope prefix; no write.
+alert-rca-weekly.yml|job:review|id-token
 alert-rca-weekly.yml|job:publish|contents
 alert-rca-weekly.yml|job:publish|issues
 alert-rca-weekly.yml|job:publish|pull-requests
