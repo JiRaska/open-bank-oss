@@ -22,7 +22,8 @@ import jakarta.enterprise.inject.Alternative
 @Alternative
 @Priority(1)
 class TestPolicyDecisionPoint : PolicyDecisionPoint {
-    override suspend fun allow(query: AuthzQuery): AuthzDecision = if (query.attributes["tool"] == ALLOWED_TOOL ||
+    override suspend fun allow(query: AuthzQuery): AuthzDecision = if (allowEverything ||
+        query.attributes["tool"] == ALLOWED_TOOL ||
         query.action.startsWith(SESSION_ACTION_PREFIX)
     ) {
         AuthzDecision(allow = true)
@@ -34,5 +35,13 @@ class TestPolicyDecisionPoint : PolicyDecisionPoint {
         const val ALLOWED_TOOL = "list_accounts"
         const val DENIED_TOOL = "list_consents"
         const val SESSION_ACTION_PREFIX = "mcp.session."
+
+        /**
+         * Opened ONLY by the wire-level fuzz test (McpToolCallWireFuzzIT), inside try/finally, so
+         * that every tool's argument handling is reachable over real HTTP. Off by default: every
+         * other test keeps the deterministic allow-one/deny-rest behaviour described above.
+         */
+        @Volatile
+        var allowEverything: Boolean = false
     }
 }
