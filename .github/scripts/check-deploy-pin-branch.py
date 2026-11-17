@@ -548,7 +548,7 @@ def application_docs(root, rev):
                            input="".join(f"{sha}\n" for _, sha in blobs).encode(),
                            capture_output=True).stdout
     offset = 0
-    for name, sha in blobs:
+    for name, _sha in blobs:
         header_end = batch.index(b"\n", offset)
         size = int(batch[offset:header_end].split()[2])
         data = batch[header_end + 1:header_end + 1 + size]
