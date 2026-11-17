@@ -13,6 +13,11 @@ package com.openbank.mcp.application
  * reference (`RF18…`) passes mod-97 (same algorithm) and is not an IBAN, while a mistyped real IBAN
  * fails it and still identifies an account. Mod-97 would get both cases wrong.
  *
+ * This is DETECTION for masking, deliberately distinct from VALIDATION: an argument that must be a
+ * real IBAN (`propose_payment`'s `toIban`, an IBAN-form `accountId` in `McpInputBounds`) is checked
+ * with libs-domain's `Iban.isValid` (mod-97), the one validator fleet-wide, and this object does not
+ * reimplement it. A masker that reused that validator would let a mistyped account number through.
+ *
  * Linear: each start position inspects at most the registry length of characters.
  */
 internal object McpIbanDetection {

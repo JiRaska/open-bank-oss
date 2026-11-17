@@ -64,7 +64,7 @@ class McpToolRegistry(
             name = "get_balance",
             description = "Get the balance of a granted account.",
             inputSchema = obj(
-                mapOf("accountId" to strProp("Account id (must be within the consent)")),
+                mapOf("accountId" to ibanProp()),
                 listOf("accountId"),
             ),
             service = "openbank-balance-service",
@@ -74,8 +74,13 @@ class McpToolRegistry(
             description = "List recent transactions of a granted account.",
             inputSchema = obj(
                 mapOf(
-                    "accountId" to strProp("Account id (must be within the consent)"),
-                    "limit" to mapOf("type" to "integer", "description" to "Max rows (default 50)"),
+                    "accountId" to ibanProp(),
+                    "limit" to mapOf(
+                        "type" to "integer",
+                        "minimum" to 1,
+                        "maximum" to McpInputBounds.MAX_TX_LIMIT,
+                        "description" to "Max rows (default ${McpInputBounds.DEFAULT_TX_LIMIT})",
+                    ),
                 ),
                 listOf("accountId"),
             ),
@@ -103,7 +108,7 @@ class McpToolRegistry(
                 "the statement.",
             inputSchema = obj(
                 mapOf(
-                    "accountId" to strProp("Account id (must be within the consent)"),
+                    "accountId" to ibanProp(),
                     "currency" to strProp("ISO 4217 pocket currency; required together with legalSequence"),
                     "legalSequence" to
                         mapOf("type" to "integer", "description" to "Exact statement sequence; omit for the latest"),
@@ -183,7 +188,7 @@ class McpToolRegistry(
                 accounts.listTransactions(
                     ctx,
                     arguments.reqText("accountId"),
-                    arguments.path("limit").asInt(DEFAULT_TX_LIMIT),
+                    McpInputBounds.transactionLimit(arguments.path("limit")),
                 )
             "list_consents" -> accounts.listConsents(ctx)
             "get_statement" -> statements.getStatementSummary(
@@ -209,7 +214,10 @@ class McpToolRegistry(
                 ProposePaymentArgs.validate(arguments)
                 ProposedOnly.enforce(proposals.proposePayment(ctx, arguments))
             }
-            else -> return ToolCallResult(listOf(ToolContent(text = "Unknown tool: $toolName")), isError = true)
+            else -> return ToolCallResult(
+                listOf(ToolContent(text = "Unknown tool: ${McpInputBounds.echo(toolName)}")),
+                isError = true,
+            )
         }
         // Two orthogonal controls, both applied HERE — one response-shaping step every tool passes
         // through, so a new tool cannot forget either of them (#2412).
@@ -230,15 +238,17 @@ class McpToolRegistry(
     private fun JsonNode.reqText(field: String): String = path(field).takeIf { it.isTextual }?.asText()
         ?: throw IllegalArgumentException("missing or non-string argument: $field")
 
+    private fun ibanProp() = mapOf(
+        "type" to "string",
+        "pattern" to McpInputBounds.IBAN_PATTERN,
+        "description" to "IBAN (uppercase, no spaces; must be within the consent)",
+    )
+
     private fun strProp(desc: String) = mapOf("type" to "string", "description" to desc)
 
     private fun obj(props: Map<String, Any>, required: List<String>): Map<String, Any> = buildMap {
         put("type", "object")
         put("properties", props)
         if (required.isNotEmpty()) put("required", required)
-    }
-
-    private companion object {
-        const val DEFAULT_TX_LIMIT = 50
     }
 }
