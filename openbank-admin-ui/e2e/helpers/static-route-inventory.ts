@@ -65,6 +65,7 @@ export const STATIC_ROUTE_INVENTORY: Record<string, { disposition: StaticRouteDi
   "/docs/identity-dedup": { disposition: "sidebar-navigation-smoke", path: "/docs/identity-dedup" },
   "/docs/lineage": { disposition: "sidebar-navigation-smoke", path: "/docs/lineage" },
   "/docs": { disposition: "sidebar-navigation-smoke", path: "/docs" },
+  "/docs/mcp-channel": { disposition: "sidebar-navigation-smoke", path: "/docs/mcp-channel" },
   "/docs/qrlesspay": { disposition: "sidebar-navigation-smoke", path: "/docs/qrlesspay" },
   "/docs/qrlesspay-readiness": { disposition: "static-direct-load-smoke", path: "/docs/qrlesspay-readiness" },
   "/docs/sensors/environment": { disposition: "static-direct-load-smoke", path: "/docs/sensors/environment" },
