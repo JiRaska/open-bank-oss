@@ -1,0 +1,126 @@
+{
+  "issue": "#16620",
+  "note": "(corpus item id) -> properties that FAIL today. Each entry is a ratchet: it aborts (skipped) while still failing and FAILS the build once it passes, so a fix must remove its entry. Never add an entry to silence a new finding without an issue.",
+  "gaps": {
+    "control-chars.ansi-escape.unmasked-field": [
+      "CONTROL"
+    ],
+    "control-chars.bidi-override.unmasked-field": [
+      "CONTROL"
+    ],
+    "control-chars.crlf-injection.unmasked-field": [
+      "CONTROL"
+    ],
+    "encoded.unicode-tags.unmasked-field": [
+      "CONTROL"
+    ],
+    "fake-end-marker.cyrillic-homoglyph.unmasked-field": [
+      "CONTROL",
+      "LENGTH",
+      "MARKER"
+    ],
+    "fake-end-marker.exact-close.unmasked-field": [
+      "CONTROL",
+      "LENGTH"
+    ],
+    "fake-end-marker.exact-open-close.unmasked-field": [
+      "CONTROL",
+      "LENGTH"
+    ],
+    "fake-end-marker.extra-spaces.unmasked-field": [
+      "CONTROL",
+      "LENGTH",
+      "MARKER"
+    ],
+    "fake-end-marker.fullwidth-brackets.unmasked-field": [
+      "CONTROL",
+      "LENGTH",
+      "MARKER"
+    ],
+    "fake-end-marker.inner-padding.unmasked-field": [
+      "CONTROL",
+      "LENGTH",
+      "MARKER"
+    ],
+    "fake-end-marker.line-separator.unmasked-field": [
+      "CONTROL"
+    ],
+    "fake-end-marker.lowercase.unmasked-field": [
+      "CONTROL",
+      "LENGTH",
+      "MARKER"
+    ],
+    "fake-end-marker.nbsp.unmasked-field": [
+      "CONTROL",
+      "LENGTH",
+      "MARKER"
+    ],
+    "fake-end-marker.unbracketed.unmasked-field": [
+      "CONTROL",
+      "LENGTH",
+      "MARKER"
+    ],
+    "fake-end-marker.word-joiner.unmasked-field": [
+      "CONTROL",
+      "LENGTH",
+      "MARKER"
+    ],
+    "fake-end-marker.zero-width.unmasked-field": [
+      "CONTROL",
+      "LENGTH",
+      "MARKER"
+    ],
+    "instruction-override.heading-block.unmasked-field": [
+      "CONTROL"
+    ],
+    "instruction-override.note-to-ai.unmasked-field": [
+      "LENGTH"
+    ],
+    "markdown-image-exfil.html-img.unmasked-field": [
+      "MARKUP"
+    ],
+    "markdown-image-exfil.md-image.unmasked-field": [
+      "MARKUP"
+    ],
+    "markdown-image-exfil.reference-image.unmasked-field": [
+      "CONTROL",
+      "MARKUP"
+    ],
+    "markdown-image-exfil.render-instruction.unmasked-field": [
+      "MARKUP"
+    ],
+    "markdown-link-exfil.autolink.unmasked-field": [
+      "MARKUP"
+    ],
+    "markdown-link-exfil.javascript-link.unmasked-field": [
+      "MARKUP"
+    ],
+    "markdown-link-exfil.md-link.unmasked-field": [
+      "MARKUP"
+    ],
+    "oversize.long-instruction.unmasked-field": [
+      "LENGTH"
+    ],
+    "oversize.padding-then-instruction.unmasked-field": [
+      "LENGTH"
+    ],
+    "pii-smuggle.iban-in-text.unmasked-field": [
+      "PII"
+    ],
+    "pii-smuggle.phone-in-text.unmasked-field": [
+      "PII"
+    ],
+    "role-play.admin-persona.unmasked-field": [
+      "LENGTH"
+    ],
+    "role-play.developer-mode.unmasked-field": [
+      "LENGTH"
+    ],
+    "markdown-image-exfil.logo-url.url-field": [
+      "MARKUP"
+    ]
+  },
+  "reasons": {
+    "markdown-image-exfil.logo-url.url-field": "merchant.logoUrl is passed through verbatim; nothing checks that it points at the bank CDN, so an upstream-poisoned logo URL reaches the model (#16620)."
+  }
+}
