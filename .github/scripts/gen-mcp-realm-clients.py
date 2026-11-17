@@ -12,7 +12,14 @@ writes, into customers-realm-template.json:
     PAR required, PKCE S256, exact redirects, no direct/implicit/device grant, no service account,
     and the dedicated browser-flow override;
   * the `openbank-mcp-fresh-passkey` browser flow: passwordless WebAuthn REQUIRED, no auth-cookie
-    alternative (ADR-0385 D2.2).
+    alternative (ADR-0385 D2.2), then the withheld-code authenticator REQUIRED (ADR-0385 D3) —
+    the code is issued only after the context-linked SCA challenge was consumed;
+  * the `openbank-mcp` client profile + policy binding the `openbank-mcp-client-guard` executor
+    to every client (`any-client`; the executor acts only on `openbank.mcp.tier` clients): no
+    token exchange for or of an MCP client (#16667), the bound RFC 8707 resource at PAR, and the
+    PAR-held request facts the authenticator recomputes the connect context from.
+
+Both providers ship in the bank's Keycloak image (openbank-infra/docker/keycloak/extension).
 
 Entries it owns are recognised by the `openbank.mcp.tier` client attribute; an owned entry no
 longer declared is removed. Everything else in the template is left byte-for-byte as it was
@@ -39,6 +46,10 @@ ROOT = Path(__file__).resolve().parents[2]
 ALLOWLIST = ROOT / "openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml"
 TEMPLATE = ROOT / "openbank-infra/gitops/components/keycloak/customers-realm-template.json"
 TIER_ATTR = "openbank.mcp.tier"
+RESOURCE_ATTR = "openbank.mcp.resource"
+WITHHELD_CODE_AUTHENTICATOR = "openbank-mcp-withheld-code"
+GUARD_EXECUTOR = "openbank-mcp-client-guard"
+POLICY_NAME = "openbank-mcp"
 
 ACCESS_TOKEN_LIFESPAN_S = 300  # ADR-0385 D1: access tokens live at most 5 minutes
 
@@ -92,6 +103,7 @@ def build_client(decl: dict, c: dict, base: Path) -> dict:
     tier = c["tier"]
     attrs = {
         TIER_ATTR: tier,
+        RESOURCE_ATTR: decl["resource"],
         "pkce.code.challenge.method": "S256",
         "require.pushed.authorization.requests": "true",
         "oauth2.device.authorization.grant.enabled": "false",
@@ -154,8 +166,8 @@ def build_flow(decl: dict) -> dict:
         "alias": decl["flow"]["alias"],
         "description": (
             "ADR-0385 D2.2: fresh passwordless WebAuthn for every MCP authorize. NO auth-cookie "
-            "alternative - an SSO session never skips the assertion. DERIVED from "
-            "mcp-client-allowlist.yaml."
+            "alternative - an SSO session never skips the assertion. D3: the code is withheld "
+            "until the context-linked SCA challenge is consumed. DERIVED from mcp-client-allowlist.yaml."
         ),
         "providerId": "basic-flow",
         "topLevel": True,
@@ -167,8 +179,36 @@ def build_flow(decl: dict) -> dict:
                 "requirement": "REQUIRED",
                 "priority": 10,
                 "userSetupAllowed": False,
-            }
+            },
+            {
+                "authenticator": WITHHELD_CODE_AUTHENTICATOR,
+                "authenticatorFlow": False,
+                "requirement": "REQUIRED",
+                "priority": 20,
+                "userSetupAllowed": False,
+            },
         ],
+    }
+
+
+def build_profile() -> dict:
+    return {
+        "name": POLICY_NAME,
+        "description": "ADR-0385 / #16667: MCP client guard. DERIVED from mcp-client-allowlist.yaml.",
+        "executors": [{"executor": GUARD_EXECUTOR, "configuration": {}}],
+    }
+
+
+def build_policy() -> dict:
+    # any-client, not a client-id list: the executor decides by the client's own tier attribute,
+    # so a newly declared client is covered without touching the policy, and the grant-type
+    # condition (which does not fire for a v1 exchange, #16667) is not relied on.
+    return {
+        "name": POLICY_NAME,
+        "description": "ADR-0385 / #16667: bind the MCP client guard. DERIVED from mcp-client-allowlist.yaml.",
+        "enabled": True,
+        "conditions": [{"condition": "any-client", "configuration": {}}],
+        "profiles": [POLICY_NAME],
     }
 
 
@@ -197,6 +237,12 @@ def render(template: dict, decl: dict, base: Path) -> dict:
     alias = decl["flow"]["alias"]
     flows = [f for f in out.get("authenticationFlows", []) if f.get("alias") != alias]
     out["authenticationFlows"] = flows + [build_flow(decl)]
+    profiles = out.get("clientProfiles") or {}
+    profiles["profiles"] = [p for p in profiles.get("profiles") or [] if p.get("name") != POLICY_NAME] + [build_profile()]
+    out["clientProfiles"] = profiles
+    policies = out.get("clientPolicies") or {}
+    policies["policies"] = [p for p in policies.get("policies") or [] if p.get("name") != POLICY_NAME] + [build_policy()]
+    out["clientPolicies"] = policies
     return out
 
 

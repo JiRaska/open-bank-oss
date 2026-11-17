@@ -276,6 +276,30 @@ class McpClientConnectScaTest {
             scope = scope,
         )
 
+    // Rule: requireInitiateScope. The authorization server's consumer raises connect challenges
+    // and nothing else — never a payment or approval prompt on a customer's device.
+    @Test
+    fun `the scoped connect consumer may initiate a connect challenge`() {
+        val challenge = runBlocking { service.initiate(command(linking()).copy(scope = mcpScope)) }
+        assertThat(challenge.purpose).isEqualTo(ScaPurpose.MCP_CLIENT_CONNECT)
+    }
+
+    @Test
+    fun `the scoped connect consumer may not initiate any other purpose`() {
+        listOf(ScaPurpose.APPROVAL, ScaPurpose.PAYMENT_INITIATION, ScaPurpose.CONSENT_GRANT).forEach { purpose ->
+            assertThatThrownBy {
+                runBlocking { service.initiate(command(linking()).copy(purpose = purpose, scope = mcpScope)) }
+            }.`as`(purpose.name).isInstanceOf(ScaInitiateScopeViolationException::class.java)
+        }
+        assertThat(challenges).isEmpty()
+    }
+
+    @Test
+    fun `a general initiator is not affected by the initiate scope`() {
+        val challenge = runBlocking { service.initiate(command(linking())) }
+        assertThat(challenge.purpose).isEqualTo(ScaPurpose.MCP_CLIENT_CONNECT)
+    }
+
     private fun command(dl: DynamicLinkingData?) = InitiateScaCommand(
         partyId = partyId,
         purpose = ScaPurpose.MCP_CLIENT_CONNECT,

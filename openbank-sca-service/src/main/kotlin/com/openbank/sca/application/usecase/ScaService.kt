@@ -30,6 +30,7 @@ import com.openbank.sca.application.port.out.PartyTypeLookup
 import com.openbank.sca.application.port.out.ScaChallengeRepository
 import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.application.port.out.ScaIdempotencyStore
+import com.openbank.sca.domain.model.ConsumerScope
 import com.openbank.sca.domain.model.DeviceApprovalDecision
 import com.openbank.sca.domain.model.DeviceDecisionType
 import com.openbank.sca.domain.model.DynamicLinkingData
@@ -89,6 +90,10 @@ class ScaChallengeAlreadyConsumedException(id: UUID) : RuntimeException("SCA cha
 class ScaChallengePartyMismatchException(id: UUID) : RuntimeException("SCA challenge belongs to another party: $id")
 class ScaConsumerScopeViolationException(id: UUID) :
     RuntimeException("SCA challenge is outside this consumer's scope: $id")
+
+/** ADR-0335 D1 / ADR-0385 D3: a scoped consumer tried to raise a challenge outside its namespace. */
+class ScaInitiateScopeViolationException(purpose: ScaPurpose) :
+    RuntimeException("This consumer may not initiate a $purpose challenge in this namespace")
 class ScaDynamicLinkingMismatchException(id: UUID) :
     RuntimeException("Operation does not match what the device signed for challenge: $id")
 class DeviceNotEnrolledException(credentialId: String) :
@@ -195,6 +200,7 @@ class ScaService(
         // saving one nobody can ever complete (#8432).
         val method = command.preferredMethod ?: ScaMethod.PUSH_NOTIFICATION
         if (method in UNDELIVERABLE_METHODS) throw ScaMethodNotDeliverableException(method)
+        requireInitiateScope(command)
         requireApprovalLinking(command)
         requireMcpConnectLinking(command)
         val ttlSeconds = 300L
@@ -550,6 +556,19 @@ class ScaService(
             require(runCatching { canonicalAmount(dl.amount) }.isSuccess) {
                 "amount must be a decimal with at most two fractional digits"
             }
+        }
+    }
+
+    /**
+     * A scoped consumer (ADR-0335 D1) raises only challenges it could itself spend: a purpose of
+     * its namespace, signed into that namespace. The authorization server's consumer therefore
+     * cannot raise a payment or approval prompt on a customer's device (ADR-0385 D3).
+     */
+    private fun requireInitiateScope(command: InitiateScaCommand) {
+        val scope = command.scope as? ConsumerScope.Reserved ?: return
+        val id = command.dynamicLinkingData?.approvalRequestId
+        if (command.purpose !in scope.namespace.purposes || id == null || !scope.namespace.isWellFormed(id)) {
+            throw ScaInitiateScopeViolationException(command.purpose)
         }
     }
 

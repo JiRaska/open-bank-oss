@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "0fe7fc2aeef36304"
+    openbank.tech/policy-checksum: "61110c7e3e36e8e4"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2061,6 +2061,7 @@ data:
           - service-account-openbank-edge                              # scaGate before every money-path forward
           - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
           - service-account-openbank-pension                           # ADR-0335: scope is DATA, see scoped_sca_consumers
+          - service-account-openbank-keycloak-mcp                      # ADR-0385 D3: connect ceremony only, see scoped_sca_consumers
 
     feature_flags:
       # Disabling any of these via a flag flip is never permitted — they guard SCA (ADR-0021),
@@ -2432,6 +2433,15 @@ data:
         purposes: [APPROVAL]
         approval_request_prefix: "pension-"
         adr: ADR-0335
+      # ADR-0385 D3 — the authorization server's withheld-code authenticator (Keycloak extension,
+      # openbank realm client `openbank-keycloak-mcp`, ROLE_API only). It raises AND spends connect
+      # challenges; sca-service refuses it any purpose but MCP_CLIENT_CONNECT at initiate
+      # (requireInitiateScope) and any challenge outside `mcp-connect:` at consume (ConsumerScope).
+      - principal: service-account-openbank-keycloak-mcp
+        actions: [scaChallenge.initiate, scaChallenge.consume]
+        purposes: [MCP_CLIENT_CONNECT]
+        approval_request_prefix: "mcp-connect:"
+        adr: ADR-0385
 
     scoped_payment_initiators:
       - principal: service-account-openbank-pension

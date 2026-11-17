@@ -1394,6 +1394,26 @@
       "secret": "__PENSION_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-keycloak-mcp",
+      "fullScopeAllowed": false,
+      "name": "OpenBank Keycloak MCP connect",
+      "description": "ADR-0385 D3: M2M identity of the customers-realm withheld-code authenticator at sca-service. ROLE_API only; OPA admits it to scaChallenge.initiate/consume alone and sca-service scopes it to MCP_CLIENT_CONNECT.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "secret": "__KEYCLOAK_MCP_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-pension-fund",
       "fullScopeAllowed": false,
       "name": "OpenBank Pension Fund Service",
@@ -2329,6 +2349,14 @@
       "username": "service-account-openbank-pension",
       "enabled": true,
       "serviceAccountClientId": "openbank-pension",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-keycloak-mcp",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-keycloak-mcp",
       "realmRoles": [
         "ROLE_API"
       ]

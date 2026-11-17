@@ -50,6 +50,7 @@ import com.openbank.sca.application.usecase.ScaChallengeNotFoundException
 import com.openbank.sca.application.usecase.ScaChallengePartyMismatchException
 import com.openbank.sca.application.usecase.ScaConsumerScopeViolationException
 import com.openbank.sca.application.usecase.ScaDynamicLinkingMismatchException
+import com.openbank.sca.application.usecase.ScaInitiateScopeViolationException
 import com.openbank.sca.application.usecase.ScaMethodNotDeliverableException
 import com.openbank.sca.application.usecase.ScaVerificationFailedException
 import com.openbank.sca.domain.model.DeviceDecisionType
@@ -269,6 +270,7 @@ class ScaResource(
             dynamicLinkingData = request.dynamicLinkingData,
             redirectUrl = request.redirectUrl,
             onBehalfOfPartyId = request.onBehalfOfPartyId,
+            scope = ConsumerScopes.forPrincipal(identity.principal?.name),
         )
         if (requestKey == null) {
             return Response.status(201).entity(ScaChallengeResponse.from(initiateSca.initiate(command))).build()
@@ -574,6 +576,14 @@ class ScaConsumerScopeViolationMapper : ExceptionMapper<ScaConsumerScopeViolatio
     override fun toResponse(e: ScaConsumerScopeViolationException): Response =
         Response.status(Response.Status.FORBIDDEN)
             .entity(err(ErrorCode.FORBIDDEN, e.message ?: "Challenge outside consumer scope")).build()
+}
+
+/** ADR-0385 D3: a scoped consumer raising a challenge outside its namespace — 403, nothing minted. */
+@Provider
+class ScaInitiateScopeViolationMapper : ExceptionMapper<ScaInitiateScopeViolationException> {
+    override fun toResponse(e: ScaInitiateScopeViolationException): Response =
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(err(ErrorCode.FORBIDDEN, e.message ?: "Challenge outside initiator scope")).build()
 }
 
 @Provider

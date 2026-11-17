@@ -23,7 +23,11 @@ Asserted, per declared client:
     audience mapper for the declared audience and no other audience, and the browser flow bound
     to the dedicated MCP flow;
   * the MCP flow: top-level, only REQUIRED executions, passwordless WebAuthn present, no
-    `auth-cookie` and no sub-flow anywhere (ADR-0385 D2.2);
+    `auth-cookie` and no sub-flow anywhere (ADR-0385 D2.2), and `openbank-mcp-withheld-code`
+    as its LAST step, after the passkey (ADR-0385 D3);
+  * every client's `openbank.mcp.resource` equals the allowlist resource (RFC 8707 binding);
+  * an enabled `any-client` client policy binding the `openbank-mcp-client-guard` executor
+    (#16667: no token exchange for or of an MCP client);
   * the realm: refreshTokenMaxReuse == 0 and revokeRefreshToken == true (never loosened).
 
     python3 .github/scripts/check-mcp-client-realm-parity.py             # enforce
@@ -45,6 +49,9 @@ ROOT = Path(__file__).resolve().parents[2]
 ALLOWLIST = ROOT / "openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml"
 TEMPLATE = ROOT / "openbank-infra/gitops/components/keycloak/customers-realm-template.json"
 TIER_ATTR = "openbank.mcp.tier"
+RESOURCE_ATTR = "openbank.mcp.resource"
+WITHHELD = "openbank-mcp-withheld-code"
+GUARD = "openbank-mcp-client-guard"
 MAX_EXCEPTION_DAYS = 183
 EXPECTED_MAPPERS = ("sub", "party-id", "mcp-service-audience")
 LOOPBACK_PREFIXES = ("http://127.0.0.1/", "http://[::1]/")
@@ -149,6 +156,15 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
         execs = flow.get("authenticationExecutions") or []
         if not any(e.get("authenticator") == "webauthn-authenticator-passwordless" for e in execs):
             f.append(f"realm: flow `{flow_alias}` has no passwordless WebAuthn step")
+        # ADR-0385 D3: the withheld-code step must run AFTER the passkey (it reads the asserted
+        # credential and the authenticated party), and be the LAST step: anything after it would
+        # run once the SCA challenge is already spent.
+        ordered = [e.get("authenticator") for e in sorted(execs, key=lambda e: e.get("priority") or 0)]
+        if WITHHELD not in ordered:
+            f.append(f"realm: flow `{flow_alias}` has no {WITHHELD} step — the code would be issued "
+                     f"without an SCA consume (ADR-0385 D3)")
+        elif ordered[-1] != WITHHELD or "webauthn-authenticator-passwordless" not in ordered[:ordered.index(WITHHELD)]:
+            f.append(f"realm: flow `{flow_alias}` must run {WITHHELD} last, after the passkey (ADR-0385 D3)")
         for e in execs:
             if e.get("authenticator") == "auth-cookie":
                 f.append(f"realm: flow `{flow_alias}` contains auth-cookie — an SSO cookie would skip the "
@@ -158,6 +174,18 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
             if e.get("requirement") != "REQUIRED":
                 f.append(f"realm: flow `{flow_alias}` execution {e.get('authenticator')} is "
                          f"{e.get('requirement')}, must be REQUIRED (no alternative path)")
+
+    # #16667: the guard executor must be bound to every client by an enabled any-client policy.
+    profiles = {p.get("name"): p for p in (realm.get("clientProfiles") or {}).get("profiles") or []}
+    bound = False
+    for pol in (realm.get("clientPolicies") or {}).get("policies") or []:
+        conds = [c.get("condition") for c in pol.get("conditions") or []]
+        execs_ = [e.get("executor") for n in pol.get("profiles") or [] for e in (profiles.get(n) or {}).get("executors") or []]
+        if pol.get("enabled") is True and conds == ["any-client"] and GUARD in execs_:
+            bound = True
+    if not bound:
+        f.append(f"realm: no enabled any-client client policy binds the {GUARD} executor — MCP clients could "
+                 f"token-exchange (#16667) and the withheld-code step would have no request facts")
 
     for cid, c in clients.items():
         if TIER_ATTR in (c.get("attributes") or {}) and cid not in declared:
@@ -172,6 +200,9 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
         a = c.get("attributes") or {}
         tier = d.get("tier")
         p = f"`{cid}` (Tier {tier})"
+        if a.get(RESOURCE_ATTR) != decl.get("resource"):
+            f.append(f"{p}: {RESOURCE_ATTR} is {a.get(RESOURCE_ATTR)!r}, the allowlist resource is "
+                     f"{decl.get('resource')!r} (RFC 8707 binding, ADR-0385 D1)")
         if a.get(TIER_ATTR) != tier:
             f.append(f"{p}: realm {TIER_ATTR}={a.get(TIER_ATTR)!r} disagrees with the allowlist")
         if tier == "H":
@@ -323,6 +354,20 @@ def self_test() -> int:
             0, {"authenticator": "auth-cookie", "requirement": "ALTERNATIVE", "priority": 1}), needle="auth-cookie")
     run("MCP flow execution ALTERNATIVE flagged",
         mutate_realm=lambda r: flow(r)["authenticationExecutions"][0].update(requirement="ALTERNATIVE"), needle="REQUIRED")
+    run("withheld-code step removed flagged",
+        mutate_realm=lambda r: flow(r).update(authenticationExecutions=[
+            e for e in flow(r)["authenticationExecutions"] if e["authenticator"] != WITHHELD]), needle="without an SCA consume")
+    run("withheld-code step before the passkey flagged",
+        mutate_realm=lambda r: next(e for e in flow(r)["authenticationExecutions"] if e["authenticator"] == WITHHELD).update(priority=1),
+        needle="last, after the passkey")
+    run("guard policy disabled flagged",
+        mutate_realm=lambda r: r["clientPolicies"]["policies"][-1].update(enabled=False), needle=GUARD)
+    run("guard policy narrowed to a grant-type condition flagged",
+        mutate_realm=lambda r: r["clientPolicies"]["policies"][-1].update(conditions=[{"condition": "grant-type"}]), needle=GUARD)
+    run("guard executor dropped from the profile flagged",
+        mutate_realm=lambda r: r["clientProfiles"]["profiles"][-1].update(executors=[]), needle=GUARD)
+    run("bound resource attribute drift flagged",
+        mutate_realm=lambda r: client(r, H)["attributes"].update({RESOURCE_ATTR: "https://evil.example/mcp"}), needle="RFC 8707")
     run("MCP flow id drift flagged", mutate_realm=lambda r: flow(r).update(id="other"), needle="overrides bind by id")
     run("undeclared realm client with the MCP marker flagged",
         mutate_realm=lambda r: r["clients"].append({**copy.deepcopy(client(r, L)), "clientId": "mcp-ghost"}), needle="not in the allowlist")

@@ -329,6 +329,7 @@
         "jwks.string": "{\"keys\":[{\"kty\":\"EC\",\"crv\":\"P-256\",\"use\":\"sig\",\"alg\":\"ES256\",\"kid\":\"reference-2026-11\",\"x\":\"XdufRJwhfCigQlaGQNm1RS9oUmPCQkKAtyqThufqW4Q\",\"y\":\"A-W1IQzopM5th1tKxq_i1dhaAjamQ6G2VSP-i__kDn4\"}]}",
         "oauth2.device.authorization.grant.enabled": "false",
         "oidc.ciba.grant.enabled": "false",
+        "openbank.mcp.resource": "https://api.open-bank.tech/mcp",
         "openbank.mcp.tier": "H",
         "pkce.code.challenge.method": "S256",
         "require.pushed.authorization.requests": "true",
@@ -416,6 +417,7 @@
         "frontchannel.logout.session.required": "false",
         "oauth2.device.authorization.grant.enabled": "false",
         "oidc.ciba.grant.enabled": "false",
+        "openbank.mcp.resource": "https://api.open-bank.tech/mcp",
         "openbank.mcp.tier": "L",
         "pkce.code.challenge.method": "S256",
         "require.pushed.authorization.requests": "true",
@@ -763,7 +765,7 @@
     {
       "id": "6d1c0b8e-3f4a-4c2e-9a51-0385d2f2a001",
       "alias": "openbank-mcp-fresh-passkey",
-      "description": "ADR-0385 D2.2: fresh passwordless WebAuthn for every MCP authorize. NO auth-cookie alternative - an SSO session never skips the assertion. DERIVED from mcp-client-allowlist.yaml.",
+      "description": "ADR-0385 D2.2: fresh passwordless WebAuthn for every MCP authorize. NO auth-cookie alternative - an SSO session never skips the assertion. D3: the code is withheld until the context-linked SCA challenge is consumed. DERIVED from mcp-client-allowlist.yaml.",
       "providerId": "basic-flow",
       "topLevel": true,
       "builtIn": false,
@@ -773,6 +775,13 @@
           "authenticatorFlow": false,
           "requirement": "REQUIRED",
           "priority": 10,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "openbank-mcp-withheld-code",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
           "userSetupAllowed": false
         }
       ]
@@ -812,5 +821,37 @@
         ]
       }
     }
-  ]
+  ],
+  "clientProfiles": {
+    "profiles": [
+      {
+        "name": "openbank-mcp",
+        "description": "ADR-0385 / #16667: MCP client guard. DERIVED from mcp-client-allowlist.yaml.",
+        "executors": [
+          {
+            "executor": "openbank-mcp-client-guard",
+            "configuration": {}
+          }
+        ]
+      }
+    ]
+  },
+  "clientPolicies": {
+    "policies": [
+      {
+        "name": "openbank-mcp",
+        "description": "ADR-0385 / #16667: bind the MCP client guard. DERIVED from mcp-client-allowlist.yaml.",
+        "enabled": true,
+        "conditions": [
+          {
+            "condition": "any-client",
+            "configuration": {}
+          }
+        ],
+        "profiles": [
+          "openbank-mcp"
+        ]
+      }
+    ]
+  }
 }
