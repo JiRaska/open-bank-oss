@@ -15,7 +15,7 @@ jackson = "2.23.0"
 # 0.31.x switched ObjectConverter to the Jackson 3 "tools.jackson" fork, which conflicts
 # with Quarkus 3.37's Jackson 2.x (jackson-databind/jackson-core, pinned above); 0.28.5
 # is the newest release still on classic com.fasterxml.jackson.
-webauthn4j = "0.32.0.RELEASE"
+webauthn4j = "0.28.5.RELEASE"
 # JUG — UUIDv7 (RFC 9562) generation for time-ordered identifiers (ADR-0106). FasterXML,
 # Apache-2.0, same org as Jackson (already a core dep). Vetted generator instead of a
 # hand-rolled one: intra-millisecond monotonicity (RFC 9562 §6.2) is subtle to get right.
