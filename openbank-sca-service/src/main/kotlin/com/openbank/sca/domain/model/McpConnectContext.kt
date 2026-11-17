@@ -34,7 +34,9 @@ data class McpConnectContext(
             require(it.isNotEmpty()) { "every MCP connect context field is required" }
             require('\n' !in it && '\r' !in it) { "an MCP connect context field may not contain CR or LF" }
         }
-        require(SHA256_LOWER_HEX.matches(requestUriSha256)) { "request_uri_sha256 must be 64 lower-case hex characters" }
+        require(SHA256_LOWER_HEX.matches(requestUriSha256)) {
+            "request_uri_sha256 must be 64 lower-case hex characters"
+        }
         require(expiresAt > 0) { "expires_at must be positive epoch seconds" }
     }
 
@@ -75,14 +77,17 @@ data class McpConnectContext(
         }
 
         fun parRequestId(requestUri: String): String {
-            require(requestUri.startsWith(PAR_REQUEST_URI_PREFIX) && requestUri.length > PAR_REQUEST_URI_PREFIX.length) {
+            require(
+                requestUri.startsWith(PAR_REQUEST_URI_PREFIX) && requestUri.length > PAR_REQUEST_URI_PREFIX.length,
+            ) {
                 "not a PAR request_uri"
             }
             return requestUri.removePrefix(PAR_REQUEST_URI_PREFIX)
         }
 
         /** `mcp-connect:<PAR request id>` — the [ReservedNamespace.MCP_CONNECT] approvalRequestId. */
-        fun approvalRequestId(requestUri: String): String = ReservedNamespace.MCP_CONNECT.prefix + parRequestId(requestUri)
+        fun approvalRequestId(requestUri: String): String =
+            ReservedNamespace.MCP_CONNECT.prefix + parRequestId(requestUri)
 
         private fun redirectHost(redirectUri: String): String {
             val host = runCatching { URI.create(redirectUri).host }.getOrNull()

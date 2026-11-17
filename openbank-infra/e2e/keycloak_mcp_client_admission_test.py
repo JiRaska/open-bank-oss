@@ -18,13 +18,21 @@ Test-only fixtures, added to the disposable realm and nowhere else:
     prove the MCP flow ignores it. The passkey is a software authenticator: an ephemeral P-256
     key registered as a `webauthn-passwordless` credential, answering Keycloak's real challenge.
 
-Requires Docker, OpenSSL and Python's standard library only.
+ADR-0385 D3 / D2.3 / #16667 run against the bank's Keycloak extension
+(openbank-infra/docker/keycloak/extension), built from the committed Dockerfile's `extension-jar`
+stage and mounted into the pinned image's providers directory. sca-service is a STUB here (an
+in-process HTTP server answering initiate/consume like sca-service does, single-use CAS included);
+the hash it receives is recomputed below from the shared canonical-context fixture's rules, and
+the same fixture holds sca-service's and the extension's own implementations.
+
+Requires Docker (with buildx), OpenSSL and Python's standard library only.
 """
 
 import base64
 import hashlib
 import html
 import http.client
+import http.server
 import itertools
 import json
 import pathlib
@@ -32,6 +40,7 @@ import re
 import secrets
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 import urllib.error
@@ -47,6 +56,13 @@ H_CB, L_CB = "https://client.test/cb", "http://127.0.0.1:53682/callback"
 USER, PARTY = "mcp-it@example.test", "11111111-1111-4111-8111-111111111111"
 USER_ID = "9a7e0c1e-0385-4d00-8000-00000000a11c"
 COUNTER = itertools.count(int(time.time()))
+YOUNG_USER, YOUNG_PARTY = "mcp-it-young@example.test", "22222222-2222-4222-8222-222222222222"
+YOUNG_USER_ID = "9a7e0c1e-0385-4d00-8000-00000000a11d"
+RESOURCE = "https://api.open-bank.tech/mcp"
+# The withheld-code session lifespan configured for THIS disposable server. The extension caps it
+# at 300 s (ADR-0385 D3.6, unit-tested in ExtensionTests); a short value lets the expiry case run
+# in seconds rather than five minutes.
+SESSION_LIFESPAN_S = 30
 
 
 def run(*args, data=None):
@@ -168,6 +184,99 @@ class Browser:
         return resp
 
 
+class ScaStub:
+    """sca-service's initiate/consume contract, in-process: single-use consume (CAS), the not-yet-
+    approved 400, party / approvalRequestId / payloadSha256 compared at consume, a bearer token
+    required. `approve()` stands in for the customer's device approval."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.challenges = {}  # id -> dict
+        self.token = secrets.token_urlsafe(24)
+        stub = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def reply(self, status, body):
+                data = json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_POST(self):
+                raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                if self.path == "/token":
+                    form = urllib.parse.parse_qs(raw.decode())
+                    ok = form.get("grant_type") == ["client_credentials"] and form.get("client_id") == ["openbank-keycloak-mcp"]
+                    return self.reply(200 if ok else 401, {"access_token": stub.token, "expires_in": 300} if ok else {})
+                if self.headers.get("Authorization") != f"Bearer {stub.token}":
+                    return self.reply(401, {})
+                body = json.loads(raw or b"{}")
+                if self.path == "/api/v1/sca/challenges":
+                    return self.reply(*stub.initiate(body, self.headers.get("Idempotency-Key")))
+                m = re.fullmatch(r"/api/v1/sca/challenges/([0-9a-f-]+)/consume", self.path)
+                if m:
+                    return self.reply(*stub.consume(m.group(1), body))
+                return self.reply(404, {})
+
+        self.server = http.server.ThreadingHTTPServer(("0.0.0.0", 0), Handler)
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def initiate(self, body, key):
+        dl = body.get("dynamicLinkingData") or {}
+        if body.get("purpose") != "MCP_CLIENT_CONNECT" or not dl.get("approvalRequestId", "").startswith("mcp-connect:") \
+                or not re.fullmatch(r"[0-9a-f]{64}", dl.get("payloadSha256", "")):
+            return 400, {}
+        with self.lock:
+            for c in self.challenges.values():
+                if c["key"] == key and key:
+                    return 201, {"id": c["id"]}
+            cid = str(uuid.uuid4())
+            self.challenges[cid] = {"id": cid, "key": key, "partyId": body["partyId"], "approved": False,
+                                    "consumed": False, "consumes": 0, "spent": 0, "corrupt": False, **dl}
+            return 201, {"id": cid}
+
+    def consume(self, cid, body):
+        with self.lock:
+            c = self.challenges.get(cid)
+            if c is None:
+                return 404, {}
+            c["consumes"] += 1
+            if not c["approved"]:
+                return 400, {"message": "SCA challenge is not approved"}
+            if c["consumed"]:
+                return 409, {"message": "SCA challenge already consumed"}
+            if (body.get("partyId"), body.get("approvalRequestId"), body.get("payloadSha256")) != \
+                    (c["partyId"], c["approvalRequestId"], c["payloadSha256"]):
+                return 409, {"message": "dynamic linking mismatch"}
+            c["consumed"] = True
+            c["spent"] += 1
+            done = {"id": cid, "partyId": c["partyId"], "purpose": "MCP_CLIENT_CONNECT", "status": "COMPLETED",
+                    "consumedAt": "2026-11-17T10:00:00Z"}
+            if c["corrupt"]:
+                # The consume DID happen; the response then fails the authenticator's post-consume check.
+                done["consumedAt"] = None
+            return 200, done
+
+    def for_request(self, request_uri):
+        want = "mcp-connect:" + request_uri.split("urn:ietf:params:oauth:request_uri:", 1)[1]
+        with self.lock:
+            found = [c for c in self.challenges.values() if c["approvalRequestId"] == want]
+        return found[0] if found else None
+
+    def approve(self, request_uri, corrupt=False):
+        c = self.for_request(request_uri)
+        assert c is not None, "no challenge was initiated for this request"
+        with self.lock:
+            c["approved"], c["corrupt"] = True, corrupt
+        return c
+
+
 class McpClientAdmission(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -176,6 +285,9 @@ class McpClientAdmission(unittest.TestCase):
         work = pathlib.Path(cls.tmp.name)
         cls.hkey, cls.passkey, cls.dpop = EcKey(work / "h.pem"), EcKey(work / "p.pem"), EcKey(work / "d.pem")
         cls.cred_id = secrets.token_bytes(32)
+        cls.young_passkey, cls.young_cred_id = EcKey(work / "y.pem"), secrets.token_bytes(32)
+        cls.sca = ScaStub()
+        cls.addClassCleanup(cls.sca.server.shutdown)
 
         text = (KC / "customers-realm-template.json").read_text()
         text = re.sub(r"__([A-Z0-9_]+)__", lambda _m: secrets.token_urlsafe(24), text)
@@ -196,16 +308,25 @@ class McpClientAdmission(unittest.TestCase):
             "authenticationExecutions": [
                 {"authenticator": "auth-cookie", "requirement": "ALTERNATIVE", "priority": 5, "authenticatorFlow": False},
                 {"authenticator": "auth-username-password-form", "requirement": "ALTERNATIVE", "priority": 10, "authenticatorFlow": False}]})
-        cose = cbor({1: 2, 3: -7, -1: 1, -2: cls.passkey.x, -3: cls.passkey.y})
-        cred = {"aaguid": "00000000-0000-0000-0000-000000000000", "credentialId": base64.b64encode(cls.cred_id).decode(),
-                "counter": 0, "attestationStatement": None, "credentialPublicKey": base64.b64encode(cose).decode(),
-                "attestationStatementFormat": "none", "transports": ["internal", "hybrid"]}
+        def passkey_credential(key, cred_id, age_hours):
+            cose = cbor({1: 2, 3: -7, -1: 1, -2: key.x, -3: key.y})
+            data = {"aaguid": "00000000-0000-0000-0000-000000000000", "credentialId": base64.b64encode(cred_id).decode(),
+                    "counter": 0, "attestationStatement": None, "credentialPublicKey": base64.b64encode(cose).decode(),
+                    "attestationStatementFormat": "none", "transports": ["internal", "hybrid"]}
+            # ADR-0385 D2.3: the extension reads the credential's creation time.
+            return {"type": "webauthn-passwordless", "userLabel": "it", "credentialData": json.dumps(data), "secretData": "{}",
+                    "createdDate": int((time.time() - age_hours * 3600) * 1000)}
         cls.password = secrets.token_urlsafe(18)
         realm.setdefault("users", []).append({
             "id": USER_ID, "username": USER, "email": USER, "firstName": "Mcp", "lastName": "It",
             "enabled": True, "emailVerified": True, "attributes": {"party_id": [PARTY]},
             "credentials": [{"type": "password", "value": cls.password, "temporary": False},
-                            {"type": "webauthn-passwordless", "userLabel": "it", "credentialData": json.dumps(cred), "secretData": "{}"}],
+                            passkey_credential(cls.passkey, cls.cred_id, 100)],
+            "realmRoles": ["ROLE_CUSTOMER", "offline_access", "default-roles-openbank-customers"]})
+        realm["users"].append({
+            "id": YOUNG_USER_ID, "username": YOUNG_USER, "email": YOUNG_USER, "firstName": "Young", "lastName": "It",
+            "enabled": True, "emailVerified": True, "attributes": {"party_id": [YOUNG_PARTY]},
+            "credentials": [passkey_credential(cls.young_passkey, cls.young_cred_id, 71)],
             "realmRoles": ["ROLE_CUSTOMER", "offline_access", "default-roles-openbank-customers"]})
         realm_file = work / "realm.json"
         realm_file.write_text(json.dumps(realm))
@@ -216,12 +337,23 @@ class McpClientAdmission(unittest.TestCase):
         version = re.search(r"ARG KEYCLOAK_VERSION=([0-9.]+)", dockerfile).group(1)
         features = re.search(r"ENV KC_FEATURES=(\S+)", dockerfile).group(1)
         image = image.replace("${KEYCLOAK_VERSION}", version)
+        # The extension, from the committed Dockerfile (compiled and unit-tested in that stage).
+        providers = work / "providers"
+        run("docker", "buildx", "build", "--target", "extension-jar", "--output", f"type=local,dest={providers}",
+            str(ROOT / "openbank-infra/docker/keycloak"))
+        providers.chmod(0o755)
         cls.container = "ob-mcp-admission-test-" + secrets.token_hex(6)
         cls.addClassCleanup(lambda: run("docker", "rm", "-f", cls.container))
+        sca = f"http://host.docker.internal:{cls.sca.port}"
+        spi = "--spi-authenticator--openbank-mcp-withheld-code--"
         run("docker", "run", "--detach", "--name", cls.container, "--memory=1g",
+            "--add-host=host.docker.internal:host-gateway",
             "-e", "JAVA_OPTS_APPEND=-XX:ActiveProcessorCount=2", "-p", "127.0.0.1::8080",
-            "-v", f"{realm_file}:/opt/keycloak/data/import/realm.json:ro", image,
-            "start-dev", "--import-realm", f"--features={features}")
+            "-v", f"{realm_file}:/opt/keycloak/data/import/realm.json:ro",
+            "-v", f"{providers}:/opt/keycloak/providers:ro", image,
+            "start-dev", "--import-realm", f"--features={features}",
+            f"{spi}sca-url={sca}", f"{spi}token-url={sca}/token", f"{spi}client-id=openbank-keycloak-mcp",
+            f"{spi}client-secret={secrets.token_urlsafe(16)}", f"{spi}session-lifespan-seconds={SESSION_LIFESPAN_S}")
         port = run("docker", "port", cls.container, "8080/tcp").decode().strip().splitlines()[0].rsplit(":", 1)[1]
         cls.origin = f"http://127.0.0.1:{port}"
         cls.iss = f"{cls.origin}/realms/openbank-customers"
@@ -283,18 +415,19 @@ class McpClientAdmission(unittest.TestCase):
                                                          f"{resp.status} {resp.location[:120]}")
         self.assertNotIn("code", resp.query())
 
-    def assert_passkey(self, browser, page):
+    def assert_passkey(self, browser, page, key=None, cred_id=None, user_id=USER_ID):
         """The software authenticator answers Keycloak's real challenge."""
+        key, cred_id = key or self.passkey, cred_id or self.cred_id
         challenge = re.search(r'challenge\s*:\s*"([^"]+)"', page.text).group(1)
         rp_id = re.search(r'rpId\s*:\s*"([^"]*)"', page.text).group(1)
         action = html.unescape(re.search(r'id="webauth" action="([^"]+)"', page.text).group(1))
         client_data = json.dumps({"type": "webauthn.get", "challenge": challenge, "origin": self.origin,
                                   "crossOrigin": False}).encode()
         auth_data = hashlib.sha256(rp_id.encode()).digest() + bytes([0x05]) + next(COUNTER).to_bytes(4, "big")
-        signature = self.passkey.sign_der(auth_data + hashlib.sha256(client_data).digest())
+        signature = key.sign_der(auth_data + hashlib.sha256(client_data).digest())
         return browser.follow(browser.request("POST", action, {
             "clientDataJSON": b64(client_data), "authenticatorData": b64(auth_data), "signature": b64(signature),
-            "credentialId": b64(self.cred_id), "userHandle": b64(USER_ID.encode()), "error": ""}))
+            "credentialId": b64(cred_id), "userHandle": b64(user_id.encode()), "error": ""}))
 
     def sso_browser(self):
         """A browser holding a genuine SSO session for the user (via the test-only password client)."""
@@ -307,12 +440,29 @@ class McpClientAdmission(unittest.TestCase):
         self.assertIn("KEYCLOAK_IDENTITY", browser.cookies, "fixture: an SSO cookie must exist")
         return browser
 
-    def code_for(self, client, redirect, **extra):
+    @staticmethod
+    def is_waiting_page(resp):
+        return resp.status in (200, 429) and 'id="mcp-connect-poll"' in resp.text
+
+    def poll(self, browser, page, **form):
+        action = html.unescape(re.search(r'id="mcp-connect-poll" method="post" action="([^"]+)"', page.text).group(1))
+        return browser.follow(browser.request("POST", action, {"check": "1", **form}))
+
+    def connect(self, client, redirect, **extra):
+        """Passkey asserted; returns (browser, waiting page, request_uri, verifier) — no code yet."""
         browser = self.sso_browser()
         uri, verifier = self.request_uri(client, redirect, **extra)
-        resp = self.assert_passkey(browser, self.authorize(browser, client, uri))
+        page = self.assert_passkey(browser, self.authorize(browser, client, uri))
+        self.assertTrue(self.is_waiting_page(page), f"passkey must lead to the SCA wait: {page.status} {page.location[:120]}")
+        self.assertNotIn("code", page.query())
+        return browser, page, uri, verifier
+
+    def code_for(self, client, redirect, **extra):
+        browser, page, uri, verifier = self.connect(client, redirect, **extra)
+        self.sca.approve(uri)
+        resp = self.poll(browser, page)
         query = resp.query()
-        self.assertIn("code", query, f"fresh passkey must yield a code: {resp.status} {resp.location[:120]}")
+        self.assertIn("code", query, f"fresh passkey + consumed SCA must yield a code: {resp.status} {resp.location[:120]}")
         return query, verifier
 
     # ---- D2.1 PAR / PKCE / redirects ----------------------------------------------------------
@@ -361,15 +511,16 @@ class McpClientAdmission(unittest.TestCase):
         self.assertNotIn("code", resp.query())
         self.assertNotIn("127.0.0.1:1/", resp.location)
 
-    @unittest.expectedFailure
     def test_foreign_resource_is_invalid_target(self):
-        # ADR-0385 D1 / D7.4. Keycloak 26.8.1 does NOT implement RFC 8707: a foreign `resource` is
-        # silently ignored (PAR 201). Kept as an expected failure so the day Keycloak (or a provider
-        # we add) enforces it, this flips to an unexpected success and the gap is re-examined. The
-        # audience half of D1 IS enforced: see test_tier_l_dpop_bound_tokens (aud == mcp-service only).
-        resp, _ = self.par(L, L_CB, resource="https://evil.example/mcp")
-        self.assertEqual(resp.status, 400)
-        self.assertIn("invalid_target", resp.text)
+        # ADR-0385 D1 / D7.4. Keycloak 26.8.1 does NOT implement RFC 8707 itself; the bank's
+        # openbank-mcp-client-guard executor refuses a resource other than the client's bound one
+        # at PAR. The audience half of D1: see test_tier_l_dpop_bound_tokens (aud == mcp-service only).
+        for client, redirect in ((L, L_CB), (H, H_CB)):
+            with self.subTest(client=client):
+                resp, _ = self.par(client, redirect, resource="https://evil.example/mcp")
+                self.assertEqual(resp.status, 400, resp.text[:200])
+                self.assertIn("invalid_target", resp.text)
+        self.assertEqual(self.par(L, L_CB, resource=RESOURCE)[0].status, 201, "the bound resource is accepted")
 
     # ---- D2.2 fresh passkey: an SSO cookie never skips it -------------------------------------
     def test_sso_cookie_does_not_skip_the_passkey(self):
@@ -486,14 +637,11 @@ class McpClientAdmission(unittest.TestCase):
 
 
     # ---- D1: no token exchange for an MCP client ----------------------------------------------
-    @unittest.expectedFailure
     def test_token_exchange_refused_for_mcp_client(self):
-        # KNOWN GAP (measured on 26.8.1, tracked in the issue cited by the PR): the image enables
-        # the legacy `token-exchange` (v1) feature for the bank's own app, and v1 lets a
-        # confidential client exchange ITS OWN access token for a fresh access + refresh token
-        # whatever `standard.token.exchange.enabled` says. A realm client policy keyed on the
-        # `grant-type` condition does not fire for that exchange either. Kept as an expected
-        # failure so the day it is closed this flips to an unexpected success.
+        # #16667: the image enables the legacy `token-exchange` (v1) feature for the bank's own app,
+        # and v1 lets a confidential client exchange ITS OWN access token for a fresh access +
+        # refresh token whatever `standard.token.exchange.enabled` says. The bank's
+        # openbank-mcp-client-guard executor (any-client policy) refuses it for MCP clients.
         query, verifier = self.code_for(H, H_CB)
         resp = self.post(self.token_url, {"grant_type": "authorization_code", "client_id": H, "code": query["code"][0],
                                           "redirect_uri": H_CB, "code_verifier": verifier, **self.client_auth()})
@@ -505,6 +653,106 @@ class McpClientAdmission(unittest.TestCase):
             "requested_token_type": "urn:ietf:params:oauth:token-type:access_token", **self.client_auth()})
         self.assertIn(exchange.status, (400, 401, 403), exchange.text[:200])
         self.assertNotIn("access_token", exchange.text)
+        self.assertNotIn("refresh_token", exchange.text)
+
+    # ---- ADR-0385 D3: the withheld code ---------------------------------------------------------
+    def expected_context(self, client, redirect_host, uri, page):
+        expires = re.search(r'id="mcp-expires">([^<]+)<', page.text).group(1)
+        expires_at = int(time.mktime(time.strptime(expires, "%Y-%m-%dT%H:%M:%SZ")) - time.timezone)
+        canon = "\n".join(["openbank-mcp-connect-context/v1", f"client_id={client}", f"redirect_host={redirect_host}",
+                           f"resource={RESOURCE}", "scopes=offline_access openid",
+                           f"request_uri_sha256={hashlib.sha256(uri.encode()).hexdigest()}", f"expires_at={expires_at}"])
+        return hashlib.sha256(canon.encode()).hexdigest()
+
+    def test_code_not_issued_before_consume(self):
+        browser, page, uri, _ = self.connect(L, L_CB)
+        challenge = self.sca.for_request(uri)
+        self.assertIsNotNone(challenge, "the passkey step must raise the SCA challenge")
+        self.assertEqual(challenge["partyId"], PARTY, "the challenge belongs to the passkey user's party")
+        self.assertEqual(challenge["payloadSha256"], self.expected_context(L, "127.0.0.1", uri, page),
+                         "payloadSha256 is the canonical context of THIS request")
+        self.assertNotIn(challenge["id"], page.text, "the challenge id never reaches the browser (D3.1)")
+        self.assertIn("127.0.0.1", page.text)
+        self.assertIn(RESOURCE, page.text)
+        time.sleep(2.1)
+        pending = self.poll(browser, page)
+        self.assertTrue(self.is_waiting_page(pending), f"unapproved: still waiting, got {pending.status}")
+        self.assertNotIn("code", pending.query())
+        self.assertFalse(challenge["consumed"])
+        # a forged challenge id in the form is ignored: the note is the only source
+        time.sleep(2.1)
+        forged = self.poll(browser, pending, challengeId=str(uuid.uuid4()))
+        self.assertNotIn("code", forged.query())
+
+    def test_poll_is_rate_limited(self):
+        browser, page, _uri, _ = self.connect(L, L_CB)
+        first = self.poll(browser, page)
+        second = self.poll(browser, first)
+        self.assertEqual(second.status, 429, "a poll within 2 s of the last is refused")
+        self.assertNotIn("code", second.query())
+
+    def test_two_concurrent_polls_issue_at_most_one_code(self):
+        # ADR-0385 D3.5: a forked session issues at most one code. Measured on 26.8.1: Keycloak's own
+        # session-code check already rejects the second POST of one page (400) or restarts the flow,
+        # and in a minority of runs the flow restart lands on the winner too, so NO code is issued
+        # although the challenge was spent — fail-closed, and a fresh connect is required. Both
+        # outcomes satisfy "at most one"; "two codes" never may. The extension's cluster-wide
+        # single-use claim is the line that holds across Keycloak nodes, which one container cannot
+        # show (see the PR's known-positive notes).
+        browser, page, uri, _ = self.connect(L, L_CB)
+        challenge = self.sca.approve(uri)
+        results, barrier = [], threading.Barrier(2)
+
+        def racer():
+            twin = Browser(self.origin)
+            twin.cookies = dict(browser.cookies)
+            barrier.wait()
+            results.append(self.poll(twin, page))
+        threads = [threading.Thread(target=racer) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(60)
+        codes = [r for r in results if "code" in r.query()]
+        self.assertEqual(len(results), 2)
+        self.assertLessEqual(len(codes), 1, f"at most one code, got {[(r.status, r.location[:60]) for r in results]}")
+        self.assertLessEqual(challenge["spent"], 1, "the challenge is spent at most once")
+        if codes:
+            self.assertEqual(challenge["spent"], 1, "a code only after a consume")
+        time.sleep(2.1)
+        for r in results:
+            if self.is_waiting_page(r):
+                self.assertNotIn("code", self.poll(browser, r).query(), "no second code after the race")
+
+    def test_consume_then_issue_failure_yields_no_code_and_no_retry(self):
+        browser, page, uri, _ = self.connect(L, L_CB)
+        challenge = self.sca.approve(uri, corrupt=True)
+        resp = self.poll(browser, page)
+        self.assertNotIn("code", resp.query())
+        self.assertTrue(challenge["consumed"], "the consume happened")
+        consumes = challenge["consumes"]
+        time.sleep(2.1)
+        retry = self.poll(browser, page)
+        self.assertNotIn("code", retry.query(), "a burned session never issues a code")
+        self.assertEqual(challenge["consumes"], consumes, "and never consumes again")
+
+    def test_session_past_its_lifespan_yields_no_code(self):
+        browser, page, uri, _ = self.connect(L, L_CB)
+        challenge = self.sca.approve(uri)
+        time.sleep(SESSION_LIFESPAN_S + 1)
+        resp = self.poll(browser, page)
+        self.assertNotIn("code", resp.query())
+        self.assertEqual(challenge["consumes"], 0, "an expired session never reaches the consume")
+        self.assertFalse(challenge["consumed"])
+
+    def test_young_passkey_refused(self):
+        browser = Browser(self.origin)
+        uri, _ = self.request_uri(L, L_CB)
+        resp = self.assert_passkey(browser, self.authorize(browser, L, uri), key=self.young_passkey,
+                                   cred_id=self.young_cred_id, user_id=YOUNG_USER_ID)
+        self.assertNotIn("code", resp.query())
+        self.assertFalse(self.is_waiting_page(resp), "a passkey younger than 72 h must not reach the SCA step")
+        self.assertIsNone(self.sca.for_request(uri), "no challenge is raised for a young passkey")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

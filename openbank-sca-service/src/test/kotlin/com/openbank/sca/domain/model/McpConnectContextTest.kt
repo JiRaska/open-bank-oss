@@ -19,7 +19,9 @@ import java.io.File
 class McpConnectContextTest {
     private val fixture: JsonNode = run {
         val file = generateSequence(File("").absoluteFile) { it.parentFile }
-            .map { File(it, "openbank-infra/docker/keycloak/extension/src/test/resources/mcp-connect-context.fixture.json") }
+            .map {
+                File(it, "openbank-infra/docker/keycloak/extension/src/test/resources/mcp-connect-context.fixture.json")
+            }
             .first { it.isFile }
         ObjectMapper().readTree(file)
     }
