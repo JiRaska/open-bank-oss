@@ -34,7 +34,15 @@
 #   5. neither sha moves backwards against the parent pin (unless pin.json says rollback, which
 #      still only permits an older IMAGE, never an older manifest set)
 #   6. a component whose service is under rules.yaml deploy_holds (as of main) cannot change
-#      its image
+#      its image. The service is the pinned image's repository name (openbank-aml-service),
+#      never "openbank-" + the component directory (aml) - those differ for most services.
+#
+# Which image a component may pin (ADR-0358 slice 2): admin-ui is declared in PINNABLE; any
+# other component is pinnable iff its directory on main at manifest_sha references exactly ONE
+# distinct image repository in the fleet registry, and that repository is the one it may pin.
+# The permission is derived from reviewed manifests, so it cannot name an image main does not
+# already run there; a multi-image component (payments, accounts, ...) is not pinnable and
+# stays on the deploy-PR path until a later slice handles it.
 
 import argparse
 import base64
@@ -56,8 +64,12 @@ DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 COMPONENT = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 PIN_KEYS = {"component", "manifest_sha", "image_source_sha", "image", "tag", "digest", "rollback"}
-# Component -> the images it is allowed to pin. One image per component today.
+# Component -> the image it is allowed to pin, where declared rather than derived.
 PINNABLE = {"admin-ui": "265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui"}
+REGISTRY = PINNABLE["admin-ui"].rsplit("/", 1)[0]
+# An `image:` field naming a fleet-registry repository (tag/digest optional, quotes optional).
+FLEET_IMAGE = re.compile(r"^[ \t-]*image:[ \t]*[\"']?(" + re.escape(REGISTRY)
+                         + r"/openbank-[a-z0-9-]+)(?=[:@\"'\s]|$)", re.M)
 
 
 class PinError(Exception):
@@ -96,22 +108,93 @@ def kustomization(names, image, tag, digest):
     return header + yaml.safe_dump(doc, sort_keys=False)
 
 
+# Argo CD's plain-directory source (no kustomization, no `directory:` options) renders exactly
+# the top-level *.yaml/*.yml/*.json files and ignores everything else (.rego, .sh, sub-
+# directories). A derived pin copies exactly that set, so it renders what main renders today.
+ARGO_MANIFEST = re.compile(r"^[^/]+\.(ya?ml|json)$")
+KUSTOMIZATION = {"kustomization.yaml", "kustomization.yml", "Kustomization"}
+
+
+def directory_manifests(root, rev, path):
+    """{name: bytes} of the files Argo's directory source renders from `path` at `rev`."""
+    files = {}
+    try:
+        listing = git(root, "ls-tree", f"{rev}:{path}").splitlines()
+    except PinError as error:
+        raise PinError(f"{path} does not exist at {rev[:12]}") from error
+    for line in listing:
+        meta, name = line.split("\t", 1)
+        mode, kind, _ = meta.split()
+        if name in KUSTOMIZATION:
+            raise PinError(f"{path} is a kustomization at {rev[:12]}; only a plain-directory "
+                           f"component is pinnable by derivation")
+        if kind != "blob" or not ARGO_MANIFEST.fullmatch(name):
+            continue
+        if mode not in ("100644", "100755"):
+            raise PinError(f"{path}/{name} at {rev[:12]} is not a regular file ({kind} {mode})")
+        files[name] = git(root, "show", f"{rev}:{path}/{name}", text=False)
+    if not files:
+        raise PinError(f"{path} has no manifests at {rev[:12]}")
+    return files
+
+
+def component_files(root, rev, component):
+    """The manifest copy for a pin: admin-ui (declared) copies its whole directory as slice 1
+    did; a derived component copies what Argo renders from its directory."""
+    path = f"{COMPONENTS_DIR}/{component}"
+    if component in PINNABLE:
+        return tree_files(root, rev, path)
+    return directory_manifests(root, rev, path)
+
+
+def derived_image(files):
+    """The single fleet-registry image repository a component's manifests reference, or None
+    when they reference none or more than one (not pinnable by derivation)."""
+    images = {m.group(1) for data in files.values()
+              for m in FLEET_IMAGE.finditer(data.decode("utf-8", errors="replace"))}
+    return next(iter(images)) if len(images) == 1 else None
+
+
+def pinnable_image(component, files):
+    """The image `component` may pin, given its manifest files at manifest_sha."""
+    if not COMPONENT.fullmatch(component):
+        raise PinError(f"{component!r} is not a valid component name")
+    if component in PINNABLE:
+        return PINNABLE[component]
+    image = derived_image(files)
+    if image is None:
+        raise PinError(f"{component} is not a pinnable component: its manifests on main do not "
+                       f"reference exactly one {REGISTRY}/openbank-* image (declared: {sorted(PINNABLE)})")
+    return image
+
+
+def service_of(image):
+    """deploy_holds key for a pinned image: its repository name."""
+    return image.rsplit("/", 1)[1]
+
+
 def render(root, component, manifest_sha, image_source_sha, tag, digest, rollback=False):
     """{relative path under pins/<component>/: bytes} for one pin."""
-    image = PINNABLE.get(component)
-    if image is None:
-        raise PinError(f"{component} is not a pinnable component")
-    files = tree_files(root, manifest_sha, f"{COMPONENTS_DIR}/{component}")
+    if not COMPONENT.fullmatch(component):
+        raise PinError(f"{component!r} is not a valid component name")
+    try:
+        files = component_files(root, manifest_sha, component)
+    except PinError as error:
+        raise PinError(f"{component} is not a pinnable component: {error}") from error
+    image = pinnable_image(component, files)
     pin = {"component": component, "manifest_sha": manifest_sha, "image_source_sha": image_source_sha,
            "image": image, "tag": tag, "digest": digest, "rollback": bool(rollback)}
-    validate_pin(pin, component)
+    validate_pin(pin, component, image)
     out = {f"manifests/{n}": data for n, data in files.items()}
     out["kustomization.yaml"] = kustomization(files, image, tag, digest).encode()
     out["pin.json"] = (json.dumps(pin, indent=2, sort_keys=True) + "\n").encode()
     return out
 
 
-def validate_pin(pin, component):
+def validate_pin(pin, component, image=None):
+    """Shape check. `image` is the image the component may pin at pin["manifest_sha"]; render()
+    passes it, and a full check re-derives it there (an image naming no manifest is rejected
+    by the byte comparison against render())."""
     if not isinstance(pin, dict) or set(pin) != PIN_KEYS:
         raise PinError(f"{component}: pin.json must have exactly {sorted(PIN_KEYS)}")
     if pin["component"] != component:
@@ -119,7 +202,9 @@ def validate_pin(pin, component):
     for key in ("manifest_sha", "image_source_sha"):
         if not isinstance(pin[key], str) or not SHA.fullmatch(pin[key]):
             raise PinError(f"{component}: {key} must be a full 40-hex commit sha")
-    if pin["image"] != PINNABLE.get(component):
+    if not isinstance(pin["image"], str) or not pin["image"].startswith(REGISTRY + "/openbank-"):
+        raise PinError(f"{component}: image {pin['image']!r} is not a fleet-registry image")
+    if image is not None and pin["image"] != image:
         raise PinError(f"{component}: image {pin['image']!r} is not the image this component may pin")
     if not isinstance(pin["tag"], str) or not TAG.fullmatch(pin["tag"]):
         raise PinError(f"{component}: invalid tag {pin['tag']!r}")
@@ -180,8 +265,8 @@ def check_commit(root, commit, parent, main_rev):
     components = sorted({p.split("/")[1] for p in changed})
     holds = load_holds(root, main_rev)
     for component in components:
-        if not COMPONENT.fullmatch(component) or component not in PINNABLE:
-            raise PinError(f"{PINS_DIR}/{component} is not a pinnable component ({sorted(PINNABLE)})")
+        if not COMPONENT.fullmatch(component):
+            raise PinError(f"{PINS_DIR}/{component} is not a pinnable component")
         pin = read_pin(root, commit, component)
         if pin is None:
             raise PinError(f"{component}: pin removed or pin.json missing — removing a pin un-deploys "
@@ -218,7 +303,7 @@ def check_commit(root, commit, parent, main_rev):
                                f"({old['image_source_sha'][:12]} -> {pin['image_source_sha'][:12]}); "
                                f"an older build may not overwrite a newer pin")
         image_changed = old is None or (old["tag"], old["digest"]) != (pin["tag"], pin["digest"])
-        service = "openbank-" + component
+        service = service_of(pin["image"])
         if image_changed and service in holds:
             raise PinError(f"{component}: {service} is under a deploy hold in rules.yaml; its image pin "
                            f"cannot change")
@@ -245,7 +330,7 @@ def check_state(root, rev, main_rev):
     if top:
         raise PinError(f"{rev[:12]} carries paths outside {PINS_DIR}/: {', '.join(top)}")
     for component in names:
-        if component not in PINNABLE:
+        if not COMPONENT.fullmatch(component):
             raise PinError(f"{PINS_DIR}/{component} is not a pinnable component")
         pin = read_pin(root, rev, component)
         if pin is None:
@@ -397,17 +482,84 @@ def self_test():
                fragment="not an ancestor of main")
         expect("pin removed", p1, {f"{PINS_DIR}/admin-ui/pin.json": None}, ok=False, fragment="pin removed")
         other = {f"{PINS_DIR}/ledger/pin.json": b"{}"}
-        expect("unpinnable component", p1, other, ok=False, fragment="not a pinnable component")
+        expect("unpinnable component", p1, other, ok=False, fragment="pin.json must have exactly")
+
+        # Slice 2: a service component is pinnable by derivation from its manifests on main.
+        svc_image = f"{REGISTRY}/openbank-aml-service"
+        aml = root / COMPONENTS_DIR / "aml"
+        aml.mkdir(parents=True)
+        (aml / "aml-service.yaml").write_text(
+            f"kind: Deployment\nspec:\n  containers:\n    - name: aml\n      image: \"{svc_image}:sandbox-old@{d1}\"\n"
+            f"    - name: opa\n      image: openpolicyagent/opa:1.0.0\n")
+        multi = root / COMPONENTS_DIR / "payments"
+        multi.mkdir(parents=True)
+        (multi / "payments.yaml").write_text(
+            f"image: {REGISTRY}/openbank-sepa-payment:x\n---\nimage: {REGISTRY}/openbank-swift-service:x\n")
+        (aml / "aml_rest_ext.rego").write_text("package x\n")
+        (aml / "gen-aml-opa-bundle.sh").write_text("#!/bin/sh\n")
+        (aml / "policy").mkdir()
+        (aml / "policy" / "p.yaml").write_text("kind: ConfigMap\n")
+        kz = root / COMPONENTS_DIR / "temporal"
+        kz.mkdir(parents=True)
+        (kz / "kustomization.yaml").write_text("resources: [t.yaml]\n")
+        (kz / "t.yaml").write_text(f"image: {REGISTRY}/openbank-temporal-worker:x\n")
+        bare = root / COMPONENTS_DIR / "kafka"
+        bare.mkdir(parents=True)
+        (bare / "kafka.yaml").write_text("image: quay.io/strimzi/kafka:0.45.0\n")
+        run("add", "-A")
+        run("commit", "-qm", "service components")
+        m4 = git(root, "rev-parse", "HEAD").strip()
+
+        def svc_files(component, manifest, image_src, tag, digest, rollback=False):
+            return {f"{PINS_DIR}/{component}/{k}": v
+                    for k, v in render(root, component, manifest, image_src, tag, digest, rollback).items()}
+
+        aml_pin = svc_files("aml", m4, m4, "t1", d1)
+        if json.loads(aml_pin[f"{PINS_DIR}/aml/pin.json"])["image"] != svc_image:
+            failures.append("derived image: aml did not derive openbank-aml-service")
+        copied = sorted(k.split("/", 2)[2] for k in aml_pin)
+        if copied != ["kustomization.yaml", "manifests/aml-service.yaml", "pin.json"]:
+            failures.append(f"derived copy must be exactly what Argo renders, got {copied}")
+        expect("derived single-image service component", p1, aml_pin, ok=True)
+        for comp_name, fragment in (("payments", "exactly one"), ("kafka", "exactly one"),
+                                    ("temporal", "is a kustomization"),
+                                    ("nonexistent", "not a pinnable component")):
+            try:
+                render(root, comp_name, m4, m4, "t1", d1)
+                failures.append(f"render {comp_name}: expected rejection, got a pin")
+            except PinError as error:
+                if fragment not in str(error):
+                    failures.append(f"render {comp_name}: wrong reason {error}")
+        forged = dict(aml_pin)
+        forged_pin = json.loads(forged[f"{PINS_DIR}/aml/pin.json"])
+        forged_pin["image"] = f"{REGISTRY}/openbank-ledger-service"
+        forged[f"{PINS_DIR}/aml/pin.json"] = (json.dumps(forged_pin, indent=2, sort_keys=True) + "\n").encode()
+        expect("pin.json names an image the manifests do not", p1, forged, ok=False,
+               fragment="differs from what main")
+        foreign = dict(aml_pin)
+        foreign_pin = json.loads(foreign[f"{PINS_DIR}/aml/pin.json"])
+        foreign_pin["image"] = "docker.io/evil/aml"
+        foreign[f"{PINS_DIR}/aml/pin.json"] = json.dumps(foreign_pin).encode()
+        expect("pin.json names a non-fleet image", p1, foreign, ok=False, fragment="not a fleet-registry image")
+
+        a1 = deploy_commit(p1, aml_pin)
 
         # Held service: put openbank-admin-ui under a hold on main, then try to move its image.
+        # The aml hold is keyed by the IMAGE repository (openbank-aml-service), which is not
+        # "openbank-" + the component directory: a component-derived key would miss it.
         held = yaml.safe_load(rules)
         held["deploy_holds"]["services"]["openbank-admin-ui"] = {
+            "issue": "#1", "reason": "self-test", "release_condition": "self-test"}
+        held["deploy_holds"]["services"]["openbank-aml-service"] = {
             "issue": "#1", "reason": "self-test", "release_condition": "self-test"}
         (root / "openbank-libs/governance/rules.yaml").write_text(yaml.safe_dump(held))
         run("commit", "-qam", "hold admin-ui")
         m3 = git(root, "rev-parse", "HEAD").strip()
         expect("held service image change", p1, pin_files(m2, m2, "t2", d2), ok=False, fragment="deploy hold")
         expect("held service manifest-only re-pin", p1, pin_files(m3, m1, "t1", d1), ok=True)
+        expect("held derived service image change (hold keyed by image, not component)", a1,
+               svc_files("aml", m3, m3, "t2", d2), ok=False, fragment="deploy hold")
+        expect("held derived service manifest-only re-pin", a1, svc_files("aml", m3, m4, "t1", d1), ok=True)
 
         # State mode: a bad pin planted earlier and left untouched by the tip.
         planted = pin_files(m2, m2, "t2", d2)
@@ -464,12 +616,26 @@ def render_real_component():
     renders silently with the old tag)."""
     failures = []
     real = Path(__file__).resolve().parents[2]
-    for component, image in PINNABLE.items():
+    head = git(real, "rev-parse", "HEAD").strip()
+    derived = {}
+    for component in ("aml", "ledger", "pension-fund"):
+        try:
+            files = component_files(real, head, component)
+        except PinError as error:
+            failures.append(f"render {component}: {error}")
+            continue
+        image = derived_image(files)
+        if image is None:
+            failures.append(f"render {component}: no single derived image (the derivation regex "
+                            f"no longer matches the real manifests)")
+        else:
+            derived[component] = image
+    for component, image in {**PINNABLE, **derived}.items():
         manifests = (real / COMPONENTS_DIR / component).glob("*.yaml")
         refs = {m.group(1) for f in manifests
-                for m in re.finditer(r"image:\s*(\S+?)(?::[^\s@]+)?(?:@\S+)?\s*$", f.read_text(), re.M)
-                if m.group(1).endswith("/openbank-" + component)}
-        if refs != {image}:
+                for m in re.finditer(r"image:\s*[\"']?(\S+?)(?::[^\s@\"']+)?(?:@[^\s\"']+)?[\"']?\s*$", f.read_text(), re.M)
+                if m.group(1).startswith(REGISTRY + "/openbank-")}
+        if component in PINNABLE and refs != {image}:
             failures.append(f"render {component}: manifest image name(s) {sorted(refs)} != PINNABLE {image!r}")
             continue
         tool = next((t for t in (["kustomize", "build"], ["kubectl", "kustomize"])

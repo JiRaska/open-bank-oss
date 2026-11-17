@@ -10,6 +10,10 @@
 #            main that touched components/<component>/)
 #   rollback pin an older image from an earlier pin.json (--tag, --digest,
 #            --image-source-sha), manifests still from the main tip
+#   seed     first pin of a component being migrated (ADR-0358 slice 2): pin exactly the
+#            image main already runs there (tag sandbox-<40-hex source sha> + digest, read
+#            from the component's manifests at the main tip). It cannot deploy anything new
+#            and refuses a component that is already pinned.
 #
 # The candidate commit is built locally and run through check-deploy-pin-branch.py's
 # check_commit BEFORE anything is written. Only then is the same tree sent through the
@@ -107,14 +111,39 @@ def on_contract_rejection(component, error):
     return 1
 
 
+def seed_image(component, main_sha):
+    """(image_source_sha, tag, digest) of the image main runs for `component`, or PinError."""
+    import re
+    files = pins.component_files(".", main_sha, component)
+    image = pins.pinnable_image(component, files)
+    ref = re.compile(r"^[ \t-]*image:[ \t]*[\"']?" + re.escape(image)
+                     + r":(sandbox-([0-9a-f]{7,40}))@(sha256:[0-9a-f]{64})[\"']?[ \t]*(?:#.*)?$", re.M)
+    found = {m.groups() for data in files.values() for m in ref.finditer(data.decode())}
+    if len(found) != 1:
+        raise pins.PinError(f"{component}: main must reference {image} exactly as "
+                            f"sandbox-<hex sha>@sha256:<digest>, and only one such pin; found {sorted(found)}")
+    tag, short, digest = next(iter(found))
+    # The tag carries an abbreviated source sha; resolve it to the one commit it names. An
+    # ambiguous or unknown prefix is refused (the contract then proves it is on main).
+    try:
+        source = git("rev-parse", "--verify", "--quiet", f"{short}^{{commit}}").strip()
+    except pins.PinError as error:
+        raise pins.PinError(f"{component}: tag {tag} names no unique commit ({error})") from error
+    if not source.startswith(short) or len(source) != 40:
+        raise pins.PinError(f"{component}: tag {tag} resolved to {source!r}")
+    return source, tag, digest
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["deploy", "repin", "rollback"])
+    parser.add_argument("mode", choices=["deploy", "repin", "rollback", "seed"])
     parser.add_argument("--component", required=True)
     parser.add_argument("--image-source-sha")
     parser.add_argument("--tag")
     parser.add_argument("--digest")
     parser.add_argument("--run-url", default="")
+    parser.add_argument("--writer", default="admin-ui-deploy.yml",
+                        help="workflow named in the commit body as the writer")
     parser.add_argument("--dry-run", action="store_true", help="check the candidate, write nothing")
     args = parser.parse_args()
     token = os.environ.get("DEPLOY_PIN_TOKEN", "")
@@ -130,7 +159,18 @@ def main():
         main_sha = git("rev-parse", "origin/main").strip()
         parent = git("rev-parse", f"origin/{BRANCH}").strip()
         current = pins.read_pin(".", parent, args.component)
-        if args.mode == "repin":
+        if args.mode == "seed":
+            if current is not None:
+                print(f"{args.component} is already pinned on {BRANCH}; seed does nothing")
+                record_outcome("unchanged", f"{args.component}: already pinned; seed wrote nothing")
+                return 0
+            try:
+                image_src, tag, digest = seed_image(args.component, main_sha)
+            except pins.PinError as error:
+                print(f"::error::cannot seed: {error}")
+                return 1
+            rollback = False
+        elif args.mode == "repin":
             if current is None:
                 print(f"::error::no pin for {args.component} on {BRANCH} to re-pin")
                 return 1
@@ -160,11 +200,12 @@ def main():
             print(f"dry run: candidate {candidate[:12]} passes the contract; nothing written")
             return 0
 
-        subject = {"deploy": "deploy", "repin": "re-pin manifests", "rollback": "rollback"}[args.mode]
+        subject = {"deploy": "deploy", "repin": "re-pin manifests", "rollback": "rollback",
+                   "seed": "seed pin from main"}[args.mode]
         message = {
             "headline": f"chore({args.component}): {subject} {tag}",
             "body": (f"image_source_sha {image_src}\nmanifest_sha {main_sha}\ndigest {digest}\n"
-                     f"{args.run_url}\n\nADR-0358 deploy pin, written by admin-ui-deploy.yml."),
+                     f"{args.run_url}\n\nADR-0358 deploy pin, written by {args.writer}."),
         }
         prefix = f"{pins.PINS_DIR}/{args.component}/"
         variables = {"input": {
