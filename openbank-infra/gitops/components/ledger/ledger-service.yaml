@@ -59,6 +59,10 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # Outbox v2 cutover pause (#15643): the dispatcher claims no rows while paused; events accumulate
+            # in the outbox table and are dispatched after the re-enable PR. Remove once no v1 pod remains.
+            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED
+              value: "false"
             # Parallel private-CA TLS listener for new east-west clients (first: clearing-service's
             # net-settlement journal posting and interest-service's capitalization leg). HTTP/8101
             # stays for existing callers (transaction, lending, settlement, balance, billing, finrep)
