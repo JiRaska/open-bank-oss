@@ -33,3 +33,29 @@ resources when investigating metadata drift; do not replace the image metadata w
 another hand-written domain map. Redeploy or roll back through the normal signed-image
 and GitOps workflow. No database migration, consent grant, event replay, capability
 change or payment execution is part of this ownership correction.
+
+## Tool-result sanitisation (ADR-0383 D7)
+
+Every tool result passes three steps in `McpToolRegistry.call`, in this order: `McpPiiMasker`
+(field-name and whole-value masking), `McpToolResultSanitiser` (D7), then `McpUntrustedData.wrap`.
+The sanitiser walks every string value in the result. It does not use a list of free-text field
+names, so a field a new tool adds is covered without an edit here. For each string it:
+
+- applies Unicode NFKC normalisation;
+- removes control, format (zero-width, bidi, word joiner, BOM), Unicode tag, private-use and
+  line/paragraph separator code points (a line break becomes a space);
+- replaces markdown image and link syntax, reference definitions, HTML tags, autolinks, URLs and
+  `javascript:`/`data:`-style schemes with a placeholder;
+- masks IBAN-shaped and phone-shaped substrings inside free text;
+- neutralises look-alikes of the untrusted-data markers, matched after case fold, whitespace
+  collapse and homoglyph folding;
+- caps the result at 140 characters (the SEPA unstructured remittance maximum) and ends a cut
+  value with `…`.
+
+A `logoUrl` field is the only URL kept. It survives only as `https` on a host in
+`McpToolResultSanitiser.CDN_HOSTS`, with no query, fragment or userinfo. Any other value removes the
+field. There is no configuration toggle.
+
+The red-team pack (`src/test/resources/redteam/`) measures these properties, and `known-gaps.json`
+lists what is still open. Today that is one item: a natural-person name inside free text, which has
+no shape to match on.

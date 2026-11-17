@@ -494,3 +494,20 @@ a stub (T-T2/T-D2).
 - **2026-09-21** — **Own machine identity for the charter-gated read ports (#10486 batch 7).** `TransactionServiceClient`, `SepaPaymentServiceClient` and `DomesticPaymentServiceClient` now mint from a NAMED oidc-client `m2m`, Keycloak client `openbank-mcp` (`ROLE_API` only). transaction-service grants it `transaction.list` (mcp-anonymous holds `query.transaction.readonly`). The payment-confirmation reads get **no** grant: no charter holds `query.payment_confirmation.readonly`, so the tool was already refused at the MCP gate. `McpMachineGrantCharterAlignmentTest` pins both facts. **STRIDE-S:** a new credential at Vault KV `keycloak/mcp-service`, projected by `mcp-service-m2m-oidc`, env ref `optional: false`. The account, balance, statement and consent clients stay on the shared client. Rollback: revert the commit.
 
 - **2026-10-31** — **account-service reads now use the generated client (#13169, ADR-0319).** The hand-written `GET /api/v1/accounts/iban/{iban}` and `GET /api/v1/accounts/{accountId}` interface is replaced by `AccountServiceClient : AccountsApi`, generated from account-service's own `openapi.yaml` (`openbank-client-account`), read through the shared `AccountClient` facade in `AccountDirectory`. **No trust-boundary change:** same routes, same `account-service` config key and URL, same M2M OIDC filter, same synthetic-taint filter, no new header; the consent gate still runs before any account read and its scope intersection is untouched. A 404 still denies the tool call (`NotFoundException`), any other status or failed call still propagates as an error, and nothing in the seam swallows an exception (a cancellation passes through unchanged). **Residual risk:** `id` and `partyId` now bind as UUIDs, so a non-UUID value from account-service fails the read instead of being passed along as text. `list_accounts` now serialises the typed account, so its output carries exactly the fields account-service's spec declares (null-valued ones included) rather than the raw upstream document; a field the spec does not declare no longer reaches the MCP client. Rollback: revert the commit.
+
+- **2026-11-17** — **ADR-0383 D7 tool-result sanitisation (#16620, refs #16590).** A new
+  `McpToolResultSanitiser` runs at the existing single seam in `McpToolRegistry.call`, after
+  `McpPiiMasker` and before `McpUntrustedData.wrap`. It covers every string value in a tool result.
+  Each string is NFKC-normalised and loses control, format, tag and separator code points. Link and
+  image markup, HTML and URLs are replaced with a placeholder, and IBAN- and phone-shaped substrings
+  are masked. Marker look-alikes (case, spacing, NBSP, zero-width, homoglyph and fullwidth variants)
+  are neutralised, and the string is capped at 140 characters. `logoUrl` is kept only as `https` on
+  the bank CDN host allow-list and is dropped otherwise. This narrows T-I3 and T-I4 (exfiltration
+  through rendered URLs, marker breakout and oversized instructions). It does not change the
+  security boundary, which is still D4, D6 and OPA. The layer-4 red-team pack closes 52 of its
+  53 recorded gaps. **Residual:** a natural-person name embedded in a free-text field the masker
+  does not redact wholesale (for example a payment reference) still passes, because a name has no
+  shape to match. It stays in `known-gaps.json`. Over-masking is possible too: an uppercase
+  IBAN-shaped token, or a 9-digit group inside free text, is masked even when it is not an
+  identifier. Rollback: revert the commit. The red-team ratchet then fails until `known-gaps.json`
+  is restored.
