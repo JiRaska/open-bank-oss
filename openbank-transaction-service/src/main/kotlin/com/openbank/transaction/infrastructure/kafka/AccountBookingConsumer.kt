@@ -45,7 +45,7 @@ class AccountBookingConsumer(private val mapper: ObjectMapper) {
         val accountId = UUID.fromString(event.path("aggregateId").asText())
         require(key == accountId.toString()) { "AccountCreated key differs from the account identity" }
         val context = event.get("bookingContext")?.takeUnless(JsonNode::isNull)?.let(::parseAccountBookingContext)
-        val json = context?.let(mapper::writeValueAsString)
+        val json = context?.let(mapper::writeValueAsString) ?: "null"
         val identical = EventRetry.withRetry(
             log = log,
             what = "account booking projection",
@@ -57,7 +57,7 @@ class AccountBookingConsumer(private val mapper: ObjectMapper) {
         check(identical) { "AccountCreated replay cannot change an account's booking context" }
     }
 
-    private suspend fun insertOrVerify(accountId: UUID, synthetic: Boolean, json: String?): Boolean =
+    private suspend fun insertOrVerify(accountId: UUID, synthetic: Boolean, json: String): Boolean =
         Panache.withTransaction {
             Panache.getSession().flatMap { session ->
                 session.createNativeMutationQuery(INSERT_SQL)
@@ -82,11 +82,11 @@ class AccountBookingConsumer(private val mapper: ObjectMapper) {
     private companion object {
         const val INSERT_SQL = """
             INSERT INTO account_booking_projection (account_id, synthetic, booking_context)
-            VALUES (:accountId, :synthetic, CAST(:context AS jsonb))
+            VALUES (:accountId, :synthetic, NULLIF(CAST(CAST(:context AS text) AS jsonb), 'null'::jsonb))
             ON CONFLICT (account_id, synthetic) DO NOTHING
         """
         const val REPLAY_SQL = """
-            SELECT booking_context IS NOT DISTINCT FROM CAST(:context AS jsonb)
+            SELECT booking_context IS NOT DISTINCT FROM NULLIF(CAST(CAST(:context AS text) AS jsonb), 'null'::jsonb)
             FROM account_booking_projection WHERE account_id = :accountId AND synthetic = :synthetic
         """
     }
