@@ -234,9 +234,14 @@ class BranchPaymentRecoveryIT {
     @ValueSource(booleans = [false, true])
     fun `worker recovery reuses persisted branch route without another client request`(synthetic: Boolean) {
         val seeded = seedPendingTransfer(synthetic)
+        val branchPath = if (synthetic) {
+            "/api/v1/journals/branch-payments/synthetic"
+        } else {
+            "/api/v1/journals/branch-payments"
+        }
         val journals = listOf(UUID.randomUUID(), UUID.randomUUID())
         LedgerWireMockResource.server.stubFor(
-            com.github.tomakehurst.wiremock.client.WireMock.post(urlEqualTo("/api/v1/journals/branch-payments"))
+            com.github.tomakehurst.wiremock.client.WireMock.post(urlEqualTo(branchPath))
                 .withRequestBody(matchingJsonPath("$.transactionId", equalTo(seeded.id.toString())))
                 .willReturn(
                     com.github.tomakehurst.wiremock.client.WireMock.okJson(
@@ -259,7 +264,7 @@ class BranchPaymentRecoveryIT {
             seeded.sourceBookingContext.establishmentId.toString(),
             seeded.targetBookingContext!!.establishmentId.toString(),
         )
-        val request = postRequestedFor(urlEqualTo("/api/v1/journals/branch-payments"))
+        val request = postRequestedFor(urlEqualTo(branchPath))
             .withRequestBody(matchingJsonPath("$.transactionId", equalTo(seeded.id.toString())))
             .withRequestBody(
                 matchingJsonPath("$.sourceBookId", equalTo(seeded.sourceBookingContext.establishmentId.toString())),

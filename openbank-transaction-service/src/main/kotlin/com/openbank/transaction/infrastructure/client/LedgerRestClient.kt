@@ -38,6 +38,13 @@ interface LedgerRestClient {
     ): Uni<BranchPaymentReceipt>
 
     @POST
+    @Path("/branch-payments/synthetic")
+    fun postSyntheticBranchPayment(
+        request: BranchPaymentRequest,
+        @HeaderParam(SyntheticTaint.KAFKA_HEADER) taint: String,
+    ): Uni<BranchPaymentReceipt>
+
+    @POST
     fun postJournal(request: PostJournalRequest): Uni<JournalResponse>
 
     @POST

@@ -60,6 +60,30 @@ paths:
         '409': { description: Changed replay facts or wrong bank/book }
         '422': { description: Accounting controls refuse the payment }
         '500': { description: Transaction rolled back; retry the same key }
+  /api/v1/journals/branch-payments/synthetic:
+    post:
+      operationId: postSyntheticBranchPayment
+      summary: Post a branch payment requiring authenticated synthetic origin
+      description: Named Transaction service only. Both journals, booked events and the bank-bound receipt commit together. Exact replay returns the original journal ids; changed facts conflict. No FX conversion is performed.
+      tags: [Ledger]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BranchPaymentRequest' }
+      responses:
+        '200':
+          description: Durable original receipt (also on replay)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BranchPaymentReceipt' }
+        '400': { description: Invalid payment shape }
+        '401': { description: Authentication required }
+        '403': { description: Caller is not Transaction or trusted synthetic origin is absent }
+        '409': { description: Changed replay facts or wrong bank/book }
+        '422': { description: Accounting controls refuse the payment }
+        '500': { description: Transaction rolled back; retry the same key }
   /api/v1/journals/branch-books:
     get:
       tags: [Ledger]

@@ -10,6 +10,7 @@ import com.openbank.ledger.application.usecase.BranchPaymentRequest
 import com.openbank.ledger.domain.model.checkConflict
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
+import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
 import com.openbank.libs.web.SyntheticTaintContext
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.security.identity.SecurityIdentity
@@ -21,6 +22,8 @@ import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.container.ContainerRequestContext
+import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,7 +43,25 @@ class BranchPaymentResource(
     @POST
     @RolesAllowed(Roles.API)
     @Authorize(action = "ledger.create", resource = "")
-    suspend fun post(body: BranchPaymentRequest?): BranchPaymentReceipt {
+    suspend fun post(
+        body: BranchPaymentRequest?,
+        @Context requestContext: ContainerRequestContext,
+    ): BranchPaymentReceipt = book(body, requestContext, requireSynthetic = false)
+
+    @POST
+    @Path("/synthetic")
+    @RolesAllowed(Roles.API)
+    @Authorize(action = "ledger.create", resource = "")
+    suspend fun postSynthetic(
+        body: BranchPaymentRequest?,
+        @Context requestContext: ContainerRequestContext,
+    ): BranchPaymentReceipt = book(body, requestContext, requireSynthetic = true)
+
+    private suspend fun book(
+        body: BranchPaymentRequest?,
+        requestContext: ContainerRequestContext,
+        requireSynthetic: Boolean,
+    ): BranchPaymentReceipt {
         val request = requireNotNull(body) { "request body is required" }
         val token = identity.principal as? JsonWebToken
         if (token?.getClaim<String>("azp") != "openbank-transaction" ||
@@ -49,7 +70,12 @@ class BranchPaymentResource(
             throw ForbiddenException("Branch payments require the Transaction service")
         }
         request.validate()
-        val synthetic = taint.tainted
+        val synthetic = taint.tainted || requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true
+        if (requireSynthetic &&
+            !synthetic
+        ) {
+            throw ForbiddenException("Synthetic branch payment requires a trusted origin")
+        }
         val digest = request.digest(synthetic)
         return Panache.withTransaction {
             CoroutineScope(Dispatchers.Unconfined).async { bookLocked(request, digest, synthetic) }.asUni()

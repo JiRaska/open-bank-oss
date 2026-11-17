@@ -20,6 +20,7 @@ import java.util.UUID
 import java.util.concurrent.CompletableFuture
 
 @QuarkusTest
+@io.quarkus.test.junit.TestProfile(BranchPaymentIT.BranchProfile::class)
 @QuarkusTestResource(PostgresRedpandaTestResource::class)
 @TestSecurity(user = "service-account-openbank-transaction", roles = ["ROLE_API"])
 @OidcSecurity(
@@ -29,6 +30,13 @@ import java.util.concurrent.CompletableFuture
     ],
 )
 class BranchPaymentIT {
+    class BranchProfile : io.quarkus.test.junit.QuarkusTestProfile {
+        override fun getConfigOverrides() = mapOf(
+            "openbank.synthetic.trusted-principals" to "service-account-openbank-transaction",
+            "test.branch-carrier-loss" to "true",
+        )
+    }
+
     @ConfigProperty(name = "quarkus.datasource.jdbc.url")
     lateinit var jdbc: String
 
@@ -37,6 +45,53 @@ class BranchPaymentIT {
 
     @ConfigProperty(name = "quarkus.datasource.password")
     lateinit var password: String
+
+    @Test
+    fun `synthetic endpoint refuses an absent trust decision before recording real money`() {
+        connection().use { db ->
+            val p = Payment()
+            register(db, p)
+            val response = given().contentType("application/json").body(p.payload())
+                .post("/api/v1/journals/branch-payments/synthetic")
+            assertThat(response.statusCode).isEqualTo(403)
+            assertCounts(db, p, 0, 0)
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["holder", "property"])
+    fun `synthetic branch receipt retains either trusted carrier and cannot replay as real`(lost: String) {
+        connection().use { db ->
+            val p = Payment()
+            register(db, p)
+            val response = given().contentType("application/json").body(p.payload())
+                .header(com.openbank.libs.synthetic.SyntheticTaint.KAFKA_HEADER, "true")
+                .header("X-Test-Branch-Carrier-Loss", lost).post("/api/v1/journals/branch-payments/synthetic")
+            assertThat(response.statusCode).isEqualTo(200)
+            assertCounts(db, p, 2, 2)
+            assertThat(
+                scalar(
+                    db,
+                    "SELECT count(*) FROM journal_entries WHERE " +
+                        "transaction_id='${p.id}' AND NOT synthetic",
+                ),
+            )
+                .isZero()
+            assertThat(
+                scalar(
+                    db,
+                    "SELECT count(*) FROM ledger_outbox WHERE " +
+                        "payload::jsonb->>'transactionId'='${p.id}' AND NOT synthetic",
+                ),
+            ).isZero()
+            assertThat(post(p.payload()).statusCode).isEqualTo(409)
+            val snapshot = given().queryParam("bankId", p.bank).queryParam("asOf", p.date.toString())
+                .get("/api/v1/journals/branch-books")
+            assertThat(snapshot.statusCode).isEqualTo(200)
+            assertThat(snapshot.jsonPath().getList<String>("lines.branchBookId"))
+                .doesNotContain(p.sourceBook.toString(), p.targetBook.toString())
+        }
+    }
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = [false, true])
@@ -263,5 +318,24 @@ class BranchPaymentIT {
             "amount" to amount, "currency" to "EUR", "entryDate" to date.toString(), "valueDate" to date.toString(),
             "createdBy" to UUID.fromString("00000000-0000-0000-0000-000000000001"),
         )
+    }
+}
+
+/** Test-only carrier loss after the real authentication/trust filter, never a synthetic grant. */
+@jakarta.enterprise.context.ApplicationScoped
+class BranchSyntheticCarrierLoss {
+    @ConfigProperty(name = "test.branch-carrier-loss", defaultValue = "false")
+    var enabled: Boolean = false
+
+    @jakarta.inject.Inject
+    lateinit var holder: com.openbank.libs.web.SyntheticTaintContext
+
+    @org.jboss.resteasy.reactive.server.ServerRequestFilter(priority = jakarta.ws.rs.Priorities.USER + 1)
+    fun loseCarrier(ctx: jakarta.ws.rs.container.ContainerRequestContext) {
+        if (!enabled || !ctx.uriInfo.path.trim('/').startsWith("api/v1/journals/branch-payments")) return
+        when (ctx.getHeaderString("X-Test-Branch-Carrier-Loss")) {
+            "holder" -> holder.tainted = false
+            "property" -> ctx.removeProperty(com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY)
+        }
     }
 }

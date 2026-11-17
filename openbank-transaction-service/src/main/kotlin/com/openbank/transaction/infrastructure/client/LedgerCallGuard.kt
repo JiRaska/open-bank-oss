@@ -28,7 +28,11 @@ class LedgerCallGuard(@RestClient private val ledgerClient: LedgerRestClient) {
     @Retry(maxRetries = 3, delay = 500, jitter = 100)
     @Timeout(2000)
     fun postBranchPayment(request: BranchPaymentRequest, synthetic: Boolean): Uni<BranchPaymentReceipt> =
-        ledgerClient.postBranchPayment(request, if (synthetic) SyntheticTaint.headerValue() else null)
+        if (synthetic) {
+            ledgerClient.postSyntheticBranchPayment(request, SyntheticTaint.headerValue())
+        } else {
+            ledgerClient.postBranchPayment(request, null)
+        }
 
     @Retry(maxRetries = 2, delay = 300)
     @Timeout(2000)
