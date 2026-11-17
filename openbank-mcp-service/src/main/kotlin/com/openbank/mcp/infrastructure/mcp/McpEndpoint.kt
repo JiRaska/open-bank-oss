@@ -112,6 +112,8 @@ class McpEndpoint(
 
     private val log = Logger.getLogger(McpEndpoint::class.java)
 
+    private val throttle by lazy { McpThrottleSupport(auditor, metrics, rateLimiter) }
+
     @POST
     @Suppress("ReturnCount")
     fun handle(body: JsonNode): Response {
@@ -156,6 +158,10 @@ class McpEndpoint(
         } catch (ex: Exception) {
             log.warnf("caller context resolution failed for tools/list: %s — denying", ex.message)
             null
+        }
+        // Throttle BEFORE any PDP call (ADR-0383 D5).
+        throttle.toolsListRefusal(ctx, registry.tools.size)?.let {
+            return error(id, RATE_LIMITED, "Rate limit exceeded: $it")
         }
         if (ctx == null) {
             runBlocking {
@@ -208,7 +214,7 @@ class McpEndpoint(
         return Response.ok(McpResponse(id = id, result = ToolsListResult(filtered.tools))).build()
     }
 
-    @Suppress("ReturnCount", "TooGenericExceptionCaught")
+    @Suppress("ReturnCount")
     private fun handleToolCall(id: JsonNode, params: JsonNode): Response {
         val startedAt = System.nanoTime()
         val toolName = params.path("name").asText("")
@@ -224,8 +230,7 @@ class McpEndpoint(
         // Caller authentication (ADR-0195): the acting agent + presented consent come from the
         // validated OAuth token. A malformed agent token (e.g. no consent_id) fails CLOSED — a
         // money-adjacent surface never degrades to an unscoped identity.
-        val ctx = resolveCaller(toolName, argumentKeys)
-            ?: return toolError(id, "Authorization unavailable")
+        val ctx = resolveCaller().getOrElse { return unauthenticated(id, toolName, argumentKeys, it) }
 
         // Audit and meter together, at every terminal branch, so the aggregate can never disagree
         // with the per-call trail about what happened.
@@ -234,26 +239,84 @@ class McpEndpoint(
             decision: McpCallAuditor.Decision,
             result: AuditResult,
             reason: String? = null,
+            persist: Boolean = true,
         ) = runBlocking {
-            auditor.toolCallCompleted(
-                McpCallAuditor.ToolCall(
-                    agentId = ctx.agentId,
-                    consentId = ctx.consentId,
-                    tool = toolName,
-                    capability = capability,
-                    decision = decision,
-                    result = result,
-                    reason = reason,
-                    argumentKeys = argumentKeys,
-                    actChain = ctx.actChain,
-                    sessionId = ctx.sessionId,
-                ),
-            )
+            if (persist) {
+                auditor.toolCallCompleted(
+                    McpCallAuditor.ToolCall(
+                        agentId = ctx.agentId,
+                        consentId = ctx.consentId,
+                        tool = toolName,
+                        capability = capability,
+                        decision = decision,
+                        result = result,
+                        reason = reason,
+                        argumentKeys = argumentKeys,
+                        actChain = ctx.actChain,
+                        sessionId = ctx.sessionId,
+                    ),
+                )
+            }
             metrics.toolCallCompleted(toolTag, decision, result, Duration.ofNanos(System.nanoTime() - startedAt))
         }
 
-        // Deny-by-default: no capability mapping ⇒ no OPA action ⇒ refuse.
+        // Throttle BEFORE any policy call or tool execution (ADR-0383 D5): a denied flood must not
+        // cost one PDP round trip per request. Every throttled request is metered; the audit trail
+        // keeps one row per caller per window (McpRateLimiter.shouldAuditThrottle), so a flood
+        // cannot become an unbounded audit-write amplifier.
         val capability = registry.capabilities[toolName]
+        val throttleReason = throttle.refusalReason(ctx.agentId)
+        if (throttleReason != null) {
+            val persist = throttle.callRefused(ctx.agentId)
+            audit(capability, McpCallAuditor.Decision.DENY, AuditResult.DENIED, throttleReason, persist)
+            return toolError(id, "Rate limit exceeded: $throttleReason")
+        }
+        try {
+            return authorizeAndExecute(
+                CallScope(id, toolName, arguments, ctx, capability) { c, d, r, why ->
+                    audit(c, d, r, why)
+                },
+            )
+        } finally {
+            rateLimiter.release(ctx.agentId)
+        }
+    }
+
+    /**
+     * No resolvable caller: bounded by the shared anonymous bucket BEFORE any audit or identity
+     * meter is written, so an unauthenticated flood costs neither. Within budget it is denied (and
+     * audited) as before.
+     */
+    private fun unauthenticated(id: JsonNode, toolName: String, keys: List<String>, cause: Throwable): Response {
+        throttle.anonymousCallRefusal(toolName, keys)?.let { return toolError(id, "Rate limit exceeded: $it") }
+        log.warnf("caller context resolution failed for %s: %s — denying", toolName, cause.message)
+        metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
+        throttle.auditAnonymousCall(toolName, keys, "caller authentication failed")
+        return toolError(id, "Authorization unavailable")
+    }
+
+    /** Everything the PDP gate and tool run need for one admitted call, in one parameter. */
+    private class CallScope(
+        val id: JsonNode,
+        val toolName: String,
+        val arguments: JsonNode,
+        val ctx: ConsentContext,
+        val capability: String?,
+        val audit: (String?, McpCallAuditor.Decision, AuditResult, String?) -> Unit,
+    )
+
+    /** The PDP gate and the tool run; only reached once the caller is inside its throttle budget. */
+    // ReturnCount: each early return is one deny-by-default gate (unmapped, PDP outage, policy deny);
+    // TooGenericExceptionCaught: a PDP transport error of any type must fail closed.
+    @Suppress("ReturnCount", "TooGenericExceptionCaught")
+    private fun authorizeAndExecute(scope: CallScope): Response {
+        val id = scope.id
+        val toolName = scope.toolName
+        val arguments = scope.arguments
+        val ctx = scope.ctx
+        val capability = scope.capability
+        val audit = scope.audit
+        // Deny-by-default: no capability mapping ⇒ no OPA action ⇒ refuse.
         if (capability == null) {
             audit(null, McpCallAuditor.Decision.DENY, AuditResult.DENIED, "no capability mapping")
             return toolError(id, "Tool not permitted: $toolName")
@@ -288,16 +351,6 @@ class McpEndpoint(
             val reason = decision.reason ?: "no matching allow rule"
             audit(capability, McpCallAuditor.Decision.DENY, AuditResult.DENIED, reason)
             return toolError(id, "Denied by policy: $reason")
-        }
-
-        // Rate limit AFTER the PDP decision, so a denied caller cannot burn the acting agent's
-        // window, and BEFORE the tool executes, which is the fan-out into consent/account/balance/
-        // transaction-service this bounds (#2409). A throttled call is a DENY like any other: same
-        // audit event, same meter, so the aggregate cannot disagree with the trail.
-        val limit = rateLimiter.check(ctx.agentId)
-        if (limit != McpRateLimiter.Outcome.ALLOWED) {
-            audit(capability, McpCallAuditor.Decision.DENY, AuditResult.DENIED, limit.reason)
-            return toolError(id, "Rate limit exceeded: ${limit.reason}")
         }
 
         return execute(id, toolName, arguments, ctx) { result, reason ->
@@ -341,34 +394,18 @@ class McpEndpoint(
         ).build()
     }
 
-    // Resolve the caller's identity + consent, or audit the failure and return null (the caller
-    // then denies with "Authorization unavailable"). Fails closed on any resolution error.
+    // Resolve the caller's identity + consent; a failure is returned (not audited here) so the caller
+    // can spend the anonymous throttle BEFORE any audit or meter is written. Fails closed on any error.
     @Suppress("TooGenericExceptionCaught")
-    private fun resolveCaller(toolName: String, argumentKeys: List<String>): ConsentContext? = try {
-        resolveContext()
+    private fun resolveCaller(): Result<ConsentContext> = try {
+        Result.success(resolveContext())
     } catch (ex: Exception) {
-        log.warnf("caller context resolution failed for %s: %s — denying", toolName, ex.message)
-        metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
-        runBlocking {
-            auditor.toolCallCompleted(
-                McpCallAuditor.ToolCall(
-                    agentId = "unknown",
-                    consentId = "none",
-                    tool = toolName,
-                    capability = null,
-                    decision = McpCallAuditor.Decision.UNAVAILABLE,
-                    result = AuditResult.DENIED,
-                    reason = "caller authentication failed",
-                    argumentKeys = argumentKeys,
-                ),
-            )
-        }
-        null
+        Result.failure(ex)
     }
 
     // ADR-0195 step 4: the phase-1 placeholder identity is REMOVED. The acting agent + consent come
     // ONLY from a validated OAuth token (CallerContextResolver) — no agent token is treated the same
-    // as a malformed one: resolveCaller's catch below denies, audits, and meters
+    // as a malformed one: unauthenticated() denies, audits, and meters
     // CallerIdentitySource.RESOLUTION_FAILED. ANONYMOUS_FALLBACK can no longer fire; it stays in the
     // enum as the historical record of the #2206 blocker this cutover closes — the metric that used
     // to track it now reads zero by construction, not because fallback traffic happened to taper off.
@@ -386,6 +423,9 @@ class McpEndpoint(
         Response.ok(McpResponse(id = id, error = McpError(code, message))).build()
 
     private companion object {
+        /** JSON-RPC implementation-defined server error range (-32000..-32099): request throttled. */
+        const val RATE_LIMITED = -32029
+
         /**
          * The JSON-RPC methods this server implements. Used ONLY to bound the `method` metric tag —
          * the dispatch itself is the `when` in [handle], which stays the single source of behaviour.

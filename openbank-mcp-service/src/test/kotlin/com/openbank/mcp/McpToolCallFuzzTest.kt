@@ -97,7 +97,7 @@ class McpToolCallFuzzTest {
         private val allow = object : PolicyDecisionPoint {
             override suspend fun allow(query: AuthzQuery) = AuthzDecision(allow = true)
         }
-        private val limiter = McpRateLimiter().apply { enabled = false }
+        private val limiter = McpRateLimiter.withDefaults().apply { enabled = false }
         private val registry = McpToolRegistry(
             ports,
             ports,

@@ -123,15 +123,25 @@ class McpToolCallWireFuzzIT {
     }
 
     @Test
-    fun `huge values survive in the slots that matter`() {
+    fun `huge values are refused by the body cap, never a 5xx, and the service keeps answering`() {
+        // ADR-0383 D5 caps the request body (quarkus.http.limits.max-body-size, 64K by default), so
+        // a 1 MiB argument is refused before the endpoint runs: HTTP 4xx, or the connection is
+        // closed while the client is still writing. Either is a refusal; a 5xx is not.
         val huge: List<Payload> = FuzzPayloads.all.filter { it.isHuge }
         assertThat(huge).isNotEmpty
         listOf("get_balance" to "accountId", "get_payment_confirmation" to "paymentId").forEach { (tool, slot) ->
             huge.forEach { p ->
-                val body = call(tool, """{"$slot":${p.json}}""")
-                assertSurvived("$tool.$slot=${p.label}", body, requestEchoes = tool == "get_payment_confirmation")
+                val status = try {
+                    send(call(tool, """{"$slot":${p.json}}""")).statusCode
+                } catch (ex: java.io.IOException) {
+                    assertThat(ex).isInstanceOf(java.io.IOException::class.java)
+                    REFUSED_BY_CLOSE
+                }
+                assertThat(status).`as`("$tool.$slot=${p.label}").isIn(400, 413, REFUSED_BY_CLOSE)
+                recorder.clear()
             }
         }
+        assertThat(send("""{"jsonrpc":"2.0","id":1,"method":"ping"}""").statusCode).isEqualTo(200)
     }
 
     @Test

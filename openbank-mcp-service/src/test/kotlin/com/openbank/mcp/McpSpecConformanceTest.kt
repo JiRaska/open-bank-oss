@@ -56,7 +56,7 @@ class McpSpecConformanceTest {
 
     private val mapper: ObjectMapper = jacksonObjectMapper()
     private val meters = SimpleMeterRegistry()
-    private val limiter = McpRateLimiter()
+    private val limiter = McpRateLimiter.withDefaults()
 
     private val agentToken = TestJsonWebToken(
         mapOf("sub" to "agent:conformance", "consent_id" to "6a1f5f38-59a5-4e77-9f0d-2b1a7a2f1c11"),
