@@ -78,7 +78,8 @@ class LedgerResourceAuthzTest {
               "synthetic":false
             }
         """.trimIndent()
-        fun post(payload: String) = given().contentType("application/json").body(payload).post("/api/v1/journals/booked")
+        fun post(payload: String) = given().contentType("application/json")
+            .body(payload).post("/api/v1/journals/booked")
 
         val created = post(body)
         assertThat(created.statusCode).describedAs(created.body.asString()).isEqualTo(201)
