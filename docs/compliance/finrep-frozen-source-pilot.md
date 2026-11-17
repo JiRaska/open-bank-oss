@@ -519,3 +519,78 @@ memory was 709 MiB, with zero swap, OOM events or CPU throttle periods. This con
 separation of CPU affinity and reporting artifact writes inside the VM. Shared block
 reads and physical host resources remain. The 64 missed schedules during recovery and
 the latency tail leave the customer-path capacity requirement open.
+
+### Durable worker with an enforced I/O budget
+
+The reproducible runner is `perf/k6/run-regulatory-isolated.py`. It targets the
+existing synthetic `ob16356-isolated` stack with 12 logical CPUs. Supply an unused
+output directory, the machine-local synthetic token fixture directory and the
+backing block device of Docker's reporting volume.
+
+```sh
+python3 perf/k6/run-regulatory-isolated.py /tmp/reporting-durable-result \
+  --auth-fixture /tmp/synthetic-customer-tokens --device /dev/vdb
+```
+
+The runner pins banking and k6 to CPUs 0–9, and reporting to 10–11 with a two-CPU
+quota. Reporting has a dedicated Docker volume, 1 GiB memory, no swap or network
+and a read-only root. Cgroup v2 limits reporting reads and writes to 10 MiB/s each.
+It verifies `io.max` and CPU affinity before load, saves I/O and memory counters
+across the restart, and preserves the volume for inspection. Existing volume and
+container names cause the run to stop. The CPU assignments remain in effect after
+the drill. The physical backing device and VM remain shared.
+
+The export is fsynced before the outage. During replay the runner removes the
+reporting container, waits 45 seconds and creates a new container on the same volume.
+It checks the persisted manifest digest and replays the entire journal. Files and
+the result directory are fsynced before the recovery window closes. The manifest,
+recovered artifacts and cgroup records are copied out after the measured windows.
+Runtime buffers and kernel writeback may batch I/O. The cgroup counters show charged
+block I/O rather than application-level byte throughput.
+
+#### Durable volume drill, 2026-11-17
+
+The dataset retained three million rows in each customer-path table. The run used
+64 active synthetic identities and attempted 30 GET requests/s per endpoint with
+OPA enforcement. Reporting exported six million synthetic journal lines to its
+own durable volume, fsynced the input and manifest, lost its container, and recovered
+on a new container using the persisted files. The configured block budget was
+10 MiB/s for reads and 10 MiB/s for writes. CPU sets were disjoint.
+
+Each cell shows p95 / p99 in milliseconds and HTTP failures / requests.
+
+| Phase | Seconds | Account | Balance | Payment | Dropped iterations (A / B / P) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Baseline | 45.0 | 643.3 / 1042.4 · 0/1353 | 1487.3 / 2065.1 · 0/1317 | 704.6 / 1238.1 · 0/1351 | 3 / 63 / 5 |
+| Export including fsync | 72.7 | 35.6 / 98.6 · 0/2181 | 91.1 / 220.3 · 0/2181 | 56.4 / 133.3 · 0/2180 | 0 / 0 / 0 |
+| Reporting outage | 45.0 | 218.1 / 434.6 · 0/1353 | 411.1 / 752.5 · 0/1354 | 325.2 / 601.0 · 0/1355 | 0 / 0 / 0 |
+| Entire replay including fsync | 196.0 | 781.6 / 1419.9 · 46/5837 | 1452.1 / 2019.7 · 47/5635 | 975.6 / 1732.2 · 39/5783 | 40 / 243 / 94 |
+
+The four windows contained 31,880 completed reads, 132 HTTP failures and 448 missed
+schedules. Catch-up failure rates were 0.788%, 0.834% and 0.674% for account, balance
+and payment respectively. Its 132 failures comprised 88 HTTP 503, 21 HTTP 403,
+nine HTTP 404 and 14 HTTP 500 responses. There were another 157 missed schedules
+outside the four windows. The baseline also missed demand before reporting started.
+
+Correlation found 85 failed OPA exchanges in Edge and 33 in Account during replay.
+All raised HttpTimeoutException. Sixty-five Edge calls and all 33 Account calls
+matched OPA decision records. The longest matched OPA HTTP handling was 530 ms for
+Edge and 673 ms for Account. The longest matched evaluation took 482 and 665 ms.
+Client waits and OPA evaluation both contributed to the observed deadlines, and
+the underlying host or runtime cause remains unconfirmed. Error totals at different
+service boundaries are not a one-to-one count of customer requests.
+
+Across the first container's measured lifetime, cgroup block I/O increased by
+48,414,720 read bytes and 713,945,088 write bytes. Across the recovered container,
+it increased by 720,240,640 read bytes and zero charged write bytes. Both containers
+reported the configured 10 MiB/s limits, reporting CPU set 10–11 and zero swap or
+OOM events. Peak memory was approximately 548 MiB before the outage and 197 MiB
+after it. The worker retained a separate volume across the container loss, and
+all three recovered snapshots passed digest, scope and balance checks.
+
+The drill fails the customer availability requirement. Limits contain the worker's
+charged I/O and CPU affinity, while the VM, physical storage and host remain shared.
+These data cannot attribute the slowdown to reporting alone. A deployment on
+independent reporting hosts with an independently provisioned durable storage budget
+remains unmeasured. The runner saves acceptance counts and exits nonzero for HTTP
+errors or dropped iterations so this outcome stays visible in automated runs.
