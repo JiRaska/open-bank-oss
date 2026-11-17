@@ -2,9 +2,9 @@
 
 package com.openbank.transaction.infrastructure.kafka
 
-import com.openbank.libs.domain.booking.BookingOperatingMode
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.booking.BookingOperatingMode
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.libs.synthetic.SyntheticTaint
 import io.quarkus.hibernate.reactive.panache.Panache

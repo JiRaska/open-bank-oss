@@ -2,8 +2,8 @@
 
 package com.openbank.transaction.infrastructure.kafka
 
-import com.openbank.libs.domain.booking.BookingOperatingMode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.booking.BookingOperatingMode
 import com.openbank.transaction.infrastructure.persistence.repository.singleBookingContext
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
