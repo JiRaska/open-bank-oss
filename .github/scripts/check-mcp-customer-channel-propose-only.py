@@ -120,6 +120,12 @@ DECL_RE = re.compile(
     r"const|inline|value|final|static)[ \t]+)*(?:class|object|fun|val|var|typealias|enum|record|import|package)\b[^\n]*",
     re.MULTILINE,
 )
+# What may legitimately follow a body-less Kotlin interface: end of file, the end of an enclosing
+# block, or the start of another declaration.
+FOLLOWS_DECL_RE = re.compile(
+    r"(?:$|\}|@|(?:(?:private|public|internal|protected|data|abstract|open|sealed|annotation|const|inline|"
+    r"value|enum|fun|expect|actual)\s+)*(?:interface|class|object|fun|val|var|typealias|import)\b)"
+)
 PKG_RE = re.compile(r"^\s*package\s+([\w.]+)", re.MULTILINE)
 KT_FUN_OK_RE = re.compile(r"^fun\s+([A-Za-z_]\w*)\s*\(")
 JAVA_METHOD_RE = re.compile(
@@ -331,7 +337,9 @@ def scan_kt_header(clean: str, start: int) -> tuple[str, int | None, int, str | 
         elif ch == "\n" and angle == 0 and paren == 0:
             so_far = clean[hstart:i].strip()
             nxt = clean[i:].lstrip()
-            if so_far.endswith((":", ",")) or nxt.startswith((":", ",")) or re.match(r"where\b", nxt):
+            # Allman style (`{` on its own line) is a continuation too: without this the body of
+            # `interface A\n{ ... }` was never read and its methods produced zero findings.
+            if so_far.endswith((":", ",")) or nxt.startswith((":", ",", "{")) or re.match(r"where\b", nxt):
                 i += 1
                 continue
             return clean[hstart:i], None, i, None
@@ -409,6 +417,11 @@ def parse_file(file: pathlib.Path, text: str) -> tuple[list[Iface], int]:
             header_text, body_open, header_end, problem = scan_kt_header(clean, m.end())
             if problem:
                 iface.problems.append(f"{iface.name}: {problem}")
+            if body_open is None and not FOLLOWS_DECL_RE.match(clean[header_end:].lstrip()):
+                iface.problems.append(
+                    f"{iface.name}: body-less interface header is followed by "
+                    f"`{clean[header_end:].lstrip()[:40]}`, which is not a declaration; cannot tell where it ends"
+                )
             iface.supers = split_supers(header_text)
             if header_text.strip() and not header_text.strip().startswith(":"):
                 iface.problems.append(f"{iface.name}: unrecognised interface header `{header_text.strip()[:60]}`")
@@ -696,7 +709,9 @@ public interface JavaReads {
 OPS_POST = _kt("x", "interface Ops {\n    @POST\n    fun write(body: String): String\n}\n")
 
 # name -> ({path under openbank-mcp-service/src/main: content}, must_flag)
-FIXTURES: dict[str, tuple[dict[str, str], bool]] = {
+# must_flag is True/False, or a substring one finding must contain (the case is only proven when the
+# finding is the RIGHT one, not merely some finding).
+FIXTURES: dict[str, tuple[dict[str, str], bool | str]] = {
     "positive_camelcase_post_no_keyword": ({"kotlin/x/A.kt": _kt("x", '''
 @RegisterRestClient(configKey = "thing-service")
 @Path("/api/v1/things")
@@ -780,6 +795,14 @@ interface A : UnknownApi
     "positive_header_never_closes": ({
         "kotlin/x/Client.kt": _kt("x", '@RegisterRestClient(configKey = "x")\ninterface Client : Ops,'),
     }, True),
+    "positive_allman_brace_bare_interface": ({"kotlin/x/A.kt": _kt(
+        "x", '@RegisterRestClient(configKey = "x")\ninterface A\n{\n    @POST fun a(): String\n}\n')}, "declares POST"),
+    "positive_allman_brace_with_supertype": ({
+        "kotlin/x/Foo.kt": _kt("x", "interface Foo {\n    @GET\n    fun r(): String\n}\n"),
+        "kotlin/x/A.kt": _kt("x", '@RegisterRestClient(configKey = "x")\ninterface A : Foo\n{\n    @POST fun a(): String\n}\n'),
+    }, "declares POST"),
+    "positive_bodyless_header_then_non_declaration": ({"kotlin/x/A.kt": _kt(
+        "x", '@RegisterRestClient(configKey = "x")\ninterface A\n    by delegate\n')}, True),
     "positive_two_funs_on_one_line": ({"kotlin/x/A.kt": _kt("x", '''
 @RegisterRestClient(configKey = "x")
 interface A {
@@ -817,7 +840,8 @@ def self_test() -> int:
             root = pathlib.Path(tmp)
             _materialise(root, files)
             findings, _ = check(root, allowlist={}, baseline={})
-        report(bool(findings) == must_flag, f"{name} (expect {'findings' if must_flag else 'clean'})", findings)
+        ok = any(must_flag in f for f in findings) if isinstance(must_flag, str) else bool(findings) == must_flag
+        report(ok, f"{name} (expect {must_flag if isinstance(must_flag, str) else ('findings' if must_flag else 'clean')})", findings)
 
     allow_src = {"kotlin/x/A.kt": _kt("x", '@RegisterRestClient(configKey = "x")\ninterface A {\n    @POST\n    fun ok(): String\n}\n')}
     with tempfile.TemporaryDirectory() as tmp:
