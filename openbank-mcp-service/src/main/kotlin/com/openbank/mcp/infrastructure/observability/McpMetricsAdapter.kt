@@ -119,6 +119,17 @@ class McpMetricsAdapter(private val registry: MeterRegistry?) : McpMetricsPort {
         }
     }
 
+    override fun inputRefused(reason: McpMetricsPort.InputRefusal) {
+        registry?.let { r ->
+            Counter.builder("openbank.mcp.input_refused")
+                .tag("service", SERVICE)
+                .tag("reason", reason.name.lowercase())
+                .description("MCP JSON-RPC requests refused by an input bound before dispatch (#16628)")
+                .register(r)
+                .increment()
+        }
+    }
+
     companion object {
         private const val SERVICE = "mcp"
     }

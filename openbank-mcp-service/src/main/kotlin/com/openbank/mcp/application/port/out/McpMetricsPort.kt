@@ -56,6 +56,15 @@ interface McpMetricsPort {
      */
     fun requestThrottled(surface: ThrottleSurface, caller: ThrottleCaller)
 
+    /**
+     * Record one request refused by an input bound before dispatch (#16628). Default no-op so test
+     * doubles need not implement it; the Micrometer adapter overrides it.
+     */
+    fun inputRefused(reason: InputRefusal) = Unit
+
+    /** Why a request was refused before dispatch. A closed enum, so safe as a tag. */
+    enum class InputRefusal { NUL, }
+
     /** Which JSON-RPC surface was throttled. A closed enum, so safe as a tag. */
     enum class ThrottleSurface { TOOLS_CALL, TOOLS_LIST }
 
