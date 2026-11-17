@@ -38,12 +38,27 @@
 //   MCP_PERF_MIX_RATE            mix arrival rate in calls/second (default 0.8, i.e. 48/min, under 60)
 //   MCP_PERF_METRICS_URL         MCP management metrics (default http://localhost:8085/q/metrics)
 //   MCP_PERF_PDP_METRICS_URL     OPA sidecar /metrics, for the ordering measurement
+//   MCP_PERF_ALLOW_NONLOCAL=1    allow a non-localhost MCP_PERF_URL (isolated port-forward only)
 //   MCP_PERF_REQUIRE_METRICS=1   fail when the MCP metrics cannot be read (default: record and warn)
 //   MCP_PERF_EXPECT_LIMITER_BEFORE_POLICY=1   hard-gate the ADR-0383 ordering (needs PDP metrics)
-// The token is never put in a tag, a log line or a summary.
+// Boolean flags accept only "1" (or unset/empty); any other value fails the run, so a typo such as
+// "true" cannot silently turn a hard gate off.
+// The token is never put in a tag, a log line or a summary. NEVER run this with --http-debug: it
+// prints request headers, including the bearer token.
+//
+// STATUS OF THE ORDERING GATE: recorded-only by default, and it has NOT been run against a live
+// OPA sidecar, only against a stand-in server. The per-admitted-call PDP cost is calibrated from a
+// few calls before the burst (it is not assumed to be 1), but the metric name is unverified.
 import http from "k6/http";
 import { check, fail } from "k6";
 import { Counter } from "k6/metrics";
+
+function flag(name) {
+  const v = __ENV[name];
+  if (v === undefined || v === "") return false;
+  if (v === "1") return true;
+  return fail(`${name} must be "1" or unset, got a different value`);
+}
 
 http.setResponseCallback(http.expectedStatuses(200, 429));
 
@@ -53,7 +68,10 @@ const BURST_CALLS = Math.ceil(LIMIT * 2.5);
 const TARGET = (__ENV.MCP_PERF_URL || "").replace(/\/$/, "");
 const METRICS_URL = __ENV.MCP_PERF_METRICS_URL || "http://localhost:8085/q/metrics";
 const PDP_METRICS_URL = __ENV.MCP_PERF_PDP_METRICS_URL || "";
-const ENFORCE_ORDER = __ENV.MCP_PERF_EXPECT_LIMITER_BEFORE_POLICY === "1";
+const ENFORCE_ORDER = flag("MCP_PERF_EXPECT_LIMITER_BEFORE_POLICY");
+const REQUIRE_METRICS = flag("MCP_PERF_REQUIRE_METRICS");
+const ALLOW_NONLOCAL = flag("MCP_PERF_ALLOW_NONLOCAL");
+const CALIBRATION_CALLS = 5;
 
 // The limiter's own answers. Today: HTTP 200 + JSON-RPC result.isError with this text (McpEndpoint
 // "Rate limit exceeded: <reason>"). ADR-0383 D5 target: HTTP 429 + Retry-After. Either is the
@@ -91,7 +109,7 @@ export const options = {
       gracefulStop: "5s",
     },
     // Starts after the mix so the burst owns its own minute windows. The fixed-window limiter can
-    // split a burst across two windows, so the assertions below tolerate exactly that and no more.
+    // split a burst across clock-aligned windows; the assertions count the windows actually crossed.
     throttle_burst: {
       executor: "per-vu-iterations",
       vus: 1,
@@ -119,7 +137,7 @@ export function setup() {
   if (!(MIX_RATE > 0) || MIX_RATE * 60 >= LIMIT) {
     fail("MCP_PERF_MIX_RATE must stay under the per-minute limit, or the mix would measure throttling");
   }
-  if (__ENV.MCP_PERF_ALLOW_NONLOCAL !== "1" && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/.test(TARGET)) {
+  if (!ALLOW_NONLOCAL && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/.test(TARGET)) {
     fail("MCP_PERF_URL must be a localhost origin for an isolated target");
   }
   if (ENFORCE_ORDER && !PDP_METRICS_URL) fail("MCP_PERF_EXPECT_LIMITER_BEFORE_POLICY=1 needs MCP_PERF_PDP_METRICS_URL");
@@ -146,7 +164,8 @@ function argsFor(tool) {
       return { accountId, limit: 20 };
     case "propose_payment":
       // A syntactically valid synthetic proposal. Today it is refused (no proposal store); once
-      // wired it creates a reviewable proposal only. The IBAN is a documentation-range test value.
+      // wired it creates a reviewable proposal only. The IBAN is a well-known valid example IBAN
+      // (the Czech example from the IBAN registry), not a real customer account.
       return { fromAccountId: accountId, toIban: "CZ6508000000192000145399", amount: "1.00", currency: "CZK", reference: "perf" };
     default:
       return {};
@@ -213,7 +232,10 @@ export function toolMix() {
   }
   if (tool === "propose_payment") {
     // Propose-only by contract: never an executed payment. A refusal (unwired store) is expected.
-    const t = text(res).toLowerCase();
+    // Advisory tripwire only, not a proof: a keyword match cannot establish that nothing executed
+    // (the real proof is the proposal store and ledger). Negated phrases ("not executed") are
+    // stripped first so a correct refusal does not trip it.
+    const t = text(res).toLowerCase().replace(/\b(not|never|no|isn't|wasn't|hasn't been|has not been|was not|is not)\s+(been\s+)?(executed|settled|debited|paid)\b/g, "");
     if (!check(res, { "propose never claims execution": () => !/\b(executed|settled|debited|paid)\b/.test(t) })) {
       breaches.add(1, { tool, kind: "propose-claims-execution" });
     }
@@ -258,12 +280,29 @@ const pdpQueries = (t) =>
 export function throttleBurst() {
   const mcpBefore = scrape(METRICS_URL);
   const pdpBefore = scrape(PDP_METRICS_URL);
-  if (mcpBefore === null && __ENV.MCP_PERF_REQUIRE_METRICS === "1") {
+  if (mcpBefore === null && REQUIRE_METRICS) {
     fail("MCP_PERF_REQUIRE_METRICS=1 but the MCP metrics endpoint could not be read");
   }
 
+  const bucket = () => Math.floor(Date.now() / 60000);
+  const bucketBefore = bucket();
   let ok = 0;
   let limited = 0;
+  // Calibrate the PDP cost of one ADMITTED call from a few calls before the burst, so the ordering
+  // comparison does not assume one policy query per call.
+  let calibrationOk = 0;
+  for (let i = 0; i < CALIBRATION_CALLS; i++) {
+    const res = rpc("list_accounts", {});
+    callsByTool.add(1, { tool: "list_accounts" });
+    if (isToolOk(res)) {
+      calibrationOk++;
+      admitted.add(1);
+    } else {
+      invalidSamples.add(1, { reason: "calibration-call-not-admitted" });
+    }
+  }
+  const pdpCalibrated = scrape(PDP_METRICS_URL);
+  ok += calibrationOk;
   let other = 0;
   let sawDaily = false;
   for (let i = 0; i < BURST_CALLS; i++) {
@@ -284,13 +323,16 @@ export function throttleBurst() {
     }
   }
 
-  // The configured rate. A fixed-window limiter may split the burst across at most two windows,
+  // The configured rate. The limiter windows are clock-aligned,
   // so at most 2*LIMIT calls can be admitted and at least BURST_CALLS-2*LIMIT must be limited.
   if (sawDaily) invalidSamples.add(1, { reason: "daily-budget-exhausted" });
   if (other > 0) invalidSamples.add(1, { reason: "burst-non-limiter-error" });
-  const minLimited = BURST_CALLS - 2 * LIMIT;
+  // Windows are clock-aligned (epoch seconds / 60), so the calls span at most
+  // (minute buckets crossed + 1) windows, each admitting at most LIMIT.
+  const windows = bucket() - bucketBefore + 1;
+  const minLimited = BURST_CALLS - windows * LIMIT;
   const rate = check(null, {
-    "admitted calls never exceed two windows of the limit": () => ok <= 2 * LIMIT,
+    "admitted calls never exceed the limit times the windows the run spanned": () => ok <= LIMIT * windows,
     "the limiter fired on an over-limit burst": () => limited >= Math.max(1, minLimited),
   });
   if (!rate) breaches.add(1, { kind: "limiter-not-at-configured-rate" });
@@ -308,11 +350,19 @@ export function throttleBurst() {
 
   // Ordering: how many PDP queries did the throttled calls cost? Zero when the limiter runs first.
   const pdpAfter = scrape(PDP_METRICS_URL);
-  if (pdpBefore !== null && pdpAfter !== null) {
-    const pdpDelta = pdpQueries(pdpAfter) - pdpQueries(pdpBefore);
-    // Every admitted call needs one PDP decision; anything beyond that was spent on a throttled one.
-    const spentOnThrottled = Math.max(0, pdpDelta - ok);
-    console.log(`ordering: admitted=${ok} throttled=${limited} pdp_queries=${pdpDelta} pdp_spent_on_throttled=${spentOnThrottled}`);
+  if (pdpBefore !== null && pdpCalibrated !== null && pdpAfter !== null) {
+    const perCall = calibrationOk > 0 ? (pdpQueries(pdpCalibrated) - pdpQueries(pdpBefore)) / calibrationOk : 0;
+    if (!(perCall > 0)) {
+      invalidSamples.add(1, { reason: "pdp-calibration-failed" });
+      return;
+    }
+    const burstAdmitted = ok - calibrationOk;
+    const burstPdp = pdpQueries(pdpAfter) - pdpQueries(pdpCalibrated);
+    // PDP queries beyond what the admitted calls account for were spent on throttled ones. Half a
+    // call's cost is the tolerance, so a fractional per-call cost cannot create a phantom finding.
+    const excess = burstPdp - burstAdmitted * perCall;
+    const spentOnThrottled = excess >= perCall / 2 ? Math.round(excess / perCall) : 0;
+    console.log(`ordering: pdp_per_admitted_call=${perCall} burst_admitted=${burstAdmitted} throttled=${limited} burst_pdp_queries=${burstPdp} pdp_calls_spent_on_throttled=${spentOnThrottled}`);
     if (spentOnThrottled > 0) orderViolations.add(1);
   } else if (PDP_METRICS_URL) {
     invalidSamples.add(1, { reason: "pdp-metrics-unreadable" });

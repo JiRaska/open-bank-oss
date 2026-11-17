@@ -19,10 +19,13 @@
 //     (`mcp_chain_breaks` must be 0 — a faster append that forks the chain is a regression);
 //   - the saturation point, so the per-call limiter cost table can be sized below it.
 import { fail } from "k6";
+import exec from "k6/execution";
 import { Counter, Trend } from "k6/metrics";
 
-const chainBreaks = new Counter("mcp_chain_breaks");
-const appendMs = new Trend("mcp_chain_append_ms", true);
+// Declared so the reserved thresholds below resolve. Nothing is ever recorded into them until the
+// append driver exists: a zero sample would read as a measured, healthy chain.
+new Counter("mcp_chain_breaks");
+new Trend("mcp_chain_append_ms", true);
 
 export const options = {
   scenarios: {
@@ -39,8 +42,7 @@ export function setup() {
   fail("mcp-audit-chain-append is pending ADR-0384 D0 (mcp-service has no hash-linked audit publisher yet); nothing to measure");
 }
 
-// Reserved metric handles; the append driver and chain verifier land with ADR-0384 D0.
+// `k6 run --no-setup` skips setup(), so the refusal must also live here: this never measures anything.
 export default function () {
-  appendMs.add(0);
-  chainBreaks.add(0);
+  exec.test.abort("mcp-audit-chain-append is pending ADR-0384 D0; refusing to run without setup() and record nothing");
 }
