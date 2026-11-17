@@ -119,7 +119,6 @@ NOT_PROBED = {
     "PERF_READ_TOKEN": "environment secret for an in-cluster service, not a GitHub token",
     "GLITCHTIP_AUTH_TOKEN": "error-tracker API token, not a GitHub token",
     "ALERTMANAGER_DIGEST_TOKEN": "Alertmanager credential, not a GitHub token",
-    "METADATA_REFRESH_PAT": "Dependabot-scoped secret; an Actions schedule run cannot read it",
 }
 CRED_NAME = re.compile(r"secrets\.([A-Z0-9_]*(?:_PAT|_TOKEN))\b")
 DECLARED = re.compile(r"^\s*CREDENTIALS:\s*[\"']?([A-Z0-9_ ]+)[\"']?\s*$", re.M)
