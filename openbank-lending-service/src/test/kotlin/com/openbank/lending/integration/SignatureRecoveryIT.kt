@@ -7,6 +7,7 @@ package com.openbank.lending.integration
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.lending.application.port.out.CatalogLoanProfile
 import com.openbank.lending.application.port.out.FosAction
+import com.openbank.lending.application.port.out.FosCommitmentRefused
 import com.openbank.lending.application.port.out.FosRoute
 import com.openbank.lending.application.port.out.FosRoutePin
 import com.openbank.lending.domain.model.CatalogLoanSnapshot
@@ -18,6 +19,7 @@ import com.openbank.lending.it.TestBorrowerCreditPort
 import com.openbank.lending.it.TestRecordingLedgerPostingPort
 import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.libs.market.OfferingMarkets
+import com.openbank.libs.market.PassportMode
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.mockk.every
 import io.mockk.mockk
@@ -31,6 +33,8 @@ import io.smallrye.mutiny.Uni
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import java.math.BigDecimal
 import java.sql.ResultSet
 import java.time.Duration
@@ -83,12 +87,14 @@ class SignatureRecoveryIT {
         assertThat(outboxCount(application)).isEqualTo(1L)
     }
 
-    @Test
+    @ParameterizedTest
+    @EnumSource(PassportMode::class)
     @TestSecurity(user = SIGNER, roles = ["ROLE_LENDING_OFFICER", "ROLE_ADMIN"])
-    fun `FOS recovers separate signing and cash operations using their original requests`() {
+    fun `passport lending recovers each original signature and cash operation`(mode: PassportMode) {
+        val route = if (mode == PassportMode.BRANCH) ROUTE.copy(hostCountry = "AT", mode = mode) else ROUTE
         val payments = installCashBackends()
-        val receipts = installCatalogue()
-        val application = createFosApplication()
+        val receipts = installCatalogue(route)
+        val application = createPassportApplication(route)
         moveToSignature(application)
         assertThat(sign(application, ARTEFACT)).isGreaterThanOrEqualTo(400)
         assertThat(status(application)).isEqualTo("AWAITING_SIGNATURE")
@@ -121,15 +127,42 @@ class SignatureRecoveryIT {
         ).isEqualTo(1L)
     }
 
-    private fun installCatalogue(): Map<UUID, FosAction> {
+    @Test
+    @TestSecurity(user = SIGNER, roles = ["ROLE_LENDING_OFFICER", "ROLE_ADMIN"])
+    fun `a refused branch disbursement cannot create a loan or credit the borrower`() {
+        val route = ROUTE.copy(hostCountry = "AT", mode = PassportMode.BRANCH)
+        val payments = installCashBackends()
+        val receipts = installCatalogue(route, refuseDisbursement = true)
+        val application = createPassportApplication(route)
+        moveToSignature(application)
+        assertThat(sign(application, ARTEFACT)).isGreaterThanOrEqualTo(400)
+        recoverFos(application, FosAction.SIGN)
+
+        execute("UPDATE loan_application SET status = 'READY_TO_DISBURSE' WHERE id = ?", application)
+        assertThat(disburse(application)).isEqualTo(409)
+        val refusal = """
+            SELECT refused_at IS NOT NULL AND admitted_at IS NULL FROM lending_fos_operation
+            WHERE application_id = ? AND action = 'DISBURSE'
+        """.trimIndent()
+        assertThat(scalar(refusal, application)).isEqualTo(true)
+        assertThat(status(application)).isEqualTo("READY_TO_DISBURSE")
+        assertThat(scalar("SELECT count(*) FROM loan WHERE application_id = ?", application)).isEqualTo(0L)
+        assertThat(payments).isEmpty()
+        assertThat(receipts.values).containsExactly(FosAction.SIGN)
+    }
+
+    private fun installCatalogue(route: FosRoute, refuseDisbursement: Boolean = false): Map<UUID, FosAction> {
         val receipts = ConcurrentHashMap<UUID, FosAction>()
         val lostSignatureResponse = AtomicBoolean()
         val outageBeforeDisbursement = AtomicBoolean()
         val catalogue = mockk<CatalogFosLoanAdapter>()
-        every { catalogue.resolve(GRANT, PARTY, REVISION) } returns Uni.createFrom().item(ROUTE)
+        every { catalogue.resolve(GRANT, PARTY, REVISION, route.mode) } returns Uni.createFrom().item(route)
         every { catalogue.admit(any(), any(), PARTY, REVISION) } answers {
             val operation = firstArg<com.openbank.lending.application.port.out.FosOperation>()
-            check(secondArg<com.openbank.lending.application.port.out.FosRoutePin>().grantId == GRANT)
+            check(secondArg<com.openbank.lending.application.port.out.FosRoutePin>() == FosRoutePin(GRANT, route))
+            if (operation.action == FosAction.DISBURSE && refuseDisbursement) {
+                return@answers Uni.createFrom().failure(FosCommitmentRefused())
+            }
             if (operation.action == FosAction.DISBURSE && outageBeforeDisbursement.compareAndSet(false, true)) {
                 return@answers Uni.createFrom().failure(IllegalStateException("synthetic unavailable catalogue"))
             }
@@ -151,13 +184,13 @@ class SignatureRecoveryIT {
                 BigDecimal("0.05"),
                 null,
                 null,
-                OfferingMarkets(setOf("SK")),
+                OfferingMarkets(setOf(route.hostCountry)),
                 "INSTALLMENT_LOAN",
             ),
         )
         QuarkusMock.installMockForType(profiles, RestCatalogLoanProfilePort::class.java)
         val guard = mockk<CompliancePackGuard>(relaxed = true)
-        every { guard.resolveOriginationPack("SK", "CONSUMER_CREDIT") } returns mockk(relaxed = true)
+        every { guard.resolveOriginationPack(route.hostCountry, "CONSUMER_CREDIT") } returns mockk(relaxed = true)
         QuarkusMock.installMockForType(guard, CompliancePackGuard::class.java)
         return receipts
     }
@@ -185,7 +218,12 @@ class SignatureRecoveryIT {
         return payments
     }
 
-    private fun createFosApplication(): UUID {
+    private fun createPassportApplication(route: FosRoute): UUID {
+        val expectedMode = if (route.mode == PassportMode.BRANCH) {
+            mapOf("passportMode" to route.mode.name)
+        } else {
+            emptyMap()
+        }
         val response = given().contentType("application/json").body(
             mapOf(
                 "partyId" to PARTY,
@@ -195,12 +233,13 @@ class SignatureRecoveryIT {
                 "firstDueDate" to LocalDate.now().plusMonths(1).toString(),
                 "catalogOfferingId" to REVISION.offeringId,
                 "passportGrantId" to GRANT,
-            ),
+            ) + expectedMode,
         ).post("/api/v1/lending/applications").then().statusCode(201)
         val id = UUID.fromString(response.extract().jsonPath().getString("id"))
-        assertThat(scalar("SELECT jurisdiction FROM loan_application WHERE id = ?", id)).isEqualTo("SK")
-        val route = scalar("SELECT CAST(route AS text) FROM lending_fos_route WHERE application_id = ?", id)
-        assertThat(mapper.readValue(route as String, FosRoutePin::class.java)).isEqualTo(FosRoutePin(GRANT, ROUTE))
+        assertThat(scalar("SELECT jurisdiction FROM loan_application WHERE id = ?", id)).isEqualTo(route.hostCountry)
+        val storedRoute = scalar("SELECT CAST(route AS text) FROM lending_fos_route WHERE application_id = ?", id)
+        val pinnedRoute = mapper.readValue(storedRoute as String, FosRoutePin::class.java)
+        assertThat(pinnedRoute).isEqualTo(FosRoutePin(GRANT, route))
         return id
     }
 

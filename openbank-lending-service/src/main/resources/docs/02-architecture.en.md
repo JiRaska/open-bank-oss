@@ -142,3 +142,15 @@ Signing and disbursement each stage an immutable operation and use its UUID at t
 The application row lock and database guard prevent a conflicting transition during a commitment.
 A disbursement keeps the loan ID, destination and value date across retries. The scheduler
 resumes work and records the cash and exposure events after both cash services confirm.
+
+### Passport lending commitments
+
+The published offering revision supplies the product and its market scope. Catalogue resolves the
+approved FOS or BRANCH route for the verified subject. Lending persists the returned mode, host
+country, establishment and pack-set digest with the application. Signing and disbursement keep
+separate durable intents and consume separate Catalogue permits. The recovery scheduler retries the
+original intent after interruption; a refused disbursement cannot post to the ledger or credit the borrower.
+
+BRANCH is exercised in the isolated C3 integration runtime. Normal runtime rejects branch origination
+and commitment recovery until B2 provides branch-aware booking. Deploy Catalogue V21 before
+upgrading Lending. An older Lending binary should only run where no branch intents were written.
