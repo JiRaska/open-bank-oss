@@ -16,8 +16,7 @@ import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.AfterAll
-import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
@@ -33,12 +32,14 @@ private const val WIRE_FUZZ_CONSENT_ID = "22222222-2222-2222-2222-222222222222"
  * limit — each of which can turn an input into an HTTP 500 that no in-process test can produce.
  *
  * Invariants for every request: status is 2xx or 4xx (never 5xx); the body carries no stack trace or
- * internal class name; the response is bounded. Refusal of a payload containing U+0000 is not asserted for U+0000 because it does not hold today — see `a NUL in any argument is refused`
- * (disabled, deviation W1).
+ * internal class name; the response is bounded. That a payload containing U+0000 is refused is NOT
+ * asserted here, because it does not hold today (disabled test `a NUL in any argument is refused
+ * before the endpoint runs`, deviation W1, #16628).
  *
- * The PDP is opened to every tool ([TestPolicyDecisionPoint.allowEverything]) only for the duration
- * of this class, so argument handling of each tool is reachable; the rate limiter is disabled for
- * the same reason and both are restored afterwards.
+ * The PDP is opened to every tool ([TestPolicyDecisionPoint.allowEverything]) and the rate limiter
+ * is disabled around EACH test (set in `@BeforeEach`, reset in `@AfterEach`, which JUnit runs even
+ * when a setup step failed), so argument handling of each tool is reachable and a failure cannot
+ * leave the shared flag open for another test class.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class, initArgs = [ResourceArg(name = "db", value = "openbank_mcp_it")])
@@ -58,13 +59,13 @@ class McpToolCallWireFuzzIT {
     @Inject
     lateinit var mapper: ObjectMapper
 
-    @BeforeAll
+    @BeforeEach
     fun open() {
         TestPolicyDecisionPoint.allowEverything = true
         limiter.enabled = false
     }
 
-    @AfterAll
+    @AfterEach
     fun close() {
         TestPolicyDecisionPoint.allowEverything = false
         limiter.enabled = true
@@ -86,8 +87,7 @@ class McpToolCallWireFuzzIT {
 
     private fun send(body: String) = given().contentType(ContentType.JSON).body(body).post("/mcp")
 
-    @Suppress("UNUSED_PARAMETER")
-    private fun assertSurvived(label: String, body: String, payload: Payload, requestEchoes: Boolean = false) {
+    private fun assertSurvived(label: String, body: String, requestEchoes: Boolean = false) {
         recorder.clear()
         val resp = send(body)
         val text = resp.body.asString()
@@ -107,7 +107,7 @@ class McpToolCallWireFuzzIT {
         firstSlot.forEach { (tool, slot) ->
             FuzzPayloads.small.forEach { p ->
                 val body = call(tool, """{"$slot":${p.json}}""")
-                assertSurvived("$tool.$slot=${p.label}", body, p)
+                assertSurvived("$tool.$slot=${p.label}", body)
             }
         }
     }
@@ -117,7 +117,7 @@ class McpToolCallWireFuzzIT {
         (firstSlot.keys + listOf("list_accounts", "list_consents", "count_marketing_consents")).forEach { tool ->
             FuzzPayloads.small.forEach { p ->
                 val body = call(tool, p.json)
-                assertSurvived("$tool.arguments=${p.label}", body, p)
+                assertSurvived("$tool.arguments=${p.label}", body)
             }
         }
     }
@@ -129,7 +129,7 @@ class McpToolCallWireFuzzIT {
         listOf("get_balance" to "accountId", "get_payment_confirmation" to "paymentId").forEach { (tool, slot) ->
             huge.forEach { p ->
                 val body = call(tool, """{"$slot":${p.json}}""")
-                assertSurvived("$tool.$slot=${p.label}", body, p, requestEchoes = tool == "get_payment_confirmation")
+                assertSurvived("$tool.$slot=${p.label}", body, requestEchoes = tool == "get_payment_confirmation")
             }
         }
     }
@@ -140,24 +140,20 @@ class McpToolCallWireFuzzIT {
             assertSurvived(
                 "params=${p.label}",
                 """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":${p.json}}""",
-                p,
             )
             assertSurvived(
                 "name=${p.label}",
                 """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":${p.json},"arguments":{}}}""",
-                p,
                 requestEchoes = true,
             )
             assertSurvived(
                 "method=${p.label}",
                 """{"jsonrpc":"2.0","id":1,"method":${p.json}}""",
-                p,
                 requestEchoes = true,
             )
             assertSurvived(
                 "id=${p.label}",
                 """{"jsonrpc":"2.0","id":${p.json},"method":"ping"}""",
-                p,
                 requestEchoes = true,
             )
         }
@@ -189,7 +185,7 @@ class McpToolCallWireFuzzIT {
     }
 
     @Disabled(
-        "Deviation W1 (#16617): the fleet NUL guard (#5913) hooks the String deserializer, but McpEndpoint binds the body as a JsonNode tree, so U+0000 in any argument is accepted (HTTP 200) and flows to the tool, the downstream request and the audit record",
+        "Deviation W1 (#16628): the fleet NUL guard (#5913) hooks the String deserializer, but McpEndpoint binds the body as a JsonNode tree, so U+0000 in any argument is accepted (HTTP 200) and flows to the tool, the downstream request and the audit record",
     )
     @Test
     fun `a NUL in any argument is refused before the endpoint runs`() {

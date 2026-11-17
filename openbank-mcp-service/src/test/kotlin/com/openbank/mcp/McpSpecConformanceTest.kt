@@ -388,7 +388,7 @@ class McpSpecConformanceTest {
     // ------------------------- KNOWN DEVIATIONS (disabled, see PR body) -------------------------
 
     @Disabled(
-        "Deviation D1 (#16617): request without `id` that is not a notification is answered; the spec says ids are mandatory on requests and notifications get no response",
+        "Deviation D1 (#16629): request without `id` that is not a notification is answered; the spec says ids are mandatory on requests and notifications get no response",
     )
     @Test
     fun `a request lacking an id is treated as a notification and is not answered`() {
@@ -397,7 +397,7 @@ class McpSpecConformanceTest {
     }
 
     @Disabled(
-        "Deviation D2 (#16617): an unknown notification (e.g. notifications/cancelled) is answered with -32601; notifications must never be answered",
+        "Deviation D2 (#16629): an unknown notification (e.g. notifications/cancelled) is answered with -32601; notifications must never be answered",
     )
     @Test
     fun `an unknown notification is ignored, not answered with an error`() {
@@ -405,7 +405,7 @@ class McpSpecConformanceTest {
         assertThat(response.entity).isNull()
     }
 
-    @Disabled("Deviation D3 (#16617): `id: null` is accepted and echoed; MCP forbids a null request id")
+    @Disabled("Deviation D3 (#16629): `id: null` is accepted and echoed; MCP forbids a null request id")
     @Test
     fun `a null request id is an Invalid Request`() {
         val body = bodyOf(send(request("ping", id = null)))
@@ -413,7 +413,7 @@ class McpSpecConformanceTest {
     }
 
     @Disabled(
-        "Deviation D4 (#16617): `jsonrpc` is not validated; a missing or non-2.0 marker must be -32600 Invalid Request",
+        "Deviation D4 (#16629): `jsonrpc` is not validated; a missing or non-2.0 marker must be -32600 Invalid Request",
     )
     @Test
     fun `a request without the jsonrpc 2 0 marker is an Invalid Request`() {
@@ -425,7 +425,7 @@ class McpSpecConformanceTest {
     }
 
     @Disabled(
-        "Deviation D5 (#16617): non-object bodies and non-string methods answer -32601/-32602 shaped text, not -32600 Invalid Request",
+        "Deviation D5 (#16629): non-object bodies and non-string methods answer -32601/-32602 shaped text, not -32600 Invalid Request",
     )
     @Test
     fun `structurally invalid requests use code -32600`() {
@@ -433,7 +433,7 @@ class McpSpecConformanceTest {
             .forEach { assertThat(raw(it).path("error").path("code").asInt()).`as`(it).isEqualTo(-32600) }
     }
 
-    @Disabled("Deviation D6 (#16617): ping answers {\"pong\":true}; the spec result is an empty object")
+    @Disabled("Deviation D6 (#16629): ping answers {\"pong\":true}; the spec result is an empty object")
     @Test
     fun `ping returns an empty result object`() {
         val result = bodyOf(send(request("ping"))).path("result")
@@ -442,7 +442,7 @@ class McpSpecConformanceTest {
     }
 
     @Disabled(
-        "Deviation D7 (#16617): `resources` capability is advertised but resources/list is not implemented (-32601)",
+        "Deviation D7 (#16629): `resources` capability is advertised but resources/list is not implemented (-32601)",
     )
     @Test
     fun `every advertised capability is backed by an implemented method`() {
@@ -455,7 +455,7 @@ class McpSpecConformanceTest {
     }
 
     @Disabled(
-        "Deviation D8 (#16617): an unknown tool is a result with isError (deny-by-default); the spec classifies it as a -32602 protocol error",
+        "Deviation D8 (#16629): an unknown tool is a result with isError (deny-by-default); the spec classifies it as a -32602 protocol error",
     )
     @Test
     fun `an unknown tool is a protocol error -32602`() {
@@ -466,7 +466,7 @@ class McpSpecConformanceTest {
     }
 
     @Disabled(
-        "Deviation D9 (#16617): tools/call without a string `name` falls through to the deny path; a request failing CallToolRequest is -32602",
+        "Deviation D9 (#16629): tools/call without a string `name` falls through to the deny path; a request failing CallToolRequest is -32602",
     )
     @Test
     fun `a tools call without a string name is -32602`() {
@@ -477,7 +477,7 @@ class McpSpecConformanceTest {
     }
 
     @Disabled(
-        "Deviation D10 (#16617): argument validation failures are JSON-RPC -32602 errors; revision 2026-07-28 classes input validation as tool execution errors (isError) so the model can self-correct",
+        "Deviation D10 (#16629): argument validation failures are JSON-RPC -32602 errors; revision 2026-07-28 classes input validation as tool execution errors (isError) so the model can self-correct",
     )
     @Test
     fun `input validation failure is a tool execution error with isError`() {
@@ -489,7 +489,7 @@ class McpSpecConformanceTest {
     }
 
     @Disabled(
-        "Deviation D11 (#16617): no tool carries annotations; a read tool should declare readOnlyHint and propose_payment must not",
+        "Deviation D11 (#16629): no tool carries annotations; a read tool should declare readOnlyHint and propose_payment must not",
     )
     @Test
     fun `tools declare behavioural annotations`() {
@@ -504,7 +504,7 @@ class McpSpecConformanceTest {
     }
 
     @Disabled(
-        "Deviation D12 (#16617): parameterless tools omit additionalProperties:false, which the spec recommends so a model cannot smuggle arguments",
+        "Deviation D12 (#16629): parameterless tools omit additionalProperties:false, which the spec recommends so a model cannot smuggle arguments",
     )
     @Test
     fun `parameterless tools reject extra arguments in their schema`() {

@@ -76,7 +76,7 @@ class McpDownstreamFuzzTest {
     }
 
     @Disabled(
-        "Deviation F4 (#16617): an invalid paymentId is echoed verbatim into the IllegalArgumentException message that McpEndpoint relays as the JSON-RPC error, so the error grows with the input",
+        "Deviation F4 (#16628): an invalid paymentId is echoed verbatim into the IllegalArgumentException message that McpEndpoint relays as the JSON-RPC error, so the error grows with the input",
     )
     @Test
     fun `an invalid paymentId is not reflected into the error message`() {
@@ -92,7 +92,7 @@ class McpDownstreamFuzzTest {
     }
 
     @Disabled(
-        "Deviation F5 (#16617): accountId is not syntax-checked before the consent-service call, so IBAN-shaped garbage (incl. 10 KB strings) is shipped downstream",
+        "Deviation F5 (#16628): accountId is not syntax-checked before the consent-service call, so IBAN-shaped garbage (incl. 10 KB strings) is shipped downstream",
     )
     @Test
     fun `an accountId that is not an IBAN never reaches consent-service`() {

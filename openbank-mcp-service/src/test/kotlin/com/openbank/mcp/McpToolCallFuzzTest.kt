@@ -384,7 +384,7 @@ class McpToolCallFuzzTest {
     // -- known deviations (disabled; see PR body) ---------------------------------------------------
 
     @Disabled(
-        "Deviation F1 (#16617): the unmapped tool name and the unknown method are echoed verbatim into the response, so a 1 MiB name yields a >1 MiB response",
+        "Deviation F1 (#16628): the unmapped tool name and the unknown method are echoed verbatim into the response, so a 1 MiB name yields a >1 MiB response",
     )
     @Test
     fun `a megabyte tool name does not amplify into the response`() {
@@ -395,7 +395,7 @@ class McpToolCallFuzzTest {
     }
 
     @Disabled(
-        "Deviation F2 (#16617): list_transactions forwards `limit` verbatim - zero, negative, int-overflow-wrapped and enormous values reach the transaction port",
+        "Deviation F2 (#16628): list_transactions forwards `limit` verbatim - zero, negative, int-overflow-wrapped and enormous values reach the transaction port",
     )
     @Test
     fun `list_transactions never forwards a non-positive or unbounded limit`() {
@@ -411,7 +411,7 @@ class McpToolCallFuzzTest {
     }
 
     @Disabled(
-        "Deviation F3 (#16617): argument KEY names are copied unbounded into the audit event, so a 1 MiB key becomes a >1 MiB audit record",
+        "Deviation F3 (#16628): argument KEY names are copied unbounded into the audit event, so a 1 MiB key becomes a >1 MiB audit record",
     )
     @Test
     fun `audit events stay bounded whatever the caller names its arguments`() {

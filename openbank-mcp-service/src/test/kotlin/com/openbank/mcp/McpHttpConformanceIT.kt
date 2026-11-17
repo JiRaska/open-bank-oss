@@ -76,7 +76,7 @@ class McpHttpConformanceIT {
     // ---- known deviations (disabled) -----------------------------------------------------------
 
     @Disabled(
-        "Deviation H1 (#16617): unauthenticated POST /mcp answers 200; RFC 9728 / MCP authorization require 401 + WWW-Authenticate Bearer resource_metadata=...",
+        "Deviation H1 (#16629): unauthenticated POST /mcp answers 200; RFC 9728 / MCP authorization require 401 + WWW-Authenticate Bearer resource_metadata=...",
     )
     @Test
     fun `an unauthenticated request is challenged with 401 and a resource_metadata pointer`() {
@@ -85,7 +85,7 @@ class McpHttpConformanceIT {
         assertThat(resp.header("WWW-Authenticate")).startsWith("Bearer").contains("resource_metadata=")
     }
 
-    @Disabled("Deviation H2 (#16617): no RFC 9728 protected-resource metadata document is served")
+    @Disabled("Deviation H2 (#16629): no RFC 9728 protected-resource metadata document is served")
     @Test
     fun `protected resource metadata is published at the well-known URI`() {
         val resp = given().get("/.well-known/oauth-protected-resource/mcp")
@@ -95,7 +95,7 @@ class McpHttpConformanceIT {
     }
 
     @Disabled(
-        "Deviation H3 (#16617): a notification is answered 204; Streamable HTTP requires 202 Accepted with no body",
+        "Deviation H3 (#16629): a notification is answered 204; Streamable HTTP requires 202 Accepted with no body",
     )
     @Test
     fun `a notification is answered 202 Accepted`() {
@@ -103,7 +103,7 @@ class McpHttpConformanceIT {
     }
 
     @Disabled(
-        "Deviation H4 (#16617): malformed JSON answers a platform 400 body, not a JSON-RPC -32700 Parse error object",
+        "Deviation H4 (#16629): malformed JSON answers a platform 400 body, not a JSON-RPC -32700 Parse error object",
     )
     @Test
     fun `malformed JSON is answered with a JSON-RPC parse error`() {
@@ -113,7 +113,7 @@ class McpHttpConformanceIT {
     }
 
     @Disabled(
-        "Deviation H5 (#16617): Origin is not validated; a present, invalid Origin MUST be refused with 403 (DNS rebinding)",
+        "Deviation H5 (#16629): Origin is not validated; a present, invalid Origin MUST be refused with 403 (DNS rebinding)",
     )
     @Test
     fun `an invalid Origin header is refused with 403`() {
@@ -123,7 +123,7 @@ class McpHttpConformanceIT {
     }
 
     @Disabled(
-        "Deviation H6 (#16617): MCP-Protocol-Version is neither required nor validated; an unsupported value MUST be 400",
+        "Deviation H6 (#16629): MCP-Protocol-Version is neither required nor validated; an unsupported value MUST be 400",
     )
     @Test
     fun `an unsupported MCP-Protocol-Version header is refused with 400`() {
@@ -133,7 +133,7 @@ class McpHttpConformanceIT {
     }
 
     @Disabled(
-        "Deviation H7 (#16617): an unknown method answers HTTP 200 + -32601; revision 2026-07-28 binds it to HTTP 404 with the JSON-RPC error body",
+        "Deviation H7 (#16629): an unknown method answers HTTP 200 + -32601; revision 2026-07-28 binds it to HTTP 404 with the JSON-RPC error body",
     )
     @Test
     fun `an unknown method is HTTP 404 carrying -32601`() {

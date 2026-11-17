@@ -37,8 +37,9 @@ class TestPolicyDecisionPoint : PolicyDecisionPoint {
         const val SESSION_ACTION_PREFIX = "mcp.session."
 
         /**
-         * Opened ONLY by the wire-level fuzz test (McpToolCallWireFuzzIT), inside try/finally, so
-         * that every tool's argument handling is reachable over real HTTP. Off by default: every
+         * Opened ONLY by the wire-level fuzz test (McpToolCallWireFuzzIT), which sets it in
+         * `@BeforeEach` and resets it in `@AfterEach` (run even if setup failed), so that every
+         * tool's argument handling is reachable over real HTTP. Off by default: every
          * other test keeps the deterministic allow-one/deny-rest behaviour described above.
          */
         @Volatile
