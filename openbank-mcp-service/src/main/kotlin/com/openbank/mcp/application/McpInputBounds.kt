@@ -33,6 +33,9 @@ object McpInputBounds {
     fun echo(value: String): String =
         if (value.length <= MAX_ECHO_CHARS) value else value.take(MAX_ECHO_CHARS) + TRUNCATED
 
+    /** [echo] with every ISO control character replaced by `?`: safe for a log line. */
+    fun logSafe(value: String): String = echo(value).map { if (it.isISOControl()) '?' else it }.joinToString("")
+
     fun auditKeys(arguments: JsonNode): List<String> {
         val keys = arguments.fieldNames().asSequence().map(::echo).sorted().toList()
         return if (keys.size <= MAX_AUDIT_KEYS) keys else keys.take(MAX_AUDIT_KEYS) + TRUNCATED

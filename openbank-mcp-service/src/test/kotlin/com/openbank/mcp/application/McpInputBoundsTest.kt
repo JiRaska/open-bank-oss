@@ -41,6 +41,15 @@ class McpInputBoundsTest {
         }
     }
 
+    @Test
+    fun `logSafe bounds the value and strips NUL and control characters`() {
+        val hostile = "tools/call\u0000\r\nFORGED log line\u001b[31m" + "x".repeat(10_000)
+        val safe = McpInputBounds.logSafe(hostile)
+        assertThat(safe.length).isLessThanOrEqualTo(McpInputBounds.MAX_ECHO_CHARS + "...[truncated]".length)
+        assertThat(safe).doesNotContain("\u0000", "\r", "\n", "\u001b").startsWith("tools/call???FORGED")
+        assertThat(McpInputBounds.logSafe("tools/call")).isEqualTo("tools/call")
+    }
+
     private companion object {
         const val VALID = "CZ6508000000192000145399"
     }

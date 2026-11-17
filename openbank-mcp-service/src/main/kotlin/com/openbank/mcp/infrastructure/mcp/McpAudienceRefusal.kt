@@ -18,7 +18,8 @@ internal class McpAudienceRefusal(private val throttle: McpThrottleSupport, priv
     private val log = Logger.getLogger(McpAudienceRefusal::class.java)
 
     fun respond(method: String, params: JsonNode): Response {
-        log.warnf("rejected %s: bearer token audience does not include this server", method)
+        // The method is caller-supplied and this runs before the NUL guard: bounded and control-free.
+        log.warnf("rejected %s: bearer token audience does not include this server", McpInputBounds.logSafe(method))
         metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
         // Bounded like every other audit write (#16628); a NUL-carrying request is not audited at all.
         if (method == "tools/call" && !McpInputBounds.containsNul(params)) {
