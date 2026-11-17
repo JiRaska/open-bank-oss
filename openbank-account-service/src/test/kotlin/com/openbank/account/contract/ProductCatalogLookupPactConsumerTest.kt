@@ -14,7 +14,9 @@ import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.openbank.account.domain.model.AccountBookingContext
 import com.openbank.account.infrastructure.client.CatalogRevisionResponse
+import com.openbank.account.infrastructure.client.PassportAdmissionClient
 import com.openbank.account.infrastructure.client.ProductCatalogClient
 import com.openbank.account.infrastructure.client.ProductCatalogResponse
 import com.openbank.account.infrastructure.client.ProductCatalogRevisionClient
@@ -137,6 +139,134 @@ class ProductCatalogLookupPactConsumerTest {
         .willRespondWith()
         .status(404)
         .toPact()
+
+    /**
+     * ADR-0380 B2: the receipt read the passport recovery loop uses to decide whether an admission
+     * already committed. 204 = consumed permit exists; the adapter never reads a body.
+     */
+    @Pact(consumer = "openbank-account-service", provider = "openbank-product-catalog")
+    fun passportReceiptFoundPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(CONSUMED_PERMIT_STATE)
+        .uponReceiving("POST passport admission receipt for a consumed account-opening permit")
+        // LITERAL on purpose — see the class KDoc. The request side uses the reflected path.
+        .path(PASSPORT_RECEIPT_PATH)
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(admissionBody(CONSUMED_OPERATION_ID))
+        .willRespondWith()
+        .status(204)
+        .toPact()
+
+    /**
+     * The admission itself: catalogue issues and consumes the permit under the grant lock (ADR-0380).
+     * 204 is the only success; the adapter maps 409 to a refusal.
+     */
+    @Pact(consumer = "openbank-account-service", provider = "openbank-product-catalog")
+    fun passportAdmitPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(APPROVED_GRANT_STATE)
+        .uponReceiving("POST passport admission for an account opening under an approved FOS grant")
+        .path(PASSPORT_ADMIT_PATH)
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(admissionBody(ADMIT_OPERATION_ID))
+        .willRespondWith()
+        .status(204)
+        .toPact()
+
+    /** 404 = no consumed permit: `hasReceipt` answers false, the only non-throwing negative branch. */
+    @Pact(consumer = "openbank-account-service", provider = "openbank-product-catalog")
+    fun passportReceiptNotFoundPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NO_CONSUMED_PERMIT_STATE)
+        .uponReceiving("POST passport admission receipt for an operation that was never admitted")
+        .path(PASSPORT_RECEIPT_PATH)
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(admissionBody(UNADMITTED_OPERATION_ID))
+        .willRespondWith()
+        .status(404)
+        .toPact()
+
+    /**
+     * The booking context the consumed receipt owns (ADR-0339). Every field is pinned by value: the
+     * account row stores it immutably (V37), so a context belonging to a different grant is the defect.
+     */
+    @Pact(consumer = "openbank-account-service", provider = "openbank-product-catalog")
+    fun passportContextPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(CONSUMED_PERMIT_STATE)
+        .uponReceiving("POST passport admission context for a consumed account-opening permit")
+        .path(PASSPORT_CONTEXT_PATH)
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(admissionBody(CONSUMED_OPERATION_ID))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.stringValue("bankId", PASSPORT_BANK_ID)
+                o.stringValue("establishmentId", PASSPORT_ESTABLISHMENT_ID)
+                o.stringValue("hostCountry", "SK")
+                o.stringValue("mode", "FOS")
+            }.build(),
+        )
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "passportReceiptFoundPact")
+    fun `a consumed passport permit answers its receipt with 204`(mockServer: MockServer) {
+        assertPassportPathsMatchTheContract()
+        assertThat(post(mockServer, reflectedPassportPath("receipt"), CONSUMED_OPERATION_ID).first).isEqualTo(204)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "passportAdmitPact")
+    fun `an account opening under an approved grant is admitted with 204`(mockServer: MockServer) {
+        assertPassportPathsMatchTheContract()
+        assertThat(post(mockServer, reflectedPassportPath("admit"), ADMIT_OPERATION_ID).first).isEqualTo(204)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "passportReceiptNotFoundPact")
+    fun `an unadmitted passport operation has no receipt and answers 404`(mockServer: MockServer) {
+        assertPassportPathsMatchTheContract()
+        assertThat(post(mockServer, reflectedPassportPath("receipt"), UNADMITTED_OPERATION_ID).first).isEqualTo(404)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "passportContextPact")
+    fun `the passport context deserializes into the AccountBookingContext an account stores`(mockServer: MockServer) {
+        assertPassportPathsMatchTheContract()
+        val (status, body) = post(mockServer, reflectedPassportPath("context"), CONSUMED_OPERATION_ID)
+
+        assertThat(status).isEqualTo(200)
+        val context = mapper.readValue(body, AccountBookingContext::class.java)
+        assertThat(context.bankId).isEqualTo(UUID.fromString(PASSPORT_BANK_ID))
+        assertThat(context.establishmentId).isEqualTo(UUID.fromString(PASSPORT_ESTABLISHMENT_ID))
+        assertThat(context.hostCountry).isEqualTo("SK")
+        assertThat(context.mode).isEqualTo("FOS")
+    }
+
+    private fun assertPassportPathsMatchTheContract() {
+        assertThat(reflectedPassportPath("admit"))
+            .describedAs("PassportAdmissionClient.admit calls a path the provider does not serve")
+            .isEqualTo(PASSPORT_ADMIT_PATH)
+        assertThat(reflectedPassportPath("receipt"))
+            .describedAs("PassportAdmissionClient.receipt calls a path the provider does not serve")
+            .isEqualTo(PASSPORT_RECEIPT_PATH)
+        assertThat(reflectedPassportPath("context"))
+            .describedAs("PassportAdmissionClient.context calls a path the provider does not serve")
+            .isEqualTo(PASSPORT_CONTEXT_PATH)
+    }
+
+    private fun post(mockServer: MockServer, path: String, operationId: String): Pair<Int, String> {
+        val json = mapper.writeValueAsString(admissionRequest(operationId))
+        val request = HttpRequest.newBuilder(URI.create(mockServer.getUrl() + path))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(json))
+            .build()
+        val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+        return response.statusCode() to response.body()
+    }
 
     @Test
     @PactTestFor(pactMethod = "publishedRevisionPact")
@@ -272,5 +402,46 @@ class ProductCatalogLookupPactConsumerTest {
         }
 
         private fun revisionPathFor(id: String): String = REVISION_PATH_TEMPLATE.replace("{productId}", id)
+        /** Provider states seeded by `CatalogPactProviderFixtures.consumedAccountPassportPermitExists`. */
+        const val CONSUMED_PERMIT_STATE = "a consumed account-opening passport permit exists"
+        const val NO_CONSUMED_PERMIT_STATE = "no consumed passport permit exists for the operation"
+
+        /** LITERAL, like [PRODUCT_BY_ID_PATH_TEMPLATE]: product-catalog's internal admission routes. */
+        const val APPROVED_GRANT_STATE = "an approved FOS passport grant with live subject evidence exists"
+        const val PASSPORT_ADMIT_PATH = "/api/v2/internal/passport-account-admissions"
+        const val ADMIT_OPERATION_ID = "0191c0de-0000-7000-8000-00000000c00c"
+        const val PASSPORT_RECEIPT_PATH = "/api/v2/internal/passport-account-admissions/receipt"
+        const val PASSPORT_CONTEXT_PATH = "/api/v2/internal/passport-account-admissions/context"
+
+        // Fixed ids shared with the provider fixture; the provider looks the permit up by all six fields.
+        const val PASSPORT_GRANT_ID = "0191c0de-0000-7000-8000-00000000c001"
+        const val CONSUMED_OPERATION_ID = "0191c0de-0000-7000-8000-00000000c002"
+        const val UNADMITTED_OPERATION_ID = "0191c0de-0000-7000-8000-00000000c0ff"
+        const val PASSPORT_PARTY_ID = "0191c0de-0000-7000-8000-00000000c003"
+        const val PASSPORT_REVISION_ID = "0191c0de-0000-7000-8000-00000000c004"
+        const val PASSPORT_BANK_ID = "0191c0de-0000-7000-8000-00000000c005"
+        const val PASSPORT_ESTABLISHMENT_ID = "0191c0de-0000-7000-8000-00000000c006"
+        val PASSPORT_BINDING: String = "c".repeat(64)
+
+        private fun admissionRequest(operationId: String) = mapOf(
+            "grantId" to PASSPORT_GRANT_ID,
+            "operation" to "OPEN",
+            "operationId" to operationId,
+            "partyId" to PASSPORT_PARTY_ID,
+            "revisionId" to PASSPORT_REVISION_ID,
+            "binding" to PASSPORT_BINDING,
+        )
+
+        private fun admissionBody(operationId: String) = newJsonBody { o ->
+            admissionRequest(operationId).forEach { (key, value) -> o.stringValue(key, value) }
+        }.build()
+
+        /** The path the production client calls, read off [PassportAdmissionClient] — OUTGOING side only. */
+        private fun reflectedPassportPath(method: String): String {
+            val classPath = PassportAdmissionClient::class.java.getAnnotation(JaxrsPath::class.java).value
+            val methodPath = PassportAdmissionClient::class.java.methods.single { it.name == method }
+                .getAnnotation(JaxrsPath::class.java)?.value.orEmpty()
+            return "$classPath$methodPath"
+        }
     }
 }

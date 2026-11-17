@@ -293,6 +293,101 @@ class CatalogPactProviderFixtures(
         },
     )
 
+    /**
+     * A consumed OPEN permit under an approved FOS grant for account-service's passport receipt and
+     * context Pact. Rows are inserted directly with FIXED ids (the Pact pins all six lookup fields);
+     * the admission path itself is exercised by `PassportPermitFenceTest`. Idempotent for replays.
+     */
+    fun consumedAccountPassportPermitExists() = dataSource.connection.use { connection ->
+        insertSpecification(connection, PASSPORT_SPECIFICATION_ID, "PACT_PASSPORT_ACCOUNT")
+        connection.prepareStatement(
+            "INSERT INTO catalog_offerings (id, specification_id, code, market, lock_version) " +
+                "VALUES (?, ?, 'PACT_PASSPORT_OFFERING', '{\"countries\":[\"SK\"]}'::jsonb, 0) " +
+                "ON CONFLICT (id) DO NOTHING",
+        ).use { statement ->
+            statement.setObject(1, PASSPORT_OFFERING_ID)
+            statement.setObject(2, PASSPORT_SPECIFICATION_ID)
+            statement.executeUpdate()
+        }
+        connection.prepareStatement(
+            "INSERT INTO catalog_revisions " +
+                "(id, offering_id, revision_no, schema_id, schema_version, state, content, effective_from, " +
+                "maker_id, checker_id, reason, content_hash, created_at, updated_at, lock_version) " +
+                "VALUES (?, ?, 1, ?, 1, 'PUBLISHED', CAST(? AS jsonb), ?, ?, ?, ?, ?, ?, ?, 0) " +
+                "ON CONFLICT (id) DO NOTHING",
+        ).use { statement ->
+            statement.setObject(1, PASSPORT_REVISION_ID)
+            statement.setObject(2, PASSPORT_OFFERING_ID)
+            statement.setString(3, SCHEMA_ID)
+            statement.setString(4, REVISION_CONTENT)
+            statement.setObject(5, LOAN_FIXTURE_TIME)
+            statement.setString(6, "pact-passport-author")
+            statement.setString(7, "pact-passport-checker")
+            statement.setString(8, "published passport account fixture")
+            statement.setString(9, "c".repeat(64))
+            statement.setObject(10, LOAN_FIXTURE_TIME)
+            statement.setObject(11, LOAN_FIXTURE_TIME)
+            statement.executeUpdate()
+        }
+        connection.prepareStatement(
+            "INSERT INTO passport_grants (id, bank_id, establishment_id, host_country, mode, offering_id, " +
+                "channel, customer_segment, pack_set_digest, evidence_ref, proposed_by, approved_by, " +
+                "approved_at, approval_reason, effective_from, effective_until) " +
+                "VALUES (?, ?, ?, 'SK', 'FOS', ?, 'WEB', 'RETAIL', ?, 'synthetic-proof', ?, ?, ?, " +
+                "'synthetic approval', ?, ?) ON CONFLICT (id) DO NOTHING",
+        ).use { statement ->
+            statement.setObject(1, PASSPORT_GRANT_ID)
+            statement.setObject(2, PASSPORT_BANK_ID)
+            statement.setObject(3, PASSPORT_ESTABLISHMENT_ID)
+            statement.setObject(4, PASSPORT_OFFERING_ID)
+            statement.setString(5, "c".repeat(64))
+            statement.setObject(6, UUID.fromString("0191c0de-0000-7000-8000-00000000c007"))
+            statement.setObject(7, UUID.fromString("0191c0de-0000-7000-8000-00000000c008"))
+            statement.setObject(8, LOAN_FIXTURE_TIME)
+            statement.setObject(9, LOAN_FIXTURE_TIME)
+            statement.setObject(10, OffsetDateTime.parse("2099-01-01T00:00:00Z"))
+            statement.executeUpdate()
+        }
+        connection.prepareStatement(
+            "INSERT INTO passport_account_permits (id, grant_id, operation, operation_id, party_id, " +
+                "product_revision_id, binding_digest, expires_at, consumed_at) " +
+                "VALUES (?, ?, 'OPEN', ?, ?, ?, ?, ?, ?) ON CONFLICT (operation, operation_id) DO NOTHING",
+        ).use { statement ->
+            statement.setObject(1, UUID.fromString("0191c0de-0000-7000-8000-00000000c009"))
+            statement.setObject(2, PASSPORT_GRANT_ID)
+            statement.setObject(3, PASSPORT_CONSUMED_OPERATION_ID)
+            statement.setObject(4, PASSPORT_PARTY_ID)
+            statement.setObject(5, PASSPORT_REVISION_ID)
+            statement.setString(6, "c".repeat(64))
+            statement.setObject(7, OffsetDateTime.parse("2026-01-01T00:01:00Z"))
+            statement.setObject(8, LOAN_FIXTURE_TIME)
+            statement.executeUpdate()
+        }
+        // Live subject evidence lets the admit interaction issue and consume its own permit; a
+        // re-replay finds that permit consumed and recovers the same receipt (204 again).
+        connection.prepareStatement(
+            "INSERT INTO passport_grant_subject_evidence (grant_id, party_id, evidence_ref, valid_until) " +
+                "VALUES (?, ?, 'synthetic-proof', ?) ON CONFLICT (grant_id, party_id) DO NOTHING",
+        ).use { statement ->
+            statement.setObject(1, PASSPORT_GRANT_ID)
+            statement.setObject(2, PASSPORT_PARTY_ID)
+            statement.setObject(3, OffsetDateTime.parse("2099-01-01T00:00:00Z"))
+            statement.executeUpdate()
+        }
+    }
+
+    /** The pact-pinned operation id is never admitted by any fixture; assert it before the 404 replays. */
+    fun noConsumedPassportPermitExists() = dataSource.connection.use { connection ->
+        connection.prepareStatement("SELECT count(*) FROM passport_account_permits WHERE operation_id = ?")
+            .use { statement ->
+                statement.setObject(1, PASSPORT_UNADMITTED_OPERATION_ID)
+                statement.executeQuery().use { rows ->
+                    rows.next()
+                    check(rows.getInt(1) == 0) { "the unadmitted Pact operation has a permit" }
+                }
+            }
+    }
+
     private fun insertSpecification(connection: Connection, id: UUID, code: String) {
         connection.prepareStatement(
             "INSERT INTO catalog_specifications " +
@@ -383,6 +478,15 @@ class CatalogPactProviderFixtures(
         const val PENSION_REVISION_CONTENT =
             """{"name":{"en":"Pact DIP strategy"},"attributes":{"productLine":"DIP","jurisdictionPackId":"CZ/DIP","fundStrategy":"DYNAMIC","reviewStatus":"LEGAL_AND_COMMERCIAL_REVIEWED","instrumentClasses":["BOND_FUNDS","EQUITY_FUNDS"]},"prices":[],"eligibility":[],"relationships":[],"documentCodes":[]}"""
         val FIXTURE_TIME: OffsetDateTime = OffsetDateTime.parse("2027-01-01T00:00:00Z")
+        val PASSPORT_SPECIFICATION_ID: UUID = UUID.fromString("0191c0de-0000-7000-8000-00000000c00a")
+        val PASSPORT_OFFERING_ID: UUID = UUID.fromString("0191c0de-0000-7000-8000-00000000c00b")
+        val PASSPORT_GRANT_ID: UUID = UUID.fromString("0191c0de-0000-7000-8000-00000000c001")
+        val PASSPORT_CONSUMED_OPERATION_ID: UUID = UUID.fromString("0191c0de-0000-7000-8000-00000000c002")
+        val PASSPORT_UNADMITTED_OPERATION_ID: UUID = UUID.fromString("0191c0de-0000-7000-8000-00000000c0ff")
+        val PASSPORT_PARTY_ID: UUID = UUID.fromString("0191c0de-0000-7000-8000-00000000c003")
+        val PASSPORT_REVISION_ID: UUID = UUID.fromString("0191c0de-0000-7000-8000-00000000c004")
+        val PASSPORT_BANK_ID: UUID = UUID.fromString("0191c0de-0000-7000-8000-00000000c005")
+        val PASSPORT_ESTABLISHMENT_ID: UUID = UUID.fromString("0191c0de-0000-7000-8000-00000000c006")
         val LOAN_FIXTURE_TIME: OffsetDateTime = OffsetDateTime.parse("2026-01-01T00:00:00Z")
         const val REVISION_CONTENT =
             """{"name":{"en":"Term life"},"attributes":{"coverage":{"amount":"100000","currency":"EUR"},"termYears":20,"premiumModel":"CALCULATED"},"prices":[],"eligibility":[],"relationships":[],"documentCodes":[]}"""
