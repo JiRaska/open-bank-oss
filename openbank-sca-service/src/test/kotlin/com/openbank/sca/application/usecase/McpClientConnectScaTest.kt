@@ -119,6 +119,18 @@ class McpClientConnectScaTest {
         assertThat(challenges).isEmpty()
     }
 
+    // Rule: the mcp-connect: prefix is refused on every other purpose (requireMcpConnectLinking).
+    @Test
+    fun `no other purpose may initiate with an mcp-connect id`() {
+        ScaPurpose.entries.filter { it != ScaPurpose.MCP_CLIENT_CONNECT }.forEach { purpose ->
+            assertThatThrownBy { runBlocking { service.initiate(command(linking()).copy(purpose = purpose)) } }
+                .`as`(purpose.name)
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("reserved to MCP_CLIENT_CONNECT")
+        }
+        assertThat(challenges).isEmpty()
+    }
+
     // Rule: STATIC_PUSH_MESSAGES entry (buildPushMessage's checkNotNull).
     @Test
     fun `initiate succeeds and pushes neutral text`(): Unit = runBlocking {

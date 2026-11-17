@@ -560,8 +560,15 @@ class ScaService(
      * document or card, so those fields are refused rather than silently carried.
      */
     private fun requireMcpConnectLinking(command: InitiateScaCommand) {
-        if (command.purpose != ScaPurpose.MCP_CLIENT_CONNECT) return
         val dl = command.dynamicLinkingData
+        if (command.purpose != ScaPurpose.MCP_CLIENT_CONNECT) {
+            // No other purpose may sign itself into the connect namespace: a challenge spendable by
+            // nobody today would become spendable by the authorization server the day it is declared.
+            require(dl?.approvalRequestId?.startsWith(ReservedNamespace.MCP_CONNECT.prefix) != true) {
+                "approvalRequestId prefix ${ReservedNamespace.MCP_CONNECT.prefix} is reserved to MCP_CLIENT_CONNECT"
+            }
+            return
+        }
         val approvalRequestId = dl?.approvalRequestId
         val payloadSha256 = dl?.payloadSha256
         require(!approvalRequestId.isNullOrBlank() && payloadSha256 != null) {
