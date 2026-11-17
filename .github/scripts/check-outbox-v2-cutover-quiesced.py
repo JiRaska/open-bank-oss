@@ -66,31 +66,116 @@ def truthy(v: object) -> bool | None:
     return None
 
 
-def app_default(repo: str, base: str, svc: str) -> bool | None:
-    """application.yaml `openbank.outbox.dispatch-enabled` at base; the code default is false."""
+PROP = "dispatch-enabled"
+# Env names that can re-point config resolution; any presence on the container is UNKNOWN.
+CONFIG_ENV = {"QUARKUS_PROFILE", "SMALLRYE_CONFIG_PROFILE", "SMALLRYE_CONFIG_LOCATIONS",
+              "QUARKUS_CONFIG_LOCATIONS", "SMALLRYE_CONFIG_PROFILE_PARENT", "QUARKUS_CONFIG_PROFILE_PARENT"}
+JVM_ENV = {"JAVA_TOOL_OPTIONS", "JAVA_OPTS", "JAVA_OPTS_APPEND", "JDK_JAVA_OPTIONS", "JAVA_OPTIONS"}
+PATCH_KEYS = ("patches", "patchesStrategicMerge", "patchesJson6902", "replacements", "images", "transformers")
+
+
+def mentions_prop(node: object) -> bool:
+    if isinstance(node, dict):
+        return any(PROP in str(k) or mentions_prop(v) for k, v in node.items())
+    if isinstance(node, list):
+        return any(mentions_prop(v) for v in node)
+    return False
+
+
+def app_default(repo: str, base: str, svc: str) -> tuple[bool | None, str]:
+    """application.yaml `openbank.outbox.dispatch-enabled` at base -> (value, why-unknown).
+
+    UNKNOWN (None) on EVERY unresolvable case: file missing/unreadable/unparseable, key absent, a
+    non-literal value, any `%<profile>` section touching the property, or application.properties
+    mentioning it. Only an explicit literal in the default section is a value."""
+    res = f"{svc}/src/main/resources"
     try:
-        text = git_out(repo, "show", f"{base}:{svc}/src/main/resources/application.yaml")
+        text = git_out(repo, "show", f"{base}:{res}/application.yaml")
+        docs = [d for d in gatelib.loads_all(text) if isinstance(d, dict)]
+    except Exception as exc:  # noqa: BLE001 — any failure to read is UNKNOWN, never "paused"
+        return None, f"application.yaml missing or unreadable at base ({type(exc).__name__})"
+    if not docs:
+        return None, "application.yaml has no mapping"
+    for doc in docs:
+        for k, v in doc.items():
+            if str(k).startswith("%") and mentions_prop(v):
+                return None, f"profile section `{k}` sets {PROP}"
+            if str(k).startswith("%") and PROP in str(k):
+                return None, f"profile key `{k}` sets {PROP}"
+    try:
+        props = git_out(repo, "show", f"{base}:{res}/application.properties")
+        if PROP in props:
+            return None, "application.properties mentions dispatch-enabled"
     except RuntimeError:
-        return False
-    node: object = None
-    for doc in gatelib.loads_all(text):
-        if isinstance(doc, dict):
-            node = doc
-            break
-    for k in ("openbank", "outbox", "dispatch-enabled"):
-        if not isinstance(node, dict) or k not in node:
-            return False
-        node = node[k]
-    if isinstance(node, str):
-        m = re.fullmatch(r"\$\{[^:}]+:([^}]*)\}", node.strip())
-        node = m.group(1) if m else node
-    return truthy(node)
+        pass
+    value: object = None
+    for doc in docs:
+        node: object = doc
+        flat = doc.get(f"openbank.outbox.{PROP}")
+        if flat is not None:
+            value = flat
+            continue
+        for k in ("openbank", "outbox", PROP):
+            if not isinstance(node, dict) or k not in node:
+                node = None
+                break
+            node = node[k]
+        if node is not None:
+            value = node
+    if value is None:
+        return None, f"application.yaml does not set openbank.outbox.{PROP}"
+    if isinstance(value, str):
+        m = re.fullmatch(r"\$\{([^:}]+):([^}]*)\}", value.strip())
+        if m:
+            return None, f"application.yaml value is an expression (${{{m.group(1)}:...}}), not a literal"
+    t = truthy(value)
+    return t, "" if t is not None else "application.yaml value is not a boolean literal"
 
 
-def workloads(repo: str, base: str, svc: str) -> list[tuple[str, str, bool | None]]:
-    """Every GitOps workload at base running this service's image -> (file, name, effective paused?)."""
+def container_taint(c: dict) -> str:
+    """A reason another source could override the switch, or '' when none."""
+    if c.get("envFrom"):
+        return "container has envFrom"
+    for e in c.get("env") or []:
+        name = str(e.get("name", ""))
+        val = str(e.get("value", ""))
+        if name in CONFIG_ENV:
+            return f"env {name} changes profile/config location"
+        if name in JVM_ENV and ("-D" in val or PROP in val or "dispatch" in val.lower()):
+            return f"env {name} carries a -D / dispatch override"
+        if name != ENV_NAME and (PROP in val or "dispatch-enabled" in name.lower()
+                                 or name.upper().endswith("DISPATCH_ENABLED")):
+            return f"env {name} mentions {PROP}"
+    return ""
+
+
+def kustomize_taint(repo: str, base: str, path: str) -> str:
+    parts = path.split("/")[:-1]
+    while len(parts) >= 2:
+        for fn in ("kustomization.yaml", "kustomization.yml"):
+            try:
+                text = git_out(repo, "show", f"{base}:{'/'.join(parts)}/{fn}")
+            except RuntimeError:
+                continue
+            try:
+                docs = [d for d in gatelib.loads_all(text) if isinstance(d, dict)]
+            except Exception:  # noqa: BLE001
+                return f"{'/'.join(parts)}/{fn} is unparseable"
+            if any(k in d for d in docs for k in PATCH_KEYS):
+                return f"{'/'.join(parts)}/{fn} patches/overlays the workload"
+        parts.pop()
+    return ""
+
+
+def workloads(repo: str, base: str, svc: str) -> list[tuple[str, str, bool | None, str]]:
+    """Every GitOps workload at base running this service's image -> (file, name, paused?, why-unknown).
+
+    paused is True ONLY for a proven pause: the container carries the literal env
+    OPENBANK_OUTBOX_DISPATCH_ENABLED=false, or no env sets it and application.yaml literally says
+    false — and in both cases nothing else could override it. Everything else is None (UNKNOWN,
+    which fails the gate) or False (enabled)."""
     found = []
-    default = app_default(repo, base, svc)
+    default, default_why = app_default(repo, base, svc)
     image_re = re.compile(rf"/{re.escape(svc)}[:@]")
     for path in git_out(repo, "ls-tree", "-r", "--name-only", base, "openbank-infra/gitops").splitlines():
         if not path.endswith((".yaml", ".yml")):
@@ -106,11 +191,32 @@ def workloads(repo: str, base: str, svc: str) -> list[tuple[str, str, bool | Non
             for c in pod.get("containers") or []:
                 if not image_re.search(str(c.get("image", ""))):
                     continue
-                enabled = default
+                name = (doc.get("metadata") or {}).get("name", "?")
+                taint = container_taint(c) or kustomize_taint(repo, base, path)
+                if taint:
+                    found.append((path, name, None, taint))
+                    continue
+                if default is None:
+                    # Unknown application.yaml state still permits a proven env literal below, but
+                    # profile sections / properties files could override even that: stay UNKNOWN.
+                    found.append((path, name, None, default_why))
+                    continue
+                env_val: object = None
+                unresolvable = False
                 for e in c.get("env") or []:
                     if e.get("name") == ENV_NAME:
-                        enabled = truthy(e["value"]) if "value" in e else None
-                found.append((path, (doc.get("metadata") or {}).get("name", "?"), None if enabled is None else not enabled))
+                        if "value" in e:
+                            env_val, unresolvable = e["value"], False
+                        else:
+                            env_val, unresolvable = None, True
+                if unresolvable:
+                    found.append((path, name, None, f"{ENV_NAME} comes from valueFrom, not a literal"))
+                    continue
+                enabled = default if env_val is None else truthy(env_val)
+                if enabled is None:
+                    found.append((path, name, None, f"{ENV_NAME} value `{env_val}` is not a boolean literal"))
+                else:
+                    found.append((path, name, not enabled, ""))
     return found
 
 
@@ -141,12 +247,12 @@ def check(repo: str, base: str, head: str) -> tuple[int, int]:
             print(f"::error file={files[0]}::{svc}: no GitOps workload running this service's image exists on the base, so "
                   f"a paused dispatcher cannot be proven. Fail closed. Runbook: {RUNBOOK}")
             rc = 1
-        for path, name, paused in wl:
+        for path, name, paused, unk in wl:
             if paused is True:
                 print(f"{svc}: {name} ({path}) dispatch is paused on base — ok")
                 continue
-            why = "dispatch is ENABLED" if paused is False else "dispatch state is not a literal (valueFrom / unparseable)"
-            print(f"::error file={files[0]}::{svc}: this PR adds the outbox v2 migration ({files[0]}) but on the base "
+            why = "dispatch is ENABLED" if paused is False else f"a paused dispatcher cannot be PROVEN ({unk}) — unknown is treated as enabled"
+            print(f"::error file={files[0]}::{svc}: this PR adds the outbox v2 migration ({files[0]}) but on the base: "
                   f"{why} for workload `{name}` ({path}). A v2 migration under a live v1 dispatcher gives a mixed "
                   f"dispatcher window. First merge a GitOps PR setting {ENV_NAME}=\"false\" on {svc}, wait for it to "
                   f"roll, then update this branch. Runbook: {RUNBOOK}. There is no label override.")
@@ -183,11 +289,12 @@ spec:
           image: registry.example.invalid/%s:sandbox-1234
           env:
 %s
-"""
+%s"""
 APP_YAML = "openbank:\n  outbox:\n    dispatch-enabled: %s\n"
 
 
-def fixture(base_app: str, base_env: str | None, head_files: dict[str, str], head_env: str | None = None) -> tuple[str, str, str]:
+def fixture(base_app: str | None, base_env: str | None, head_files: dict[str, str], head_env: str | None = None,
+            extra: str = "", app_text: str | None = None, kustomization: str | None = None) -> tuple[str, str, str]:
     """A tiny repo: base commit carries config, head commit adds `head_files` (and maybe a manifest edit)."""
     root = pathlib.Path(tempfile.mkdtemp(prefix="outbox-v2-fixture-"))
     repo = str(root)
@@ -199,10 +306,15 @@ def fixture(base_app: str, base_env: str | None, head_files: dict[str, str], hea
         if v == "valueFrom":
             return ("            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED\n              valueFrom:\n"
                     "                configMapKeyRef: {name: cm, key: k}")
+        if v.startswith("raw:"):
+            return v[4:]
         return f"            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED\n              value: \"{v}\""
 
-    write(root, f"{SVC}/src/main/resources/application.yaml", APP_YAML % base_app)
-    write(root, "openbank-infra/gitops/components/foo/foo-service.yaml", MANIFEST % (SVC, env_block(base_env)))
+    if base_app is not None:
+        write(root, f"{SVC}/src/main/resources/application.yaml", app_text or APP_YAML % base_app)
+    if kustomization:
+        write(root, "openbank-infra/gitops/components/foo/kustomization.yaml", kustomization)
+    write(root, "openbank-infra/gitops/components/foo/foo-service.yaml", MANIFEST % (SVC, env_block(base_env), extra))
     write(root, f"{SVC}/src/main/resources/db/migration/V1__init.sql", "CREATE TABLE foo_outbox (id BIGINT);\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "base")
@@ -210,7 +322,7 @@ def fixture(base_app: str, base_env: str | None, head_files: dict[str, str], hea
     for rel, text in head_files.items():
         write(root, rel, text)
     if head_env is not None:
-        write(root, "openbank-infra/gitops/components/foo/foo-service.yaml", MANIFEST % (SVC, env_block(head_env)))
+        write(root, "openbank-infra/gitops/components/foo/foo-service.yaml", MANIFEST % (SVC, env_block(head_env), extra))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "head")
     return repo, base, git(repo, "rev-parse", "HEAD").strip()
@@ -233,12 +345,32 @@ def self_test() -> int:
          {unrelated: "-- ADD COLUMN claim_token later\nALTER TABLE foo ADD COLUMN note TEXT;\n"}, None, 0),
         ("re-enable PR (config only, no migration) is not a subject", "true", "false", {}, "true", 0),
     ]
+    # Fail-closed cases: each has an explicit literal `false` (or yaml false) AND a second source
+    # that could override it, or no provable source at all. Each must FAIL (exit 1).
+    cases_unknown = [
+        ("envFrom on the container", "true", "false", {mig: V2_SQL}, None, 1,
+         dict(extra="          envFrom:\n            - configMapRef: {name: cm}\n")),
+        ("%prod profile sets dispatch-enabled", "false", "false", {mig: V2_SQL}, None, 1,
+         dict(app_text="openbank:\n  outbox:\n    dispatch-enabled: false\n\"%prod\":\n  openbank:\n    outbox:\n      dispatch-enabled: true\n")),
+        ("JAVA_TOOL_OPTIONS carries a -D override", "true", "raw:            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED\n              value: \"false\"\n"
+         "            - name: JAVA_TOOL_OPTIONS\n              value: \"-Dopenbank.outbox.dispatch-enabled=true\"", {mig: V2_SQL}, None, 1, {}),
+        ("QUARKUS_PROFILE changes the profile", "true", "raw:            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED\n              value: \"false\"\n"
+         "            - name: QUARKUS_PROFILE\n              value: other", {mig: V2_SQL}, None, 1, {}),
+        ("QUARKUS_CONFIG_LOCATIONS adds a config file", "true", "raw:            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED\n              value: \"false\"\n"
+         "            - name: QUARKUS_CONFIG_LOCATIONS\n              value: /x/y.yaml", {mig: V2_SQL}, None, 1, {}),
+        ("application.yaml missing and no env", None, None, {mig: V2_SQL}, None, 1, {}),
+        ("application.yaml lacks the key and no env", "x", None, {mig: V2_SQL}, None, 1,
+         dict(app_text="openbank:\n  other: 1\n")),
+        ("kustomize patches touch the workload", "true", "false", {mig: V2_SQL}, None, 1,
+         dict(kustomization="resources: [foo-service.yaml]\npatches:\n  - path: p.yaml\n")),
+    ]
     failures = 0
     made: list[str] = []
-    for label, app, env, files, head_env, want in cases:
+    cases = [(*c, {}) for c in cases] + cases_unknown
+    for label, app, env, files, head_env, want, kw in cases:
         if not files:
             files = {"README.md": "x\n"}
-        repo, base, head = fixture(app, env, files, head_env)
+        repo, base, head = fixture(app, env, files, head_env, **kw)
         made.append(repo)
         import contextlib
         import io
