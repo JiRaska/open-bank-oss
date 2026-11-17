@@ -193,6 +193,23 @@ Events are **append-only**; corrections are made by a new status-changed event, 
 - **Event evolution:** additive (new optional fields) only on the existing topic; a breaking change means a new topic.
 - **OpenAPI diff** is gated in CI against `main`.
 
+## Reservation-bound delegated create (#16000)
+
+`POST /api/v1/domestic-payments/delegated` is for the verified customer-edge service account only
+(every other caller gets 403). The body carries `reservationId`, `delegationId`, `actingPartyId` and
+the payment fields. The rail checks them against its projection of delegation-service's reservation
+stream: the reservation must be RESERVED, and the delegation, delegate, debtor account, amount,
+currency and `Idempotency-Key` must match it. Refusals are `409` with a `code`:
+`RESERVATION_PROJECTION_PENDING` (retryable, `Retry-After`), `RESERVATION_NOT_RESERVED`,
+`RESERVATION_MISMATCH` (neutral) or `IDEMPOTENCY_KEY_REUSED`; `503 ACCOUNT_AUTHORITY_UNAVAILABLE` is
+retryable. A retry with the same key replays the one payment. The payment's events carry
+`delegationId` and `reservationId`.
+
+The create-time authority re-check (ADR-0375 D1) answers `409 DELEGATION_AUTHORITY_WITHDRAWN`
+when the grant was revoked or no longer covers the account. It refuses a NEW debit only: a retry
+with the key of the payment already bound to the reservation replays that payment, because the
+money moved while the grant was live. A new key against a bound reservation is still refused.
+
 ## Customer submission lookup
 
 `POST /api/v1/domestic-payments/submissions/lookup` is a read-only operation reserved for
@@ -204,3 +221,34 @@ The response has `Cache-Control: no-store`. `FOUND` contains only `paymentId` an
 current `status` alongside the outcome. `UNKNOWN` covers missing records, mismatched
 account or scope, and legacy records without a customer binding. Roll out this provider
 before enabling the customer-edge caller.
+
+## Original business submission key on approval release
+
+Verified customer-edge may send `X-OpenBank-Original-Submission-Key-Digest` when releasing a
+mode-bound business approval. The existing `Idempotency-Key` remains the approval ID and the
+request body remains the frozen rail instruction. The optional header carries lowercase SHA-256
+of the exact original key as UTF-8 in the `openbank-domestic-approval-key-v1|` domain.
+
+PostgreSQL reserves one original submission key across new releases and older direct payments.
+An already accepted direct payment blocks a release with the same original key. A new release
+also blocks a later direct submission of that key. Both return the existing generic 409 without
+another payment or outbox event. An exact approval-ID replay requires the same digest as the
+first release. Older callers without this header keep their existing replay contract.
+
+V21 adds a nullable digest and the unique index. Rollback retains both as durable protection
+for committed rows. A populated deployment needs an index build plan before sending the header.
+
+### Reconcile a release whose rail response was lost
+
+For a mode-bound release, verified customer-edge sends the approval ID as the rail key to
+`/api/v1/domestic-payments/submissions/lookup` with the debit account, stored customer scope and
+`originalSubmissionKeyDigest`. The lookup requires all four values. It echoes the stored digest
+on `FOUND` so the edge can distinguish exact proof from an older provider's unqualified reply.
+An ordinary direct lookup omits the digest and matches only rows stored without it.
+
+### Dispatch a mode-bound approval
+
+Send mode-bound releases to `POST /api/v1/domestic-payments/approval-releases` with the frozen
+rail instruction, approval ID and original submission digest. The dedicated route requires the
+digest before the payment transaction starts. Its absence on an older provider leaves the
+release unavailable. General payment creation remains available for direct and legacy writes.

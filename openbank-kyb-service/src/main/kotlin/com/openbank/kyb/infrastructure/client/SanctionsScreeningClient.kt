@@ -54,6 +54,12 @@ data class SanctionsScreenBody(
     val name: String,
     val subjectId: String,
     val profile: String,
+    /** Registration country of an entity, residence of a person; a listed jurisdiction matches on its own. */
+    val country: String? = null,
+    val aliases: List<String> = emptyList(),
+    /** ISO-8601 date. */
+    val dateOfBirth: String? = null,
+    val nationality: String? = null,
 )
 
 /** Subset of the sanctions-service check payload this service acts on. */
@@ -122,6 +128,10 @@ class SanctionsRelatedPartyScreeningAdapter(@RestClient private val client: Sanc
                 name = request.name,
                 subjectId = request.subjectId,
                 profile = PROFILE,
+                country = request.identity.country?.trim()?.uppercase()?.takeIf { it.isNotEmpty() },
+                aliases = request.identity.aliases.map { it.trim() }.filter { it.isNotEmpty() },
+                dateOfBirth = request.identity.dateOfBirth?.toString(),
+                nationality = request.identity.nationality?.trim()?.uppercase()?.takeIf { it.isNotEmpty() },
             ),
         ).awaitSuspending()
         val (pepMatches, decidingMatches) = response.matches.partition { it.isPep() }

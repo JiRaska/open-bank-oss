@@ -66,6 +66,8 @@ class PartyKycAmlConcurrencyIT {
             "openbank.outbox.dispatch-enabled" to "false",
             "mp.messaging.incoming.kyc-events-in.auto.offset.reset" to "earliest",
             "mp.messaging.incoming.aml-events-in.auto.offset.reset" to "earliest",
+            // Shared with KybEndedCaseMandateRevocationIT: one resource set, one Quarkus app, no extra restart.
+            "mp.messaging.incoming.kyb-events-in.auto.offset.reset" to "earliest",
         )
         override fun stop() = Unit
     }

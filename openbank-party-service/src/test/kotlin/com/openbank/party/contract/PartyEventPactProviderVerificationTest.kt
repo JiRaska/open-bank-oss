@@ -190,6 +190,9 @@ class PartyEventPactProviderVerificationTest {
             // Match Document's real OIDC client-credentials read for the unmasked legal address.
             testIdentityAssociation.setTestIdentity(verifiedApiIdentity("openbank-services"))
         }
+        if (context.interaction.providerStates.any { it.name == StatutoryRepresentationPactFixture.STATE }) {
+            testIdentityAssociation.setTestIdentity(StatutoryRepresentationPactFixture.kybIdentity())
+        }
         context.verifyInteraction()
     }
 
@@ -235,6 +238,11 @@ class PartyEventPactProviderVerificationTest {
     fun partiesExistForJointKybMandate() = runOnVertxContext {
         seedMandateParty(KYB_MANDATE_PRINCIPAL_ID, PartyType.COMPANY, "Pact Joint Company a.s.")
         seedMandateParty(KYB_MANDATE_AGENT_ID, PartyType.INDIVIDUAL, "Pact Joint Signatory")
+    }
+
+    @State(StatutoryRepresentationPactFixture.STATE)
+    fun companyHasVerifiedStatutoryMandates() = runOnVertxContext {
+        StatutoryRepresentationPactFixture.seed(partyUseCase, ::seedMandateParty)
     }
 
     private suspend fun seedMandateParty(id: UUID, type: PartyType, name: String) {

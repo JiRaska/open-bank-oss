@@ -85,6 +85,8 @@ aml_case_openers := [
 	"service-account-openbank-sepa-payment",
 	"service-account-openbank-sepa-instant",
 	"service-account-openbank-fx",
+	"service-account-openbank-sdd",
+	"service-account-openbank-swift",
 ]
 
 test_named_openers_create_case_with_role_api_only if {
@@ -195,4 +197,35 @@ test_anonymous_is_denied_monitoring_and_reports if {
 # Negative control for the verb choice: had the read been named `.read`, an operator WOULD get it.
 test_a_read_verb_would_have_leaked_to_operators if {
 	count(allowed_reasons) > 0 with input as {"principal": operator, "action": "amlReport.read"}
+}
+
+test_compliance_proposes_hold_decision if {
+	"compliance-aml-hold-decision" in allowed_reasons with input as {"principal": compliance, "action": "amlCase.holdDecision.propose"}
+}
+
+test_compliance_confirms_hold_decision if {
+	"compliance-aml-hold-decision" in allowed_reasons with input as {"principal": compliance, "action": "amlCase.holdDecision.confirm"}
+}
+
+test_operator_cannot_decide_hold if {
+	not allow.allow with input as {"principal": operator, "action": "amlCase.holdDecision.confirm"}
+	not allow.allow with input as {"principal": operator, "action": "amlCase.holdDecision.propose"}
+}
+
+test_admin_cannot_decide_hold if {
+	not allow.allow with input as {"principal": admin, "action": "amlCase.holdDecision.confirm"}
+}
+
+test_service_m2m_cannot_decide_hold if {
+	not allow.allow with input as {"principal": service_m2m, "action": "amlCase.holdDecision.propose"}
+	not allow.allow with input as {"principal": service_m2m, "action": "amlCase.holdDecision.confirm"}
+}
+
+test_compliance_withdraws_hold_proposal if {
+	"compliance-aml-hold-decision" in allowed_reasons with input as {"principal": compliance, "action": "amlCase.holdDecision.withdraw"}
+}
+
+test_operator_and_m2m_cannot_withdraw_hold_proposal if {
+	not allow.allow with input as {"principal": operator, "action": "amlCase.holdDecision.withdraw"}
+	not allow.allow with input as {"principal": service_m2m, "action": "amlCase.holdDecision.withdraw"}
 }

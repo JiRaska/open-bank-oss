@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
   annotations:
-    openbank.tech/policy-checksum: "e6104141b767b501"
+    openbank.tech/policy-checksum: "f2f0c59a483a96cb"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -895,7 +895,7 @@ data:
 
     # amlCase.create by the payment/FX services' OWN machine principals (ROLE_API only), which open a
     # case when a screening gate refers a transfer (AmlServiceClient in domestic-payment, sepa-payment,
-    # sepa-instant and fx-service). Identity-gated, never a role: ROLE_API is held by every service
+    # sepa-instant, fx-service, sdd-service and swift-service). Identity-gated, never a role: ROLE_API is held by every service
     # account. The shared `service-account-openbank-services` is deliberately absent. Keep this set
     # equal to AML_CASE_CREATE_CALLERS in AmlCaseResource.kt (AmlCaseCreateCallerGuardTest pins it):
     # while AUTHZ_ENFORCE=false that Kotlin check is the enforcing half and this rule is the one the
@@ -907,6 +907,8 @@ data:
     		"service-account-openbank-sepa-payment",
     		"service-account-openbank-sepa-instant",
     		"service-account-openbank-fx",
+    		"service-account-openbank-sdd",
+    		"service-account-openbank-swift",
     	}
     	machine_named(named_client)
     	input.action == "amlCase.create"
@@ -943,6 +945,19 @@ data:
     		"amlReport.file",
     		"amlReport.withdraw",
     	}
+    }
+
+    # The terminal decision on the case of a HELD payment (ADR-0374 point 3, #16003) is four-eyes: one
+    # compliance analyst proposes, a different one confirms, and only the confirmation releases or
+    # rejects the payment. This rule decides who may act at all; the service decides that the
+    # confirmer differs from the proposer and restates the proposal. Compliance only — not operators
+    # or admins, whose `amlCase.updateDecision` grant cannot reach a hold case (the service refuses a
+    # single-step terminal decision on it) — and never a machine principal.
+    allowed_reasons contains "compliance-aml-hold-decision" if {
+    	input.principal.type == "HUMAN"
+    	not principal_is_machine
+    	"ROLE_COMPLIANCE" in input.principal.roles
+    	input.action in {"amlCase.holdDecision.propose", "amlCase.holdDecision.confirm", "amlCase.holdDecision.withdraw"}
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1153,6 +1168,28 @@ data:
     	not charter_denied
     	charter_allowed
     	skill_ok
+    	not pr_base_ref_denied
+    }
+
+    # ADR-0031 D9 amendment 2026-11-14: a pull request's TARGET is part of the write, so the policy
+    # decides it — not only the writer's code. `gh.pr.open` is allowed only when `input.base_ref` is
+    # listed in the `base_refs` of the charter's tier/resource grant that permits it. A grant naming
+    # no base_refs, or a call sending none, is denied: a PR grant that does not say where it may
+    # land is not a bounded grant. Scope: the tier/resource path (calls carrying `input.tier`), which
+    # is the only PR writer wired today. Plain-pattern `gh.pr.open` grants (ledger-domain-engineer)
+    # are unwired and unchanged here; bounding them is ADR-0031 D9 phase-4 work.
+    pr_base_ref_denied if {
+    	input.tool == "gh.pr.open"
+    	is_string(input.tier)
+    	not pr_base_ref_granted
+    }
+
+    pr_base_ref_granted if {
+    	is_string(input.base_ref)
+    	some entry in tier_resource_allow_entries
+    	entry.tier == input.tier
+    	tier_resource_resources_granted(entry.resources)
+    	input.base_ref in entry.base_refs
     }
 
     # ---------------------------------------------------------------------------------------
@@ -1164,6 +1201,7 @@ data:
     	"agent": input.agent,
     	"tool": input.tool,
     	"resource": input.resource,
+    	"base_ref": object.get(input, "base_ref", null),
     	"reason": reason,
     }
 
@@ -1176,6 +1214,8 @@ data:
     else := "skill not in agent allowlist" if not skill_ok
 
     else := "no matching allow rule" if not charter_allowed
+
+    else := "pr base ref not granted by charter" if pr_base_ref_denied
 
     else := "allowed by charter"
 
@@ -1226,6 +1266,8 @@ data:
       - product.explain
       write_proposal:
       - draft.ticket
+      - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1255,6 +1297,8 @@ data:
         - query.disputes.readonly
         - query.observability.readonly
         - flags.write
+        - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*
@@ -1559,6 +1603,9 @@ data:
         - tier: write_proposal
           resources:
           - github-pr
+          base_refs:
+          - main
+          - qualification/flaky-test-hunter
         deny:
         - tier: write
           resources:
@@ -1859,8 +1906,12 @@ data:
                                              # payment rails — the distinct-operator-only-action pattern this guardrail prescribes.
         - clear                             # sanctions: decide a screening hit (CLEAR/HIT/POTENTIAL_HIT) — a wrongly-cleared true positive
                                              # is a real sanctions violation; distinct from `release` (payment-hold release) for clean audit
-                                             # separation. Confirmed no M2M caller (@RolesAllowed on POST /sanctions/review admits only
-                                             # ROLE_OPERATOR/ROLE_ADMIN, no ROLE_SERVICE).
+                                             # separation. ONE documented M2M caller, deliberately paused (#16381/#16455):
+                                             # service-account-openbank-agent on POST /api/v3/sanctions/review, CLEAR only, as the
+                                             # four-eyes MAKER. Being paused is the point for that caller, so the GUARDRAIL below
+                                             # (no automated caller may be stalled) does not apply to it; it never holds
+                                             # sanctions.approval.decide. Every other caller is ROLE_OPERATOR/ROLE_ADMIN (no
+                                             # ROLE_SERVICE); /api/v1/sanctions/review stays human-only.
         # GUARDRAIL (issue #938 follow-up — found while wiring sca-service): four_eyes_required is
         # computed by ACTION NAME ALONE (rest.rego money_path_scopes + endswith verb match), with NO
         # awareness of the caller's identity. A verb is only safe to add here if EVERY real-world
@@ -2054,6 +2105,10 @@ data:
         # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
         # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
         - card.details.read
+        # The queue of business customers under an ongoing sanctions-monitoring hold (#16028): who is
+        # being reviewed is itself sensitive (tipping-off). Granted to ROLE_KYC_REVIEWER by the matrix
+        # only; the generic operator/admin list rule must not reach it.
+        - kyb.monitoring.queue.list
       role_action_matrix:
         ROLE_OPERATOR:
           grant:
@@ -2235,6 +2290,11 @@ data:
             - kyb.case.reject
             - kyb.case.review.resolve
             - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
+            - kyb.monitoring.finding.decide    # #16028: decide an ongoing-monitoring finding (human reviewer only)
+            - kyb.monitoring.queue.list        # #16028: ongoing-monitoring holds queue
+            - kyb.monitoring.exit.propose      # #16028: four-eyes exit, maker
+            - kyb.monitoring.exit.confirm      # #16028: four-eyes exit, checker (code refuses checker == maker)
+            - kyb.monitoring.exit.withdraw     # #16028: the proposing person withdraws their own pending exit proposal
         ROLE_AUDITOR:
           grant:
             - audit.trail.inspect

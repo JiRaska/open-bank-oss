@@ -143,7 +143,9 @@ class SanctionsClearanceTest {
         coEvery { entryRepo.search(any(), any(), any(), any()) } answers {
             val query = firstArg<String>()
             matches.map { current ->
-                val entry = entry(current.matchedId, current.matchedName)
+                // The entry carries the screened name itself, so the name-structure cap
+                // (NameTokenScore) leaves the stubbed trigram score as the deciding score.
+                val entry = entry(current.matchedId, query)
                 SanctionsEntryMatch(entry = entry, matchedName = query, score = current.matchScore)
             }
         }

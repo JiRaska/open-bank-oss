@@ -124,6 +124,29 @@ class ScreeningTriggerServiceTest {
     }
 
     @Test
+    fun `recording a change while the loop is off writes deferred rows and never calls the coordinator`(): Unit =
+        runBlocking {
+            val partyA = UUID.randomUUID()
+            val partyB = UUID.randomUUID()
+            coEvery { kycCaseRepository.findActivePartyIds(any(), any()) } returns listOf(partyA, partyB)
+            val recorded = mutableListOf<ScreeningTrigger>()
+            coEvery { triggerRepository.recordDeferred(capture(recorded)) } returnsMany listOf(true, false)
+
+            val result = service.recordListChange(change, candidateLimit = 500)
+
+            assertThat(result.candidates).isEqualTo(2)
+            assertThat(result.opened).isZero()
+            assertThat(result.duplicates).isEqualTo(1) // partyB already waits — coalesced
+            assertThat(recorded.map { it.partyId }).containsExactly(partyA, partyB)
+            // DEFERRED, no attempt made, due at once for the retry job.
+            assertThat(recorded).allMatch {
+                it.state.name == "DEFERRED" && it.attempts == 0 && it.nextAttemptAt == Instant.now(fixedClock)
+            }
+            coVerify(exactly = 0) { coordinatorPort.openAmlAlertCase(any()) }
+            coVerify(exactly = 0) { triggerRepository.insertIfAbsent(any()) }
+        }
+
+    @Test
     fun `a duplicate (publication, party) trigger never calls the coordinator`(): Unit = runBlocking {
         val party = UUID.randomUUID()
         coEvery { kycCaseRepository.findActivePartyIds(any(), any()) } returns listOf(party)

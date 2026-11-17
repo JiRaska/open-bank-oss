@@ -26,6 +26,7 @@ import com.openbank.agent.domain.policy.AgentIdentity
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.security.sanitizeForLog
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
@@ -175,7 +176,14 @@ class McpEndpoint {
             )
         }
 
-        return registry.call(toolName, arguments, actorId = identity?.agentId ?: "unknown")
+        return registry.call(
+            toolName,
+            arguments,
+            actorId = identity?.agentId ?: "unknown",
+            // The person driving this MCP session, when the bearer is a verified person token; a
+            // machine caller yields null and every INTERACTIVE_ONLY tool refuses (#16455).
+            interactivePerson = this.identity.takeIf { ServiceAccountIdentity.isVerifiedPerson(it) }?.principal?.name,
+        )
     }
 
     private fun agentIdentity(arguments: JsonNode?): AgentIdentity? {

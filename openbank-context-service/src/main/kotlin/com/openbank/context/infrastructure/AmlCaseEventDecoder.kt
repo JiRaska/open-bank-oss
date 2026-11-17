@@ -24,6 +24,15 @@ data class AmlCaseObservation(
 
 @ApplicationScoped
 class AmlCaseEventDecoder(private val mapper: ObjectMapper) {
+    /**
+     * True for an event of a case that has no established party: aml-service publishes `partyId`
+     * as an explicit null then (a held payment whose rail could not name the debtor). There is no
+     * party to record such an event under. Nothing is lost by leaving it out: when aml-service
+     * resolves the party it states the case's status again with the party, and that is recorded.
+     * A MISSING `partyId` is not this; [decode] still refuses it.
+     */
+    fun namesNoParty(payload: String): Boolean = mapper.readTree(payload)?.path("partyId")?.isNull == true
+
     fun decode(payload: String, eventId: String?, eventType: String?): AmlCaseObservation {
         require(payload.toByteArray(Charsets.UTF_8).size <= MAX_PAYLOAD) { "AML event exceeds payload budget" }
         val identity = uuid(requireNotNull(eventId) { "missing eventId header" })

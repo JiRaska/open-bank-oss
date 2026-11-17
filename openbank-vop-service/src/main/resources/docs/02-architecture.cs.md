@@ -61,6 +61,8 @@ Jediné, co se při selhání nikdy nestane: tichý `MATCH`. Absence odpovědi j
 
 Když je Valkey nedostupný, nemůžeme prokázat, že je volající pod limitem, takže vracíme 429. Zní to jako rozpor s výše uvedeným, ale není: **429 způsobí, že volající vykreslí `no_data`, takže platba stejně projde s varováním** — fail-open chování VoP dosažené jinou cestou. Fail-open na limiteru by za výpadku tiše sebral jedinou obranu proti enumeraci, aniž by získal jakoukoli dostupnost plateb.
 
+Limiter nikdy neblokuje. Běží jako RESTEasy Reactive `@ServerRequestFilter` na event loopu Vert.x a volá Valkey reaktivním klientem (`ReactiveRedisDataSource`). Blokující volání Valkey tam vyhodí `The current thread cannot be blocked` a fail-closed větev pak odpoví 429 na každý požadavek, i když je Valkey v pořádku. Přesně to se stalo na sandboxu (#13049), dokud byl filtr `@Blocking` `ContainerRequestFilter`; ta anotace ho z event loopu nepřesunula. `VopRateLimitHttpIT` to hlídá skutečnými HTTP požadavky přes filtr.
+
 ## Odolnost
 
 `AccountHolderNameLookupAdapter` nese `@CircuitBreaker` / `@Retry` / `@Timeout(3s)`, kopíruje tvar `SanctionsScreeningAdapter` — včetně jeho triku se `self`-injekcí:

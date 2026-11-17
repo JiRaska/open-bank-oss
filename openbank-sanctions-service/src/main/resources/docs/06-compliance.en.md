@@ -10,7 +10,7 @@
 | **UN Security Council Resolutions** | UN consolidated sanctions | `UN_CONSOLIDATED` list always enabled |
 | **AMLD 6 (EU 2018/1673)** | Enhanced AML obligations; 10-year record retention | All `SanctionsCheck` records retained 10 years; GDPR erasure overridden |
 | **PSD2 (EU 2015/2366)** | Execution of payment transactions | Sanctions check is a mandatory gate before payment execution (ADR-0032) |
-| **FATF Recommendations** | High-risk jurisdictions enhanced due diligence | A screen carrying `country` or `bankIdentifier` is matched against the jurisdiction reference data (versioned, maintained by reviewed migration; loaded with the EU list of high-risk third countries, Delegated Regulation (EU) 2016/1675 — the FATF lists themselves are not loaded yet; the age of each list is a metric with an alert) |
+| **FATF Recommendations** | High-risk jurisdictions enhanced due diligence | A screen carrying `country` or `bankIdentifier` is matched against the jurisdiction reference data (versioned, maintained by reviewed migration; loaded with the EU list of high-risk third countries, Delegated Regulation (EU) 2016/1675, and the FATF statements of 2026-10-30: call-for-action countries go to review, increased-monitoring countries are a customer-risk factor and raise no screen finding; the age of each list is a metric with an alert) |
 | **Act No. 1/2023 Coll.** | Czech national sanctions list kept by MZV | `CNB_DOMESTIC` list (imported from `cz_national_sanctions`) |
 | **Regulation No. 210/2008 Coll.** | Czech anti-terrorism designations; a separate legal regime from the national sanctions list | `CZ_TERRORISTS` list imported from official e-Sbírka SPARQL open data, never the commercially licensed OpenSanctions mirror |
 | **GDPR (EU 2016/679)** | PII in screening requests (name, DoB, identifiers) | PII masked in logs; Art. 6(1)(c) legal obligation basis; erasure overridden by AMLD |
@@ -40,6 +40,26 @@ sequenceDiagram
     P->>A: Trigger account freeze workflow
   end
 ```
+
+## Name matching
+
+The candidate search ranks list entries by pg_trgm `word_similarity` over the whole name. That
+counts shared trigrams and cannot tell which part of the name they came from, so a shared given
+name plus the first letters of a surname was enough: `Jiří Raška` scored 0.64 against three
+different PEPs (`Jiří Rathouský`, `Jiří Zlatuška`, `Jüri Ratas`). Every candidate is therefore
+re-scored part by part (`NameTokenScore`): name parts are aligned one to one, a pair below 0.80 is
+two different names and contributes nothing, and the sum is divided by the shorter name's part
+count, so an omitted middle name or patronymic does not dilute a true match. Spelling and
+transliteration variants still align — Jaro-Winkler plus a consonant skeleton (`Adanov`/`Adnuf`,
+`Hammam`/`Humam`) and initials — and honorifics, generational suffixes and particles (`al`, `bin`,
+`ibn`, `abu`, `van`, `de`) are ignored unless nothing else remains. A particle is also tried fused
+onto the next part (`bin Laden`/`Binladen`, `de la Cruz`/`Delacruz`), and a fused `al-` is tried both
+ways. Letters that do not decompose (`đ`, `ł`, `ø`, `ß`) are folded to their Latin spelling.
+The re-score never raises a score and is fail-closed: it removes a candidate only when it tells the
+names apart clearly (below the 0.65 review floor), and where it lands between that floor and the
+caller's search floor (0.85 on PAYMENT) the trigram score stands, so a blocking HIT is never
+softened into a REVIEW. A trigram score at or above the HIT threshold (0.85) is never removed, only
+held at the caller's search floor. The live screen and the monitoring delta apply the same rule.
 
 ## GDPR mapping
 

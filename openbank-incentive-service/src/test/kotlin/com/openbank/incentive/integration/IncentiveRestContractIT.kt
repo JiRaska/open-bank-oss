@@ -30,6 +30,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
+import org.awaitility.Awaitility.await
 import org.eclipse.microprofile.reactive.messaging.Message
 import org.eclipse.microprofile.reactive.messaging.spi.Connector
 import org.hamcrest.Matchers.equalTo
@@ -473,14 +474,20 @@ class IncentiveRestContractIT {
         ).isEqualTo(count("select count(*) from incentive_outbox"))
 
         val eventCount = count("select count(*) from incentive_outbox")
-        onVertxContext { dispatcher.dispatchForTest() }
+        drainOutbox()
+        // Delivery to the in-memory sink is asynchronous: on a loaded machine the last ack can
+        // land after dispatchForTest returns, so await the full batch instead of racing it.
+        await().atMost(Duration.ofSeconds(10)).untilAsserted {
+            @Suppress("UNCHECKED_CAST")
+            val received = connector.sink<String>("incentive-events-out").received().map { it as Message<String> }
+            assertThat(received)
+                .describedAs(
+                    string("select string_agg(status || ':' || coalesce(last_error, ''), ',') from incentive_outbox"),
+                )
+                .hasSize(eventCount.toInt())
+        }
         @Suppress("UNCHECKED_CAST")
         val published = connector.sink<String>("incentive-events-out").received().map { it as Message<String> }
-        assertThat(published)
-            .describedAs(
-                string("select string_agg(status || ':' || coalesce(last_error, ''), ',') from incentive_outbox"),
-            )
-            .hasSize(eventCount.toInt())
         published.forEach { message ->
             val metadata = message.getMetadata(OutgoingKafkaRecordMetadata::class.java).orElseThrow()
             val eventId = message.payload.substringAfter("\"eventId\":\"").substringBefore('"')
@@ -494,8 +501,10 @@ class IncentiveRestContractIT {
             assertThat(eventType).isIn(CONTRACTED_EVENT_TYPES)
         }
         assertThat(count("select count(*) from incentive_outbox where status = 'SENT'")).isEqualTo(eventCount)
-        onVertxContext { dispatcher.dispatchForTest() }
-        assertThat(connector.sink<String>("incentive-events-out").received()).hasSize(eventCount.toInt())
+        drainOutbox()
+        await().atMost(Duration.ofSeconds(10)).untilAsserted {
+            assertThat(connector.sink<String>("incentive-events-out").received()).hasSize(eventCount.toInt())
+        }
 
         // A real attributed reservation generated these audit and outbox rows in one transaction.
         // Simulate the delivery age, then prove retention removes only delivery metadata: the
@@ -567,6 +576,23 @@ class IncentiveRestContractIT {
         testIdentity.setTestIdentity(identity)
     }
 
+    /**
+     * Drives the dispatcher until the module outbox has no PENDING row left. A single
+     * [IncentiveOutboxDispatcher.dispatchForTest] pass claims at most the dispatcher batch size
+     * (25) rows, and every @QuarkusTest class in the module shares one outbox table, so one pass
+     * under-runs as soon as this journey plus the rows other classes left behind exceed the batch.
+     */
+    private fun drainOutbox() {
+        onVertxContext {
+            repeat(OUTBOX_DRAIN_MAX_PASSES) {
+                dispatcher.dispatchForTest()
+                if (count("select count(*) from incentive_outbox where status = 'PENDING'") == 0L) {
+                    return@onVertxContext
+                }
+            }
+        }
+    }
+
     private fun <T> onVertxContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
         CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
     }
@@ -620,6 +646,8 @@ class IncentiveRestContractIT {
     } When { post("/api/v1/customer-incentives/offers/${java.util.UUID.randomUUID()}/reservations") }
 
     companion object {
+        private const val OUTBOX_DRAIN_MAX_PASSES = 5
+
         private val CONTRACTED_EVENT_TYPES =
             setOf(
                 "incentive.offer.created.v1",

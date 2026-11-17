@@ -37,6 +37,7 @@ dependencies {
     implementation("io.temporal:temporal-sdk:1.25.1")
 
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.mockk)
     testImplementation(libs.pact.consumer)
     testImplementation(libs.testcontainers)

@@ -209,3 +209,16 @@ describe('Gate Health runtime snapshot reader', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('gate-health lastOk (ADR-0379 phase 2)', () => {
+  const gate = data().gates[0]
+  it('accepts a snapshot from before lastOk existed, and one that carries it', () => {
+    expect(validateGateHealthSnapshotData(data({ gates: [gate] }), Date.parse(COLLECTED))).toBe(true)
+    expect(validateGateHealthSnapshotData(data({ gates: [{ ...gate, lastOk: { runId: 7, sha: SHA, createdAt: COLLECTED } }] }), Date.parse(COLLECTED))).toBe(true)
+    expect(validateGateHealthSnapshotData(data({ gates: [{ ...gate, lastOk: null }] }), Date.parse(COLLECTED))).toBe(true)
+  })
+  it('rejects a malformed lastOk instead of trusting its date', () => {
+    const bad = { ...gate, lastOk: { runId: 7, sha: SHA, createdAt: 'yesterday' } }
+    expect(validateGateHealthSnapshotData(data({ gates: [bad] }), Date.parse(COLLECTED))).toBe(false)
+  })
+})

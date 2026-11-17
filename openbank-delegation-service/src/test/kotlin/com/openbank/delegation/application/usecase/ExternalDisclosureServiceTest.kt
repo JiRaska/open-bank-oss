@@ -12,7 +12,6 @@ import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
-import com.openbank.delegation.domain.model.Exposure
 import com.openbank.delegation.domain.model.ExternalDisclosure
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -40,7 +39,10 @@ class ExternalDisclosureServiceTest {
         resourceId = documentId,
         capabilities = setOf(DelegationCapability.OBJECT_READ),
         approvalPolicy = ApprovalPolicy.SOLO,
-        exposure = Exposure(maxViews = 2),
+        // ADR-0375 D6. Deliberately NO exposure: the lifecycle cannot produce an ACTIVE grant that
+        // carries it (offer refuses it, `accept` and `reinstate` refuse it), so a fixture with
+        // exposure tests a state production cannot reach — which is exactly how `issue` stayed
+        // green while being unreachable for every real grant.
         validFrom = now.minusDays(1),
         validTo = now.plusDays(3),
         status = DelegationStatus.ACTIVE,
@@ -127,4 +129,45 @@ class ExternalDisclosureServiceTest {
         maxViews = 1,
         callerPartyId = caller,
     )
+
+    /**
+     * The regression that matters, and the one the old fixture could not express.
+     *
+     * `issue` required `grant.exposure` to be non-null. `DelegationService` refuses exposure on
+     * every new offer and on `accept`/`reinstate`, so no grant can be ACTIVE and carry it — the
+     * requirement threw for every input a real caller could present, and the sealed-disclosure
+     * mechanism that ADR-0375 D6 names as the END STATE was dead code behind a green test.
+     *
+     * This asserts the shape the lifecycle actually produces: an ACTIVE DOCUMENT grant with
+     * OBJECT_READ and NO exposure issues a disclosure, and the view limit is the disclosure's own.
+     */
+    @Test
+    fun `issues for the only grant shape the lifecycle can produce — active, no exposure`(): Unit = runBlocking {
+        val delegations = mockk<DelegationRepository>()
+        val disclosures = mockk<ExternalDisclosureRepository>()
+        coEvery { delegations.findById(grant.id) } returns grant
+        coEvery { disclosures.issue(any()) } answers { firstArg() }
+        val service = ExternalDisclosureService(
+            delegations,
+            disclosures,
+            mockk<ExternalDisclosureDocumentExporter>(),
+            clock,
+            SecureRandom(),
+        )
+
+        val issued = service.issue(
+            IssueExternalDisclosureCommand(
+                delegationId = grant.id,
+                documentId = documentId,
+                recipientLabel = "auditor",
+                expiresAt = now.plusDays(2),
+                maxViews = 3,
+                callerPartyId = grantor,
+            ),
+        )
+
+        assertThat(grant.exposure).describedAs("the fixture must stay in a reachable shape").isNull()
+        assertThat(issued.disclosure.maxViews).isEqualTo(3)
+        assertThat(issued.disclosure.delegationId).isEqualTo(grant.id)
+    }
 }

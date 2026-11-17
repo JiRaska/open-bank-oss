@@ -26,7 +26,9 @@ class DelegatedDebitAuthorityTest {
         active: Boolean = true,
         validFrom: OffsetDateTime = now.minusDays(1),
         validTo: OffsetDateTime? = now.plusDays(1),
-    ) = DelegationFact(resourceId, grantee, capabilities, active, validFrom, validTo)
+        grantId: UUID = UUID.randomUUID(),
+        grantorPartyId: UUID = owner,
+    ) = DelegationFact(grantId, grantorPartyId, resourceId, grantee, capabilities, active, validFrom, validTo)
 
     private fun facts(grants: List<DelegationFact>, actor: UUID = delegate) =
         DebitAuthorityFacts(account, owner, actor, capability, grants, now)
@@ -124,6 +126,52 @@ class DelegatedDebitAuthorityTest {
         )
 
         assertThat(outcome.decision).isEqualTo(AdmissionDecision.ALLOW)
+    }
+
+    @Test
+    fun `an allowed delegated debit names the grant that permitted it`() {
+        val grantId = UUID.randomUUID()
+        val grantor = UUID.randomUUID()
+        val outcome = decided(
+            DelegatedDebitAuthority.evaluate(
+                facts(listOf(grant(grantId = grantId, grantorPartyId = grantor))),
+            ),
+        )
+
+        assertThat(outcome.decision).isEqualTo(AdmissionDecision.ALLOW)
+        assertThat(outcome.reason).isEqualTo(DelegatedDebitAuthority.DELEGATED)
+        assertThat(outcome.evidence.attributes)
+            .containsEntry("grant_id", grantId.toString())
+            .containsEntry("grantor_party_id", grantor.toString())
+            .containsEntry("capability", capability)
+    }
+
+    @Test
+    fun `the named grant is the one that actually permitted, not the first row`() {
+        val wrongCapability = UUID.randomUUID()
+        val permitting = UUID.randomUUID()
+        val outcome = decided(
+            DelegatedDebitAuthority.evaluate(
+                facts(
+                    listOf(
+                        grant(grantId = wrongCapability, capabilities = setOf("ACCOUNT_READ_BALANCES")),
+                        grant(grantId = permitting),
+                    ),
+                ),
+            ),
+        )
+
+        assertThat(outcome.evidence.attributes).containsEntry("grant_id", permitting.toString())
+    }
+
+    @Test
+    fun `a refusal names no grant`() {
+        val outcome = decided(
+            DelegatedDebitAuthority.evaluate(facts(emptyList())),
+        )
+
+        assertThat(outcome.decision).isEqualTo(AdmissionDecision.REJECT)
+        assertThat(outcome.evidence.attributes).doesNotContainKey("grant_id")
     }
 }
 

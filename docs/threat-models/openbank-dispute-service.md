@@ -157,6 +157,16 @@ context (corresponding to ADR-0085 §3–§5, which are **not yet implemented**)
   a retention window. Required before go-live (GDPR Art. 5(1)(e)).
 - **Signed audit / evidence bundle (R1, ADR-0029 D2):** Outbox events are unverified; a
   tamper-evident signed record is needed for dispute evidence in arbitration.
+- **Evidence-chain legacy segment (T, #16473/#16511):** evidence rows stamped before V12 carry
+  no `hash_version` and were hashed under forms that cannot be recomputed from the stored row
+  (a nanosecond/offset timestamp string, then a form without the evidence id). They are never
+  re-stamped. `GET .../evidence/verify` checks their linkage (prevHash = previous stored
+  recordHash) and allows them only as a prefix, but does not verify their content: an in-place
+  edit of a legacy row's fields that leaves its stored recordHash untouched is undetectable, and
+  a downgrade of a dispute's ENTIRE versioned tail to NULL is indistinguishable from an
+  all-legacy chain. The response reports `legacyItems` next to `itemsChecked` so a consumer never
+  reads those rows as verified. Accepted residual risk; same treatment as audit-service's
+  pre-#3586 rows (ADR-0133 precedent).
 - **Rate limiting (D1):** No per-endpoint rate limit; gateway-level throttle is an infra
   follow-up before customer-facing channels open.
 - **Customer self-service channel (Phase 2 — S1 scope expansion):** ADR-0085 §2 plans a
@@ -175,3 +185,4 @@ context (corresponding to ADR-0085 §3–§5, which are **not yet implemented**)
 | Date | Change | Author |
 |---|---|---|
 | 2026-06-23 | Initial draft — ADR-0085 Phase 1 (complaints + disputes, STRIDE §3, invariants §4) | ADR-0030 D2 requirement |
+| 2026-11-16 | §5: evidence-chain legacy segment (hash_version, V12) as accepted residual risk | #16473 |

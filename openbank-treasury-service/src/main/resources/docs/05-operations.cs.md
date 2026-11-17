@@ -187,6 +187,24 @@ a stejně se porovnávají i oba zůstatky.
   - pohyb, který korespondent zaúčtoval jiný den, než je valuta zapsaná bankou. Takový řádek
     zůstane i nespárovaný.
 
+## Uzavření nostro rozdílu, který se nikdy nespáruje (ADR-0369, #14770)
+
+Rozdíl na straně výpisu (STATEMENT) se posuzuje jen proti vlastnímu výpisu a výpis se nemění, takže
+ho rekonciliace uzavřít nemůže. Po prošetření se uzavírá ručně na čtyři oči:
+
+1. `POST /api/v1/treasury/nostro/{account}/breaks/{breakId}/resolution` s `{"reason": "..."}`
+   (10–500 znaků) a hlavičkou `Idempotency-Key`, role `ROLE_TREASURY_APPROVER`. Rozdíl zůstává
+   otevřený a do schválení se dál počítá do `openbank_treasury_nostro_breaks_aged`.
+2. `POST .../resolution/approve` s `{"proposedAt": "..."}` (návrh, který jste četli) a
+   `Idempotency-Key`, JINÁ osoba s rolí `ROLE_TREASURY_SENIOR_APPROVER`. Navrhovatel nebo jedna
+   osoba s oběma rolemi dostane 422 `FOUR_EYES_VIOLATION`. Návrh změněný od přečtení vrátí 409.
+   `POST .../resolution/reject` s důvodem návrh naopak zruší.
+
+Agenti a service accounty jsou odmítnuti v každém kroku. Každý krok se zapisuje do
+`nostro_break_resolution_history`. Nic se neúčtuje. Ručně uzavřený rozdíl zůstane uzavřený, i když
+ho sweep znovu uvidí (sweep každou hodinu čte i staré výpisy); rozdíl uzavřený spárováním se dál
+znovu otevírá. Výsledek ukáže `GET .../breaks?includeResolved=true`.
+
 ## Zdrojové důkazy denní uzávěrky
 
 Dokončení porovnává uložené akruály, trvalé účetní zápisy obchodů a potvrzené přechody jejich stavu.
@@ -198,3 +216,12 @@ práce zneplatní zmrazený důkaz. Hold zůstává do posouzení celého živé
 
 
 Pozorované povinnosti úloh se ukládají odděleně od dokladů skutečných běhů. Vypnutí nebo přesun scheduleru po odmítnutí chybějící práce povinnost neodstraní, ani po restartu. Vyřeší ji skutečně dokončený běh nebo doložená výjimka v ledgeru. Pozorování nevyrábí dokončené běhy ani zpětně neodvozuje nikdy nepozorované plány. Rollback zachová tabulku povinností i běhů.
+
+## Obnova klientského certifikátu (odchozí mTLS)
+
+Každá pojmenovaná konfigurace `quarkus.tls.<name>`, kterou se služba prokazuje vůči
+naslouchání 8443 jiné služby, nastavuje `reload-period: 1h`. cert-manager klientský certifikát
+obnoví před expirací; bez této volby by proces dál předkládal ten starý, dokud by ho protistrana
+neodmítla, zatímco všechny signály expirace měřily obnovený Secret a hlásily zelenou. Po obnově
+se nový certifikát použije do hodiny, bez restartu. Gate `tls-certificate-reload` hlídá, aby
+žádná taková konfigurace nevypadla.

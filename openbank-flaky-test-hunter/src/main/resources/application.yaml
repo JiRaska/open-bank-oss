@@ -87,6 +87,10 @@ openbank:
     # Filesystem path for TestScanPort. GitOps supplies a read-only own-test snapshot;
     # a local checkout can also contain broader source trees and JUnit reports.
     repo-root: ${FLAKY_TEST_HUNTER_REPO_ROOT:.}
+    # ADR-0031 D9 amendment 2026-11-14: the one ref the writer reads and targets — a closed enum
+    # (main | qualification), so an unknown value fails at boot. GitOps must clone the scan
+    # snapshot from the SAME ref, or the scan and the write would describe different trees.
+    writer-base-ref: ${FLAKY_TEST_HUNTER_WRITER_BASE_REF:main}
     # ADR-0031 D9 phase 3: policy pre-flight gate on the rare gh.pr.open write path. Deny-by-
     # default — in-process charter re-check against the packaged agents.yaml, then an OPA sidecar
     # query; ANY OPA connectivity/parse error denies with reason pdp_unreachable (fail closed,

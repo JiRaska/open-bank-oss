@@ -24,7 +24,8 @@ SANCTIONS_REST_EXT=$(cat << 'REGO'
 #   sanctions.clear   — review (POST /review); decide a screening hit (renamed from
 #                       sanctions.review, issue #938 follow-up). Four-eyes gated (rules.yaml
 #                       four_eyes.verbs) — a wrongly-cleared true positive is a real sanctions
-#                       violation. No ROLE_SERVICE on this endpoint, confirmed no M2M caller.
+#                       violation. One M2M caller: service-account-openbank-agent, as the
+#                       four-eyes MAKER only (rule service-agent-sanctions-review-maker below).
 #   sanctions.update  — edit a watchlist entry (#listType)
 #   sanctions.trigger — refresh one list (#listType) or all lists
 #
@@ -33,8 +34,8 @@ SANCTIONS_REST_EXT=$(cat << 'REGO'
 #
 # Base rest.rego already grants: operator-read-any / compliance-read-any for sanctions.list +
 # sanctions.read, and m2m-sanctions-screening for any service-account-* caller on
-# sanctions.create only (deliberately NOT the whole family — sanctions.clear/.update/.trigger
-# are real operator judgment calls and must stay human-only).
+# sanctions.create only (deliberately NOT the whole family — .update/.trigger and the checker's
+# sanctions.approval.decide stay human-only; sanctions.clear admits the agent as maker only).
 
 package openbank.rest
 
@@ -53,12 +54,24 @@ allowed_reasons contains "operator-sanctions-write" if {
 # tools (SanctionsServiceClient, query.compliance.readonly, held by the compliance-officer charter only;
 # the agent gate refuses every other agent before the call). They used to reach these reads on the
 # shared service-account-openbank-services principal's ROLE_OPERATOR; they now present
-# service-account-openbank-agent (ROLE_API only), and this rule is that principal's whole grant here:
-# the two read verbs, never a screen, a decision or a watchlist edit.
+# service-account-openbank-agent (ROLE_API only). This rule is its read grant: the two read verbs,
+# never a screen or a watchlist edit. Its only other grant is the four-eyes maker rule below.
 allowed_reasons contains "service-agent-sanctions-read" if {
 	input.principal.type == "HUMAN"
 	machine_named("service-account-openbank-agent")
 	input.action in {"sanctions.list", "sanctions.read"}
+}
+
+# Agent false-positive triage (#16381): the same principal may submit a review as the four-eyes
+# MAKER and nothing else. sanctions.clear is four_eyes_required (rules.yaml four_eyes.verbs) and the
+# deployed AUTHZ_FOUR_EYES_ENFORCE is "true", so the call pauses with an approvalId until a DIFFERENT
+# principal decides it. sanctions.approval.decide is deliberately NOT granted here, so the agent can
+# never be its own checker. The agent gate admits the call only for a charter holding
+# sanctions.review.maker (compliance-officer). AgentMachineGrantCharterAlignmentTest pins both halves.
+allowed_reasons contains "service-agent-sanctions-review-maker" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-agent")
+	input.action == "sanctions.clear"
 }
 
 # AUTHZ_ENFORCE flip for sanctions: a compliance officer (ROLE_COMPLIANCE + ROLE_VIEWER, the
