@@ -145,6 +145,10 @@ internal object DelegatedBoundCreate {
      * - RESERVATION_MISMATCH — returned by the pre-checks, or by the repository only when the
      *   binding is NOT already BOUND (a BOUND one answers a replay instead).
      * - ACCOUNT_AUTHORITY_UNAVAILABLE — returned before the repository is reached.
+     * - DELEGATION_AUTHORITY_WITHDRAWN — the ADR-0375 D1 create-time authority step
+     *   (`refuseDelegatedAuthority`) refused; it runs before `createPaymentInternal`, so neither a
+     *   binding nor a payment is written. Not retryable: without this release the headroom stays
+     *   held for a grant that can no longer spend it, until delegation-service settles it.
      * NOT pre-binding proof: RESERVATION_NOT_RESERVED (already finalized; delegation settles it),
      * IDEMPOTENCY_KEY_REUSED (a payment exists under this key), and every uncoded status.
      */
@@ -153,6 +157,7 @@ internal object DelegatedBoundCreate {
             "RESERVATION_PROJECTION_PENDING" -> true
             "RESERVATION_MISMATCH" -> true
             "ACCOUNT_AUTHORITY_UNAVAILABLE" -> true
+            "DELEGATION_AUTHORITY_WITHDRAWN" -> true
             "RESERVATION_NOT_RESERVED" -> false
             "IDEMPOTENCY_KEY_REUSED" -> false
             else -> false

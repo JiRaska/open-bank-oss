@@ -14,9 +14,13 @@
 name: Weekly critical-alert RCA review
 
 on:
-  schedule:
-    # ADR-0241 D3: Mondays at 10:00 UTC.
-    - cron: "0 10 * * 1"
+  # Schedule DISABLED 2026-11-16 (issue #6432 / #16022, review by 2027-01-15). Its only
+  # producer, standing-critical-digest.yml, has had its own schedule disabled since
+  # 2026-11-14 (#6432): Alertmanager is not reachable read-only from a GitHub-hosted runner,
+  # so no observation envelopes are archived and every weekly run here could only fold an
+  # empty window into a "NO OBSERVATIONS" PR (#15414, #16535). Re-enable the Monday cron
+  # (ADR-0241 D3: "0 10 * * 1") only after the in-cluster read-only digest (follow-up to
+  # #6432) lands and produces envelopes. Manual dispatch stays so the path can be proven.
   workflow_dispatch:
 
 permissions:
