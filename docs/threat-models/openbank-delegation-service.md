@@ -230,6 +230,24 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
 
 ## Change log
 
+- **2026-11-17** — **New grantee class `MCP_CLIENT`** (ADR-0383 D3). A grant may now name a
+  customer-admitted third-party MCP client as grantee instead of a party. Existing grants are
+  `PARTY` (V34 defaults the column), and their behaviour is unchanged. Elevation of privilege is
+  bounded in the aggregate, which is the only writer: an `MCP_CLIENT` grant may hold ONLY the
+  account reads (`ACCOUNT_READ_BALANCES`, `ACCOUNT_READ_TRANSACTIONS`, `ACCOUNT_VIEW_DETAILS`,
+  `ACCOUNT_DOWNLOAD_STATEMENTS`) and `ACCOUNT_PROPOSE_PAYMENT`. The set is an allow-list, so every
+  executing or managing capability (`ACCOUNT_INITIATE_PAYMENT`, every `*_MANAGE_*`,
+  `DELEGATION_MANAGE`, savings and card capabilities) is refused whatever the ceilings, and so is
+  any capability added to the vocabulary later until someone names it. Spoofing: the grant records
+  the client id (`azp`) and the DPoP key thumbprint (`cnf.jkt`) at grant time, and a DB CHECK pins
+  the shape so a half-bound MCP grant or a PARTY grant with client bindings cannot be stored. The
+  grantee id of an MCP client is derived from its `azp`, so there is no party for it to impersonate.
+  No new endpoint, caller, event field or privilege ships in this change. Nothing creates an
+  `MCP_CLIENT` grant yet, and the triple lookup `(grantor, azp, jkt)` is indexed but not yet served.
+  Residual risk: until that lookup exists, enforcement of the key binding depends on the future
+  caller. Rollback: a forward migration dropping the three columns, after confirming there are no
+  `MCP_CLIENT` rows.
+
 - **2026-11-12** — **Document ownership read added as a sixth outbound edge** (ADR-0375 D5).
   `DocumentOwnershipRestClient` reads `GET /api/v1/documents/{id}/owner` on the NAMED `m2m`
   principal (`service-account-openbank-delegation`, ROLE_API), under document-service's own OPA

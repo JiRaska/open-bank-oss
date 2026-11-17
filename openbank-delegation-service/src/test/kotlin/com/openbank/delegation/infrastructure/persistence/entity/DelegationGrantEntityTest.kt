@@ -7,6 +7,7 @@ package com.openbank.delegation.infrastructure.persistence.entity
 import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationGranteeType
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.Exposure
@@ -54,6 +55,33 @@ class DelegationGrantEntityTest {
         val restored = DelegationGrantEntity.fromDomain(grant).toDomain()
 
         assertThat(restored).isEqualTo(grant)
+    }
+
+    @Test
+    fun `round-trip preserves the MCP client grantee binding`() {
+        val clientId = "registered-mcp-client"
+        val grant = DelegationGrant(
+            grantorPartyId = UUID.randomUUID(),
+            granteePartyId = DelegationGrant.mcpClientGranteeId(clientId),
+            granteeType = DelegationGranteeType.MCP_CLIENT,
+            granteeClientId = clientId,
+            granteeKeyThumbprint = "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs",
+            resourceType = DelegationResourceType.ACCOUNT,
+            resourceId = UUID.randomUUID(),
+            capabilities = setOf(
+                DelegationCapability.ACCOUNT_READ_BALANCES,
+                DelegationCapability.ACCOUNT_PROPOSE_PAYMENT,
+            ),
+            validFrom = now,
+            validTo = now.plusDays(90),
+            createdAt = now,
+            updatedAt = now,
+        )
+
+        val restored = DelegationGrantEntity.fromDomain(grant).toDomain()
+
+        assertThat(restored).isEqualTo(grant)
+        assertThat(restored.granteeType).isEqualTo(DelegationGranteeType.MCP_CLIENT)
     }
 
     @Test
