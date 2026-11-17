@@ -60,6 +60,7 @@ data class AccountResponse(
     val termsEffectiveFrom: LocalDate? = null,
     /** Published catalog revision the account was opened under (ADR-0341 D1). Absent = opened before V33. */
     val productRevision: ProductRevisionPinResponse? = null,
+    val bookingContext: com.openbank.account.domain.model.AccountBookingContext? = null,
     /**
      * Whether money may leave or enter the account now (ADR-0374 D4). Payment rails read this
      * instead of interpreting [status] themselves. Always present on a response this service wrote.

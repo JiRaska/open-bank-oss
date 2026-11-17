@@ -551,6 +551,7 @@ class AccountResource(
 private fun com.openbank.account.domain.model.Account.toResponse() = AccountResponse(
     id = id,
     accountNumber = accountNumber.value,
+    bookingContext = bookingContext,
     accountType = accountType,
     partyId = partyId,
     productId = productId,

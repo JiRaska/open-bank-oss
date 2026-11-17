@@ -4,6 +4,7 @@
 
 package com.openbank.account.application.port.out
 
+import com.openbank.account.domain.model.AccountBookingContext
 import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.ProductRevisionPin
 import java.time.Instant
@@ -56,4 +57,7 @@ interface PassportCommitment {
 
     /** Catalogue commits the one-use admission, or returns the exact earlier receipt. */
     suspend fun admit(intent: PassportIntent)
+
+    /** Only the exact consumed receipt can supply an account booking context. */
+    suspend fun bookingContext(intent: PassportIntent): AccountBookingContext
 }

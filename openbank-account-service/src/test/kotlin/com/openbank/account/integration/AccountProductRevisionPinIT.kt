@@ -237,6 +237,8 @@ class AccountProductRevisionPinIT {
     fun `HTTP retry recovers a persisted passport opening after the acknowledgement is lost`() {
         val calls = mutableListOf<PassportAdmissionRequest>()
         val catalogue = object : PassportAdmissionClient {
+            override fun context(request: PassportAdmissionRequest) = Uni.createFrom().item(BOOKING_CONTEXT)
+
             override fun admit(request: PassportAdmissionRequest): Uni<Void> {
                 calls += request
                 return if (calls.size == 1) {
@@ -279,6 +281,8 @@ class AccountProductRevisionPinIT {
         val requests = CopyOnWriteArrayList<PassportAdmissionRequest>()
         val storedReceipt = AtomicReference<PassportAdmissionRequest>()
         val catalogue = object : PassportAdmissionClient {
+            override fun context(request: PassportAdmissionRequest) = Uni.createFrom().item(BOOKING_CONTEXT)
+
             override fun admit(request: PassportAdmissionRequest): Uni<Void> {
                 requests += request
                 if (requests.size != 1 || consumedBeforeLoss) storedReceipt.set(request)
@@ -311,6 +315,23 @@ class AccountProductRevisionPinIT {
         """.trimIndent()
         while (query(lookup, account).isEmpty() && System.nanoTime() < deadline) Thread.sleep(100)
         assertThat(query(lookup, account)).containsExactly(listOf("PENDING_ACTIVATION", null, "CLEAR", true))
+        assertThat(query("SELECT booking_establishment_id::text FROM accounts WHERE id = ?", account))
+            .containsExactly(listOf(BOOKING_CONTEXT.establishmentId.toString()))
+        assertThat(
+            query(
+                "SELECT payload::jsonb->'bookingContext'->>'establishmentId' FROM account_outbox WHERE aggregate_id = ?",
+                account,
+            ),
+        )
+            .containsExactly(listOf(BOOKING_CONTEXT.establishmentId.toString()))
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            dataSource.connection.use { c ->
+                c.prepareStatement("UPDATE accounts SET booking_establishment_id = NULL WHERE id = ?").use {
+                    it.setObject(1, account)
+                    it.executeUpdate()
+                }
+            }
+        }.isInstanceOf(java.sql.SQLException::class.java).hasMessageContaining("booking context is immutable")
         assertThat(requests).hasSize(if (consumedBeforeLoss) 1 else 2)
         assertThat(requests).allMatch { it == storedReceipt.get() }
         assertThat(query("SELECT event_type FROM account_outbox WHERE aggregate_id = ?", account))
@@ -382,6 +403,13 @@ class AccountProductRevisionPinIT {
     }
 
     private companion object {
+        val BOOKING_CONTEXT = com.openbank.account.domain.model.AccountBookingContext(
+            UUID.fromString("11111111-1111-4111-8111-111111111111"),
+            UUID.fromString("22222222-2222-4222-8222-222222222222"),
+            "AT",
+            "BRANCH",
+        )
+
         const val ACTOR_ID = "00000000-0000-0000-0000-000000000099"
     }
 }

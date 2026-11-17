@@ -10,6 +10,7 @@ import com.openbank.account.application.port.out.PassportIntent
 import com.openbank.account.application.port.out.PassportOpeningDraft
 import com.openbank.account.application.port.out.PassportOpeningJob
 import com.openbank.account.application.port.out.PassportOperation
+import com.openbank.account.domain.model.AccountBookingContext
 import com.openbank.account.domain.model.ProductRevisionPin
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.web.SyntheticTaintClientFilter
@@ -45,6 +46,10 @@ interface PassportAdmissionClient {
     @POST
     @Path("/receipt")
     fun receipt(request: PassportAdmissionRequest): Uni<Void>
+
+    @POST
+    @Path("/context")
+    fun context(request: PassportAdmissionRequest): Uni<AccountBookingContext>
 }
 
 data class PassportAdmissionRequest(
@@ -90,6 +95,9 @@ class PassportCommitmentAdapter(
             throw exception
         }
     }
+
+    override suspend fun bookingContext(intent: PassportIntent): AccountBookingContext =
+        client.context(intent.toRequest()).awaitSuspending()
 
     override suspend fun stageOpening(intent: PassportIntent, draft: PassportOpeningDraft) {
         pool.preparedQuery(STAGE_OPENING).execute(

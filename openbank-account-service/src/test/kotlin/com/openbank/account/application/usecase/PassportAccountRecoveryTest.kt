@@ -57,10 +57,17 @@ class PassportAccountRecoveryTest {
     private val revision = UUID.randomUUID()
     private val binding = "a".repeat(64)
     private val prepared = mutableMapOf<String, PassportIntent>()
+    private val context = com.openbank.account.domain.model.AccountBookingContext(
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        "AT",
+        "BRANCH",
+    )
     private val consumed = mutableListOf<PassportIntent>()
     private val pin = ProductRevisionPin(offering, "CURRENT", revision, 1, null, null, null, now)
 
     init {
+        coEvery { passport.bookingContext(any()) } returns context
         coEvery { passport.find(any()) } answers { prepared[firstArg()] }
         coEvery { passport.prepare(any()) } answers {
             val intent = firstArg<PassportIntent>()
@@ -97,6 +104,7 @@ class PassportAccountRecoveryTest {
         coEvery { repo.saveNewAccount(any(), any(), any(), any(), any()) } answers { firstArg() }
 
         val opened = runBlocking { service().openAccount(command) }
+        assertEquals(context, opened.bookingContext)
         assertEquals(first.accountId, opened.id)
         assertEquals(AccountStatus.PENDING_ACTIVATION, opened.status)
         assertEquals(first.pin, opened.productRevisionPin)
@@ -118,6 +126,7 @@ class PassportAccountRecoveryTest {
             closedAt = null,
             version = 0,
             productRevisionPin = pin,
+            bookingContext = context,
         )
         val opening = PassportIntent(
             "OPEN:test",
@@ -195,6 +204,30 @@ class PassportAccountRecoveryTest {
                 any(),
             )
         }
+    }
+
+    @Test
+    fun `activation refuses a different establishment before changing the account`() {
+        val account = Account(
+            UUID.randomUUID(), iban, AccountType.CURRENT, party, product, CurrencyCode.of("CZK"),
+            AccountStatus.PENDING_ACTIVATION, openedAt = now, closedAt = null, version = 0,
+            productRevisionPin = pin, bookingContext = context,
+        )
+        val opening = PassportIntent(
+            "OPEN:synthetic",
+            UUID.randomUUID(),
+            account.id,
+            grant,
+            party,
+            PassportOperation.OPEN,
+            binding,
+            pin,
+        )
+        coEvery { repo.findById(account.id) } returns account
+        coEvery { passport.openingFor(account.id) } returns opening
+        coEvery { passport.bookingContext(any()) } returns context.copy(establishmentId = UUID.randomUUID())
+        assertThrows(IllegalStateException::class.java) { runBlocking { service().activateAccount(account.id) } }
+        coVerify(exactly = 0) { repo.update(any(), any()) }
     }
 
     private fun unconsumedOpening(): PassportOpeningJob {

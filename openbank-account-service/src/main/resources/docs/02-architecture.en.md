@@ -232,3 +232,16 @@ bound to the pending account version. Its state transition and status event comm
 Redelivery of the existing onboarding event, or a repeat of the activation request, resumes
 the operation after a failed account write. Existing domestic accounts follow their usual
 route. Branch booking requires its own approved route before use.
+
+### Immutable booking context (ADR-0380 B2)
+
+The exact consumed catalogue receipt supplies the shared openbank-libs-market BookingContext. Clients supply
+only the grant ID; they cannot choose bank, establishment, country or mode. Account columns freeze all four
+fields together. Opening and lifecycle events and the account read API retain the same value. Recovery re-reads
+the exact receipt after consumption, even after revocation; activation must match the original context. Legacy
+null contexts remain unknown and require evidence-backed migration before passport activation.
+
+This PR integrates #16353/#16351 and the exact Catalogue C3 schema prerequisites V19–V21 from #16587, followed by V22.
+Deploy context readers before account writers. Branch admission remains restricted to LaunchMode.TEST until
+branch launch approval; this change performs no live activation. Rollback stops new writers and retains columns,
+receipts and outbox evidence. The shared type is framework-free; SQL immutability remains the owner's rule.

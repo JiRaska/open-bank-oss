@@ -14,7 +14,7 @@ info:
   # dry-run of the same parser a revision write runs; stores nothing.
   # 2.10.0 -> 2.11.0 (#12078): correction. The six v1 404s also document the ApiError body the
   # disabled banking-compatibility routes answer with; served behaviour is unchanged.
-  version: 2.13.0
+  version: 2.16.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -53,6 +53,26 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /api/v2/internal/passport-account-admissions/context:
+    post:
+      tags: [Passport grants]
+      operationId: getPassportAccountBookingContext
+      summary: Read immutable booking context from an exact consumed account receipt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PassportAccountAdmissionRequest' }
+      responses:
+        '200':
+          description: Exact consumed receipt and immutable scope
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountBookingContext' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No exact consumed receipt }
   /api/v1/products:
     get:
       tags: [Products]
@@ -1027,6 +1047,14 @@ components:
       description: Strong optimistic-concurrency token for this product representation.
       schema: { type: string, pattern: '^"[0-9]+"$' }
   schemas:
+    AccountBookingContext:
+      type: object
+      required: [bankId, establishmentId, hostCountry, mode]
+      properties:
+        bankId: { type: string, format: uuid }
+        establishmentId: { type: string, format: uuid }
+        hostCountry: { type: string, pattern: '^[A-Z]{2}$' }
+        mode: { type: string, enum: [FOS, BRANCH] }
     PassportAccountAdmissionRequest:
       type: object
       required: [grantId, operation, operationId, partyId, revisionId, binding]

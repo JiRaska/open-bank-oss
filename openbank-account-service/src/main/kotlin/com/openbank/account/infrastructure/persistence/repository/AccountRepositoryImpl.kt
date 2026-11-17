@@ -284,6 +284,9 @@ private fun AccountRepositoryImpl.versionMatchedUpdate(
         // renameAccount in AccountService actually changes this.
         existing.nickname = entity.nickname
         // Travels with status: set by a freeze, cleared by an unfreeze (chk_accounts_freeze_origin).
+        check(existing.bookingContextOrNull() == entity.bookingContextOrNull()) {
+            "account booking context is immutable"
+        }
         existing.freezeOrigin = entity.freezeOrigin
         // Audit timestamp comes from the injected Clock, not the entity default (ADR-0100 /
         // #540): the @PreUpdate callback's EPOCH default is never overwritten by the DB
@@ -319,6 +322,7 @@ private fun AccountEntity.toDomain() = Account(
     termsEffectiveFrom = termsEffectiveFrom,
     productRevisionPin = productRevisionPinOrNull(),
     freezeOrigin = freezeOrigin?.let(FreezeOrigin::valueOf),
+    bookingContext = bookingContextOrNull(),
 )
 
 // Whole or absent, as chk_accounts_product_revision_pin_whole guarantees for the row.
@@ -356,6 +360,10 @@ private fun Account.toEntity() = AccountEntity().also {
     it.goalTargetDate = goalTargetDate
     it.nickname = nickname
     it.freezeOrigin = freezeOrigin?.name
+    it.bookingBankId = bookingContext?.bankId
+    it.bookingEstablishmentId = bookingContext?.establishmentId
+    it.bookingHostCountry = bookingContext?.hostCountry
+    it.bookingMode = bookingContext?.mode
     it.termsVersion = termsVersion
     it.termsUrl = termsUrl
     it.termsEffectiveFrom = termsEffectiveFrom
@@ -369,4 +377,13 @@ private fun Account.toEntity() = AccountEntity().also {
         it.productRevisionIrVersion = pin.irVersion
         it.productRevisionPinnedAt = pin.pinnedAt
     }
+}
+
+private fun AccountEntity.bookingContextOrNull() = bookingBankId?.let { bank ->
+    com.openbank.libs.market.BookingContext(
+        bank,
+        checkNotNull(bookingEstablishmentId),
+        checkNotNull(bookingHostCountry),
+        checkNotNull(bookingMode),
+    )
 }

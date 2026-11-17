@@ -211,7 +211,13 @@ class AccountService(
     ): Account {
         // A queued account opens only after admission. Keep the original revision, but stamp
         // its recorded pin and opening together at the time of the account write.
-        val opening = if (intent == null) account else account.atPassportCommit(clock.instant())
+        val opening = if (intent == null) {
+            account
+        } else {
+            account.atPassportCommit(clock.instant()).copy(
+                bookingContext = passport.bookingContext(intent),
+            )
+        }
         // Account, pocket, idempotency key, outbox and queue cleanup share the account transaction.
         val saved = try {
             accountRepository.saveNewAccount(opening, primaryPocketFor(opening), key, binding, ::accountCreatedEvent)
@@ -254,6 +260,7 @@ class AccountService(
         occurredAt = saved.openedAt,
         sourceService = "account-service",
         productRevision = saved.productRevisionPin?.let(AccountProductRevision::of),
+        bookingContext = saved.bookingContext,
     )
 
     override suspend fun closeAccount(command: CloseAccountCommand): Account {
@@ -294,6 +301,7 @@ class AccountService(
                 reason = command.reason,
                 occurredAt = clock.instant(),
                 sourceService = "account-service",
+                bookingContext = updated.bookingContext,
             ),
         )
 
@@ -342,6 +350,7 @@ class AccountService(
         version = account.version,
         previousStatus = previous,
         newStatus = account.status,
+        bookingContext = account.bookingContext,
         reason = "KYC + AML cleared (ADR-0267)",
         occurredAt = clock.instant(),
         sourceService = "account-service",
@@ -398,6 +407,8 @@ class AccountService(
             throw ResourceConflictException("passport activation operation no longer matches the account")
         }
         passport.admit(intent)
+        val context = passport.bookingContext(intent)
+        check(account.bookingContext == context) { "passport activation booking context differs from the account" }
     }
 
     override suspend fun freezeAccount(command: FreezeAccountCommand): Account {
@@ -417,6 +428,7 @@ class AccountService(
                 reason = command.reason,
                 occurredAt = clock.instant(),
                 sourceService = "account-service",
+                bookingContext = updated.bookingContext,
             ),
         )
 
@@ -447,6 +459,7 @@ class AccountService(
                 reason = command.reason,
                 occurredAt = clock.instant(),
                 sourceService = "account-service",
+                bookingContext = updated.bookingContext,
             ),
         )
 

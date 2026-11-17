@@ -1241,3 +1241,11 @@ requires authoritative facts from the applicable country pack before any FOS or 
   screening of the registered name. Account creation requires the exact catalogue admission.
   Duplicate runners reuse the account ID and binding. The account transaction clears the queued
   details, which omit the holder name and raw screening evidence.
+
+### ADR-0380 B2 account book
+
+Booking context is obtained only from the exact consumed catalogue receipt under the named M2M identity. Freeze
+its complete bank/establishment/host/mode tuple in SQL and preserve it through outbox/recovery/lifecycle changes.
+An activation with different context fails before status change. Existing null history is not silently assigned.
+No raw identity evidence or national identifier is added. Branch opening remains TEST-only pending wider B2 and
+country launch evidence. The lower catalogue migration prerequisites must be deployed before V22.
