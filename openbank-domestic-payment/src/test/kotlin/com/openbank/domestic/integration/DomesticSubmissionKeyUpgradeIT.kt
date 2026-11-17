@@ -48,8 +48,7 @@ class DomesticSubmissionKeyUpgradeIT {
     )
     fun `a V20 direct payment still fences its original key after V21 without changing the old outbox`() {
         dataSource.connection.use { connection ->
-            // The newest migration is the hold facts (V22); V21, the fence under test, ran before it.
-            assertThat(installedVersion(connection)).isEqualTo("22")
+            assertThat(appliedVersions(connection)).contains("20", "21", "22")
             assertHistoricalWrite(connection)
         }
 
@@ -103,7 +102,7 @@ class DomesticSubmissionKeyUpgradeIT {
                     .load()
                     .migrate()
                 DriverManager.getConnection(url, username, password).use { connection ->
-                    check(installedVersion(connection) == "20")
+                    check(appliedVersions(connection).maxOf { it.toInt() } == 20)
                     connection.autoCommit = false
                     seedV20Payment(connection)
                     seedV20Outbox(connection)
@@ -184,14 +183,15 @@ class DomesticSubmissionKeyUpgradeIT {
             MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)),
         )
 
-        private fun installedVersion(connection: Connection): String = connection.createStatement().use { statement ->
-            statement.executeQuery(
-                "SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1",
-            ).use { rows ->
-                check(rows.next()) { "No successful Flyway migration recorded" }
-                rows.getString(1)
+        // Later migrations may follow V21, so assert V21 applied rather than that it is the newest.
+        private fun appliedVersions(connection: Connection): List<String> =
+            connection.createStatement().use { statement ->
+                statement.executeQuery(
+                    "SELECT version FROM flyway_schema_history WHERE success AND version IS NOT NULL",
+                ).use { rows ->
+                    buildList { while (rows.next()) add(rows.getString(1)) }
+                }
             }
-        }
 
         private fun seedV20Payment(connection: Connection) = connection.prepareStatement(
             """
