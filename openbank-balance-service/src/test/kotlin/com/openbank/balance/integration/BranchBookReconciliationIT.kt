@@ -70,11 +70,31 @@ class BranchBookReconciliationIT {
         QuarkusMock.installMockForType(client, LedgerBranchBooksClient::class.java, RestClient.LITERAL)
         seed(bank, first, "25", date.plusDays(1), "5")
         seed(bank, second, "30", null, null)
-        val matched = given().queryParam("bankId", bank).queryParam("asOf", date.toString())
+        val key = UUID.randomUUID().toString()
+        val matched = given().header(
+            "Idempotency-Key",
+            key,
+        ).queryParam("bankId", bank).queryParam("asOf", date.toString())
             .post(PATH).then().statusCode(201).extract().jsonPath()
         assertThat(matched.getBoolean("complete")).isTrue()
         swapped.set(true)
-        val drift = given().queryParam("bankId", bank).queryParam("asOf", date.toString())
+        val replay = given().header(
+            "Idempotency-Key",
+            key,
+        ).queryParam("bankId", bank).queryParam("asOf", date.toString())
+            .post(PATH).then().statusCode(201).extract().jsonPath()
+        assertThat(replay.getString("generatedAt")).isEqualTo(matched.getString("generatedAt"))
+        assertThat(replay.getBoolean("complete")).isTrue()
+        given().header(
+            "Idempotency-Key",
+            key,
+        ).queryParam("bankId", bank).queryParam("asOf", date.minusDays(1).toString())
+            .post(PATH).then().statusCode(409)
+        given().queryParam("bankId", bank).queryParam("asOf", date.toString()).post(PATH).then().statusCode(400)
+        val drift = given().header(
+            "Idempotency-Key",
+            UUID.randomUUID().toString(),
+        ).queryParam("bankId", bank).queryParam("asOf", date.toString())
             .post(PATH).then().statusCode(201).extract().jsonPath()
         assertThat(drift.getBoolean("bankMatches")).isTrue()
         assertThat(drift.getBoolean("booksMatch")).isFalse()
@@ -90,7 +110,8 @@ class BranchBookReconciliationIT {
         // No POST retry: the real scheduler must publish fresh successful evidence.
         await {
             val report = latest(bank)
-            report.getString("generatedAt") > captured && report.getBoolean("complete")
+            java.time.Instant.parse(report.getString("generatedAt")).isAfter(java.time.Instant.parse(captured)) &&
+                report.getBoolean("complete")
         }
     }
 

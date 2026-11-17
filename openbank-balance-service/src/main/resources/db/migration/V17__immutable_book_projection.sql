@@ -24,6 +24,7 @@ CREATE TABLE branch_book_reconciliations (
     bank_id UUID NOT NULL,
     as_of DATE NOT NULL,
     generated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    operation_key TEXT UNIQUE CHECK (operation_key IS NULL OR char_length(btrim(operation_key)) BETWEEN 1 AND 255),
     report JSONB NOT NULL
 );
 CREATE INDEX idx_branch_book_reconciliation_latest ON branch_book_reconciliations(bank_id,id DESC);

@@ -36,6 +36,7 @@ paths:
       operationId: reconcileBranchBooks
       summary: Reconcile each immutable book and the bank on the same value-date basis
       parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
         - { name: bankId, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: asOf, in: query, required: true, schema: { type: string, format: date } }
       responses:
@@ -47,6 +48,7 @@ paths:
         '400': { description: Invalid or absent bank/date }
         '401': { description: Authentication required }
         '403': { description: Access denied }
+        '409': { description: Key was already used for another bank or date }
   /api/v1/balances/reconciliation/branch-books/latest:
     get:
       tags: [Reconciliation]

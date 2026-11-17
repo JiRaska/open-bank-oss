@@ -27,7 +27,11 @@ class BranchBookReconciliations(
     private val metrics: com.openbank.libs.observability.DomainMetrics,
     @RestClient private val ledger: LedgerBranchBooksClient,
 ) {
-    suspend fun run(bank: UUID, date: LocalDate): BranchBookReport {
+    suspend fun run(bank: UUID, date: LocalDate, operationKey: String? = null): BranchBookReport {
+        operationKey?.let {
+            require(it.isNotBlank() && it.length <= MAX_OPERATION_KEY_LENGTH) { "invalid Idempotency-Key" }
+            operation(it, bank, date)?.let { report -> return report }
+        }
         val snapshot = ledger.snapshot(bank, date.toString()).awaitSuspending()
         check(snapshot.bankId == bank && snapshot.asOf == date) { "Ledger returned a different reconciliation scope" }
         val rows = pool.preparedQuery(TOTALS).execute(Tuple.of(bank, date)).awaitSuspending().map {
@@ -40,8 +44,13 @@ class BranchBookReconciliations(
             )
         }
         val report = BranchBookReconciliation.reconcile(snapshot, rows, clock.instant())
-        pool.preparedQuery("INSERT INTO branch_book_reconciliations(bank_id,as_of,report) VALUES ($1,$2,$3)")
-            .execute(Tuple.of(bank, date, JsonObject(mapper.writeValueAsString(report)))).awaitSuspending()
+        val inserted = pool.preparedQuery(
+            "INSERT INTO branch_book_reconciliations(bank_id,as_of,report,operation_key) VALUES ($1,$2,$3,$4) " +
+                "ON CONFLICT(operation_key) DO NOTHING",
+        ).execute(Tuple.of(bank, date, JsonObject(mapper.writeValueAsString(report)), operationKey)).awaitSuspending()
+        if (inserted.rowCount() == 0) {
+            return checkNotNull(operation(checkNotNull(operationKey), bank, date))
+        }
         report.books.groupBy { it.currency }.forEach { (currency, rows) ->
             // Opposite branch errors must never cancel in a bank-level gauge.
             metrics.recordReconciliationDrift(
@@ -51,6 +60,18 @@ class BranchBookReconciliations(
             )
         }
         return report
+    }
+
+    private suspend fun operation(key: String, bank: UUID, date: LocalDate): BranchBookReport? {
+        val row = pool.preparedQuery(
+            "SELECT bank_id,as_of,report FROM branch_book_reconciliations WHERE operation_key=$1",
+        ).execute(Tuple.of(key)).awaitSuspending().firstOrNull() ?: return null
+        if (row.getUUID("bank_id") != bank || row.getLocalDate("as_of") != date) {
+            throw com.openbank.libs.domain.error.ResourceConflictException(
+                "reconciliation key reused for a different scope",
+            )
+        }
+        return mapper.readValue(row.getJsonObject("report").encode(), BranchBookReport::class.java)
     }
 
     suspend fun latest(bank: UUID): BranchBookReport? = pool.preparedQuery(
@@ -64,6 +85,7 @@ class BranchBookReconciliations(
     ).execute().awaitSuspending().map { it.getUUID("bank_id") }
 
     private companion object {
+        const val MAX_OPERATION_KEY_LENGTH = 255
         val TOTALS = """
             SELECT c.bank_id, CASE WHEN c.mode='BRANCH' THEN c.establishment_id END AS branch_book_id,
                 b.currency, sum(b.booked_amount-coalesce(f.delta,0)) AS booked,

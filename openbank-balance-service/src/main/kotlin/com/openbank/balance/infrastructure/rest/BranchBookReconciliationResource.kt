@@ -9,6 +9,7 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
@@ -24,7 +25,11 @@ class BranchBookReconciliationResource(private val reports: BranchBookReconcilia
     @POST
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.reconciliation.run")
-    suspend fun run(@QueryParam("bankId") bankId: UUID?, @QueryParam("asOf") asOf: String?): Response {
+    suspend fun run(
+        @QueryParam("bankId") bankId: UUID?,
+        @QueryParam("asOf") asOf: String?,
+        @HeaderParam("Idempotency-Key") key: String?,
+    ): Response {
         val date = try {
             LocalDate.parse(requireNotNull(asOf) { "asOf is required" })
         } catch (
@@ -33,7 +38,13 @@ class BranchBookReconciliationResource(private val reports: BranchBookReconcilia
             throw IllegalArgumentException("asOf must be an ISO date", e)
         }
         return Response.status(Response.Status.CREATED)
-            .entity(reports.run(requireNotNull(bankId) { "bankId is required" }, date)).build()
+            .entity(
+                reports.run(
+                    requireNotNull(bankId) { "bankId is required" },
+                    date,
+                    requireNotNull(key) { "Idempotency-Key is required" },
+                ),
+            ).build()
     }
 
     @GET

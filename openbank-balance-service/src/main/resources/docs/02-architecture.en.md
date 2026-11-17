@@ -125,3 +125,7 @@ an outage/restart without an operator POST. Failed captures never overwrite the 
 and workflow liveness for freshness. This is an eventually consistent control across two source databases.
 Deploy the Ledger reader and schemas before the account writer/projection cutover. Rollback stops the new
 writers/consumers first and retains contexts, dated markers and reconciliation evidence.
+
+Manual branch reconciliation requires Idempotency-Key. Its bank/date-bound receipt returns the original report
+on retry and rejects reuse for a different scope with 409, including concurrent requests. Scheduled captures
+are fresh unkeyed runs; an old manual receipt never replaces their freshness or re-emits a drift metric.
