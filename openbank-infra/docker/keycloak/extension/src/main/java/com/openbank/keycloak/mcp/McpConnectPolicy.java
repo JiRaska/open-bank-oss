@@ -52,6 +52,11 @@ public final class McpConnectPolicy {
         return lastPollEpochMillis > 0 && nowEpochMillis - lastPollEpochMillis < MIN_POLL_INTERVAL_MS;
     }
 
+    /** True when any requested audience/resource is one of the MCP targets. */
+    public static boolean targetsAny(java.util.List<String> requested, java.util.Set<String> mcpTargets) {
+        return requested != null && mcpTargets != null && requested.stream().anyMatch(mcpTargets::contains);
+    }
+
     /** The requested RFC 8707 resource: absent, or exactly the one the client is bound to. */
     public static boolean resourceAllowed(java.util.List<String> requested, String bound) {
         if (requested == null || requested.isEmpty()) {

@@ -94,14 +94,28 @@ class ScaClient {
             HttpResponse<String> resp = send(HttpRequest.newBuilder(
                     uri("/api/v1/sca/challenges/" + URLEncoder.encode(challengeId, StandardCharsets.UTF_8) + "/consume")),
                     body);
-            if (resp.statusCode() == 400) {
-                // ScaChallengeNotApprovedException: the device has not approved (yet).
-                return Outcome.PENDING;
+            return outcomeOf(resp.statusCode(), resp.body(), challengeId, partyId);
+        } catch (IOException | RuntimeException e) {
+            return Outcome.REFUSED;
+        }
+    }
+
+    /** sca-service's 400 code for a challenge the device has not decided yet — the ONLY "wait". */
+    static final String PENDING_CODE = "SCA_CHALLENGE_PENDING";
+
+    /**
+     * PENDING only for sca-service's specific not-yet-decided code. Every other answer — another
+     * 400 (malformed, denied, failed), 403, 404, 409, 410, 5xx, an unreadable body — is terminal.
+     */
+    static Outcome outcomeOf(int status, String body, String challengeId, String partyId) {
+        try {
+            Map<?, ?> c = body == null || body.isBlank() ? Map.of() : JsonSerialization.readValue(body, Map.class);
+            if (status == 400) {
+                return PENDING_CODE.equals(c.get("code")) ? Outcome.PENDING : Outcome.REFUSED;
             }
-            if (resp.statusCode() != 200) {
+            if (status != 200) {
                 return Outcome.REFUSED;
             }
-            Map<?, ?> c = JsonSerialization.readValue(resp.body(), Map.class);
             boolean attested = Objects.equals(c.get("id"), challengeId)
                     && Objects.equals(c.get("partyId"), partyId)
                     && Objects.equals(c.get("purpose"), "MCP_CLIENT_CONNECT")

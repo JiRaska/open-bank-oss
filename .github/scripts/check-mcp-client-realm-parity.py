@@ -26,6 +26,7 @@ Asserted, per declared client:
     `auth-cookie` and no sub-flow anywhere (ADR-0385 D2.2), and `openbank-mcp-withheld-code`
     as its LAST step, after the passkey (ADR-0385 D3);
   * every client's `openbank.mcp.resource` equals the allowlist resource (RFC 8707 binding);
+  * `party_id` a declared user-profile attribute viewable and editable by admin only;
   * an enabled `any-client` client policy binding the `openbank-mcp-client-guard` executor
     (#16667: no token exchange for or of an MCP client);
   * the realm: refreshTokenMaxReuse == 0 and revokeRefreshToken == true (never loosened).
@@ -132,6 +133,33 @@ def check_allowlist(decl: dict, base: Path, today: dt.date) -> tuple[list[str], 
     return f, jwks
 
 
+def check_party_id_profile(realm: dict) -> list[str]:
+    comps = (realm.get("components") or {}).get("org.keycloak.userprofile.UserProfileProvider") or []
+    raw = [v for c in comps for v in ((c.get("config") or {}).get("kc.user.profile.config") or [])]
+    if len(raw) != 1:
+        return [f"realm: exactly one declarative user profile is required, found {len(raw)} — `party_id` "
+                f"must be a declared admin-only attribute"]
+    try:
+        profile = json.loads(raw[0])
+    except ValueError:
+        return ["realm: the user profile config is not valid JSON"]
+    attrs = [a for a in profile.get("attributes") or [] if a.get("name") == "party_id"]
+    if len(attrs) != 1:
+        return ["realm: user profile does not declare `party_id` — a customer could set the party their MCP "
+                "token and SCA consume are bound to"]
+    perms = attrs[0].get("permissions") or {}
+    out = []
+    for kind in ("view", "edit"):
+        if sorted(perms.get(kind) or []) != ["admin"]:
+            out.append(f"realm: user profile `party_id` {kind} permission is {perms.get(kind)!r}, must be ['admin'] only")
+    if attrs[0].get("annotations", {}).get("inputType") or attrs[0].get("selector") or attrs[0].get("required"):
+        out.append("realm: user profile `party_id` must carry no inputType, selector or required (no user-facing form)")
+    if profile.get("unmanagedAttributePolicy") not in (None, "ADMIN_VIEW", "ADMIN_EDIT"):
+        out.append(f"realm: unmanagedAttributePolicy {profile.get('unmanagedAttributePolicy')!r} lets users edit "
+                   f"undeclared attributes")
+    return out
+
+
 def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
     f: list[str] = []
     clients = {c.get("clientId"): c for c in realm.get("clients") or []}
@@ -186,6 +214,12 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
     if not bound:
         f.append(f"realm: no enabled any-client client policy binds the {GUARD} executor — MCP clients could "
                  f"token-exchange (#16667) and the withheld-code step would have no request facts")
+
+    # Review of #16672: the MCP token's party_id claim and the withheld-code consume's
+    # expectedPartyId both come from the user attribute `party_id`, so a customer must never be able
+    # to set it (account console, registration, update-profile required action): it is a declared
+    # user-profile attribute that ONLY an admin may view or edit.
+    f.extend(check_party_id_profile(realm))
 
     for cid, c in clients.items():
         if TIER_ATTR in (c.get("attributes") or {}) and cid not in declared:
@@ -368,6 +402,26 @@ def self_test() -> int:
         mutate_realm=lambda r: r["clientProfiles"]["profiles"][-1].update(executors=[]), needle=GUARD)
     run("bound resource attribute drift flagged",
         mutate_realm=lambda r: client(r, H)["attributes"].update({RESOURCE_ATTR: "https://evil.example/mcp"}), needle="RFC 8707")
+    def profile(r, mutate):
+        comp = r["components"]["org.keycloak.userprofile.UserProfileProvider"][0]["config"]
+        doc = json.loads(comp["kc.user.profile.config"][0])
+        mutate(doc)
+        comp["kc.user.profile.config"] = [json.dumps(doc)]
+
+    def party(doc):
+        return next(a for a in doc["attributes"] if a["name"] == "party_id")
+
+    run("party_id editable by the user flagged",
+        mutate_realm=lambda r: profile(r, lambda d: party(d)["permissions"].update(edit=["admin", "user"])), needle="edit permission")
+    run("party_id viewable by the user flagged",
+        mutate_realm=lambda r: profile(r, lambda d: party(d)["permissions"].update(view=["admin", "user"])), needle="view permission")
+    run("party_id undeclared flagged",
+        mutate_realm=lambda r: profile(r, lambda d: d.update(attributes=[a for a in d["attributes"] if a["name"] != "party_id"])),
+        needle="does not declare")
+    run("user profile removed flagged", mutate_realm=lambda r: r["components"].pop("org.keycloak.userprofile.UserProfileProvider"),
+        needle="declarative user profile")
+    run("unmanaged attributes user-editable flagged",
+        mutate_realm=lambda r: profile(r, lambda d: d.update(unmanagedAttributePolicy="ENABLED")), needle="unmanagedAttributePolicy")
     run("MCP flow id drift flagged", mutate_realm=lambda r: flow(r).update(id="other"), needle="overrides bind by id")
     run("undeclared realm client with the MCP marker flagged",
         mutate_realm=lambda r: r["clients"].append({**copy.deepcopy(client(r, L)), "clientId": "mcp-ghost"}), needle="not in the allowlist")

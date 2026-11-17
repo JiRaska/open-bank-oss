@@ -247,8 +247,11 @@ class ScaStub:
             if c is None:
                 return 404, {}
             c["consumes"] += 1
+            if c.get("denied"):
+                # sca-service: a final refusal is a 400 VALIDATION_ERROR, distinct from "pending".
+                return 400, {"code": "VALIDATION_ERROR", "message": "SCA challenge is not approved"}
             if not c["approved"]:
-                return 400, {"message": "SCA challenge is not approved"}
+                return 400, {"code": "SCA_CHALLENGE_PENDING", "message": "SCA challenge is not approved"}
             if c["consumed"]:
                 return 409, {"message": "SCA challenge already consumed"}
             if (body.get("partyId"), body.get("approvalRequestId"), body.get("payloadSha256")) != \
@@ -268,6 +271,13 @@ class ScaStub:
         with self.lock:
             found = [c for c in self.challenges.values() if c["approvalRequestId"] == want]
         return found[0] if found else None
+
+    def deny(self, request_uri):
+        c = self.for_request(request_uri)
+        assert c is not None, "no challenge was initiated for this request"
+        with self.lock:
+            c["denied"] = True
+        return c
 
     def approve(self, request_uri, corrupt=False):
         c = self.for_request(request_uri)
@@ -302,7 +312,20 @@ class McpClientAdmission(unittest.TestCase):
         realm["clients"].append({"clientId": "local-cookie-seeder", "publicClient": True, "enabled": True,
                                  "standardFlowEnabled": True, "directAccessGrantsEnabled": False,
                                  "redirectUris": ["https://client.test/*"], "protocol": "openid-connect",
+                                 # test-only: a token the account API accepts (aud + account roles)
+                                 "protocolMappers": [
+                                     {"name": "aud-account", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
+                                      "config": {"included.client.audience": "account", "access.token.claim": "true"}},
+                                     {"name": "account-roles", "protocol": "openid-connect",
+                                      "protocolMapper": "oidc-usermodel-client-role-mapper",
+                                      "config": {"usermodel.clientRoleMapping.clientId": "account", "multivalued": "true",
+                                                 "claim.name": "resource_access.${client_id}.roles", "access.token.claim": "true"}}],
                                  "authenticationFlowBindingOverrides": {"browser": "it-password-flow"}})
+        cls.exchanger_secret = secrets.token_urlsafe(24)
+        realm["clients"].append({"clientId": "it-exchanger", "publicClient": False, "enabled": True,
+                                 "clientAuthenticatorType": "client-secret", "secret": cls.exchanger_secret,
+                                 "serviceAccountsEnabled": True, "standardFlowEnabled": False,
+                                 "directAccessGrantsEnabled": False, "protocol": "openid-connect"})
         realm["authenticationFlows"].append({
             "id": "it-password-flow", "alias": "it-password", "providerId": "basic-flow", "topLevel": True, "builtIn": False,
             "authenticationExecutions": [
@@ -322,6 +345,7 @@ class McpClientAdmission(unittest.TestCase):
             "enabled": True, "emailVerified": True, "attributes": {"party_id": [PARTY]},
             "credentials": [{"type": "password", "value": cls.password, "temporary": False},
                             passkey_credential(cls.passkey, cls.cred_id, 100)],
+            "clientRoles": {"account": ["manage-account", "view-profile"]},
             "realmRoles": ["ROLE_CUSTOMER", "offline_access", "default-roles-openbank-customers"]})
         realm["users"].append({
             "id": YOUNG_USER_ID, "username": YOUNG_USER, "email": YOUNG_USER, "firstName": "Young", "lastName": "It",
@@ -342,6 +366,7 @@ class McpClientAdmission(unittest.TestCase):
         run("docker", "buildx", "build", "--target", "extension-jar", "--output", f"type=local,dest={providers}",
             str(ROOT / "openbank-infra/docker/keycloak"))
         providers.chmod(0o755)
+        cls.admin_password = secrets.token_urlsafe(18)
         cls.container = "ob-mcp-admission-test-" + secrets.token_hex(6)
         cls.addClassCleanup(lambda: run("docker", "rm", "-f", cls.container))
         sca = f"http://host.docker.internal:{cls.sca.port}"
@@ -349,6 +374,7 @@ class McpClientAdmission(unittest.TestCase):
         run("docker", "run", "--detach", "--name", cls.container, "--memory=1g",
             "--add-host=host.docker.internal:host-gateway",
             "-e", "JAVA_OPTS_APPEND=-XX:ActiveProcessorCount=2", "-p", "127.0.0.1::8080",
+            "-e", "KC_BOOTSTRAP_ADMIN_USERNAME=it-admin", "-e", f"KC_BOOTSTRAP_ADMIN_PASSWORD={cls.admin_password}",
             "-v", f"{realm_file}:/opt/keycloak/data/import/realm.json:ro",
             "-v", f"{providers}:/opt/keycloak/providers:ro", image,
             "start-dev", "--import-realm", f"--features={features}",
@@ -744,6 +770,76 @@ class McpClientAdmission(unittest.TestCase):
         self.assertNotIn("code", resp.query())
         self.assertEqual(challenge["consumes"], 0, "an expired session never reaches the consume")
         self.assertFalse(challenge["consumed"])
+
+    def test_app_denial_ends_the_session(self):
+        # Review of #16672: only sca-service's specific "pending" code keeps the session waiting; a
+        # final refusal (here: the customer denied in the app) ends it at once, fail-closed.
+        browser, page, uri, _ = self.connect(L, L_CB)
+        challenge = self.sca.deny(uri)
+        resp = self.poll(browser, page)
+        self.assertNotIn("code", resp.query())
+        self.assertFalse(self.is_waiting_page(resp), "a denial must not keep the session waiting")
+        consumes = challenge["consumes"]
+        time.sleep(2.1)
+        self.assertNotIn("code", self.poll(browser, page).query())
+        self.assertEqual(challenge["consumes"], consumes, "a burned session never consumes again")
+
+    def test_no_exchange_may_target_the_mcp_resource(self):
+        # Review of #16672: whoever asks, a token for the MCP resource / audience is never minted
+        # by exchange. Control first: the same non-MCP client's self-exchange succeeds (v1), so the
+        # refusal below is the guard and not Keycloak's general refusal.
+        def exchange(**extra):
+            tok = self.post(self.token_url, {"grant_type": "client_credentials", "client_id": "it-exchanger",
+                                              "client_secret": self.exchanger_secret}).json()["access_token"]
+            return self.post(self.token_url, {
+                "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange", "client_id": "it-exchanger",
+                "client_secret": self.exchanger_secret, "subject_token": tok,
+                "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                "requested_token_type": "urn:ietf:params:oauth:token-type:access_token", **extra})
+        control = exchange()
+        self.assertEqual(control.status, 200, f"control: a non-MCP self-exchange must succeed: {control.text[:200]}")
+        for extra in ({"resource": RESOURCE}, {"audience": "openbank-mcp-service"}):
+            with self.subTest(**extra):
+                resp = exchange(**extra)
+                self.assertIn(resp.status, (400, 401, 403), resp.text[:200])
+                self.assertNotIn("access_token", resp.text)
+
+    def admin_token(self):
+        return self.post(f"{self.origin}/realms/master/protocol/openid-connect/token", {
+            "grant_type": "password", "client_id": "admin-cli", "username": "it-admin",
+            "password": self.admin_password}).json()["access_token"]
+
+    def test_customer_cannot_set_party_id(self):
+        # Review of #16672: party_id binds the MCP token and the SCA consume; the user profile
+        # declares it admin-only, so the account API (what the account console and the
+        # update-profile forms use) refuses or ignores a customer's attempt to set it.
+        browser = Browser(self.origin)
+        verifier = b64(secrets.token_bytes(32))
+        page = browser.request("GET", self.auth_url + "?" + urllib.parse.urlencode({
+            "client_id": "local-cookie-seeder", "response_type": "code", "redirect_uri": "https://client.test/x",
+            "scope": "openid", "code_challenge": b64(hashlib.sha256(verifier.encode()).digest()),
+            "code_challenge_method": "S256"}))
+        action = html.unescape(re.search(r'id="kc-form-login"[^>]*action="([^"]+)"', page.text).group(1))
+        code = browser.follow(browser.request("POST", action, {"username": USER, "password": self.password})).query()["code"][0]
+        user_token = self.post(self.token_url, {"grant_type": "authorization_code", "client_id": "local-cookie-seeder",
+                                                "code": code, "redirect_uri": "https://client.test/x",
+                                                "code_verifier": verifier}).json()["access_token"]
+        account = f"{self.iss}/account"
+        auth = {"Authorization": f"Bearer {user_token}", "Accept": "application/json"}
+        me = json.loads(urllib.request.urlopen(urllib.request.Request(account, headers=auth), timeout=30).read())
+        self.assertNotIn("party_id", me.get("attributes") or {}, "party_id must not even be visible to the user")
+        attempt = {**me, "attributes": {**(me.get("attributes") or {}), "party_id": [YOUNG_PARTY]}}
+        req = urllib.request.Request(account, data=json.dumps(attempt).encode(), method="POST",
+                                     headers={**auth, "Content-Type": "application/json"})
+        try:
+            status = urllib.request.urlopen(req, timeout=30).status
+        except urllib.error.HTTPError as error:
+            status = error.code
+        users = json.loads(urllib.request.urlopen(urllib.request.Request(
+            f"{self.origin}/admin/realms/openbank-customers/users?username={urllib.parse.quote(USER)}&exact=true",
+            headers={"Authorization": f"Bearer {self.admin_token()}"}), timeout=30).read())
+        self.assertEqual(users[0]["attributes"]["party_id"], [PARTY],
+                         f"party_id must be unchanged after a user attempt (account API answered {status})")
 
     def test_young_passkey_refused(self):
         browser = Browser(self.origin)

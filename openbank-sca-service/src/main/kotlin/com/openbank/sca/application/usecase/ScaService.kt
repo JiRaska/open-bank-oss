@@ -85,7 +85,12 @@ class ScaChallengeExpiredException(id: UUID) : RuntimeException("SCA challenge e
 class ScaChallengeMaxAttemptsException(id: UUID) : RuntimeException("Max attempts exceeded for challenge: $id")
 class ScaVerificationFailedException(id: UUID) : RuntimeException("SCA verification failed for challenge: $id")
 class ScaChallengeNotAwaitingException(id: UUID) : RuntimeException("SCA challenge is not awaiting a decision: $id")
-class ScaChallengeNotApprovedException(id: UUID) : RuntimeException("SCA challenge is not approved: $id")
+/**
+ * [status] is the challenge's status at the refusal: PENDING means "not decided yet" (a poller may
+ * keep waiting), anything else is final (denied, failed, cancelled).
+ */
+class ScaChallengeNotApprovedException(id: UUID, val status: ScaStatus? = null) :
+    RuntimeException("SCA challenge is not approved: $id")
 class ScaChallengeAlreadyConsumedException(id: UUID) : RuntimeException("SCA challenge already consumed: $id")
 class ScaChallengePartyMismatchException(id: UUID) : RuntimeException("SCA challenge belongs to another party: $id")
 class ScaConsumerScopeViolationException(id: UUID) :
@@ -479,7 +484,7 @@ class ScaService(
         ) {
             challenge = verifyDecoupled(challenge, now)
         }
-        if (challenge.status != ScaStatus.COMPLETED) throw ScaChallengeNotApprovedException(command.challengeId)
+        if (challenge.status != ScaStatus.COMPLETED) throw ScaChallengeNotApprovedException(command.challengeId, challenge.status)
         val authorised = linkingAuthorises(challenge.dynamicLinkingData, command, challenge.purpose)
         if (!authorised) throw ScaDynamicLinkingMismatchException(command.challengeId)
         if (!repository.markConsumed(command.challengeId)) {

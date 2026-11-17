@@ -75,13 +75,41 @@ public class McpClientGuardExecutor implements ClientPolicyExecutorProvider<Clie
             throw new ClientPolicyException(OAuthErrorException.UNAUTHORIZED_CLIENT,
                     "token exchange is not available to MCP clients");
         }
-        String subjectToken = context.getTokenExchangeContext().getParams().getSubjectToken();
+        // Whoever asks: no exchange may mint a token FOR the MCP resource / audience. MCP tokens
+        // come from the connect flow (fresh passkey + SCA) and nowhere else.
+        var params = context.getTokenExchangeContext().getParams();
+        java.util.Set<String> targets = mcpTargets();
+        if (McpConnectPolicy.targetsAny(params.getAudience(), targets)
+                || McpConnectPolicy.targetsAny(params.getResource(), targets)) {
+            LOG.warnf("refused token exchange targeting the MCP resource, requested by %s",
+                    requester == null ? "?" : requester.getClientId());
+            throw new ClientPolicyException(OAuthErrorException.INVALID_TARGET,
+                    "a token for the MCP resource cannot be obtained by exchange");
+        }
+        String subjectToken = params.getSubjectToken();
         String issuedFor = issuedFor(subjectToken);
         if (issuedFor != null && isMcp(session.getContext().getRealm().getClientByClientId(issuedFor))) {
             LOG.warnf("refused token exchange of a token issued to MCP client %s", issuedFor);
             throw new ClientPolicyException(OAuthErrorException.INVALID_REQUEST,
                     "a token issued to an MCP client cannot be exchanged");
         }
+    }
+
+    /** Every bound resource of an MCP client, and every audience its audience mapper adds. */
+    private java.util.Set<String> mcpTargets() {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        session.getContext().getRealm().getClientsStream().filter(McpClientGuardExecutor::isMcp).forEach(c -> {
+            String r = c.getAttribute(McpConnectPolicy.RESOURCE_ATTRIBUTE);
+            if (r != null && !r.isBlank()) {
+                out.add(r);
+            }
+            c.getProtocolMappersStream()
+                    .filter(m -> "oidc-audience-mapper".equals(m.getProtocolMapper()))
+                    .map(m -> m.getConfig() == null ? null : m.getConfig().get("included.custom.audience"))
+                    .filter(v -> v != null && !v.isBlank())
+                    .forEach(out::add);
+        });
+        return out;
     }
 
     /** The unverified {@code azp}, used only to REFUSE more; Keycloak verifies the token itself. */

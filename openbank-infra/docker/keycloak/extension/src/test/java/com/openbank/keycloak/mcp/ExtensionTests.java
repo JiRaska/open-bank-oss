@@ -100,8 +100,31 @@ public final class ExtensionTests {
         check("resource refused when the client is bound to none",
                 !McpConnectPolicy.resourceAllowed(List.of("https://a/mcp"), null));
 
+        java.util.Set<String> t = java.util.Set.of("https://a/mcp", "openbank-mcp-service");
+        check("exchange for the MCP resource refused", McpConnectPolicy.targetsAny(List.of("https://a/mcp"), t));
+        check("exchange for the MCP audience refused",
+                McpConnectPolicy.targetsAny(List.of("openbank-edge", "openbank-mcp-service"), t));
+        check("exchange for another audience allowed", !McpConnectPolicy.targetsAny(List.of("openbank-edge"), t));
+        check("exchange with no audience allowed", !McpConnectPolicy.targetsAny(null, t));
         check("tier attribute marks an MCP client", McpConnectPolicy.isMcpClient("H"));
         check("no tier attribute: not an MCP client", !McpConnectPolicy.isMcpClient(null));
+        String ok = "{\"id\":\"c1\",\"partyId\":\"p1\",\"purpose\":\"MCP_CLIENT_CONNECT\","
+                + "\"status\":\"COMPLETED\",\"consumedAt\":\"2026-11-17T10:00:00Z\"}";
+        eq("consume 200 attested", ScaClient.Outcome.CONSUMED, ScaClient.outcomeOf(200, ok, "c1", "p1"));
+        eq("consume 200 for another challenge", ScaClient.Outcome.REFUSED, ScaClient.outcomeOf(200, ok, "c2", "p1"));
+        eq("consume 200 for another party", ScaClient.Outcome.REFUSED, ScaClient.outcomeOf(200, ok, "c1", "p2"));
+        eq("consume 200 without consumedAt", ScaClient.Outcome.REFUSED,
+                ScaClient.outcomeOf(200, ok.replace("\"2026-11-17T10:00:00Z\"", "null"), "c1", "p1"));
+        eq("400 SCA_CHALLENGE_PENDING keeps waiting", ScaClient.Outcome.PENDING,
+                ScaClient.outcomeOf(400, "{\"code\":\"SCA_CHALLENGE_PENDING\"}", "c1", "p1"));
+        eq("400 VALIDATION_ERROR (denied/malformed) is terminal", ScaClient.Outcome.REFUSED,
+                ScaClient.outcomeOf(400, "{\"code\":\"VALIDATION_ERROR\"}", "c1", "p1"));
+        eq("400 without a body is terminal", ScaClient.Outcome.REFUSED, ScaClient.outcomeOf(400, "", "c1", "p1"));
+        eq("400 with garbage is terminal", ScaClient.Outcome.REFUSED, ScaClient.outcomeOf(400, "<html>", "c1", "p1"));
+        for (int st : new int[] {401, 403, 404, 409, 410, 500, 503}) {
+            eq("status " + st + " is terminal", ScaClient.Outcome.REFUSED,
+                    ScaClient.outcomeOf(st, "{\"code\":\"SCA_CHALLENGE_PENDING\"}", "c1", "p1"));
+        }
         eq("waiting page escapes markup", "&lt;script&gt;&amp;&quot;&#39;",
                 McpWithheldCodeAuthenticator.escape("<script>&\"'"));
     }
