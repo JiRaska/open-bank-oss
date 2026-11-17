@@ -34,14 +34,18 @@ class AuditAuthzWiringIT {
             server.createContext("/v1/data/openbank/rest/allow") { exchange ->
                 exchange.use {
                     val input = ObjectMapper().readTree(exchange.requestBody)["input"]
-                    // AuditEvidenceBundleIT shares this profile (one Quarkus boot, not two: with its own
-                    // profile the full suite ran out of test heap) and needs its route
-                    // to reach the resource; the real evidence rule is proven by the rego tests.
-                    val allowed = input["action"].asText() == "audit.evidence.reconstruct" ||
-                        (
-                            input["action"].asText() == "audit.verify" &&
-                                input["principal"]["roles"].any { it.asText() == "ROLE_AUDITOR" }
-                            )
+                    // AuditEvidenceBundleIT and AuditInvestigationJourneyE2E share this profile (one
+                    // Quarkus boot, not three: with its own profile the full suite ran out of test
+                    // heap) and need their routes to reach the resource; the real rules are proven by
+                    // the rego tests. The edge-proxied customer-transparency read is granted to any
+                    // authenticated principal (the edge is what narrows it).
+                    val action = input["action"].asText()
+                    val auditor = input["principal"]["roles"].any { it.asText() == "ROLE_AUDITOR" }
+                    val allowed = when (action) {
+                        "audit.evidence.reconstruct", "audit.customerRead" -> true
+                        "audit.verify", "audit.trail.inspect" -> auditor
+                        else -> false
+                    }
                     val response = "{\"result\":{\"allow\":$allowed}}".toByteArray()
                     exchange.responseHeaders.add("Content-Type", "application/json")
                     exchange.sendResponseHeaders(200, response.size.toLong())

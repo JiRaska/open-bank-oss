@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.5](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.11.4...dispute-service-v0.11.5) (2026-11-17)
+
+
+### Bug Fixes
+
+* **dispute:** hash the evidence id again in the tamper-evident chain ([#16533](https://github.com/JiRaska/open-bank-oss/issues/16533)) ([8e87e38](https://github.com/JiRaska/open-bank-oss/commit/8e87e385267d25d04dda56a6917bb505717a20ce))
+
 ## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.11.3...dispute-service-v0.11.4) (2026-11-06)
 
 
