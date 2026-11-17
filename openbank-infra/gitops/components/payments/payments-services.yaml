@@ -42,7 +42,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-transaction-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "c34980acbfc3f311" # transaction-opa-bundle
+        openbank.tech/policy-checksum: "b0c6633f1ce645b3" # transaction-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -69,6 +69,10 @@ spec:
             # migrations; same shape as account-service's and ledger-service's 8443 listeners.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
@@ -424,7 +428,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-payment-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "290dadb66492290e"
+        openbank.tech/policy-checksum: "70cb9a86f609a8ff"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -451,7 +455,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-9e765663
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-44fff644@sha256:9fba769ef8ab40d6830fc46c7fc6aba07d6a9537cc1e6d557389c3158d02d8d6
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -827,7 +831,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-domestic-payment-opa-bundle.sh via the trailing marker
         # comment (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "6b817b7864ac1933" # domestic-payment-opa-bundle
+        openbank.tech/policy-checksum: "3680653e9ce40518" # domestic-payment-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -840,7 +844,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-d159b245
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-3cf5c536@sha256:240defc36329096bb52593e5d0f90c2c145a401eb4c0b59818380cb59bf3339b
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -853,6 +857,10 @@ spec:
           env:
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: "/mnt/internal-tls/tls.crt"
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: "/mnt/internal-tls/tls.key"
             - name: QUARKUS_HTTP_SSL_PORT
@@ -1230,7 +1238,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-instant-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "ce98aed080c94a72"
+        openbank.tech/policy-checksum: "5639d13d2e53f92f"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1243,7 +1251,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-fd1d0136@sha256:a4998d157a4aa66eee85ce884c64ce7f2a069b3a3aecdb8a8524181f4a8bcac0
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-44fff644@sha256:2395a1f1b1e7f24dd52cbc48dfcc940813440dba4539aa0412829f8677576e69
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1571,7 +1579,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-clearing-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "d003756e25e0dd5a" # clearing-opa-bundle
+        openbank.tech/policy-checksum: "abab25a289563258" # clearing-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1582,7 +1590,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-548fa683@sha256:c7b9dd80cfba44398edcec7b264fd3eddb104c67f7dff8e0c431e63c9bf4ce4a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-44fff644@sha256:5119d729a791b3083ad38d6a9193d7b4cf85af261a825bb6c2e19d30d9c720e6
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1902,7 +1910,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (ADR-0034). Value is stamped by
         # gen-standing-order-opa-bundle.sh — do not hand-edit.
-        openbank.tech/policy-checksum: "e6e602163a3b0d42" # standing-order-opa-bundle
+        openbank.tech/policy-checksum: "26ace63f65ff4352" # standing-order-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1925,6 +1933,10 @@ spec:
           env:
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: "/mnt/internal-tls/tls.crt"
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: "/mnt/internal-tls/tls.key"
             - name: QUARKUS_HTTP_SSL_PORT
@@ -2217,7 +2229,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-issuance-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "65b90f58ac072e92"
+        openbank.tech/policy-checksum: "2fca3015be797311"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2228,7 +2240,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-e435ad0a@sha256:8bca34753d6daa0313f5ba12fadf2e022ca86d234824f2c39101c927a334ae90
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-3cf5c536@sha256:a8dca49deb8c1a96c869309aaa7f5fdb66de589a2423fe5225545074e784888f
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2327,15 +2339,11 @@ spec:
             # every other service's rollout convention. Flip to true only after an observation
             # window with a clean advisory report.
             #
-            # Advisory deliberately (#8470): ADR-0283 phase 0 makes this service money-path, so
-            # the money-path authz-enforce gate now reads this value. It stays false because the
-            # observation window above has not run — the card authorisation decision only started
-            # shipping with ADR-0283, so there is no advisory report to confirm an empty
-            # "would DENY" population yet. Flipping on the same PR that declares the service
-            # money-path would enforce against a policy nobody has watched decide.
-            # Flip target: 2026-10-05, with the other three advisory money-path services.
+            # ENFORCED (#8470): the advisory window ran. Every would-DENY in the decision log was
+            # a viewer-role read that the current bundle allows, and card-processing's own client
+            # is allowed the card authorisation decision.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
@@ -2521,7 +2529,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-processing-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "37367b2abaa448d1"
+        openbank.tech/policy-checksum: "9b0844432eccc7f3"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2791,7 +2799,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-settlement-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "52e6ff480b05dd90" # settlement-opa-bundle
+        openbank.tech/policy-checksum: "1bead952d8baf302" # settlement-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2802,7 +2810,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-379e548b@sha256:82c3e9479f7b37bb18420d15b33fde67a22abe52c3c37c4e5b9babee7f06d3b5
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-3cf5c536@sha256:3d46e979a462c6b991afe09a36dc39659b8ba4649a802e1b733ef50b57efb524
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2914,6 +2922,14 @@ spec:
             # fine-grained PEP. The money-path canary analysis (openbank-money-path-canary)
             # aborts the rollout if enforce regresses the error rate.
             - name: AUTHZ_ENFORCE
+              value: "true"
+            # Four-eyes ENFORCED (ADR-0155, #15748): settlement.create (rules.yaml
+            # four_eyes.actions) parks an operator's origination with 202 + a durable
+            # PostgresApprovalStore approval until a DIFFERENT operator decides it in the
+            # admin-ui /approvals/settlement workbench. Safe to enforce: the only allow reason
+            # (operator-settlement-write) excludes every service-account, so no machine caller
+            # can be paused. Gate: four-eyes-enforce-deployed (check-four-eyes-enforce.py).
+            - name: AUTHZ_FOUR_EYES_ENFORCE
               value: "true"
           startupProbe:
             tcpSocket:
@@ -3255,7 +3271,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-swift-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "8c2f07d9ecd4fbff"
+        openbank.tech/policy-checksum: "79c4af8b28733d90"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -3348,6 +3364,12 @@ spec:
             # ADR-0108: transaction-service for post-ACSC settlement booking.
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
+            # ADR-0032: sanctions gate before every MT103 release, and the AML case store it
+            # opens a case in (8443 mTLS, client certificate swift-service-internal-tls).
+            - name: SANCTIONS_SERVICE_URL
+              value: http://sanctions-service.sanctions.svc:8123
+            - name: AML_SERVICE_URL
+              value: https://aml-service.aml.svc:8443
             # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
             # enables the @Authorize HTTP interceptor to enforce decisions from
             # data.openbank.rest.allow. There is no @RolesAllowed outer gate on
@@ -3387,6 +3409,9 @@ spec:
               readOnly: true
             - name: kafka-truststore
               mountPath: /mnt/kafka/truststore
+              readOnly: true
+            - name: aml-tls
+              mountPath: /mnt/aml-tls
               readOnly: true
           resources:
             requests:
@@ -3470,6 +3495,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: aml-tls
+          secret:
+            secretName: swift-service-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: kafka-keystore
@@ -3584,7 +3613,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-vop-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "939a1992abda26d2"
+        openbank.tech/policy-checksum: "0b98961a93d1b3e6"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -3596,7 +3625,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-548fa683@sha256:c4597f02fbb1ecaedf1a4d85ffa54963c7b09f2fa3aa66e1c848c18384c3ed49
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-3cf5c536@sha256:f2d31bea08c9d38fb1bb8a5dde3352a1ece696d4412bb557c9f61672d7e81c43
 
           imagePullPolicy: IfNotPresent
           ports:

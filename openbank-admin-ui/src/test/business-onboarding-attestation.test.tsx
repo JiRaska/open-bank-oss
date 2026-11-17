@@ -61,7 +61,7 @@ const superseded = {
     id: 'p1', scheme: 'CZ_ICO', identifier: '45274649',
     ruleTextHash: 'a'.repeat(64), ruleText: 'dva jednatelé společně',
     parsedMode: 'JOINT_N', parsedSigners: 2,
-    confirmedSigners: 2, confirmedRoles: [],
+    confirmedSigners: 2, confirmedRoles: [], confirmedMode: 'JOINT_N',
     attestedBy: 'operator-anna', attestedAt: '2026-09-01T08:00:00Z',
     supersededAt: null, note: null,
   },
@@ -116,6 +116,21 @@ describe('business onboarding representation review', () => {
     const sent = JSON.parse(posted[0])
     expect(sent.ruleTextHash).toBe('a'.repeat(64))
     expect(sent.confirmedSigners).toBe(2)
+    expect(sent).not.toHaveProperty('confirmedMode')
+  })
+
+  it('records the mode selected by the human while a parser suggestion stays unselected', async () => {
+    const posted: string[] = []
+    vi.stubGlobal('fetch', mockFetch(unattested, body => { posted.push(body); return new Response('{}', { status: 200 }) }))
+    renderPage()
+
+    const mode = await screen.findByRole('combobox', { name: 'Confirmed representation mode' }) as HTMLSelectElement
+    expect(mode.value).toBe('')
+    fireEvent.change(mode, { target: { value: 'JOINT_ALL' } })
+    fireEvent.click(screen.getByLabelText('Confirm the representation rule'))
+
+    await waitFor(() => expect(posted).toHaveLength(1))
+    expect(JSON.parse(posted[0])).toMatchObject({ confirmedMode: 'JOINT_ALL', ruleTextHash: 'a'.repeat(64) })
   })
 
   it('renders a 409 as "the register text changed", never as a generic failure', async () => {
@@ -139,6 +154,64 @@ describe('business onboarding representation review', () => {
     expect(alert).toMatch(/must not be reused/)
     expect(alert).toMatch(/operator-anna/)
     expect(alert).toMatch(/dva jednatelé společně/)
+    const mode = screen.getByRole('combobox', { name: 'Confirmed representation mode' }) as HTMLSelectElement
+    expect(mode.value).toBe('')
+  })
+
+  it('opens an active case on demand and publishes the exact currently displayed confirmation', async () => {
+    const attestationId = '97276023-5b59-408e-a857-ab1b9eb5b8dc'
+    const active = { ...reviewCase, status: 'ACTIVE', signedCount: 2 }
+    const attested = {
+      ...unattested, state: 'ATTESTED',
+      attestation: { ...superseded.previous, id: attestationId, confirmedMode: 'JOINT_N' },
+    }
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return Response.json({ attestationId })
+      if (url.includes('/representation/')) return Response.json(attested)
+      const status = new URL(url, 'http://x').searchParams.get('status')
+      return Response.json(status === 'ACTIVE' ? [active] : [reviewCase])
+    })
+    vi.stubGlobal('fetch', fetcher)
+    renderPage()
+
+    await screen.findByLabelText('Confirm the representation rule')
+    expect(screen.queryByRole('button', { name: 'Publish rule for delegations' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Active cases' }))
+    const view = await screen.findByRole('button', { name: 'View representation' })
+    expect(screen.queryByRole('button', { name: 'Publish rule for delegations' })).toBeNull()
+    fireEvent.click(view)
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish rule for delegations' }))
+    await screen.findByText('Representation rule published.')
+
+    const publish = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')
+    expect(publish?.[0]).toContain(`/api/v1/kyb/cases/${active.id}/statutory-representation`)
+    expect(JSON.parse(String(publish?.[1]?.body))).toEqual({ attestationId })
+  })
+
+  it('reports unavailable evidence and allows the reviewer to retry publication', async () => {
+    const attestationId = '97276023-5b59-408e-a857-ab1b9eb5b8dc'
+    const active = { ...reviewCase, status: 'ACTIVE' }
+    const attested = {
+      ...unattested, state: 'ATTESTED',
+      attestation: { ...superseded.previous, id: attestationId, confirmedMode: 'JOINT_ALL' },
+    }
+    let attempts = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return ++attempts === 1
+        ? new Response(null, { status: 404 })
+        : Response.json({ attestationId })
+      return url.includes('/representation/') ? Response.json(attested) : Response.json([active])
+    }))
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: 'Active cases' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'View representation' }))
+    const button = await screen.findByRole('button', { name: 'Publish rule for delegations' })
+    fireEvent.click(button)
+    await screen.findByText(/The signed evidence is incomplete or the confirmation changed/)
+    expect(screen.queryByText('Representation rule published.')).toBeNull()
+    fireEvent.click(button)
+    await screen.findByText('Representation rule published.')
+    expect(attempts).toBe(2)
   })
 
   it('warns that naming offices sends the signatories to manual review', async () => {
@@ -183,7 +256,7 @@ describe('business onboarding representation review', () => {
         ruleTextHash: 'c'.repeat(64),
         ruleText: 'předseda představenstva spolu s jedním členem představenstva',
         parsedMode: 'SOLE', parsedSigners: 1,
-        confirmedSigners: 2, confirmedRoles: ['predseda', 'clen'],
+        confirmedSigners: 2, confirmedRoles: ['predseda', 'clen'], confirmedMode: 'JOINT_N',
         attestedBy: 'operator-anna', attestedAt: '2026-09-01T08:00:00Z',
         supersededAt: null, note: null,
       },
@@ -201,6 +274,7 @@ describe('business onboarding representation review', () => {
     const sent = JSON.parse(posted[0])
     expect(sent.confirmedSigners).toBe(2)
     expect(sent.confirmedRoles).toEqual(['predseda', 'clen'])
+    expect(sent.confirmedMode).toBe('JOINT_N')
   })
 
   it('refreshes the panel after a 409 instead of leaving the operator re-posting a dead hash', async () => {

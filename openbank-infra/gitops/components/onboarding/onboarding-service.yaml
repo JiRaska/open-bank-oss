@@ -45,7 +45,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-onboarding-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "4162feba0a965815"
+        openbank.tech/policy-checksum: "e81fd513fc24532b"
       labels:
         app.kubernetes.io/name: onboarding-service
         app.kubernetes.io/part-of: onboarding
@@ -67,13 +67,11 @@ spec:
             - name: management
               containerPort: 8085
           env:
-            # ADVISORY on purpose (ADR-0034 Phase 5). Every endpoint now carries @Authorize and
-            # the `opa` sidecar below serves onboarding_rest_ext.rego, so each request is decided
-            # and logged while @RolesAllowed (JWT roles) still does the enforcing. Flip to "true"
-            # only after the decision log shows no would-DENY for the cockpit's real callers —
-            # an owner decision, not part of the change that wired the PDP.
+            # ENFORCED (ADR-0034 Phase 5). Every endpoint carries @Authorize and the `opa` sidecar
+            # below serves onboarding_rest_ext.rego; the advisory window logged no would-DENY for
+            # the cockpit's real callers before this flip.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://onboarding-db-rw.onboarding.svc:5432/openbank_onboarding
             - name: QUARKUS_DATASOURCE_REACTIVE_URL

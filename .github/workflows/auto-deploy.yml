@@ -124,7 +124,7 @@ on:
           listed services at the current HEAD, re-drive every stranded service to the correct
           per-service commit, using the same logic as the every-3h schedule tick. This is the
           safe way to recover stale gitops tags when the current HEAD did not change those
-          services. When reconcile is true, `services` is ignored and `codeploy` is not used.
+          services. When reconcile is true, a non-empty `services` is refused (use `reconcile_services`) and `codeploy` is not used.
         type: boolean
         required: false
         default: false
@@ -340,6 +340,11 @@ jobs:
             # Reconcile on demand: use the same logic as the schedule tick, which picks the
             # correct per-service commit instead of forcing everything onto the current HEAD.
             if [ "${INPUT_RECONCILE}" = "true" ]; then
+              if [ -n "${INPUT_SERVICES:-}" ]; then
+                # Silently dropping it once ran a whole-fleet reconcile the caller meant to narrow.
+                echo "::error::reconcile=true ignores 'services'; narrow a reconcile with reconcile_services instead"
+                exit 1
+              fi
               SERVICES_JSON="$(reconcile_candidates)"
               if [ "$SERVICES_JSON" = "[]" ] || [ -z "$SERVICES_JSON" ]; then
                 if [ -n "${INPUT_RECONCILE_SERVICES:-}" ]; then
@@ -1551,7 +1556,7 @@ jobs:
       - name: Open gitops PR
         id: gitops_pr
         if: steps.rewrite.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@15733dbdfeedb4f7fdb73d13c6f5ac83b710fab8 # v8.1.2
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8.1.3
         with:
           # Preference order, and why each rung exists:
           #   1. App installation token — triggers required checks AND gets its commit signed.
@@ -1610,6 +1615,9 @@ jobs:
       # A deferred PR may carry images from an older source commit. Check every proposed pin
       # against the current main build inputs before the PR can close older proposals or arm
       # auto-merge. This also catches a source commit that aged while the image was building.
+      # Staleness is per image (#15977): a stale pin is reverted on the PR branch in one signed
+      # App commit and the fresh pins proceed; with no fresh pin left the PR is closed. A false
+      # tag/digest pair, a missing digest or an unreadable diff still refuses the whole PR.
       - name: Verify GitOps image source freshness
         if: steps.gitops_pr.outputs.pull-request-number != ''
         env:
@@ -1622,8 +1630,19 @@ jobs:
           # Restore bounded history and check against current main, as the flusher does.
           git fetch --depth=100 origin main
           git reset --hard origin/main
+          rc=0
           gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            | python3 .github/scripts/deploy-window.py verify --root . --require-digest
+            | python3 .github/scripts/deploy-window.py prune --root . --number "$PR_NUMBER" \
+                --require-digest || rc=$?
+          case "$rc" in
+            0) ;;
+            3) echo "::notice::stale pins pruned from #${PR_NUMBER}; its fresh pins proceed" ;;
+            4)
+              gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment \
+                "Closing: every image pin in this deploy PR went stale while it was built (main changed those services' build inputs), so nothing in it is safe to deploy. The next build on main opens fresh pins."
+              exit 1 ;;
+            *) exit 1 ;;
+          esac
 
       # Close every OLDER open deploy PR now that this one exists. A deploy PR rewrites an image tag
       # to the newest build, so two are never additive and both edit the same manifest line — left

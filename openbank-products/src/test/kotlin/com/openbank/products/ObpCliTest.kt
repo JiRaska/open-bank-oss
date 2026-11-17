@@ -4,6 +4,7 @@
 
 package com.openbank.products
 
+import com.openbank.libs.audit.CanonicalJson
 import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.finance.deposit.FinanceProductArithmetic
 import com.openbank.libs.product.ir.IrDayCount
@@ -36,6 +37,42 @@ class ObpCliTest {
     @Suppress("UNCHECKED_CAST")
     private fun json(text: String): Map<String, Any?> =
         IrJson.parse(text.lines().last { it.isNotBlank() }) as Map<String, Any?>
+
+    @Test
+    fun `fincrime proof runs both bundled domains and reports deterministic replay evidence`() {
+        val (code, out, err) = run("fincrime", "proof")
+        assertThat(code).isEqualTo(Obp.EXIT_OK)
+        assertThat(err).isEmpty()
+        assertThat(run("fincrime", "proof").second).isEqualTo(out)
+        val report = json(out)
+        assertThat(out).isEqualTo(CanonicalJson.write(report) + "\n")
+        assertThat(report["ok"]).isEqualTo(true)
+        assertThat(report["synthetic"]).isEqualTo(true)
+        val (aml, fraud) = (report["domains"] as List<*>).map { it as Map<*, *> }
+        assertThat(listOf(aml["domain"], fraud["domain"])).containsExactly("AML", "FRAUD")
+        assertThat(listOf(aml["matchedReason"], fraud["matchedReason"]))
+            .containsExactly("SYNTHETIC_PATTERN", "BURST")
+        assertThat(listOf(aml["matchedEffect"], fraud["matchedEffect"])).containsExactly("EXPEDITED", "REVIEW")
+        listOf(aml, fraud).forEach { domain ->
+            assertThat(domain["evaluatedRules"].toString()).isEqualTo("2")
+            assertThat(domain["behaviorChanged"]).isEqualTo(true)
+            assertThat(domain["missingInput"]).isEqualTo("MISSING_FEATURE")
+            assertThat(domain["inputHash"] as String).matches("[a-f0-9]{64}")
+            assertThat(domain["baselineHash"] as String).matches("[a-f0-9]{64}")
+            assertThat(domain["candidateHash"] as String).matches("[a-f0-9]{64}").isNotEqualTo(domain["baselineHash"])
+        }
+    }
+
+    @Test
+    fun `fincrime proof rejects external inputs and unknown actions`() {
+        listOf(listOf("fincrime"), listOf("fincrime", "proof", "input.json"), listOf("fincrime", "activate"))
+            .forEach { args ->
+                val (code, out, err) = run(*args.toTypedArray())
+                assertThat(code).isEqualTo(Obp.EXIT_USAGE)
+                assertThat(out).isEmpty()
+                assertThat(err).contains("usage: obp fincrime proof")
+            }
+    }
 
     @Test
     fun `lint accepts a reference product and a file, and rejects an invalid document`(@TempDir dir: Path) {

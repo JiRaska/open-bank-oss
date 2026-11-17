@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Dispute Service API
-  version: 1.5.0
+  version: 1.6.0
   description: >-
     Payment dispute management — open, evidence, escalate, withdraw, resolve, timeline — plus
     regulatory complaints handling with a statutory deadline clock (ADR-0085). Evidence is a
@@ -457,6 +457,13 @@ components:
           type: string
           readOnly: true
           nullable: true
+        hashVersion:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: >-
+            Canonical form recordHash was computed under; null for items stamped before hash
+            versioning, whose content the verify endpoint cannot recompute.
 
     ResolveDisputeRequest:
       type: object
@@ -485,10 +492,16 @@ components:
           type: boolean
         itemsChecked:
           type: integer
+          description: Items whose hash was recomputed and matched.
         firstBrokenEvidenceId:
           type: string
           format: uuid
           nullable: true
+        legacyItems:
+          type: integer
+          description: >-
+            Items stamped before hash versioning (a prefix of the chain). Their linkage is checked
+            but their content cannot be recomputed, so `intact` never vouches for it.
 
     FileComplaintRequest:
       type: object

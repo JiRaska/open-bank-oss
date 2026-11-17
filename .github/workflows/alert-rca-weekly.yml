@@ -14,9 +14,13 @@
 name: Weekly critical-alert RCA review
 
 on:
-  schedule:
-    # ADR-0241 D3: Mondays at 10:00 UTC.
-    - cron: "0 10 * * 1"
+  # Schedule DISABLED 2026-11-16 (issue #6432 / #16022, review by 2027-01-15). Its only
+  # producer, standing-critical-digest.yml, has had its own schedule disabled since
+  # 2026-11-14 (#6432): Alertmanager is not reachable read-only from a GitHub-hosted runner,
+  # so no observation envelopes are archived and every weekly run here could only fold an
+  # empty window into a "NO OBSERVATIONS" PR (#15414, #16535). Re-enable the Monday cron
+  # (ADR-0241 D3: "0 10 * * 1") only after the in-cluster read-only digest (follow-up to
+  # #6432) lands and produces envelopes. Manual dispatch stays so the path can be proven.
   workflow_dispatch:
 
 permissions:
@@ -33,9 +37,10 @@ jobs:
     permissions:
       contents: read
       actions: read # list and download successful daily digest runs
+      id-token: write # GitHub OIDC -> read-only role on the in-cluster digest's envelope store (ADR-0382)
     timeout-minutes: 15
     outputs:
-      observation_count: ${{ steps.download.outputs.count }}
+      observation_count: ${{ steps.s3.outputs.count || steps.download.outputs.count }}
       ledger_exit: ${{ steps.fold.outputs.exit_code }}
       requires_writer: ${{ steps.decision.outputs.requires_writer }}
     steps:
@@ -72,6 +77,43 @@ jobs:
             fi
           done
           echo "downloaded $count observation run(s) since $since"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      # ADR-0382 / #6432: the digest is now produced IN-CLUSTER and its envelopes land in S3.
+      # Skipped until the owner provisions the reader role and sets the repository variable, so
+      # the job keeps today's behaviour (and its zero-envelope failure) until the path is live.
+      - name: Configure AWS credentials for the digest envelope store (GitHub OIDC)
+        if: vars.ALERT_DIGEST_READER_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.ALERT_DIGEST_READER_ROLE_ARN }}
+          aws-region: eu-north-1
+          unset-current-credentials: true
+
+      - name: Download the last 7 days of in-cluster digest envelopes
+        id: s3
+        if: vars.ALERT_DIGEST_READER_ROLE_ARN != ''
+        env:
+          DIGEST_BUCKET: openbank-sandbox-alert-digest
+          PRIOR_COUNT: ${{ steps.download.outputs.count }}
+        run: |
+          set -euo pipefail
+          count="$PRIOR_COUNT"
+          # Only a SUCCESSFUL in-cluster run uploads an envelope (the CronJob is fail-closed), so
+          # a missing day is a missing object — never an empty observation.
+          for back in 0 1 2 3 4 5 6; do
+            day="$(date -u -d "$back days ago" +%Y-%m-%d)"
+            key="observations/${day}/alert-observation.json"
+            if aws s3api head-object --bucket "$DIGEST_BUCKET" --key "$key" >/dev/null 2>&1; then
+              mkdir -p "observations/s3-${day}"
+              aws s3api get-object --bucket "$DIGEST_BUCKET" --key "$key" \
+                "observations/s3-${day}/alert-observation.json" >/dev/null
+              count=$((count + 1))
+            else
+              echo "::warning::no in-cluster digest envelope for ${day}"
+            fi
+          done
+          echo "observation count including in-cluster envelopes: $count"
           echo "count=$count" >> "$GITHUB_OUTPUT"
 
       - name: Fold observations into the ledger and render the RCA log
@@ -125,7 +167,7 @@ jobs:
         if: steps.decision.outputs.requires_writer == 'true'
         env:
           SOURCE_SHA: ${{ github.sha }}
-          OBSERVATION_COUNT: ${{ steps.download.outputs.count }}
+          OBSERVATION_COUNT: ${{ steps.s3.outputs.count || steps.download.outputs.count }}
           LEDGER_EXIT: ${{ steps.fold.outputs.exit_code }}
         run: |
           set -euo pipefail

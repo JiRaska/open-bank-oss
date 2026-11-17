@@ -540,7 +540,13 @@ class UpstreamClient {
     // Idempotency-aware POST: forwards the caller's Idempotency-Key (required by some upstreams,
     // e.g. domestic-payment) so an app retry replays rather than duplicates. A blank/absent key
     // falls back to a generated one so the upstream contract is always satisfied.
-    private fun post(uri: URI, partyId: String, body: String, idempotencyKey: String?): Response {
+    private fun post(
+        uri: URI,
+        partyId: String,
+        body: String,
+        idempotencyKey: String?,
+        keepRetryAfter: Boolean = false,
+    ): Response {
         val request = upstreamRequest()
             .uri(uri)
             .header("Authorization", "Bearer ${serviceToken()}")
@@ -551,11 +557,25 @@ class UpstreamClient {
             .timeout(Duration.ofMillis(requestTimeoutMs))
             .POST(HttpRequest.BodyPublishers.ofString(body)).build()
         val r = http.send(request, HttpResponse.BodyHandlers.ofString())
-        return jsonResponse(r)
+        if (!keepRetryAfter) return jsonResponse(r)
+        val retryAfter = r.headers().firstValue("Retry-After").orElse(null) ?: return jsonResponse(r)
+        return Response.fromResponse(jsonResponse(r)).header("Retry-After", retryAfter).build()
     }
 
     fun post(url: String, partyId: String, body: String, idempotencyKey: String? = null): Response = try {
         post(validatedUri(url), partyId, body, idempotencyKey)
+    } catch (e: Exception) {
+        Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * [post] that also keeps the upstream's `Retry-After`, for the one caller that honours it
+     * (the reservation-bound delegated create, #16000). Every other route keeps today's headers.
+     */
+    fun postKeepingRetryAfter(url: String, partyId: String, body: String, idempotencyKey: String): Response = try {
+        post(validatedUri(url), partyId, body, idempotencyKey, keepRetryAfter = true)
     } catch (e: Exception) {
         Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
         Response.status(502).entity("""{"error":"upstream unavailable"}""")

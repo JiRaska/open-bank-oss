@@ -201,6 +201,23 @@ test_ledger_seed_identity_rule_does_not_admit_the_shared_client if {
 		with data.rules as rules_mock
 }
 
+transfer_verifier_m2m := {"service_account": true, "client_id": "openbank-synthetic-transfer-verifier", "type": "HUMAN", "id": "service-account-openbank-synthetic-transfer-verifier", "roles": ["ROLE_API"]}
+
+test_transfer_verifier_can_only_read_its_proof if {
+	decision := rest.allow with input as {"principal": transfer_verifier_m2m, "action": "ledger.synthetic-transfer.prove"}
+		with data.rules as rules_mock
+	decision.allow == true
+	every action in {"ledger.read", "ledger.list", "ledger.create", "ledger.reverse"} {
+		rest.allow == false with input as {"principal": transfer_verifier_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_transfer_proof_rejects_other_machine_identity if {
+	rest.allow == false with input as {"principal": services_m2m, "action": "ledger.synthetic-transfer.prove"}
+		with data.rules as rules_mock
+}
+
 # --- #10486: interest-service's own machine identity (ROLE_API only) ---
 # The identity carries ROLE_API and nothing else, exactly as the realm template grants it. The
 # matrix mock grants ROLE_OPERATOR only, so no role-based reason can admit these principals: the

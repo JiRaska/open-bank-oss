@@ -22,7 +22,7 @@ info:
   # 1.23 -> 1.24 (ADR-0341 D1, #668): additive — the Account response exposes the optional
   # productRevision pin (absent on accounts opened before it existed); open-account documents
   # 422 PRODUCT_REVISION_NOT_PUBLISHED and 503 PRODUCT_CATALOG_UNAVAILABLE (fail-closed on the pin).
-  version: 1.27.0
+  version: 1.28.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -542,6 +542,98 @@ paths:
                     description: Present only when `outcome` is DELEGATED.
         '400':
           description: amount supplied without a currency, or not a valid monetary value
+
+  /api/v1/accounts/{accountId}/delegation/authority-facts:
+    get:
+      tags: [Accounts]
+      summary: Active delegation grants held by a party over the account
+      description: >-
+        The grant FACTS a payment rail needs to answer its own admission-chain authority
+        step (ADR-0375 D1), as opposed to `delegation/payment-authorization`, which answers
+        the whole question for the edge pre-flight. The chain's authority step is a pure
+        function whose capability is an ARGUMENT, so a rail asking about the capability its
+        own action names cannot be served by an endpoint that hard-codes PAYMENT_ONLY.
+
+
+        Returns every ACTIVE, in-window, ACCOUNT-scoped grant held by `partyId` whose
+        grantor owns the account. Ownership is applied here because the caller does not
+        know the owner, and a projection row keyed on (accountId, granteePartyId) alone
+        would be authority in itself.
+
+
+        Deliberately NOT represented: the legacy `account_authorizations` arm that
+        `delegation/payment-authorization` still ORs in. A party permitted solely by a
+        legacy row is absent from these facts. That divergence is instrumented by the
+        dual-run disagreement counter.
+
+
+        An unknown account answers 200 with an empty list, never 404 — a distinguishable
+        not-found would make this an existence oracle. Authorize action `account.read`.
+      operationId: getDelegationAuthorityFacts
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: partyId
+          in: query
+          required: true
+          description: >-
+            The party whose authority is in question. Resolved by the caller from its own
+            authenticated identity — never from a customer-supplied request body.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The active grants, possibly empty
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accountId, partyId, grants]
+                properties:
+                  accountId:
+                    type: string
+                    format: uuid
+                  partyId:
+                    type: string
+                    format: uuid
+                  ownerPartyId:
+                    type: string
+                    format: uuid
+                    nullable: true
+                    description: >-
+                      The account's owner, read in the SAME snapshot as the grants, so a caller
+                      decides the owner case and the delegated case from one answer. Null exactly
+                      when the account is unknown — where `grants` is empty too, so the pair stays
+                      indistinguishable from an existing account with no grant.
+                  grants:
+                    type: array
+                    items:
+                      type: object
+                      required: [grantId, grantorPartyId, capabilities, validFrom]
+                      properties:
+                        grantId:
+                          type: string
+                          format: uuid
+                          description: >-
+                            Names the grant in the chain's ALLOW evidence. A grant is
+                            revocable, so nothing after the fact can reconstruct which
+                            one was live when the money moved.
+                        grantorPartyId:
+                          type: string
+                          format: uuid
+                        capabilities:
+                          type: array
+                          items:
+                            type: string
+                        validFrom:
+                          type: string
+                          format: date-time
+                        validTo:
+                          type: string
+                          format: date-time
+                          description: Absent for an open-ended grant.
+        '400':
+          description: partyId was not supplied
 
   /api/v1/accounts/{accountId}/savings-goal/delegation/proposals:
     post:

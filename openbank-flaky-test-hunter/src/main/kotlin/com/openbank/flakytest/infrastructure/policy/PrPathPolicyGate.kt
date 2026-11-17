@@ -45,7 +45,9 @@ class PrPathPolicyGate @Inject constructor(
             return PrPathDecision.Denied(PrPathGateVocabulary.REASON_POLICY_GATE_DISABLED)
         }
         val branch = GitHubProposalPort.prBranchFor(finding.id)
-        when (val charter = charterVerifier.checkPrOpenGrant()) {
+        // The ref both layers authorize is the ref the writer targets — one config read, one value.
+        val baseRef = config.writerBaseRef().ref
+        when (val charter = charterVerifier.checkPrOpenGrant(baseRef)) {
             is CharterGrant.Denied -> {
                 log.warnf("In-process charter check denied the PR path: %s", charter.reason)
                 return PrPathDecision.Denied(charter.reason)
@@ -53,7 +55,7 @@ class PrPathPolicyGate @Inject constructor(
             CharterGrant.Granted -> Unit
         }
         val opaDecision = try {
-            opa.queryPrOpenDecision()
+            opa.queryPrOpenDecision(baseRef)
         } catch (ex: OpaGateException) {
             log.warnf("OPA sidecar decision failed — failing closed: %s", ex.message)
             return PrPathDecision.Denied(PrPathGateVocabulary.REASON_PDP_UNREACHABLE)

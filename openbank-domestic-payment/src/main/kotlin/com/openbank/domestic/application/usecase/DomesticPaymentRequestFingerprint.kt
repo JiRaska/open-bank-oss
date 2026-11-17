@@ -76,6 +76,10 @@ internal object DomesticPaymentRequestFingerprint {
         // Keep the existing byte stream for unscoped callers. An older provider cannot replay a
         // scoped row even after rollback, since its fingerprint omits this additional binding.
         normalized.customerSubmissionScope?.let { digest.add(it) }
+        normalized.originalSubmissionKeyDigest?.let {
+            digest.add("original-business-submission-key-v1")
+            digest.add(it)
+        }
 
         return HexFormat.of().formatHex(digest.digest())
     }

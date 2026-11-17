@@ -42,6 +42,10 @@ class McpToolRegistry {
 
     @Inject lateinit var proposals: CreateProposalUseCase
 
+    @Inject lateinit var amlDecisions: AmlDecisionProposalTool
+
+    @Inject lateinit var sanctionsReview: SanctionsReviewTool
+
     @Inject lateinit var objectMapper: ObjectMapper
 
     @Inject lateinit var auditPublisher: AuditEventPublisher
@@ -150,7 +154,8 @@ class McpToolRegistry {
         ToolDefinition(
             name = "aml_list_cases",
             description = "List AML cases, optionally filtered by status " +
-                "(OPEN/UNDER_REVIEW/CLOSED/ESCALATED/SAR_FILED) or party.",
+                "(OPEN/UNDER_REVIEW/CLEARED/BLOCKED/ESCALATED) or party. Each case carries " +
+                "alertCode (e.g. SANCTIONS_HIT), alertDetail (match score) and matchedEntity.",
             inputSchema = schema(
                 "status" to (stringProp("Case status filter, optional") to false),
                 "partyId" to (stringProp("Party UUID filter, optional") to false),
@@ -159,10 +164,26 @@ class McpToolRegistry {
         ),
         ToolDefinition(
             name = "aml_get_case",
-            description = "Get an AML case by id (status, screening type, decision).",
+            description = "Get an AML case by id: status, screening type, alertCode, alertDetail " +
+                "(match score), matchedEntity, and the last decision with its rationale.",
             inputSchema = schema("caseId" to (stringProp("UUID of the AML case") to true)),
         ),
+        ToolDefinition(
+            name = AML_PROPOSE_DECISION,
+            description = "Propose a decision on an AML case for human approval (HITL). Typical use: a " +
+                "fuzzy name-only SANCTIONS_HIT that is a false positive -> CLEARED. Has NO effect on the " +
+                "case: a compliance officer approves the proposal and records the decision under their " +
+                "own identity. A written rationale (what was compared, why it is or is not a match) is " +
+                "mandatory.",
+            inputSchema = schema(
+                "caseId" to (stringProp("UUID of the AML case") to true),
+                "targetStatus" to (stringProp("One of CLEARED, BLOCKED, ESCALATED, UNDER_REVIEW") to true),
+                "rationale" to
+                    (stringProp("What was verified and why (min $MIN_RATIONALE_LENGTH chars)") to true),
+            ),
+        ),
         // ── Sanctions (compliance) ────────────────────────────────────────────
+        SanctionsReviewTool.DEFINITION,
         ToolDefinition(
             name = "sanctions_list_checks",
             description = "List recent sanctions screening checks.",
@@ -412,6 +433,10 @@ class McpToolRegistry {
         // compliance-officer charter owns and the ui-assistant is granted (agents.yaml).
         "aml_list_cases" to "query.compliance.readonly",
         "aml_get_case" to "query.compliance.readonly",
+        // The AML disposition proposal — a write_proposal capability, never a direct decision.
+        AML_PROPOSE_DECISION to "propose.aml.decision",
+        // Sanctions hit review as the four-eyes MAKER (ADR-0155): no effect until a distinct human approves.
+        SanctionsReviewTool.NAME to "sanctions.review.maker",
         "sanctions_list_checks" to "query.compliance.readonly",
         "sanctions_get_check" to "query.compliance.readonly",
         "sanctions_list_pending" to "query.compliance.readonly",
@@ -457,12 +482,23 @@ class McpToolRegistry {
      * not data access), everything else is a downstream read resolved through [downstream].
      * Every outcome is audited exactly once (ADR-0031 D5).
      */
-    fun call(toolName: String, arguments: JsonNode?, actorId: String = "unknown"): ToolCallResult {
+    fun call(
+        toolName: String,
+        arguments: JsonNode?,
+        actorId: String = "unknown",
+        interactivePerson: String? = null,
+    ): ToolCallResult {
         val args = arguments ?: objectMapper.createObjectNode()
         return try {
             when {
                 toolName == "flip_feature_flag" -> flipFeatureFlag(args, actorId)
                 toolName == "draft_ticket" -> succeed(toolName, actorId, draftTicket(args, actorId))
+                toolName == AML_PROPOSE_DECISION -> succeed(toolName, actorId, amlDecisions.propose(args, actorId))
+                toolName == SanctionsReviewTool.NAME -> succeed(
+                    toolName,
+                    actorId,
+                    sanctionsReview.review(args, interactivePerson),
+                )
                 toolName in ProductAuthoringTools.READ_TOOLS -> productResult(
                     toolName,
                     actorId,
@@ -712,7 +748,17 @@ class McpToolRegistry {
         }
     }
 
-    private companion object {
+    companion object {
+        /**
+         * Tools that act as a four-eyes MAKER upstream. Offered and executable only on an MCP
+         * session driven by a signed-in person — never by the chat loop or the unattended
+         * oversight sweep, which share the compliance-officer charter (#16455 review).
+         */
+        val INTERACTIVE_ONLY_TOOLS = setOf(SanctionsReviewTool.NAME)
+
+        private const val AML_PROPOSE_DECISION = AmlDecisionProposalTool.NAME
+        private const val MIN_RATIONALE_LENGTH = AmlDecisionProposalTool.MIN_RATIONALE_LENGTH
+
         /**
          * Flags no approval can ever flip. Mirrors `rules.yaml:feature_flags` and the OPA
          * `rest.rego` `prohibited` rule — kept in sync by the CI gate.

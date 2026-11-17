@@ -48,6 +48,31 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
         )
         .build()
 
+    /**
+     * Every admission activity keeps retrying, like settlement, and for the same reason: a run that
+     * gave up would leave the payment where nothing else moves it. That includes the FIRST admission.
+     * Its attempt can be lost after it committed HELD (a worker killed between the commit and the
+     * completion), and under a bounded policy the run then failed with the payment HELD, a case
+     * open and no run to signal. Safe because each of those activities is re-entrant on the
+     * payment's row: a retry of an attempt that committed answers what that attempt decided.
+     *
+     * The start-to-close bound is short, a small multiple of the chain's own budget, so an attempt
+     * whose worker died is given up on and retried in minutes. No heartbeat: one attempt is a few
+     * bounded remote calls, shorter than any useful heartbeat interval.
+     */
+    private val admissionActivityOptions: ActivityOptions = ActivityOptions.newBuilder()
+        .setScheduleToCloseTimeout(SETTLEMENT_SCHEDULE_TO_CLOSE)
+        .setStartToCloseTimeout(ADMISSION_START_TO_CLOSE)
+        .setRetryOptions(
+            RetryOptions.newBuilder()
+                .setMaximumAttempts(UNLIMITED_ATTEMPTS)
+                .setInitialInterval(Duration.ofSeconds(INITIAL_INTERVAL_SECONDS))
+                .setBackoffCoefficient(BACKOFF_COEFFICIENT)
+                .setMaximumInterval(SETTLEMENT_MAX_INTERVAL)
+                .build(),
+        )
+        .build()
+
     companion object {
         /** Workflow.getVersion change id gating the settlement retry policy for in-flight runs. */
         const val SETTLEMENT_RETRY_CHANGE_ID = "settlement-unbounded-retry"
@@ -56,6 +81,9 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
         /** Workflow.getVersion change id gating the fraud gate (#4403) for in-flight runs. */
         const val FRAUD_ENFORCEMENT_CHANGE_ID = "fraud-enforcement"
         private const val FRAUD_ENFORCEMENT_VERSION = 1
+
+        /** One admission attempt: the chain's budget is 30 s by default, so two minutes is a dead worker. */
+        val ADMISSION_START_TO_CLOSE: Duration = Duration.ofMinutes(2)
 
         /** A fraud-hold signal the run refused (not holding, another case, already decided). */
         const val IGNORED_FRAUD_SIGNAL_METRIC = "openbank_domestic_fraud_hold_signal_ignored"
@@ -86,11 +114,18 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
     private val settlementActivities: DomesticPaymentActivities =
         Workflow.newActivityStub(DomesticPaymentActivities::class.java, settlementActivityOptions)
 
+    private val admission: PaymentAdmissionActivities =
+        Workflow.newActivityStub(PaymentAdmissionActivities::class.java, admissionActivityOptions)
+
+    /** Set by [holdChanged]; cleared by the run right before it looks at the hold. */
+    private var holdNudged = false
+
+    private var expectedFraudCaseKey: String? = null
+
     private var fraudReviewDecision: FraudReviewDecision? = null
 
     /** True only between the HOLD and its end; a decision outside that window is not a decision. */
     private var awaitingFraudReview = false
-    private var expectedFraudCaseKey: String? = null
 
     override fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?) {
         // Deterministic: the flag is set by workflow code right before the await, and signal order
@@ -114,9 +149,21 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
             .inc(1)
     }
 
+    override fun holdChanged() {
+        holdNudged = true
+    }
+
     override fun process(paymentId: UUID): DomesticPaymentStatus {
         // Known from the start, so the case binding and the holding window are independent guards.
         expectedFraudCaseKey = fraudReviewCaseKey(paymentId)
+        // Whether this run goes through admission is the task queue it was started on
+        // ([AdmissionRun]): part of the start event, the same on every replay, and nothing a pre-chain
+        // run writes to its history. A run on the rail's own queue takes no version marker and
+        // records no side effect here, so its history is, event for event, what the implementation
+        // from before the chain produces.
+        if (AdmissionRun.chainOn()) {
+            return processAdmission(paymentId, admission.admit(paymentId, false))
+        }
         val decision = activities.screenPayment(paymentId)
 
         return when (decision) {
@@ -165,6 +212,58 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
             ScreeningDecision.REVIEW -> {
                 // Payment is held in RECEIVED for human decision via the AML case lifecycle.
                 DomesticPaymentStatus.RECEIVED
+            }
+        }
+    }
+
+    /**
+     * ADR-0374: the chain decided [first]. Follow it to the scheme, to a rejection, or through the
+     * hold. Nothing here screens, scores or validates: the admission activity did, in chain order.
+     */
+    private fun processAdmission(paymentId: UUID, first: AdmissionAction): DomesticPaymentStatus {
+        var action = first
+        var reevaluations = 0
+        // A control that could not answer is asked again on a bounded schedule; the last attempt
+        // turns a persisting outage into a case instead of another wait (ADR-0374 D13).
+        while (action == AdmissionAction.HELD_UNAVAILABLE) {
+            Workflow.sleep(PaymentHoldPolicy.REEVALUATION_INTERVAL)
+            reevaluations++
+            action = admission.admit(paymentId, reevaluations >= PaymentHoldPolicy.MAX_REEVALUATIONS)
+        }
+        val admitted = when (action) {
+            AdmissionAction.ADMITTED -> true
+            AdmissionAction.HELD_FOR_REVIEW -> awaitHoldEnd(paymentId)
+            // HELD_UNAVAILABLE cannot leave the loop above; refused, so an impossible answer cannot
+            // send money.
+            AdmissionAction.REJECTED, AdmissionAction.HELD_UNAVAILABLE -> false
+        }
+        if (!admitted) return DomesticPaymentStatus.REJECTED
+        val schemeStatus = activities.submitScheme(paymentId)
+        return if (schemeStatus == DomesticPaymentStatus.SENT_TO_CLEARING) {
+            settlementActivities.settlePayment(paymentId)
+        } else {
+            schemeStatus
+        }
+    }
+
+    /**
+     * Stays with a hold until it ends. True only when the payment was released.
+     *
+     * The run holds no state of the hold: the decision, the expiry and what the controls say are
+     * all read from the payment's row by [PaymentAdmissionActivities.concludeHold], every time. So
+     * it does not matter whether the decision arrived before this run existed, while it was
+     * starting, or after an earlier run died with it; nor whether the nudge was delivered. The run
+     * looks, waits for a nudge or for the check interval, and looks again.
+     */
+    private fun awaitHoldEnd(paymentId: UUID): Boolean {
+        while (true) {
+            // Cleared BEFORE looking: a nudge that lands while the activity runs is not lost, it
+            // ends the next wait at once.
+            holdNudged = false
+            when (admission.concludeHold(paymentId)) {
+                HoldState.RELEASED -> return true
+                HoldState.REJECTED -> return false
+                HoldState.WAITING -> Workflow.await(PaymentHoldPolicy.HOLD_CHECK_INTERVAL) { holdNudged }
             }
         }
     }

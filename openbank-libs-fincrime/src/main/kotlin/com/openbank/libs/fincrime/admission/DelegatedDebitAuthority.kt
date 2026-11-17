@@ -15,6 +15,8 @@ import java.util.UUID
  * (ADR-0232 D3) and never calls delegation-service on the money path, which that clause refuses.
  */
 data class DelegationFact(
+    val grantId: UUID,
+    val grantorPartyId: UUID,
     val resourceId: UUID,
     val granteePartyId: UUID,
     val capabilities: Set<String>,
@@ -71,14 +73,22 @@ object DelegatedDebitAuthority {
         if (facts.actorPartyId == facts.ownerPartyId) {
             return StepOutcome.Decided(AdmissionDecision.ALLOW, OWNER)
         }
-        val granted = facts.grants.any {
+        val granted = facts.grants.firstOrNull {
             it.authorizes(facts.accountId, facts.actorPartyId, facts.requiredCapability, facts.now)
         }
-        return if (granted) {
+        return if (granted != null) {
+            // The grant is named in the evidence, not merely counted. A delegated debit is only
+            // auditable AS delegated if the record says which grant permitted it, and a grant is
+            // revocable — so nothing after the fact can reconstruct which one was live. Picking
+            // the first permitting grant rather than asking "any?" is what makes that possible.
             StepOutcome.Decided(
                 AdmissionDecision.ALLOW,
                 DELEGATED,
-                AdmissionEvidence.of("capability" to facts.requiredCapability),
+                AdmissionEvidence.of(
+                    "capability" to facts.requiredCapability,
+                    "grant_id" to granted.grantId.toString(),
+                    "grantor_party_id" to granted.grantorPartyId.toString(),
+                ),
             )
         } else {
             StepOutcome.Decided(

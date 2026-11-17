@@ -572,6 +572,113 @@ class ResolveReconcileSourceTest(unittest.TestCase):
         self.assertEqual(caught.exception.resolved[SERVICE]["sha"], self.OLDER)
         self.assertIsInstance(caught.exception, MODULE.VerificationError)
 
+    def test_budget_exhaustion_keeps_the_proven_half_and_names_the_rest(self):
+        """An exhausted time budget is a per-service refusal, never a whole-batch one.
+
+        2026-11-14: a 12-service scheduled reconcile ran out of RECONCILE_RESOLUTION_SECONDS
+        while still searching older runs for some services, and the plain VerificationError
+        refused the whole batch, including a service whose source was already proven.
+        """
+        slow = ["openbank-anacredit-service", "openbank-card-issuance-service"]
+        newer = self.run_record(40, self.OLDER, "2026-10-17T12:00:00Z")
+        older = self.run_record(39, self.OLDEST, "2026-10-16T12:00:00Z")
+        clock = [0.0]
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            path = urlsplit(request.full_url).path
+            if path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse({"workflow_runs": [newer, older]})
+            if path.endswith("/runs/40/attempts/1/jobs"):
+                return FixtureResponse({"jobs": job_fixture()["jobs"][:3]})
+            raise AssertionError(f"unexpected API request: {request.full_url}")
+
+        def ancestor_then_expire(sha, _tip, *, deadline=None):
+            del deadline
+            if sha == self.OLDEST:
+                clock[0] = 10.0**9  # the budget runs out while searching an older run
+            return True
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE.time, "monotonic", lambda: clock[0]),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+            patch.object(MODULE, "_is_ancestor", ancestor_then_expire),
+            patch.object(MODULE, "_tree_equivalent", return_value=True),
+            patch.object(MODULE, "_exact_pact_exists", return_value=True),
+            self.assertRaises(MODULE.UnresolvedServicesError) as caught,
+        ):
+            MODULE.resolve_reconcile_service_sources(
+                [SERVICE, *slow], self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertEqual(set(caught.exception.resolved), {SERVICE})
+        self.assertEqual(caught.exception.missing, sorted(slow))
+        self.assertIn("time budget", str(caught.exception))
+        self.assertTrue(caught.exception.budget_exhausted)
+
+    def test_budget_exhaustion_cli_reports_it_as_the_reason(self):
+        """The CLI tells the gate WHY the remainder is unresolved, so it can say so per service."""
+        err = MODULE.UnresolvedServicesError(
+            "time budget",
+            {SERVICE: {"sha": "a" * 40, "run_id": "1", "attempt": 1}},
+            ["openbank-x-service"],
+            budget_exhausted=True,
+        )
+        argv = ["v", "--resolve-reconcile-sources", json.dumps([SERVICE, "openbank-x-service"]), self.TIP]
+        out = io.StringIO()
+        with (
+            patch.object(MODULE.sys, "argv", argv),
+            patch.object(MODULE, "resolve_reconcile_service_sources", side_effect=err),
+            patch.object(MODULE.sys, "stdout", out),
+            patch.object(MODULE.sys, "stderr", io.StringIO()),
+        ):
+            self.assertEqual(MODULE.main(), 3)
+        answer = json.loads(out.getvalue())
+        self.assertEqual(answer["unresolved"], ["openbank-x-service"])
+        self.assertIs(answer["budget_exhausted"], True)
+
+    def test_read_failure_after_partial_progress_still_refuses_all(self):
+        """Only the budget converts to a per-service refusal; a read failure does not.
+
+        One service is fully proven from the newest run before the next run's jobs read
+        answers 403. If the budget handler were widened to every VerificationError, this
+        would come back as a partial answer and deploy the proven half on unread evidence.
+        """
+        newer = self.run_record(40, self.OLDER, "2026-10-17T12:00:00Z")
+        older = self.run_record(39, self.OLDEST, "2026-10-16T12:00:00Z")
+        other = "openbank-anacredit-service"
+        proven = []
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            path = urlsplit(request.full_url).path
+            if path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse({"workflow_runs": [newer, older]})
+            if path.endswith("/runs/40/attempts/1/jobs"):
+                return FixtureResponse({"jobs": job_fixture()["jobs"][:3]})
+            raise MODULE.HTTPError(
+                request.full_url, 403, "Resource not accessible by integration", {}, None
+            )
+
+        def pact(service, sha, *, deadline=None):
+            del deadline
+            proven.append((service, sha))
+            return True
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+            patch.object(MODULE, "_is_ancestor", return_value=True),
+            patch.object(MODULE, "_tree_equivalent", return_value=True),
+            patch.object(MODULE, "_exact_pact_exists", pact),
+            self.assertRaises(MODULE.VerificationError) as caught,
+        ):
+            MODULE.resolve_reconcile_service_sources(
+                [SERVICE, other], self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertEqual(proven, [(SERVICE, self.OLDER)])  # partial progress really happened
+        self.assertNotIsInstance(caught.exception, MODULE.UnresolvedServicesError)
+
     def test_api_failure_is_not_downgraded_to_a_per_service_refusal(self):
         def fake_urlopen(request, timeout):
             del request, timeout
@@ -1178,6 +1285,128 @@ class ResolveReconcileSourceTest(unittest.TestCase):
                 "fixture-token",
                 "https://api.github.test",
             )
+
+
+class ReconcileQuotaAndContractFreeTest(unittest.TestCase):
+    """2026-11-15: a quota 403 read as "no source"; a contract-free service never resolved."""
+
+    TIP = "f" * 40
+    OLDER = "a" * 40
+
+    def quota_error(self, code: int, headers: dict) -> HTTPError:
+        return HTTPError("https://api.github.test/jobs", code, "reason", headers, None)
+
+    def test_quota_exhaustion_is_transient_not_a_refusal_of_evidence(self):
+        for code, headers in (
+            (403, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1794727141"}),
+            (429, {"Retry-After": "60"}),
+            (403, {"Retry-After": "30"}),
+        ):
+            with self.subTest(code=code, headers=headers):
+                with patch.object(
+                    MODULE, "urlopen", side_effect=self.quota_error(code, headers)
+                ):
+                    with self.assertRaises(MODULE.TransientApiError) as caught:
+                        MODULE._json_pages("https://api.github.test/jobs", "fixture-token")
+                self.assertIn("retry later", str(caught.exception))
+
+    def test_permission_denial_stays_an_ordinary_refusal(self):
+        for headers in ({}, {"X-RateLimit-Remaining": "4999"}):
+            with self.subTest(headers=headers):
+                with patch.object(
+                    MODULE, "urlopen", side_effect=self.quota_error(403, headers)
+                ):
+                    with self.assertRaises(MODULE.VerificationError) as caught:
+                        MODULE._json_pages("https://api.github.test/jobs", "fixture-token")
+                self.assertNotIsInstance(caught.exception, MODULE.TransientApiError)
+
+    def test_cli_reports_quota_as_exit_4_for_both_resolver_entry_points(self):
+        transient = MODULE.TransientApiError("GitHub Actions API /jobs failed (HTTP 403)")
+        for argv, target in (
+            (["x", "--resolve-reconcile-sources", json.dumps([SERVICE]), self.TIP],
+             "resolve_reconcile_service_sources"),
+            (["x", "--verify-services", json.dumps({SERVICE: self.TIP})],
+             "verify_successful_services_ci"),
+        ):
+            with self.subTest(entry=argv[1]):
+                with (
+                    patch.object(MODULE.sys, "argv", argv),
+                    patch.object(MODULE, target, side_effect=transient),
+                    patch("sys.stderr", new_callable=io.StringIO) as stderr,
+                ):
+                    self.assertEqual(MODULE.main(), 4)
+                self.assertIn("not evaluated", stderr.getvalue())
+                self.assertNotIn("::error::", stderr.getvalue())
+
+    def test_a_pact_added_after_the_source_at_tip_refuses(self):
+        refused, names = self.resolve_with(names_no_pact=lambda svc, sha, deadline=None: sha != self.TIP)
+        self.assertIsInstance(refused, MODULE.UnresolvedServicesError)
+        self.assertIn(self.TIP, [call.args[1] for call in names.call_args_list])
+
+    def resolve_with(self, *, names_no_pact):
+        run = {
+            "id": 41, "run_attempt": 1, "head_sha": self.OLDER, "head_branch": "main",
+            "event": "push", "status": "completed", "conclusion": "failure",
+            "created_at": "2026-11-14T15:42:36Z",
+        }
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            path = urlsplit(request.full_url).path
+            if path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse({"workflow_runs": [run]})
+            if path.endswith("/runs/41/attempts/1/jobs"):
+                return FixtureResponse(job_fixture())
+            raise AssertionError(f"unexpected API request: {request.full_url}")
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+            patch.object(MODULE, "_is_ancestor", return_value=True),
+            patch.object(MODULE, "_push_might_build_service", return_value=True),
+            patch.object(MODULE, "_global_build_inputs_differ", return_value=False),
+            patch.object(MODULE, "_tree_equivalent", return_value=True),
+            patch.object(MODULE, "_exact_pact_exists", return_value=False),
+            patch.object(
+                MODULE, "_names_no_committed_pact",
+                **({"side_effect": names_no_pact} if callable(names_no_pact)
+                   else {"return_value": names_no_pact}),
+            ) as names,
+        ):
+            try:
+                return MODULE.resolve_reconcile_service_sources(
+                    [SERVICE], self.TIP, REPOSITORY, "fixture-token",
+                    "https://api.github.test",
+                ), names
+            except MODULE.UnresolvedServicesError as exc:
+                return exc, names
+
+    def test_contract_free_service_resolves_without_a_pact_version(self):
+        resolved, names = self.resolve_with(names_no_pact=True)
+        self.assertEqual(
+            resolved,
+            {SERVICE: {"sha": self.OLDER, "run_id": "41", "attempt": 1, "contract_free": True}},
+        )
+        self.assertEqual(
+            sorted(call.args[1] for call in names.call_args_list), sorted([self.OLDER, self.TIP])
+        )
+
+    def test_a_service_named_by_a_committed_pact_still_needs_its_exact_version(self):
+        refused, _ = self.resolve_with(names_no_pact=False)
+        self.assertIsInstance(refused, MODULE.UnresolvedServicesError)
+        self.assertEqual(refused.missing, [SERVICE])
+        self.assertEqual(refused.resolved, {})
+
+    def test_committed_pact_lookup_reads_the_real_tree_and_fails_closed(self):
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True,
+            cwd=SCRIPT.parent,
+        ).stdout.strip()
+        # Measured on main: anacredit is named by no pact; pid is the provider of delegation's.
+        self.assertTrue(MODULE._names_no_committed_pact("openbank-anacredit-service", head))
+        self.assertFalse(MODULE._names_no_committed_pact("openbank-pid-service", head))
+        self.assertFalse(MODULE._names_no_committed_pact("openbank-delegation-service", head))
+        self.assertFalse(MODULE._names_no_committed_pact("openbank-anacredit-service", "0" * 40))
 
 
 if __name__ == "__main__":

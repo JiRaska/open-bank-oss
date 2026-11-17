@@ -204,6 +204,21 @@ mp:
         # rebuild projections, flip it via the msg-override ConfigMap in an announced replay window.
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # #16015: a kyb business-onboarding case that ends ABANDONED/REJECTED after SIGNED revokes the
+      # mandates it granted (KybCaseEventConsumer). The consumer rethrows a party-db failure, so the
+      # channel parks it in an explicit per-service DLQ (nested form, see kyc-events-in above).
+      # No group.id key here: the dotted leaf is inert (#686) and the connector's fallback,
+      # quarkus.application.name, is the group the other three channels already use.
+      kyb-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.party.kyb-events-in
+        connector: smallrye-kafka
+        topic: openbank.kyb.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # Marketing-consent projection (ADR-0205 D4): the whole consent-service outbox topic,
       # filtered in-consumer to the fixed internal grantee id — see MarketingConsentEventConsumer.
       consent-events-in:

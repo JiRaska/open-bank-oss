@@ -10,7 +10,7 @@ the money path; the `deny` tool tier (`money.transfer`, `money.post.ledger`, `gh
 `gh.pr.approve`, `secrets.read.raw`) is hard-forbidden for every charter.
 
 - **Status:** Draft (first pass; opened with the ADR-0031 D3 identity-binding change)
-- **Last reviewed:** 2026-10-24 (merge-execution evidence boundary)
+- **Last reviewed:** 2026-11-15 (AML decision proposal tool)
 - **Owner:** agent-service CODEOWNERS
 - **Related ADRs:** ADR-0031 (AI agent governance — this service), ADR-0080 (security hardening /
   pentest follow-ups), ADR-0034 (unified OPA authz), ADR-0002 (hexagonal), ADR-0008 (OTel),
@@ -269,6 +269,36 @@ browser-provider hiding and the unchanged client-credentials fallback.
   yet — that is a separate, later decision (registry entry + ADR-0148 evals), not this change.
 
 ## 4. Change log
+
+- **2026-11-16 (sanctions false-positive triage, #16381):** New MCP tool `sanctions_review_check`,
+  capability `sanctions.review.maker`, compliance-officer only. **New upstream WRITE grant:**
+  `service-account-openbank-agent` may call `sanctions.clear` on `POST /api/v3/sanctions/review` as the
+  four-eyes MAKER (rule `service-agent-sanctions-review-maker`). It is never granted
+  `sanctions.approval.decide`, and self-approval is refused by the approval store, so a human is always
+  the checker. **STRIDE-E:** an injected prompt can at most queue pending approvals (bounded by the
+  store's per-maker pending limit) that a human must approve one by one; the tool refuses to confirm a
+  hit (target CLEAR only) and any check not awaiting review. **Dependency:**
+  the control rests on sanctions-service `AUTHZ_FOUR_EYES_ENFORCE="true"`; with it off the review would
+  execute unapproved, so `AgentMachineGrantCharterAlignmentTest` fails unless the deployed value is
+  `"true"`. **STRIDE-R:** maker is the agent identity (approval `makerActorKind`), checker the human id.
+  **Unattended runs cannot submit (#16455 review):** the oversight sweep shares the compliance-officer
+  charter, so `sanctions_review_check` is INTERACTIVE_ONLY: never offered to, and refused at
+  execution by, the chat loop the sweep runs through, and refused by the tool itself unless a
+  verified person drives the MCP session. **Accepted risk (owner, 2026-11-16):** the person who instructed the agent may also be the checker,
+  so one human plus the agent can clear a hit; see the sanctions-service threat model for rationale.
+  Rollback: revert (drops the rego rule, the ROLE_API admission and the tool together).
+
+- **2026-11-15 (AML false-positive triage):** New MCP tool `aml_propose_case_decision`, capability
+  `propose.aml.decision` (tier `write_proposal`), granted to the `compliance-officer` charter only.
+  It reads the case through the existing `aml_get_case` path, refuses an unknown target status, a
+  closed case, a no-op transition or a rationale under 10 characters, and queues an agent-service
+  HITL proposal. **No new trust boundary and no new upstream grant:** agent-service holds no AML
+  write client, aml-service is not called with a write, and `shared_m2m_matrix_write_grants` is
+  unchanged. **STRIDE-E:** an injected prompt can at most create a proposal; the AML decider of
+  record stays the authenticated human who approves and records it (aml-service `decidedBy`), and
+  held-payment / monitoring cases keep their own four-eyes flows (ADR-0374). **STRIDE-R:** every
+  call is audited as `agent.mcp.tool_exec` with the charter model id; the proposal carries the
+  agent's rationale. `ui-assistant` is not granted the capability (FIND-S4-05). Rollback: revert.
 
 - **2026-11-11 (#15758 item 5):** `AgentPolicyGate` fails closed when the policy decision point errors in
   `block` mode (EU AI Act Art. 14). New outcome `pdp_unavailable_denied`. Rollback: revert the commit.
