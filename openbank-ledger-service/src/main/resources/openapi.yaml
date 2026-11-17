@@ -21,7 +21,7 @@ info:
   # contra) that migration V35 maps for the posting-rule matrix classes.
   # 1.29.0 -> 1.30.0: additive raw journal snapshot reads and optional unverified caller-origin evidence.
   # 1.30.0 -> 1.31.0: additive immutable close evidence, monthly readiness and explicit participant mode.
-  version: 1.35.0
+  version: 1.36.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -2210,6 +2210,11 @@ components:
     JournalEntryResponse:
       type: object
       properties:
+        branchBookId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Establishment of the branch book. Null for journals with no branch attribution.
         id:
           type: string
           format: uuid
@@ -2380,6 +2385,11 @@ components:
       type: object
       required: [idempotencyKey, transactionId, entryDate, valueDate, createdBy, lines]
       properties:
+        branchBookId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Registered branch establishment. Only the named Lending service may set it for loan disbursements.
         origin:
           $ref: '#/components/schemas/JournalOriginInput'
         idempotencyKey:
