@@ -270,7 +270,7 @@ source and target account coverage. Drain in-flight payment activities before sw
 mode. A dated copy of the ledger feeds reporting with separate compute and storage limits.
 
 For the Customer Edge read benchmark, apply each service's Flyway migrations to a dedicated
-database named `ob_perf_accounts`, `ob_perf_balances` or `ob_perf_domestic`. Run
+database named `ob_perf_accounts`, `ob_perf_balances`, `ob_perf_domestic` or `ob_perf_parties`. Run
 `psql -X -v clients=3000000 -f perf/k6/seed-regulatory-customer.sql` once against each database.
 The script creates one account, balance and settled domestic payment per synthetic party. IDs
 are PostgreSQL UUIDs derived from `md5('regulatory-perf/party/' || n)`,
@@ -278,3 +278,35 @@ are PostgreSQL UUIDs derived from `md5('regulatory-perf/party/' || n)`,
 for each ordinal `n`. Use these IDs in the k6 customer fixture after issuing matching tokens
 from the isolated issuer. This data seeds the read APIs. The reporting worker still needs its
 own attributed ledger fixture and an independently logged export, outage and recovery schedule.
+
+### Isolated Customer Edge read benchmark, 2026-11-17
+
+Local Docker hosted the real Customer Edge, Party, Account, Balance and Domestic Payment
+services behind an internal network. PostgreSQL held 3,000,000 rows each for parties,
+accounts, balances and settled payments. Local Keycloak issued tokens for 64 sampled
+customers. k6 sent 30 GET requests per second to each of the three Customer Edge routes
+continuously throughout the run. JWT and customer ownership checks were active. OPA ran
+in advisory mode and the domestic Temporal worker was disabled for this read-only drill.
+
+The reporting container had its own storage, no network, a two-CPU quota and a 1 GiB
+memory limit. It exported six million synthetic journal lines, then was stopped to simulate
+an outage. After the outage it replayed the entire frozen export at a 50,000-lines/s cap
+and produced balanced trial balances for the domestic, FOS and branch fixtures.
+The reporting worker used synthetic frozen input; this drill did not post payments or
+read from an operational ledger.
+
+Each API cell shows p95 / p99 in milliseconds, followed by HTTP failures / requests.
+
+| Phase | Seconds | Account | Balance | Payment |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline | 45.0 | 20.5 / 36.5; 0/1353 | 41.5 / 69.0; 0/1352 | 31.6 / 52.4; 0/1352 |
+| Export | 9.7 | 13.8 / 22.6; 0/290 | 24.6 / 35.7; 0/290 | 20.4 / 31.6; 0/290 |
+| Reporting outage | 45.0 | 11.0 / 204.5; 8/1350 | 21.6 / 156.7; 10/1351 | 16.3 / 176.9; 10/1351 |
+| Complete replay | 143.7 | 10.3 / 22.3; 0/4310 | 19.3 / 38.4; 0/4310 | 15.2 / 34.1; 0/4310 |
+
+There were 21,909 requests in the four measured windows and zero dropped iterations.
+All 28 failures were HTTP 500 responses completed within an 18 ms interval during the
+outage phase. Customer Edge logged `ConnectionPoolTooBusyException` in the Vert.x Redis
+client, with a full wait queue of 24. The run does not establish why the queue filled.
+The 143.7-second recovery window had 12,930 requests and zero failures. This is a single
+run on the isolated fixture at the stated request rate and active customer sample.

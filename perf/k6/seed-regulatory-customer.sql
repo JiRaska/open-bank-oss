@@ -1,15 +1,16 @@
 -- SPDX-License-Identifier: Apache-2.0
--- Run against the three freshly migrated, isolated ob_perf_* databases.
+-- Run against the freshly migrated, isolated ob_perf_* databases.
 -- Example: psql -X -v clients=3000000 -d ob_perf_accounts -f seed-regulatory-customer.sql
 \set ON_ERROR_STOP on
 BEGIN;
 SELECT 1 / ((
-    current_database() IN ('ob_perf_accounts', 'ob_perf_balances', 'ob_perf_domestic')
+    current_database() IN ('ob_perf_accounts', 'ob_perf_balances', 'ob_perf_domestic', 'ob_perf_parties')
     AND :'clients'::integer BETWEEN 1 AND 3000000
 )::integer) AS isolated_fixture_target;
 
 SELECT current_database() = 'ob_perf_accounts' AS account_db,
-       current_database() = 'ob_perf_balances' AS balance_db
+       current_database() = 'ob_perf_balances' AS balance_db,
+       current_database() = 'ob_perf_parties' AS party_db
 \gset
 
 CREATE TEMP VIEW fixture_clients AS
@@ -35,6 +36,13 @@ SELECT account_id, 'CZK', 1000 + n % 10000, 1000 + n % 10000
 FROM fixture_clients
 ON CONFLICT (account_id, currency) DO NOTHING;
 ANALYZE balances;
+\elif :party_db
+INSERT INTO parties (party_id, party_type, status, legal_name, email, kyc_status)
+SELECT party_id, 'INDIVIDUAL', 'ACTIVE', 'Synthetic customer',
+       'fixture-' || n || '@example.invalid', 'APPROVED'
+FROM fixture_clients
+ON CONFLICT (party_id) DO NOTHING;
+ANALYZE parties;
 \else
 INSERT INTO domestic_payments (
     payment_id, idempotency_key, status, debtor_account_id, debtor_account_number, debtor_bank_code,
