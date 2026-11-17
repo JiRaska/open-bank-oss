@@ -31,9 +31,21 @@ spec:
         # answered 200 to CI while every remote write to Prometheus timed out and was dropped (a
         # NetworkPolicy that admitted the pod IP but not the Service VIP). CiMetricsAbsent would
         # say "no data" a day later without naming the hop; this names it within 15 minutes.
+        # The second arm is load-bearing: the collector creates the failure counter LAZILY, at its
+        # first failure, already at the dropped count. increase() needs a prior sample, so for a
+        # counter born at 30 it answers 0 and the first arm alone never fired (measured
+        # 2026-11-16: 30 points dropped at 15:33Z, rule `inactive` all day). A series that is
+        # non-zero now and absent for the 6h before the last 30m is a failure that started within the
+        # window; a whole-window lookback (not a single `offset` sample) keeps a scrape gap quiet.
         - alert: CiMetricsGatewayExportFailing
           expr: |
-            increase(otelcol_exporter_send_failed_metric_points{job="ci-metrics-gateway", exporter="prometheusremotewrite"}[30m]) > 0
+            (increase(otelcol_exporter_send_failed_metric_points{job="ci-metrics-gateway", exporter="prometheusremotewrite"}[30m]) > 0)
+            or
+            (
+              otelcol_exporter_send_failed_metric_points{job="ci-metrics-gateway", exporter="prometheusremotewrite"} > 0
+              unless
+              max_over_time(otelcol_exporter_send_failed_metric_points{job="ci-metrics-gateway", exporter="prometheusremotewrite"}[6h] offset 30m)
+            )
           for: 15m
           labels:
             severity: warning
@@ -59,7 +71,7 @@ spec:
             service: openbank-app-ci
           annotations:
             summary: "No CI quality metrics from openbank-app main for >26h"
-            description: "The nightly/main exporter (scripts/ci-quality-metrics.py) has not pushed for over 26h, or never has. Check the CI_METRICS_OTLP_ENDPOINT / CI_METRICS_TOKEN secrets (not armed = silent), the token in Vault key ci-metrics-ingest, and the ci-metrics-gateway pod/route."
+            description: "The nightly/main exporter (scripts/ci-quality-metrics.py) has not pushed for over 26h, or never has. Check the CI_METRICS_OTLP_ENDPOINT / CI_METRICS_TOKEN secrets (not armed = silent), the in-cluster Secret observability/ci-metrics-ingest (ESO-generated) matching CI_METRICS_TOKEN, the ci-metrics-gateway pod/route, and CiMetricsGatewayExportFailing (remote write dropping data)."
     - name: openbank.ci-quality.tests
       rules:
         # Silent skip: a main-branch suite executed fewer tests than it discovered, for the same run.
