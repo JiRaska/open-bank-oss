@@ -202,17 +202,25 @@ class McpToolResultSanitiserTest {
 
     /**
      * Pathological inputs: without the pre-truncation and the linear patterns, `"<a".repeat(50_000)`
-     * alone took ~30 s. 1 MiB of each must finish well inside the budget.
+     * alone took ~30 s. 1 MiB of each must finish well inside the 1 s budget (30x margin).
      */
     @Test
     fun `pathological inputs are processed in bounded time`() {
         val mib = 1 shl 20
         val patterns = listOf("<a", "![", "[", "https:", "CZ00 1", "1 2 3 ", "untrusted ", "&#x3c;", "%3A")
-        val started = System.nanoTime()
-        patterns.forEach { p -> sanitiseText(p.repeat(mib / p.length)) }
-        val elapsedMs = (System.nanoTime() - started) / NANOS_PER_MS
-        println("pathological 1 MiB x ${patterns.size}: $elapsedMs ms")
-        assertTrue(elapsedMs < BUDGET_MS, "sanitising took $elapsedMs ms (budget $BUDGET_MS ms)")
+        val perPattern = patterns.associateWith { p ->
+            val input = p.repeat(mib / p.length)
+            val started = System.nanoTime()
+            sanitiseText(input)
+            (System.nanoTime() - started) / NANOS_PER_MS
+        }
+        val elapsedMs = perPattern.values.sum()
+        println("pathological 1 MiB x ${patterns.size}: $elapsedMs ms $perPattern")
+        // 1 s: loaded CI runners must not flake, and the regression class this guards took ~30 s.
+        assertTrue(
+            elapsedMs < BUDGET_MS,
+            "sanitising took $elapsedMs ms (budget $BUDGET_MS ms), per pattern: $perPattern",
+        )
     }
 
     @Test
@@ -327,6 +335,6 @@ class McpToolResultSanitiserTest {
         const val UUID = "7a2e3f40-5b6c-4d7e-8f90-0a1b2c3d4e5f"
         const val PAYMENT_ID = "0b9d3c1e-2f4a-4b5c-8d6e-7f8091a2b3c4"
         const val NANOS_PER_MS = 1_000_000L
-        const val BUDGET_MS = 200L
+        const val BUDGET_MS = 1000L
     }
 }
