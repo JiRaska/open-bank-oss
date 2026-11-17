@@ -1,5 +1,5 @@
 {
-  "$comment": "SINGLE SOURCE OF TRUTH for every assistant-platform package in this directory (issue #16614, ADR-0383, ADR-0385). Name, logo and MCP URL are defined here once; scripts/generate.py renders every package from this file and scripts/check.py fails when a package, or the tool list, drifts from it. The bank-assigned display name and logo shown on the consent screen and in the app (ADR-0385 D2.3) must be these values; the customers-realm client entries are to be generated from this file when they exist. Values starting with OWNER-SUPPLIED are placeholders only the owner can fill.",
+  "$comment": "SINGLE SOURCE OF TRUTH for every assistant-platform package in this directory (issue #16614, ADR-0383 (proposed), ADR-0385 (proposed, PR #16611)). Name, logo and MCP URL are defined here once; scripts/generate.py renders every package from this file and scripts/check.py fails when a package, or the tool list, drifts from it. The bank-assigned display name and logo shown on the consent screen and in the app (ADR-0385 D1, 'The bank names the client': assigned by the bank, never taken from vendor metadata) must be these values; the customers-realm client entries are to be generated from this file when they exist. Values starting with OWNER-SUPPLIED are placeholders only the owner can fill.",
   "schemaVersion": 1,
   "packageVersion": "0.1.0",
   "identity": {
@@ -9,7 +9,12 @@
     "description": "Read your OpenBank accounts, balances, transactions, statements and payment confirmations, and draft payment proposals that you approve yourself in the OpenBank app.",
     "longDescription": "Connect your OpenBank account to ask about balances, recent transactions, closed statements and the confirmation details of payments you already made. The assistant can also draft a payment PROPOSAL. A proposal is never a payment: nothing leaves your account until you open the OpenBank app and approve that exact proposal with strong customer authentication. The assistant can never pay, change limits, add trusted payees or change security settings. Data you ask about is sent to the assistant platform's own provider. You can see and revoke every connected assistant in the OpenBank app. Limitations: personal accounts only; IBANs and counterparty names are masked; transaction history is limited to 90 days and statements to 12 months.",
     "category": "Finance",
-    "keywords": ["banking", "accounts", "payments", "mcp"],
+    "keywords": [
+      "banking",
+      "accounts",
+      "payments",
+      "mcp"
+    ],
     "brandColor": "#5658E6",
     "brandColorSource": "openbank-admin-ui/src/components/layout/Sidebar.module.css .brandMark gradient mid stop",
     "icon": {
@@ -19,7 +24,10 @@
       "source": "openbank-admin-ui/src/components/layout/Sidebar.tsx brand mark (no new brand)"
     },
     "developerName": "OWNER-SUPPLIED:legal-entity-name",
-    "author": { "name": "OpenBank contributors", "url": "https://github.com/JiRaska/open-bank-oss" },
+    "author": {
+      "name": "OpenBank contributors",
+      "url": "https://github.com/JiRaska/open-bank-oss"
+    },
     "license": "Apache-2.0",
     "repository": "https://github.com/JiRaska/open-bank-oss",
     "urls": {
@@ -43,31 +51,45 @@
     "scopes": {
       "$comment": "Read + propose only (ADR-0383 D3/D4, ADR-0385 D1). Scope NAMES are proposed here; no realm defines them yet.",
       "status": "PROPOSED-NOT-DEFINED-IN-REALM",
-      "default": ["openbank-mcp.read", "openbank-mcp.propose"],
-      "forbidden": ["openbank-mcp.initiate", "offline_access-without-client-auth"]
+      "default": [
+        "openbank-mcp.read",
+        "openbank-mcp.propose"
+      ],
+      "forbidden": [
+        "openbank-mcp.initiate",
+        "offline_access-without-client-auth"
+      ]
     }
   },
   "admission": {
-    "$comment": "Per ADR-0385 D1. Only a path where the platform authenticates as a confidential client at BOTH token and refresh (Tier H) or a local client with DPoP (Tier L) is admitted. Public-client paths are 'not supported by the bank'.",
+    "$comment": "Per ADR-0385 D1 (proposed). Only a Tier H hosted client that authenticates as a confidential client at BOTH token and refresh, or a Tier L local client with DPoP, is admitted. Tier H default is private_key_jwt against an allowlisted JWKS with a pinned key-set hash. Pre-registration is the default; CIMD is used only if ADR-0385 D7 item 9 shows Keycloak 26.8.1 supports it. Public-client paths are 'not supported by the bank'.",
     "tierH": {
       "openai-chatgpt-directory": {
-        "registration": "cimd",
-        "tokenEndpointAuthMethod": "private_key_jwt",
-        "clientIdMetadataUrl": "https://chatgpt.com/oauth/client.json",
-        "jwks": "https://chatgpt.com/oauth/jwks.json",
+        "default": "pre-registered client with private_key_jwt (OpenAI 'predefined OAuth client'); whether OpenAI's predefined client can use private_key_jwt rather than a secret is UNVERIFIED",
+        "ifP3ConfirmsCimd": {
+          "registration": "cimd",
+          "tokenEndpointAuthMethod": "private_key_jwt",
+          "clientIdMetadataUrl": "https://chatgpt.com/oauth/client.json",
+          "jwks": "https://chatgpt.com/oauth/jwks.json"
+        },
         "redirectUri": "https://chatgpt.com/connector_platform_oauth_redirect",
-        "status": "candidate; vendor docs verified 2026-11-17, bank side not built"
+        "status": "candidate; vendor docs read 2026-11-17, bank side not built"
       },
       "anthropic-claude-directory": {
-        "registration": "oauth_anthropic_creds",
-        "tokenEndpointAuthMethod": "client_secret (Anthropic-held, entered by the owner in the developer portal)",
+        "default": "private_key_jwt - not offered for an Anthropic-held listing client per the docs read 2026-11-17",
+        "exception": {
+          "registration": "oauth_anthropic_creds",
+          "tokenEndpointAuthMethod": "client_secret (Anthropic-held, entered by the owner in the developer portal)",
+          "conditions": "EXCEPTION ONLY (ADR-0385 D1): recorded, time-boxed <= 6 months, owner risk acceptance, secret >= 256 bits per bank, rotated <= 90 days, never logged; the expiry date is a field of the allowlist declaration and after it the authorization server answers invalid_client; renewal needs a new owner risk acceptance",
+          "riskAcceptance": "OWNER-SUPPLIED:risk-acceptance-reference-and-expiry-date"
+        },
         "redirectUri": "https://claude.ai/api/mcp/auth_callback",
-        "status": "candidate at ADR-0385 Tier H MINIMUM (secret, not private_key_jwt); vendor docs verified 2026-11-17, bank side not built"
+        "status": "candidate only as a secret exception; vendor docs read 2026-11-17, bank side not built"
       }
     },
     "notSupportedByTheBank": [
       "Claude custom connector added by URL (uses Anthropic's CIMD as a public client, or DCR; never the portal secret)",
-      "Claude Code (own CIMD public client + loopback redirect; DPoP not documented) - Tier L requires DPoP",
+      "Claude Code (own CIMD public client; loopback redirect on localhost, which ADR-0385 D1 does not accept - only 127.0.0.1/[::1]; DPoP not documented) - Tier L requires DPoP",
       "ChatGPT/Codex custom MCP server typed by URL with token_endpoint_auth_method none",
       "Codex local CLI OAuth, until verified to be either the hosted confidential client or a DPoP-capable local client",
       "Any Dynamic Client Registration path (DCR is off, ADR-0383 D1)"
@@ -93,8 +115,12 @@
         "capability": "query.balance.readonly",
         "readOnlyHint": true,
         "destructiveHint": false,
-        "properties": ["accountId"],
-        "required": ["accountId"],
+        "properties": [
+          "accountId"
+        ],
+        "required": [
+          "accountId"
+        ],
         "description": "Get the current balance of one of your connected accounts."
       },
       {
@@ -103,8 +129,13 @@
         "capability": "query.transaction.readonly",
         "readOnlyHint": true,
         "destructiveHint": false,
-        "properties": ["accountId", "limit"],
-        "required": ["accountId"],
+        "properties": [
+          "accountId",
+          "limit"
+        ],
+        "required": [
+          "accountId"
+        ],
         "description": "List recent transactions of one of your connected accounts (bounded window and page size)."
       },
       {
@@ -113,8 +144,14 @@
         "capability": "query.statement.readonly",
         "readOnlyHint": true,
         "destructiveHint": false,
-        "properties": ["accountId", "currency", "legalSequence"],
-        "required": ["accountId"],
+        "properties": [
+          "accountId",
+          "currency",
+          "legalSequence"
+        ],
+        "required": [
+          "accountId"
+        ],
         "description": "Get a closed account statement as structured data; IBANs and counterparty names are masked."
       },
       {
@@ -123,8 +160,12 @@
         "capability": "query.payment_confirmation.readonly",
         "readOnlyHint": true,
         "destructiveHint": false,
-        "properties": ["paymentId"],
-        "required": ["paymentId"],
+        "properties": [
+          "paymentId"
+        ],
+        "required": [
+          "paymentId"
+        ],
         "description": "Get the confirmation details of a payment you already made, by its id."
       },
       {
@@ -133,14 +174,41 @@
         "capability": "propose.payment",
         "readOnlyHint": false,
         "destructiveHint": false,
-        "properties": ["fromAccountId", "toIban", "amount", "currency"],
-        "required": ["fromAccountId", "toIban", "amount", "currency"],
+        "properties": [
+          "fromAccountId",
+          "toIban",
+          "amount",
+          "currency"
+        ],
+        "required": [
+          "fromAccountId",
+          "toIban",
+          "amount",
+          "currency"
+        ],
         "description": "Draft a payment PROPOSAL. It never moves money: you approve or reject it yourself in the OpenBank app with strong customer authentication. TODAY: refused, because no proposal store is wired (ADR-0383 D6 not built)."
       }
     ],
     "excluded": [
-      { "name": "list_consents", "reason": "ADR-0383 D3: PSD2 consent is not used on the customer channel." },
-      { "name": "count_marketing_consents", "reason": "Operator-plane aggregate (ADR-0209 D5), not a customer read." }
+      {
+        "name": "list_consents",
+        "reason": "ADR-0383 D3: PSD2 consent is not used on the customer channel."
+      },
+      {
+        "name": "count_marketing_consents",
+        "reason": "Operator-plane aggregate (ADR-0209 D5), not a customer read."
+      }
     ]
+  },
+  "adrStatus": {
+    "ADR-0383": "proposed / planned (on main)",
+    "ADR-0385": "proposed / planned (PR #16611, not merged)",
+    "note": "Everything below mirrors PROPOSALS. If either ADR changes before acceptance, this file follows it."
+  },
+  "deliveryChecks": {
+    "$comment": "scripts/check.py --release refuses until every entry is MET. The descriptions in this file (longDescription, tool descriptions) state TARGET behaviour; --release is the control that stops them being published before that behaviour exists.",
+    "ADR-0383 Delivery check (no write grant at MCP and downstream, allow-list invariant, DPoP binding, cross-customer isolation, throttle ordering, proposal approval, exposure last)": "NOT-MET",
+    "ADR-0385 Delivery check (admission, PAR and authorize, SCA linking, same device, CIMD, throttling)": "NOT-MET",
+    "ADR-0385 D7 amended P3 on local Keycloak 26.8.1 (10 items)": "NOT-MET"
   }
 }

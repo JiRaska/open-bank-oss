@@ -215,7 +215,7 @@ def render(listing: dict) -> dict[str, bytes | str]:
         "6_authentication": {
             "requirement": "Always required",
             "method": "OAuth sign-in",
-            "oauthClient": "Anthropic-held client credentials (oauth_anthropic_creds)",
+            "oauthClient": "Anthropic-held client credentials (oauth_anthropic_creds) - ONLY under the ADR-0385 D1 client-secret exception: <= 6 months, owner risk acceptance, expiry enforced in the allowlist (invalid_client after); the default is private_key_jwt",
             "redirectUri": listing["admission"]["tierH"]["anthropic-claude-directory"]["redirectUri"],
             "clientIdAndSecret": "OWNER enters these in the portal; never in this repository",
         },
