@@ -402,6 +402,7 @@ class ProductCatalogLookupPactConsumerTest {
         }
 
         private fun revisionPathFor(id: String): String = REVISION_PATH_TEMPLATE.replace("{productId}", id)
+
         /** Provider states seeded by `CatalogPactProviderFixtures.consumedAccountPassportPermitExists`. */
         const val CONSUMED_PERMIT_STATE = "a consumed account-opening passport permit exists"
         const val NO_CONSUMED_PERMIT_STATE = "no consumed passport permit exists for the operation"

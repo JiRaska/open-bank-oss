@@ -329,6 +329,10 @@ class CatalogPactProviderFixtures(
             statement.setObject(11, LOAN_FIXTURE_TIME)
             statement.executeUpdate()
         }
+        insertPassportGrantAndConsumedPermit(connection)
+    }
+
+    private fun insertPassportGrantAndConsumedPermit(connection: Connection) {
         connection.prepareStatement(
             "INSERT INTO passport_grants (id, bank_id, establishment_id, host_country, mode, offering_id, " +
                 "channel, customer_segment, pack_set_digest, evidence_ref, proposed_by, approved_by, " +
