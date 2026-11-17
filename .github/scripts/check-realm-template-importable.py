@@ -41,7 +41,9 @@
 #         whole import. `openbank-edge-webauthn` was at 490.
 #     R3  a confidential client (`publicClient: false`) with no `secret`. Keycloak generates a
 #         random one on import, so a rebuilt realm issues credentials the service does not
-#         present — an auth outage that looks nothing like a missing JSON field.
+#         present — an auth outage that looks nothing like a missing JSON field. Exempt:
+#         `clientAuthenticatorType: client-jwt` (private_key_jwt, ADR-0385 Tier H) — it
+#         authenticates with its pinned key set and no secret is ever presented.
 #     R4  a `secret` or `credentials[].value` that is NOT a `__PLACEHOLDER__` token. This repo is
 #         PUBLIC; a literal secret in a realm template is a disclosure, not a style problem.
 #     R5  a login-capable user missing `firstName`/`lastName`/`email` — Keycloak 26 answers
@@ -82,6 +84,8 @@
 #         client's tokens after a cold-start import. Nothing errors: the import is clean, the role
 #         exists, the user holds it, and `@RolesAllowed` answers 403. This happened within a week
 #         of the rule being written down in prose (ROLE_MARKETING, ROLE_MERGE_RECORDER).
+#         An ADR-0385 MCP client (attribute `openbank.mcp.tier`) is held to the opposite, stricter
+#         shape: exactly ['offline_access'], so no realm role ever reaches a third-party token.
 #
 #     R12 a `defaultClientScopes` / `optionalClientScopes` entry that no `clientScopes[].name`
 #         declares. Keycloak logs "Referenced client scope ... doesn't exist" and silently drops
@@ -187,7 +191,9 @@ def check_realm(name, realm):
                 f"{DESCRIPTION_MAX} cap (R2) — a longer one fails the entire import."
             )
         if c.get("publicClient") is False:
-            if "secret" not in c:
+            if "secret" not in c and c.get("clientAuthenticatorType") == "client-jwt":
+                pass  # R3 carve-out: a private_key_jwt client authenticates with its key, never a secret
+            elif "secret" not in c:
                 findings.append(
                     f"[{name}] confidential client `{cid}` declares no `secret` (R3) — Keycloak "
                     f"generates a random one on import, so a rebuilt realm issues credentials the "
@@ -280,6 +286,7 @@ def check_realm(name, realm):
 
     role_names = {r.get("name") for r in ((realm.get("roles") or {}).get("realm") or [])}
     client_ids = {c.get("clientId") for c in clients}
+    mcp_ids = {c.get("clientId") for c in clients if "openbank.mcp.tier" in (c.get("attributes") or {})}
     for m in realm.get("scopeMappings", []) or []:
         cid = m.get("client")
         if cid not in client_ids:
@@ -287,6 +294,15 @@ def check_realm(name, realm):
                 f"[{name}] scopeMappings names client `{cid}`, which the template does not "
                 f"declare (R11)."
             )
+        if cid in mcp_ids:
+            # ADR-0385 D1: an MCP client is mapped to offline_access ONLY — no realm role reaches
+            # its token. Stricter than the all-roles rule, not a hole in it.
+            if sorted(m.get("roles") or []) != ["offline_access"]:
+                findings.append(
+                    f"[{name}] scopeMappings for MCP client `{cid}` must be exactly ['offline_access'] "
+                    f"(R11, ADR-0385 D1), got {sorted(m.get('roles') or [])}."
+                )
+            continue
         missing = sorted(role_names - set(m.get("roles") or []))
         if missing:
             findings.append(
@@ -379,6 +395,12 @@ def self_test():
     del d["clients"][1]["secret"]
     f, _ = check_realm("t", d)
     cases.append(("R3 secret-less confidential client flagged", any("declares no" in x for x in f), f))
+
+    d = _clean()
+    del d["clients"][1]["secret"]
+    d["clients"][1]["clientAuthenticatorType"] = "client-jwt"
+    f, _ = check_realm("t", d)
+    cases.append(("R3 secret-less private_key_jwt client NOT flagged (ADR-0385 Tier H)", f == [], f))
 
     d = _clean()
     d["clients"][1]["secret"] = "s3cr3t-literal"
@@ -500,6 +522,15 @@ def self_test():
     d["scopeMappings"] = []
     f, _ = check_realm("t", d)
     cases.append(("R11 a client with no entry is NOT flagged (deliberately role-less clients)", f == [], f))
+    d = copy.deepcopy(sm)
+    d["clients"][1]["attributes"] = {"openbank.mcp.tier": "H"}
+    d["roles"]["realm"].append({"name": "offline_access"})
+    d["scopeMappings"] = [{"client": "conf", "roles": ["offline_access"]}]
+    f, _ = check_realm("t", d)
+    cases.append(("R11 MCP client mapped to exactly offline_access passes", f == [], f))
+    d["scopeMappings"] = [{"client": "conf", "roles": ["offline_access", "A"]}]
+    f, _ = check_realm("t", d)
+    cases.append(("R11 MCP client mapped to a realm role flagged", any("(R11" in x and "MCP client" in x for x in f), f))
 
     # R12, both directions. `openid` is the reserved OIDC protocol scope, not a
     # client-scope definition; assigning it when clientScopes does not declare it
