@@ -218,6 +218,24 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
 
 ## 7. Change log
 
+- **2026-11-17 (#16593, follow-up to #16455):** Trust-boundary change on the same surface
+  (`POST /api/v3/sanctions/review`, agent path). Three controls tightened, no new caller:
+  (1) `X-Approval-Id` is read from the request headers, not a method parameter — as a parameter it
+  entered the four-eyes request fingerprint, so the agent's retry never matched its approval and
+  minted a new pending one each time (fail-closed, but the agent path never executed);
+  (2) **the approval is bound to the request that consumed it**: `@Authorize` records the approval
+  it consumed for THIS call (libs-runtime `FourEyesConsumption`, request-scoped) and the resource
+  accepts only that id, and `checkerOf` accepts `EXECUTED` only. **Tampering/EoP closed:** before
+  this, an approval consumed by an earlier call (EXECUTED, same check, same maker) would have
+  authorised a replayed CLEAR had the policy ever stopped flagging `four_eyes_required`;
+  (3) `AgentReviewGuard` refuses a review body whose target method or caller cannot be resolved,
+  instead of passing it to `@Authorize`. Evidence: `AgentClearFourEyesFlowIT` (202 → human decide →
+  200 with the human as reviewer → replay 202 → replay with the gate off 403), each step sabotaged
+  red; `sanctions_rest_ext_test.rego` pins the OPA grant (allow + four-eyes for the agent's clear,
+  deny for decide/update/trigger, another machine and a name-only impostor). **Open:** v1 `/review`
+  is protected from the agent only by `@RolesAllowed` (the agent holds `ROLE_API` only in every
+  realm file), because the OPA grant is keyed on the action, not the path.
+
 - **2026-11-16 (#16381):** Trust-boundary change. `POST /api/v3/sanctions/review` (`sanctions.clear`)
   now admits `ROLE_API` at the `@RolesAllowed` layer so that ONE machine principal,
   `service-account-openbank-agent`, reaches OPA, which grants it `sanctions.clear` only (rule
