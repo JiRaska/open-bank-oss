@@ -6,6 +6,7 @@ package com.openbank.domestic.infrastructure.outbox
 
 import com.openbank.domestic.application.port.out.DomesticPaymentOutboxRepository
 import com.openbank.domestic.infrastructure.kafka.KafkaDomesticPaymentEventPublisher
+import com.openbank.libs.persistence.outbox.OutboxClaim
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.mockk.coEvery
@@ -14,17 +15,10 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
-/**
- * Stubs/verifies `claimProcessable` (#1201's atomic claim), not `listProcessable`: the shared
- * `OutboxDispatch.dispatchOnce` calls the former, and a `mockk()` never falls through to the
- * interface's default `claimProcessable = listProcessable(limit)` body — it intercepts every
- * call at the proxy level, so an un-stubbed `claimProcessable` throws (swallowed by
- * `dispatchOnce`'s `runCatching`), silently skipping the batch. See
- * `BillingOutboxDispatcherTest` for the full explanation.
- */
 class DomesticPaymentOutboxDispatcherTest {
 
     private val outboxRepository: DomesticPaymentOutboxRepository = mockk()
@@ -35,6 +29,7 @@ class DomesticPaymentOutboxDispatcherTest {
         eventPublisher,
         dispatchEnabled = true,
         metrics = mockk(relaxed = true),
+        dispatchPollInterval = Duration.ofSeconds(5),
     )
 
     private fun entry(eventId: UUID = UUID.randomUUID(), payload: String = "{\"event\":\"$eventId\"}") = OutboxEntry(
@@ -51,46 +46,47 @@ class DomesticPaymentOutboxDispatcherTest {
     )
 
     @Test
-    fun `happy drain publishes each row and marks it sent`(): Unit = runBlocking {
-        val first = entry()
-        val second = entry()
-        coEvery { outboxRepository.claimProcessable(any(), any()) } returns listOf(first, second)
+    fun `happy drain publishes each row and acknowledges its claim`(): Unit = runBlocking {
+        val first = OutboxClaim(entry(), UUID.randomUUID())
+        val second = OutboxClaim(entry(), UUID.randomUUID())
+        coEvery { outboxRepository.claimWithTokens(any(), any()) } returnsMany
+            listOf(listOf(first, second), emptyList())
         coJustRun { eventPublisher.publish(any()) }
-        coJustRun { outboxRepository.markSent(any(), any()) }
+        coEvery { outboxRepository.markClaimsSent(any(), any()) } returns
+            setOf(first.entry.eventId, second.entry.eventId)
 
         dispatcher().dispatch()
 
-        coVerify(exactly = 1) { eventPublisher.publish(first) }
-        coVerify(exactly = 1) { eventPublisher.publish(second) }
-        coVerify(exactly = 1) { outboxRepository.markSent(first.eventId, any()) }
-        coVerify(exactly = 1) { outboxRepository.markSent(second.eventId, any()) }
+        coVerify(exactly = 1) { eventPublisher.publish(first.entry) }
+        coVerify(exactly = 1) { eventPublisher.publish(second.entry) }
+        coVerify(exactly = 1) { outboxRepository.markClaimsSent(listOf(first, second), any()) }
     }
 
     @Test
-    fun `publish failure marks the row failed and continues the batch`(): Unit = runBlocking {
-        val failing = entry()
-        val healthy = entry()
-        coEvery { outboxRepository.claimProcessable(any(), any()) } returns listOf(failing, healthy)
-        coEvery { eventPublisher.publish(failing) } throws RuntimeException("kafka down")
-        coJustRun { eventPublisher.publish(healthy) }
-        coJustRun { outboxRepository.markSent(any(), any()) }
-        coEvery { outboxRepository.markFailed(any(), any(), any()) } returns OutboxStatus.FAILED
+    fun `publish failure marks the current claim failed and continues the batch`(): Unit = runBlocking {
+        val failing = OutboxClaim(entry(), UUID.randomUUID())
+        val healthy = OutboxClaim(entry(), UUID.randomUUID())
+        coEvery { outboxRepository.claimWithTokens(any(), any()) } returnsMany
+            listOf(listOf(failing, healthy), emptyList())
+        coEvery { eventPublisher.publish(failing.entry) } throws RuntimeException("kafka down")
+        coJustRun { eventPublisher.publish(healthy.entry) }
+        coEvery { outboxRepository.markClaimsSent(listOf(healthy), any()) } returns setOf(healthy.entry.eventId)
+        coEvery { outboxRepository.markClaimFailed(failing, "kafka down", any()) } returns OutboxStatus.FAILED
 
         dispatcher().dispatch()
 
-        coVerify(exactly = 1) { outboxRepository.markFailed(failing.eventId, "kafka down", any()) }
-        coVerify(exactly = 0) { outboxRepository.markSent(failing.eventId, any()) }
-        coVerify(exactly = 1) { outboxRepository.markSent(healthy.eventId, any()) }
+        coVerify(exactly = 1) { outboxRepository.markClaimFailed(failing, "kafka down", any()) }
+        coVerify(exactly = 1) { outboxRepository.markClaimsSent(listOf(healthy), any()) }
     }
 
     @Test
-    fun `a repository listing fault is swallowed so the scheduler never crashes`(): Unit = runBlocking {
-        coEvery { outboxRepository.claimProcessable(any(), any()) } throws RuntimeException("db unreachable")
+    fun `a repository claim fault is swallowed so the scheduler never crashes`(): Unit = runBlocking {
+        coEvery { outboxRepository.claimWithTokens(any(), any()) } throws RuntimeException("db unreachable")
 
         dispatcher().dispatch()
 
-        coVerify(exactly = 0) { outboxRepository.markSent(any(), any()) }
-        coVerify(exactly = 0) { outboxRepository.markFailed(any(), any(), any()) }
+        coVerify(exactly = 0) { outboxRepository.markClaimsSent(any(), any()) }
+        coVerify(exactly = 0) { outboxRepository.markClaimFailed(any(), any(), any()) }
     }
 
     @Test
@@ -100,11 +96,12 @@ class DomesticPaymentOutboxDispatcherTest {
             eventPublisher,
             dispatchEnabled = false,
             metrics = mockk(relaxed = true),
+            dispatchPollInterval = Duration.ofSeconds(5),
         )
-        coEvery { outboxRepository.claimProcessable(any(), any()) } returns emptyList()
+        coEvery { outboxRepository.claimWithTokens(any(), any()) } returns emptyList()
 
         disabled.dispatch()
 
-        coVerify(exactly = 0) { outboxRepository.claimProcessable(any(), any()) }
+        coVerify(exactly = 0) { outboxRepository.claimWithTokens(any(), any()) }
     }
 }
