@@ -310,3 +310,43 @@ outage phase. Customer Edge logged `ConnectionPoolTooBusyException` in the Vert.
 client, with a full wait queue of 24. The run does not establish why the queue filled.
 The 143.7-second recovery window had 12,930 requests and zero failures. This is a single
 run on the isolated fixture at the stated request rate and active customer sample.
+
+### Redis queue regression and OPA enforcement, 2026-11-17
+
+The 28 original errors originated in the Customer Edge per-party limiter's blocking
+Redis increment. The shared Redis pool refused acquisition after 24 requests queued.
+No Valkey latency trace was captured for that original spike. In the isolated stack,
+a controlled 750 ms Valkey command pause reproduced the same exception on all three
+routes. Each comparison used the same 22-second k6 workload and enforced OPA.
+
+| Customer Edge | HTTP requests | HTTP 500 | Dropped iterations |
+| --- | ---: | ---: | ---: |
+| Shared Redis pool | 1,917 | 42 | 64 |
+| Dedicated rate-limit pool and atomic increment | 1,983 | 0 | 0 |
+
+The rate limiter now uses a named Redis pool capped at 32 connections and 64 waiting
+requests, with a one-second command timeout. A single Lua script increments the counter
+and sets its expiry. It also repairs a legacy counter that lacks an expiry. The OPA
+instances loaded the repository's GitOps bundles for Customer Edge, Party, Account,
+Balance and Domestic Payment. Stopping the Edge policy service returned HTTP 503
+`POLICY_DECISION_POINT_UNAVAILABLE` on each route. All three authenticated reads returned
+HTTP 200 after OPA recovered.
+
+The fixed build was measured with enforced OPA across the five services, using the same
+three-million-row datasets, 64 active synthetic customers, and 30 GET requests per second
+per route. The reporting worker exported and replayed six million synthetic lines.
+Each API cell shows p95 / p99 in milliseconds and HTTP failures / requests.
+
+| Phase | Seconds | Account | Balance | Payment |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline | 45.0 | 72.9 / 343.3 · 0/1351 | 143.1 / 519.2 · 0/1351 | 105.4 / 440.1 · 0/1350 |
+| Export | 18.5 | 132.5 / 436.4 · 0/554 | 214.4 / 479.3 · 0/554 | 208.3 / 514.5 · 0/554 |
+| Reporting outage | 45.0 | 110.6 / 577.5 · 0/1350 | 214.7 / 763.0 · 0/1350 | 162.5 / 775.7 · 6/1350 |
+| Complete replay | 145.9 | 28.9 / 85.2 · 0/4376 | 57.0 / 169.5 · 0/4376 | 43.0 / 132.7 · 0/4376 |
+
+The run recorded 22,892 HTTP requests and zero dropped iterations. Customer Edge logged
+zero Redis pool exhaustion exceptions. Six payment reads returned HTTP 404 during the
+reporting outage window. Domestic Payment logged six OPA deadline errors at the same time.
+The Customer Edge payment status route maps the upstream non-200 result to 404.
+The 145.9-second recovery window completed 13,128 error-free reads. All three recovered
+trial balances matched the index digests and balanced independently.
