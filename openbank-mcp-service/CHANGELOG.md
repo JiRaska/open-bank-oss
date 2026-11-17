@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.8](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.7...mcp-service-v0.17.8) (2026-11-17)
+
+
+### Bug Fixes
+
+* **mcp:** throttle before policy for call and list, bound flood audit, cap body size ([#16596](https://github.com/JiRaska/open-bank-oss/issues/16596)) ([fb6600c](https://github.com/JiRaska/open-bank-oss/commit/fb6600cb1abe6c01bebdc485c9a1de6521d4d6fa))
+
 ## [0.17.7](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.6...mcp-service-v0.17.7) (2026-11-07)
 
 

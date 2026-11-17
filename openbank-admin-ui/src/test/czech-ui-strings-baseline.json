@@ -43,7 +43,7 @@
   "src/components/delegations/DelegationAuditTimeline.tsx": 6,
   "src/components/delegations/RoleCatalog.tsx": 3,
   "src/components/docs/BpmnView.tsx": 3,
-  "src/components/docs/DocsHub.tsx": 19,
+  "src/components/docs/DocsHub.tsx": 21,
   "src/components/docs/ProcessView.tsx": 8,
   "src/components/feedback/ScreenPainChart.tsx": 3,
   "src/components/kyc/PartyLookup.tsx": 13,
