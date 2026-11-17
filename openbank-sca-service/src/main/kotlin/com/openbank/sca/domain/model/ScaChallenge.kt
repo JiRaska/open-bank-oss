@@ -63,6 +63,14 @@ enum class ScaPurpose {
      * creditor. The evidence therefore says "I signed THIS frozen instruction", and a signature
      * collected for one approval can never be spent on another or on an edited payload. */
     APPROVAL,
+
+    /** Connecting a customer MCP client to the bank (ADR-0385 D3). Dynamic-linked to the PAR
+     * request ([DynamicLinkingData.approvalRequestId], `mcp-connect:<request id>`) and to the
+     * SHA-256 of its canonical context ([DynamicLinkingData.payloadSha256]: client_id, redirect
+     * host, resource URL, scopes, request_uri hash, expiry). A reserved namespace (ADR-0335): only
+     * the authorization server's scoped consumer may spend it, and consent-service never accepts
+     * it as PSD2 consent evidence. A device enrolled less than 72 h ago cannot approve it. */
+    MCP_CLIENT_CONNECT,
 }
 
 enum class ScaStatus {
