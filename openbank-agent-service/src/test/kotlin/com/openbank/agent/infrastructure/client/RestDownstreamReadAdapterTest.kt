@@ -32,7 +32,13 @@ class RestDownstreamReadAdapterTest {
         // agree, so adding a tool to one without the other cannot ship.
         val registry = McpToolRegistry()
         val declared = registry.tools.map { it.name }.toSet()
-        val proposalTools = setOf("draft_ticket", "flip_feature_flag")
+        val proposalTools = setOf(
+            "draft_ticket",
+            "flip_feature_flag",
+            com.openbank.agent.application.AmlDecisionProposalTool.NAME,
+            // Sanctions maker review goes through its own port (SanctionsReviewPort), never this read adapter.
+            com.openbank.agent.application.SanctionsReviewTool.NAME,
+        )
         // ADR-0352 §12: the product tools run in-process over ProductToolkit — no downstream call.
         val inProcessTools = com.openbank.agent.application.ProductAuthoringTools.CAPABILITIES.keys
 

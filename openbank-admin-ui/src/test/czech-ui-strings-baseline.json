@@ -11,7 +11,6 @@
   "src/app/docs/api/page.tsx": 28,
   "src/app/docs/bcp/page.tsx": 18,
   "src/app/docs/cloud-architecture/page.tsx": 62,
-  "src/app/docs/compliance/page.tsx": 89,
   "src/app/docs/identity-dedup/page.tsx": 44,
   "src/app/docs/qrlesspay-readiness/page.tsx": 42,
   "src/app/docs/qrlesspay/page.tsx": 1,

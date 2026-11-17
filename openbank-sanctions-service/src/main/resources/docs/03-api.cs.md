@@ -148,6 +148,14 @@ Authorization: Bearer <token>
 
 Přezkoumávající zaznamenaný u rozhodnutí je přihlášený principal (`preferred_username` z tokenu). Přezkoumávajícího v těle neposílejte: pole `reviewedBy` se z důvodu kompatibility přijme, ale ignoruje se.
 
+**Identita agenta (maker v rámci čtyř očí).** `service-account-openbank-agent` (MCP nástroj
+`sanctions_review_check` v agent-service) smí tento endpoint volat, a to pouze s `newStatus: CLEAR`;
+jakýkoli jiný stav vrátí 403. Čtyři oči jeho volání pozastaví (`202` + `approvalId`), dokud jej
+lidský checker neschválí v `/api/v1/sanctions/approvals/{id}`; agent pak stejný požadavek zopakuje
+s `X-Approval-Id`. Jako přezkoumávající se zaznamená tento lidský checker. Dokud čtyři oči nejsou
+vynucené, je agent odmítnut vždy. Identita agenta nikdy nedostává `sanctions.approval.decide`. `/api/v1/.../review`
+zůstává jen pro lidi.
+
 ### Získat konkrétní prověření
 
 ```http

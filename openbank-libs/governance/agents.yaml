@@ -191,6 +191,9 @@ tool_tiers:
     - product.explain             # ruleId / instruction -> IR path (ADR-0352 §12)
   write_proposal: # produces a reviewable artifact, never a direct effect
     - draft.ticket
+    - propose.aml.decision # AML case decision as a HITL proposal; the human records it under their own identity
+    - sanctions.review.maker # EXCEPTION to "never a direct effect": a real sanctions.clear upstream, but only as four-eyes
+                             # MAKER (CLEAR only, server-side); nothing happens until a distinct human checker approves (ADR-0155)
     - gh.pr.open
     - draft.adr
     - git.branch
@@ -276,7 +279,9 @@ agents:
       allow: [query.ledger.readonly, query.gl.readonly, query.catalog.readonly, read.logs, read.governance,
               draft.ticket, query.compliance.readonly, query.payments.readonly, query.disputes.readonly,
               query.observability.readonly,   # Prometheus/Loki/Alertmanager read (oversight telemetry)
-              flags.write]    # feature-flag flip proposals (ADR-0067 / issue #419)
+              flags.write,    # feature-flag flip proposals (ADR-0067 / issue #419)
+              propose.aml.decision,   # AML false-positive triage as a HITL proposal; never decides
+              sanctions.review.maker] # sanctions hit review as four-eyes maker; a human checker approves
       deny:  ["money.*", "gh.pr.*"]
     requires_human:
       # Control-plane output is ALWAYS a proposal into the admin-ui approval queue (ADR-0031 D4).

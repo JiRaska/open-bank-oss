@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Can } from '@/components/auth/AuthGuard'
 import { useSession } from 'next-auth/react'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { ShortId } from '@/components/ui/HumanReference'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
@@ -95,6 +96,7 @@ function CeuSection({ returns }: { returns: StatutoryReturn[] }) {
         <table className="table">
           <thead>
             <tr>
+              <th>{t('Subjekt', 'Entity')}</th>
               <th>{t('Období do', 'Window end')}</th>
               <th>{t('Stav', 'Status')}</th>
               <th>{t('Změny', 'Changes')}</th>
@@ -106,6 +108,7 @@ function CeuSection({ returns }: { returns: StatutoryReturn[] }) {
           <tbody>
             {filings.map(item => (
               <tr key={item.id}>
+                <td><ShortId value={item.entityId} copyLabel={t('Kopírovat ID subjektu', 'Copy entity ID')} /></td>
                 <td>{item.window}{item.initialLoad ? ` · ${t('úvodní plné načtení', 'initial full load')}` : ''}</td>
                 <td>{item.status} · {t('revize', 'revision')} {item.revision}</td>
                 <td>{show(item.changes)}</td>
@@ -154,7 +157,7 @@ function CatalogueSection({ catalogues, returns, onChanged }: { catalogues: Retu
                       <td>{definition.periodicity}</td>
                       <td>{definition.legalBasis}</td>
                       <td>{definition.onDemand ? t('ano', 'yes') : t('ne', 'no')}</td>
-                      <td>{last ? `${last.period} · ${t('revize', 'revision')} ${last.revision} · ${last.status}` : t('zatím nesestaveno', 'not assembled yet')}</td>
+                      <td>{last ? last.map(item => <div key={item.id}><ShortId value={item.entityId} copyLabel={t('Kopírovat ID subjektu', 'Copy entity ID')} />{' · '}{`${item.period} · ${t('revize', 'revision')} ${item.revision} · ${item.status}`}</div>) : t('zatím nesestaveno', 'not assembled yet')}</td>
                     </tr>
                   )
                 })}

@@ -747,6 +747,26 @@ gates:
     selftest_inputs: [".github/scripts/check-deploy-holds.py", ".github/scripts/merge-deploy-holds.py", ".github/scripts/test-conjunctive-holds.py", "openbank-libs/governance/rules.yaml"]
     run: python3 .github/scripts/check-deploy-holds.py --root . --enforce-live-strict
 
+  # ADR-0358: image pins live on the bot-owned deploy/sandbox branch. The branch carries no
+  # workflows, so a push there runs nothing; the contract is checked by the writer
+  # (publish-deploy-pin.py) before every write, and here against the live tip on every CI run.
+  # Contract: only pins/** changes, digest present, manifests are a verbatim copy of main at
+  # manifest_sha, every pinned sha is an ancestor of main, no sha moves backwards (rollback
+  # may move only the image), and a service under deploy_holds keeps its image. Before the
+  # owner bootstraps the branch the corpus is UNRESOLVED, which is not a pass.
+  - id: deploy-pin-branch-contract
+    name: "deploy/sandbox pins obey the ADR-0358 contract"
+    group: gitops
+    mode: enforced
+    min_subjects: 1  # the tip commit; UNRESOLVED until deploy/sandbox exists
+    budget_seconds: 60  # self-test builds a throwaway repo; live mode may unshallow main (blobless)
+    rationale: "Pins bypass PR review by design (ADR-0358); this contract is what keeps a direct write to deploy/sandbox from deploying a manifest or image main never had."
+    review_after: "2027-04-30"
+    selftest: python3 .github/scripts/check-deploy-pin-branch.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-deploy-pin-branch.py", "openbank-infra/gitops/components/admin-ui/", ".github/scripts/check-deploy-holds.py", "openbank-libs/governance/rules.yaml"]
+    run: bash .github/scripts/check-deploy-pin-branch-live.sh
+
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
   # mechanism-3 liveness gauge. ENFORCED as of #3931, ahead of the 2026-09-30
   # target — a baseline ratchet, not a sweep gate: the 16 files still without a
@@ -1263,6 +1283,29 @@ gates:
       python3 .github/scripts/check-otel-exporter-endpoint.py --self-test
     run: |
       python3 .github/scripts/check-otel-exporter-endpoint.py
+  # #16292. cert-manager renews an internal leaf 15 days before expiry and rewrites the mounted
+  # Secret; Quarkus reads QUARKUS_HTTP_SSL_CERTIFICATE_FILES once at start unless a reload period
+  # is set. A pod that outlives the renewal window serves the old leaf until it expires while the
+  # Certificate, the Secret and the expiry metric all report a fresh one. 24 of 26 serving
+  # containers had no reload period on 2026-11-15. Per container, not per file. The same holds
+  # for the outbound identity: a named quarkus.tls.<name> config with a key-store needs its own
+  # reload-period (45 of 49 lacked one the same day).
+  - id: tls-certificate-reload
+    name: "mounted TLS certificates are reloaded, server and client side (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      A renewed certificate that the process never re-reads is an outage on a timer that every
+      expiry signal reports as healthy, because they all measure the Secret, not the listener.
+    review_after: 2027-05-15
+    min_subjects: 60   # 26 serving containers + 49 named client TLS configs today (2026-11-15)
+    budget_seconds: 20
+    selftest_inputs: [".github/scripts/check-tls-certificate-reload.py"]
+    selftest: |
+      python3 .github/scripts/check-tls-certificate-reload.py --self-test
+    run: |
+      python3 .github/scripts/check-tls-certificate-reload.py
+
   - id: entity-column-names
     name: "JPA entity columns are named explicitly where nothing converts them (enforced)"
     group: gitops
@@ -3182,18 +3225,6 @@ gates:
     run: |
       python3 .github/scripts/check-ai-act-high-risk-inventory.py
 
-  # The admin-ui compliance page renders 47 regulatory-conformance claims from a hardcoded
-  # literal. #2370 found it wrong in BOTH directions — GDPR rows marked `ok` citing columns
-  # that exist only in a Flyway migration, with nothing reading them — and #2667 corrected
-  # those rows BY HAND. The checker that stops them rotting again was written at the same
-  # time and then referenced from nowhere: no workflow, no manifest entry, and nothing in
-  # this repo iterates `.github/scripts/check-*` (this runner reads the manifest, not the
-  # directory). So it had never run once (#3240).
-  #
-  # ENFORCED, same reasoning as the two gates above: the claim is published to users, the
-  # evidence citation is mechanical, and advisory over a published claim means "the page
-  # says something the code does not support" is mergeable. Green on the current tree, and
-  # `--self-test` (added with this registration) proves the red is reachable.
   # ensure-ecr-repository.sh runs on the deploy path, which CI cannot exercise: it needs AWS
   # credentials and a real registry. What CAN regress silently is its CLASSIFICATION of the
   # registry's answer, and that is exactly what broke the first attempt — #3444 read AccessDenied
@@ -3913,16 +3944,6 @@ gates:
     run: |
       python3 .github/scripts/check-route-exports.py --enforce
 
-  - id: compliance-matrix
-    name: "compliance-page evidence citations (#2370, enforced)"
-    group: registry
-    min_subjects: 1000   # 2177 Kotlin sources observed
-    mode: enforced
-    selftest_inputs: [".github/scripts/check-compliance-matrix.py"]
-    selftest: |
-      python3 .github/scripts/check-compliance-matrix.py --self-test
-    run: |
-      python3 .github/scripts/check-compliance-matrix.py --enforce
 
   # docs/compliance/openssf-gold-gap.md feeds the OpenSSF BadgeApp form -- a public
   # attestation to a third party. It shipped scoring crypto_used_network/crypto_tls12 as
@@ -4079,6 +4100,27 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-regulatory-obligations.py"]
     run: python3 .github/scripts/check-regulatory-obligations.py
+
+  # GATE-REMOVED: compliance-matrix — guarded the hand-written COMPLIANCE_AREAS literal on /docs/compliance; ADR-0379 deletes the literal and `compliance-trace` replaces the guard.
+  # GATE-REMOVED: compliance-page-evidence — same literal, same reason (ADR-0379); `compliance-trace` keeps the literal from returning.
+  # The admin-ui compliance hub (ADR-0379) joins obligation -> control -> evidence at request time
+  # from three hand-authored YAML ids. A misspelt id fails nothing at runtime; the hub would quietly
+  # show an honest-looking gap. This gate resolves every edge (gate id, workflow file, ADR, path,
+  # control id) and keeps the deleted requirement literal from returning.
+  - id: compliance-trace
+    name: "compliance trace resolves: obligation -> control -> evidence (ADR-0379, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 20   # ~0.3s locally
+    # 63 edges measured 2026-11-14 (55 evidence refs + 8 obligation links); half, so a renamed key
+    # turning the check into a green no-op over an empty catalogue goes red.
+    min_subjects: 30
+    review_after: "2027-11-14"
+    rationale: "The compliance hub is what compliance, other departments and auditors read as the platform's control posture. An edge that silently fails to resolve turns a real control into an apparent gap, or hides a gap behind evidence that does not exist."
+    selftest: python3 .github/scripts/check-compliance-trace.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-compliance-trace.py"]
+    run: python3 .github/scripts/check-compliance-trace.py --enforce
 
   - id: ai-governance-snapshot-drift
     name: "AI governance snapshot drift (ADR-0029 D3 / ADR-0031, enforced)"
@@ -6158,6 +6200,24 @@ gates:
     run: |
       python3 .github/scripts/check-helm-values-keys.py
 
+  # Kubernetes drops null fields from a stored object, so an Application whose
+  # helm.valuesObject disables a chart default with `key: null` can never match its live copy,
+  # so the parent app is OutOfSync forever and the standing diff hides any real drift there.
+  # The string form `values: |` keeps nulls. Scans every Application under gitops/. ENFORCED.
+  - id: argocd-valuesobject-no-null
+    name: "Argo CD helm.valuesObject carries no null (permanent OutOfSync, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "A null in valuesObject is stripped when Kubernetes stores the Application, so desired never equals live and the parent app is OutOfSync forever, masking real drift; the values string keeps the null."
+    review_after: "2027-05-17"
+    selftest: python3 .github/scripts/check-argocd-valuesobject-null.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-argocd-valuesobject-null.py"]
+    min_subjects: 15   # Helm sources with a valuesObject under gitops/
+    budget_seconds: 30
+    run: |
+      python3 .github/scripts/check-argocd-valuesobject-null.py
+
   # #15216: ci/artifacts.lock is the one trust anchor for every external tool and chart CI
   # fetches; fetch-artifact.py accepts bytes from any tier only when they match its sha256.
   - id: ci-artifact-lock-integrity
@@ -6417,15 +6477,6 @@ gates:
     run: |
       python3 .github/scripts/check-threat-model-test-evidence.py --fetch-evidence --pr-base "${PR_DIFF_BASE:-}" --ratchet .github/gates/baselines/threat-model-test-evidence.txt
 
-  - id: compliance-page-evidence
-    name: "Compliance-page evidence (issue #2370, enforced)"
-    group: security
-    mode: enforced
-    selftest_inputs: [".github/scripts/check-compliance-evidence.py"]
-    selftest: |
-      python3 .github/scripts/check-compliance-evidence.py --selftest
-    run: |
-      python3 .github/scripts/check-compliance-evidence.py --enforce
 
   - id: scheduler-exercised-in-tests
     name: "Scheduler exercised in tests (issue #2204, enforced)"
@@ -6749,6 +6800,27 @@ gates:
     selftest_inputs: [".github/scripts/check-realm-template-importable.py"]
     run: |
       python3 .github/scripts/check-realm-template-importable.py
+
+  # Keycloak client secrets must name their OpenBao source (issue #3246). The import artifact
+  # Keycloak rebuilds from lives in OpenBao and is not derived from the template, so a client
+  # added to realm-template.json merges green and the nightly keycloak-realm-drift job goes red
+  # the next morning — twice in one week (2026-11-10, 2026-11-15). This makes the second step
+  # visible at PR time: a new placeholder client must state where its secret lives in
+  # keycloak-realm-import-secret-sources.yaml, and the finding names the operator follow-up. Static, no
+  # cluster or OpenBao read; the drift job stays the proof that the artifact was updated.
+  - id: realm-import-secret-sources
+    name: "Keycloak placeholder client secrets name their OpenBao source (issue #3246, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 15
+    rationale: "Two template-only client additions in one week merged green and left the OpenBao realm-import artifact without the client; only the next-day drift job noticed, and nothing at PR time said a second step existed."
+    review_after: "2027-02-15"
+    min_subjects: 40
+    selftest: python3 .github/scripts/check-realm-import-secret-sources.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-realm-import-secret-sources.py"]
+    run: |
+      python3 .github/scripts/check-realm-import-secret-sources.py
 
   # A bank-owned canary customer (ADR-0331) is safe in exactly one shape: a confidential
   # customers-realm client with no browser/password/implicit flow, a party_id mapper, and a
@@ -7889,6 +7961,8 @@ gates:
       - ".github/scripts/test-await-admin-ui-source-validation.py"
       - ".github/scripts/shard-verification-modules.py"
       - ".github/workflows/admin-ui-deploy.yml"
+      - ".github/workflows/admin-ui-repin.yml"
+      - ".github/scripts/publish-deploy-pin.py"
       - ".github/workflows/auto-deploy.yml"
       - ".github/workflows/platform-images.yml"
     selftest: |

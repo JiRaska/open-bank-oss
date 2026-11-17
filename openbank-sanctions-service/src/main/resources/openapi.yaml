@@ -28,7 +28,7 @@ info:
   # and withdraw it. The owner of a registration is the calling service, taken from its token and
   # from no request value. No existing operation, schema or response changes. Registration
   # answers 503 while `openbank.sanctions.monitoring.enabled` is false, which is the default.
-  version: 3.4.0
+  version: 3.5.0
   # 1.4.0 -> 2.0.0 (#9048, ADR-0048): POST /lists/refresh-all could not keep answering 200 — that
   # required the whole external-feed fan-out to finish inside the request, which was the defect.
   # oasdiff classifies 200 -> 202 as breaking, and a breaking change here means a new URL major:
@@ -301,6 +301,11 @@ paths:
                 $ref: '#/components/schemas/SanctionsCheckV3'
         '202':
           description: Four-eyes pending — a second, distinct principal must approve via /approvals/{id}.
+        '403':
+          description: >-
+            Forbidden. The agent identity (service-account-openbank-agent) may submit only
+            `newStatus: CLEAR`; any other status is refused. Also returned when the caller lacks the
+            sanctions.clear grant.
 
   /api/v3/sanctions/hits:
     get:
