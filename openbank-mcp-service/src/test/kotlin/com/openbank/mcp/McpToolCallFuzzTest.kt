@@ -118,7 +118,13 @@ class McpToolCallFuzzTest {
                 },
             ),
             callerResolver = CallerContextResolver(
-                TestJsonWebToken(mapOf("sub" to "agent:fuzz", "consent_id" to "6a1f5f38-59a5-4e77-9f0d-2b1a7a2f1c11")),
+                TestJsonWebToken(
+                    mapOf(
+                        "sub" to "agent:fuzz",
+                        "aud" to "openbank-mcp-service",
+                        "consent_id" to "6a1f5f38-59a5-4e77-9f0d-2b1a7a2f1c11",
+                    ),
+                ),
             ),
             mapper = mapper,
             serverName = "openbank-mcp",

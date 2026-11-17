@@ -46,7 +46,11 @@ private const val WIRE_FUZZ_CONSENT_ID = "22222222-2222-2222-2222-222222222222"
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestSecurity(user = "agent:fuzz")
 @OidcSecurity(
-    claims = [Claim(key = "sub", value = "agent:fuzz"), Claim(key = "consent_id", value = WIRE_FUZZ_CONSENT_ID)],
+    claims = [
+        Claim(key = "sub", value = "agent:fuzz"),
+        Claim(key = "aud", value = "openbank-mcp-service"),
+        Claim(key = "consent_id", value = WIRE_FUZZ_CONSENT_ID),
+    ],
 )
 class McpToolCallWireFuzzIT {
 

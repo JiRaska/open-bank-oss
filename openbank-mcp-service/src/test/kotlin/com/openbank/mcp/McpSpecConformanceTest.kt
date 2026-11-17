@@ -59,7 +59,11 @@ class McpSpecConformanceTest {
     private val limiter = McpRateLimiter.withDefaults()
 
     private val agentToken = TestJsonWebToken(
-        mapOf("sub" to "agent:conformance", "consent_id" to "6a1f5f38-59a5-4e77-9f0d-2b1a7a2f1c11"),
+        mapOf(
+            "sub" to "agent:conformance",
+            "aud" to "openbank-mcp-service",
+            "consent_id" to "6a1f5f38-59a5-4e77-9f0d-2b1a7a2f1c11",
+        ),
     )
 
     private fun endpoint(
