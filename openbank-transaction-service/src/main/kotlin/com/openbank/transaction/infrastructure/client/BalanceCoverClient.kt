@@ -55,7 +55,7 @@ data class PlaceHoldBody(
     val currency: String,
     val reason: String,
     val referenceId: String,
-    val ttlSeconds: Long,
+    val ttlSeconds: Long?,
 )
 
 data class HoldResponse(val id: UUID)
@@ -69,7 +69,7 @@ class BalanceCoverClient(@RestClient private val client: BalanceCoverRestClient)
         currency: String,
         reason: String,
         referenceId: String,
-        ttlSeconds: Long,
+        ttlSeconds: Long?,
     ): UUID = client.placeHold(accountId, PlaceHoldBody(amount, currency, reason, referenceId, ttlSeconds))
         .awaitSuspending().id
 

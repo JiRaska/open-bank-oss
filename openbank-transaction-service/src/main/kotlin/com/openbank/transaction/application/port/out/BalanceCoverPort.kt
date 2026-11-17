@@ -24,7 +24,7 @@ interface BalanceCoverPort {
         currency: String,
         reason: String,
         referenceId: String,
-        ttlSeconds: Long,
+        ttlSeconds: Long?,
     ): UUID
 
     /** Release a previously placed reservation. Idempotent enough for compensation best-effort. */

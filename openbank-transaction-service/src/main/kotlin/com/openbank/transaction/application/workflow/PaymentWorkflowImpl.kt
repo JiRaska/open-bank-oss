@@ -23,7 +23,7 @@ import java.util.UUID
  * initialInterval 2 s, backoff 2.0).
  */
 @Suppress("MagicNumber")
-class PaymentWorkflowImpl : PaymentWorkflow {
+class PaymentWorkflowImpl(private val durableBranch: Boolean = false) : PaymentWorkflow {
 
     private val retryOptions: RetryOptions = RetryOptions.newBuilder()
         .setMaximumAttempts(MAX_ATTEMPTS)
@@ -74,6 +74,17 @@ class PaymentWorkflowImpl : PaymentWorkflow {
         private const val FINALISATION_MAX_INTERVAL_SECONDS = 30L
     }
 
+    private val durableOptions = ActivityOptions.newBuilder()
+        .setStartToCloseTimeout(Duration.ofSeconds(FINALISATION_MAX_INTERVAL_SECONDS))
+        .setRetryOptions(
+            RetryOptions.newBuilder().setMaximumAttempts(0)
+                .setInitialInterval(Duration.ofSeconds(INITIAL_INTERVAL_SECONDS))
+                .setMaximumInterval(Duration.ofSeconds(FINALISATION_MAX_INTERVAL_SECONDS)).build(),
+        )
+        .build()
+
+    private val durable: PaymentActivities = Workflow.newActivityStub(PaymentActivities::class.java, durableOptions)
+
     private val activities: PaymentActivities =
         Workflow.newActivityStub(PaymentActivities::class.java, activityOptions)
 
@@ -91,8 +102,8 @@ class PaymentWorkflowImpl : PaymentWorkflow {
         // try) rather than failing the workflow and orphaning the transaction. holdId is still the
         // sentinel in that case, so the catch releases nothing.
         val state = try {
-            holdId = activities.placeHold(transactionId)
-            journalId = activities.postJournal(transactionId)
+            holdId = if (durableBranch) durable.placeHold(transactionId) else activities.placeHold(transactionId)
+            journalId = if (durableBranch) durable.postJournal(transactionId) else activities.postJournal(transactionId)
             journalPosted = true
 
             // No direct balance debit/credit and no success-path hold release: the ledger projection in
@@ -123,7 +134,7 @@ class PaymentWorkflowImpl : PaymentWorkflow {
         // and reverse a journal that already settled; it fails the workflow instead, and Temporal
         // retries the activity from history.
         if (state == SagaState.COMPLETED) {
-            finalisation.markCompleted(transactionId)
+            if (durableBranch) durable.markCompleted(transactionId) else finalisation.markCompleted(transactionId)
         } else {
             finalisation.markFailed(transactionId, "Payment workflow did not complete (state=$state)")
         }

@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openbank:transaction-booking-events:v1",
+  "title": "Additive transaction lifecycle booking context v1",
+  "type": "object",
+  "properties": {
+    "sourceBookingContext": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "bankId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "establishmentId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "hostCountry": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$"
+        },
+        "mode": {
+          "enum": [
+            "FOS",
+            "BRANCH"
+          ]
+        }
+      },
+      "required": [
+        "bankId",
+        "establishmentId",
+        "hostCountry",
+        "mode"
+      ]
+    },
+    "targetBookingContext": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "bankId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "establishmentId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "hostCountry": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$"
+        },
+        "mode": {
+          "enum": [
+            "FOS",
+            "BRANCH"
+          ]
+        }
+      },
+      "required": [
+        "bankId",
+        "establishmentId",
+        "hostCountry",
+        "mode"
+      ]
+    }
+  },
+  "additionalProperties": true
+}

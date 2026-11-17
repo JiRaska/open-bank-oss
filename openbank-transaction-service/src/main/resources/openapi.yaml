@@ -25,7 +25,7 @@ info:
   # Also additive: TransactionPage.pagination now declares the fields the server actually sends
   # (limit, hasNextPage, previousCursor, totalCount - libs `PageInfo`); `hasMore`, which the server
   # never sent, is kept and labelled. No path, parameter or status code changes.
-  version: 1.23.0
+  version: 1.24.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -836,6 +836,14 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    BookingContext:
+      type: object
+      required: [bankId, establishmentId, hostCountry, mode]
+      properties:
+        bankId: { type: string, format: uuid }
+        establishmentId: { type: string, format: uuid }
+        hostCountry: { type: string, pattern: '^[A-Z]{2}$' }
+        mode: { type: string, enum: [FOS, BRANCH] }
     MerchantAdmin:
       type: object
       description: A catalogue entry as an operator sees it. Public business data only.
@@ -1050,6 +1058,8 @@ components:
     TransactionResponse:
       type: object
       properties:
+        sourceBookingContext: { $ref: '#/components/schemas/BookingContext' }
+        targetBookingContext: { $ref: '#/components/schemas/BookingContext' }
         id:
           type: string
           format: uuid

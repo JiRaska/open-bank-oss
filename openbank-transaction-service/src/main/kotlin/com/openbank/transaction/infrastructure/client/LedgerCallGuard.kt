@@ -25,6 +25,11 @@ class LedgerCallGuard(@RestClient private val ledgerClient: LedgerRestClient) {
         ledgerClient.postJournal(request)
     }
 
+    @Retry(maxRetries = 3, delay = 500, jitter = 100)
+    @Timeout(2000)
+    fun postBranchPayment(request: BranchPaymentRequest, synthetic: Boolean): Uni<BranchPaymentReceipt> =
+        ledgerClient.postBranchPayment(request, if (synthetic) SyntheticTaint.headerValue() else null)
+
     @Retry(maxRetries = 2, delay = 300)
     @Timeout(2000)
     fun reverseJournal(journalId: UUID, request: ReverseJournalRequest): Uni<JournalResponse> =

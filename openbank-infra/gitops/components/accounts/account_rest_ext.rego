@@ -208,3 +208,10 @@ allowed_reasons contains "service-account-verify-ownership" if {
 	machine_named(caller)
 	input.action == "account.verifyOwnership"
 }
+
+# ADR-0380 B2: Transaction pins account-owned immutable booking context before persistence.
+allowed_reasons contains "service-transaction-account-read" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-transaction")
+	input.action == "account.read"
+}

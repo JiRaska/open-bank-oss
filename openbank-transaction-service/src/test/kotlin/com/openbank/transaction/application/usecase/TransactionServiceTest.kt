@@ -106,7 +106,57 @@ class TransactionServiceTest {
         temporalConfig,
         workflowClient,
         bookingClock,
-    )
+    ).also { subject ->
+        subject.accountBookings = mockk { coEvery { context(any(), any()) } returns null }
+        subject.branchDispatch = mockk { coEvery { start(any()) } returns Unit }
+    }
+
+    @Test
+    fun `bank and both branch contexts are pinned before the workflow`(): Unit = runBlocking {
+        val command = initiateCommand()
+        val bank = UUID.randomUUID()
+        val source = com.openbank.libs.market.BookingContext(bank, UUID.randomUUID(), "AT", "BRANCH")
+        val target = com.openbank.libs.market.BookingContext(bank, UUID.randomUUID(), "SK", "BRANCH")
+        coEvery { service.accountBookings.context(command.sourceAccountId!!, false) } returns source
+        coEvery { service.accountBookings.context(command.targetAccountId!!, false) } returns target
+        coEvery { transactionRepository.findByIdempotencyKey(any()) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        stubWorkflowCommitted(TransactionStatus.PENDING)
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+        val result = service.initiateTransaction(command)
+        assertThat(result.sourceBookingContext).isEqualTo(source)
+        assertThat(result.targetBookingContext).isEqualTo(target)
+    }
+
+    @Test
+    fun `same-pocket branch transfer cannot retain a reservation without a booked movement`(): Unit = runBlocking {
+        val sourceId = UUID.randomUUID()
+        val command = initiateCommand().copy(sourceAccountId = sourceId, targetAccountId = sourceId)
+        val context = com.openbank.libs.market.BookingContext(UUID.randomUUID(), UUID.randomUUID(), "AT", "BRANCH")
+        coEvery { service.accountBookings.context(sourceId, false) } returns context
+        coEvery { transactionRepository.findByIdempotencyKey(any()) } returns null
+        assertThat(runCatching { service.initiateTransaction(command) }.exceptionOrNull())
+            .isInstanceOf(IllegalStateException::class.java)
+        coVerify(exactly = 0) { transactionRepository.save(any(), any()) }
+    }
+
+    @Test
+    fun `unknown or foreign-bank target fails before persistence or workflow`(): Unit = runBlocking {
+        val command = initiateCommand()
+        val source = com.openbank.libs.market.BookingContext(UUID.randomUUID(), UUID.randomUUID(), "AT", "BRANCH")
+        coEvery { service.accountBookings.context(command.sourceAccountId!!, false) } returns source
+        coEvery { service.accountBookings.context(command.targetAccountId!!, false) } returnsMany listOf(
+            null,
+            source.copy(bankId = UUID.randomUUID(), establishmentId = UUID.randomUUID(), hostCountry = "SK"),
+        )
+        coEvery { transactionRepository.findByIdempotencyKey(any()) } returns null
+        repeat(2) {
+            assertThat(runCatching { service.initiateTransaction(command) }.exceptionOrNull())
+                .isInstanceOf(IllegalStateException::class.java)
+        }
+        coVerify(exactly = 0) { transactionRepository.save(any(), any()) }
+        verify(exactly = 0) { workflowClient.newWorkflowStub(any<Class<*>>(), any<WorkflowOptions>()) }
+    }
 
     @ParameterizedTest
     @CsvSource(

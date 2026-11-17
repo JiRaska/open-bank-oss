@@ -281,6 +281,23 @@ private fun TransactionEntity.toDomain(): com.openbank.transaction.domain.model.
         isReversal = isReversal,
         counterpartyName = counterpartyName,
         synthetic = synthetic,
+        sourceBookingContext = sourceBookingBankId?.let {
+            com.openbank.libs.market.BookingContext(
+                it,
+                checkNotNull(sourceBookingEstablishmentId),
+                checkNotNull(sourceBookingHostCountry),
+                checkNotNull(sourceBookingMode),
+            )
+        },
+        targetBookingContext = targetBookingBankId?.let {
+            com.openbank.libs.market.BookingContext(
+                it,
+                checkNotNull(targetBookingEstablishmentId),
+                checkNotNull(targetBookingHostCountry),
+                checkNotNull(targetBookingMode),
+            )
+        },
+
     )
 }
 
@@ -320,6 +337,14 @@ private fun com.openbank.transaction.domain.model.Transaction.toEntity() = Trans
     isReversal = this@toEntity.isReversal
     counterpartyName = this@toEntity.counterpartyName
     synthetic = this@toEntity.synthetic
+    sourceBookingBankId = this@toEntity.sourceBookingContext?.bankId
+    sourceBookingEstablishmentId = this@toEntity.sourceBookingContext?.establishmentId
+    sourceBookingHostCountry = this@toEntity.sourceBookingContext?.hostCountry
+    sourceBookingMode = this@toEntity.sourceBookingContext?.mode
+    targetBookingBankId = this@toEntity.targetBookingContext?.bankId
+    targetBookingEstablishmentId = this@toEntity.targetBookingContext?.establishmentId
+    targetBookingHostCountry = this@toEntity.targetBookingContext?.hostCountry
+    targetBookingMode = this@toEntity.targetBookingContext?.mode
 }
 
 /**

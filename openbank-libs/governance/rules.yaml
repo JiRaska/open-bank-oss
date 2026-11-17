@@ -4768,6 +4768,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*LedgerClient*.kt"
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/transaction/infrastructure/client/AccountBookingClient.kt"
       - "src/main/kotlin/com/openbank/transaction/infrastructure/client/BalanceCoverClient.kt"
       - "src/main/kotlin/com/openbank/transaction/infrastructure/client/FxRateClient.kt"
       - "src/main/kotlin/com/openbank/transaction/infrastructure/client/LedgerRestClient.kt"
@@ -5066,6 +5067,8 @@ security_sensitive_paths:
     cardholder: []
   openbank-ledger-service:
     auth_crypto_payment:
+      - "src/main/kotlin/**/BranchPaymentPlan.kt"
+      - "src/main/kotlin/**/BranchPaymentResource.kt"
       - "src/main/kotlin/**/ApprovalResource.kt"
       # ADR-0365: own-book posting, payload identity, startup binding and four-eyes controls.
       - "src/main/kotlin/**/Pension*.kt"

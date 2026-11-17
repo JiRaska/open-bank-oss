@@ -18,6 +18,39 @@ class BranchBookReconciliationTest {
     private val date = LocalDate.of(2026, 11, 17)
 
     @Test
+    fun `matching deposit books cannot hide an unmatched clearing position`() {
+        val rows = listOf(
+            line(first, "20").copy(clearing = BigDecimal("-10")),
+            line(second, "30").copy(clearing = BigDecimal("9")),
+        )
+        val report = BranchBookReconciliation.reconcile(
+            BranchLedgerSnapshot(bank, date, rows),
+            listOf(total(first, "20"), total(second, "30")),
+            Instant.now(),
+        )
+        assertThat(report.bankMatches).isTrue()
+        assertThat(report.booksMatch).isTrue()
+        assertThat(report.clearingEliminates).isFalse()
+        assertThat(report.complete).isFalse()
+    }
+
+    @Test
+    fun `opposite corrupt payment pairs cannot cancel the per-payment control`() {
+        val rows = listOf(
+            line(first, "20").copy(clearing = BigDecimal("-10")),
+            line(second, "30").copy(clearing = BigDecimal("10")),
+        )
+        val report = BranchBookReconciliation.reconcile(
+            BranchLedgerSnapshot(bank, date, rows, clearingBalanced = false),
+            listOf(total(first, "20"), total(second, "30")),
+            Instant.now(),
+        )
+        assertThat(report.booksMatch).isTrue()
+        assertThat(report.clearingEliminates).isFalse()
+        assertThat(report.complete).isFalse()
+    }
+
+    @Test
     fun `two swapped branch allocations fail even though the bank still reconciles`() {
         val snapshot = BranchLedgerSnapshot(bank, date, listOf(line(first, "20"), line(second, "30")))
         val report = BranchBookReconciliation.reconcile(

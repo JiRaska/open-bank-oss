@@ -144,6 +144,8 @@ spec:
             # Downstream money-path dependencies. Without these the rest-clients fall back to the
             # application.yaml localhost defaults, so the payment saga's ledger posting and balance
             # credit/debit silently fail and every transaction lands in COMPENSATED/FAILED.
+            - name: ACCOUNT_SERVICE_URL
+              value: http://account-service.accounts.svc:8100
             - name: LEDGER_SERVICE_URL
               value: http://ledger-service.ledger.svc:8101
             - name: BALANCE_SERVICE_URL

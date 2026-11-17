@@ -10,7 +10,12 @@ import java.time.LocalDate
 import java.util.UUID
 
 data class BookKey(val branchBookId: UUID?, val currency: String)
-data class BranchLedgerSnapshot(val bankId: UUID, val asOf: LocalDate, val lines: List<BranchLedgerLine>)
+data class BranchLedgerSnapshot(
+    val bankId: UUID,
+    val asOf: LocalDate,
+    val lines: List<BranchLedgerLine>,
+    val clearingBalanced: Boolean = true,
+)
 data class BranchLedgerLine(
     val branchBookId: UUID?,
     val currency: String,
@@ -18,6 +23,7 @@ data class BranchLedgerLine(
     val credit: BigDecimal,
     val deposits: BigDecimal,
     val baseCurrency: String = currency,
+    val clearing: BigDecimal = BigDecimal.ZERO,
 )
 data class ProjectedBookTotal(
     val bankId: UUID?,
@@ -33,6 +39,8 @@ data class BranchBookComparison(
     val projected: BigDecimal,
     val difference: BigDecimal,
 )
+data class BranchClearingBalance(val branchBookId: UUID?, val currency: String, val balance: BigDecimal)
+
 data class BranchBookReport(
     val bankId: UUID,
     val asOf: LocalDate,
@@ -42,10 +50,13 @@ data class BranchBookReport(
     val journalBooksBalanced: Boolean,
     val unknownAccounts: Long,
     val hasUnattributedJournals: Boolean,
+    val clearingBalances: List<BranchClearingBalance> = emptyList(),
+    val clearingEliminates: Boolean = true,
 ) {
     val bankMatches: Boolean get() = bank.all { it.difference.signum() == 0 }
     val booksMatch: Boolean get() = books.all { it.difference.signum() == 0 }
-    val complete: Boolean get() = bankMatches &&
+    val complete: Boolean get() = clearingEliminates &&
+        bankMatches &&
         booksMatch &&
         journalBooksBalanced &&
         unknownAccounts == 0L &&
@@ -74,6 +85,9 @@ object BranchBookReconciliation {
                 rows.fold(BigDecimal.ZERO) { sum, row -> sum + row.projected },
             )
         }
+        val clearing = ledger.lines.groupBy { BookKey(it.branchBookId, it.currency) }.map { (key, lines) ->
+            BranchClearingBalance(key.branchBookId, key.currency, lines.sumOf { it.clearing })
+        }
         return BranchBookReport(
             ledger.bankId,
             ledger.asOf,
@@ -85,6 +99,9 @@ object BranchBookReconciliation {
             },
             projected.sumOf { it.unknownAccounts },
             ledger.lines.any { it.branchBookId == null && (it.debit.signum() != 0 || it.credit.signum() != 0) },
+            clearing,
+            ledger.clearingBalanced &&
+                clearing.groupBy { it.currency }.values.all { rows -> rows.sumOf { it.balance }.signum() == 0 },
         )
     }
 
