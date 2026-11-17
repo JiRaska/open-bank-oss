@@ -1,7 +1,9 @@
 {
   "realm": "openbank-customers",
   "eventsEnabled": true,
-  "eventsListeners": ["jboss-logging"],
+  "eventsListeners": [
+    "jboss-logging"
+  ],
   "eventsExpiration": 2592000,
   "adminEventsEnabled": true,
   "adminEventsDetailsEnabled": false,
@@ -44,7 +46,9 @@
         "tech.openbank.app://oauth/callback",
         "http://localhost:*"
       ],
-      "webOrigins": ["+"],
+      "webOrigins": [
+        "+"
+      ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "oauth2.device.authorization.grant.enabled": "false",
@@ -246,6 +250,176 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "mcp-hosted-reference",
+      "name": "Reference hosted assistant (template, not a registration)",
+      "description": "MCP client, ADR-0385 Tier H. DERIVED from mcp-client-allowlist.yaml - do not hand-edit.",
+      "enabled": false,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "frontchannelLogout": false,
+      "consentRequired": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [
+        "https://mcp-client.example/oauth/callback"
+      ],
+      "webOrigins": [],
+      "authenticationFlowBindingOverrides": {
+        "browser": "6d1c0b8e-3f4a-4c2e-9a51-0385d2f2a001"
+      },
+      "defaultClientScopes": [],
+      "optionalClientScopes": [
+        "offline_access"
+      ],
+      "protocolMappers": [
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "party-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "party_id",
+            "claim.name": "party_id",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "aggregate.attrs": "false"
+          }
+        },
+        {
+          "name": "mcp-service-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "openbank-mcp-service",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "publicClient": false,
+      "clientAuthenticatorType": "client-jwt",
+      "attributes": {
+        "access.token.lifespan": "300",
+        "backchannel.logout.session.required": "true",
+        "client_credentials.use_refresh_token": "false",
+        "dpop.bound.access.tokens": "false",
+        "exclude.session.state.from.auth.response": "false",
+        "frontchannel.logout.session.required": "false",
+        "jwks.string": "{\"keys\":[{\"kty\":\"EC\",\"crv\":\"P-256\",\"use\":\"sig\",\"alg\":\"ES256\",\"kid\":\"reference-2026-11\",\"x\":\"XdufRJwhfCigQlaGQNm1RS9oUmPCQkKAtyqThufqW4Q\",\"y\":\"A-W1IQzopM5th1tKxq_i1dhaAjamQ6G2VSP-i__kDn4\"}]}",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "openbank.mcp.tier": "H",
+        "pkce.code.challenge.method": "S256",
+        "require.pushed.authorization.requests": "true",
+        "token.endpoint.auth.signing.alg": "ES256",
+        "use.jwks.string": "true",
+        "use.jwks.url": "false",
+        "use.refresh.tokens": "true"
+      }
+    },
+    {
+      "clientId": "mcp-local-reference",
+      "name": "Reference local assistant (template, not a registration)",
+      "description": "MCP client, ADR-0385 Tier L. DERIVED from mcp-client-allowlist.yaml - do not hand-edit.",
+      "enabled": false,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "frontchannelLogout": false,
+      "consentRequired": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [
+        "http://127.0.0.1/callback",
+        "http://[::1]/callback"
+      ],
+      "webOrigins": [],
+      "authenticationFlowBindingOverrides": {
+        "browser": "6d1c0b8e-3f4a-4c2e-9a51-0385d2f2a001"
+      },
+      "defaultClientScopes": [],
+      "optionalClientScopes": [
+        "offline_access"
+      ],
+      "protocolMappers": [
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "party-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "party_id",
+            "claim.name": "party_id",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "aggregate.attrs": "false"
+          }
+        },
+        {
+          "name": "mcp-service-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "openbank-mcp-service",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "publicClient": true,
+      "attributes": {
+        "access.token.lifespan": "300",
+        "backchannel.logout.session.required": "true",
+        "client_credentials.use_refresh_token": "false",
+        "dpop.bound.access.tokens": "true",
+        "exclude.session.state.from.auth.response": "false",
+        "frontchannel.logout.session.required": "false",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "openbank.mcp.tier": "L",
+        "pkce.code.challenge.method": "S256",
+        "require.pushed.authorization.requests": "true",
+        "use.refresh.tokens": "true"
+      }
     }
   ],
   "clientScopes": [
@@ -384,10 +558,54 @@
     }
   ],
   "scopeMappings": [
-    { "client": "openbank-app", "roles": ["ROLE_CUSTOMER", "offline_access", "uma_authorization", "default-roles-openbank-customers"] },
-    { "client": "customer-edge-admin", "roles": ["ROLE_CUSTOMER", "offline_access", "uma_authorization", "default-roles-openbank-customers"] },
-    { "client": "openbank-edge-webauthn", "roles": ["ROLE_CUSTOMER", "offline_access", "uma_authorization", "default-roles-openbank-customers"] },
-    { "client": "openbank-synthetic-retail", "roles": ["ROLE_CUSTOMER", "offline_access", "uma_authorization", "default-roles-openbank-customers"] }
+    {
+      "client": "openbank-app",
+      "roles": [
+        "ROLE_CUSTOMER",
+        "offline_access",
+        "uma_authorization",
+        "default-roles-openbank-customers"
+      ]
+    },
+    {
+      "client": "customer-edge-admin",
+      "roles": [
+        "ROLE_CUSTOMER",
+        "offline_access",
+        "uma_authorization",
+        "default-roles-openbank-customers"
+      ]
+    },
+    {
+      "client": "openbank-edge-webauthn",
+      "roles": [
+        "ROLE_CUSTOMER",
+        "offline_access",
+        "uma_authorization",
+        "default-roles-openbank-customers"
+      ]
+    },
+    {
+      "client": "openbank-synthetic-retail",
+      "roles": [
+        "ROLE_CUSTOMER",
+        "offline_access",
+        "uma_authorization",
+        "default-roles-openbank-customers"
+      ]
+    },
+    {
+      "client": "mcp-hosted-reference",
+      "roles": [
+        "offline_access"
+      ]
+    },
+    {
+      "client": "mcp-local-reference",
+      "roles": [
+        "offline_access"
+      ]
+    }
   ],
   "roles": {
     "realm": [
@@ -408,8 +626,17 @@
         "description": "${role_default-roles}",
         "composite": true,
         "composites": {
-          "realm": ["ROLE_CUSTOMER", "offline_access", "uma_authorization"],
-          "client": { "account": ["view-profile", "manage-account"] }
+          "realm": [
+            "ROLE_CUSTOMER",
+            "offline_access",
+            "uma_authorization"
+          ],
+          "client": {
+            "account": [
+              "view-profile",
+              "manage-account"
+            ]
+          }
         }
       }
     ]
@@ -530,18 +757,39 @@
           "userSetupAllowed": false
         }
       ]
+    },
+    {
+      "id": "6d1c0b8e-3f4a-4c2e-9a51-0385d2f2a001",
+      "alias": "openbank-mcp-fresh-passkey",
+      "description": "ADR-0385 D2.2: fresh passwordless WebAuthn for every MCP authorize. NO auth-cookie alternative - an SSO session never skips the assertion. DERIVED from mcp-client-allowlist.yaml.",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "webauthn-authenticator-passwordless",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false
+        }
+      ]
     }
   ],
   "browserFlow": "openbank-passkey-browser",
   "registrationFlow": "openbank-passkey-registration",
   "webAuthnPolicyRpEntityName": "OpenBank",
-  "webAuthnPolicySignatureAlgorithms": ["ES256"],
+  "webAuthnPolicySignatureAlgorithms": [
+    "ES256"
+  ],
   "webAuthnPolicyRpId": "open-bank.tech",
   "webAuthnPolicyAttestationConveyancePreference": "none",
   "webAuthnPolicyAuthenticatorAttachment": "platform",
   "webAuthnPolicyRequireResidentKey": "Yes",
   "webAuthnPolicyUserVerificationRequirement": "required",
-  "webAuthnPolicyPasswordlessSignatureAlgorithms": ["ES256"],
+  "webAuthnPolicyPasswordlessSignatureAlgorithms": [
+    "ES256"
+  ],
   "webAuthnPolicyPasswordlessRpEntityName": "OpenBank",
   "webAuthnPolicyPasswordlessRpId": "open-bank.tech",
   "webAuthnPolicyPasswordlessAttestationConveyancePreference": "none",
