@@ -47,9 +47,12 @@ the current code shows that extending ADR-0195 unchanged to customers would be u
    balance, transaction, statement and payment services through the M2M clients `openbank-services`
    and `openbank-mcp`. The only thing that limits *which* customer is read is `ConsentGate` inside
    MCP, so one defect in one read port exposes every customer.
-3. **`ConsentGate` fails open on a null grant list.** It applies `accountIban !in granted` only
-   when `granted != null`. consent-service rechecks `coversAccount` itself, so this is not
-   exploitable today, but the MCP-side check is decorative.
+3. **The per-account check lives in consent-service, and MCP's copy is only a mirror.**
+   `ConsentGate` re-checks `accountIban in grantedAccounts` only when the list is non-null. That
+   is correct: a null list on a valid answer means "all of the party's accounts", and
+   consent-service has already checked the named account (`coversAccount`). For this channel the
+   consequence is that account scoping depends entirely on a party-bound consent, which item 1
+   shows is not party-bound.
 4. **Throttling sits behind the expensive steps.** `McpRateLimiter.check` runs after caller
    resolution and after the OPA decision, so an unauthenticated or denied flood costs token
    validation plus a PDP call per request with no bound. It is keyed on `agentId` only. With a
@@ -158,8 +161,6 @@ prerequisite below has landed. Until then no route to mcp-service is created.
 - Today the ADR-0375 gate `delegation-capability-enforcement` is **advisory**. The
   `MCP_CLIENT` allow-list is therefore enforced by the aggregate invariant and its negative unit
   test. That gate going enforced is a separate ADR-0375 follow-up.
-- `ConsentGate` is also hardened to fail closed on a missing grant list, because the agent path
-  keeps using it.
 
 **D4 — Downstream reads carry the customer, and MCP's credential cannot write**
 - For each downstream read, MCP obtains a **customer-scoped token** by RFC 8693 exchange:
