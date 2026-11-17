@@ -374,3 +374,32 @@ with the server responses. The underlying source of the brief slowdown remains u
 The follow-up Edge build was checked by pausing Domestic Payment's OPA instance. The
 same domestic payment status request returned HTTP 200, 503 and 200 across the pause
 and recovery. Account and balance reads returned HTTP 200 throughout the check.
+
+### Correlating OPA exchanges in an isolated benchmark
+
+Set the Quarkus log category
+`quarkus.log.category."com.openbank.libs.authz.OpaSidecarPolicyDecisionPoint".level` to
+`DEBUG` on the test applications. For each call the adapter generates an opaque UUID
+and sends it as `X-OpenBank-OPA-Request-ID`. The log records microseconds from adapter
+entry to the exchange invocation, response headers, return of the bounded body, and
+completion or failure. A missing headers value means the body handler did not observe
+response headers before the failure was logged. The interval to headers includes client
+scheduling, transport and server handling. The interval from headers to body also
+includes the caller resuming. The adapter uses the existing deadline and logs the
+failure class without logging policy inputs or outputs.
+
+Configure the isolated OPA instances with `decision_logs.console: true` and
+`decision_logs.request_context.http.headers: [X-OpenBank-OPA-Request-ID]`. Include
+`system/log` in the test bundle roots and load this mask before sending fixture traffic.
+
+```rego
+package system.log
+
+mask := {"/input", "/result", "/nd_builtin_cache"}
+```
+
+Verify the mask against a fixture request before starting load. Join client and OPA
+decision records by the UUID, then join the decision to the HTTP response by OPA
+instance and `req_id`. Compare `timer_rego_query_eval_ns` with `resp_duration` and
+the client phase durations. The decision may be absent if the request has not reached
+policy evaluation by the deadline. The UUID is a log field rather than a metric label.

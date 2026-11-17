@@ -10,10 +10,13 @@ import com.openbank.libs.security.HttpExchangeDeadline
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.jboss.logging.Logger
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.time.Duration
+import java.util.UUID
 
 /**
  * Production [PolicyDecisionPoint] — posts to the per-service OPA sidecar
@@ -45,24 +48,78 @@ class OpaSidecarPolicyDecisionPoint(
         .connectTimeout(timeout)
         .build()
 
-    override suspend fun allow(query: AuthzQuery): AuthzDecision = withContext(Dispatchers.IO) {
+    override suspend fun allow(query: AuthzQuery): AuthzDecision {
+        val timing = if (log.isDebugEnabled) ExchangeTiming() else null
+        return withContext(Dispatchers.IO) { evaluate(query, timing) }
+    }
+
+    private suspend fun evaluate(query: AuthzQuery, timing: ExchangeTiming?): AuthzDecision {
         val request = HttpRequest.newBuilder()
             .uri(URI.create("$baseUrl$queryPath"))
             .timeout(timeout)
             .header("Content-Type", "application/json")
+            .apply { timing?.let { header("X-OpenBank-OPA-Request-ID", it.id) } }
             .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(mapOf("input" to query.toInput()))))
             .build()
 
+        val handler = BoundedBodyHandlers.ofString()
         val response = runCatching {
-            HttpExchangeDeadline.sendCancellable(http, request, BoundedBodyHandlers.ofString())
+            timing?.exchangeStarted()
+            HttpExchangeDeadline.sendCancellable(http, request, timing?.observeHeaders(handler) ?: handler)
+        }.getOrElse {
+            timing?.record("exchange_failed", it)
+            policyFailure(it)
         }
-            .getOrElse(::policyFailure)
+        timing?.bodyReceived()
+        try {
+            if (response.statusCode() !in 200..299) {
+                throw PolicyDecisionException("OPA returned HTTP ${response.statusCode()}: ${response.body()}")
+            }
 
-        if (response.statusCode() !in 200..299) {
-            throw PolicyDecisionException("OPA returned HTTP ${response.statusCode()}: ${response.body()}")
+            return parseResponse(response.body()).also { timing?.record("complete") }
+        } catch (failure: Exception) {
+            timing?.record("response_failed", failure)
+            throw failure
+        }
+    }
+
+    private class ExchangeTiming {
+        private val start = System.nanoTime()
+        val id: String = UUID.randomUUID().toString()
+        private var exchangeStart: Long? = null
+
+        @Volatile
+        private var headers: Long? = null
+        private var body: Long? = null
+
+        fun exchangeStarted() {
+            exchangeStart = elapsedMicros()
         }
 
-        parseResponse(response.body())
+        fun <T> observeHeaders(delegate: HttpResponse.BodyHandler<T>): HttpResponse.BodyHandler<T> =
+            HttpResponse.BodyHandler { info ->
+                headers = elapsedMicros()
+                delegate.apply(info)
+            }
+
+        fun bodyReceived() {
+            body = elapsedMicros()
+        }
+
+        fun record(outcome: String, failure: Throwable? = null) {
+            log.debugf(
+                "OPA exchange request_id=%s outcome=%s error=%s exchange_start_us=%s headers_us=%s body_us=%s end_us=%s",
+                id,
+                outcome,
+                failure?.javaClass?.simpleName,
+                exchangeStart,
+                headers,
+                body,
+                elapsedMicros(),
+            )
+        }
+
+        private fun elapsedMicros(): Long = (System.nanoTime() - start) / 1_000
     }
 
     private fun policyFailure(failure: Throwable): Nothing {
@@ -116,6 +173,7 @@ class OpaSidecarPolicyDecisionPoint(
     }
 
     companion object {
+        private val log = Logger.getLogger(OpaSidecarPolicyDecisionPoint::class.java)
         const val DEFAULT_BASE_URL: String = "http://localhost:8181"
         const val DEFAULT_QUERY_PATH: String = "/v1/data/openbank/rest/allow"
         val DEFAULT_TIMEOUT: Duration = Duration.ofMillis(500)
