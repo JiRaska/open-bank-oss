@@ -325,7 +325,7 @@ All of this is bounded by read + propose only (ADR-0383 D4/D6).
 - **D2:** the DPoP requirement and "no bearer fallback" now apply to Tier L. Tier H follows D1.
 - **D3:** the grant key is `(party, azp, jkt)`, or `(party, azp)` for a Tier H grant without
   DPoP.
-- **D5:** adds per-client ceilings, the vendor-egress exemption and fail-closed only (D4).
+- **D5:** adds per-client ceilings, a separate higher vendor-egress edge limit and fail-closed only (D4).
 - **P3:** extended (D7). P6 is added (ADR-0384).
 - **Delivery checks:** extended (below).
 - **Consequences:** "Clients without DPoP cannot connect" now applies to Tier L only.
@@ -379,7 +379,7 @@ Any failure keeps the channel closed.
   - an app screen in `openbank-app`;
   - a new app-link path.
 - Customers without a usable passkey cannot connect.
-- Client-secret exceptions need owner tracking.
+- Client-secret exceptions expire by configuration: the allowlist carries the expiry date and the authorization server refuses the secret after it (`invalid_client`); renewal needs a new owner risk acceptance.
 - The channel depends on ADR-0384 (open) and ADR-0320 P1/P2 (unbuilt).
 
 **Neutral**
