@@ -2,9 +2,10 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { parseAllDocuments } from 'yaml'
 import { KEY_CATALOG, catalogEntry } from '@/lib/security/keys/catalog'
 import { allStatuses, byUrgency, dependents, entryStatus, statusForDays, type MeasuredCert } from '@/lib/security/keys/status'
 import { measure, projectCertManager, projectSeal, projectStrimzi } from '@/lib/security/keys/prometheus'
@@ -193,5 +194,55 @@ describe('report and permissions', () => {
     expect(permissionForPath('/security/keys')).toBe('keys:view')
     expect(permissionForPath('/api/security/keys')).toBe('keys:view')
     expect(permissionForPath('/security')).toBe('system:view')
+  })
+})
+
+/**
+ * The catalogue's `algorithm` is hand-written, so a manifest that changes its key type would leave
+ * the page (and its post-quantum column) describing a key that no longer exists. cert-manager
+ * Certificates are the decidable case: their key type is a field, and an omitted `privateKey`
+ * silently means RSA 2048, so that default is spelled out here rather than assumed away.
+ */
+function certManagerDescriptors(file: string): string[] {
+  const out: string[] = []
+  for (const doc of parseAllDocuments(readFileSync(file, 'utf8'))) {
+    const d = doc.toJS() as { apiVersion?: string; kind?: string; spec?: { privateKey?: { algorithm?: string; size?: number } } } | null
+    if (!d || d.kind !== 'Certificate' || !String(d.apiVersion ?? '').startsWith('cert-manager.io/')) continue
+    const algorithm = d.spec?.privateKey?.algorithm ?? 'RSA'
+    const size = d.spec?.privateKey?.size ?? (algorithm === 'ECDSA' ? 256 : 2048)
+    out.push(algorithm === 'ECDSA' ? `ECDSA P-${size}` : `${algorithm} ${size}`)
+  }
+  return out
+}
+
+function yamlFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name)
+    if (e.isDirectory()) return yamlFiles(p)
+    return /\.ya?ml$/.test(e.name) ? [p] : []
+  })
+}
+
+describe('keys catalogue algorithms match the manifests', () => {
+  const repoRoot = path.resolve(__dirname, '../../..')
+  const certBacked = KEY_CATALOG.filter((e) => e.expiry.type === 'cert-manager')
+
+  it('every cert-manager entry names the key type its own manifest declares', () => {
+    expect(certBacked.length).toBeGreaterThan(0)
+    for (const e of certBacked) {
+      const declared = new Set(certManagerDescriptors(path.join(repoRoot, e.definedIn)))
+      expect(declared.size, `${e.id}: no cert-manager Certificate in ${e.definedIn}`).toBe(1)
+      const [descriptor] = [...declared]
+      expect(e.algorithm.startsWith(descriptor), `${e.id}: catalogue says "${e.algorithm}", ${e.definedIn} declares ${descriptor}`).toBe(true)
+    }
+  })
+
+  it('no Certificate anywhere in gitops uses a key type the catalogue does not describe', () => {
+    const described = new Set(certBacked.map((e) => e.algorithm.split(' / ')[0]))
+    const found = yamlFiles(path.join(repoRoot, 'openbank-infra/gitops'))
+      .flatMap((f) => certManagerDescriptors(f).map((d) => ({ f: path.relative(repoRoot, f), d })))
+    expect(found.length).toBeGreaterThan(0)
+    const undescribed = found.filter(({ d }) => !described.has(d)).map(({ f, d }) => `${f}: ${d}`)
+    expect(undescribed).toEqual([])
   })
 })
