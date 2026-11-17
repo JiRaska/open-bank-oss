@@ -117,3 +117,16 @@ IBANs and counterparty data should be masked in logs (`libs.security.PiiMask`). 
 - Replaying an event older than the window comes from the Kafka topic or audit-service, not from this table.
 - Signals: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total`, and workflow liveness `outbox-sent-retention`.
 - Opt-out: `openbank.outbox.retention.enabled=false` (logs a WARN at boot). Don't lower `sent-days` below what any reader of SENT rows needs.
+
+## Account booking context projection
+
+The `account-booking-in` channel projects versioned AccountCreated booking context
+into a durable account projection. Schema and mode/branch shape are validated;
+conflicting evidence for an existing account is rejected. The channel has a
+service-specific dead-letter topic and write ACL.
+
+`ACCOUNT_BOOKING_PROJECTION_ENABLED` and
+`openbank.transaction.booking-posting.enabled` default to false. Activation requires
+the trusted account/catalog admission source, approved booking configuration and
+reconciliation of the projection and historical backfill. Unknown context remains
+unavailable to attributed posting.

@@ -17,6 +17,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
  * Production [PolicyDecisionPoint] — posts to the per-service OPA sidecar
@@ -71,16 +72,14 @@ class OpaSidecarPolicyDecisionPoint(
             policyFailure(it)
         }
         timing?.bodyReceived()
-        try {
+        return runCatching {
             if (response.statusCode() !in 200..299) {
                 throw PolicyDecisionException("OPA returned HTTP ${response.statusCode()}: ${response.body()}")
             }
-
-            return parseResponse(response.body()).also { timing?.record("complete") }
-        } catch (failure: Exception) {
-            timing?.record("response_failed", failure)
-            throw failure
-        }
+            parseResponse(response.body())
+        }.onSuccess { timing?.record("complete") }
+            .onFailure { timing?.record("response_failed", it) }
+            .getOrThrow()
     }
 
     private class ExchangeTiming {
@@ -119,7 +118,7 @@ class OpaSidecarPolicyDecisionPoint(
             )
         }
 
-        private fun elapsedMicros(): Long = (System.nanoTime() - start) / 1_000
+        private fun elapsedMicros(): Long = TimeUnit.NANOSECONDS.toMicros(System.nanoTime() - start)
     }
 
     private fun policyFailure(failure: Throwable): Nothing {
