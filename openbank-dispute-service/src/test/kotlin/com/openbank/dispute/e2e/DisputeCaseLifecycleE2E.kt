@@ -136,6 +136,9 @@ class DisputeCaseLifecycleE2E {
             .statusCode(200)
             .body("intact", equalTo(true))
             .body("itemsChecked", equalTo(2))
+            // hash_version survived the TIMESTAMPTZ/SMALLINT round trip: a row read back without
+            // it would count as legacy, not as checked.
+            .body("legacyItems", equalTo(0))
             .body("firstBrokenEvidenceId", equalTo(null))
     }
 

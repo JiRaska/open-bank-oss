@@ -274,6 +274,21 @@ class DelegatedBoundCreateSwitchTest {
     }
 
     @Test
+    fun `switch on - a withdrawn delegation is not retried, releases, and answers neutrally`() {
+        val upstream = upstream()
+        railAnswers(upstream, refusal(409, "DELEGATION_AUTHORITY_WITHDRAWN"))
+
+        val resp = resource(upstream, boundCreate = true).createDomesticPayment(body(), "idem-w", SCA_ID)
+
+        assertThat(resp.status).isEqualTo(409)
+        assertThat(resp.entity.toString()).contains("PAYMENT_NOT_ACCEPTED").doesNotContain("DELEGATION")
+        assertThat(sleeps).isEmpty()
+        verify(exactly = 1) { upstream.postKeepingRetryAfter(any(), any(), any(), any()) }
+        settled(upstream, "release", 1)
+        settled(upstream, "confirm", 0)
+    }
+
+    @Test
     fun `switch on - an ambiguous upstream failure keeps the reservation for the outcome to settle`() {
         val upstream = upstream()
         railAnswers(upstream, Response.status(502).entity("""{"error":"upstream unavailable"}""").build())
@@ -335,6 +350,7 @@ class DelegatedBoundCreateSwitchTest {
             "RESERVATION_PROJECTION_PENDING" to release,
             "RESERVATION_MISMATCH" to release,
             "ACCOUNT_AUTHORITY_UNAVAILABLE" to release,
+            "DELEGATION_AUTHORITY_WITHDRAWN" to release,
             "RESERVATION_NOT_RESERVED" to leave,
             "IDEMPOTENCY_KEY_REUSED" to leave,
             "SOMETHING_NEW" to leave,

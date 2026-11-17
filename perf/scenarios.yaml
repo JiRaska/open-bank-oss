@@ -58,6 +58,21 @@ scenarios:
     blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL, Redis and Kafka (OIDC and dev-mode auth disabled, so no read identity is required). The detail probe needs a seeded row, so the module ships src/test/k6/fixtures.sql (one fixed-id ACTIVE order plus 199 more for the same party), loaded into the throwaway database after boot.
     assertions: Exercises standing orders by party, list all, and detail by id. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
 
+  - id: card-issuance-read-baseline
+    definition: openbank-card-issuance-service/src/test/k6/card-issuance-read-baseline.js
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-card-issuance-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL/Redis/Kafka (OIDC and dev-mode auth disabled, so no read identity is required; the named-caller-guarded GETs and the product-catalog-backed entitlements read are deliberately NOT probed — they would measure a rejection, not a handler). The card fixtures (200 cards for the fleet-wide fixture account, plus four category rules for the fixed probe card) ship as src/test/k6/fixtures.sql and are loaded into the throwaway database after boot; verified locally end to end.
+    assertions: Exercises card list, per-account card listing, spend-category taxonomy, per-card category rules. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+  - id: treasury-read-baseline
+    definition: openbank-treasury-service/src/test/k6/treasury-read-baseline.js
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-treasury-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL/Kafka (OIDC and dev-mode auth disabled, so no read identity is required). Counterparties and credit measures are seeded by Flyway (V1, V28); the deal fixtures (60 money-market deals across the three synthetic counterparties and CNB, BOOKED/SETTLED/MATURED, CZK/EUR) ship as src/test/k6/fixtures.sql and are loaded into the throwaway database after boot; verified locally end to end.
+    assertions: Exercises the dealer blotter (list + filtered view), posting-rule matrix, events calendar, counterparty limits with exposure and headroom, limit utilisation, daily positions, day-completion record. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
   - id: balance-read-baseline
     definition: openbank-balance-service/src/test/k6/balance-read-baseline.js
     execution_mode: scheduled-read-only-throwaway
