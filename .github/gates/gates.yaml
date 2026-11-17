@@ -2928,6 +2928,28 @@ gates:
     run: |
       python3 .github/scripts/run-evals.py --require-recordings
 
+  # ADR-0383 D7 / #16617 layer 4 — model-in-the-loop half of the MCP prompt-injection red-team
+  # pack. Replays committed model outputs against evals/mcp-redteam/scenarios.json; a recording
+  # whose scenario digest (scenario + rendered poisoned tool result + preamble + tool list) moved
+  # is STALE and fails, and drifted promptfoo/tests.json|tools.json fail. A missing recording is
+  # UNAVAILABLE (warning, never a pass) until the first owner-run live recording lands; then add
+  # --require-recordings here, as evals-gate-replay did. The deterministic half is JUnit in
+  # openbank-mcp-service (PoisonedToolResultRedTeamTest).
+  - id: mcp-redteam-replay
+    name: "MCP red-team replay (ADR-0383 D7, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "A model-facing tool result is attacker-influenceable; the replay keeps the recorded model verdicts tied to the exact bytes the MCP server renders, so a server change cannot keep an old verdict."
+    review_after: "2027-05-17"
+    budget_seconds: 30
+    # 44 scenarios today (42 unmasked-field items + 2 masked controls).
+    min_subjects: 40
+    selftest: python3 .github/scripts/run-mcp-redteam-evals.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/run-mcp-redteam-evals.py"]
+    run: |
+      python3 .github/scripts/run-mcp-redteam-evals.py
+
   # ADR-0160 mechanism 2 / rules.yaml: change_requirements.lineage_code_audit. Fleet-wide scan
   # (not diff-scoped): every governance.yaml lineage edge — downstream AND, since #2315,
   # upstream — must be backed by grep-verifiable code, or a one-line-reasoned allowlist entry.

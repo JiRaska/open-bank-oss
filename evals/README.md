@@ -108,3 +108,10 @@ output, which is why it is a different mechanism in a different tree — see the
 - ADR-0175 — data residency and sovereignty (§5 synthetic/non-personal data class).
 - ADR-0089 — customer-facing AI assistant (`customer-copilot` charter).
 - `openbank-libs/governance/evals/README.md` — the sibling LLM prompt/model evals gate.
+
+## MCP prompt-injection red team (ADR-0383 D7, #16617 layer 4)
+
+This pack has both shapes in one place: deterministic server assertions (JUnit in
+`openbank-mcp-service`, `redteam/PoisonedToolResultRedTeamTest`) and a model-in-the-loop pack in
+record/replay form (`evals/mcp-redteam/`, gate `mcp-redteam-replay`). See
+[`mcp-redteam/README.md`](mcp-redteam/README.md).
