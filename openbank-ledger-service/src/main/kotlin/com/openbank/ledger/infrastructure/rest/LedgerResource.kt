@@ -26,7 +26,6 @@ import com.openbank.ledger.domain.model.LedgerScope
 import com.openbank.ledger.domain.model.SubLedgerBalance
 import com.openbank.ledger.domain.model.TrialBalance
 import com.openbank.ledger.domain.model.YearEndResultAllocationPlan
-import com.openbank.ledger.infrastructure.security.BranchJournalBooks
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
@@ -76,9 +75,6 @@ class LedgerResource(
 
     @jakarta.inject.Inject
     private lateinit var callerIdentity: io.quarkus.security.identity.SecurityIdentity
-
-    @jakarta.inject.Inject
-    private lateinit var branchBooks: BranchJournalBooks
 
     /**
      * Request-scoped taint decision, written by [com.openbank.libs.web.SyntheticTaintRequestFilter]
@@ -235,7 +231,6 @@ class LedgerResource(
         require(!request.idempotencyKey.startsWith(YearEndResultAllocationPlan.KEY_PREFIX)) {
             "idempotency keys starting with '${YearEndResultAllocationPlan.KEY_PREFIX}' are reserved"
         }
-        request.branchBookId?.let { branchBooks.requireDisbursementBook(it, callerIdentity, request.idempotencyKey) }
         val command = PostJournalCommand(
             idempotencyKey = request.idempotencyKey,
             transactionId = request.transactionId,
@@ -245,7 +240,6 @@ class LedgerResource(
             lines = request.requireLines().map { it.toCommand(accountingClasses) },
             postedBy = request.createdBy,
             synthetic = synthetic,
-            branchBookId = request.branchBookId,
             origin = request.origin?.let { origin ->
                 check(!callerIdentity.isAnonymous) { "authenticated journal submitter is required" }
                 origin.toDomain(callerIdentity.principal.name)
@@ -357,7 +351,6 @@ data class PostJournalRequest(
      */
     val lines: List<PostJournalLineRequest?>,
     val origin: JournalOriginInput? = null,
-    val branchBookId: UUID? = null,
 ) {
     /**
      * The lines, with every element proven present.
@@ -397,7 +390,6 @@ data class JournalEntryResponse(
     val createdAt: String,
     /** ADR-0252: posted by a bank-owned canary, so excluded from the regulatory aggregates. */
     val synthetic: Boolean,
-    val branchBookId: UUID? = null,
 )
 
 private fun JournalLine.toResponse() = JournalLineResponse(
@@ -423,7 +415,6 @@ private fun JournalEntry.toResponse() = JournalEntryResponse(
     lines = lines.map { it.toResponse() },
     createdAt = createdAt.toString(),
     synthetic = synthetic,
-    branchBookId = branchBookId,
 )
 
 private fun CursorPage<JournalEntry>.toResponse() =

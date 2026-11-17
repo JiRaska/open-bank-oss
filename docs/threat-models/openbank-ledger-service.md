@@ -963,10 +963,3 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
-
-### Branch lending journal
-
-Ledger resolves the optional establishment against its branch book register. Only the named Lending
-client can supply the dimension for a disbursement. The journal and both lines commit with the
-idempotency receipt. A replay with a different book or different financial terms conflicts, and a
-reversal retains the book. Uncategorized historical entries retain their original attribution.

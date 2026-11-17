@@ -107,7 +107,7 @@ class LedgerService(
         // Checked BEFORE the period lock so replaying an entry that was legitimately booked while
         // the year was still open stays idempotent even after the year is later attested.
         journalRepository.findByIdempotencyKey(command.idempotencyKey)?.let {
-            return PostJournalOutcome(it.verifyReplay(command), replayed = true)
+            return PostJournalOutcome(it.verifyReplayOrigin(command.synthetic), replayed = true)
         }
 
         // Day lock (ADR-0207 D3) runs BEFORE the year check because the day is the tighter
@@ -164,7 +164,6 @@ class LedgerService(
             // same controls upstream — which is the only reason a canary posting proves anything.
             synthetic = command.synthetic,
             origin = command.origin,
-            branchBookId = command.branchBookId,
         ).post()
 
         // Cross-check that we actually validated every account that the entry references.
@@ -200,28 +199,11 @@ class LedgerService(
             .any { it.message?.contains("ledger_idempotency", ignoreCase = true) == true }
         if (!isIdempotencyKeyConflict) throw e
         return journalRepository.findByIdempotencyKey(command.idempotencyKey)
-            ?.verifyReplay(command) ?: throw e
+            ?.verifyReplayOrigin(command.synthetic) ?: throw e
     }
 
-    private fun JournalEntry.verifyReplay(command: PostJournalCommand): JournalEntry {
-        checkConflict(synthetic == command.synthetic) { "Idempotency key is bound to a different journal origin" }
-        checkConflict(branchBookId == command.branchBookId) { "Idempotency key is bound to a different book" }
-        if (branchBookId != null) {
-            checkConflict(
-                transactionId == command.transactionId &&
-                    entryDate == command.entryDate &&
-                    valueDate == command.valueDate &&
-                    lines.size == command.lines.size &&
-                    lines.zip(command.lines).all { (line, requested) ->
-                        line.glAccountId == requested.glAccountId &&
-                            line.side == requested.side &&
-                            line.amount == Money.of(requested.amount, requested.currencyCode) &&
-                            line.baseAmount == Money.of(requested.baseAmount, requested.baseCurrencyCode) &&
-                            line.subAccountId == requested.subAccountId &&
-                            line.fxRate?.stripTrailingZeros() == requested.fxRate?.stripTrailingZeros()
-                    },
-            ) { "Idempotency key is bound to a different branch posting" }
-        }
+    private fun JournalEntry.verifyReplayOrigin(expectedSynthetic: Boolean): JournalEntry {
+        checkConflict(synthetic == expectedSynthetic) { "Idempotency key is bound to a different journal origin" }
         return this
     }
 
