@@ -5959,7 +5959,28 @@ gates:
     selftest: |
       python3 .github/scripts/check-event-contract-code-agreement.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-event-contract-code-agreement.py", ".github/scripts/check-asyncapi-doc-discriminator.py"]
+    # The self-test mutates COPIES of these services' sources and contracts (build() in the script):
+    # a change there can move the fixture anchors, so the self-test must run on that PR, not first on
+    # main (#16599 left this gate UNFALSIFIED on main for 6 h; the reads were baselined, not declared).
+    selftest_inputs:
+      - .github/scripts/check-event-contract-code-agreement.py
+      - .github/scripts/check-asyncapi-doc-discriminator.py
+      - openbank-aml-service/src/main/
+      - openbank-contracts/openbank-aml-service/
+      - openbank-delegation-service/src/main/
+      - openbank-contracts/openbank-delegation-service/
+      - openbank-engagement-service/src/main/
+      - openbank-contracts/openbank-engagement-service/
+      - openbank-fraud-service/src/main/
+      - openbank-contracts/openbank-fraud-service/
+      - openbank-notification-service/src/main/
+      - openbank-contracts/openbank-notification-service/
+      - openbank-product-catalog/src/main/
+      - openbank-contracts/openbank-product-catalog/
+      - openbank-sanctions-service/src/main/
+      - openbank-contracts/openbank-sanctions-service/
+      - openbank-sca-service/src/main/
+      - openbank-contracts/openbank-sca-service/
     run: |
       python3 .github/scripts/check-event-contract-code-agreement.py
 
