@@ -7,6 +7,9 @@ package com.openbank.simulation.engine
 import java.util.Random
 import java.util.UUID
 
+private const val UUID_VERSION_MASK = 0xF000L
+private const val UUID_VERSION_FOUR = 0x4000L
+
 /**
  * The single seeded source of randomness for a simulation run (ADR-0100 Layer 1 §3).
  *
@@ -49,7 +52,7 @@ class SimulationRandom(val seed: Long) {
      * This uses no SecureRandom: replaying the seed reproduces the same ids.
      */
     fun nextUuid(): UUID = UUID(
-        (random.nextLong() and 0xF000L.inv()) or 0x4000L,
+        (random.nextLong() and UUID_VERSION_MASK.inv()) or UUID_VERSION_FOUR,
         (random.nextLong() and Long.MAX_VALUE.ushr(1)) or Long.MIN_VALUE,
     )
 }
