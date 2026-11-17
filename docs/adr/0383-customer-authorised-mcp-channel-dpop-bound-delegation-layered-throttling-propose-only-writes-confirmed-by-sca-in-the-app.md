@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ai-agents, authn, security, payments]
-summary: "Customer MCP clients are AGENT delegation grantees with zero execution capability: allowlisted OAuth+PKCE, DPoP 5-min tokens, grant bound to party+client+key, throttled before OPA; MCP only proposes, the app authorises via SCA."
+summary: "Customer MCP clients are MCP_CLIENT delegation grantees with read+propose only: allowlisted OAuth+PKCE, DPoP 5-min tokens, grant per party+client+key, throttled before OPA; MCP cannot write, the app authorises via SCA."
 ---
 
 # ADR-0383 — Customer-authorised MCP channel: DPoP-bound delegation, layered throttling, propose-only writes confirmed by SCA in the app
@@ -18,8 +18,8 @@ summary: "Customer MCP clients are AGENT delegation grantees with zero execution
 - ADR-0090: TPPs reach the bank through the Berlin Group XS2A interface, so TPP access is out of
   scope here.
 - ADR-0232: delegated access lives in `delegation-service`, not consent-service.
-- ADR-0233 (proposed): chartered agents can be delegation grantees that **execute within
-  ceilings** and only propose above them.
+- ADR-0233 (proposed): bank-chartered agents can be delegation grantees that **execute within
+  ceilings** and only propose above them. A third-party client is not a chartered agent.
 - ADR-0193: an AP2 mandate is evidence into an SCA decision and may yield a
   delegated-authentication exemption.
 - ADR-0374/0375: every outbound payment passes one admission chain whose first step is Authority.
@@ -70,163 +70,239 @@ the customer channel.
 
 ## Decision
 
-We will expose MCP to customers as a **delegation channel** with these properties.
+We will expose MCP to customers as a **delegation channel**. It opens only when every
+prerequisite below has landed. Until then no route to mcp-service is created.
 
-**D1 — Identity and client admission**
-- Tokens come only from the **customer realm** (ADR-0065), through the customer edge. MCP
-  validates them as a **separate OIDC tenant** selected by issuer, and a customer-realm token can
-  never take the `agent:` or OBO paths in `CallerContextResolver`. Tenant is chosen by `iss`,
-  never by a `sub` prefix.
-- Only **allowlisted, bank-registered clients** are accepted:
-  - open dynamic client registration is off;
-  - redirect URIs must match exactly, and desktop clients use loopback redirects;
+**Prerequisites (not built on main on 2026-11-17)**
+- **P1:** an RFC 9449 DPoP proof verifier and a shared replay store, as the ADR-0320 primitive.
+  ADR-0320 is `proposed/partial` and does not yet contain one.
+- **P2:** the `MCP_CLIENT` grantee type in delegation-service (D3). `DelegationGrant` has no
+  grantee type at all today.
+- **P3:** the deployed Keycloak version is verified to issue DPoP-bound access and refresh tokens
+  for a customers-realm public client. This is checked against a local Keycloak of that exact
+  version, per the realm-template rule in CLAUDE.md. If it cannot, the channel does not open.
+  There is no bearer-token fallback.
+
+**D1 — Identity, tenant separation and client admission**
+- Tokens come only from the **customer realm** (ADR-0065). MCP validates them as a **separate
+  OIDC tenant selected by `iss`**. `CallerContextResolver` applies these rules in order:
+  1. A token whose `iss` is the customers realm is resolved **only** by the customer-channel
+     path. Its `sub` is never inspected for an `agent:` prefix, and the OBO path is never tried.
+  2. The `agent:` and OBO paths accept only a token whose `iss` is the staff realm.
+  3. A customer token must carry `aud` = `openbank-mcp-service`, an `azp` in the allowlist, and
+     `cnf.jkt`. Anything else is anonymous, which means denied.
+- Only **allowlisted, bank-registered clients** are admitted:
+  - dynamic client registration is off;
+  - redirect URIs must match exactly, and desktop clients use RFC 8252 loopback redirects;
   - authorization code + PKCE (S256) only;
   - no implicit, password or device grants.
-- The consent screen is rendered by the bank. It names the client, the scopes, that the data
-  leaves the bank to the client's provider, and the expiry. The screen requires SCA.
+- The connect screen is rendered by the bank and requires SCA. It names:
+  - the client;
+  - the capabilities;
+  - that data leaves the bank to the client's own provider;
+  - the expiry.
 
 **D2 — Sender-constrained, short-lived tokens; no long-lived bearer secrets**
-- Access tokens are **DPoP-bound** (RFC 9449, ADR-0320 primitive), live **≤ 5 minutes**, and have
-  the audience `openbank-mcp-service` (RFC 8707). A token without a valid DPoP proof for its `jkt`
-  is rejected. DPoP `jti` replay is checked inside the proof lifetime.
+- Access tokens are **DPoP-bound**, live **≤ 5 minutes**, and carry the audience
+  `openbank-mcp-service` (RFC 8707). MCP checks the DPoP proof on every request:
+  - `typ` is `dpop+jwt` and the alg is in the allow-list;
+  - the proof header carries a public key only;
+  - `htm`, `htu` and `ath` match the request and the token;
+  - `iat` is within ±60 s and no older than 300 s;
+  - `jti` has not been used before;
+  - the proof key's thumbprint equals `cnf.jkt`.
+- MCP issues a **server nonce** (RFC 9449 §8), so a proof cannot be pre-generated.
+- The `jti` replay store is shared (Valkey) and **fails closed**. If the store is unavailable,
+  every request is rejected.
 - Long validity comes only from a **rotating, DPoP-bound refresh token**:
   - reuse of a rotated refresh token revokes the whole token family;
   - idle expiry is 30 days;
-  - absolute expiry is the consent expiry, at most 180 days, after which re-consent with SCA is
-    required.
-- No static API keys and no per-customer client certificates. A certificate gives a retail
-  customer the same binding as DPoP at the cost of a PKI they cannot operate. mTLS-bound tokens
-  (RFC 8705) are reserved for a later corporate channel under its own ADR.
-- The customer sees connected clients in the app, can revoke them, and is notified when a new
+  - absolute expiry is the grant's expiry, at most 180 days, after which the customer
+    reconnects with SCA.
+- **Revocation takes effect on the next call, not at token expiry.** Every call re-reads the
+  grant (D3). A revoked grant therefore denies even while its access token is still valid.
+- No static API keys and no per-customer client certificates. A retail customer cannot operate a
+  PKI, and DPoP gives the same proof of possession. mTLS-bound tokens (RFC 8705) are reserved for
+  a later corporate channel under its own ADR. TPPs use the ADR-0090 XS2A interface.
+- The app shows connected clients, allows revoking them, and notifies the customer when a new
   client is connected.
 
-**D3 — The client is an AGENT delegation grantee bound to customer AND client AND key**
-- Connecting a client creates a `DelegationGrant` in `delegation-service` (ADR-0232 home,
-  ADR-0233 `granteeType: AGENT`):
+**D3 — The delegation grant is the single authority for a read**
+- Connecting a client creates a `DelegationGrant` in delegation-service (ADR-0232) with a **new,
+  distinct grantee type `MCP_CLIENT`**:
   - grantor is the customer's party;
-  - grantee is the allowlisted client;
-  - the grant records the token's `cnf.jkt` at connection time.
-- Capabilities are drawn **only** from `account.read-*` and `account.propose-payment` (ADR-0232
-  D2 vocabulary). `account.initiate-payment` and every other executing or managing capability
-  are structurally refused for this grantee class, whatever ceiling is set. This restricts
-  ADR-0233 D2 for third-party MCP clients.
-- MCP looks the grant up server-side from the triple (customer `sub`/`party_id`, `azp`,
-  `cnf.jkt`). No grant or consent id is ever taken from a client-influenced claim.
-- Each read is checked against the grant through a declared enforcer and ownership oracle
-  (ADR-0375, enforced gate `delegation-capability-enforcement`).
-- `ConsentGate` fails closed when the grant list is absent.
+  - grantee is the allowlisted client id;
+  - the grant records the `jkt` from connection time.
+- This is **not** the ADR-0233 `AGENT` grantee. ADR-0233 covers bank-chartered agents with
+  execution ceilings and remains unchanged for them. `MCP_CLIENT` is its own type, so ADR-0233
+  D1 and D2 need no amendment.
+- An `MCP_CLIENT` grant carries **only** capabilities from an allow-list, which is read
+  capabilities plus `account.propose-payment`. The aggregate refuses every other capability,
+  whatever ceiling is set. That includes `account.initiate-payment`, any `*.manage*` capability
+  and `delegation.manage`.
+- MCP finds the grant server-side from `(party from sub, azp, cnf.jkt)` on **every** call, and
+  checks the requested resource against it.
+- **PSD2 consent and consent-service are not used on this channel.** `ConsentGate` and the
+  ADR-0195 grantee check remain the path for governed agents only. This removes the shared-grantee
+  defect in Context item 1 by construction: a grant names one grantor party, and the lookup key
+  includes that party.
+- Today the ADR-0375 gate `delegation-capability-enforcement` is **advisory**. The
+  `MCP_CLIENT` allow-list is therefore enforced by the aggregate invariant and its negative unit
+  test. That gate going enforced is a separate ADR-0375 follow-up.
+- `ConsentGate` is also hardened to fail closed on a missing grant list, because the agent path
+  keeps using it.
 
-**D4 — Downstream reads carry the customer, not a shared operator**
-- MCP obtains a **customer-scoped downstream token** by RFC 8693 exchange:
+**D4 — Downstream reads carry the customer, and MCP's credential cannot write**
+- For each downstream read, MCP obtains a **customer-scoped token** by RFC 8693 exchange:
   - subject is the customer;
   - actor is MCP plus the client (`act` chain, ADR-0226);
-  - audience is per downstream service.
-- Downstream services enforce party ownership themselves, so a defect in an MCP read port can no
-  longer read another party.
-- The shared `openbank-services` principal is not used on this channel.
+  - audience is that one downstream service;
+  - lifetime is at most 60 s.
+- The exchanged token is in-cluster only and never leaves MCP, so it does not need to be
+  sender-constrained. Its value is in the short lifetime and the per-service audience.
+- Downstream services enforce party ownership themselves. A defect in an MCP read port can
+  therefore no longer read another party. The shared `openbank-services` principal is not used on
+  this channel.
+- **The primary write control is authorization, not code shape.** In the OPA data (ADR-0034),
+  the identity MCP acts as on this channel is granted only `*.read` actions plus
+  `paymentProposal.create`. This is proven with `opa eval` against the built bundle, with a
+  must-deny and a must-allow control in every run.
 
-**D5 — Layered throttling, cheapest first**
-1. Edge gateway (Envoy Gateway, ADR-0324): per-IP and new-connection limits, plus a body-size cap, **before** any token
-   validation.
-2. Per `(party, client)` cost-weighted token bucket in Valkey (ADR-0320 primitive, ADR-0132 key
-   shape), applied **before** the OPA call. Tool costs are data in the charter.
-3. Per-party daily quota and a **global** budget per downstream service.
-4. A concurrency cap per session and per party, per-call timeouts, and mandatory pagination with
-   bounded time windows and response size.
+**D5 — Layered throttling, cheapest first, failing closed**
+1. **Edge (before any token work).** Per-IP request and new-connection limits plus a body-size cap
+   on the live edge controller (today ingress-nginx, later Envoy Gateway per ADR-0324).
+2. **MCP, before token validation.** A small shared bucket for requests that carry no token.
+3. **MCP, after the local JWT and DPoP check, before the grant lookup and before OPA.** A
+   cost-weighted token bucket per `(party, azp)` in Valkey.
+   - This deliberately reverses the current "denied calls do not burn the window" ordering. A
+     caller holding a valid token who floods denied calls must still be bounded, because each
+     denied call costs a grant lookup and a PDP call.
+   - Tool costs are data in a customer-channel cost table in mcp-service config. There is no
+     shared charter: a shared fallback identity must not return, per `CallerContextResolver`.
+4. Per-party daily quota, a **global** budget per downstream service, a concurrency cap per party,
+   per-call timeouts, and mandatory pagination with bounded time windows and response size.
 5. Circuit breaker / bulkhead to each downstream, with load shedding (`429` + `Retry-After`)
    rather than queueing.
 
+**Every limiter fails closed.** A Valkey outage rejects calls; it never admits them unthrottled.
 Throttled and denied calls are audited and metered like any other deny.
 
 **D6 — Writes are propose-only; authorisation happens in the bank app, always**
-- **MCP can never authorise an instruction.** No tool, scope or consent on this channel can
+- **MCP can never authorise an instruction.** No tool, capability or token on this channel can
   initiate, confirm or release a payment, change a limit, add a trusted beneficiary, or change
   security settings. MCP may only create a **proposal**.
-- A proposal executes only after the customer approves it in the **bank app** with full SCA and
-  dynamic linking (amount + payee). The approval consumes a single-use challenge (ADR-0086,
-  ADR-0021). This is the same authorisation as for an instruction entered in the app, with no
-  weaker variant.
-- The approval screen shows **bank-rendered** fields only: payee name from the bank's own
-  resolution, IBAN and amount. Model-supplied free text is never shown as if it were authoritative.
-- **No SCA exemption** applies to a proposal that originates on this channel, including
-  own-account and trusted-beneficiary exemptions, and including an ADR-0193 delegated-authentication
-  exemption derived from an AP2 mandate. A mandate presented on this channel is recorded as
-  evidence only. A proposal never adds the payee to trusted beneficiaries.
+- **What a proposal is and how it is stored**
+  - It is an immutable record created through `paymentProposal.create`. Payee IBAN, amount,
+    currency and reference are fixed at creation.
+  - Approval re-reads those fields from the store, never from MCP or the model.
+  - An identical open proposal (same payee, amount and currency) is deduplicated, not created
+    twice.
+- **How it reaches the customer**
+  - It appears in the customer's approval inbox (ADR-0227), clearly labelled as coming from the
+    named connected client. It is never shown as if the customer had entered it.
+  - Notifications for proposals are coalesced to at most one push per party per 15 minutes.
+- **Approval**
+  - A proposal executes only after the customer approves it in the bank app with full SCA and
+    dynamic linking (amount + payee), consuming a single-use challenge (ADR-0086, ADR-0021). This
+    is the same authorisation as an instruction entered in the app, with no weaker variant.
+  - The approval screen shows only data the bank produced. For an external IBAN it shows the IBAN
+    and the Verification of Payee outcome (ADR-0171). If there is no VoP result it says the payee
+    is unverified. Model-supplied text is never shown as authoritative.
+  - Each proposal is approved individually; bulk approval is not possible.
+- **No SCA exemption** applies to a proposal from this channel:
+  - not own-account;
+  - not trusted beneficiary;
+  - not an ADR-0193 delegated-authentication exemption from an AP2 mandate. A mandate presented
+    here is recorded as evidence only.
+- A proposal never adds the payee to trusted beneficiaries.
+- **Limits:** at most 10 open proposals per party, at most 20 created per party per day, and
+  proposals expire after 24 h.
 - An approved proposal then passes the full ADR-0374 admission chain. Its Authority step
-  (ADR-0375 D1) sees the customer as the actor, because the customer authorised it; the MCP
-  client is never the debiting actor.
-- Proposals expire, are rate-limited per party, and cannot be approved in bulk, so an injected
-  model cannot cause approval fatigue.
+  (ADR-0375 D1) sees the customer as the actor, because the customer authorised it. The MCP client
+  is never the debiting actor.
 
 **D7 — Prompt-injection posture**
-- The security boundary is D6 and the OPA gate (ADR-0034), not the model. `McpUntrustedData`
-  markers and PII masking stay as defence in depth.
+- The security boundary is D4 (no write grant), D6 (SCA in the app) and the OPA gate (ADR-0034),
+  not the model. `McpUntrustedData` markers and PII masking stay as defence in depth.
 - Free-text fields are length-capped and stripped of control characters and link/image markup
-  (exfiltration via rendered URLs). Tools take only schema-validated, typed arguments. There is
-  no URL, query-expression or free-form filter argument.
+  (exfiltration via rendered URLs). Tools take only schema-validated, typed arguments. There is no
+  URL, query-expression or free-form filter argument.
 - Tool descriptions are static and versioned in the repository. `tools/list` is policy-filtered
   (ADR-0225).
 
 ## Alternatives considered
 
-- **Extend ADR-0195 unchanged (client = grantee, bearer tokens).** Least work. Rejected: Context
-  items 1–2 show that it makes a shared client a cross-customer read path.
-- **Static per-customer API keys.** Simple for clients. Rejected: long-lived bearer secrets,
-  copied into config files, with no binding and no rotation story.
+- **Extend ADR-0195 unchanged (client = consent grantee, bearer tokens).** Least work. Rejected:
+  a shared public client becomes a cross-customer read path (Context items 1–2).
+- **Reuse ADR-0233 `AGENT` grantees.** One grantee concept fewer. Rejected: ADR-0233 requires a
+  chartered agent identity and execution ceilings. A third-party client is neither, and bending
+  ADR-0233 would silently widen it.
+- **Allow execution within ceilings for MCP clients (ADR-0233 D2 shape).** Gives the client
+  autonomy for small payments. Rejected: the ceiling bounds the loss, not the likelihood. An
+  injected model drains up to the ceiling on every grant, and the customer never sees the payment.
+- **Static per-customer API keys.** Simple for clients. Rejected: long-lived bearer secrets with no
+  binding and no rotation story.
 - **Per-customer mTLS client certificates.** Strong binding. Rejected for retail: customers cannot
-  operate a PKI, and DPoP gives the same proof-of-possession property. Kept for a future corporate
-  channel.
-- **Apply ADR-0233 unchanged: execution within ceilings.** Gives agents real autonomy for small
-  payments. Rejected for third-party MCP clients: the ceiling bounds the loss, not the
-  likelihood. An injected model drains up to the ceiling on every grant, and the customer never
-  saw the payment. ADR-0233 stays applicable to bank-chartered agents.
+  operate a PKI, and DPoP gives the same proof of possession. Kept for a future corporate channel.
 - **Let MCP authorise low-value payments directly (with an exemption).** Better UX. Rejected: a
   third-party model reads attacker-written data, so any write the model can complete alone is an
-  injection-to-debit path. The owner requires the same in-app authorisation as for app-entered
-  instructions.
+  injection-to-debit path. The decision rule is that every MCP-originated instruction carries the
+  same in-app authorisation as one entered in the app.
 
 ## Consequences
 
 **Positive**
-- A stolen access token is useless without the DPoP key and expires in minutes. Consent is
-  unusable across customers or clients.
-- An injected model can at worst create a proposal, and the customer then rejects it in the app.
-- Floods are shed before token validation or OPA calls, and money-path reads have a global ceiling.
+- A stolen access token is useless without the DPoP key and expires in minutes.
+- A grant cannot be used across customers, clients or keys, and revocation applies on the next
+  call.
+- MCP's credential cannot write, so an injected model can at worst create a proposal, and the
+  customer then rejects it in the app.
+- Floods are shed before token validation or OPA calls, and money-path reads have a global
+  ceiling.
 
 **Negative**
-- New work: a customer-realm OIDC tenant in MCP, DPoP verification, an AGENT-grant binding triple
-  in delegation-service,
-  token exchange plus downstream party enforcement, a Valkey limiter, a proposal store with an
-  in-app approval UI.
-- Clients that do not support DPoP cannot connect. Customers must re-consent at least every 180
-  days.
+- New work across mcp-service, delegation-service, libs, OPA data, the customers realm and the
+  customer edge.
+- The approval-inbox screen lives in the separate customer-app repository (ADR-0064).
+- Clients without DPoP cannot connect. Customers reconnect at least every 180 days.
 - A DPoP key and refresh token stolen together from a compromised customer device still allow
   read access until revocation. This is mitigated by notifications, the connected-clients view
   and anomaly alerts, not eliminated.
 
 **Neutral**
-- The governed-agent (ADR-0195) and staff OBO (ADR-0224) channels are unchanged.
+- The governed-agent (ADR-0195), staff OBO (ADR-0224) and chartered-agent allowance (ADR-0233)
+  paths are unchanged.
 
 **Enforcement.**
-- A new checker under `.github/scripts/` (gate `mcp-customer-channel-propose-only`, enforced): no
-  REST client in `openbank-mcp-service` may target a non-GET path of a payment, limit,
-  beneficiary or SCA service except the proposal store.
+- The primary write control is D4: OPA data grants this channel no write action, proven by
+  `opa eval`.
+- A tripwire gate `mcp-customer-channel-propose-only` (planned, enforced once it lands) fails on
+  any non-GET REST client in mcp-service other than the proposal store. It is a backstop, not
+  proof.
+- The `MCP_CLIENT` capability allow-list is an aggregate invariant with a negative unit test.
 - The existing `mcp-real-port-requires-caller-auth-first` gate stays.
-- `docs/threat-models/openbank-mcp-service.md` is extended with the customer channel before any
-  route is exposed.
+- `docs/threat-models/openbank-mcp-service.md` gains the customer channel before any route exists.
 
 ### Delivery check
 
-- `git grep -n 'granted != null' openbank-mcp-service/src/main` prints nothing.
-- `git grep -n 'initiate-payment' openbank-delegation-service/src/main` shows it refused for the
-  MCP-client grantee class (aggregate invariant plus unit test).
-- An MCP request without a DPoP proof, or with a proof for another key, answers 401, asserted by
-  an IT driving real HTTP.
-- An IT with customer A's token against a consent of customer B answers deny.
-- `grep -n 'mcp-customer-channel-propose-only' -A3 .github/gates/gates.yaml` shows
-  `mode: enforced`.
-- An IT shows a flood of unauthenticated requests is throttled with zero OPA calls recorded.
-- No HTTPRoute exposes mcp-service until all of the above hold.
+- **No write grant.** `opa eval` on the built mcp bundle answers `allow=false` for the
+  customer-channel identity on `sepaPayment.create` and `domestic-payment.create`, and
+  `allow=true` for `paymentProposal.create` (both controls in one run).
+- **Allow-list invariant.** The delegation-service unit test "MCP_CLIENT grant with
+  account.initiate-payment is rejected" exists and passes, and fails when the invariant is
+  removed.
+- **DPoP binding.** An IT over real HTTP shows:
+  - no DPoP proof gives 401;
+  - a proof for another key gives 401;
+  - a replayed `jti` gives 401.
+- **Cross-customer isolation.** An IT shows customer A's token against customer B's resource is
+  denied.
+- **Throttle ordering.** An IT shows a flood of tokenless requests is throttled with zero OPA calls
+  and zero grant lookups recorded.
+- **Proposal approval.** An IT shows a proposal executes only after a consumed SCA challenge, and a
+  second approval of the same proposal is refused.
+- **Exposure last.** `kubectl get httproute,ingress -A | grep mcp` lists nothing until all of the
+  above hold.
 
 ## Compliance impact
 
@@ -238,8 +314,8 @@ Throttled and denied calls are audited and metered like any other deny.
 
 ## References
 
-- ADR-0021, ADR-0034, ADR-0065, ADR-0086, ADR-0089, ADR-0090, ADR-0126, ADR-0132, ADR-0193,
-  ADR-0195, ADR-0224, ADR-0225, ADR-0226, ADR-0232, ADR-0233, ADR-0320, ADR-0324, ADR-0374,
+- ADR-0021, ADR-0034, ADR-0064, ADR-0065, ADR-0086, ADR-0089, ADR-0090, ADR-0126, ADR-0132, ADR-0193,
+  ADR-0195, ADR-0224, ADR-0171, ADR-0225, ADR-0226, ADR-0227, ADR-0232, ADR-0233, ADR-0320, ADR-0324, ADR-0374,
   ADR-0375
 - `openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/mcp/CallerContextResolver.kt`
 - `openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/read/ConsentGate.kt`
