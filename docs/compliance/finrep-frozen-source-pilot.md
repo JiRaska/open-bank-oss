@@ -403,3 +403,54 @@ decision records by the UUID, then join the decision to the HTTP response by OPA
 instance and `req_id`. Compare `timer_rego_query_eval_ns` with `resp_duration` and
 the client phase durations. The decision may be absent if the request has not reached
 policy evaluation by the deadline. The UUID is a log field rather than a metric label.
+
+### Enforced OPA with exchange timing, 2026-11-17
+
+The same isolated workload used 3,000,000 rows each for parties, accounts, balances
+and settled domestic payments. k6 attempted 30 reads per second per route with
+64 active synthetic customers. OPA enforcement and exchange diagnostics were active.
+The reporting worker exported six million synthetic journal lines without a network,
+with a two-CPU and 1 GiB memory budget. The worker was killed before publishing any
+output. It replayed all six million lines after a 45-second outage. The three balanced
+trial balances, for domestic, FOS and branch, matched their index digests.
+
+Each cell shows p95 / p99 in milliseconds, HTTP errors / requests and dropped k6
+iterations. A dropped iteration is demand that the load generator could not send.
+
+| Phase | Seconds | Account | Balance | Payment |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline | 45.0 | 74.9 / 149.6 · 0/1353 · 0 | 160.7 / 266.4 · 0/1355 · 0 | 111.1 / 213.6 · 0/1353 · 0 |
+| Export | 32.4 | 1057.5 / 1348.9 · 0/971 · 2 | 1584.5 / 2296.6 · 0/918 · 55 | 1282.6 / 1731.0 · 0/943 · 30 |
+| Reporting outage | 45.0 | 32.7 / 64.7 · 0/1351 · 0 | 67.0 / 129.0 · 0/1353 · 0 | 48.8 / 108.1 · 0/1353 · 0 |
+| Complete replay | 149.7 | 75.8 / 329.5 · 0/4490 · 0 | 148.4 / 500.5 · 0/4488 · 0 | 111.2 / 400.9 · 0/4490 · 0 |
+
+There were 24,418 HTTP requests and zero HTTP errors in the measured phases. Export
+missed 87 scheduled requests, and the simultaneous latency increase across all three
+routes prevents a finding of performance isolation. The synthetic row count checks
+were run near the baseline-to-export transition. A follow-up export control omitted
+those checks. Both the banking stack and the reporting worker share a Docker VM in
+this experiment, and application and OPA timing logs add diagnostic workload.
+
+There were no OPA deadlines in the four correlated windows. All 8,139 Domestic
+Payment OPA calls in those windows matched a server decision. Its p99 time to response
+headers rose from 19.3 ms at baseline to 157.3 ms at export. OPA p99 HTTP handling
+increased from 11.0 to 68.2 ms, and p99 evaluation from 7.3 to 38.9 ms. The longest
+Domestic Payment exchange during export was 465.9 ms, and the longest Edge exchange
+was 489.1 ms. These times show longer waits both around and inside OPA, but the
+original six uncorrelated deadlines did not recur. Their underlying trigger remains
+unconfirmed.
+
+In the export control the worker finished in 20.8 seconds with zero HTTP errors and
+zero dropped iterations. Account p95/p99 changed from 45.0/82.0 to 106.1/189.3 ms,
+balance from 89.0/137.8 to 174.3/315.5 ms, and payment from 64.6/110.1 to
+131.9/243.9 ms. Aggregate VM CPU activity rose from a median 22.6% in 13 sampled
+baseline intervals to 30.4% in 20 export intervals. Peak sampled I/O wait rose
+from 0.3% to 5.0%. These coarse VM counters do not identify the cause of individual
+requests or of the original OPA spike. The export slowdown repeated without the
+first run's second-scale tail.
+
+A separate fault check paused only the Domestic Payment OPA. The payment read
+returned 200 before the pause, 503 during it, and 200 after recovery. Accounts and
+balances stayed at 200. The caller logged `HttpTimeoutException` without response
+headers or a body, approximately 535 ms after invoking the exchange. This verifies
+the diagnostic on a known pre-header fault.
