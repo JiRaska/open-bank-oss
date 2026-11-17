@@ -65,7 +65,7 @@ data class ConsentValidationResponse(
     val code: String?,
     /** Granted scopes (present when valid). */
     val scopes: Set<ConsentScope>? = null,
-    /** Accounts the consent covers; null (when valid) = all of the party's accounts. */
+    /** Accounts the consent explicitly covers. Without an explicit list it covers no account. */
     val grantedAccounts: List<String>? = null,
     /** PSD2 RTS Art. 10 AISP per-day read cap; null for non-AISP consents. */
     val frequencyPerDay: Int? = null,

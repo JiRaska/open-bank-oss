@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.21.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.20.0...admin-ui-v4.21.0) (2026-11-17)
+
+
+### Features
+
+* **admin-ui:** explain the customer MCP channel with repo-derived control status ([#16610](https://github.com/JiRaska/open-bank-oss/issues/16610)) ([88a1002](https://github.com/JiRaska/open-bank-oss/commit/88a10024593737e759ab70e8b95407657b8a1351))
+
 ## [4.20.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.19.1...admin-ui-v4.20.0) (2026-11-17)
 
 
