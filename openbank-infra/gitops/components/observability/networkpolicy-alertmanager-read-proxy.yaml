@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Egress allow-list for the GET-only Alertmanager relay (alertmanager-read-proxy.yaml,
+# ADR-0382). The relay talks to DNS and to Alertmanager :9093 and nothing else, so a
+# compromised relay can neither exfiltrate what it reads nor reach any other in-cluster API.
+# Its INGRESS (only the alert-digest namespace, plus the fleet's static edges) is generated
+# into network-policies.yaml from the digest CronJob's declared URL.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: alertmanager-read-proxy-egress-allow-list
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager-read-proxy
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alertmanager
+      ports:
+        - protocol: TCP
+          port: 9093

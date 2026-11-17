@@ -13,6 +13,8 @@ import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
+import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -217,6 +219,28 @@ interface SanctionsServiceClient {
     @GET
     @Path("/pending")
     fun listPending(): JsonNode
+}
+
+/**
+ * The agent identity's sanctions review submission (four-eyes maker, ADR-0155). Same `m2m` identity
+ * as [SanctionsServiceClient]; sanctions-service grants `service-account-openbank-agent`
+ * `sanctions.clear` only through the maker rule in gen-sanctions-opa-bundle.sh, and the deployed
+ * four-eyes enforcement pauses every such call until a distinct human checker approves it.
+ */
+@RegisterRestClient(configKey = "sanctions-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
+@OidcClientFilter("m2m")
+@Path("/api/v3/sanctions")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+interface SanctionsReviewClient {
+
+    @POST
+    @Path("/review")
+    fun review(
+        body: Map<String, String>,
+        @HeaderParam("X-Approval-Id") approvalId: String?,
+    ): jakarta.ws.rs.core.Response
 }
 
 @RegisterRestClient(configKey = "fx-service")
