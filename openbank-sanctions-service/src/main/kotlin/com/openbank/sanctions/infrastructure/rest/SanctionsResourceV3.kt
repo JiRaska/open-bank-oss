@@ -40,7 +40,7 @@ class SanctionsResourceV3(private val useCase: SanctionsUseCase) {
     @Inject
     lateinit var approvals: ApprovalStore
 
-    @ConfigProperty(name = "authz.four-eyes.enforce", defaultValue = "false")
+    @field:ConfigProperty(name = "authz.four-eyes.enforce", defaultValue = "false")
     var fourEyesEnforce: Boolean = false
 
     @GET

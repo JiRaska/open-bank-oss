@@ -5151,6 +5151,10 @@ security_sensitive_paths:
     auth_crypto_payment:
       - "src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/repository/SanctionsChangePublisherImpl.kt"
       - "src/main/kotlin/**/ApprovalResource.kt"
+      # #16455: the v3 review binds a four-eyes approval at the point of effect, and the guard
+      # refuses the agent maker before @Authorize runs.
+      - "src/main/kotlin/**/rest/SanctionsResourceV3.kt"
+      - "src/main/kotlin/**/rest/AgentReviewGuard.kt"
       - "src/main/kotlin/**/approval/**"
       - "src/main/kotlin/**/security/**"
       - "src/main/kotlin/**/filter/**"
