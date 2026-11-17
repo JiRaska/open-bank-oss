@@ -41,6 +41,8 @@ pins = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pins)
 
 BRANCH = "deploy/sandbox"
+# The workflows that legitimately write a pin; named in the commit body as the writer.
+WRITERS = ("admin-ui-deploy.yml", "admin-ui-repin.yml")
 MUTATION = """
 mutation($input: CreateCommitOnBranchInput!) {
   createCommitOnBranch(input: $input) { commit { oid signature { isValid state } } }
@@ -129,8 +131,12 @@ def seed_image(component, main_sha):
         source = git("rev-parse", "--verify", "--quiet", f"{short}^{{commit}}").strip()
     except pins.PinError as error:
         raise pins.PinError(f"{component}: tag {tag} names no unique commit ({error})") from error
-    if not source.startswith(short) or len(source) != 40:
+    if not pins.SHA.fullmatch(source) or not source.startswith(short):
         raise pins.PinError(f"{component}: tag {tag} resolved to {source!r}")
+    # The prefix must resolve to a commit ON main, not merely to some object in this clone.
+    if not pins.is_ancestor(".", source, main_sha):
+        raise pins.PinError(f"{component}: tag {tag} resolves to {source[:12]}, which is not an "
+                            f"ancestor of main@{main_sha[:12]}")
     return source, tag, digest
 
 
@@ -142,7 +148,7 @@ def main():
     parser.add_argument("--tag")
     parser.add_argument("--digest")
     parser.add_argument("--run-url", default="")
-    parser.add_argument("--writer", default="admin-ui-deploy.yml",
+    parser.add_argument("--writer", default="admin-ui-deploy.yml", choices=WRITERS,
                         help="workflow named in the commit body as the writer")
     parser.add_argument("--dry-run", action="store_true", help="check the candidate, write nothing")
     args = parser.parse_args()
