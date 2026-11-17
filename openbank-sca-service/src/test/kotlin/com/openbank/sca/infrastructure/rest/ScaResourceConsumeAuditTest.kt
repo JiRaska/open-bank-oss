@@ -24,8 +24,8 @@ import io.quarkus.security.identity.SecurityIdentity
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.junit.jupiter.api.Test
 import org.eclipse.microprofile.jwt.JsonWebToken
+import org.junit.jupiter.api.Test
 import java.security.Principal
 import java.time.OffsetDateTime
 import java.util.UUID
