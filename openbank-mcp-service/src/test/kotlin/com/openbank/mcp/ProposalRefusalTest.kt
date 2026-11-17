@@ -144,7 +144,7 @@ class ProposalRefusalTest {
             protocolVersion = "2025-06-18",
         ).apply {
             metrics = McpMetricsAdapter(meters)
-            rateLimiter = McpRateLimiter()
+            rateLimiter = McpRateLimiter.withDefaults()
             toolsCatalog = PolicyFilteredToolCatalog(toolRegistry, pdp, 0)
         }
     }

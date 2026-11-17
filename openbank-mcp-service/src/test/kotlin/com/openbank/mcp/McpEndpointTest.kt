@@ -80,7 +80,7 @@ class McpEndpointTest {
      * window can, and every other test gets the production defaults (60/min) — well above the
      * handful of calls they each make.
      */
-    private val limiter = McpRateLimiter()
+    private val limiter = McpRateLimiter.withDefaults()
 
     // ── ADR-0226: every MCP event is stamped with its channel and delegation chain ──────────
 
@@ -248,6 +248,40 @@ class McpEndpointTest {
 
     // #16622: an audience mark that is missing or names another resource is refused at the door with
     // 401 (RFC 8707), before any tool or session lookup runs.
+    // #16622 x ADR-0383 D5: the audience refusal runs before the limiter, so a flood of
+    // foreign-audience tokens neither spends any rate window nor holds an in-flight slot.
+    @Test
+    fun `foreign-audience requests consume no limiter budget`() {
+        limiter.callsPerMinute = 1
+        limiter.anonymousCallsPerMinute = 1
+        limiter.maxInFlight = 1
+        val foreign = TestJsonWebToken(
+            mapOf("sub" to "agent:test-agent", "aud" to "some-other-service", "consent_id" to TEST_CONSENT_ID),
+        )
+        repeat(5) {
+            val e = endpoint(allowAll(), jwt = foreign)
+            assertThat(
+                e.handle(
+                    rpc(
+                        "tools/call",
+                        mapOf(
+                            "name" to "list_accounts",
+                            "arguments" to emptyMap<String, Any>(),
+                        ),
+                    ),
+                ).status,
+            )
+                .isEqualTo(401)
+            assertThat(e.handle(rpc("tools/list", emptyMap<String, Any>())).status).isEqualTo(401)
+        }
+        val resp = body(
+            endpoint(allowAll()).handle(
+                rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+            ).entity,
+        )
+        assertThat(resp.path("result").path("isError").asBoolean()).isFalse()
+    }
+
     @Test
     fun `a staff token without this server's audience is refused with 401`() {
         listOf(staffClaims - "aud", staffClaims + ("aud" to "some-other-service")).forEach { claims ->
