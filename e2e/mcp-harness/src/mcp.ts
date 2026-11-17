@@ -9,6 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { DpopKey } from './dpop.ts'
 import { createDpopProof, htuOf } from './dpop.ts'
+import { assertTarget, guardedFetch, TargetRefused } from './guard.ts'
 
 export interface Credential {
   accessToken: string
@@ -26,14 +27,24 @@ export async function authHeaders(cred: Credential, method: string, url: string,
   return h
 }
 
-export function authenticatedFetch(cred: Credential): typeof fetch {
+/**
+ * Adds the credential and a fresh DPoP proof. The target is checked BEFORE any header is built,
+ * and a redirect is an error: a token or proof must never be replayed to another URL.
+ */
+export function authenticatedFetch(cred: Credential, base: typeof fetch = fetch): typeof fetch {
   let nonce: string | undefined
   const go = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = input instanceof Request ? input.url : input.toString()
+    assertTarget(url)
     const method = (init.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase()
     const headers = new Headers(init.headers)
     for (const [k, v] of Object.entries(await authHeaders(cred, method, url, nonce))) headers.set(k, v)
-    return fetch(input, { ...init, headers })
+    const res = await base(input, { ...init, headers, redirect: 'manual' })
+    if (res.status >= 300 && res.status < 400) {
+      await res.body?.cancel()
+      throw new TargetRefused(`authenticated request to ${url} answered ${res.status}; redirects are not followed with credentials`)
+    }
+    return res
   }
   return async (input, init) => {
     const res = await go(input, init)
@@ -48,7 +59,7 @@ export function authenticatedFetch(cred: Credential): typeof fetch {
 }
 
 export async function connectMcp(resourceUrl: string, cred?: Credential): Promise<Client> {
-  const transport = new StreamableHTTPClientTransport(new URL(resourceUrl), cred ? { fetch: authenticatedFetch(cred) } : {})
+  const transport = new StreamableHTTPClientTransport(new URL(resourceUrl), { fetch: cred ? authenticatedFetch(cred) : guardedFetch() })
   const client = new Client({ name: 'openbank-mcp-harness', version: '0.0.0' })
   await client.connect(transport)
   return client

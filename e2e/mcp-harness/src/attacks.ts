@@ -16,6 +16,7 @@
 import { createSign, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { b64url, decodeJwtPayload } from './b64.ts'
+import { assertTarget } from './guard.ts'
 import { authorizeInBrowser, openPasskeyBrowser } from './browser.ts'
 import type { HarnessConfig } from './config.ts'
 import type { DpopKey, ProofOptions } from './dpop.ts'
@@ -258,6 +259,7 @@ export const ATTACKS: AttackCase[] = [
       expectStatus(r, 401, 'unauthenticated tools/list')
       const m = /resource_metadata="([^"]+)"/.exec(r.headers.get('www-authenticate') ?? '')
       if (!m) fail(`no resource_metadata in WWW-Authenticate: ${r.headers.get('www-authenticate')}`)
+      assertTarget(m![1]) // the server names this URL; it is a target like any other
       const prm = await send(m![1], {})
       expectStatus(prm, 200, 'protected-resource metadata')
       if (prm.json?.resource !== cfg.resourceUrl) fail(`metadata resource ${prm.json?.resource} != ${cfg.resourceUrl}`)

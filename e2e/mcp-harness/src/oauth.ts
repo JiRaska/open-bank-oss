@@ -10,7 +10,7 @@ import {
   discoverOAuthProtectedResourceMetadata,
 } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { DpopKey } from './dpop.ts'
-import { assertTarget } from './guard.ts'
+import { assertTarget, guardedFetch } from './guard.ts'
 import { createDpopProof } from './dpop.ts'
 import type { RawResponse } from './http.ts'
 import { send } from './http.ts'
@@ -38,13 +38,13 @@ export async function discover(resourceUrl: string, authServerOverride?: string)
   let authServer = authServerOverride
   if (!authServer) {
     // Throws when the resource serves no RFC 9728 document — today's mcp-service state.
-    const prm = await discoverOAuthProtectedResourceMetadata(resourceUrl)
+    const prm = await discoverOAuthProtectedResourceMetadata(resourceUrl, undefined, guardedFetch())
     resource = prm.resource
     authServer = prm.authorization_servers?.[0]
     if (!authServer) throw new Error('protected-resource metadata lists no authorization_servers')
   }
   assertTarget(authServer) // a discovered AS is a target too — metadata must not redirect us
-  const as = (await discoverAuthorizationServerMetadata(authServer)) as AsMetadata | undefined
+  const as = (await discoverAuthorizationServerMetadata(authServer, { fetchFn: guardedFetch() })) as AsMetadata | undefined
   if (!as) throw new Error(`no authorization-server metadata at ${authServer}`)
   for (const e of [as.authorization_endpoint, as.token_endpoint, as.pushed_authorization_request_endpoint]) if (e) assertTarget(e)
   return { resource, authServer, as }

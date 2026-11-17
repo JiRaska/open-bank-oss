@@ -5,6 +5,8 @@
 // Raw HTTP for the attack suite. The SDK client is the right tool for the journey, but an attack
 // must see the status code and headers the SDK deliberately hides (it turns 401 into an exception).
 
+import { assertTarget } from './guard.ts'
+
 export interface RawResponse {
   status: number
   headers: Headers
@@ -13,6 +15,8 @@ export interface RawResponse {
 }
 
 export async function send(url: string, init: RequestInit & { form?: Record<string, string | undefined> }): Promise<RawResponse> {
+  // Raw requests do not follow redirects (attacks read the Location), but the first hop is guarded.
+  assertTarget(url)
   const headers = new Headers(init.headers)
   let body = init.body
   if (init.form) {

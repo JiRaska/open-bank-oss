@@ -22,12 +22,23 @@ fail against a stub with exactly the defence it targets switched off.
 
 ## Target guard
 
-The harness forges tokens, replays proofs and approves SCA challenges, so `src/guard.ts` refuses
-every target host (resource URL, authorization server, discovered endpoints, SCA URL, and every
-browser navigation) unless it is loopback, `*.localhost`, `*.test`, or carries a
-`sandbox|staging|dev|qa` label below the TLD. `MCP_HARNESS_I_UNDERSTAND_NON_LOCAL=<exact host>`
-accepts one other host. URLs with userinfo are always refused. The software SCA device has no
-override: it self-approves only against loopback, `*.localhost`, `*.test` or a sandbox-labelled host.
+The harness forges tokens, replays proofs and approves SCA challenges. `src/guard.ts` is a
+**safety net** against pointing it at a production bank by mistake. It is not a security
+boundary. It refuses every target host unless the host is one of these:
+
+- loopback, `*.localhost` or `*.test`;
+- a labelled sandbox host: the **leftmost** label is `sandbox`, `staging`, `dev` or `qa`, **and**
+  the host ends with a suffix listed in `MCP_HARNESS_ALLOWED_SUFFIXES` (comma-separated). The
+  default list is empty, because no sandbox-labelled `open-bank.tech` host exists on main;
+- exactly the host named by `MCP_HARNESS_I_UNDERSTAND_NON_LOCAL`.
+
+The guard covers the resource URL, the configured and discovered authorization server and its
+endpoints, the SCA URL, the `resource_metadata` URL a server names, every browser navigation,
+and every redirect hop. Authenticated requests never follow a redirect. A URL with userinfo is
+always refused.
+
+The software SCA device self-approves challenges, so it is stricter. It accepts only loopback,
+`*.localhost`, `*.test` or an allow-suffix sandbox host, and it has no override.
 
 `--list --trace` maps every ADR-0383/0385 delivery-check line to its cases, or to the layer that
 owns it (`src/delivery-checks.ts`; a test keeps the two in step).

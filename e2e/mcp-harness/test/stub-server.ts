@@ -18,6 +18,8 @@ export type Flaw =
   | 'as-ignore-client-binding' | 'as-ignore-extra-params' | 'as-allow-front-channel' | 'as-no-iss-support'
   /** not a defence: the protected-resource metadata names a non-local authorization server */
   | 'prm-foreign-as'
+  /** guard probes: an allowed host redirecting to, or pointing at, a refused host */
+  | 'redirect-mcp-foreign' | 'redirect-prm-foreign' | 'anon-401-foreign-prm'
 
 export interface Stub {
   url: string
@@ -72,6 +74,10 @@ export async function startStub(flaws: Flaw[] = []): Promise<Stub> {
     if (u.pathname === '/.well-known/oauth-authorization-server') {
       return json(200, { issuer: base, authorization_endpoint: `${base}/authorize`, token_endpoint: `${base}/token`, pushed_authorization_request_endpoint: `${base}/par`, require_pushed_authorization_requests: true, code_challenge_methods_supported: ['S256'], dpop_signing_alg_values_supported: ['ES256'], authorization_response_iss_parameter_supported: !has('as-no-iss-support'), response_types_supported: ['code'] })
     }
+    const FOREIGN = 'https://mcp.examplebank.com'
+    if (u.pathname.startsWith('/.well-known/oauth-protected-resource') && has('redirect-prm-foreign')) { res.writeHead(302, { location: `${FOREIGN}/.well-known/oauth-protected-resource/mcp` }); return res.end() }
+    if (u.pathname === '/mcp' && has('redirect-mcp-foreign')) { res.writeHead(307, { location: `${FOREIGN}/mcp` }); return res.end() }
+    if (u.pathname === '/mcp' && has('anon-401-foreign-prm') && !req.headers.authorization) return json(401, { error: 'invalid_token' }, { 'www-authenticate': `Bearer resource_metadata="${FOREIGN}/.well-known/oauth-protected-resource/mcp"` })
     if (u.pathname === '/.well-known/oauth-protected-resource/mcp') return json(200, { resource: `${base}/mcp`, authorization_servers: [has('prm-foreign-as') ? 'https://login.examplebank.com' : base] })
     if (u.pathname === '/par') {
       const f = new URLSearchParams(raw)
