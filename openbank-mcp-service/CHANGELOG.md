@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.9](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.8...mcp-service-v0.17.9) (2026-11-17)
+
+
+### Security
+
+* **mcp:** require this server's audience on every /mcp token ([#16626](https://github.com/JiRaska/open-bank-oss/issues/16626)) ([800e795](https://github.com/JiRaska/open-bank-oss/commit/800e795e2292ea193bd1cad63862d024aaba716e)), closes [#16622](https://github.com/JiRaska/open-bank-oss/issues/16622) [#16590](https://github.com/JiRaska/open-bank-oss/issues/16590)
+
 ## [0.17.8](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.7...mcp-service-v0.17.8) (2026-11-17)
 
 

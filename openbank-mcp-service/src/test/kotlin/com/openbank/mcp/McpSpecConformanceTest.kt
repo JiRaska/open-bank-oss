@@ -27,6 +27,7 @@ import com.openbank.mcp.infrastructure.read.StubMarketingReachPort
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 
 /**
@@ -57,23 +58,25 @@ class McpSpecConformanceTest {
     private val meters = SimpleMeterRegistry()
     private val limiter = McpRateLimiter.withDefaults()
 
-    private fun endpoint(): McpEndpoint {
-        val stub = ConformanceReads(mapper)
+    private val agentToken = TestJsonWebToken(
+        mapOf(
+            "sub" to "agent:conformance",
+            "aud" to "openbank-mcp-service",
+            "consent_id" to "6a1f5f38-59a5-4e77-9f0d-2b1a7a2f1c11",
+        ),
+    )
+
+    private fun endpoint(
+        token: TestJsonWebToken = agentToken,
+        stub: ConformanceReads = ConformanceReads(mapper),
+    ): McpEndpoint {
         val toolRegistry =
             McpToolRegistry(stub, stub, stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
         return McpEndpoint(
             registry = toolRegistry,
             pdp = AllowAll,
             auditor = McpCallAuditor(SinkPublisher),
-            callerResolver = CallerContextResolver(
-                TestJsonWebToken(
-                    mapOf(
-                        "sub" to "agent:conformance",
-                        "aud" to "openbank-mcp-service",
-                        "consent_id" to "6a1f5f38-59a5-4e77-9f0d-2b1a7a2f1c11",
-                    ),
-                ),
-            ),
+            callerResolver = CallerContextResolver(token),
             mapper = mapper,
             serverName = "openbank-mcp",
             serverVersion = "0.1.0",
@@ -251,6 +254,285 @@ class McpSpecConformanceTest {
     }
 
     // -----------------------------------------------------------------------------------
+    // Issue #16617 layer 1 — extended conformance, written against what the server implements
+    // today. Every @Disabled test below is a KNOWN DEVIATION from the MCP specification (revision
+    // 2026-07-28, https://modelcontextprotocol.io/specification/2026-07-28), kept as an executable
+    // expectation instead of a comment: it is a follow-up, not a pass. Production code is
+    // deliberately untouched by this change. Remove @Disabled when the deviation is fixed.
+    //
+    // Context for the whole group: this server implements the initialize-handshake protocol shape
+    // (pinned 2025-06-18). Revision 2026-07-28 is stateless: no initialize/session, the protocol
+    // version and client capabilities travel in every request's `_meta`, and the HTTP binding
+    // mandates MCP-Protocol-Version / Mcp-Method headers. That migration is itself a follow-up.
+    // -----------------------------------------------------------------------------------
+
+    private fun raw(json: String): JsonNode = bodyOf(endpoint().handle(mapper.readTree(json)))
+
+    private fun assertJsonRpcRejection(body: JsonNode, what: String) {
+        assertThat(body.has("result")).`as`("%s must not produce a result: %s", what, body).isFalse()
+        assertThat(body.path("error").path("code").isInt).`as`("%s needs an error.code: %s", what, body).isTrue()
+        assertThat(body.path("error").path("message").isTextual).isTrue()
+    }
+
+    @Test
+    fun `request ids of every legal JSON type round-trip exactly`() {
+        // JSON-RPC 2.0 ids are strings or integers. Correlation is by exact value, so a lossy
+        // round trip (long truncated to int, unicode normalised, empty string dropped) strands the
+        // client's pending request.
+        val ids: List<Any> = listOf(0, -1, Long.MAX_VALUE, Long.MIN_VALUE, "", " ", "a/b", "é中😀")
+        ids.forEach { id ->
+            val sent = mapper.valueToTree<JsonNode>(id)
+            val echoed = bodyOf(send(request("ping", id = id))).path("id")
+            assertThat(echoed).`as`("id %s did not round-trip", sent).isEqualTo(sent)
+        }
+    }
+
+    @Test
+    fun `a non-object body is rejected with a JSON-RPC error and never throws`() {
+        // A 500 here would be a bare stack-trace path on the first byte a client sends. Batches
+        // (arrays) are not part of MCP since 2025-06-18; scalars were never valid requests.
+        listOf("[]", "[1]", "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}]", "\"x\"", "42", "true", "null")
+            .forEach { body -> assertJsonRpcRejection(raw(body), "body $body") }
+    }
+
+    @Test
+    fun `a request without a method string is rejected rather than executed`() {
+        listOf("{}", """{"jsonrpc":"2.0","id":1}""", """{"jsonrpc":"2.0","id":1,"method":7}""")
+            .forEach { body -> assertJsonRpcRejection(raw(body), "body $body") }
+    }
+
+    @Test
+    fun `initialize echoes a client version the server supports`() {
+        val result = bodyOf(
+            send(request("initialize", params = mapOf("protocolVersion" to "2025-06-18"))),
+        ).path("result")
+        assertThat(result.path("protocolVersion").asText()).isEqualTo("2025-06-18")
+    }
+
+    @Test
+    fun `initialize answers an unsupported client version with a version the server does support`() {
+        // Negotiation rule: when the requested version is unsupported the server responds with
+        // another version it supports (never echoes the unsupported one, never errors the handshake).
+        listOf("1999-01-01", "2026-07-28", "", "not-a-version").forEach { proposed ->
+            val result = bodyOf(
+                send(request("initialize", params = mapOf("protocolVersion" to proposed))),
+            ).path("result")
+            assertThat(result.path("protocolVersion").asText())
+                .`as`("client proposed '%s'", proposed).isEqualTo("2025-06-18")
+        }
+    }
+
+    @Test
+    fun `initialize tolerates absent and malformed params`() {
+        listOf(null, emptyMap<String, Any>(), "x", listOf(1), 7).forEach { params ->
+            val body = bodyOf(send(request("initialize", params = params)))
+            assertThat(body.path("result").path("protocolVersion").asText()).`as`("params=%s", params).isNotEmpty()
+        }
+    }
+
+    @Test
+    fun `tools list is deterministic and every inputSchema is structurally valid JSON Schema`() {
+        val first = bodyOf(send(request("tools/list"))).path("result").path("tools")
+        val second = bodyOf(send(request("tools/list"))).path("result").path("tools")
+        assertThat(second.map { it.path("name").asText() }).isEqualTo(first.map { it.path("name").asText() })
+
+        val validTypes = setOf("string", "integer", "number", "boolean", "object", "array", "null")
+        first.forEach { tool ->
+            val name = tool.path("name").asText()
+            assertThat(name).`as`("tool name charset/length").matches("[A-Za-z0-9_.-]{1,128}")
+            val schema = tool.path("inputSchema")
+            assertThat(schema.path("properties").isObject).`as`("%s: properties must be an object", name).isTrue()
+            val props = schema.path("properties").fieldNames().asSequence().toSet()
+            schema.path("properties").fields().forEach { (prop, def) ->
+                assertThat(validTypes).`as`("%s.%s type", name, prop).contains(def.path("type").asText())
+            }
+            val required = schema.path("required")
+            if (schema.has("required")) {
+                assertThat(required.isArray).`as`("%s: required must be an array", name).isTrue()
+                assertThat(required.map { it.asText() }).`as`("%s: required names an undeclared property", name)
+                    .isSubsetOf(props)
+                assertThat(required.map { it.asText() }).doesNotHaveDuplicates()
+            }
+        }
+    }
+
+    @Test
+    fun `an invalid tool argument never produces a success result`() {
+        val body = raw(
+            """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_balance","arguments":{}}}""",
+        )
+        val rejected = body.has("error") || body.path("result").path("isError").asBoolean(false)
+        assertThat(rejected).`as`("a call missing its required argument succeeded: %s", body).isTrue()
+    }
+
+    @Test
+    fun `an unauthenticated caller gets no tools, no data and no downstream call`() {
+        val reads = ConformanceReads(mapper)
+        val anonymous = TestJsonWebToken(emptyMap())
+        val ep = endpoint(token = anonymous, stub = reads)
+
+        val list = bodyOf(ep.handle(mapper.valueToTree(request("tools/list")))).path("result").path("tools")
+        assertThat(list).`as`("anonymous tools/list leaked the tool catalogue").isEmpty()
+
+        TOOL_NAMES.forEach { tool ->
+            val call = bodyOf(
+                ep.handle(
+                    mapper.valueToTree(
+                        request("tools/call", params = mapOf("name" to tool, "arguments" to emptyMap<String, Any>())),
+                    ),
+                ),
+            )
+            assertThat(call.path("result").path("isError").asBoolean(false))
+                .`as`("anonymous call to %s was not refused: %s", tool, call).isTrue()
+            assertThat(call.toString()).doesNotContain("ACTIVE")
+        }
+        assertThat(reads.calls).`as`("an unauthenticated call reached a downstream port").isZero()
+    }
+
+    // ------------------------- KNOWN DEVIATIONS (disabled, see PR body) -------------------------
+
+    @Disabled(
+        "Deviation D1 (#16629): request without `id` that is not a notification is answered; the spec says ids are mandatory on requests and notifications get no response",
+    )
+    @Test
+    fun `a request lacking an id is treated as a notification and is not answered`() {
+        val response = send(mapOf("jsonrpc" to "2.0", "method" to "tools/list"))
+        assertThat(response.entity).`as`("a notification-shaped tools/list was answered").isNull()
+    }
+
+    @Disabled(
+        "Deviation D2 (#16629): an unknown notification (e.g. notifications/cancelled) is answered with -32601; notifications must never be answered",
+    )
+    @Test
+    fun `an unknown notification is ignored, not answered with an error`() {
+        val response = send(mapOf("jsonrpc" to "2.0", "method" to "notifications/cancelled"))
+        assertThat(response.entity).isNull()
+    }
+
+    @Disabled("Deviation D3 (#16629): `id: null` is accepted and echoed; MCP forbids a null request id")
+    @Test
+    fun `a null request id is an Invalid Request`() {
+        val body = bodyOf(send(request("ping", id = null)))
+        assertThat(body.path("error").path("code").asInt()).isEqualTo(-32600)
+    }
+
+    @Disabled(
+        "Deviation D4 (#16629): `jsonrpc` is not validated; a missing or non-2.0 marker must be -32600 Invalid Request",
+    )
+    @Test
+    fun `a request without the jsonrpc 2 0 marker is an Invalid Request`() {
+        listOf(
+            """{"id":1,"method":"ping"}""",
+            """{"jsonrpc":"1.0","id":1,"method":"ping"}""",
+            """{"jsonrpc":2,"id":1,"method":"ping"}""",
+        ).forEach { assertThat(raw(it).path("error").path("code").asInt()).`as`(it).isEqualTo(-32600) }
+    }
+
+    @Disabled(
+        "Deviation D5 (#16629): non-object bodies and non-string methods answer -32601/-32602 shaped text, not -32600 Invalid Request",
+    )
+    @Test
+    fun `structurally invalid requests use code -32600`() {
+        listOf("[]", "[1]", "\"x\"", "42", "{}", """{"jsonrpc":"2.0","id":1,"method":7}""")
+            .forEach { assertThat(raw(it).path("error").path("code").asInt()).`as`(it).isEqualTo(-32600) }
+    }
+
+    @Disabled("Deviation D6 (#16629): ping answers {\"pong\":true}; the spec result is an empty object")
+    @Test
+    fun `ping returns an empty result object`() {
+        val result = bodyOf(send(request("ping"))).path("result")
+        assertThat(result.isObject).isTrue()
+        assertThat(result.size()).isZero()
+    }
+
+    @Disabled(
+        "Deviation D7 (#16629): `resources` capability is advertised but resources/list is not implemented (-32601)",
+    )
+    @Test
+    fun `every advertised capability is backed by an implemented method`() {
+        val caps = bodyOf(send(request("initialize"))).path("result").path("capabilities")
+        if (caps.has("resources")) {
+            val listed = bodyOf(send(request("resources/list")))
+            assertThat(listed.path("error").path("code").asInt(0))
+                .`as`("resources capability advertised but resources/list says: %s", listed).isNotEqualTo(-32601)
+        }
+    }
+
+    @Disabled(
+        "Deviation D8 (#16629): an unknown tool is a result with isError (deny-by-default); the spec classifies it as a -32602 protocol error",
+    )
+    @Test
+    fun `an unknown tool is a protocol error -32602`() {
+        val body = raw(
+            """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"no_such_tool","arguments":{}}}""",
+        )
+        assertThat(body.path("error").path("code").asInt()).isEqualTo(-32602)
+    }
+
+    @Disabled(
+        "Deviation D9 (#16629): tools/call without a string `name` falls through to the deny path; a request failing CallToolRequest is -32602",
+    )
+    @Test
+    fun `a tools call without a string name is -32602`() {
+        listOf("""{"arguments":{}}""", """{"name":7}""", """{"name":null}""", "null", """"x"""").forEach { params ->
+            val body = raw("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":$params}""")
+            assertThat(body.path("error").path("code").asInt()).`as`(params).isEqualTo(-32602)
+        }
+    }
+
+    @Disabled(
+        "Deviation D10 (#16629): argument validation failures are JSON-RPC -32602 errors; revision 2026-07-28 classes input validation as tool execution errors (isError) so the model can self-correct",
+    )
+    @Test
+    fun `input validation failure is a tool execution error with isError`() {
+        val body = raw(
+            """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_balance","arguments":{}}}""",
+        )
+        assertThat(body.has("error")).isFalse()
+        assertThat(body.path("result").path("isError").asBoolean()).isTrue()
+    }
+
+    @Disabled(
+        "Deviation D11 (#16629): no tool carries annotations; a read tool should declare readOnlyHint and propose_payment must not",
+    )
+    @Test
+    fun `tools declare behavioural annotations`() {
+        val tools = bodyOf(send(request("tools/list"))).path("result").path("tools").associateBy {
+            it.path("name").asText()
+        }
+        listOf("list_accounts", "get_balance", "list_transactions", "list_consents", "get_statement")
+            .forEach {
+                assertThat(tools.getValue(it).path("annotations").path("readOnlyHint").asBoolean()).`as`(it).isTrue()
+            }
+        assertThat(tools.getValue("propose_payment").path("annotations").path("readOnlyHint").asBoolean(true)).isFalse()
+    }
+
+    @Disabled(
+        "Deviation D12 (#16629): parameterless tools omit additionalProperties:false, which the spec recommends so a model cannot smuggle arguments",
+    )
+    @Test
+    fun `parameterless tools reject extra arguments in their schema`() {
+        val tools = bodyOf(send(request("tools/list"))).path("result").path("tools")
+        tools.filter { it.path("inputSchema").path("properties").isEmpty }.forEach {
+            assertThat(it.path("inputSchema").path("additionalProperties").asText()).`as`(it.path("name").asText())
+                .isEqualTo("false")
+        }
+    }
+
+    private companion object {
+        val TOOL_NAMES = listOf(
+            "list_accounts",
+            "get_balance",
+            "list_transactions",
+            "list_consents",
+            "get_statement",
+            "get_payment_confirmation",
+            "count_marketing_consents",
+            "propose_payment",
+        )
+    }
+
+    // -----------------------------------------------------------------------------------
 
     private object AllowAll : PolicyDecisionPoint {
         override suspend fun allow(query: AuthzQuery) = AuthzDecision(allow = true, reason = "test")
@@ -265,7 +547,13 @@ class McpSpecConformanceTest {
         StatementReadPort,
         PaymentConfirmationReadPort,
         ProposalPort {
-        private fun payload() = m.createObjectNode().put("status", "ACTIVE").put("currency", "CZK")
+        /** Every port call lands here, so a test can prove "no data and no downstream call". */
+        var calls = 0
+
+        private fun payload(): JsonNode {
+            calls++
+            return m.createObjectNode().put("status", "ACTIVE").put("currency", "CZK")
+        }
         override fun listAccounts(consentContext: ConsentContext): JsonNode = payload()
         override fun getBalance(consentContext: ConsentContext, accountId: String): JsonNode = payload()
         override fun listTransactions(consentContext: ConsentContext, accountId: String, limit: Int): JsonNode =
@@ -278,7 +566,9 @@ class McpSpecConformanceTest {
             legalSequence: Long?,
         ): JsonNode = payload()
         override fun getPaymentConfirmation(consentContext: ConsentContext, paymentId: String): JsonNode = payload()
-        override fun proposePayment(consentContext: ConsentContext, request: JsonNode): JsonNode =
-            m.createObjectNode().put("status", "PROPOSED")
+        override fun proposePayment(consentContext: ConsentContext, request: JsonNode): JsonNode {
+            calls++
+            return m.createObjectNode().put("status", "PROPOSED")
+        }
     }
 }
