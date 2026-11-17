@@ -29,6 +29,8 @@ data class OpenAccountRequest(
     val termsVersion: String? = null,
     val termsUrl: String? = null,
     val termsEffectiveFrom: LocalDate? = null,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL)
+    val passportGrantId: UUID? = null,
 )
 
 data class CloseAccountRequest(val reason: String?)

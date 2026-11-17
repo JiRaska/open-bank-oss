@@ -200,3 +200,35 @@ Before the shared decoder, the first nine lines of this consumer were character-
 identical to card-issuance-service's. Both were green and nothing compared them, so a producer-side
 rename would have silently stopped one projection from matching — which leaves a revoked grant
 enforceable.
+
+### Offering market scope (ADR-0380)
+
+The Czech domestic route checks the offering market countries returned with the published
+product revision. A foreign-only offering is refused before account creation. Pending accounts
+with a product revision pin recheck the current offering scope before activation. Legacy
+unscoped catalogue responses and historical pending accounts without a pin retain the existing
+domestic route. This check does not activate FOS or branch sales.
+
+### Passport operation recovery (ADR-0380)
+
+A passport opening accepts a grant reference. The catalogue verifies subject evidence against
+the approved grant. Account-service persists the operation ID, exact request fingerprint, account ID,
+pinned revision and screened opening details before asking catalogue to consume. After a crash or
+lost acknowledgement, a scheduler checks for the exact consumed receipt and writes the pending
+account through the same account, pocket, idempotency and outbox transaction. That transaction also
+clears the queued details. Recovery can finish an already-consumed operation after revocation.
+
+If the original call stopped before consumption, the scheduler reads the current party record for
+the original ID, screens the registered name with a new screening attempt and asks catalogue to
+admit the same operation. A missing, closed, merged or suspended party, an inconclusive or blocking
+screening result, and catalogue refusal all prevent the account write. The request retains its
+original grant, party, revision, fingerprint and account ID. The catalogue checks current evidence
+and orders consumption against revocation. The recovery queue stores no holder name. Recovered
+accounts leave the optional cached display name empty. Existing V35 intents need a matching caller
+retry before they have enough information for automatic recovery.
+
+Activation derives its grant from the persisted opening. It gets a separate operation ID
+bound to the pending account version. Its state transition and status event commit together.
+Redelivery of the existing onboarding event, or a repeat of the activation request, resumes
+the operation after a failed account write. Existing domestic accounts follow their usual
+route. Branch booking requires its own approved route before use.

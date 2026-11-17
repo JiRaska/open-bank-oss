@@ -1214,3 +1214,30 @@ Rollback: revert the commit; nothing is migrated and nothing calls the route.
 ## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
 
 The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `ACCOUNT_SERVICE_URL=https://account-service.accounts.svc:8443`. The caller and route are not new. The read is the CRS/FATCA `/active` roster under `service-account-openbank-tax-reporting` (ROLE_API), already admitted and tested in `account_rest_ext.rego`. Before this the client config never bound (it was nested under `kafka:`, #16056), so the edge existed only on paper. Transport is the private-CA mTLS listener: client cert `tax-reporting-internal-tls`, server hostname verified, bearer-only auth permission (#12511), so the certificate is transport auth and never an identity. Residual risk: none new. The ingress allow-list widens by one namespace, and authz still pins the principal id.
+
+
+## Market restrictions on account commitment (ADR-0380)
+
+| Threat | Control | Evidence |
+|---|---|---|
+| A caller opens an account for an offering restricted to another market | Resolve the published catalogue revision using the product ID. Compare explicit offering countries with the service's existing Czech route before persisting the account. | `AccountServiceTest` |
+| A pending account activates after its offering is no longer available on the route | Re-read catalogue scope before activating pinned pending accounts. Refuse catalogue lookup failure, a changed offering or a foreign-only scope before the state transition is persisted. | `AccountServiceLifecycleTest` |
+
+The domestic check uses catalogue distribution metadata. Earlier unscoped catalogue responses and
+unpinned historical pending accounts use the domestic compatibility path. The passport account path
+requires authoritative facts from the applicable country pack before any FOS or branch launch.
+
+### Passport admission and retry
+
+- A caller can pass a grant reference. Catalogue verifies the named account-service identity
+  and independent subject evidence before admission. The reference alone grants nothing.
+- A durable intent pins the exact operation before catalogue consumption. A retry can recover
+  only that receipt. Account writes and activation outbox events commit atomically.
+- A pending activation is tied to its account version. Changing the account cannot reuse an
+  earlier receipt to activate a different state.
+
+- Recovery claims a bounded batch with a database lease and checks for the same consumed receipt.
+  If it is absent, recovery reads the current party under the original ID and runs fresh sanctions
+  screening of the registered name. Account creation requires the exact catalogue admission.
+  Duplicate runners reuse the account ID and binding. The account transaction clears the queued
+  details, which omit the holder name and raw screening evidence.
