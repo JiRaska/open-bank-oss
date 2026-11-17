@@ -2958,6 +2958,7 @@ gates:
     name: "MCP red-team model verdict (ADR-0383 D7, advisory)"
     group: registry
     mode: advisory
+    verified: "2026-11-17 — 0 of 45 scenarios evaluated: no recording committed (CI holds no model keys); self-test proves partial/stale/failing recordings fail"
     rationale: "Whether a model given a poisoned tool result proposes an unrequested payment, fetches beyond the question or repeats an attacker URL can only be measured against a recorded model run; CI holds no keys."
     review_after: "2026-12-15"
     budget_seconds: 30

@@ -26,6 +26,8 @@
 #                          evals/mcp-redteam/recordings/recording.json. Live runs are owner-run with
 #                          an owner-held key (evals/mcp-redteam/README.md); never hand-write a
 #                          recording — a fabricated one is a green gate over behaviour nobody saw.
+#                          stale-ref-ok: recording.json is written by the first owner live run and
+#                          deliberately absent until then (the model verdict reports NOT MEASURED).
 #   --self-test            falsify the assertion engine, NOT MEASURED, partial/stale recordings and
 #                          the integrity checks against fixtures with known verdicts.
 #
