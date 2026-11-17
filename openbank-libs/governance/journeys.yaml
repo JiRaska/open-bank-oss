@@ -567,6 +567,52 @@ journeys:
       with a partial answer. Setting CUSTOMER_BASE to wealth-service's ClusterIP must also
       fail, since that proves the service answers and not that a customer can reach it.
 
+  - id: mcp-customer-read
+    title: "Customer MCP channel: read own accounts through a delegated client"
+    capability: >-
+      A synthetic customer can authorise an allowlisted MCP client (OAuth with PKCE, DPoP-bound
+      token, per-party grant) and that client can list the customer's accounts and read a
+      balance and recent transactions, scoped to the granted accounts and nothing else.
+    status: planned
+    severity: ticket
+    money_moving: false
+    covers:
+      - openbank-mcp-service
+    target_schedule: "*/30 * * * *"
+    falsification: >-
+      Revoke the grant, or present the token without its DPoP proof: the journey must fail on
+      the read being refused with the precise authorisation error, and it must also fail if a
+      second synthetic party's account is ever returned. Pointing the client at the staff realm
+      must fail, since that proves the service answers and not that a customer can reach it.
+    blocked_by: >-
+      #16617 / #16590 (ADR-0383, ADR-0384) — the customer MCP channel is not routable yet: no
+      public route, tokens are validated against the staff realm, and the customer-realm
+      client, grant lookup and DPoP validation are not built. Needs the bank-owned synthetic
+      customer identity of ADR-0331 and the hash-linked audit prerequisite (ADR-0384 D0).
+
+  - id: mcp-propose-approve
+    title: "Customer MCP channel: propose a payment and approve it in the app"
+    capability: >-
+      A synthetic customer's MCP client can create a payment proposal (never a debit), the
+      customer approves it with strong customer authentication in the app, and only then is
+      the instruction admitted, with the whole chain visible in the audit trail.
+    status: planned
+    severity: page
+    money_moving: true
+    covers:
+      - openbank-mcp-service
+    target_schedule: "0 * * * *"
+    falsification: >-
+      Approve proposal A and assert proposal B stays unreleased, or let the proposal expire
+      unapproved: the journey must fail on a released instruction without an SCA approval, and
+      on the proposal being mutated between creation and approval, not on a transport error.
+    blocked_by: >-
+      #16617 / #16590 (ADR-0383) — the channel is not routable yet and propose_payment is
+      refused by the unwired proposal store. Also blocked by the default money-moving blocker:
+      the SYNTHETIC taint must reach the ledger and the regulatory aggregates (ADR-0252 phase
+      1, #4348) before an approved proposal may post, and the in-app SCA approval needs the
+      test device of the end-to-end harness (layer 2 of #16617).
+
 # ---------------------------------------------------------------------------------------
 # MONEY-PATH ACCOUNTABILITY (ADR-0252 phase 2, #4348)
 #
