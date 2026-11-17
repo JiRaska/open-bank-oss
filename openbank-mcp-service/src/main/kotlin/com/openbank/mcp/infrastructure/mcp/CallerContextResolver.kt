@@ -9,6 +9,7 @@ import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.infrastructure.persistence.AgentSessionRepository
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.json.JsonString
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.time.Clock
@@ -52,6 +53,10 @@ class CallerContextResolver @Inject constructor(
     suspend fun resolveOrNull(): ConsentContext? {
         val subject = jwt.subject ?: return null
         if (subject.startsWith(AGENT_PREFIX)) {
+            // RFC 8707 / ADR-0383 D1: an agent token must be issued FOR this server. Checked here as
+            // well as in McpEndpoint (which answers 401 first) so that a caller reaching the
+            // resolver by any other route still fails closed (#16622).
+            if (MCP_AUDIENCE !in audience()) return null
             val consentId = jwt.getClaim<String?>(CLAIM_CONSENT_ID)?.takeIf { it.isNotBlank() }
                 ?: error("agent token '$subject' carries no '$CLAIM_CONSENT_ID' claim")
             return ConsentContext(
@@ -65,6 +70,14 @@ class CallerContextResolver @Inject constructor(
         if (!oboEnabled) return null
         return resolveOboHuman(subject)
     }
+
+    /**
+     * True when a bearer token is present whose `aud` does not name this server (RFC 8707, ADR-0383
+     * D1). Such a token was issued for some other resource; accepting it would be token
+     * passthrough. No token at all (anonymous) is NOT foreign — that case keeps its existing
+     * deny-without-401 behaviour.
+     */
+    fun presentsForeignAudience(): Boolean = jwt.subject != null && MCP_AUDIENCE !in audience()
 
     /**
      * ADR-0224 phase 1b: a staff token minted by RFC 8693 exchange at Keycloak. Recognized by four
@@ -127,10 +140,12 @@ class CallerContextResolver @Inject constructor(
         .filter { it.isNotBlank() }
         .toSet()
 
-    /** The `aud` claim is a single string or an array depending on the grant — accept both. */
+    /** The `aud` claim is a single string or an array depending on the grant and the JWT library — accept every shape. */
     private fun audience(): List<String> = when (val aud = jwt.getClaim<Any?>(CLAIM_AUD)) {
         is String -> listOf(aud)
-        is List<*> -> aud.filterIsInstance<String>()
+        is JsonString -> listOf(aud.string)
+        // Covers a List, the Set Quarkus OIDC builds, and a jakarta.json JsonArray.
+        is Iterable<*> -> aud.mapNotNull { (it as? String) ?: (it as? JsonString)?.string }
         else -> emptyList()
     }
 

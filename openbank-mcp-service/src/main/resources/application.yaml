@@ -3,6 +3,10 @@ quarkus:
     name: openbank-mcp-service
   http:
     port: 8150
+    limits:
+      # ADR-0383 D5: bound a request body before it is parsed. Global to this service, which only
+      # serves small JSON-RPC and session-control bodies; oversize requests get HTTP 413.
+      max-body-size: ${MCP_MAX_BODY_SIZE:64K}
   management:
     enabled: true
     port: 8085
@@ -141,6 +145,10 @@ openbank:
       enabled: ${MCP_RATE_LIMIT_ENABLED:true}
       calls-per-minute: ${MCP_RATE_LIMIT_PER_MINUTE:60}
       calls-per-day: ${MCP_RATE_LIMIT_PER_DAY:1000}
+      # Shared by ALL requests with no resolvable caller (ADR-0383 D5).
+      anonymous-calls-per-minute: ${MCP_RATE_LIMIT_ANON_PER_MINUTE:10}
+      # Concurrent in-flight tool calls per caller.
+      max-in-flight: ${MCP_RATE_LIMIT_MAX_IN_FLIGHT:4}
 
 "%dev":
   quarkus:
