@@ -9,6 +9,7 @@ import com.openbank.ledger.application.usecase.BranchPaymentReceipt
 import com.openbank.ledger.application.usecase.BranchPaymentRequest
 import com.openbank.ledger.domain.model.checkConflict
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.security.Roles
 import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
 import com.openbank.libs.web.SyntheticTaintContext
@@ -28,7 +29,6 @@ import jakarta.ws.rs.core.MediaType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import org.eclipse.microprofile.jwt.JsonWebToken
 import java.util.UUID
 
 /** Both books, their outbox and the receipt commit in one database transaction. */
@@ -63,10 +63,7 @@ class BranchPaymentResource(
         requireSynthetic: Boolean,
     ): BranchPaymentReceipt {
         val request = requireNotNull(body) { "request body is required" }
-        val token = identity.principal as? JsonWebToken
-        if (token?.getClaim<String>("azp") != "openbank-transaction" ||
-            token.getClaim<String>("preferred_username") != "service-account-openbank-transaction"
-        ) {
+        if (ServiceAccountIdentity.verifiedClientId(identity) != "openbank-transaction") {
             throw ForbiddenException("Branch payments require the Transaction service")
         }
         request.validate()

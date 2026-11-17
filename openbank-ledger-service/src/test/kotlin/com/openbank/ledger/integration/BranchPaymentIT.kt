@@ -26,6 +26,7 @@ import java.util.concurrent.CompletableFuture
 @OidcSecurity(
     claims = [
         Claim(key = "azp", value = "openbank-transaction"),
+        Claim(key = "sub", value = "branch-transaction-subject"),
         Claim(key = "preferred_username", value = "service-account-openbank-transaction"),
     ],
 )
@@ -204,6 +205,7 @@ class BranchPaymentIT {
     @OidcSecurity(
         claims = [
             Claim(key = "azp", value = "openbank-lending"),
+            Claim(key = "sub", value = "branch-lending-subject"),
             Claim(key = "preferred_username", value = "service-account-openbank-lending"),
         ],
     )
