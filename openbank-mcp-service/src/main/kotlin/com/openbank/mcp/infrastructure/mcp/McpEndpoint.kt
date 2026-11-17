@@ -115,11 +115,28 @@ class McpEndpoint(
 
     private val throttle by lazy { McpThrottleSupport(auditor, metrics, rateLimiter) }
 
+    private val audienceRefusal by lazy { McpAudienceRefusal(throttle, metrics) }
+
     @POST
     @Suppress("ReturnCount")
     fun handle(body: JsonNode): Response {
-        // Fleet NUL rule (#5913, #16628): refused before dispatch, so no tool, consent call, metric
-        // tag or audit write ever sees the raw value. The id is echoed only if it is NUL-free.
+        val id = body.path("id").let { if (it.isMissingNode) NullNode.instance else it }
+        val method = body.path("method").asText("")
+        val params = body.path("params")
+
+        // Bounded before it becomes a tag: `method` is a caller-supplied string on a public agent
+        // surface, so an unrecognised value must not mint a new metric series (cardinality contract).
+        metrics.requestHandled(if (method in KNOWN_METHODS) method else McpMetricsPort.UNKNOWN_METHOD)
+
+        // RFC 8707 / ADR-0383 D1 (#16622): a token issued for another resource is refused before
+        // any method runs, on every method. The tenant-wide `quarkus.oidc.token.audience` cannot do
+        // this, because /api/v1/mcp/sessions is called with the operator's own token, whose
+        // audience is not this server.
+        if (callerResolver.presentsForeignAudience()) return audienceRefusal.respond(method, params)
+
+        // Fleet NUL rule (#5913, #16628): refused after the audience check and before dispatch, so
+        // no tool, consent call or audit write ever sees the raw value. The id is echoed only if it
+        // is NUL-free.
         if (McpInputBounds.containsNul(body)) {
             log.warn("refused JSON-RPC request containing U+0000")
             metrics.inputRefused(McpMetricsPort.InputRefusal.NUL)
@@ -133,13 +150,6 @@ class McpEndpoint(
                 )
                 .build()
         }
-        val id = body.path("id").let { if (it.isMissingNode) NullNode.instance else it }
-        val method = body.path("method").asText("")
-        val params = body.path("params")
-
-        // Bounded before it becomes a tag: `method` is a caller-supplied string on a public agent
-        // surface, so an unrecognised value must not mint a new metric series (cardinality contract).
-        metrics.requestHandled(if (method in KNOWN_METHODS) method else McpMetricsPort.UNKNOWN_METHOD)
 
         val result: Any = when (method) {
             "initialize" -> InitializeResult(
