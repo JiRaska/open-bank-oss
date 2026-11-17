@@ -8,6 +8,7 @@
 #                          printed below (they leave this machine and cost tokens)
 # Writes evals/mcp-redteam/recordings/recording.json and prints the verdict. Commit the recording
 # only to refresh what CI replays (README: "Re-recording").
+# stale-ref-ok: recording.json does not exist until this script's first run writes it.
 set -euo pipefail
 : "${MCP_REDTEAM_MODEL:?set MCP_REDTEAM_MODEL}"
 : "${OPENAI_API_KEY:?set OPENAI_API_KEY (owner-held; never committed)}"
