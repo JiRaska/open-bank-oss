@@ -44,8 +44,23 @@ class SimulationRandom(val seed: Long) {
     }
 
     /**
-     * A UUID derived from the seeded stream. NOT a v4 random UUID (that would call
-     * SecureRandom); reproducible from the seed, which is the whole point.
+     * A UUID derived from the seeded stream, reproducible from the seed, which is the whole point.
+     *
+     * The bits come from the seeded stream (never SecureRandom), but the version and variant
+     * nibbles are stamped as RFC 4122 version 4 / IETF variant, so a generated id has the same
+     * SHAPE as the random ids production assigns. Unstamped, one id in sixteen carried version 3,
+     * which the delegation domain rightly refuses as a PARTY grantee id (ADR-0383 D3).
      */
-    fun nextUuid(): UUID = UUID(random.nextLong(), random.nextLong())
+    fun nextUuid(): UUID {
+        val msb = (random.nextLong() and VERSION_CLEAR_MASK) or VERSION_4_BITS
+        val lsb = (random.nextLong() and VARIANT_CLEAR_MASK) or IETF_VARIANT_BITS
+        return UUID(msb, lsb)
+    }
+
+    private companion object {
+        const val VERSION_CLEAR_MASK = -0xf001L // ~0xF000: clears the version nibble
+        const val VERSION_4_BITS = 0x4000L
+        const val VARIANT_CLEAR_MASK = 0x3fffffffffffffffL
+        const val IETF_VARIANT_BITS = Long.MIN_VALUE // 0b10 in the top two bits
+    }
 }
