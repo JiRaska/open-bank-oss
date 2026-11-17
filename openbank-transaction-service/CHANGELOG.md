@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.2.1...transaction-service-v2.2.2) (2026-11-17)
+
+
+### Bug Fixes
+
+* **transaction:** keep outbox claims compatible with additive schema changes ([#15654](https://github.com/JiRaska/open-bank-oss/issues/15654)) ([a9eb09c](https://github.com/JiRaska/open-bank-oss/commit/a9eb09ce192df0251a5c16eca1bd9518e40a8fc3)), closes [#11652](https://github.com/JiRaska/open-bank-oss/issues/11652)
+
 ## [2.2.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.2.0...transaction-service-v2.2.1) (2026-11-16)
 
 
