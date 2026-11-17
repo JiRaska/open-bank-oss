@@ -42,7 +42,12 @@ class McpToolResultSanitiserTest {
 
     @Test
     fun `C0 C1 controls, zero-width, bidi, word-joiner, BOM and tag characters are removed`() {
-        val raw = "a\u0000b\u001b[31mc\u0085d${Char(0x200B)}e${Char(0x200F)}f${Char(0x202E)}g${Char(0x2060)}h${Char(0xFEFF)}i" + String(Character.toChars(0xE0041)) + "j"
+        // Built from code points: the invisible characters must never appear literally in source.
+        val raw = buildString {
+            append("a\u0000b\u001b[31mc\u0085d")
+            listOf(0x200B to "e", 0x200F to "f", 0x202E to "g", 0x2060 to "h", 0xFEFF to "i", 0xE0041 to "j")
+                .forEach { (cp, next) -> appendCodePoint(cp).append(next) }
+        }
         assertEquals("ab[31mcdefghij", sanitiseText(raw))
     }
 
