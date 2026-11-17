@@ -44,8 +44,12 @@ class SimulationRandom(val seed: Long) {
     }
 
     /**
-     * A UUID derived from the seeded stream. NOT a v4 random UUID (that would call
-     * SecureRandom); reproducible from the seed, which is the whole point.
+     * A version-4, RFC-variant UUID derived from the seeded stream. Setting the UUID shape
+     * keeps synthetic party ids out of namespaces reserved for name-based client ids.
+     * This uses no SecureRandom: replaying the seed reproduces the same ids.
      */
-    fun nextUuid(): UUID = UUID(random.nextLong(), random.nextLong())
+    fun nextUuid(): UUID = UUID(
+        (random.nextLong() and 0xF000L.inv()) or 0x4000L,
+        (random.nextLong() and Long.MAX_VALUE.ushr(1)) or Long.MIN_VALUE,
+    )
 }
