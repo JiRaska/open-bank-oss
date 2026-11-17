@@ -55,6 +55,41 @@ function renderPage(snapshot: EvidenceSnapshot) {
   )
 }
 
+/** Independent oracle for the exact badge every piece of evidence must earn. */
+function expectedStatus(evidence: Evidence, snapshot: EvidenceSnapshot): string {
+  if (evidence.kind === 'planned') return 'planned'
+  if (evidence.kind === 'gate') {
+    if (snapshot.gates === null) return 'unknown'
+    const mode = snapshot.gates[evidence.gateId]?.mode
+    return mode === 'enforced' ? 'active' : mode === 'advisory' ? 'partial' : 'planned'
+  }
+  if (snapshot.adrs === null) return 'unknown'
+  const delivery = snapshot.adrs[evidence.adr]?.deliveryStatus
+  return delivery === 'shipped' ? 'active' : delivery === 'partial' ? 'partial' : delivery === 'planned' ? 'planned' : 'unknown'
+}
+
+/** Every badge in every layer row must equal the oracle; returns the mismatches. */
+function mismatchedBadges(container: HTMLElement, snapshot: EvidenceSnapshot): string[] {
+  const bad: string[] = []
+  for (const control of CHANNEL_CONTROLS) {
+    const row = container.querySelector(`#layer-${control.id}`)!
+    const badges = [...row.querySelectorAll('[data-status]')].map(node => node.getAttribute('data-status'))
+    const evidence = [control.evidence, ...control.foundations.map(item => item.evidence)]
+    evidence.forEach((item, index) => {
+      const want = expectedStatus(item, snapshot)
+      if (badges[index] !== want) bad.push(`${control.id}#${index}: ${badges[index]} != ${want}`)
+    })
+  }
+  return bad
+}
+
+/** Every design-or-fact sentence: framed (badge + "By design") unless its controls are all in force. */
+function unframedClaims(container: HTMLElement): string[] {
+  return [...container.querySelectorAll('[data-claim]')]
+    .filter(node => node.getAttribute('data-framed') !== 'true' || !node.querySelector('[data-status]') || !node.textContent?.includes('By design (ADR-0383):'))
+    .map(node => node.textContent ?? '')
+}
+
 /** Checks every rendered layer row against the oracle; returns the rows that lie. */
 function lyingRows(container: HTMLElement, snapshot: EvidenceSnapshot): string[] {
   const lies: string[] = []
@@ -110,6 +145,62 @@ describe('customer MCP channel explainer — rendered status is backed by reposi
     expect(snapshot.adrs?.['0383'], 'ADR-0383 must be in the corpus').toBeDefined()
     const { container } = renderPage(snapshot)
     expect(lyingRows(container, snapshot)).toEqual([])
+    expect(mismatchedBadges(container, snapshot)).toEqual([])
+  })
+
+  it('frames every story, callout, flow-step and attack-outcome sentence as design while its evidence is planned', () => {
+    const snapshot = repoSnapshot()
+    const { container } = renderPage(snapshot)
+    // 4 story cards + 1 callout + 7 attack outcomes + the visible flow step.
+    expect(container.querySelectorAll('[data-claim]').length).toBe(4 + 1 + ATTACKS.length + 1)
+    if (snapshot.adrs?.['0383']?.deliveryStatus !== 'shipped') expect(unframedClaims(container)).toEqual([])
+    // Walk every flow step: each body must be framed too.
+    const steps = within(screen.getByRole('list', { name: 'Flow steps' })).getAllByRole('button')
+    for (const step of steps) {
+      fireEvent.click(step)
+      if (snapshot.adrs?.['0383']?.deliveryStatus !== 'shipped') expect(unframedClaims(container)).toEqual([])
+    }
+  })
+
+  it('earns present tense only where every control behind a sentence is in force', () => {
+    const real = repoSnapshot()
+    const gates = Object.fromEntries(Object.keys(real.gates ?? {}).map(id => [id, { mode: 'enforced' as const, name: id }]))
+    gates['mcp-customer-channel-propose-only'] = { mode: 'enforced', name: 'tripwire' }
+    const adrs = Object.fromEntries(Object.entries(real.adrs ?? {}).map(([id, adr]) => [id, { ...adr, deliveryStatus: 'shipped' as const }]))
+    const { container } = renderPage({ gates, adrs })
+    expect([...container.querySelectorAll('[data-claim]')].every(node => node.getAttribute('data-framed') === 'false')).toBe(true)
+    expect(container.textContent).not.toContain('By design (ADR-0383):')
+  })
+
+  it('separates existing platform pieces from the channel and scopes the caller-auth gate to governed agents', () => {
+    const { container } = renderPage(repoSnapshot())
+    for (const control of CHANNEL_CONTROLS) {
+      const row = container.querySelector(`#layer-${control.id}`)!
+      const block = row.querySelector('[data-foundations]')
+      if (control.foundations.length === 0) { expect(block).toBeNull(); continue }
+      expect(block?.textContent).toContain('Existing platform pieces (not this channel)')
+      expect(block?.querySelectorAll('[data-status]').length).toBe(control.foundations.length)
+    }
+    expect(container.querySelector('#layer-scoped-read [data-foundations]')?.textContent).toContain('governed-agent path only')
+  })
+
+  it('shows what repository state the badges describe', () => {
+    render(
+      <LanguageProvider initialLanguage="en">
+        <McpChannelExplainer resolved={resolveControls({ gates: null, adrs: null })} adr={null} sourcesAvailable={{ gates: false, adrs: false }}
+          asOf={{ gateRef: 'a'.repeat(40), gateGeneratedAt: '2026-11-17T09:00:00.000Z', adrSource: 'image-baked', adrSha: 'b'.repeat(40), adrCollectedAt: '2026-11-17T08:00:00Z', adrImageBuiltAt: null }} />
+      </LanguageProvider>,
+    )
+    const line = document.querySelector('[data-as-of]')?.textContent ?? ''
+    expect(line).toContain('As of this build')
+    expect(line).toContain('2026-11-17T09:00:00.000Z @ aaaaaaaaaa')
+    expect(line).toContain('ADR corpus (image-baked) 2026-11-17T08:00:00Z @ bbbbbbbbbb')
+  })
+
+  it('the mock uses a deliberately invalid IBAN placeholder', () => {
+    renderPage({ gates: null, adrs: null })
+    expect(screen.getByText('XX00 0000 0000 0000 0000')).toBeInTheDocument()
+    expect(src('components/docs/McpChannelExplainer.tsx')).not.toMatch(/\b[A-W][A-Z]\d{2}(?: ?\d{4}){3,}/)
   })
 
   it('shows every channel control as not in force while ADR-0383 is not shipped', () => {
@@ -132,6 +223,7 @@ describe('customer MCP channel explainer — rendered status is backed by reposi
     const snapshot = { gates, adrs }
     const { container } = renderPage(snapshot)
     expect(lyingRows(container, snapshot)).toEqual([])
+    expect(mismatchedBadges(container, snapshot)).toEqual([])
     for (const control of CHANNEL_CONTROLS) {
       expect(container.querySelector(`#layer-${control.id} [data-status]`)?.getAttribute('data-status'), control.id).toBe('planned')
     }
@@ -147,6 +239,7 @@ describe('customer MCP channel explainer — rendered status is backed by reposi
       </LanguageProvider>,
     )
     expect(lyingRows(container, snapshot).length).toBeGreaterThan(0)
+    expect(mismatchedBadges(container, snapshot).length).toBeGreaterThan(0)
   })
 
   it('says unknown, not in force, when the build has no gate catalog or ADR corpus', () => {
@@ -178,6 +271,18 @@ describe('flow stepper', () => {
     expect(steps[0]).toHaveAttribute('aria-current', 'step')
     fireEvent.click(steps[9])
     expect(screen.getByText(/Step 10 of 10/)).toBeInTheDocument()
+    fireEvent.click(steps[8])
+    const next = screen.getByRole('button', { name: /Next/ })
+    const previous = screen.getByRole('button', { name: /Previous/ })
+    next.focus()
+    fireEvent.click(next)
+    expect(next).toBeDisabled()
+    expect(previous).toHaveFocus()
+    fireEvent.click(steps[1])
+    previous.focus()
+    fireEvent.click(previous)
+    expect(previous).toBeDisabled()
+    expect(next).toHaveFocus()
     expect(screen.getByRole('button', { name: /Play/ })).toBeInTheDocument()
   })
 

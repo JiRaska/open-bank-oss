@@ -8,7 +8,7 @@
 // itself never decides that a control is in force.
 
 import Link from 'next/link'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Bot, ChevronLeft, ChevronRight, CheckCircle, Circle, CircleDashed, CircleHelp, ExternalLink, Info, Pause, Play, Printer, ShieldAlert, ShieldCheck, Smartphone } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
@@ -27,11 +27,31 @@ export interface McpChannelExplainerProps {
   resolved: Record<string, ResolvedControl>
   adr: AdrFact | null
   sourcesAvailable: { gates: boolean; adrs: boolean }
+  asOf?: EvidenceAsOf
 }
 
-export function McpChannelExplainer({ resolved, adr, sourcesAvailable }: McpChannelExplainerProps) {
+/** Which repository state the badges describe: whatever was baked into this build. */
+export interface EvidenceAsOf {
+  gateRef: string | null
+  gateGeneratedAt: string | null
+  adrSource: string | null
+  adrSha: string | null
+  adrCollectedAt: string | null
+  adrImageBuiltAt: string | null
+}
+
+const STATUS_RANK: Record<EvidenceStatus, number> = { unknown: 0, planned: 1, partial: 2, active: 3 }
+
+/** A claim spanning several controls is only as delivered as its least-delivered control. */
+export function combineStatus(statuses: EvidenceStatus[]): EvidenceStatus {
+  if (statuses.length === 0) return 'unknown'
+  return statuses.reduce((low, next) => (STATUS_RANK[next] < STATUS_RANK[low] ? next : low))
+}
+
+export function McpChannelExplainer({ resolved, adr, sourcesAvailable, asOf }: McpChannelExplainerProps) {
   const { t } = useLanguage()
   const tr = (pair: Bi) => t(pair[0], pair[1])
+  const statusOf = (...ids: string[]) => combineStatus(ids.map(id => resolved[id]?.own.status ?? 'unknown'))
   const adrHref = adr ? `/docs/adr/${adr.slug}` : '/docs/adr'
 
   return (
@@ -45,8 +65,8 @@ export function McpChannelExplainer({ resolved, adr, sourcesAvailable }: McpChan
         </>}
         title={t('Asistent čte a navrhuje, zákazník schvaluje v aplikaci', 'The assistant reads and proposes, the customer approves in the app')}
         subtitle={t(
-          'Kanál MCP pro zákazníky (ADR-0383): zákazník připojí AI asistenta podle svého výběru ke svým datům v bance. Asistent smí číst a navrhnout platbu. Platbu nikdy nemůže autorizovat: to udělá jen zákazník v bankovní aplikaci se SCA.',
-          'Customer MCP channel (ADR-0383): a customer connects an AI assistant of their choice to their bank data. The assistant may read and propose a payment. It can never authorise one: only the customer does that, in the banking app, with SCA.',
+          'Kanál MCP pro zákazníky, jak ho navrhuje ADR-0383: zákazník připojí AI asistenta podle svého výběru ke svým datům v bance. Asistent má smět číst a navrhnout platbu, ale nikdy ji autorizovat: to má udělat jen zákazník v bankovní aplikaci se SCA.',
+          'The customer MCP channel as ADR-0383 designs it: a customer connects an AI assistant of their choice to their bank data. The assistant is to read and propose a payment, never authorise one: only the customer does that, in the banking app, with SCA.',
         )}
         icon={<Bot aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
         actions={
@@ -57,22 +77,24 @@ export function McpChannelExplainer({ resolved, adr, sourcesAvailable }: McpChan
         }
       />
 
-      <DeliveryBanner adr={adr} adrHref={adrHref} sourcesAvailable={sourcesAvailable} />
+      <DeliveryBanner adr={adr} adrHref={adrHref} sourcesAvailable={sourcesAvailable} asOf={asOf} />
 
       {/* One-screen story */}
       <Section title={t('Příběh na jednu obrazovku', 'The story on one screen')}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
-          <StoryCard n={1} title={t('Připojí', 'Connect')} body={t('Zákazník připojí asistenta. Banka mu ukáže, co asistent smí, a zákazník to potvrdí v bance.', 'The customer connects the assistant. The bank shows what it may do, and the customer confirms at the bank.')} />
-          <StoryCard n={2} title={t('Čte', 'Read')} body={t('Asistent čte jen data tohoto zákazníka, s tokenem, který bez klíče klienta nefunguje.', 'The assistant reads only this customer\'s data, with a token that does not work without the client\'s key.')} />
-          <StoryCard n={3} title={t('Navrhne', 'Propose')} body={t('Asistent může platbu jen navrhnout. Peníze se tím nepohnou.', 'The assistant can only propose a payment. No money moves.')} />
-          <StoryCard n={4} title={t('Zákazník schválí', 'Customer approves')} body={t('Platba odejde jen po schválení v bankovní aplikaci se SCA, stejně jako kdyby ji zákazník zadal sám.', 'The payment leaves only after approval in the banking app with SCA, exactly as if the customer had entered it.')} />
+          <StoryCard status={statusOf('client-admission')} n={1} title={t('Připojí', 'Connect')} body={t('Zákazník připojí asistenta. Banka mu ukáže, co asistent smí, a zákazník to potvrdí v bance.', 'The customer connects the assistant. The bank shows what it may do, and the customer confirms at the bank.')} />
+          <StoryCard status={statusOf('dpop', 'grant', 'scoped-read')} n={2} title={t('Čte', 'Read')} body={t('Asistent čte jen data tohoto zákazníka, s tokenem, který bez klíče klienta nefunguje.', 'The assistant reads only this customer\'s data, with a token that does not work without the client\'s key.')} />
+          <StoryCard status={statusOf('proposal', 'policy', 'downstream-no-write')} n={3} title={t('Navrhne', 'Propose')} body={t('Asistent může platbu jen navrhnout. Peníze se tím nepohnou.', 'The assistant can only propose a payment. No money moves.')} />
+          <StoryCard status={statusOf('sca', 'admission')} n={4} title={t('Zákazník schválí', 'Customer approves')} body={t('Platba odejde jen po schválení v bankovní aplikaci se SCA, stejně jako kdyby ji zákazník zadal sám.', 'The payment leaves only after approval in the banking app with SCA, exactly as if the customer had entered it.')} />
         </div>
         <Callout tone="accent">
-          <strong>{t('MCP nikdy nemůže autorizovat platbu.', 'MCP can never authorise a payment.')}</strong>{' '}
-          {t(
-            'Ani zmanipulovaný model, ani škodlivý klient se nedostane přes to, že každá platba z tohoto kanálu potřebuje SCA zákazníka v aplikaci, bez výjimek.',
-            'Neither a manipulated model nor a malicious client gets past the rule that every payment from this channel needs the customer\'s SCA in the app, with no exemptions.',
-          )}
+          <Claim status={statusOf('policy', 'downstream-no-write', 'proposal', 'sca')}>
+            <strong>{t('MCP nikdy nemůže autorizovat platbu.', 'MCP can never authorise a payment.')}</strong>{' '}
+            {t(
+              'Ani zmanipulovaný model, ani škodlivý klient se nedostane přes to, že každá platba z tohoto kanálu potřebuje SCA zákazníka v aplikaci, bez výjimek.',
+              'Neither a manipulated model nor a malicious client gets past the rule that every payment from this channel needs the customer\'s SCA in the app, with no exemptions.',
+            )}
+          </Claim>
         </Callout>
       </Section>
 
@@ -82,8 +104,8 @@ export function McpChannelExplainer({ resolved, adr, sourcesAvailable }: McpChan
       <Section
         title={t('Obrana do hloubky', 'Defence in depth')}
         subtitle={t(
-          'Každá vrstva: co zastaví, jaký útok porazí a čím se to dokazuje. Stav vrstvy i jejích základů se odvozuje z repozitáře.',
-          'Each layer: what it stops, which attack it defeats and how it is proven. The status of the layer and of its foundations is derived from the repository.',
+          'Každá vrstva: co zastaví, jaký útok porazí a čím se to dokazuje. Stav se odvozuje z repozitáře. Dokud vrstva nemá vlastní důkaz (gate nebo test), její stav je stav dodávky ADR-0383 jako celku; vlastní důkaz má zatím jen CI pojistka (gate mcp-customer-channel-propose-only).',
+          'Each layer: what it stops, which attack it defeats and how it is proven. Status is derived from the repository. Until a layer has evidence of its own (a gate or a test), its status is ADR-0383\'s delivery status as a whole; so far only the CI tripwire has its own (gate mcp-customer-channel-propose-only).',
         )}
       >
         <div style={{ overflowX: 'auto' }}>
@@ -112,9 +134,16 @@ export function McpChannelExplainer({ resolved, adr, sourcesAvailable }: McpChan
                     <td style={{ ...td, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{tr(control.proof)}</td>
                     <td style={{ ...td, minWidth: 220 }}>
                       {state && <EvidenceLine resolved={state.own} label={t('Tento kanál', 'This channel')} />}
-                      {state && control.foundations.map((foundation, index) => (
-                        <EvidenceLine key={index} resolved={state.foundations[index]} label={tr(foundation.label)} />
-                      ))}
+                      {state && control.foundations.length > 0 && (
+                        <div data-foundations style={{ marginTop: 6, paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
+                          <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)', marginBottom: 4 }}>
+                            {t('Existující části platformy (ne tento kanál)', 'Existing platform pieces (not this channel)')}
+                          </div>
+                          {control.foundations.map((foundation, index) => (
+                            <EvidenceLine key={index} resolved={state.foundations[index]} label={tr(foundation.label)} />
+                          ))}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 )
@@ -140,7 +169,8 @@ export function McpChannelExplainer({ resolved, adr, sourcesAvailable }: McpChan
                 <strong style={{ color: 'var(--text-primary)' }}>{t('Pokus: ', 'Attempt: ')}</strong>{tr(attack.scenario)}
               </p>
               <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: '0 0 8px', lineHeight: 1.5 }}>
-                <strong style={{ color: 'var(--text-primary)' }}>{t('Výsledek: ', 'Outcome: ')}</strong>{tr(attack.outcome)}
+                <strong style={{ color: 'var(--text-primary)' }}>{t('Výsledek: ', 'Outcome: ')}</strong>
+                <Claim status={statusOf(...attack.controls)}>{tr(attack.outcome)}</Claim>
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {attack.controls.map(id => {
@@ -191,7 +221,7 @@ export function McpChannelExplainer({ resolved, adr, sourcesAvailable }: McpChan
 
 // ── Delivery banner: derived from ADR-0383's own front-matter ─────────────────
 
-function DeliveryBanner({ adr, adrHref, sourcesAvailable }: { adr: AdrFact | null; adrHref: string; sourcesAvailable: { gates: boolean; adrs: boolean } }) {
+function DeliveryBanner({ adr, adrHref, sourcesAvailable, asOf }: { adr: AdrFact | null; adrHref: string; sourcesAvailable: { gates: boolean; adrs: boolean }; asOf?: EvidenceAsOf }) {
   const { t } = useLanguage()
   const decision = adr?.decision ?? null
   const delivery = adr?.deliveryStatus ?? null
@@ -216,12 +246,31 @@ function DeliveryBanner({ adr, adrHref, sourcesAvailable }: { adr: AdrFact | nul
             )}
           </div>
         )}
+        <AsOfLine asOf={asOf} />
         {(!sourcesAvailable.gates || !sourcesAvailable.adrs) && (
           <div style={{ color: 'var(--text-secondary)' }}>
             {t('Část zdrojových dat (katalog gate nebo registr ADR) v tomto buildu chybí, takže dotčené stavy jsou „neznámé“.', 'Some source data (gate catalog or ADR registry) is missing from this build, so the affected statuses read "unknown".')}
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function shortSha(sha: string | null): string | null {
+  return sha && /^[a-f0-9]{7,40}$/.test(sha) ? sha.slice(0, 10) : sha
+}
+
+function AsOfLine({ asOf }: { asOf?: EvidenceAsOf }) {
+  const { t } = useLanguage()
+  const none = t('v buildu nezaznamenáno', 'not recorded in this build')
+  const adrWhen = asOf?.adrCollectedAt ?? asOf?.adrImageBuiltAt ?? null
+  return (
+    <div data-as-of="" style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 2 }}>
+      {t('Stav k tomuto buildu', 'As of this build')}{': '}
+      {t('katalog gate', 'gate catalog')} {asOf?.gateGeneratedAt ?? none} @ {shortSha(asOf?.gateRef ?? null) ?? none}
+      {' · '}
+      {t('korpus ADR', 'ADR corpus')} ({asOf?.adrSource ?? none}) {adrWhen ?? none} @ {shortSha(asOf?.adrSha ?? null) ?? none}
     </div>
   )
 }
@@ -251,6 +300,8 @@ export function FlowStepper({ resolved }: { resolved: Record<string, ResolvedCon
   const tr = (pair: Bi) => t(pair[0], pair[1])
   const [active, setActive] = useState(0)
   const [playRequested, setPlaying] = useState(false)
+  const prevRef = useRef<HTMLButtonElement>(null)
+  const nextRef = useRef<HTMLButtonElement>(null)
   const reducedMotion = usePrefersReducedMotion()
   const playing = playRequested && !reducedMotion
   const last = FLOW_STEPS.length - 1
@@ -290,7 +341,7 @@ export function FlowStepper({ resolved }: { resolved: Record<string, ResolvedCon
                   color: current ? 'var(--accent-text)' : done ? 'var(--text-primary)' : 'var(--text-secondary)',
                   background: current ? 'var(--accent-bg)' : 'var(--surface-2)',
                   border: `1px solid ${current ? 'var(--accent-border)' : 'var(--border)'}`,
-                  transition: 'background-color 200ms ease, color 200ms ease',
+                  transition: reducedMotion ? 'none' : 'background-color 200ms ease, color 200ms ease',
                 }}
               >
                 <span aria-hidden="true" style={{ fontVariantNumeric: 'tabular-nums' }}>{index + 1}</span>
@@ -309,22 +360,33 @@ export function FlowStepper({ resolved }: { resolved: Record<string, ResolvedCon
           </div>
           <StatusBadge status={status} />
         </div>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.6 }}>{tr(step.body)}</p>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.6 }}><Claim status={status}>{tr(step.body)}</Claim></p>
         {control && (
           <a href={`#layer-${control.id}`} style={{ display: 'inline-block', marginTop: 8, fontSize: 12, fontWeight: 600, color: 'var(--accent-text)' }}>
             {t('Vrstva', 'Layer')}: {tr(control.name)} (ADR-0383 {control.decision})
           </a>
         )}
         <div aria-hidden="true" style={{ height: 4, borderRadius: 4, background: 'var(--border)', marginTop: 12, overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: `${((active + 1) / FLOW_STEPS.length) * 100}%`, background: 'var(--accent)', transition: 'width 300ms ease' }} />
+          <div style={{ height: '100%', width: `${((active + 1) / FLOW_STEPS.length) * 100}%`, background: 'var(--accent)', transition: reducedMotion ? 'none' : 'width 300ms ease' }} />
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button type="button" className="btn btn-secondary" onClick={() => { setPlaying(false); setActive(Math.max(0, active - 1)) }} disabled={active === 0}>
+        <button ref={prevRef} type="button" className="btn btn-secondary" disabled={active === 0}
+          onClick={() => {
+            const target = Math.max(0, active - 1)
+            setPlaying(false); setActive(target)
+            // The button is about to disable itself; keep keyboard focus on a live control (WCAG 2.4.3).
+            if (target === 0) nextRef.current?.focus()
+          }}>
           <ChevronLeft size={14} aria-hidden="true" /> {t('Předchozí', 'Previous')}
         </button>
-        <button type="button" className="btn btn-secondary" onClick={() => { setPlaying(false); setActive(Math.min(last, active + 1)) }} disabled={active === last}>
+        <button ref={nextRef} type="button" className="btn btn-secondary" disabled={active === last}
+          onClick={() => {
+            const target = Math.min(last, active + 1)
+            setPlaying(false); setActive(target)
+            if (target === last) prevRef.current?.focus()
+          }}>
           {t('Další', 'Next')} <ChevronRight size={14} aria-hidden="true" />
         </button>
         {!reducedMotion && (
@@ -376,7 +438,7 @@ function CustomerViewMock() {
         <Phone label={t('Schválení', 'Approval')}>
           <MockTitle>{t('Návrh platby od „Example Assistant“', 'Payment proposal from "Example Assistant"')}</MockTitle>
           <MockField k={t('Částka', 'Amount')} v="120.00 EUR" />
-          <MockField k="IBAN" v="DE89 3704 0044 0532 0130 00" />
+          <MockField k="IBAN" v="XX00 0000 0000 0000 0000" />
           <MockField k={t('Ověření příjemce', 'Payee check')} v={t('Jméno se shoduje', 'Name matches')} />
           <MockField k={t('Zpráva (od asistenta)', 'Reference (from the assistant)')} v={t('Nájem listopad', 'Rent November')} muted />
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
@@ -487,15 +549,32 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
   )
 }
 
-function StoryCard({ n, title, body }: { n: number; title: string; body: string }) {
+function StoryCard({ n, title, body, status }: { n: number; title: string; body: string; status: EvidenceStatus }) {
   return (
     <div style={{ padding: 14, borderRadius: 10, background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <span aria-hidden="true" style={{ width: 22, height: 22, borderRadius: 11, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'var(--accent-text)', background: 'var(--accent-bg)', border: '1px solid var(--accent-border)' }}>{n}</span>
         <span style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-primary)' }}>{title}</span>
       </div>
-      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{body}</div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}><Claim status={status}>{body}</Claim></div>
     </div>
+  )
+}
+
+/**
+ * A sentence about how the channel behaves. Until the controls behind it are in force per the
+ * repository, it is framed as design and carries the derived badge; present tense is earned only
+ * by evidence. `data-claim` / `data-framed` let the test hold every such sentence to that rule.
+ */
+export function Claim({ status, children }: { status: EvidenceStatus; children: React.ReactNode }) {
+  const { t } = useLanguage()
+  if (status === 'active') return <span data-claim="" data-framed="false">{children}</span>
+  return (
+    <span data-claim="" data-framed="true">
+      <StatusBadge status={status} />{' '}
+      <em style={{ fontStyle: 'normal', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Podle návrhu (ADR-0383): ', 'By design (ADR-0383): ')}</em>
+      {children}
+    </span>
   )
 }
 

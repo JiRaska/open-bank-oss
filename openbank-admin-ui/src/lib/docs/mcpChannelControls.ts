@@ -142,7 +142,7 @@ export const CHANNEL_CONTROLS: readonly ChannelControl[] = [
     attack: ['Čtení cizího zákazníka', 'Cross-customer read'],
     proof: ['Pro každé čtení výměna tokenu (RFC 8693): subjekt je zákazník, publikum jedna služba, platnost nejvýš 60 s. Vlastnictví ověřuje sama cílová služba; IT „token A na zdroj B = zamítnuto“ v každé zapnuté službě.', 'For each read, a token exchange (RFC 8693): subject is the customer, audience one service, lifetime at most 60 s. The downstream service checks ownership itself; an IT "token A on resource B = denied" in every enabled service.'],
     evidence: ADR_0383,
-    foundations: [{ label: ['Gate: skutečný port MCP nejdřív ověří volajícího', 'Gate: a real MCP port authenticates the caller first'], evidence: { kind: 'gate', gateId: 'mcp-real-port-requires-caller-auth-first' } }],
+    foundations: [{ label: ['Gate: skutečný port MCP nejdřív ověří volajícího (jen cesta řízených agentů, ne tento kanál)', 'Gate: a real MCP port authenticates the caller first (governed-agent path only, not this channel)'], evidence: { kind: 'gate', gateId: 'mcp-real-port-requires-caller-auth-first' } }],
   },
   {
     id: 'downstream-no-write', decision: 'D4',

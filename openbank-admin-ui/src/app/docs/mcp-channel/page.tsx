@@ -11,12 +11,13 @@ import { loadMcpChannelEvidence } from '@/lib/docs/mcpChannelEvidence'
 export const dynamic = 'force-dynamic'
 
 export default async function McpChannelPage() {
-  const snapshot = await loadMcpChannelEvidence()
+  const { snapshot, asOf } = await loadMcpChannelEvidence()
   return (
     <McpChannelExplainer
       resolved={resolveControls(snapshot)}
       adr={snapshot.adrs?.['0383'] ?? null}
       sourcesAvailable={{ gates: snapshot.gates !== null, adrs: snapshot.adrs !== null }}
+      asOf={asOf}
     />
   )
 }

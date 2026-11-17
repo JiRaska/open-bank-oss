@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { loadAdrRegistry } from '@/lib/governance/docs'
 import type { AdrFact, EvidenceSnapshot, GateFact } from './mcpChannelControls'
+import type { EvidenceAsOf } from '@/components/docs/McpChannelExplainer'
 
 export function gatesFromCatalog(catalog: unknown): Record<string, GateFact> | null {
   const gates = (catalog as { gates?: unknown } | null)?.gates
@@ -24,21 +25,29 @@ export function gatesFromCatalog(catalog: unknown): Record<string, GateFact> | n
   return out
 }
 
-export async function loadMcpChannelEvidence(): Promise<EvidenceSnapshot> {
+export async function loadMcpChannelEvidence(): Promise<{ snapshot: EvidenceSnapshot; asOf: EvidenceAsOf }> {
+  const asOf: EvidenceAsOf = { gateRef: null, gateGeneratedAt: null, adrSource: null, adrSha: null, adrCollectedAt: null, adrImageBuiltAt: null }
   let gates: Record<string, GateFact> | null = null
   try {
     const file = process.env.OPENBANK_GATE_CATALOG ?? path.resolve(process.cwd(), 'gate-catalog.json')
-    gates = gatesFromCatalog(JSON.parse(await readFile(file, 'utf8')))
+    const catalog = JSON.parse(await readFile(file, 'utf8')) as { ref?: unknown; generatedAt?: unknown }
+    gates = gatesFromCatalog(catalog)
+    asOf.gateRef = typeof catalog.ref === 'string' ? catalog.ref : null
+    asOf.gateGeneratedAt = typeof catalog.generatedAt === 'string' ? catalog.generatedAt : null
   } catch { gates = null }
 
   let adrs: Record<string, AdrFact> | null = null
   try {
-    const { items } = await loadAdrRegistry()
+    const { items, contentSource } = await loadAdrRegistry()
+    asOf.adrSource = contentSource.source
+    asOf.adrSha = contentSource.sourceSha
+    asOf.adrCollectedAt = contentSource.sourceCollectedAt
+    asOf.adrImageBuiltAt = contentSource.imageBuiltAt
     if (items.length > 0) {
       adrs = {}
       for (const adr of items) adrs[adr.numberLabel] = { deliveryStatus: adr.deliveryStatus, decision: adr.status, slug: adr.slug }
     }
   } catch { adrs = null }
 
-  return { gates, adrs }
+  return { snapshot: { gates, adrs }, asOf }
 }
