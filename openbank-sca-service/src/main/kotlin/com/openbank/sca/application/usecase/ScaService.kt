@@ -560,12 +560,14 @@ class ScaService(
     }
 
     /**
-     * A scoped consumer (ADR-0335 D1) raises only challenges it could itself spend: a purpose of
-     * its namespace, signed into that namespace. The authorization server's consumer therefore
-     * cannot raise a payment or approval prompt on a customer's device (ADR-0385 D3).
+     * The MCP_CONNECT consumer (ADR-0385 D3) is the one scoped consumer OPA admits to initiate, so it
+     * raises only challenges it could itself spend: MCP_CLIENT_CONNECT, signed into `mcp-connect:`.
+     * It therefore cannot raise a payment or approval prompt on a customer's device. Other scoped
+     * consumers (pension) hold no initiate grant at all; OPA refuses them before this point.
      */
     private fun requireInitiateScope(command: InitiateScaCommand) {
         val scope = command.scope as? ConsumerScope.Reserved ?: return
+        if (scope.namespace != ReservedNamespace.MCP_CONNECT) return
         val id = command.dynamicLinkingData?.approvalRequestId
         if (command.purpose !in scope.namespace.purposes || id == null || !scope.namespace.isWellFormed(id)) {
             throw ScaInitiateScopeViolationException(command.purpose)
