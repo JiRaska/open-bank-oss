@@ -454,3 +454,68 @@ returned 200 before the pause, 503 during it, and 200 after recovery. Accounts a
 balances stayed at 200. The caller logged `HttpTimeoutException` without response
 headers or a body, approximately 535 ms after invoking the exchange. This verifies
 the diagnostic on a known pre-header fault.
+
+### Separate CPU and block I/O budgets
+
+For the isolated Customer Edge fixture, pin the edge, account, balance, party and
+payment services, their OPA instances, database, broker, Valkey, identity provider and
+load generator to the banking CPU set. Pin the reporting container to a disjoint CPU
+set. Verify the effective CPU set inside each process namespace before running load.
+A CPU quota on its own allows scheduling on the same CPUs.
+
+Run the synthetic reporting worker without a network, with a read-only root and a
+768 MiB tmpfs for the fixture, scripts, intermediate state and results. The reporting
+cgroup gets a two-CPU budget and 1 GiB of RAM, with swap disabled. Copy the scripts into
+tmpfs and warm imports before starting load. Capture the reporting cgroup's block I/O
+counters before and after the run. Copy out the manifest and results only after the
+last measured request. Kill the replay process during the outage and leave the tmpfs
+mounted so the new process can reread the frozen source.
+
+This benchmark isolates the reporting data path from the bank's block device inside the
+test VM. It still shares VM memory bandwidth and host scheduling. The outage exercises
+process recovery. For production, bulk export and replay require a separate worker pool
+and a separate durable storage I/O budget for staged input, checkpoint and artifacts.
+The immutable handoff remains the boundary with bank services. Verify this deployment
+with durable storage and a workload that represents customer-path SLOs before treating
+the pilot as capacity evidence for go-live.
+
+#### CPU and storage separation drill, 2026-11-17
+
+The test VM had 12 logical CPUs. The banking stack and k6 used CPUs 0–9, and the
+reporting cgroup used 10–11. The dataset, OPA enforcement, request rate, synthetic
+identities and reporting replay cap matched the previous drill.
+
+In the first attempt, every one of 23,493 measured requests failed. Of those,
+23,473 were HTTP 429 rejections with the Edge concurrency limiter's error shape
+and 20 were client timeouts. The limiter remained saturated after traffic stopped.
+The run measured the rejection path, so those latency results cannot be used to
+assess the account, balance and payment services under load. Restarting the isolated
+Edge restored HTTP 200 on all three routes. The retry required ten seconds of healthy
+traffic at the target rate before taking the baseline. The rate limits and the OPA
+enforcement settings were retained.
+
+Retry results follow. Each cell gives p95 / p99 in milliseconds and HTTP errors /
+requests. k6 scheduled 30 reads/s per route for 64 synthetic identities.
+
+| Phase | Seconds | Account | Balance | Payment | Dropped iterations (A / B / P) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Baseline | 45.0 | 578.5 / 1097.8 · 22/1357 | 979.2 / 1820.7 · 21/1355 | 674.8 / 1114.6 · 21/1358 | 0 / 19 / 1 |
+| Export | 11.9 | 109.9 / 206.9 · 0/358 | 186.2 / 255.2 · 0/358 | 138.8 / 240.4 · 0/358 | 0 / 0 / 0 |
+| Reporting outage | 45.0 | 139.1 / 245.6 · 0/1349 | 247.1 / 451.7 · 0/1348 | 179.0 / 345.7 · 0/1348 | 0 / 0 / 0 |
+| Complete replay | 170.6 | 317.4 / 622.0 · 0/5118 | 846.0 / 1432.0 · 0/5066 | 489.4 / 998.4 · 0/5102 | 0 / 51 / 13 |
+
+The retry completed 24,475 measured reads. All 64 HTTP errors were 503s in a baseline
+cluster before the reporting worker started. Edge logged 64 OPA exchanges that timed out
+before receiving headers. Forty-eight matched an OPA decision by correlation ID. Among
+those, OPA HTTP handling took up to 653 ms, while policy evaluation took up to 42 ms.
+The cluster was outside the export and replay windows. The shared cause of the stall
+remains unknown. There were no OPA exchange failures in the three reporting phases.
+
+The replay processed the full six million lines. All three trial balances reconciled
+to the expected gross controls and validated against the digests in the recovered index.
+The reporting cgroup's measured block I/O delta was zero writes and 42,409,984 bytes of
+reads from the shared VM device. The journal and results stayed on tmpfs. Peak reporting
+memory was 709 MiB, with zero swap, OOM events or CPU throttle periods. This confirms
+separation of CPU affinity and reporting artifact writes inside the VM. Shared block
+reads and physical host resources remain. The 64 missed schedules during recovery and
+the latency tail leave the customer-path capacity requirement open.
