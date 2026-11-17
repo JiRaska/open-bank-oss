@@ -268,3 +268,13 @@ consumer first, load and reconcile accounts whose original Kafka events aged out
 consumer lag and DLQ before enabling posting. Route pilot traffic to a cohort with reconciled
 source and target account coverage. Drain in-flight payment activities before switching posting
 mode. A dated copy of the ledger feeds reporting with separate compute and storage limits.
+
+For the Customer Edge read benchmark, apply each service's Flyway migrations to a dedicated
+database named `ob_perf_accounts`, `ob_perf_balances` or `ob_perf_domestic`. Run
+`psql -X -v clients=3000000 -f perf/k6/seed-regulatory-customer.sql` once against each database.
+The script creates one account, balance and settled domestic payment per synthetic party. IDs
+are PostgreSQL UUIDs derived from `md5('regulatory-perf/party/' || n)`,
+`md5('regulatory-perf/account/' || n)` and `md5('regulatory-perf/payment/' || n)`, respectively,
+for each ordinal `n`. Use these IDs in the k6 customer fixture after issuing matching tokens
+from the isolated issuer. This data seeds the read APIs. The reporting worker still needs its
+own attributed ledger fixture and an independently logged export, outage and recovery schedule.
