@@ -87,6 +87,22 @@ class PoisonedToolResultRedTeamTest {
         }
 
     @Test
+    fun `the corpus is complete`() {
+        assertEquals(
+            CORPUS_SIZE,
+            corpus.path("items").size(),
+            "poisoned corpus size changed — bump CORPUS_SIZE deliberately",
+        )
+        assertEquals(
+            10,
+            corpus.path("items").map {
+                it.path("attackClass").asText()
+            }.toSet().size,
+            "an attack class vanished",
+        )
+    }
+
+    @Test
     fun `known-gaps names only real items and properties`() {
         val ids = corpus.path("items").map { it.path("id").asText() }.toSet()
         knownGaps.path("gaps").properties().forEach { (id, props) ->
@@ -184,11 +200,17 @@ class PoisonedToolResultRedTeamTest {
         val body = unwrap(rendered) ?: return listOf("result is not wrapped exactly once in the untrusted-data markers")
         val tree = runCatching { mapper.readTree(body) }.getOrNull()
             ?: return listOf("body between the markers is not valid JSON — the payload altered the structure")
-        val strings = mutableListOf<Pair<String, String>>().also { collect(tree, null, it) }
+        val strings = mutableListOf<Pair<String, String>>().also { collect(tree, "", it) }
         return when (property) {
             Property.MARKER -> markerViolations(body)
-            Property.MARKUP -> strings.filter { (k, _) -> k !in URL_FIELDS }
-                .flatMap { (k, v) -> MARKUP.filter { it.containsMatchIn(v) }.map { r -> "$k matches /${r.pattern}/" } }
+            Property.MARKUP -> strings.flatMap { (k, v) ->
+                if (k == BANK_URL_PATH) {
+                    // The one URL-by-contract field: exempt from "no URL", but only for a bank-CDN URL.
+                    if (BANK_URL.matches(v)) emptyList() else listOf("$k is not a bank-CDN URL")
+                } else {
+                    MARKUP.filter { it.containsMatchIn(v) }.map { r -> "$k matches /${r.pattern}/" }
+                }
+            }
             Property.CONTROL -> strings.flatMap { (k, v) ->
                 v.codePoints().toArray().filter(::isControlLike).distinct()
                     .map { "$k contains U+%04X".format(it) }
@@ -228,11 +250,13 @@ class PoisonedToolResultRedTeamTest {
         return sb.toString().lowercase().replace(Regex("[\\s\\u2028\\u2029]+"), " ")
     }
 
-    private fun collect(node: JsonNode, key: String?, out: MutableList<Pair<String, String>>) {
+    /** Collects every decoded string with its slash-separated path, e.g. `0/merchant/logoUrl`. */
+    private fun collect(node: JsonNode, path: String, out: MutableList<Pair<String, String>>) {
+        fun child(seg: String) = if (path.isEmpty()) seg else "$path/$seg"
         when {
-            node.isObject -> node.properties().forEach { (k, v) -> collect(v, k, out) }
-            node.isArray -> node.forEach { collect(it, key, out) }
-            node.isTextual -> out += (key ?: "<root>") to node.asText()
+            node.isObject -> node.properties().forEach { (k, v) -> collect(v, child(k), out) }
+            node.isArray -> node.forEachIndexed { i, v -> collect(v, child(i.toString()), out) }
+            node.isTextual -> out += path.ifEmpty { "<root>" } to node.asText()
         }
     }
 
@@ -245,7 +269,7 @@ class PoisonedToolResultRedTeamTest {
         knownGaps.path("gaps").path(id).any { it.asText() == property.name }
 
     private fun load(resource: String): JsonNode =
-        mapper.readTree(requireNotNull(javaClass.classLoader.getResource(resource)) { "missing $resource" })
+        mapper.readTree(requireNotNull(javaClass.classLoader.getResource(resource)) { "missing $resource" }.readText())
 
     private class FixedPorts(private val record: JsonNode) :
         AccountReadPort,
@@ -280,8 +304,16 @@ class PoisonedToolResultRedTeamTest {
          */
         const val FREE_TEXT_CAP = 140
 
-        /** Fields whose value is a bank-issued URL by contract (merchant logo), not payer text. */
-        val URL_FIELDS = setOf("logoUrl")
+        /**
+         * The one field whose value is a URL by contract — the merchant logo the bank's enrichment
+         * serves on a transaction. Exempt by EXACT path, never by key name anywhere, and only while
+         * it points at the bank's own CDN.
+         */
+        const val BANK_URL_PATH = "0/merchant/logoUrl"
+        val BANK_URL = Regex("""^https://cdn\.openbank\.example/[A-Za-z0-9/._-]*$""")
+
+        /** ±0: the corpus is a fixed, versioned set; a shrunk or truncated file must not pass quietly. */
+        const val CORPUS_SIZE = 85
 
         val MARKER_PHRASES = listOf("end untrusted tool data", "untrusted tool data")
 

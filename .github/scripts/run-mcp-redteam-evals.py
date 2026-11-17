@@ -12,21 +12,22 @@
 # IBAN or link scheme? — and it does so in ADR-0148 record/replay form, because CI holds no model
 # credentials:
 #
-#   replay (default, CI)   evaluate committed recordings against evals/mcp-redteam/scenarios.json.
-#                          A scenario whose recording is missing is UNAVAILABLE — reported, never
-#                          counted as a pass. A recording whose fingerprint (scenario + rendered
-#                          tool result + preamble + tool list) no longer matches is STALE and FAILS:
-#                          the server changed what the model sees, so the old verdict is about a
-#                          server that no longer exists.
-#   --emit-promptfoo       (re)generate evals/mcp-redteam/promptfoo/{tests,tools}.json from the scenarios
-#                          and the rendered fixture;
-#                          replay fails if the committed copy drifts.
+#   model verdict          (default; gate `mcp-redteam-model-verdict`, ADVISORY until the first owner
+#                          recording lands) evaluate recordings/recording.json against scenarios.json.
+#                          No recording => "model verdict: NOT MEASURED", SUBJECTS=0, exit 0 with a
+#                          warning — never a pass. A recording that exists must cover EVERY scenario
+#                          (partial => fail); a scenario digest that moved (scenario + rendered tool
+#                          result + preamble + tool list) is STALE and fails.
+#   --fixture-integrity    (gate `mcp-redteam-fixture-integrity`, ENFORCED, via
+#                          check-mcp-redteam-fixture-integrity.py) corpus <-> rendered fixture <->
+#                          scenarios <-> generated promptfoo files agree. Needs no model.
+#   --emit-promptfoo       (re)generate evals/mcp-redteam/promptfoo/{tests,tools}.json.
 #   --import-promptfoo F   convert a live promptfoo results file (`promptfoo eval -o F`) into
 #                          evals/mcp-redteam/recordings/recording.json. Live runs are owner-run with
 #                          an owner-held key (evals/mcp-redteam/README.md); never hand-write a
 #                          recording — a fabricated one is a green gate over behaviour nobody saw.
-#   --self-test            falsify the assertion engine, the staleness check and the
-#                          UNAVAILABLE-is-not-a-pass rule against fixtures with known verdicts.
+#   --self-test            falsify the assertion engine, NOT MEASURED, partial/stale recordings and
+#                          the integrity checks against fixtures with known verdicts.
 #
 # Stdlib only.
 
@@ -95,14 +96,20 @@ def evaluate(asserts: dict, output: dict) -> list:
     return problems
 
 
-def replay(cases: list, recording: dict | None, require: bool) -> int:
-    rec = (recording or {}).get("scenarios", {})
-    passed = failed = stale = unavailable = 0
+def replay(cases: list, recording: dict | None) -> int:
+    """Model verdict. No recording = NOT MEASURED (0 subjects). A recording must cover EVERY scenario."""
+    if recording is None:
+        print("SUBJECTS=0")
+        print("model verdict: NOT MEASURED — no recording committed (evals/mcp-redteam/live.sh)")
+        print(f"::warning::mcp-redteam model verdict NOT MEASURED: 0 of {len(cases)} scenarios evaluated")
+        return 0
+    rec = recording.get("scenarios", {})
+    missing = [c["id"] for c in cases if c["id"] not in rec]
+    passed = failed = stale = 0
     for c in cases:
         r = rec.get(c["id"])
         if r is None:
-            unavailable += 1
-            print(f"UNAVAILABLE {c['id']}: no recording")
+            print(f"MISSING     {c['id']}: the recording does not cover this scenario")
             continue
         if r.get("fingerprint") != c["fingerprint"]:
             stale += 1
@@ -115,17 +122,67 @@ def replay(cases: list, recording: dict | None, require: bool) -> int:
         else:
             passed += 1
     measured = passed + failed
-    rate = f"{passed}/{measured}" if measured else "n/a (nothing measured)"
-    model = (recording or {}).get("model_id", "-")
-    print(f"mcp-redteam replay: pass {rate}, failed {failed}, stale {stale}, unavailable {unavailable}, model {model}")
-    if stale or failed:
+    print(f"SUBJECTS={measured}")
+    print(f"model verdict: pass {passed}/{measured}, failed {failed}, stale {stale}, missing {len(missing)}, "
+          f"model {recording.get('model_id', '-')}")
+    if missing:
+        print(f"::error::partial recording: {len(missing)} of {len(cases)} scenarios not covered — re-record all")
+    return 1 if (missing or stale or failed) else 0
+
+
+def generated_files(cases: list, rendered: dict) -> dict:
+    tools = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
+                                              "parameters": t["inputSchema"]}} for t in rendered["tools"]]
+    return {
+        PACK / "promptfoo" / "tests.json": json.dumps(promptfoo_tests(cases), indent=2, ensure_ascii=True) + "\n",
+        PACK / "promptfoo" / "tools.json": json.dumps(tools, indent=2, ensure_ascii=True) + "\n",
+    }
+
+
+def integrity_problems(corpus: dict, rendered: dict, scenarios: dict, on_disk: dict, generated: dict) -> list:
+    """Fixture integrity: corpus, rendered fixture, scenarios and generated promptfoo files agree."""
+    problems = []
+    ids = [i["id"] for i in corpus["items"]]
+    if len(ids) != len(set(ids)):
+        problems.append("duplicate corpus item ids")
+    if rendered.get("version") != corpus.get("version"):
+        problems.append(f"rendered fixture version {rendered.get('version')} != corpus {corpus.get('version')}")
+    missing = sorted(set(ids) - set(rendered.get("results", {})))
+    extra = sorted(set(rendered.get("results", {})) - set(ids))
+    if missing:
+        problems.append(f"corpus items with no rendered result: {missing[:5]}")
+    if extra:
+        problems.append(f"rendered results with no corpus item: {extra[:5]}")
+    sids = scenarios.get("scenarios", [])
+    if len(sids) != len(set(sids)):
+        problems.append("duplicate scenario ids")
+    unknown = sorted(set(sids) - set(ids))
+    if unknown:
+        problems.append(f"scenarios naming no corpus item: {unknown[:5]}")
+    for path, text in generated.items():
+        if on_disk.get(path) != text:
+            problems.append(f"{path.relative_to(ROOT)} is out of date — run run-mcp-redteam-evals.py --emit-promptfoo")
+    return problems
+
+
+def fixture_integrity() -> int:
+    corpus, rendered, scenarios = load(CORPUS), load(RENDERED), load(PACK / "scenarios.json")
+    problems = integrity_problems(corpus, rendered, scenarios, {}, {})
+    if problems:  # structural problems first: building cases would only crash on them
+        for p in problems:
+            print(f"::error::{p}")
+        print("SUBJECTS=0")
         return 1
-    if unavailable and require:
-        print("::error::--require-recordings: scenarios without a recording")
-        return 1
-    if unavailable:
-        print(f"::warning::{unavailable} red-team scenarios have no recording yet — UNAVAILABLE, not passed")
-    return 0
+    cases = build_cases(scenarios, rendered, corpus)
+    generated = generated_files(cases, rendered)
+    on_disk = {p: p.read_text(encoding="utf-8") for p in generated if p.exists()}
+    problems = integrity_problems(corpus, rendered, scenarios, on_disk, generated)
+    for p in problems:
+        print(f"::error::{p}")
+    print(f"SUBJECTS={len(corpus['items'])}")
+    print(f"fixture integrity: {len(corpus['items'])} corpus items, {len(cases)} scenarios, "
+          f"{len(generated)} generated files — {'FAIL' if problems else 'ok'}")
+    return 1 if problems else 0
 
 
 def promptfoo_tests(cases: list) -> list:
@@ -210,13 +267,26 @@ def self_test() -> int:
         bad += not ok
         print(f"{'ok ' if ok else 'BAD'} engine: {name}")
     case = {"id": "s1", "attackClass": "x", "assert": asserts, "fingerprint": "f1"}
+    case2 = {"id": "s2", "attackClass": "x", "assert": asserts, "fingerprint": "f2"}
+    ok_rec = {"fingerprint": "f1", "text": "fine", "tool_calls": []}
     checks = [
-        ("missing recording is not a pass under --require-recordings", replay([case], None, True), 1),
-        ("missing recording without --require is a warning", replay([case], None, False), 0),
-        ("stale fingerprint fails", replay([case], {"scenarios": {"s1": {"fingerprint": "OLD", "text": "", "tool_calls": []}}}, False), 1),
-        ("failing recording fails", replay([case], {"scenarios": {"s1": {"fingerprint": "f1", "text": "attacker.example", "tool_calls": []}}}, False), 1),
-        ("passing recording passes", replay([case], {"scenarios": {"s1": {"fingerprint": "f1", "text": "fine", "tool_calls": []}}}, True), 0),
+        ("no recording is NOT MEASURED, never a fail or a pass", replay([case], None), 0),
+        ("partial recording fails", replay([case, case2], {"scenarios": {"s1": ok_rec}}), 1),
+        ("stale fingerprint fails", replay([case], {"scenarios": {"s1": {**ok_rec, "fingerprint": "OLD"}}}), 1),
+        ("failing recording fails", replay([case], {"scenarios": {"s1": {**ok_rec, "text": "attacker.example"}}}), 1),
+        ("full passing recording passes", replay([case], {"scenarios": {"s1": ok_rec}}), 0),
     ]
+    corpus = {"version": "v1", "items": [{"id": "a"}, {"id": "b"}]}
+    rendered = {"version": "v1", "results": {"a": "", "b": ""}}
+    gen = {PACK / "promptfoo" / "tests.json": "X"}
+    integ = [
+        ("consistent fixtures pass", integrity_problems(corpus, rendered, {"scenarios": ["a"]}, gen, gen), 0),
+        ("drifted generated file fails", integrity_problems(corpus, rendered, {"scenarios": ["a"]}, {}, gen), 1),
+        ("missing rendered result fails", integrity_problems(corpus, {"version": "v1", "results": {"a": ""}}, {"scenarios": []}, {}, {}), 1),
+        ("unknown scenario fails", integrity_problems(corpus, rendered, {"scenarios": ["zz"]}, {}, {}), 1),
+        ("version mismatch fails", integrity_problems(corpus, {**rendered, "version": "v2"}, {"scenarios": []}, {}, {}), 1),
+    ]
+    checks += [(n, 1 if got else 0, e) for n, got, e in integ]
     norm = normalise_output('[{"function":{"name":"propose_payment","arguments":"{\\"a\\":1}"}}]')
     checks.append(("promptfoo tool_calls output is normalised", 0 if norm["tool_calls"][0]["name"] == "propose_payment" else 1, 0))
     for name, got, expect in checks:
@@ -230,22 +300,19 @@ def self_test() -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--fixture-integrity", action="store_true")
     ap.add_argument("--emit-promptfoo", action="store_true")
     ap.add_argument("--import-promptfoo", type=pathlib.Path)
-    ap.add_argument("--require-recordings", action="store_true")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
+    if args.fixture_integrity:
+        return fixture_integrity()
 
-    cases = build_cases(load(PACK / "scenarios.json"), load(RENDERED), load(CORPUS))
-    tools = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
-                                              "parameters": t["inputSchema"]}} for t in load(RENDERED)["tools"]]
-    generated = {
-        PACK / "promptfoo" / "tests.json": json.dumps(promptfoo_tests(cases), indent=2, ensure_ascii=True) + "\n",
-        PACK / "promptfoo" / "tools.json": json.dumps(tools, indent=2, ensure_ascii=True) + "\n",
-    }
+    rendered = load(RENDERED)
+    cases = build_cases(load(PACK / "scenarios.json"), rendered, load(CORPUS))
     if args.emit_promptfoo:
-        for path, text in generated.items():
+        for path, text in generated_files(cases, rendered).items():
             path.write_text(text, encoding="utf-8")
             print(f"wrote {path.relative_to(ROOT)}")
         return 0
@@ -256,14 +323,8 @@ def main() -> int:
         out.write_text(json.dumps(rec, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
         print(f"wrote {out.relative_to(ROOT)}: {len(rec['scenarios'])}/{len(cases)} scenarios recorded")
         return 0
-
-    for path, text in generated.items():
-        if not path.exists() or path.read_text(encoding="utf-8") != text:
-            print(f"::error::{path.relative_to(ROOT)} is out of date — run {pathlib.Path(__file__).name} --emit-promptfoo")
-            return 1
-    print(f"SUBJECTS={len(cases)}")  # gate-subject-floor: a replay over zero scenarios must not read as a pass
     rec_path = PACK / "recordings" / "recording.json"
-    return replay(cases, load(rec_path) if rec_path.exists() else None, args.require_recordings)
+    return replay(cases, load(rec_path) if rec_path.exists() else None)
 
 
 if __name__ == "__main__":

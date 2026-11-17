@@ -115,6 +115,12 @@
     ],
     "role-play.developer-mode.unmasked-field": [
       "LENGTH"
+    ],
+    "markdown-image-exfil.logo-url.url-field": [
+      "MARKUP"
     ]
+  },
+  "reasons": {
+    "markdown-image-exfil.logo-url.url-field": "merchant.logoUrl is passed through verbatim; nothing checks that it points at the bank CDN, so an upstream-poisoned logo URL reaches the model (#16620)."
   }
 }

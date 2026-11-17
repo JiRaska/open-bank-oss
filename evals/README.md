@@ -113,5 +113,5 @@ output, which is why it is a different mechanism in a different tree — see the
 
 This pack has both shapes in one place: deterministic server assertions (JUnit in
 `openbank-mcp-service`, `redteam/PoisonedToolResultRedTeamTest`) and a model-in-the-loop pack in
-record/replay form (`evals/mcp-redteam/`, gate `mcp-redteam-replay`). See
+record/replay form (`evals/mcp-redteam/`, gates `mcp-redteam-fixture-integrity` and `mcp-redteam-model-verdict`). See
 [`mcp-redteam/README.md`](mcp-redteam/README.md).
