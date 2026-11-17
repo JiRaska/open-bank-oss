@@ -428,6 +428,8 @@ class PerformanceStageTests(unittest.TestCase):
             "openbank-sanctions-service-sanctions-read-baseline",
             "openbank-standing-order-service-standing-order-read-baseline",
             "openbank-pension-service-pension-read-baseline",
+            "openbank-card-processing-service-card-processing-read-baseline",
+            "openbank-card-issuance-service-card-issuance-read-baseline",
             "openbank-treasury-service-treasury-read-baseline",
         })
 
