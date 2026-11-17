@@ -4,7 +4,9 @@
 
 package com.openbank.sanctions.infrastructure.rest
 
+import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
+import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.sanctions.application.port.`in`.SanctionsUseCase
@@ -70,9 +72,14 @@ class SanctionsResourceV3(private val useCase: SanctionsUseCase) {
             AgentReviewGuard.refusal(cmd.newStatus.name, fourEyesEnforce)?.let { throw ForbiddenException(it) }
             // The decision of record belongs to the human who approved it, not the maker identity:
             // record the checker as reviewer and keep the agent's authorship in the note.
-            val checker = requireNotNull(approvalId?.let { approvals.find(it)?.decidedBy }) {
-                "an agent review executes only with the approval a human checker granted"
-            }
+            // Bind the approval here too, so a looser interceptor or policy cannot let a decided
+            // approval for another check, action or maker authorise this CLEAR.
+            val approval = approvalId?.let { approvals.find(it) }
+            val checker =
+                approval?.let { checkerOf(it, cmd.checkId.toString(), identity.principal.name) }
+                    ?: throw ForbiddenException(
+                        "an agent review executes only with a human checker's approval of this exact check",
+                    )
             return useCase.review(cmd.toCommand(reviewedBy = checker, noteSuffix = AGENT_NOTE_SUFFIX))
         }
         return useCase.review(cmd.toCommand(identity))
@@ -96,7 +103,18 @@ class SanctionsResourceV3(private val useCase: SanctionsUseCase) {
     @Authorize(action = "sanctions.list", resource = "")
     suspend fun pending() = useCase.listPending()
 
-    private companion object {
+    internal companion object {
+        /** The human checker of [approval] if it authorises an agent CLEAR of [checkId] by [makerId]. */
+        fun checkerOf(approval: PendingApproval, checkId: String, makerId: String): String? =
+            approval.decidedBy?.takeIf {
+                approval.action == "sanctions.clear" &&
+                    approval.resourceId == checkId &&
+                    approval.makerId == makerId &&
+                    approval.status in setOf(ApprovalStatus.APPROVED, ApprovalStatus.EXECUTED) &&
+                    it.isNotBlank() &&
+                    it != makerId
+            }
+
         const val AGENT_NOTE_SUFFIX = " [submitted by service-account-openbank-agent as four-eyes maker]"
     }
 }

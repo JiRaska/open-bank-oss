@@ -57,19 +57,23 @@ class SanctionsResourceV3AgentReviewTest {
 
     private fun asAgent() = caller("openbank-agent", "service-account-openbank-agent")
 
+    private val checkId = UUID.randomUUID()
+
     private fun request(status: SanctionsCheckStatus) =
-        ReviewRequest(UUID.randomUUID(), "Name-only fuzzy match; DOB differs.", status)
+        ReviewRequest(checkId, "Name-only fuzzy match; DOB differs.", status)
+
+    private fun approval(checker: String) = PendingApproval(
+        id = "appr-1",
+        action = "sanctions.clear",
+        resourceId = checkId.toString(),
+        makerId = "service-account-openbank-agent",
+        status = ApprovalStatus.EXECUTED,
+        createdAt = OffsetDateTime.parse("2026-11-17T08:00:00Z"),
+        decidedBy = checker,
+    )
 
     private fun approvedBy(checker: String) {
-        coEvery { approvals.find("appr-1") } returns PendingApproval(
-            id = "appr-1",
-            action = "sanctions.clear",
-            resourceId = null,
-            makerId = "service-account-openbank-agent",
-            status = ApprovalStatus.EXECUTED,
-            createdAt = OffsetDateTime.parse("2026-11-17T08:00:00Z"),
-            decidedBy = checker,
-        )
+        coEvery { approvals.find("appr-1") } returns approval(checker)
     }
 
     @Test
@@ -110,7 +114,29 @@ class SanctionsResourceV3AgentReviewTest {
         asAgent()
         coEvery { approvals.find(any()) } returns null
         assertThatThrownBy { runBlocking { resource.review(request(SanctionsCheckStatus.CLEAR), "appr-x") } }
-            .isInstanceOf(IllegalArgumentException::class.java)
+            .isInstanceOf(ForbiddenException::class.java)
+        coVerify(exactly = 0) { useCase.review(any()) }
+    }
+
+    @Test
+    fun `an approval that does not authorise exactly this agent CLEAR is refused at the point of effect`() {
+        asAgent()
+        val base = approval("officer-1")
+        listOf(
+            "other check" to base.copy(resourceId = UUID.randomUUID().toString()),
+            "no check" to base.copy(resourceId = null),
+            "other action" to base.copy(action = "sanctions.approval.decide"),
+            "other maker" to base.copy(makerId = "service-account-openbank-services"),
+            "still pending" to base.copy(status = ApprovalStatus.PENDING),
+            "rejected" to base.copy(status = ApprovalStatus.REJECTED),
+            "self-approved" to base.copy(decidedBy = "service-account-openbank-agent"),
+            "undecided" to base.copy(decidedBy = null),
+        ).forEach { (case, approval) ->
+            coEvery { approvals.find("appr-1") } returns approval
+            assertThatThrownBy { runBlocking { resource.review(request(SanctionsCheckStatus.CLEAR), "appr-1") } }
+                .describedAs(case)
+                .isInstanceOf(ForbiddenException::class.java)
+        }
         coVerify(exactly = 0) { useCase.review(any()) }
     }
 
