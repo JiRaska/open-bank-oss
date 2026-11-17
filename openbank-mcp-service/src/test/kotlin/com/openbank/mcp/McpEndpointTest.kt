@@ -80,7 +80,7 @@ class McpEndpointTest {
      * window can, and every other test gets the production defaults (60/min) — well above the
      * handful of calls they each make.
      */
-    private val limiter = McpRateLimiter()
+    private val limiter = McpRateLimiter.withDefaults()
 
     // ── ADR-0226: every MCP event is stamped with its channel and delegation chain ──────────
 
