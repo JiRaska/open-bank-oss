@@ -107,7 +107,7 @@ class LedgerDatabaseOutageIT {
         val proxy = ToxiproxyClient(proxyAdmin.host, proxyAdmin.port).getProxy("ledger-postgres")
         DriverManager.getConnection(directJdbcUrl, databaseUser, databasePassword).use { observer ->
             assertThat(post(payload).statusCode).isEqualTo(409)
-            registerBranchBooks(observer, book, otherBook)
+            val bank = registerBranchBooks(observer, book, otherBook)
 
             // The first caller loses its receipt. Only the database is used to identify the commit.
             post(payload)
@@ -141,10 +141,30 @@ class LedgerDatabaseOutageIT {
             assertThat(lines.map { it.substringAfter(':').toBigDecimal().stripTrailingZeros() })
                 .containsExactly("25".toBigDecimal(), "25".toBigDecimal())
             assertThat(rows(observer, statement, otherBook)).isEmpty()
+            assertBookSnapshot(observer, request, bank, book)
         }
     }
 
-    private fun registerBranchBooks(observer: Connection, vararg books: UUID) {
+    private fun assertBookSnapshot(observer: Connection, request: Posting, bank: UUID, book: UUID) {
+        val snapshot = given().queryParam("bankId", bank).queryParam("asOf", LocalDate.now().toString())
+            .get("/api/v1/journals/branch-books").then().statusCode(200).extract().jsonPath()
+        assertThat(snapshot.getString("bankId")).isEqualTo(bank.toString())
+        val bookRows = snapshot.getList<Map<String, Any?>>("lines").filter { it["branchBookId"] == book.toString() }
+        assertThat(bookRows).hasSize(1)
+        assertThat(bookRows.single()["deposits"].toString().toBigDecimal()).isEqualByComparingTo("25")
+        assertThat(
+            rows(
+                observer,
+                "SELECT payload::jsonb->>'branchBookId' FROM ledger_outbox " +
+                    "WHERE aggregate_id=? AND event_type='AccountBookedChanged'",
+                request.subAccountId,
+            ),
+        )
+            .containsExactly(book.toString())
+        given().queryParam("bankId", bank).get("/api/v1/journals/branch-books").then().statusCode(400)
+    }
+
+    private fun registerBranchBooks(observer: Connection, vararg books: UUID): UUID {
         val sql = "INSERT INTO ledger_branch_books (establishment_id, bank_id, host_country) VALUES (?, ?, 'AT')"
         val bank = UUID.randomUUID()
         observer.prepareStatement(sql).use { statement ->
@@ -154,6 +174,7 @@ class LedgerDatabaseOutageIT {
                 statement.executeUpdate()
             }
         }
+        return bank
     }
 
     private fun post(payload: String): Response = given().config(

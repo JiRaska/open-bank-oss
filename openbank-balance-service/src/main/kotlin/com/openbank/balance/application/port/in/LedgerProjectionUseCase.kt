@@ -26,6 +26,7 @@ data class AccountBookedChange(
     val transactionId: UUID,
     val entryDate: LocalDate,
     val version: Long,
+    val branchBookId: UUID? = null,
 ) {
     val currency: String get() = delta.currency.code
 }

@@ -162,3 +162,13 @@ disbursement journal. The same transaction commits the journal, its lines and th
 receipt. A replay must match the original book and financial terms. A reversal inherits the book.
 Centrally posted borrower cash uses the existing Transaction credit reference. The branch dimension
 on the loan journal preserves attribution while the bank-wide journal continues to include it.
+
+### Branch-book events and control snapshot (ADR-0380 B2)
+
+JournalPosted, JournalReversed and AccountBookedChanged carry the immutable parent branchBookId; the historical
+booked-change replay uses that same persisted value. `GET /api/v1/journals/branch-books?bankId=...&asOf=...` reads
+one SQL snapshot of BUSINESS posted/reversed journals: native-currency deposit-control totals and base-currency
+trial-balance amounts per book. Null book is explicitly unattributed, never guessed as a home establishment.
+The bank scope covers this reference implementation's single legal bank; a registry containing multiple banks
+refuses the read because legacy null-book journals have no truthful bank dimension. Registered books cannot be
+moved to a different bank/country. Reader-first deployment and rollback retain the registry and journal evidence.

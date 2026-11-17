@@ -970,3 +970,10 @@ Ledger resolves the optional establishment against its branch book register. Onl
 client can supply the dimension for a disbursement. The journal and both lines commit with the
 idempotency receipt. A replay with a different book or different financial terms conflicts, and a
 reversal retains the book. Uncategorized historical entries retain their original attribution.
+
+### ADR-0380 B2 projection evidence
+
+The branch dimension in emitted/replayed events is derived from the immutable journal, never the caller's next
+request or a mutable profile. The read-only branch snapshot uses the existing ledger.read authorization and
+refuses an ambiguous multi-bank legacy scope. Branch register identity is immutable. This control detects wrong
+allocation together with the independent account-context projection, including when the bank total balances.

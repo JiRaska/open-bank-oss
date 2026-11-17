@@ -164,6 +164,7 @@ interface LedgerProjectionPort {
         transactionId: UUID,
         entryDate: java.time.LocalDate,
         actorId: String,
+        branchBookId: UUID? = null,
     ): Balance?
 }
 

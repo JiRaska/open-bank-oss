@@ -21,7 +21,7 @@ info:
   # contra) that migration V35 maps for the posting-rule matrix classes.
   # 1.29.0 -> 1.30.0: additive raw journal snapshot reads and optional unverified caller-origin evidence.
   # 1.30.0 -> 1.31.0: additive immutable close evidence, monthly readiness and explicit participant mode.
-  version: 1.36.0
+  version: 1.37.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -36,6 +36,23 @@ tags:
   - name: ClosedPeriod
 
 paths:
+  /api/v1/journals/branch-books:
+    get:
+      tags: [Journals]
+      operationId: getBranchBookSnapshot
+      summary: Coherent native-currency deposit totals and base-currency trial balances by immutable book
+      parameters:
+        - { name: bankId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Bank and book source snapshot; null book is explicitly unattributed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BranchLedgerSnapshot' }
+        '400': { description: Invalid or absent bank/date }
+        '401': { description: Authentication required }
+        '403': { description: Access denied }
   /api/v1/ledger/pension-accounting/identity:
     get:
       summary: Inspect the configured identity of this segregated ledger book
@@ -1713,6 +1730,25 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    BranchLedgerLine:
+      type: object
+      required: [currency, baseCurrency, debit, credit, deposits]
+      properties:
+        branchBookId: { type: string, format: uuid, nullable: true }
+        currency: { type: string }
+        baseCurrency: { type: string }
+        debit: { type: number }
+        credit: { type: number }
+        deposits: { type: number }
+    BranchLedgerSnapshot:
+      type: object
+      required: [bankId, asOf, lines]
+      properties:
+        bankId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/BranchLedgerLine' }
     PensionBookIdentity:
       type: object
       required: [kind, bookId]
