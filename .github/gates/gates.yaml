@@ -2232,7 +2232,9 @@ gates:
     group: supplychain
     mode: enforced
     min_subjects: 6   # 13 measured 2026-09-01; half, so the fleet can shrink without a red
-    selftest_inputs: [".github/scripts/check-license-headers.py"]
+    # evals/ declared (#16623): the self-test walks every SPDX-headered source file, and
+    # evals/mcp-redteam added the first .sh/.js/.yaml under evals/, which the trace caught.
+    selftest_inputs: [".github/scripts/check-license-headers.py", "evals/"]
     selftest: |
       python3 .github/scripts/check-license-headers.py --selftest
     run: |
