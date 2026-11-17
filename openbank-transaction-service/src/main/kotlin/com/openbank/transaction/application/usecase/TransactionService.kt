@@ -222,8 +222,12 @@ class TransactionService(
             )
         }
 
-        val sourceContext = command.sourceAccountId?.let { accountBookings.context(it, command.synthetic) }
-        val targetContext = command.targetAccountId?.let { accountBookings.context(it, command.synthetic) }
+        val sourceContext = command.sourceAccountId?.let {
+            accountBookings.context(it, command.synthetic, amount.currency)
+        }
+        val targetContext = command.targetAccountId?.let {
+            accountBookings.context(it, command.synthetic, amount.currency)
+        }
         validateBranchRoute(command, sourceContext, targetContext, amount, baseAmount)
 
         val transaction = Transaction(

@@ -175,6 +175,47 @@ class BranchPaymentRecoveryIT {
         assertThat(events).isEmpty()
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["EUR", ""])
+    @io.quarkus.test.security.TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `branch incoming credit refuses a different or unknown account currency before persisting`(currency: String) {
+        val account = UUID.randomUUID()
+        val key = "branch-currency-${UUID.randomUUID()}"
+        val currencyField = if (currency.isEmpty()) "" else "\"currencyCode\":\"$currency\","
+        LedgerWireMockResource.server.stubFor(
+            com.github.tomakehurst.wiremock.client.WireMock.get(urlEqualTo("/api/v1/accounts/$account"))
+                .willReturn(
+                    com.github.tomakehurst.wiremock.client.WireMock.okJson(
+                        """{"id":"$account",$currencyField"bookingContext":{"bankId":"${UUID.randomUUID()}","establishmentId":"${UUID.randomUUID()}","hostCountry":"AT","mode":"BRANCH"}}""",
+                    ),
+                ),
+        )
+        val response = io.restassured.RestAssured.given().contentType("application/json").body(
+            mapOf(
+                "idempotencyKey" to key,
+                "type" to "CREDIT",
+                "targetAccountId" to account,
+                "amount" to "100.00",
+                "currencyCode" to "CZK",
+                "valueDate" to LocalDate.now().toString(),
+            ),
+        ).post("/api/v1/transactions")
+        assertThat(response.statusCode).isEqualTo(400)
+        java.sql.DriverManager.getConnection(jdbc, databaseUser, databasePassword).use { db ->
+            db.createStatement().use { statement ->
+                statement.executeQuery("SELECT count(*) FROM transactions WHERE idempotency_key='$key'").use {
+                    assertThat(it.next()).isTrue()
+                    assertThat(it.getLong(1)).isZero()
+                }
+            }
+        }
+        LedgerWireMockResource.server.verify(
+            0,
+            postRequestedFor(urlEqualTo("/api/v1/journals/branch-payments"))
+                .withRequestBody(matchingJsonPath("$.targetAccountId", equalTo(account.toString()))),
+        )
+    }
+
     @org.junit.jupiter.api.Test
     @io.quarkus.test.security.TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
     fun `HTTP ingestion obtains the account-owned route and commits it before async settlement`() {
@@ -188,7 +229,7 @@ class BranchPaymentRecoveryIT {
                 com.github.tomakehurst.wiremock.client.WireMock.get(urlEqualTo("/api/v1/accounts/$id"))
                     .willReturn(
                         com.github.tomakehurst.wiremock.client.WireMock.okJson(
-                            """{"id":"$id","bookingContext":{"bankId":"$bank","establishmentId":"$book","hostCountry":"$country","mode":"BRANCH"}}""",
+                            """{"id":"$id","currencyCode":"EUR","bookingContext":{"bankId":"$bank","establishmentId":"$book","hostCountry":"$country","mode":"BRANCH"}}""",
                         ),
                     ),
             )

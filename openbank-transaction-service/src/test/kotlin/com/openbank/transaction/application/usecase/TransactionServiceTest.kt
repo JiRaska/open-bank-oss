@@ -107,7 +107,7 @@ class TransactionServiceTest {
         workflowClient,
         bookingClock,
     ).also { subject ->
-        subject.accountBookings = mockk { coEvery { context(any(), any()) } returns null }
+        subject.accountBookings = mockk { coEvery { context(any(), any(), any()) } returns null }
         subject.branchDispatch = mockk { coEvery { start(any()) } returns Unit }
     }
 
@@ -117,8 +117,8 @@ class TransactionServiceTest {
         val bank = UUID.randomUUID()
         val source = com.openbank.libs.market.BookingContext(bank, UUID.randomUUID(), "AT", "BRANCH")
         val target = com.openbank.libs.market.BookingContext(bank, UUID.randomUUID(), "SK", "BRANCH")
-        coEvery { service.accountBookings.context(command.sourceAccountId!!, false) } returns source
-        coEvery { service.accountBookings.context(command.targetAccountId!!, false) } returns target
+        coEvery { service.accountBookings.context(command.sourceAccountId!!, false, any()) } returns source
+        coEvery { service.accountBookings.context(command.targetAccountId!!, false, any()) } returns target
         coEvery { transactionRepository.findByIdempotencyKey(any()) } returns null
         every { eventPublisher.initiatedPayload(any()) } returns "{}"
         stubWorkflowCommitted(TransactionStatus.PENDING)
@@ -133,7 +133,7 @@ class TransactionServiceTest {
         val sourceId = UUID.randomUUID()
         val command = initiateCommand().copy(sourceAccountId = sourceId, targetAccountId = sourceId)
         val context = com.openbank.libs.market.BookingContext(UUID.randomUUID(), UUID.randomUUID(), "AT", "BRANCH")
-        coEvery { service.accountBookings.context(sourceId, false) } returns context
+        coEvery { service.accountBookings.context(sourceId, false, any()) } returns context
         coEvery { transactionRepository.findByIdempotencyKey(any()) } returns null
         assertThat(runCatching { service.initiateTransaction(command) }.exceptionOrNull())
             .isInstanceOf(IllegalStateException::class.java)
@@ -144,8 +144,8 @@ class TransactionServiceTest {
     fun `unknown or foreign-bank target fails before persistence or workflow`(): Unit = runBlocking {
         val command = initiateCommand()
         val source = com.openbank.libs.market.BookingContext(UUID.randomUUID(), UUID.randomUUID(), "AT", "BRANCH")
-        coEvery { service.accountBookings.context(command.sourceAccountId!!, false) } returns source
-        coEvery { service.accountBookings.context(command.targetAccountId!!, false) } returnsMany listOf(
+        coEvery { service.accountBookings.context(command.sourceAccountId!!, false, any()) } returns source
+        coEvery { service.accountBookings.context(command.targetAccountId!!, false, any()) } returnsMany listOf(
             null,
             source.copy(bankId = UUID.randomUUID(), establishmentId = UUID.randomUUID(), hostCountry = "SK"),
         )

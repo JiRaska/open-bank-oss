@@ -3,6 +3,7 @@
 
 package com.openbank.transaction.infrastructure.client
 
+import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.market.BookingContext
 import com.openbank.libs.synthetic.SyntheticTaint
 import com.openbank.libs.web.SyntheticTaintClientFilter
@@ -33,13 +34,20 @@ interface AccountBookingClient {
     ): Uni<AccountBookingView>
 }
 
-data class AccountBookingView(val id: UUID, val bookingContext: BookingContext? = null)
+data class AccountBookingView(
+    val id: UUID,
+    val bookingContext: BookingContext? = null,
+    val currencyCode: String? = null,
+)
 
 @ApplicationScoped
 class AccountBookingAdapter(@RestClient private val client: AccountBookingClient) : AccountBookingPort {
-    override suspend fun context(accountId: UUID, synthetic: Boolean): BookingContext? {
+    override suspend fun context(accountId: UUID, synthetic: Boolean, currency: CurrencyCode): BookingContext? {
         val account = client.read(accountId, if (synthetic) SyntheticTaint.headerValue() else null).awaitSuspending()
         check(account.id == accountId) { "Account booking response is bound to a different account" }
+        require(account.bookingContext?.mode != "BRANCH" || account.currencyCode == currency.code) {
+            "Branch account currency is unknown or differs from payment currency"
+        }
         return account.bookingContext
     }
 }

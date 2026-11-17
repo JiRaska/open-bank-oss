@@ -3,9 +3,10 @@
 
 package com.openbank.transaction.application.port.out
 
+import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.market.BookingContext
 import java.util.UUID
 
 interface AccountBookingPort {
-    suspend fun context(accountId: UUID, synthetic: Boolean): BookingContext?
+    suspend fun context(accountId: UUID, synthetic: Boolean, currency: CurrencyCode): BookingContext?
 }

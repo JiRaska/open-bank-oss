@@ -38,7 +38,12 @@ class AccountBookingPactConsumerTest {
         .path("/api/v1/accounts/$accountId").method("GET")
         .willRespondWith().status(200)
         .headers(mapOf("Content-Type" to "application/json"))
-        .body(newJsonBody { it.stringValue("id", accountId) }.build())
+        .body(
+            newJsonBody {
+                it.stringValue("id", accountId)
+                it.stringValue("currencyCode", "CZK")
+            }.build(),
+        )
         .toPact()
 
     @Pact(consumer = "openbank-transaction-service", provider = "openbank-account-service")
@@ -56,6 +61,7 @@ class AccountBookingPactConsumerTest {
         val account = ObjectMapper().registerKotlinModule().readValue(json, AccountBookingView::class.java)
         assertThat(account.id).isEqualTo(UUID.fromString(accountId))
         assertThat(account.bookingContext).isNull()
+        assertThat(account.currencyCode).isEqualTo("CZK")
     }
 
     @Test
