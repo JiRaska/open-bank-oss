@@ -123,7 +123,7 @@ class McpClientConnectScaTest {
     @Test
     fun `no other purpose may initiate with an mcp-connect id`() {
         ScaPurpose.entries.filter { it != ScaPurpose.MCP_CLIENT_CONNECT }.forEach { purpose ->
-            assertThatThrownBy { runBlocking { service.initiate(command(linking()).copy(purpose = purpose)) } }
+            assertThatThrownBy { runBlocking { service.initiate(command(linking()).copy(purpose = purpose, scope = ConsumerScope.General)) } }
                 .`as`(purpose.name)
                 .isInstanceOf(IllegalArgumentException::class.java)
                 .hasMessageContaining("reserved to MCP_CLIENT_CONNECT")
@@ -246,7 +246,7 @@ class McpClientConnectScaTest {
             RecordDeviceDecisionCommand(connect.id, young.credentialId, DeviceDecisionType.DENIED, "sig"),
         )
 
-        val login = service.initiate(command(null).copy(purpose = ScaPurpose.LOGIN))
+        val login = service.initiate(command(null).copy(purpose = ScaPurpose.LOGIN, scope = ConsumerScope.General))
         service.recordDecision(
             RecordDeviceDecisionCommand(login.id, young.credentialId, DeviceDecisionType.APPROVED, "sig"),
         )
@@ -288,16 +288,24 @@ class McpClientConnectScaTest {
     fun `the scoped connect consumer may not initiate any other purpose`() {
         listOf(ScaPurpose.APPROVAL, ScaPurpose.PAYMENT_INITIATION, ScaPurpose.CONSENT_GRANT).forEach { purpose ->
             assertThatThrownBy {
-                runBlocking { service.initiate(command(linking()).copy(purpose = purpose, scope = mcpScope)) }
+                runBlocking { service.initiate(command(linking(requestId = "other-op:1")).copy(purpose = purpose, scope = mcpScope)) }
             }.`as`(purpose.name).isInstanceOf(ScaInitiateScopeViolationException::class.java)
         }
         assertThat(challenges).isEmpty()
     }
 
+    // Rule: requireInitiateScope (converse). Only the authorization server's consumer raises a
+    // connect prompt; a General initiator (e.g. the edge, which holds scaChallenge.initiate) and
+    // another reserved consumer (pension) are refused, and nothing is minted or pushed.
     @Test
-    fun `a general initiator is not affected by the initiate scope`() {
-        val challenge = runBlocking { service.initiate(command(linking())) }
-        assertThat(challenge.purpose).isEqualTo(ScaPurpose.MCP_CLIENT_CONNECT)
+    fun `a general or other reserved initiator may not raise a connect challenge`() {
+        listOf(ConsumerScope.General, ConsumerScope.Reserved(ReservedNamespace.PENSION)).forEach { scope ->
+            assertThatThrownBy { runBlocking { service.initiate(command(linking()).copy(scope = scope)) } }
+                .`as`(scope.toString())
+                .isInstanceOf(ScaInitiateScopeViolationException::class.java)
+        }
+        assertThat(challenges).isEmpty()
+        assertThat(pushed).isEmpty()
     }
 
     private fun command(dl: DynamicLinkingData?) = InitiateScaCommand(
@@ -306,6 +314,8 @@ class McpClientConnectScaTest {
         preferredMethod = null,
         dynamicLinkingData = dl,
         redirectUrl = null,
+        // The authorization server's consumer: the only initiator a connect challenge accepts.
+        scope = mcpScope,
     )
 
     private fun linking(requestId: String? = "mcp-connect:req-1", sha: String? = "d".repeat(64)) =

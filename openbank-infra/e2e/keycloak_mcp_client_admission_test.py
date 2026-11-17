@@ -326,6 +326,16 @@ class McpClientAdmission(unittest.TestCase):
                                  "clientAuthenticatorType": "client-secret", "secret": cls.exchanger_secret,
                                  "serviceAccountsEnabled": True, "standardFlowEnabled": False,
                                  "directAccessGrantsEnabled": False, "protocol": "openid-connect"})
+        # test-only: an admin-REST service account shaped like customer-edge's (realm-management
+        # manage-users), to prove the admin-only party_id profile still admits the M2M write.
+        cls.edge_admin_secret = secrets.token_urlsafe(24)
+        realm["clients"].append({"clientId": "it-edge-admin", "publicClient": False, "enabled": True,
+                                 "clientAuthenticatorType": "client-secret", "secret": cls.edge_admin_secret,
+                                 "serviceAccountsEnabled": True, "standardFlowEnabled": False,
+                                 "directAccessGrantsEnabled": False, "protocol": "openid-connect"})
+        realm.setdefault("users", []).append({
+            "username": "service-account-it-edge-admin", "enabled": True, "serviceAccountClientId": "it-edge-admin",
+            "clientRoles": {"realm-management": ["manage-users", "view-users"]}})
         realm["authenticationFlows"].append({
             "id": "it-password-flow", "alias": "it-password", "providerId": "basic-flow", "topLevel": True, "builtIn": False,
             "authenticationExecutions": [
@@ -798,7 +808,7 @@ class McpClientAdmission(unittest.TestCase):
                 "requested_token_type": "urn:ietf:params:oauth:token-type:access_token", **extra})
         control = exchange()
         self.assertEqual(control.status, 200, f"control: a non-MCP self-exchange must succeed: {control.text[:200]}")
-        for extra in ({"resource": RESOURCE}, {"audience": "openbank-mcp-service"}):
+        for extra in ({"resource": RESOURCE}, {"audience": "openbank-mcp-service"}, {"audience": H}, {"audience": L}):
             with self.subTest(**extra):
                 resp = exchange(**extra)
                 self.assertIn(resp.status, (400, 401, 403), resp.text[:200])
@@ -840,6 +850,36 @@ class McpClientAdmission(unittest.TestCase):
             headers={"Authorization": f"Bearer {self.admin_token()}"}), timeout=30).read())
         self.assertEqual(users[0]["attributes"]["party_id"], [PARTY],
                          f"party_id must be unchanged after a user attempt (account API answered {status})")
+
+    def test_edge_service_account_can_still_write_party_id(self):
+        # Review of #16672: customer-edge's KeycloakAdminClient.setPartyIdAttribute PUTs exactly
+        # {"attributes":{"party_id":[...]}} as a service account with manage-users. The admin-only
+        # profile (edit: ["admin"]) must keep admitting that write.
+        sa = self.post(self.token_url, {"grant_type": "client_credentials", "client_id": "it-edge-admin",
+                                         "client_secret": self.edge_admin_secret}).json()["access_token"]
+        auth = {"Authorization": f"Bearer {sa}"}
+        users = json.loads(urllib.request.urlopen(urllib.request.Request(
+            f"{self.origin}/admin/realms/openbank-customers/users?username={urllib.parse.quote(YOUNG_USER)}&exact=true",
+            headers=auth), timeout=30).read())
+        new_party = str(uuid.uuid4())
+        url = f"{self.origin}/admin/realms/openbank-customers/users/{users[0]['id']}"
+        # The edge's shape (KeycloakAdminClient.withPartyId): read the user, merge party_id, PUT it
+        # back. A bare {"attributes": {...}} body is refused by Keycloak 26 with or without this
+        # profile (email "required"), measured on 26.8.1 — which is why the edge no longer sends it.
+        user = json.loads(urllib.request.urlopen(urllib.request.Request(url, headers=auth), timeout=30).read())
+        user.setdefault("attributes", {})["party_id"] = [new_party]
+        req = urllib.request.Request(url, data=json.dumps(user).encode(), method="PUT",
+                                     headers={**auth, "Content-Type": "application/json"})
+        try:
+            status = urllib.request.urlopen(req, timeout=30).status
+            detail = ""
+        except urllib.error.HTTPError as error:
+            status, detail = error.code, error.read().decode(errors="replace")[:300]
+        self.assertEqual(status, 204, f"the edge-shaped admin write must succeed: {detail}")
+        after = json.loads(urllib.request.urlopen(urllib.request.Request(
+            f"{self.origin}/admin/realms/openbank-customers/users/{users[0]['id']}", headers=auth), timeout=30).read())
+        self.assertEqual(after["attributes"]["party_id"], [new_party])
+        self.assertEqual(after["username"], YOUNG_USER, "the partial PUT must not wipe the user's identity")
 
     def test_young_passkey_refused(self):
         browser = Browser(self.origin)

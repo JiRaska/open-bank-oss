@@ -206,9 +206,10 @@ class ScaService(
         // saving one nobody can ever complete (#8432).
         val method = command.preferredMethod ?: ScaMethod.PUSH_NOTIFICATION
         if (method in UNDELIVERABLE_METHODS) throw ScaMethodNotDeliverableException(method)
-        requireInitiateScope(command)
         requireApprovalLinking(command)
         requireMcpConnectLinking(command)
+        // After the shape checks: a malformed request is a 400 whoever sends it.
+        requireInitiateScope(command)
         val ttlSeconds = 300L
         val idempotencyKey = buildIdempotencyKey(command, method)
 
@@ -576,6 +577,14 @@ class ScaService(
      * consumers (pension) hold no initiate grant at all; OPA refuses them before this point.
      */
     private fun requireInitiateScope(command: InitiateScaCommand) {
+        // And the converse: a connect prompt is raised by the authorization server's consumer ONLY.
+        // Any other OPA-admitted initiator (the edge holds scaChallenge.initiate) is refused, so no
+        // caller but Keycloak can push "connect an assistant" to a customer's device.
+        if (command.purpose == ScaPurpose.MCP_CLIENT_CONNECT &&
+            command.scope != ConsumerScope.Reserved(ReservedNamespace.MCP_CONNECT)
+        ) {
+            throw ScaInitiateScopeViolationException(command.purpose)
+        }
         val scope = command.scope as? ConsumerScope.Reserved ?: return
         if (scope.namespace != ReservedNamespace.MCP_CONNECT) return
         val id = command.dynamicLinkingData?.approvalRequestId

@@ -95,10 +95,14 @@ public class McpClientGuardExecutor implements ClientPolicyExecutorProvider<Clie
         }
     }
 
-    /** Every bound resource of an MCP client, and every audience its audience mapper adds. */
+    /**
+     * Every MCP client id, its bound resource, and every audience its audience mapper adds — so an
+     * exchange asking for audience=<an MCP client> (v1 audience = target client id) is refused too.
+     */
     private java.util.Set<String> mcpTargets() {
         java.util.Set<String> out = new java.util.HashSet<>();
         session.getContext().getRealm().getClientsStream().filter(McpClientGuardExecutor::isMcp).forEach(c -> {
+            out.add(c.getClientId());
             String r = c.getAttribute(McpConnectPolicy.RESOURCE_ATTRIBUTE);
             if (r != null && !r.isBlank()) {
                 out.add(r);
