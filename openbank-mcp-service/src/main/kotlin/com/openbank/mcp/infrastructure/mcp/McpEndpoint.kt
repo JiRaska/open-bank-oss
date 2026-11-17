@@ -122,6 +122,7 @@ class McpEndpoint(
         // tag or audit write ever sees the raw value. The id is echoed only if it is NUL-free.
         if (McpInputBounds.containsNul(body)) {
             log.warn("refused JSON-RPC request containing U+0000")
+            metrics.inputRefused(McpMetricsPort.InputRefusal.NUL)
             val safeId = body.path("id").takeUnless { it.isMissingNode || McpInputBounds.containsNul(it) }
             return Response.status(Response.Status.BAD_REQUEST)
                 .entity(

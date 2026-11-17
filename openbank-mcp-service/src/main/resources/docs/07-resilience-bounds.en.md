@@ -47,8 +47,9 @@ forwarded (`McpInputBounds`, #16628):
   `-32602`, before dispatch. Not audited; logged without the payload.
 - Tool names, unknown methods and invalid ids are echoed at most 64 characters, then
   `...[truncated]`.
-- `list_transactions.limit`: integer in `1..500`, default `50` when absent; anything else
+- `list_transactions.limit`: integer in `1..200`, default `50` when absent; anything else
   is `-32602`.
 - Audit `argument_keys`: at most 32 keys, each at most 64 characters.
-- `accountId` on `get_balance` / `list_transactions` / `get_statement` must be a valid IBAN (shape and
+- `accountId` on `get_balance` / `list_transactions` / `get_statement` must be a canonical IBAN (uppercase, no spaces; shape and libs-domain
   mod-97) before consent-service is called; otherwise `-32602`.
+- Every NUL refusal increments `openbank.mcp.input_refused{reason="nul"}` (closed tag set).

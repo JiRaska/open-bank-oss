@@ -60,6 +60,24 @@ class RealAccountReadPortTest {
     }
 
     @Test
+    fun `a lowercase or spaced IBAN is refused before consent-service, never normalised (#16628)`() {
+        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ6508000000192000145399"))
+        val port = RealAccountReadPort(
+            consent,
+            accountServiceStub(emptyMap()),
+            FakeBalanceServiceClient(byAccountId = emptyMap()),
+            FakeTransactionServiceClient(),
+            mapper,
+        )
+        listOf("cz6508000000192000145399", "CZ65 0800 0000 1920 0014 5399").forEach { variant ->
+            assertThatThrownBy { port.getBalance(ctx, variant) }.isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy { port.listTransactions(ctx, variant, 10) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+        assertThat(consent.lastRequest).isNull()
+    }
+
+    @Test
     fun `getBalance resolves the IBAN and returns the balance`() {
         val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ6508000000192000145399"))
         val accounts = accountServiceStub(

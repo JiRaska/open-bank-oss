@@ -93,6 +93,7 @@ class McpToolCallFuzzTest {
     private class Harness(val mapper: ObjectMapper) {
         val ports = Ports(mapper)
         val audit = CopyOnWriteArrayList<AuditEvent>()
+        val meters = SimpleMeterRegistry()
         private val allow = object : PolicyDecisionPoint {
             override suspend fun allow(query: AuthzQuery) = AuthzDecision(allow = true)
         }
@@ -124,7 +125,7 @@ class McpToolCallFuzzTest {
             serverVersion = "0.1.0",
             protocolVersion = "2025-06-18",
         ).apply {
-            metrics = McpMetricsAdapter(SimpleMeterRegistry())
+            metrics = McpMetricsAdapter(meters)
             rateLimiter = limiter
             toolsCatalog = PolicyFilteredToolCatalog(registry, allow, 0)
         }
@@ -393,7 +394,16 @@ class McpToolCallFuzzTest {
     @Test
     fun `list_transactions never forwards a non-positive or unbounded limit`() {
         val h = Harness(mapper)
-        listOf("0", "-1", "-2147483649", "4294967296", "2147483647", "9223372036854775807", "1e308").forEach { limit ->
+        listOf(
+            "0",
+            "-1",
+            "201",
+            "-2147483649",
+            "4294967296",
+            "2147483647",
+            "9223372036854775807",
+            "1e308",
+        ).forEach { limit ->
             h.endpoint.handle(
                 mapper.readTree(
                     call("list_transactions", """{"accountId":"CZ6508000000192000145399","limit":$limit}"""),
@@ -423,10 +433,34 @@ class McpToolCallFuzzTest {
         }
     }
 
+    @Test
+    fun `a NUL inside a non-object root is refused, metered and never dispatched`() {
+        val h = Harness(mapper)
+        val arrayRoot = mapper.readTree(
+            """[{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_accounts","arguments":{"a\u0000":1}}}]""",
+        )
+        val resp = h.endpoint.handle(arrayRoot)
+        assertThat(resp.status).isEqualTo(400)
+        val body = mapper.readTree(mapper.writeValueAsString(resp.entity))
+        assertThat(body.path("error").path("code").asInt()).isEqualTo(-32602)
+        assertThat(h.audit).isEmpty()
+        assertThat(h.ports.limits).isEmpty()
+        assertThat(
+            h.meters.find("openbank.mcp.input_refused").tag("reason", "nul").counter()?.count(),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `control - a NUL-free request does not tick the refusal counter`() {
+        val h = Harness(mapper)
+        h.endpoint.handle(mapper.readTree(call("list_accounts", "{}")))
+        assertThat(h.meters.find("openbank.mcp.input_refused").counter()).isNull()
+    }
+
     private companion object {
         const val RESPONSE_CAP_BYTES = 64 * 1024
         const val AUDIT_CAP_BYTES = 64 * 1024
-        const val MAX_SANE_LIMIT = 1_000
+        const val MAX_SANE_LIMIT = 200
         val LEAK_MARKERS = listOf(
             "\tat ", "Caused by", "java.lang", "java.util", "kotlin.", "jakarta.", "io.quarkus", "com.openbank",
             "Exception", "NullPointer", "ClassCast", "NumberFormat",

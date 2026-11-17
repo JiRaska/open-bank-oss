@@ -208,6 +208,15 @@ class McpToolCallWireFuzzIT {
     }
 
     @Test
+    fun `a NUL inside a JSON array root is refused over the wire`() {
+        recorder.clear()
+        val body =
+            """[{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_balance","arguments":{"accountId":"\u0000"}}}]"""
+        assertThat(send(body).statusCode).isEqualTo(400)
+        assertThat(recorder.events).isEmpty()
+    }
+
+    @Test
     fun `a body far above any sane size is bounded, not a 500`() {
         val huge = """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_balance","arguments":{"accountId":"${"A".repeat(
             11 * FuzzPayloads.MEGABYTE,

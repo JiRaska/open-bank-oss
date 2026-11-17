@@ -5,6 +5,7 @@
 package com.openbank.mcp.application
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.openbank.libs.domain.account.Iban
 
 /**
  * Input bounds for the JSON-RPC surface (#16628). Every caller-supplied string that is reflected
@@ -15,24 +16,19 @@ import com.fasterxml.jackson.databind.JsonNode
  *   tree itself, keys and values, recursively.
  * - [echo]: caps a reflected value, so the response cannot grow with the input.
  * - [auditKeys]: bounds the argument KEY list written to the audit trail (count and length).
- * - [requireIban]: syntax + ISO 13616 mod-97 check of an account IBAN, before any consent call.
+ * - [requireIban]: strict canonical form + libs-domain mod-97 check of an account IBAN, before any consent call.
  * - [transactionLimit]: positive, bounded, integral; default when absent.
  */
 object McpInputBounds {
     const val MAX_ECHO_CHARS = 64
     const val MAX_AUDIT_KEYS = 32
-    const val MAX_TX_LIMIT = 500
+    const val MAX_TX_LIMIT = 200
     const val DEFAULT_TX_LIMIT = 50
     private const val TRUNCATED = "...[truncated]"
     private const val IBAN_MIN = 15
     private const val IBAN_MAX = 34
-    private const val IBAN_HEAD = 4
-    private const val IBAN_MOD = 97
-    private const val IBAN_REMAINDER = 1
-    private const val LETTER_OFFSET = 10
-    private const val DECIMAL = 10
-    private const val HUNDRED = 100
-    private val IBAN_SHAPE = Regex("^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$")
+    const val IBAN_PATTERN = "^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$"
+    private val IBAN_SHAPE = Regex(IBAN_PATTERN)
 
     fun echo(value: String): String =
         if (value.length <= MAX_ECHO_CHARS) value else value.take(MAX_ECHO_CHARS) + TRUNCATED
@@ -56,24 +52,20 @@ object McpInputBounds {
 
     private fun hasNul(s: String): Boolean = s.indexOf('\u0000') >= 0
 
+    /**
+     * Strict account IBAN: the canonical uppercase, no-space form ONLY. Consent stores the exact
+     * IBAN and ConsentGate compares exactly, so a lowercase or spaced variant is refused rather than
+     * normalised. The shape regex runs first so the shared mod-97 check only ever sees [A-Z0-9];
+     * the checksum itself is libs-domain's [Iban.isValid] — one implementation fleet-wide.
+     */
     fun requireIban(accountId: String): String {
-        require(accountId.length in IBAN_MIN..IBAN_MAX && IBAN_SHAPE.matches(accountId) && mod97(accountId)) {
-            "accountId is not a valid IBAN"
-        }
+        require(
+            accountId.length in IBAN_MIN..IBAN_MAX &&
+                IBAN_SHAPE.matches(accountId) &&
+                accountId == Iban.of(accountId).value &&
+                Iban.isValid(accountId),
+        ) { "accountId is not a valid IBAN (uppercase, no spaces)" }
         return accountId
-    }
-
-    private fun mod97(iban: String): Boolean {
-        val rearranged = iban.substring(IBAN_HEAD) + iban.substring(0, IBAN_HEAD)
-        var rem = 0
-        for (c in rearranged) {
-            if (c.isDigit()) {
-                rem = (rem * DECIMAL + (c - '0')) % IBAN_MOD
-            } else {
-                rem = (rem * HUNDRED + (c - 'A' + LETTER_OFFSET)) % IBAN_MOD
-            }
-        }
-        return rem == IBAN_REMAINDER
     }
 
     fun transactionLimit(node: JsonNode): Int {
