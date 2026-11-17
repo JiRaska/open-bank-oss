@@ -799,8 +799,6 @@ change_requirements:
         reason: "Same shared CustomerEdgeRestClient (configKey=customer-edge) — GET /customer/v1/statements/{accountId}."
       - edge: "openbank-copilot-service->openbank-transaction-service:api"
         reason: "Same shared CustomerEdgeRestClient (configKey=customer-edge) — listTransactions()."
-      - edge: "openbank-transaction-service->openbank-account-service:api"
-        reason: "Validation is implemented via BalanceCoverClient (configKey=balance-service) placing/releasing holds, a sibling of account-service — never a direct account-service call."
       - edge: "openbank-customer-edge->openbank-account-service:api"
         reason: "customer-edge is a BFF with ZERO @RegisterRestClient interfaces — every hop is a Vert.x WebClient built from openbank.edge.account-service-url (CustomerEdgeResource); the Deployment env's ACCOUNT_SERVICE_URL is the independent witness."
       - edge: "openbank-customer-edge->openbank-party-service:api"

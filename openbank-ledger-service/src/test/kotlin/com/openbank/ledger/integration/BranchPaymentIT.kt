@@ -108,29 +108,13 @@ class BranchPaymentIT {
             assertThat(response.statusCode).isEqualTo(200)
             assertThat(response.jsonPath().getList<String>("journalIds")).hasSize(1)
             assertCounts(db, p, 1, 1)
-            db.createStatement().use { st ->
-                st.executeQuery(
-                    """
-                    SELECT e.branch_book_id,g.code,sum(CASE WHEN l.side='D' THEN l.amount ELSE -l.amount END)
-                    FROM journal_entries e JOIN journal_lines l ON l.journal_id=e.id
-                    JOIN gl_accounts g ON g.id=l.gl_account_id WHERE e.transaction_id='${p.id}'
-                    GROUP BY e.branch_book_id,g.code
-                    """.trimIndent(),
-                ).use { rows ->
-                    val balances = mutableMapOf<String, String>()
-                    while (rows.next()) {
-                        assertThat(rows.getObject(1)).isEqualTo(if (outbound) p.sourceBook else p.targetBook)
-                        balances[rows.getString(2)] = rows.getBigDecimal(3).stripTrailingZeros().toPlainString()
-                    }
-                    assertThat(balances).containsExactlyInAnyOrderEntriesOf(
-                        if (outbound) {
-                            mapOf("2101" to "100", "1101" to "-100")
-                        } else {
-                            mapOf("1101" to "100", "2101" to "-100")
-                        },
-                    )
-                }
+            val expectedBook = if (outbound) p.sourceBook else p.targetBook
+            val expected = if (outbound) {
+                mapOf("2101" to "100", "1101" to "-100")
+            } else {
+                mapOf("1101" to "100", "2101" to "-100")
             }
+            assertThat(cashBalances(db, p, expectedBook)).containsExactlyInAnyOrderEntriesOf(expected)
         }
     }
 
@@ -143,24 +127,9 @@ class BranchPaymentIT {
             assertThat(response.statusCode).isEqualTo(200)
             assertThat(response.jsonPath().getList<String>("journalIds")).hasSize(1)
             assertCounts(db, p, 1, 2)
-            db.createStatement().use { st ->
-                st.executeQuery(
-                    """
-                    SELECT l.sub_account_id,sum(CASE WHEN l.side='D' THEN l.amount ELSE -l.amount END)
-                    FROM journal_entries e JOIN journal_lines l ON l.journal_id=e.id
-                    WHERE e.transaction_id='${p.id}' GROUP BY l.sub_account_id
-                    """.trimIndent(),
-                ).use { rows ->
-                    val balances = mutableMapOf<UUID, String>()
-                    while (rows.next()) {
-                        balances[rows.getObject(1) as UUID] =
-                            rows.getBigDecimal(2).stripTrailingZeros().toPlainString()
-                    }
-                    assertThat(
-                        balances,
-                    ).containsExactlyInAnyOrderEntriesOf(mapOf(p.source to "100", p.target to "-100"))
-                }
-            }
+            assertThat(pocketBalances(db, p)).containsExactlyInAnyOrderEntriesOf(
+                mapOf(p.source to "100", p.target to "-100"),
+            )
         }
     }
 
@@ -240,6 +209,42 @@ class BranchPaymentIT {
     )
     fun `another machine principal cannot create branch payments`() {
         assertThat(post(Payment().payload()).statusCode).isEqualTo(403)
+    }
+
+    private fun cashBalances(db: Connection, p: Payment, expectedBook: UUID): Map<String, String> =
+        db.createStatement().use { st ->
+            st.executeQuery(
+                """
+                SELECT e.branch_book_id,g.code,sum(CASE WHEN l.side='D' THEN l.amount ELSE -l.amount END)
+                FROM journal_entries e JOIN journal_lines l ON l.journal_id=e.id
+                JOIN gl_accounts g ON g.id=l.gl_account_id WHERE e.transaction_id='${p.id}'
+                GROUP BY e.branch_book_id,g.code
+                """.trimIndent(),
+            ).use { rows ->
+                val balances = mutableMapOf<String, String>()
+                while (rows.next()) {
+                    assertThat(rows.getObject(1)).isEqualTo(expectedBook)
+                    balances[rows.getString(2)] = rows.getBigDecimal(3).stripTrailingZeros().toPlainString()
+                }
+                balances
+            }
+        }
+
+    private fun pocketBalances(db: Connection, p: Payment): Map<UUID, String> = db.createStatement().use { st ->
+        st.executeQuery(
+            """
+                SELECT l.sub_account_id,sum(CASE WHEN l.side='D' THEN l.amount ELSE -l.amount END)
+                FROM journal_entries e JOIN journal_lines l ON l.journal_id=e.id
+                WHERE e.transaction_id='${p.id}' GROUP BY l.sub_account_id
+            """.trimIndent(),
+        ).use { rows ->
+            val balances = mutableMapOf<UUID, String>()
+            while (rows.next()) {
+                balances[rows.getObject(1) as UUID] =
+                    rows.getBigDecimal(2).stripTrailingZeros().toPlainString()
+            }
+            balances
+        }
     }
 
     private fun assertEconomics(db: Connection, p: Payment) {

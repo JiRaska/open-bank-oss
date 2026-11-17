@@ -1,5 +1,6 @@
 -- SPDX-License-Identifier: Apache-2.0
--- ADR-0380 B2. Rollback: stop branch payment writers; retain receipts, journals and clearing accounts.
+-- ADR-0380 B2.
+-- Rollback: stop branch payment writers; retain receipts, journals and clearing accounts.
 CREATE TABLE ledger_branch_payments (
     operation_key VARCHAR(255) PRIMARY KEY,
     request_digest VARCHAR(64) NOT NULL,
