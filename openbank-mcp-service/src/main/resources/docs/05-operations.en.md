@@ -38,27 +38,32 @@ change or payment execution is part of this ownership correction.
 
 Every tool result passes three steps in `McpToolRegistry.call`, in this order: `McpPiiMasker`
 (field-name and whole-value masking), `McpToolResultSanitiser` (D7), then `McpUntrustedData.wrap`.
-The sanitiser walks every string value and every object key in the result. It does not use a list
+The sanitiser walks every string value and every object key in the result. A key the sanitiser had
+to change is dropped when its cleaned form names another entry, so it can never shadow one. It does not use a list
 of free-text field names, so a field a new tool adds is covered without an edit here. For each
 string it:
 
-- cuts the input to 560 code points (4 x the cap) before any other step, so every later step runs on
-  bounded input, and every pattern is linear;
+- removes invisible code points and cuts the input to 560 surviving code points (4 x the cap) in one
+  linear pass, so padding cannot push a payload past the bound, and every pattern is linear;
 - applies Unicode NFKC normalisation;
 - removes control, format (zero-width, bidi, word joiner, BOM), Unicode tag, private-use and
   line/paragraph separator code points (a line break becomes a space);
-- decodes percent-encoded ASCII and HTML entities once, then repeats the step above;
+- decodes percent-encoded ASCII and HTML entities to a fixpoint (at most 3 rounds), then repeats
+  the step above;
 - replaces markdown image and link syntax, reference definitions, HTML tags, autolinks, URLs
   (scheme, `www.` and protocol-relative `//host`) and `javascript:`/`data:`-style schemes with a
   placeholder, and again on the text with combining marks removed when markup only shows there;
 - masks IBANs inside free text (country code with its ISO 13616 registry length, any case,
   separated by space, dot, hyphen or slash) and phone numbers (3-3-3 or 3-2-2-2, optional
-  `+CC`/`00CC`, separated by space, dot or hyphen). It skips both for identifier and amount fields
-  (`*Id`, `id`, amount, currency, date, balance), so an id a model chains into the next call is never
-  altered;
+  `+CC`/`00CC`, separated by space, dot or hyphen). When the input was cut, a trailing IBAN fragment
+  is masked too. Masking is skipped only for an allow-listed system id field (`id`, `accountId`,
+  `paymentId`, `consentId`, `transactionId`, `statementId`, `proposalId`, `partyId`, `fromAccountId`,
+  `debtorAccountId`, `sessionId`) whose value is a UUID, and for an amount field whose value is a
+  plain decimal. A payer-controlled field such as `endToEndId` is never exempt;
 - neutralises look-alikes of the untrusted-data markers, matched on a skeleton (NFD, combining marks
-  dropped, case folded, Cyrillic/Greek/Armenian/Cherokee confusables mapped to Latin, any
-  separator between the words);
+  dropped, case folded, Cyrillic/Greek/Armenian/Cherokee/Lisu/small-capital confusables mapped to
+  Latin, any run of non-letters between the words). The confusables table is vendored because
+  ICU4J is not on the runtime classpath; a look-alike outside it is a known residual;
 - caps the result at 140 characters (the SEPA unstructured remittance maximum) and ends a cut
   value with `…`.
 

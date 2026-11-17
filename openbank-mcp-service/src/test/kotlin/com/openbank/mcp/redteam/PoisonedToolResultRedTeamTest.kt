@@ -313,7 +313,7 @@ class PoisonedToolResultRedTeamTest {
         val BANK_URL = Regex("""^https://cdn\.openbank\.example/[A-Za-z0-9/._-]*$""")
 
         /** ±0: the corpus is a fixed, versioned set; a shrunk or truncated file must not pass quietly. */
-        const val CORPUS_SIZE = 96
+        const val CORPUS_SIZE = 102
 
         val MARKER_PHRASES = listOf("end untrusted tool data", "untrusted tool data")
 

@@ -45,6 +45,18 @@ internal object McpIbanDetection {
         return out.append(s, copied, s.length).toString()
     }
 
+    /**
+     * Masks an IBAN-shaped fragment (registry country code, at least one check digit, then
+     * alphanumerics) that runs to the end of [s]: used only after a length cut, which can leave an
+     * IBAN too short for [mask] to recognise while still carrying most of the account number.
+     */
+    fun maskTrailingPartial(s: String): String {
+        val m = TRAILING_PARTIAL.find(s) ?: return s
+        return if (m.groupValues[1].uppercase() in IBAN_LENGTHS) s.substring(0, m.range.first) + MASK_PREFIX else s
+    }
+
+    private val TRAILING_PARTIAL = Regex("""(?<![A-Za-z0-9])([A-Za-z]{2})[0-9]{1,2}(?:[ .\-/]?[A-Za-z0-9])*+$""")
+
     /** Exclusive end of an IBAN starting at [start], or -1. */
     private fun endAt(s: String, start: Int): Int {
         val startsWord = start == 0 || !s[start - 1].isAsciiAlnum()

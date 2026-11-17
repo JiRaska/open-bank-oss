@@ -22,8 +22,11 @@ import java.text.Normalizer
  * string goes through [sanitiseText]. An allow-list of "free-text fields" would leave the next
  * tool's new field unsanitised, the drift [McpPiiMasker] was built to avoid. Two exceptions:
  *  - a URL-by-contract field ([URL_FIELDS]) is checked against the bank CDN allow-list instead;
- *  - an identifier or amount field ([isIdentifierField]) skips only the embedded IBAN/phone masking,
- *    so a surrogate id or an amount a model chains into the next call is never altered.
+ *  - a system-generated id field on [SYSTEM_ID_FIELDS] whose value is a UUID, or an amount field
+ *    on [AMOUNT_FIELDS] whose value is a plain decimal ([isExemptValue]), skips only the embedded
+ *    IBAN/phone masking, so an id or amount a model chains into the next call is never altered. A
+ *    payer-controlled field (`endToEndId`, `mandateId`, `variableSymbol`, …) is never exempt, and
+ *    neither is an allow-listed field whose value has any other shape.
  *
  * Order inside [sanitiseText] matters:
  *  1. Pre-truncation to [PRE_CAP_CODE_POINTS] code points, so every later step runs on bounded input
@@ -54,8 +57,17 @@ object McpToolResultSanitiser {
     /** Field names whose value is a URL by contract (merchant logo from enrichment). */
     private val URL_FIELDS = setOf("logourl")
 
-    /** Field-name fragments for amounts and dates; with a trailing `id`, these skip IBAN/phone masking. */
-    private val IDENTIFIER_FRAGMENTS = listOf("amount", "currency", "date", "balance")
+    /**
+     * Ids the bank itself generates, as they appear in tool results and tool arguments (the read
+     * adapters and `McpToolRegistry` input schemas). Exact names only: no suffix matching.
+     */
+    val SYSTEM_ID_FIELDS: Set<String> = setOf(
+        "id", "accountId", "paymentId", "consentId", "transactionId", "statementId", "proposalId",
+        "partyId", "fromAccountId", "debtorAccountId", "sessionId",
+    )
+
+    /** Amount fields; exempt only while the value is a plain decimal. */
+    val AMOUNT_FIELDS: Set<String> = setOf("amount", "openingBalance", "closingBalance", "balance", "availableBalance")
 
     private val factory = JsonNodeFactory.instance
 
@@ -65,7 +77,9 @@ object McpToolResultSanitiser {
     private fun sanitiseNode(node: JsonNode, fieldName: String?): JsonNode = when {
         node.isObject -> factory.objectNode().also { out -> sanitiseObject(node, out) }
         node.isArray -> factory.arrayNode().apply { node.forEach { add(sanitiseNode(it, fieldName)) } }
-        node.isTextual -> TextNode.valueOf(sanitiseText(node.asText(), maskIdentifiers = !isIdentifierField(fieldName)))
+        node.isTextual -> TextNode.valueOf(
+            sanitiseText(node.asText(), maskIdentifiers = !isExemptValue(fieldName, node.asText())),
+        )
         else -> node
     }
 
@@ -76,24 +90,21 @@ object McpToolResultSanitiser {
                 // as an image source by a markdown client.
                 if (value.isTextual && isAllowedCdnUrl(value.asText())) out.set<JsonNode>(name, value)
             } else {
-                // Keys are data too: a poisoned upstream document can carry instructions in a key.
-                val key = sanitiseText(name, maskIdentifiers = false).ifEmpty { "_" }
-                out.set<JsonNode>(uniqueKey(key, out), sanitiseNode(value, name))
+                // Keys are data too: a poisoned upstream document can carry instructions or
+                // identifiers in a key. A key the sanitiser had to change is dropped when its clean
+                // form names another entry, so it can neither shadow nor be shadowed by it.
+                val key = sanitiseText(name).ifEmpty { "_" }
+                val collides = key != name && (out.has(key) || node.has(key))
+                if (!collides) out.set<JsonNode>(key, sanitiseNode(value, name))
             }
         }
     }
 
-    private fun uniqueKey(key: String, out: ObjectNode): String {
-        if (!out.has(key)) return key
-        var n = 2
-        while (out.has("${key}_$n")) n++
-        return "${key}_$n"
-    }
-
-    /** `accountId`, `paymentId`, `id`, amounts, currencies, dates: values a model chains into the next call. */
-    fun isIdentifierField(fieldName: String?): Boolean {
-        val key = fieldName?.lowercase() ?: return false
-        return key.endsWith("id") || IDENTIFIER_FRAGMENTS.any { key.contains(it) }
+    /** True for a bank-generated id (UUID) or a plain decimal amount in an allow-listed field. */
+    fun isExemptValue(fieldName: String?, value: String): Boolean = when (fieldName) {
+        in SYSTEM_ID_FIELDS -> UUID_SHAPE.matches(value)
+        in AMOUNT_FIELDS -> DECIMAL_SHAPE.matches(value)
+        else -> false
     }
 
     fun isAllowedCdnUrl(value: String): Boolean {
@@ -102,19 +113,20 @@ object McpToolResultSanitiser {
     }
 
     fun sanitiseText(raw: String, maskIdentifiers: Boolean = true): String {
-        var s = preTruncate(raw)
-        s = McpControlChars.strip(Normalizer.normalize(s, Normalizer.Form.NFKC))
+        // Strip BEFORE bounding, so padding of invisible characters cannot push the payload past
+        // the window; the scan is linear and stops after the window is full.
+        val (bounded, truncated) = McpControlChars.stripBounded(raw, PRE_CAP_CODE_POINTS)
+        var s = McpControlChars.strip(Normalizer.normalize(bounded, Normalizer.Form.NFKC))
         s = McpControlChars.strip(McpMarkupNeutraliser.decode(s))
         s = McpMarkupNeutraliser.neutralise(s)
-        if (maskIdentifiers) s = PHONE_IN_TEXT.replace(McpIbanDetection.mask(s), MASK)
+        if (maskIdentifiers) {
+            s = McpIbanDetection.mask(s)
+            // A cut can leave an IBAN that no longer has its registry length: mask the fragment.
+            if (truncated) s = McpIbanDetection.maskTrailingPartial(s)
+            s = PHONE_IN_TEXT.replace(s, MASK)
+        }
         s = McpMarkerNeutraliser.neutralise(s)
         return cap(WHITESPACE_RUN.replace(s, " ").trim())
-    }
-
-    /** First [PRE_CAP_CODE_POINTS] code points; never splits a surrogate pair. */
-    internal fun preTruncate(s: String): String {
-        if (s.length <= PRE_CAP_CODE_POINTS) return s
-        return s.substring(0, s.offsetByCodePoints(0, minOf(PRE_CAP_CODE_POINTS, s.codePointCount(0, s.length))))
     }
 
     internal fun cap(s: String): String {
@@ -125,6 +137,8 @@ object McpToolResultSanitiser {
     }
 
     private val WHITESPACE_RUN = Regex(" {2,}+")
+    private val UUID_SHAPE = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+    private val DECIMAL_SHAPE = Regex("-?[0-9]{1,15}(?:\\.[0-9]{1,4})?")
     private val CDN_URL = Regex("""^https://([A-Za-z0-9.-]++)/[A-Za-z0-9/._-]*+$""")
 
     /**
@@ -148,6 +162,28 @@ internal object McpControlChars {
     /** Unicode tag block U+E0000..U+E007F ("ASCII smuggling"). */
     private val TAG_CHARS = "\uDB40\uDC00".codePointAt(0).."\uDB40\uDC7F".codePointAt(0)
     private val BREAKS = setOf('\n'.code, '\r'.code, '\t'.code, LINE_SEPARATOR, PARAGRAPH_SEPARATOR)
+
+    /**
+     * [strip] fused with a code-point bound: keeps at most [limit] surviving code points and reports
+     * whether input remained. Linear in the input, and never splits a surrogate pair.
+     */
+    fun stripBounded(s: String, limit: Int): Pair<String, Boolean> {
+        val sb = StringBuilder()
+        var kept = 0
+        var i = 0
+        while (i < s.length && kept < limit) {
+            val cp = s.codePointAt(i)
+            i += Character.charCount(cp)
+            when {
+                cp in BREAKS -> sb.append(' ')
+                isStripped(cp) -> continue
+                else -> sb.appendCodePoint(cp)
+            }
+            kept++
+        }
+        val truncated = (i until s.length).any { !isStripped(s[it].code) || Character.isSurrogate(s[it]) }
+        return sb.toString() to truncated
+    }
 
     /** Removes them; a line break, tab or separator becomes a space so words do not fuse. */
     fun strip(s: String): String {

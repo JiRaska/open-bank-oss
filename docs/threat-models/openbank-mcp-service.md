@@ -499,24 +499,30 @@ a stub (T-T2/T-D2).
   `McpToolResultSanitiser` runs at the existing single seam in `McpToolRegistry.call`, after
   `McpPiiMasker` and before `McpUntrustedData.wrap`. It covers every string value and object key in
   a tool result:
-  - Input is cut to 560 code points before any step, and all patterns are linear. 1 MiB of each
+  - Invisible code points are removed and the input cut to 560 surviving code points in one linear
+    pass, and all patterns are linear. 1 MiB of each
     pathological pattern is processed in well under 200 ms, against about 30 s for one before.
   - Strings are NFKC-normalised and lose control, format, tag and separator code points.
-  - Percent and HTML-entity encodings are decoded first. Link and image markup, HTML and URLs
+  - Percent and HTML-entity encodings are decoded first, to a fixpoint of at most 3 rounds. Link and image markup, HTML and URLs
     (including `www.` and protocol-relative forms) are then replaced with a placeholder.
   - IBANs (registry country and length, any grouping) and phone numbers (3-3-3, 3-2-2-2, `+CC`)
-    inside free text are masked. Identifier and amount fields are exempt, so ids chain unchanged.
+    inside free text are masked, and so is an IBAN fragment left at a cut. Only allow-listed
+    system id fields holding a UUID, and amount fields holding a plain decimal, are exempt, so ids
+    chain unchanged while a payer-controlled field such as `endToEndId` is still masked.
+  - Object keys are sanitised and masked. A key that cleans to another entry's name is dropped.
   - Marker look-alikes are neutralised on a UTS #39-style skeleton covering case, separators,
-    combining marks, and Cyrillic, Greek, Armenian, Cherokee and fullwidth forms.
+    combining marks, digits between words, and Cyrillic, Greek, Armenian, Cherokee, Lisu,
+    small-capital and fullwidth forms.
   - Strings are capped at 140 characters.
   - `logoUrl` is kept only as `https` on the bank CDN host allow-list and is dropped otherwise.
 
   This narrows T-I3 and T-I4 (exfiltration through rendered URLs, marker breakout and oversized
   instructions). It does not change the security boundary, which is still D4, D6 and OPA. The
-  layer-4 red-team pack closes 52 of its original 53 recorded gaps, and its 11 added payloads all
+  layer-4 red-team pack closes 52 of its original 53 recorded gaps, and its 17 added payloads all
   pass. **Residual:** a natural-person name embedded in a free-text field the masker does not
   redact wholesale (for example a payment reference) still passes, because a name has no shape to
-  match. It stays in `known-gaps.json`. The marker skeleton is a minimal confusables subset for the
-  marker's own letters, not the full UTS #39 table. IBAN detection deliberately skips mod-97: an RF
+  match. It stays in `known-gaps.json`. The marker skeleton is a vendored confusables subset for the
+  marker's own letters, not the full UTS #39 table (ICU4J is not on the runtime classpath, and no
+  dependency was added for it), so a look-alike outside the subset still passes. IBAN detection deliberately skips mod-97: an RF
   reference passes it and a mistyped IBAN fails it. Rollback: revert the commit. The red-team
   ratchet then fails until `known-gaps.json` is restored.

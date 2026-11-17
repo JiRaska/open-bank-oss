@@ -9,14 +9,20 @@ import java.text.Normalizer
 /**
  * Neutralises spellings of the untrusted-data marker phrase that a lenient reader could take for a
  * marker (ADR-0383 D7). The match runs on a skeleton: NFD with combining marks dropped, case
- * folded, confusables mapped to their Latin target (UTS #39 style), any non-alphanumeric run
- * between the words. The skeleton is mapped back to the original indices and the span replaced.
+ * folded, confusables mapped to their Latin target (UTS #39 style), any run of non-letters (digits
+ * included) between the words. Digits are therefore NOT mapped as confusables in the table: the
+ * digit look-alikes of `tool` (`t00l`, `too1`, `too|`) are spelled out in the phrase instead.
+ *
+ * ICU4J is not on this service's runtime classpath, so `SpoofChecker.getSkeleton` is not used and
+ * no dependency is added for it. The vendored table below covers the marker's own letters only.
+ * Residual: a look-alike from a script not in the table, and not folded by NFKC, still evades the
+ * skeleton. The markers are defence in depth (ADR-0383 D7), not the boundary. The skeleton is mapped back to the original indices and the span replaced.
  */
 internal object McpMarkerNeutraliser {
 
     const val PLACEHOLDER = "(marker removed)"
 
-    private val PHRASE = Regex("""untrusted[^\p{L}\p{N}]*+tool[^\p{L}\p{N}]*+data""")
+    private val PHRASE = Regex("""untrusted[^\p{L}]*+t[o0]{2}[l1|][^\p{L}]*+data""")
     private val COMBINING = Regex("""\p{Mn}++""")
     private val SMALL_CHEROKEE = 'ꭰ'.code..'ꮿ'.code
     private const val CHEROKEE_BASE = 'Ꭰ'.code
@@ -65,6 +71,12 @@ internal object McpMarkerNeutraliser {
             "ոnսuՍuօo" +
             "ΑaαaΕeΟoοoΤtτtυuΝn" +
             "ᎠdᎡrᎢtᎪaᎬeᏚsᏞlᏫo" +
-            "ɑaılǀlIl1l|l0o"
+            "ɑaılǀlIl" +
+            // Latin small capitals (U+1D00 block and IPA extensions).
+            "ᴀaᴅdᴇeʟlɴnᴏoʀrꜱsᴛtᴜu" +
+            // Lisu (U+A4D0..U+A4FF).
+            "ꓮaꓓdꓰeꓡlꓠnꓳoꓣrꓢsꓔtꓴu" +
+            // Other Latin look-alikes: turned, reversed and hooked forms.
+            "ɐaɗdɖdəeǝeɹrɾrʂsƫtƭtʊuɳn"
         ).chunked(2).associate { it[0].code to it[1].toString() }
 }

@@ -21,6 +21,9 @@ internal object McpMarkupNeutraliser {
 
     private const val HEX = 16
 
+    /** Decoding rounds: `%2568` needs two; a bound keeps nested encodings from costing more. */
+    private const val MAX_DECODE_ROUNDS = 3
+
     /** Replaces markup; repeats on the combining-mark-stripped text when markup only shows there. */
     fun neutralise(input: String): String {
         val s = replaceMarkup(input)
@@ -28,8 +31,18 @@ internal object McpMarkupNeutraliser {
         return if (unmarked != s && PROBES.any { it.containsMatchIn(unmarked) }) replaceMarkup(unmarked) else s
     }
 
-    /** One pass of percent (printable ASCII only) and HTML-entity decoding. */
+    /** Percent (printable ASCII only) and HTML-entity decoding, repeated to a fixpoint (max 3 rounds). */
     fun decode(input: String): String {
+        var s = input
+        repeat(MAX_DECODE_ROUNDS) {
+            val next = decodeOnce(s)
+            if (next == s) return s
+            s = next
+        }
+        return s
+    }
+
+    private fun decodeOnce(input: String): String {
         var s = PERCENT.replace(input) { m ->
             val c = m.groupValues[1].toInt(HEX).toChar()
             if (c in ' '..'~') c.toString() else m.value
