@@ -113,6 +113,18 @@ class LegalInboxHttpTest {
     }
 
     @Test
+    @TestSecurity(user = "operator-subject", roles = [INBOX_VIEW, INBOX_EVIDENCE, ACCESSIBLE])
+    fun `extracts the namespace returned by the public ISDS test`() {
+        val source = cms("239", "http://isds.czechpoint.cz/v20/message")
+        val id = import("synthetic-inbox", "239", source)
+        assertEquals(200, request("/$id/extract", "").statusCode())
+        val draft = request("/$id").body().decodeToString()
+        assertTrue(draft.contains("Zkušební návrh"))
+        assertTrue(draft.contains("REF-239"))
+        assertTrue(draft.contains("\"attachmentCount\":1"))
+    }
+
+    @Test
     @TestSecurity(user = "view-only-subject", roles = [INBOX_VIEW, ACCESSIBLE])
     fun `metadata grants neither evidence nor assignment`() {
         val id = import("synthetic-inbox", "232", byteArrayOf(4))
@@ -285,9 +297,9 @@ class LegalInboxHttpTest {
         }
     }
 
-    private fun cms(id: String): ByteArray {
+    private fun cms(id: String, namespace: String = "http://isds.czebox.cz/v20/message"): ByteArray {
         val xml = """
-            <MessageDownloadResponse xmlns="http://isds.czebox.cz/v20/message">
+            <MessageDownloadResponse xmlns="$namespace">
               <dmReturnedMessage><dmDm><dmID>$id</dmID><dmAnnotation>Zkušební návrh</dmAnnotation>
               <dmSenderRefNumber>REF-$id</dmSenderRefNumber><dmFiles><dmFile/></dmFiles>
               </dmDm></dmReturnedMessage>

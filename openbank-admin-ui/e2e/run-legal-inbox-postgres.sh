@@ -147,7 +147,11 @@ from sys import argv
 from xml.etree import ElementTree
 
 root = ElementTree.parse(argv[1]).getroot()
-namespaces = ("http://isds.czebox.cz/v20/message", "http://isds.czechpoint.cz/v20")
+namespaces = (
+    "http://isds.czechpoint.cz/v20/message",
+    "http://isds.czebox.cz/v20/message",
+    "http://isds.czechpoint.cz/v20",
+)
 for namespace in namespaces:
     delivery = root.findtext(f".//{{{namespace}}}dmAcceptanceTime")
     if delivery and datetime.fromisoformat(delivery.replace("Z", "+00:00")).tzinfo is not None:

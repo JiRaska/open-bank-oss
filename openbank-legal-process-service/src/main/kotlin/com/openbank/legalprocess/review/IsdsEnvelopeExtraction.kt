@@ -23,7 +23,10 @@ internal data class EnvelopeDraft(
 /** Reads envelope metadata from stored CMS. The result is a draft pending independent verification. */
 internal object IsdsEnvelopeExtraction {
     private const val TYPES = "http://isds.czechpoint.cz/v20"
-    private const val NAMESPACE = "http://isds.czebox.cz/v20/message"
+    private val namespaces = setOf(
+        "http://isds.czechpoint.cz/v20/message",
+        "http://isds.czebox.cz/v20/message",
+    )
     private const val SUBJECT_LIMIT = 256
     private const val REFERENCE_LIMIT = 128
 
@@ -52,7 +55,7 @@ internal object IsdsEnvelopeExtraction {
             setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
         }.newDocumentBuilder().apply { setErrorHandler(DefaultHandler()) }.parse(bytes.inputStream())
         val root = document.documentElement
-        if (root.namespaceURI != NAMESPACE || root.localName != "MessageDownloadResponse") return null
+        if (root.namespaceURI !in namespaces || root.localName != "MessageDownloadResponse") return null
         val returned = root.child("dmReturnedMessage") ?: return null
         val envelope = returned.child("dmDm") ?: return null
         if (envelope.child("dmID")?.textContent?.trim() != deliveryId) return null
@@ -68,5 +71,5 @@ internal object IsdsEnvelopeExtraction {
 
     private fun Element.children(name: String): List<Element> = (0 until childNodes.length)
         .mapNotNull { childNodes.item(it) as? Element }
-        .filter { (it.namespaceURI == NAMESPACE || it.namespaceURI == TYPES) && it.localName == name }
+        .filter { (it.namespaceURI in namespaces || it.namespaceURI == TYPES) && it.localName == name }
 }
