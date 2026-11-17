@@ -1,0 +1,71 @@
+{
+  "$comment": "Answers for the claude.ai/directory/manage 'MCP connector' form, step by step (claude.com/docs/connectors/building/submission). Not uploaded as a file. Generated from listing.json.",
+  "1_connection": {
+    "universalUrl": "https://customer.open-bank.tech/mcp"
+  },
+  "2_tools": [
+    {
+      "name": "list_accounts",
+      "title": "List my accounts",
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "get_balance",
+      "title": "Get account balance",
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "list_transactions",
+      "title": "List recent transactions",
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "get_statement",
+      "title": "Get a closed statement",
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "get_payment_confirmation",
+      "title": "Get payment confirmation",
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "propose_payment",
+      "title": "Propose a payment",
+      "readOnlyHint": false,
+      "destructiveHint": false
+    }
+  ],
+  "3_listing": {
+    "serverName": "OpenBank",
+    "oneLiner": "Read your OpenBank accounts, balances, transactions, statements and payment confirmations, and draft payment proposals that you approve yourself in the OpenBank app.",
+    "description": "Connect your OpenBank account to ask about balances, recent transactions, closed statements and the confirmation details of payments you already made. The assistant can also draft a payment PROPOSAL. A proposal is never a payment: nothing leaves your account until you open the OpenBank app and approve that exact proposal with strong customer authentication. The assistant can never pay, change limits, add trusted payees or change security settings. Data you ask about is sent to the assistant platform's own provider. You can see and revoke every connected assistant in the OpenBank app. Limitations: personal accounts only; IBANs and counterparty names are masked; transaction history is limited to 90 days and statements to 12 months.",
+    "categories": [
+      "Finance"
+    ],
+    "documentationUrl": "https://github.com/JiRaska/open-bank-oss/tree/main/integrations/assistant-plugins",
+    "icon": "assets/icon.png",
+    "slug": "openbank"
+  },
+  "4_use_cases": {
+    "readsOrWrites": "both: reads, plus payment proposals that the customer approves in the bank app",
+    "prerequisites": "An OpenBank personal account and the OpenBank app with a registered passkey."
+  },
+  "6_authentication": {
+    "requirement": "Always required",
+    "method": "OAuth sign-in",
+    "oauthClient": "Anthropic-held client credentials (oauth_anthropic_creds)",
+    "redirectUri": "https://claude.ai/api/mcp/auth_callback",
+    "clientIdAndSecret": "OWNER enters these in the portal; never in this repository"
+  },
+  "7_data_handling": {
+    "api": "own first-party API",
+    "personalHealthData": false,
+    "sponsoredContent": false
+  }
+}
