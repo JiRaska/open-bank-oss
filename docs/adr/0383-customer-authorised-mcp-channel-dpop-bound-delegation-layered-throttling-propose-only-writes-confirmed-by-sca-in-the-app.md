@@ -80,8 +80,17 @@ prerequisite below has landed. Until then no route to mcp-service is created.
   grantee type at all today.
 - **P3:** the deployed Keycloak version is verified to issue DPoP-bound access and refresh tokens
   for a customers-realm public client. This is checked against a local Keycloak of that exact
-  version, per the realm-template rule in CLAUDE.md. If it cannot, the channel does not open.
-  There is no bearer-token fallback.
+  version, per the realm-template rule in CLAUDE.md. The same check covers the D4 exchange: an
+  RFC 8693 exchange from a DPoP-bound subject token, with an `act` claim, a read-only scope and a
+  ≤ 60 s lifetime. If either step fails, the channel does not open. There is no bearer-token
+  fallback.
+- **P4:** a Valkey connection for mcp-service: the secret, the egress NetworkPolicy, and
+  fail-closed client configuration. It holds the DPoP `jti` store, the nonces and the D5 buckets.
+  In-memory stores are acceptable only while no route exists, because a pod roll resets them and
+  re-opens a replay window.
+- **P5:** party-ownership enforcement in every downstream read service the channel touches
+  (account, balance, transaction, statement, payment confirmation). Each service gets its own
+  cross-party-deny IT before its tool is enabled on this channel.
 
 **D1 — Identity, tenant separation and client admission**
 - Tokens come only from the **customer realm** (ADR-0065). MCP validates them as a **separate
@@ -142,7 +151,7 @@ prerequisite below has landed. Until then no route to mcp-service is created.
   and `delegation.manage`.
 - MCP finds the grant server-side from `(party from sub, azp, cnf.jkt)` on **every** call, and
   checks the requested resource against it.
-- **PSD2 consent and consent-service are not used on this channel.** `ConsentGate` and the
+- **PSD2 consent and consent-service (ADR-0126) are not used on this channel.** `ConsentGate` and the
   ADR-0195 grantee check remain the path for governed agents only. This removes the shared-grantee
   defect in Context item 1 by construction: a grant names one grantor party, and the lookup key
   includes that party.
@@ -163,10 +172,17 @@ prerequisite below has landed. Until then no route to mcp-service is created.
 - Downstream services enforce party ownership themselves. A defect in an MCP read port can
   therefore no longer read another party. The shared `openbank-services` principal is not used on
   this channel.
-- **The primary write control is authorization, not code shape.** In the OPA data (ADR-0034),
-  the identity MCP acts as on this channel is granted only `*.read` actions plus
-  `paymentProposal.create`. This is proven with `opa eval` against the built bundle, with a
-  must-deny and a must-allow control in every run.
+- **The primary write control is authorization at two PDPs, not code shape.**
+  1. **MCP's own PDP.** A customer-channel call is evaluated as principal type `HUMAN`, with id =
+     the customer `sub`, `channel = mcp-customer` and `client = azp`. The policy allows this
+     channel only the `query.*.readonly` capabilities and `propose.payment`
+     (`McpToolRegistry` capability names), whatever the customer's roles.
+  2. **Every downstream PDP.** The exchanged token carries only a read scope. Base `rest.rego`
+     denies every non-read action to a token whose `act` chain names the MCP actor, identified by
+     principal id per the OPA rule in CLAUDE.md, never by a `SERVICE` principal type. The single
+     exception is the proposal-store create action that D6 introduces.
+  - Both are proven with `opa eval` against the built bundles, with a must-deny and a must-allow
+    control in every run.
 
 **D5 — Layered throttling, cheapest first, failing closed**
 1. **Edge (before any token work).** Per-IP request and new-connection limits plus a body-size cap
@@ -198,8 +214,12 @@ Throttled and denied calls are audited and metered like any other deny.
   - An identical open proposal (same payee, amount and currency) is deduplicated, not created
     twice.
 - **How it reaches the customer**
-  - It appears in the customer's approval inbox (ADR-0227), clearly labelled as coming from the
-    named connected client. It is never shown as if the customer had entered it.
+  - It appears on a **new customer-facing approval surface**: customer-edge routes plus an app
+    screen in the separate customer-app repository (ADR-0064). The surface reuses only the
+    ADR-0227 `ApprovalItem` contract shape. The ADR-0227 inbox itself is a staff surface and is
+    not used.
+  - It is clearly labelled as coming from the named connected client, and never shown as if the
+    customer had entered it.
   - Notifications for proposals are coalesced to at most one push per party per 15 minutes.
 - **Approval**
   - A proposal executes only after the customer approves it in the bank app with full SCA and
@@ -255,8 +275,9 @@ Throttled and denied calls are audited and metered like any other deny.
 - A stolen access token is useless without the DPoP key and expires in minutes.
 - A grant cannot be used across customers, clients or keys, and revocation applies on the next
   call.
-- MCP's credential cannot write, so an injected model can at worst create a proposal, and the
-  customer then rejects it in the app.
+- Neither MCP's own principal nor the exchanged customer token can perform a write other than
+  creating a proposal. An injected model can at worst create a proposal, and the customer then
+  rejects it in the app.
 - Floods are shed before token validation or OPA calls, and money-path reads have a global
   ceiling.
 
@@ -285,9 +306,12 @@ Throttled and denied calls are audited and metered like any other deny.
 
 ### Delivery check
 
-- **No write grant.** `opa eval` on the built mcp bundle answers `allow=false` for the
-  customer-channel identity on `sepaPayment.create` and `domestic-payment.create`, and
-  `allow=true` for `paymentProposal.create` (both controls in one run).
+- **No write grant at MCP.** `opa eval` on the built mcp bundle, for a `channel = mcp-customer`
+  principal, answers `allow=false` on any capability outside `query.*.readonly` and
+  `propose.payment`, and `allow=true` on `query.balance.readonly`.
+- **No write grant downstream.** `opa eval` on the sepa-payment and domestic-payment bundles, for
+  a token whose `act` chain names the MCP actor, answers `allow=false` on `sepaPayment.create` and
+  `domestic-payment.create`, and `allow=true` on `sepaPayment.read`.
 - **Allow-list invariant.** The delegation-service unit test "MCP_CLIENT grant with
   account.initiate-payment is rejected" exists and passes, and fails when the invariant is
   removed.
@@ -295,8 +319,8 @@ Throttled and denied calls are audited and metered like any other deny.
   - no DPoP proof gives 401;
   - a proof for another key gives 401;
   - a replayed `jti` gives 401.
-- **Cross-customer isolation.** An IT shows customer A's token against customer B's resource is
-  denied.
+- **Cross-customer isolation.** Per P5, an IT in each enabled downstream service shows customer A's
+  exchanged token against customer B's resource is denied, and an IT at MCP shows the same.
 - **Throttle ordering.** An IT shows a flood of tokenless requests is throttled with zero OPA calls
   and zero grant lookups recorded.
 - **Proposal approval.** An IT shows a proposal executes only after a consumed SCA challenge, and a
