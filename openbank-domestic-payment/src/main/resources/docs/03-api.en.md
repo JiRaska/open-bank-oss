@@ -205,6 +205,11 @@ currency and `Idempotency-Key` must match it. Refusals are `409` with a `code`:
 retryable. A retry with the same key replays the one payment. The payment's events carry
 `delegationId` and `reservationId`.
 
+The create-time authority re-check (ADR-0375 D1) answers `409 DELEGATION_AUTHORITY_WITHDRAWN`
+when the grant was revoked or no longer covers the account. It refuses a NEW debit only: a retry
+with the key of the payment already bound to the reservation replays that payment, because the
+money moved while the grant was live. A new key against a bound reservation is still refused.
+
 ## Customer submission lookup
 
 `POST /api/v1/domestic-payments/submissions/lookup` is a read-only operation reserved for
