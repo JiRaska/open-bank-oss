@@ -12,10 +12,13 @@ import com.openbank.transaction.application.port.out.TransactionRepository
 import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
+import com.openbank.transaction.infrastructure.client.BookedJournalRequest
 import com.openbank.transaction.infrastructure.client.JournalResponse
 import com.openbank.transaction.infrastructure.client.LedgerCallGuard
 import com.openbank.transaction.infrastructure.client.PostJournalRequest
 import com.openbank.transaction.infrastructure.client.ReverseJournalRequest
+import com.openbank.transaction.infrastructure.kafka.AccountBookingContext
+import com.openbank.transaction.infrastructure.persistence.repository.PaymentBookingProjection
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -26,6 +29,8 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -41,16 +46,19 @@ class PaymentActivitiesImplTest {
     private val eventPublisher: TransactionEventPublisher = mockk()
     private val clock: Clock = Clock.fixed(Instant.parse("2026-06-28T10:00:00Z"), ZoneOffset.UTC)
 
+    private val bookingProjection: PaymentBookingProjection = mockk()
     private lateinit var activities: PaymentActivitiesImpl
 
     @BeforeEach
     fun setUp() {
+        coEvery { bookingProjection.resolve(any()) } returns null
         activities = TestableActivities(
             transactionRepository,
             ledgerCallGuard,
             balanceCoverPort,
             eventPublisher,
             clock,
+            bookingProjection,
         )
     }
 
@@ -154,6 +162,34 @@ class PaymentActivitiesImplTest {
         coVerify(exactly = 0) { balanceCoverPort.placeHold(any(), any(), any(), any(), any(), any()) }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["DOMESTIC", "FOS", "BRANCH"])
+    fun `postJournal uses the attributed ledger endpoint`(modeName: String): Unit = runBlocking {
+        val mode = AccountBookingContext.Mode.valueOf(modeName)
+        val tx = transaction(sourceAccountId = UUID.randomUUID())
+        val receipt = AccountBookingContext(
+            schemaVersion = 1,
+            contextVersionId = UUID.randomUUID(),
+            legalEntityId = UUID.randomUUID(),
+            bookingBookId = UUID.randomUUID(),
+            operatingMode = mode,
+            establishmentId = UUID.randomUUID().takeIf { mode == AccountBookingContext.Mode.BRANCH },
+        )
+        val journalId = UUID.randomUUID()
+        val request = slot<BookedJournalRequest>()
+        coEvery { transactionRepository.findById(tx.id) } returns tx
+        coEvery { bookingProjection.resolve(tx) } returns receipt
+        every { ledgerCallGuard.postBookedJournal(capture(request)) } returns
+            Uni.createFrom().item(JournalResponse(journalId, tx.id, "POSTED"))
+
+        assertThat(activities.postJournal(tx.id)).isEqualTo(journalId)
+        assertThat(request.captured.journal.transactionId).isEqualTo(tx.id)
+        assertThat(request.captured.booking.contextVersionId).isEqualTo(receipt.contextVersionId)
+        assertThat(request.captured.booking.legalEntityId).isEqualTo(receipt.legalEntityId)
+        assertThat(request.captured.booking.operatingMode).isEqualTo(mode.name)
+        assertThat(request.captured.booking.establishmentId).isEqualTo(receipt.establishmentId)
+    }
+
     @Test
     fun `postJournal posts via ledger guard and returns journal id`(): Unit = runBlocking {
         val tx = transaction(sourceAccountId = UUID.randomUUID())
@@ -250,6 +286,14 @@ private class TestableActivities(
     balanceCoverPort: BalanceCoverPort,
     eventPublisher: TransactionEventPublisher,
     clock: Clock,
-) : PaymentActivitiesImpl(transactionRepository, ledgerCallGuard, balanceCoverPort, eventPublisher, clock) {
+    bookingProjection: PaymentBookingProjection,
+) : PaymentActivitiesImpl(
+    transactionRepository,
+    ledgerCallGuard,
+    balanceCoverPort,
+    eventPublisher,
+    clock,
+    bookingProjection,
+) {
     override fun <T> runOnVertxContext(block: suspend () -> T): T = runBlocking { block() }
 }

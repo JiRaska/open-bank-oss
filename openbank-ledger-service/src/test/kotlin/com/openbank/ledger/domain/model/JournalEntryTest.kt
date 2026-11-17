@@ -290,6 +290,20 @@ class JournalEntryTest {
     inner class Reverse {
 
         @Test
+        fun `a reversal retains the original approved booking attribution`() {
+            val attribution = JournalBookingAttribution(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                JournalBookingMode.BRANCH,
+                UUID.randomUUID(),
+            )
+            val posted = balancedEntry(status = JournalStatus.POSTED).copy(bookingAttribution = attribution)
+
+            assertThat(posted.reverse(UUID.randomUUID(), UUID.randomUUID()).bookingAttribution)
+                .isEqualTo(attribution)
+        }
+
+        @Test
         fun `a reversal inherits the synthetic taint of the entry it reverses`() {
             // ADR-0252 (#8615). Dropping the taint here puts the compensating half inside the real
             // population while the original sits outside it, so a real-only trial balance would

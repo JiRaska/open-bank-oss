@@ -32,6 +32,7 @@ data class JournalEntry(
     val synthetic: Boolean = false,
     /** Optional, immutable caller-attributed raw source facts; legacy journals remain unknown. */
     val origin: JournalOrigin? = null,
+    val bookingAttribution: JournalBookingAttribution? = null,
 ) {
     init {
         requireValid(lines.size >= 2) { "Journal entry must have at least 2 lines" }
@@ -119,6 +120,7 @@ data class JournalEntry(
             // globally (the same shape as the #939 status-filter defect, which is why that class
             // of break is invisible to the balanced check).
             synthetic = synthetic,
+            bookingAttribution = bookingAttribution,
         )
     }
 }
