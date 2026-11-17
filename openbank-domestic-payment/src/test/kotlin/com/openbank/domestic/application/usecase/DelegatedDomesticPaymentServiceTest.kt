@@ -363,6 +363,40 @@ class DelegatedDomesticPaymentServiceTest {
         coVerify(exactly = 0) { paymentRepository.saveDelegated(any(), any(), any(), any()) }
     }
 
+    /**
+     * The positive half of the carve-out. The stored payment is produced by the service's own
+     * create path while the grant is live, so its fingerprint, submission scope and original-key
+     * digest are exactly what `createDelegatedPayment` persists; the retry after revocation must
+     * then replay it rather than answer WITHDRAWN, and must write nothing.
+     */
+    @Test
+    fun `a revoked grant replays the bound payment for the same key and payload`(): Unit = runBlocking {
+        val stored = slot<DomesticPayment>()
+        coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns pendingBinding()
+        coEvery { paymentRepository.saveDelegated(capture(stored), any(), any(), any()) } answers {
+            DelegatedPaymentSaveOutcome.Created(stored.captured.copy(id = BOUND_PAYMENT_ID))
+        }
+        val original = service.createDelegatedPayment(RESERVATION_ID, command())
+        assertThat(original).isInstanceOf(DelegatedDomesticPaymentResult.Accepted::class.java)
+        val persisted = stored.captured.copy(id = BOUND_PAYMENT_ID)
+
+        coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns boundBinding()
+        coEvery { paymentRepository.findByIdempotencyKey("payment-42") } returns persisted
+        coEvery { authorityPort.factsFor(ACCOUNT_ID, GRANTEE_ID) } returns
+            DelegationFactsLookup.Available(emptyList(), GRANTOR_ID)
+
+        val retry = service.createDelegatedPayment(RESERVATION_ID, command())
+
+        assertThat(retry).isInstanceOf(DelegatedDomesticPaymentResult.Accepted::class.java)
+        val replay = (retry as DelegatedDomesticPaymentResult.Accepted).result
+        assertThat(replay.replayed).isTrue()
+        assertThat(replay.payment.id).isEqualTo(BOUND_PAYMENT_ID)
+        // Exactly the ONE write and ONE outbox payload of the original create; the retry adds none.
+        coVerify(exactly = 1) { paymentRepository.saveDelegated(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { paymentRepository.save(any(), any()) }
+        verify(exactly = 1) { eventPublisher.paymentCreatedPayload(any()) }
+    }
+
     @Test
     fun `a revoked grant refuses a new key against a bound reservation`(): Unit = runBlocking {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns boundBinding()
