@@ -92,7 +92,7 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 5. Residual risks / assumptions
 
-The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit mapped-column projection. This keeps the existing dispatcher available across additive schema expansion. The claim and acknowledgement semantics stay the same.
+Outbox v2 acknowledges `domestic_payment_outbox` rows only when a dispatcher owns the current claim token. A stale worker may still deliver an event, so downstream deduplication by event ID remains required. The compatibility rollout pauses all v1 dispatchers before v2 claims begin. The existing SENT retention and synthetic origin rules continue to apply.
 
 - **Idempotency-key required** — only an exact, actor-bound retry may replay the durable payment;
   changed or unverifiable legacy requests are rejected with 409.
@@ -1066,6 +1066,9 @@ reservation.
   bound path. The grant state and the account owner come from one lookup, before any write. A
   revoked grant, or one that does not cover the debtor account, is
   `409 DELEGATION_AUTHORITY_WITHDRAWN`, which writes no payment and leaves the reservation PENDING.
+  A retry of a payment already BOUND to the reservation, under the same idempotency key, skips
+  this step and takes the fingerprint-checked replay: revocation refuses the next debit, never
+  the report of one that already committed. A new key against a BOUND reservation is still decided.
   A lookup outage is a retryable `503`, never a refusal.
 
 ## 2026-11-11 - Label key domain rename (no reach change)

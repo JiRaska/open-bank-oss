@@ -416,6 +416,7 @@ class PerformanceStageTests(unittest.TestCase):
             "openbank-product-catalog-product-catalog-smoke",
             "openbank-flaky-test-hunter-flaky-test-hunter-smoke",
             "openbank-ledger-service-ledger-read-baseline",
+            "openbank-account-service-account-read-baseline",
             "openbank-balance-service-balance-read-baseline",
             "openbank-transaction-service-transaction-read-baseline",
             "openbank-consent-service-consent-read-baseline",
@@ -424,6 +425,11 @@ class PerformanceStageTests(unittest.TestCase):
             "openbank-sca-service-sca-read-baseline",
             "openbank-sepa-instant-sepa-instant-read-baseline",
             "openbank-sepa-payment-sepa-payment-read-baseline",
+            "openbank-sanctions-service-sanctions-read-baseline",
+            "openbank-standing-order-service-standing-order-read-baseline",
+            "openbank-card-processing-service-card-processing-read-baseline",
+            "openbank-card-issuance-service-card-issuance-read-baseline",
+            "openbank-treasury-service-treasury-read-baseline",
         })
 
     def test_ambiguous_baseline_definition_is_never_attributed(self):

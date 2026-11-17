@@ -417,6 +417,8 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
   ['compliance:view', [
     '/aml', '/fraud', '/disputes', '/consents', '/customer-360',
     '/docs/compliance', '/docs/bcp',
+    // ADR-0379: the compliance trace and its auditor export carry the same audience as the page.
+    '/api/compliance',
     // ADR-0286: the warehouse-backed risk reporting surface. Each registry entry also carries
     // its own permission at the BFF boundary — this prefix only gates the page shell.
     '/reporting',

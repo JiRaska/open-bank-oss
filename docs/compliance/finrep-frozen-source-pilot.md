@@ -105,7 +105,7 @@ with no production non-interference claim.
 
 ## Ledger history and deployment sequence
 
-Ledger V45 adds optional company, approved context version, operating mode and branch identifiers
+Ledger V46 adds optional company, approved context version, operating mode and branch identifiers
 to the journal row. The context version must identify the approved historical booking context,
 including the market for FOS. The application preserves the attribution on reversal and rejects a
 changed attribution on an idempotent retry. V44's posted-row guard protects the added columns.
@@ -119,7 +119,7 @@ path. Existing records are unknown. A historical overlay needs independent evide
 reconciliation, with no rewrite of posted journals. Report production must stop for unknown
 attribution within the requested scope.
 
-Apply V45 before deploying the new writer. Until trusted inputs are enabled, an older application
+Apply V46 before deploying the new writer. Until trusted inputs are enabled, an older application
 can resume with the additional columns in place. Once attributed journals exist, keep an
 attribution-aware writer for reversals. Reverting to a writer that drops the original context
 would produce incomplete reporting evidence. Do not remove the columns during rollback.

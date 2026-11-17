@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.4](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v3.1.3...pension-service-v3.1.4) (2026-11-16)
+
+
+### Bug Fixes
+
+* **pension,risk-engine,sca:** reload outbound mTLS client certificates ([#16416](https://github.com/JiRaska/open-bank-oss/issues/16416)) ([9f9c926](https://github.com/JiRaska/open-bank-oss/commit/9f9c926541a8af2e84dcad9e9d5a4059048f3d31))
+
 ## [3.1.3](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v3.1.2...pension-service-v3.1.3) (2026-11-09)
 
 

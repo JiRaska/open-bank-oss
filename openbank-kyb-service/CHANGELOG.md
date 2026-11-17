@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.1...kyb-service-v0.11.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **fx,interest,kyb:** reload outbound mTLS client certificates ([#16414](https://github.com/JiRaska/open-bank-oss/issues/16414)) ([afceb60](https://github.com/JiRaska/open-bank-oss/commit/afceb607acaadd6a5d4e44619795f5fabf18f63c))
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.0...kyb-service-v0.11.1) (2026-11-15)
 
 

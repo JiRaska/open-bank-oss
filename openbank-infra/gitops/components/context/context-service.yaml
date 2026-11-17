@@ -14,7 +14,7 @@ spec:
   selector: { matchLabels: { app.kubernetes.io/name: context-service } }
   template:
     metadata:
-      annotations: { openbank.tech/policy-checksum: "03015a5ae22d3b07" }
+      annotations: { openbank.tech/policy-checksum: "c5d55a0214687401" }
       labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
     spec:
       securityContext:
@@ -25,7 +25,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: context-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-context-service:sandbox-98b05073@sha256:9076b26c7e483fd6f1504f8cf8781072cc488cbef267636a1a495e27ab1f80d7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-context-service:sandbox-44fff644@sha256:9f3ce8a56fb9cbf442685edf5bd7e686414372a80ed2bfd7cc3b1db8392c4df0
           imagePullPolicy: IfNotPresent
           ports:
             - { name: http, containerPort: 8149 }
@@ -38,6 +38,8 @@ spec:
               value: "0.1"
             - { name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES, value: /mnt/context-tls/tls.crt }
             - { name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES, value: /mnt/context-tls/tls.key }
+            # Re-read the pair cert-manager rewrites 15 days before expiry (check-tls-certificate-reload.py).
+            - { name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD, value: 1h }
             - { name: QUARKUS_HTTP_SSL_PORT, value: "8443" }
             - { name: QUARKUS_DATASOURCE_JDBC_URL, value: jdbc:postgresql://context-db-rw.context.svc:5432/openbank_context }
             - { name: QUARKUS_DATASOURCE_REACTIVE_URL, value: vertx-reactive:postgresql://context-db-rw.context.svc:5432/openbank_context }

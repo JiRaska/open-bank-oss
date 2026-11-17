@@ -308,6 +308,10 @@ class TreasuryDealConsumerIT {
             ),
         )
         await { outcome("malformed") >= malformedBefore + 1.0 }
+        val revisions = "FROM treasury_deal_cash_flow_revision WHERE deal_id = '$deal' AND deal_version = 3"
+        assertThat(TestDb.count("SELECT count(*) $revisions")).isEqualTo(2)
+        assertThat(TestDb.count("SELECT count(*) $revisions AND flows->0->>'state' = 'PROJECTED'")).isEqualTo(1)
+        assertThat(TestDb.count("SELECT count(*) $revisions AND flows->0->>'state' = 'FIXED'")).isEqualTo(1)
     }
 
     /** ADR-0344 D4: the stored ledger is kept at the latest version; an older version is a no-op. */

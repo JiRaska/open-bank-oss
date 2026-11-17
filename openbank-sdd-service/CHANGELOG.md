@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.7](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.6...sdd-service-v0.14.7) (2026-11-16)
+
+
+### Bug Fixes
+
+* **sdd,sepa-instant,sepa-payment:** reload outbound mTLS client certificates ([#16417](https://github.com/JiRaska/open-bank-oss/issues/16417)) ([ed923ee](https://github.com/JiRaska/open-bank-oss/commit/ed923ee0ce431dcd37a2b5a35c899e9184752632))
+
 ## [0.14.6](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.5...sdd-service-v0.14.6) (2026-11-15)
 
 

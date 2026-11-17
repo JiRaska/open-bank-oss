@@ -265,6 +265,8 @@ openbank:
     # further upstreams to these maps.
     tls:
       internal-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:

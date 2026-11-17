@@ -70,3 +70,25 @@ záznam se počítá v `openbank_delegation_payment_outcome_events_total{outcome
 Konzument je vypnutý, dokud není `OPENBANK_DELEGATION_PAYMENT_OUTCOME_CONSUMER_ENABLED=true`;
 vypnutý kanál vůbec neexistuje. Pořadí zapnutí: tento konzument, potom vazba rezervace v platebním
 kanálu, potom edge přestane potvrzovat na odpověď 2xx.
+
+## Příjemci typu MCP klient (ADR-0383 D3) — neaktivní
+
+Grant uvádí třídu příjemce ve sloupci `grantee_type` (V34): `PARTY` (výchozí; všechny granty před
+V34) nebo `MCP_CLIENT`, tedy MCP klient třetí strany, kterého zákazník připustil.
+
+- Grant `MCP_CLIENT` zaznamenává při udělení ID klienta (`grantee_client_id`, `azp` z tokenu) a
+  otisk klíče DPoP (`grantee_key_thumbprint`, `cnf.jkt`). Kontroly CHECK v databázi hlídají tvar:
+  u `MCP_CLIENT` jsou obě vazby vyplněné, u `PARTY` obě chybí. `grantee_party_id` je UUID verze 3
+  odvozené z ID klienta a grant `PARTY` tento tvar použít nesmí.
+- Oprávnění jsou výčtem povolených: čtení účtu (`ACCOUNT_READ_BALANCES`,
+  `ACCOUNT_READ_TRANSACTIONS`, `ACCOUNT_VIEW_DETAILS`, `ACCOUNT_DOWNLOAD_STATEMENTS`) a
+  `ACCOUNT_PROPOSE_PAYMENT`. Cokoli, co provádí nebo spravuje, je odmítnuto bez ohledu na limity.
+- Takový grant nikdy nepřijímá osoba. `accept()` ho odmítne; aktivaci zajistí budoucí tok
+  připojení s SCA v aplikaci banky (ADR-0383 D1).
+- Události životního cyklu nesou volitelná pole `granteeType` (chybí = `PARTY`) a
+  `granteeClientId` (AsyncAPI 1.7.0). Konzumenti musí grant s jiným `granteeType` než `PARTY`
+  ignorovat.
+- **Zatím neaktivní:** každá zapisující cesta grant `MCP_CLIENT` odmítne
+  (`400 MCP_CLIENT_GRANTEE_DORMANT`) a nelze pro něj sestavit žádnou událost, protože současní
+  konzumenti (account-service, card-issuance-service, context-service) znají jen osoby. Ochrana se
+  zruší až poté, co budou granty jiné než PARTY přeskakovat.
