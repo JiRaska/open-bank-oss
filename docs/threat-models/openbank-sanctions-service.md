@@ -240,9 +240,14 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
   word alone; (3) the agent is limited to `CLEAR` server-side and never holds
   `sanctions.approval.decide`. **Revisit** before any environment with more than one operator or real
   customer data: bind the instructing person to the approval and refuse them as its checker.
-  **Known ordering:** the CLEAR-only check runs in the resource body, after `AuthorizeInterceptor`
-  has created the pending approval, so a non-CLEAR agent request still appears in the checker queue;
-  approving it changes nothing (the call then answers 403 and the check keeps its status).
+  **Guard placement (#16455 review):** `AgentReviewGuard` (a JAX-RS `ReaderInterceptor`) refuses the
+  agent identity while the body is read, BEFORE `@Authorize`: any `newStatus` other than CLEAR, and
+  every request while `authz.four-eyes.enforce` is not `true` (the code default is `false`, so the
+  agent path fails closed without relying on the gitops value). A refused agent request therefore
+  never creates a pending approval; `AgentReviewGuardHttpTest` proves the order over real HTTP (403
+  where reaching the interceptor would have answered 503). The resource repeats both checks at the
+  point of effect. **Reviewer of record:** on an approved agent review, `reviewedBy` is the HUMAN
+  checker who approved it (read from the approval store), and the note records the agent as maker.
   Rollback: revert.
 
 - **2026-11-14** — **Ongoing monitoring switched on in the sandbox deployment

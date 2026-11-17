@@ -49,7 +49,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sanctions-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "3f5cf85d03c07a75"
+        openbank.tech/policy-checksum: "5bff675e9a34f1a9"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -165,9 +165,12 @@ spec:
             # Four-eyes ENFORCED (ADR-0155, #15748): sanctions.clear (deciding a screening hit,
             # rules.yaml four_eyes.verbs `clear`) answers 202 + approvalId until a DIFFERENT
             # operator approves it; the maker's retry carries X-Approval-Id (admin-ui /sanctions
-            # review form + checker queue). Human-only: POST /review admits ROLE_OPERATOR/ADMIN
-            # and no rule grants sanctions.clear to a service-account, so no screening caller is
-            # paused (they call sanctions.create). Approvals live in the Redis above.
+            # review form + checker queue). Makers: ROLE_OPERATOR/ADMIN humans, and ONE documented
+            # machine, service-account-openbank-agent on POST /api/v3/sanctions/review (CLEAR only,
+            # #16381), which holds no sanctions.approval.decide, so the checker is always a human.
+            # Screening callers are never paused (they call sanctions.create). With this "false" the
+            # agent path is refused outright (AgentReviewGuard), and AgentMachineGrantCharterAlignmentTest
+            # fails unless it is "true". Approvals live in the Redis above.
             # Rollback: set "false". Gate: four-eyes-enforce-deployed.
             - name: AUTHZ_FOUR_EYES_ENFORCE
               value: "true"

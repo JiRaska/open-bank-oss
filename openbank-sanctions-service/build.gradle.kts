@@ -41,6 +41,8 @@ dependencies {
     // POST /api/v1/sanctions/screen. @TestSecurity supplies the operator role Pact replays with.
     testImplementation(libs.pact.provider)
     testImplementation(libs.quarkus.test.security)
+    // AgentReviewGuardHttpTest: a JWT principal with azp / preferred_username claims (#16381).
+    testImplementation(libs.quarkus.test.security.oidc)
     // RestAssured: SanctionsOutboxAtomicityIT (#8353) drives POST /screen and POST /review over
     // real HTTP, the only way to exercise a reactive Panache write (a bare @QuarkusTest thread
     // carries no Vert.x context). Pact's own provider verification uses HttpTestTarget, so this

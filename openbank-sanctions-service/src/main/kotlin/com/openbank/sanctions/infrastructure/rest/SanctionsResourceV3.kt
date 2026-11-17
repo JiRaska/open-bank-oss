@@ -4,6 +4,7 @@
 
 package com.openbank.sanctions.infrastructure.rest
 
+import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.sanctions.application.port.`in`.SanctionsUseCase
@@ -15,6 +16,7 @@ import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -22,6 +24,7 @@ import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.util.UUID
 
 @Path("/api/v3/sanctions")
@@ -31,6 +34,12 @@ class SanctionsResourceV3(private val useCase: SanctionsUseCase) {
 
     @Inject
     lateinit var identity: SecurityIdentity
+
+    @Inject
+    lateinit var approvals: ApprovalStore
+
+    @ConfigProperty(name = "authz.four-eyes.enforce", defaultValue = "false")
+    var fourEyesEnforce: Boolean = false
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
@@ -50,15 +59,21 @@ class SanctionsResourceV3(private val useCase: SanctionsUseCase) {
     // grants it sanctions.clear as four-eyes maker only, and four-eyes pauses it for a human checker.
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.clear", resource = "#cmd.checkId")
-    suspend fun review(cmd: ReviewRequest): SanctionsCheck {
-        // The agent identity does false-positive triage only: CLEAR, nothing else (owner decision, #16455).
-        // Enforced here, server-side, not just in the agent's tool (#16381).
-        if (ServiceAccountIdentity.verifiedClientId(identity) == AGENT_CLIENT_ID &&
-            cmd.newStatus.name !in AGENT_REVIEW_TARGETS
-        ) {
-            throw ForbiddenException(
-                "the agent identity may only review towards ${AGENT_REVIEW_TARGETS.joinToString()}",
-            )
+    suspend fun review(
+        cmd: ReviewRequest,
+        @HeaderParam("X-Approval-Id") approvalId: String?,
+    ): SanctionsCheck {
+        // Defence in depth: AgentReviewGuard already refused this while reading the body, before
+        // @Authorize created any approval. This repeats the decision at the point of effect.
+        val agent = ServiceAccountIdentity.verifiedClientId(identity) == AgentReviewGuard.AGENT_CLIENT_ID
+        if (agent) {
+            AgentReviewGuard.refusal(cmd.newStatus.name, fourEyesEnforce)?.let { throw ForbiddenException(it) }
+            // The decision of record belongs to the human who approved it, not the maker identity:
+            // record the checker as reviewer and keep the agent's authorship in the note.
+            val checker = requireNotNull(approvalId?.let { approvals.find(it)?.decidedBy }) {
+                "an agent review executes only with the approval a human checker granted"
+            }
+            return useCase.review(cmd.toCommand(reviewedBy = checker, noteSuffix = AGENT_NOTE_SUFFIX))
         }
         return useCase.review(cmd.toCommand(identity))
     }
@@ -82,7 +97,6 @@ class SanctionsResourceV3(private val useCase: SanctionsUseCase) {
     suspend fun pending() = useCase.listPending()
 
     private companion object {
-        const val AGENT_CLIENT_ID = "openbank-agent"
-        val AGENT_REVIEW_TARGETS = setOf("CLEAR")
+        const val AGENT_NOTE_SUFFIX = " [submitted by service-account-openbank-agent as four-eyes maker]"
     }
 }

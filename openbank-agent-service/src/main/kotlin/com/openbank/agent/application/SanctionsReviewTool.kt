@@ -28,7 +28,12 @@ class SanctionsReviewTool {
 
     @Inject lateinit var objectMapper: ObjectMapper
 
-    fun review(args: JsonNode): JsonNode {
+    fun review(args: JsonNode, interactivePerson: String?): JsonNode {
+        // Only a person driving an MCP session may have the agent submit a review; the unattended
+        // oversight sweep shares this charter and must never act (OversightService, #16455).
+        requireNotNull(interactivePerson?.takeIf { it.isNotBlank() }) {
+            "sanctions_review_check needs a signed-in person driving the MCP session; unattended runs cannot submit"
+        }
         val checkId = args.requiredString("checkId")
         val newStatus = args.requiredString("newStatus").uppercase()
         val note = args.requiredString("note").trim()

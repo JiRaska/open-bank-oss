@@ -482,7 +482,12 @@ class McpToolRegistry {
      * not data access), everything else is a downstream read resolved through [downstream].
      * Every outcome is audited exactly once (ADR-0031 D5).
      */
-    fun call(toolName: String, arguments: JsonNode?, actorId: String = "unknown"): ToolCallResult {
+    fun call(
+        toolName: String,
+        arguments: JsonNode?,
+        actorId: String = "unknown",
+        interactivePerson: String? = null,
+    ): ToolCallResult {
         val args = arguments ?: objectMapper.createObjectNode()
         return try {
             when {
@@ -492,7 +497,7 @@ class McpToolRegistry {
                 toolName == SanctionsReviewTool.NAME -> succeed(
                     toolName,
                     actorId,
-                    sanctionsReview.review(args),
+                    sanctionsReview.review(args, interactivePerson),
                 )
                 toolName in ProductAuthoringTools.READ_TOOLS -> productResult(
                     toolName,
@@ -743,9 +748,16 @@ class McpToolRegistry {
         }
     }
 
-    private companion object {
-        const val AML_PROPOSE_DECISION = AmlDecisionProposalTool.NAME
-        const val MIN_RATIONALE_LENGTH = AmlDecisionProposalTool.MIN_RATIONALE_LENGTH
+    companion object {
+        /**
+         * Tools that act as a four-eyes MAKER upstream. Offered and executable only on an MCP
+         * session driven by a signed-in person — never by the chat loop or the unattended
+         * oversight sweep, which share the compliance-officer charter (#16455 review).
+         */
+        val INTERACTIVE_ONLY_TOOLS = setOf(SanctionsReviewTool.NAME)
+
+        private const val AML_PROPOSE_DECISION = AmlDecisionProposalTool.NAME
+        private const val MIN_RATIONALE_LENGTH = AmlDecisionProposalTool.MIN_RATIONALE_LENGTH
 
         /**
          * Flags no approval can ever flip. Mirrors `rules.yaml:feature_flags` and the OPA

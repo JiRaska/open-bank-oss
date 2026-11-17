@@ -281,7 +281,10 @@ browser-provider hiding and the unchanged client-credentials fallback.
   the control rests on sanctions-service `AUTHZ_FOUR_EYES_ENFORCE="true"`; with it off the review would
   execute unapproved, so `AgentMachineGrantCharterAlignmentTest` fails unless the deployed value is
   `"true"`. **STRIDE-R:** maker is the agent identity (approval `makerActorKind`), checker the human id.
-  **Accepted risk (owner, 2026-11-16):** the person who instructed the agent may also be the checker,
+  **Unattended runs cannot submit (#16455 review):** the oversight sweep shares the compliance-officer
+  charter, so `sanctions_review_check` is INTERACTIVE_ONLY: never offered to, and refused at
+  execution by, the chat loop the sweep runs through, and refused by the tool itself unless a
+  verified person drives the MCP session. **Accepted risk (owner, 2026-11-16):** the person who instructed the agent may also be the checker,
   so one human plus the agent can clear a hit; see the sanctions-service threat model for rationale.
   Rollback: revert (drops the rego rule, the ROLE_API admission and the tool together).
 

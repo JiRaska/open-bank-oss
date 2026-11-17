@@ -186,7 +186,8 @@ The reviewer recorded on the decision is the authenticated principal (the token'
 `sanctions_review_check` MCP tool) may call this endpoint, and only with `newStatus: CLEAR`; any
 other status answers 403. Four-eyes pauses its call (`202` + `approvalId`) until a human checker
 approves it in `/api/v1/sanctions/approvals/{id}`; the agent then retries the identical request with
-`X-Approval-Id`. The agent identity is never granted `sanctions.approval.decide`. `/api/v1/.../review`
+`X-Approval-Id`. The reviewer recorded is that human checker. While four-eyes is not enforced the
+agent is refused outright. The agent identity is never granted `sanctions.approval.decide`. `/api/v1/.../review`
 stays human-only.
 
 ### Get a specific check

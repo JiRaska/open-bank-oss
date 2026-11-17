@@ -152,7 +152,8 @@ Přezkoumávající zaznamenaný u rozhodnutí je přihlášený principal (`pre
 `sanctions_review_check` v agent-service) smí tento endpoint volat, a to pouze s `newStatus: CLEAR`;
 jakýkoli jiný stav vrátí 403. Čtyři oči jeho volání pozastaví (`202` + `approvalId`), dokud jej
 lidský checker neschválí v `/api/v1/sanctions/approvals/{id}`; agent pak stejný požadavek zopakuje
-s `X-Approval-Id`. Identita agenta nikdy nedostává `sanctions.approval.decide`. `/api/v1/.../review`
+s `X-Approval-Id`. Jako přezkoumávající se zaznamená tento lidský checker. Dokud čtyři oči nejsou
+vynucené, je agent odmítnut vždy. Identita agenta nikdy nedostává `sanctions.approval.decide`. `/api/v1/.../review`
 zůstává jen pro lidi.
 
 ### Získat konkrétní prověření
