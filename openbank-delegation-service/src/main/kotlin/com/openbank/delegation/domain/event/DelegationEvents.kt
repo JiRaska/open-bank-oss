@@ -6,6 +6,7 @@ package com.openbank.delegation.domain.event
 
 import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
+import com.openbank.delegation.domain.model.DelegationGranteeType
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.domain.money.Money
@@ -35,6 +36,20 @@ data class EventMoney(val amount: BigDecimal, val currency: String) {
     }
 }
 
+/**
+ * ADR-0383 D3 dormancy guard (backstop). The grantee class is on the wire so consumers can learn to
+ * skip non-PARTY grants, but today's consumers (account-service, card-issuance, context-service)
+ * build projections that know only parties. Until each of them ignores `granteeType != PARTY`, no
+ * lifecycle event may be constructed for an MCP_CLIENT grant, whichever producer path builds it
+ * (DelegationService, the lifecycle-approval executor, the expiration sweep). Lift this together
+ * with the guard in DelegationService, in the PR that makes the consumers skip.
+ */
+internal fun requirePublishableGrantee(granteeType: DelegationGranteeType) {
+    require(granteeType == DelegationGranteeType.PARTY) {
+        "MCP_CLIENT grants are dormant: no delegation event may be published for one until consumers skip non-PARTY grants"
+    }
+}
+
 data class DelegationOffered(
     override val aggregateId: UUID,
     val lifecycleRevision: Long,
@@ -51,7 +66,15 @@ data class DelegationOffered(
     val validTo: OffsetDateTime? = null,
     val perTransactionLimit: EventMoney? = null,
     override val occurredAt: Instant,
+    /** ADR-0383 D3 / ADR-0260: optional, defaults to PARTY. Consumers must ignore a grant whose class they do not know. */
+    val granteeType: DelegationGranteeType = DelegationGranteeType.PARTY,
+    /** The admitted MCP client's `azp` when [granteeType] is MCP_CLIENT; absent otherwise. */
+    val granteeClientId: String? = null,
 ) : DomainEvent(occurredAt) {
+    init {
+        requirePublishableGrantee(granteeType)
+    }
+
     override val aggregateType = "DelegationGrant"
     override val eventType = "DelegationOffered"
     override val version = 1L
@@ -73,7 +96,15 @@ data class DelegationActivated(
     val validTo: OffsetDateTime? = null,
     val perTransactionLimit: EventMoney? = null,
     override val occurredAt: Instant,
+    /** ADR-0383 D3 / ADR-0260: optional, defaults to PARTY. Consumers must ignore a grant whose class they do not know. */
+    val granteeType: DelegationGranteeType = DelegationGranteeType.PARTY,
+    /** The admitted MCP client's `azp` when [granteeType] is MCP_CLIENT; absent otherwise. */
+    val granteeClientId: String? = null,
 ) : DomainEvent(occurredAt) {
+    init {
+        requirePublishableGrantee(granteeType)
+    }
+
     override val aggregateType = "DelegationGrant"
     override val eventType = "DelegationActivated"
     override val version = 1L
@@ -85,7 +116,15 @@ data class DelegationDeclined(
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
     override val occurredAt: Instant,
+    /** ADR-0383 D3 / ADR-0260: optional, defaults to PARTY. Consumers must ignore a grant whose class they do not know. */
+    val granteeType: DelegationGranteeType = DelegationGranteeType.PARTY,
+    /** The admitted MCP client's `azp` when [granteeType] is MCP_CLIENT; absent otherwise. */
+    val granteeClientId: String? = null,
 ) : DomainEvent(occurredAt) {
+    init {
+        requirePublishableGrantee(granteeType)
+    }
+
     override val aggregateType = "DelegationGrant"
     override val eventType = "DelegationDeclined"
     override val version = 1L
@@ -101,7 +140,15 @@ data class DelegationRevoked(
     val capabilities: Set<DelegationCapability>,
     val reason: String,
     override val occurredAt: Instant,
+    /** ADR-0383 D3 / ADR-0260: optional, defaults to PARTY. Consumers must ignore a grant whose class they do not know. */
+    val granteeType: DelegationGranteeType = DelegationGranteeType.PARTY,
+    /** The admitted MCP client's `azp` when [granteeType] is MCP_CLIENT; absent otherwise. */
+    val granteeClientId: String? = null,
 ) : DomainEvent(occurredAt) {
+    init {
+        requirePublishableGrantee(granteeType)
+    }
+
     override val aggregateType = "DelegationGrant"
     override val eventType = "DelegationRevoked"
     override val version = 1L
@@ -117,7 +164,15 @@ data class DelegationSuspended(
     val capabilities: Set<DelegationCapability>,
     val reason: String,
     override val occurredAt: Instant,
+    /** ADR-0383 D3 / ADR-0260: optional, defaults to PARTY. Consumers must ignore a grant whose class they do not know. */
+    val granteeType: DelegationGranteeType = DelegationGranteeType.PARTY,
+    /** The admitted MCP client's `azp` when [granteeType] is MCP_CLIENT; absent otherwise. */
+    val granteeClientId: String? = null,
 ) : DomainEvent(occurredAt) {
+    init {
+        requirePublishableGrantee(granteeType)
+    }
+
     override val aggregateType = "DelegationGrant"
     override val eventType = "DelegationSuspended"
     override val version = 1L
@@ -139,7 +194,15 @@ data class DelegationReinstated(
     val validTo: OffsetDateTime? = null,
     val perTransactionLimit: EventMoney? = null,
     override val occurredAt: Instant,
+    /** ADR-0383 D3 / ADR-0260: optional, defaults to PARTY. Consumers must ignore a grant whose class they do not know. */
+    val granteeType: DelegationGranteeType = DelegationGranteeType.PARTY,
+    /** The admitted MCP client's `azp` when [granteeType] is MCP_CLIENT; absent otherwise. */
+    val granteeClientId: String? = null,
 ) : DomainEvent(occurredAt) {
+    init {
+        requirePublishableGrantee(granteeType)
+    }
+
     override val aggregateType = "DelegationGrant"
     override val eventType = "DelegationReinstated"
     override val version = 1L
@@ -153,7 +216,15 @@ data class DelegationRenounced(
     val resourceType: DelegationResourceType,
     val resourceId: UUID,
     override val occurredAt: Instant,
+    /** ADR-0383 D3 / ADR-0260: optional, defaults to PARTY. Consumers must ignore a grant whose class they do not know. */
+    val granteeType: DelegationGranteeType = DelegationGranteeType.PARTY,
+    /** The admitted MCP client's `azp` when [granteeType] is MCP_CLIENT; absent otherwise. */
+    val granteeClientId: String? = null,
 ) : DomainEvent(occurredAt) {
+    init {
+        requirePublishableGrantee(granteeType)
+    }
+
     override val aggregateType = "DelegationGrant"
     override val eventType = "DelegationRenounced"
     override val version = 1L
@@ -167,7 +238,15 @@ data class DelegationExpired(
     val resourceType: DelegationResourceType,
     val resourceId: UUID,
     override val occurredAt: Instant,
+    /** ADR-0383 D3 / ADR-0260: optional, defaults to PARTY. Consumers must ignore a grant whose class they do not know. */
+    val granteeType: DelegationGranteeType = DelegationGranteeType.PARTY,
+    /** The admitted MCP client's `azp` when [granteeType] is MCP_CLIENT; absent otherwise. */
+    val granteeClientId: String? = null,
 ) : DomainEvent(occurredAt) {
+    init {
+        requirePublishableGrantee(granteeType)
+    }
+
     override val aggregateType = "DelegationGrant"
     override val eventType = "DelegationExpired"
     override val version = 1L

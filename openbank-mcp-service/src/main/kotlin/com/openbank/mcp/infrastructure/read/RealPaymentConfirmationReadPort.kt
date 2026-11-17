@@ -39,7 +39,7 @@ class RealPaymentConfirmationReadPort(
 
     override fun getPaymentConfirmation(consentContext: ConsentContext, paymentId: String): JsonNode {
         val id = runCatching { UUID.fromString(paymentId) }.getOrElse {
-            throw IllegalArgumentException("paymentId '$paymentId' is not a valid payment id")
+            throw IllegalArgumentException("paymentId is not a valid payment id")
         }
         // Scope-only check first (accountIban = null, mirrors listConsents/listAccounts): fails
         // closed before either payment service is ever called.
