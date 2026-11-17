@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: account-service
     app.kubernetes.io/part-of: accounts
   annotations:
-    openbank.tech/policy-checksum: "bb044805aafe6e8c"
+    openbank.tech/policy-checksum: "225d6b63af9b3244"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1031,6 +1031,13 @@ data:
     	}
     	machine_named(caller)
     	input.action == "account.verifyOwnership"
+    }
+
+    # ADR-0380 B2: Transaction pins account-owned immutable booking context before persistence.
+    allowed_reasons contains "service-transaction-account-read" if {
+    	input.principal.type == "HUMAN"
+    	machine_named("service-account-openbank-transaction")
+    	input.action == "account.read"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
