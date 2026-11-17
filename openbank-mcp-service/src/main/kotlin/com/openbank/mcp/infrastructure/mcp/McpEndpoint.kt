@@ -123,6 +123,12 @@ class McpEndpoint(
         // surface, so an unrecognised value must not mint a new metric series (cardinality contract).
         metrics.requestHandled(if (method in KNOWN_METHODS) method else McpMetricsPort.UNKNOWN_METHOD)
 
+        // RFC 8707 / ADR-0383 D1 (#16622): a token issued for another resource is refused before
+        // any method runs, on every method. The tenant-wide `quarkus.oidc.token.audience` cannot do
+        // this, because /api/v1/mcp/sessions is called with the operator's own token, whose
+        // audience is not this server.
+        if (callerResolver.presentsForeignAudience()) return foreignAudience(method, params)
+
         val result: Any = when (method) {
             "initialize" -> InitializeResult(
                 protocolVersion,
@@ -376,6 +382,33 @@ class McpEndpoint(
         val ctx = runBlocking { callerResolver.resolveOrNull() } ?: error("no agent token presented")
         metrics.callerIdentityResolved(CallerIdentitySource.TOKEN)
         return ctx
+    }
+
+    private fun foreignAudience(method: String, params: JsonNode): Response {
+        log.warnf("rejected %s: bearer token audience does not include this server", method)
+        metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
+        if (method == "tools/call") {
+            runBlocking {
+                auditor.toolCallCompleted(
+                    McpCallAuditor.ToolCall(
+                        agentId = "unknown",
+                        consentId = "none",
+                        tool = params.path("name").asText(""),
+                        capability = null,
+                        decision = McpCallAuditor.Decision.UNAVAILABLE,
+                        result = AuditResult.DENIED,
+                        reason = "token audience mismatch",
+                        argumentKeys = params.path("arguments").fieldNames().asSequence().sorted().toList(),
+                    ),
+                )
+            }
+        }
+        return Response.status(Response.Status.UNAUTHORIZED)
+            .header(
+                "WWW-Authenticate",
+                "Bearer error=\"invalid_token\", error_description=\"token audience does not include this server\"",
+            )
+            .build()
     }
 
     private fun toolError(id: JsonNode, message: String): Response = Response.ok(
