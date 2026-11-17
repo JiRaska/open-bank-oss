@@ -107,9 +107,15 @@ def check_chain(documents, prometheus, policy):
     assert not permits(policy, ns, {"app.kubernetes.io/name": "other"}, 8888), "other Pod admitted"
 
 
+def helm_values(app):
+    """The app's Helm values, whether written as `valuesObject` or as the `values` string."""
+    helm = app["spec"]["source"]["helm"]
+    return helm["valuesObject"] if "valuesObject" in helm else yaml.safe_load(helm["values"])
+
+
 class RumMonitoringTest(unittest.TestCase):
     def setUp(self):
-        self.values = load(APP)["spec"]["source"]["helm"]["valuesObject"]
+        self.values = helm_values(load(APP))
         self.policy = load(POLICY)
 
     def test_native_chart_monitoring_is_enabled(self):
@@ -146,7 +152,7 @@ class RumMonitoringTest(unittest.TestCase):
 
 
 def real_chart_roundtrip(chart, prometheus_path):
-    values = load(APP)["spec"]["source"]["helm"]["valuesObject"]
+    values = helm_values(load(APP))
     policy, prometheus = load(POLICY), json.loads(prometheus_path.read_text())
     documents = render(chart, values)
     check_chain(documents, prometheus, policy)
