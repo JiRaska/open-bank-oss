@@ -8,7 +8,7 @@
     ],
     "must_not_contain": [
       "attacker.example",
-      "CZ0000000000000000000666",
+      "DE00000000000000000666",
       "javascript:"
     ]
   },

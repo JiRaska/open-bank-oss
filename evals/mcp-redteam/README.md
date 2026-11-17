@@ -15,8 +15,9 @@ injection payloads. Every payload is placed twice: once in a field the masker re
 description, counterparty or creditor name) and once in a field it passes through verbatim (a
 reference number, merchant category, statement-entry detail or statement label). All identifiers
 are synthetic. The attacker host is `attacker.example` (a reserved TLD) and the attacker IBAN
-deliberately has an invalid checksum. The two valid-checksum IBANs in the base records
-(`CZ65…5399`, `DE89…3000`) are public documentation examples, not customer accounts.
+has an invalid checksum. Every IBAN in the corpus carries check digits `00`, which no valid
+IBAN can have, so none is a real account. The masker matches on shape, not checksum, so no item
+needs a valid one.
 One extra item poisons `merchant.logoUrl`, the only field allowed to carry a URL; it is exempt
 only by exact path and only for the bank CDN.
 
