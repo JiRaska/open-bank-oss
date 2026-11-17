@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs'
 import type { BrowserContext, Page } from 'playwright-core'
 import { chromium } from 'playwright-core'
+import { assertTarget } from './guard.ts'
 
 /** CDP `WebAuthn.addCredential` shape. Base64 (standard) fields, as CDP expects. */
 export interface PasskeyCredential {
@@ -66,9 +67,20 @@ export async function authorizeInBrowser(
   const redirectPrefix = redirectUri.split('?')[0]
   let resolveCb!: (url: string) => void
   const callback = new Promise<string>((r) => { resolveCb = r })
-  await page.route((url) => url.toString().startsWith(redirectPrefix), async (route) => {
-    resolveCb(route.request().url())
-    await route.fulfill({ status: 200, contentType: 'text/plain', body: 'harness: redirect captured' })
+  assertTarget(authorizeUrl)
+  let refused: Error | undefined
+  // Every navigation is guarded, not only the first: a login page must not walk the browser to a
+  // host the operator did not allow (src/guard.ts).
+  await page.route('**/*', async (route) => {
+    const req = route.request()
+    if (req.url().startsWith(redirectPrefix)) {
+      resolveCb(req.url())
+      return route.fulfill({ status: 200, contentType: 'text/plain', body: 'harness: redirect captured' })
+    }
+    if (req.isNavigationRequest()) {
+      try { assertTarget(req.url()) } catch (e) { refused = e as Error; return route.abort('blockedbyclient') }
+    }
+    return route.continue()
   })
   await page.goto(authorizeUrl)
   const selector = process.env.MCP_HARNESS_PASSKEY_SELECTOR ?? '#authenticateWebAuthnButton, button:has-text("passkey")'
@@ -76,6 +88,7 @@ export async function authorizeInBrowser(
   if (await button.isVisible({ timeout: 10_000 }).catch(() => false)) await button.click()
   const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`no redirect to ${redirectPrefix} within ${o.timeoutMs} ms (last page: ${page.url()})`)), o.timeoutMs))
   const work = o.whileWaiting ? o.whileWaiting() : Promise.resolve()
-  const [url] = await Promise.race([Promise.all([callback, work]), timeout])
+  const [url] = await Promise.race([Promise.all([callback, work]), timeout]).catch((e) => { throw refused ?? e })
+  if (refused) throw refused
   return url
 }

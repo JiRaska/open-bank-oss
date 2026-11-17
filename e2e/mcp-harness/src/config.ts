@@ -41,10 +41,12 @@ export interface HarnessConfig {
 const json = (raw: string | undefined, fallback: Record<string, unknown>): Record<string, unknown> =>
   raw ? (JSON.parse(raw) as Record<string, unknown>) : fallback
 
+import { assertTarget } from './guard.ts'
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): HarnessConfig {
   const tier = (env.MCP_HARNESS_TIER ?? 'L').toUpperCase()
   if (tier !== 'L' && tier !== 'H') throw new Error(`MCP_HARNESS_TIER must be L or H, got ${tier}`)
-  return {
+  const cfg: HarnessConfig = {
     resourceUrl: env.MCP_HARNESS_RESOURCE_URL ?? 'http://localhost:8150/mcp',
     authServerUrl: env.MCP_HARNESS_AUTH_SERVER || undefined,
     clientId: env.MCP_HARNESS_CLIENT_ID || undefined,
@@ -71,4 +73,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HarnessConfig 
     headless: env.MCP_HARNESS_HEADED !== 'true',
     timeoutMs: Number(env.MCP_HARNESS_TIMEOUT_MS ?? 120_000),
   }
+  // Refuse before any request leaves the process (src/guard.ts).
+  for (const u of [cfg.resourceUrl, cfg.authServerUrl, cfg.scaUrl]) if (u) assertTarget(u, env)
+  return cfg
 }

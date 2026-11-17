@@ -2,12 +2,13 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 //
-//   node src/cli.ts --list                       ACTIVE vs PENDING report (no network)
+//   node src/cli.ts --list [--trace]             ACTIVE vs PENDING report; --trace maps ADR delivery-check lines
 //   node src/cli.ts --run [--include-pending] [--only <id>[,<id>]] [--json]
 //   node src/cli.ts --journey                    layer-2 connect → read → propose
 import { ATTACKS, contextFor, exitCodeFor, runAttacks } from './attacks.ts'
 import type { AttackCase } from './attacks.ts'
 import { loadConfig } from './config.ts'
+import { traceReport } from './delivery-checks.ts'
 import { runJourney } from './journey.ts'
 
 const args = process.argv.slice(2)
@@ -32,6 +33,7 @@ async function main(): Promise<number> {
       process.stdout.write(`${JSON.stringify(ATTACKS.map(({ run, ...c }) => ({ ...c, hasBody: Boolean(run) })), null, 2)}\n`)
     } else {
       process.stdout.write(`${listReport(ATTACKS)}\n`)
+      if (has('--trace')) process.stdout.write(`\nDelivery-check trace (ADR line → cases | [other layer])\n${traceReport()}\n`)
     }
     return 0
   }

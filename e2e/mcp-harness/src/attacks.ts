@@ -55,27 +55,37 @@ export interface AttackCase {
   run?: (ctx: AttackContext) => Promise<void>
 }
 
+/**
+ * Every assertion that HOLDS appends its label here. The known-positive test uses it to prove a
+ * run against the correct stub reached the case's final assertion (not an early return), so a
+ * broken twin failing for an unrelated reason can never stand in for the real proof.
+ */
+export const assertionLog: string[] = []
+const pass = (label: string): void => { assertionLog.push(label) }
+
 const fail = (msg: string, r?: RawResponse): never => {
   throw new Error(r ? `${msg} (got HTTP ${r.status}${r.json?.error ? ` error=${r.json.error}` : ''})` : msg)
 }
 
 const expectStatus = (r: RawResponse, status: number, what: string): void => {
   if (r.status !== status) fail(`${what}: expected HTTP ${status}`, r)
+  pass(what)
 }
 
 /** An OAuth error response: exact status (400 unless given) and exact `error` code. */
 const expectOAuthError = (r: RawResponse, error: string, status = 400): void => {
   if (r.status !== status || r.json?.error !== error) fail(`expected HTTP ${status} error=${error}`, r)
+  pass(`oauth-error ${error}`)
 }
 
 /** Authorization-endpoint refusal: either a 4xx page, or a redirect carrying `error` and no `code`. */
 const expectAuthorizeRefused = (r: RawResponse, error?: string): void => {
-  if (r.status >= 400 && r.status < 500) return
+  if (r.status >= 400 && r.status < 500) return pass('authorize refused')
   const loc = r.headers.get('location')
   if (r.status >= 300 && r.status < 400 && loc) {
     const u = new URL(loc, 'http://x')
     if (u.searchParams.get('code')) fail(`authorize issued a code: ${u.searchParams.get('code')?.slice(0, 6)}…`)
-    if (u.searchParams.get('error') && (!error || u.searchParams.get('error') === error)) return
+    if (u.searchParams.get('error') && (!error || u.searchParams.get('error') === error)) return pass('authorize refused')
   }
   fail(`expected the authorization request to be refused${error ? ` with error=${error}` : ''}`, r)
 }
@@ -84,13 +94,14 @@ const NO_DATA = 'Authorization unavailable'
 
 /** The unauthenticated caller gets nothing: 401, or a tool error whose only text is the deny. */
 function expectNoDataToolResult(r: RawResponse): void {
-  if (r.status === 401) return
+  if (r.status === 401) return pass('no-data')
   if (r.status !== 200) fail('expected HTTP 401 or a JSON-RPC tool error', r)
   const res = r.json?.result
   if (res?.isError !== true) fail(`expected isError=true, got ${JSON.stringify(r.json).slice(0, 200)}`)
   if (res.structuredContent !== undefined) fail('a denied call returned structuredContent')
   const texts = (res.content ?? []).map((c: { text?: string }) => c.text)
   if (texts.length !== 1 || texts[0] !== NO_DATA) fail(`expected the single text "${NO_DATA}", got ${JSON.stringify(texts)}`)
+  pass('no-data')
 }
 
 /** A syntactically valid RS256 JWT signed by a key no authorization server knows. */
@@ -189,11 +200,12 @@ export const ATTACKS: AttackCase[] = [
     status: 'ACTIVE',
     run: async ({ cfg }) => {
       const r = await rpc(cfg.resourceUrl, 'tools/list', {})
-      if (r.status === 401) return
+      if (r.status === 401) return pass('tools/list empty')
       expectStatus(r, 200, 'tools/list')
       const tools = r.json?.result?.tools
       if (!Array.isArray(tools)) fail(`no result.tools array: ${r.body.slice(0, 200)}`)
       if (tools.length !== 0) fail(`anonymous caller was shown ${tools.length} tools: ${tools.map((t: { name: string }) => t.name).join(',')}`)
+      pass('tools/list empty')
     },
   },
   {
@@ -249,6 +261,7 @@ export const ATTACKS: AttackCase[] = [
       const prm = await send(m![1], {})
       expectStatus(prm, 200, 'protected-resource metadata')
       if (prm.json?.resource !== cfg.resourceUrl) fail(`metadata resource ${prm.json?.resource} != ${cfg.resourceUrl}`)
+      pass('resource metadata')
     },
   },
   {
@@ -296,6 +309,13 @@ export const ATTACKS: AttackCase[] = [
     expected: 'HTTP 401',
     status: 'PENDING', enabledBy: D2,
     run: async (ctx) => expectStatus((await dpopCall(ctx, { key: await generateDpopKey() })).r, 401, 'proof for another key'),
+  },
+  {
+    id: 'dpop-bad-signature-401', source: 'ADR-0383 D2',
+    title: 'A proof advertising the bound key but signed by another key (signature does not verify)',
+    expected: 'HTTP 401',
+    status: 'PENDING', enabledBy: D2,
+    run: async (ctx) => expectStatus((await dpopCall(ctx, { proofOverrides: { signWith: await generateDpopKey() } })).r, 401, 'bad signature'),
   },
   {
     id: 'dpop-jti-replay-401', source: 'ADR-0383 Delivery check: DPoP binding',
@@ -430,6 +450,7 @@ export const ATTACKS: AttackCase[] = [
         validateAuthorizationResponse(`${ctx.cfg.redirectUri}?code=x&state=s&iss=${encodeURIComponent('https://attacker.invalid')}`, { state: 's', issuer: d.as.issuer, issRequired: true })
       } catch { refused = true }
       if (!refused) fail('client accepted a foreign iss')
+      pass('iss enforced')
     },
   },
   {
@@ -553,6 +574,87 @@ export const ATTACKS: AttackCase[] = [
     title: 'consent-service refuses an MCP_CLIENT_CONNECT challenge as PSD2 consent evidence',
     expected: 'consent authorisation refused (4xx), consent stays unauthorised',
     status: 'PENDING', enabledBy: `${SCA}; consent-service refusal (#16590)`, needs: 'an approved MCP_CLIENT_CONNECT challenge (needs the purpose)',
+  },
+  // ---------------------------------------------------------------- PENDING: no body yet
+  {
+    id: 'cross-customer-isolation-at-mcp', source: 'ADR-0383 Delivery check: Cross-customer isolation',
+    title: 'Customer A\'s grant cannot read customer B\'s account through MCP',
+    expected: 'tool error / deny for B\'s resource; nothing of B in the response',
+    status: 'PENDING', enabledBy: '#16590 D3/D4 — grant lookup per (party, azp, jkt) + downstream party ownership (P5)',
+    needs: 'two seeded customers with journeys, and the D4 exchange in mcp-service',
+  },
+  {
+    id: 'proposal-executes-only-after-consumed-sca', source: 'ADR-0383 Delivery check: Proposal approval',
+    title: 'A proposal created via MCP executes only after a consumed SCA challenge; a second approval is refused',
+    expected: 'no execution before consume; second approval 409/refused',
+    status: 'PENDING', enabledBy: '#16590 D6 — proposal store + customer approval surface',
+    needs: 'the proposal store and its customer-edge approval routes',
+  },
+  {
+    id: 'client-secret-after-exception-expiry', source: 'ADR-0385 PAR and authorize',
+    title: 'A Tier H client secret used after its exception expiry',
+    expected: 'HTTP 401 error=invalid_client',
+    status: 'PENDING', enabledBy: P3, needs: 'an allowlist declaration with an expired secret exception, on a local Keycloak',
+  },
+  {
+    id: 'registration-unreachable-from-mcp-authorize', source: 'ADR-0385 PAR and authorize; D2.3',
+    title: 'The registration endpoint cannot be reached from an MCP authorize',
+    expected: 'no registration form reachable; no code',
+    status: 'PENDING', enabledBy: FLOW, needs: 'the per-client flow override, to know which page links must be absent',
+  },
+  {
+    id: 'grants-survive-credential-rotation', source: 'ADR-0385 Admission (Tier H)',
+    title: 'Rotating the client key or secret keeps existing grants refreshable',
+    expected: 'refresh HTTP 200 after rotation',
+    status: 'PENDING', enabledBy: P3, needs: 'admin access to rotate the client credential on a local Keycloak',
+  },
+  {
+    id: 'young-passkey-or-device-refused', source: 'ADR-0385 PAR and authorize; D2.3',
+    title: 'A passkey or SCA device enrolled less than 72 h ago cannot authorize a connect',
+    expected: 'connect refused, no code',
+    status: 'PENDING', enabledBy: `${FLOW}; ${SCA}`, needs: 'a way to seed enrolment age (clock or fixture) on a local stack',
+  },
+  {
+    id: 'auth-session-older-than-300s-no-code', source: 'ADR-0385 SCA linking',
+    title: 'An auth session older than 300 s',
+    expected: 'no code',
+    status: 'PENDING', enabledBy: SCA, needs: 'the withheld-code authenticator',
+  },
+  {
+    id: 'no-code-before-consume', source: 'ADR-0385 SCA linking',
+    title: 'No code is issued before the SCA challenge is consumed',
+    expected: 'no redirect with code while the challenge is pending',
+    status: 'PENDING', enabledBy: SCA, needs: 'the withheld-code authenticator',
+  },
+  {
+    id: 'consume-ok-issuance-fails-no-code', source: 'ADR-0385 SCA linking',
+    title: 'A consume that succeeds while code issuance fails',
+    expected: 'no code, and a retry is refused',
+    status: 'PENDING', enabledBy: SCA, needs: 'a fault-injection hook in the withheld-code authenticator',
+  },
+  {
+    id: 'general-consumer-cannot-spend-mcp-connect', source: 'ADR-0385 SCA linking',
+    title: 'A ConsumerScope.General consumer spending an MCP_CLIENT_CONNECT challenge',
+    expected: 'consume refused (409/403)',
+    status: 'PENDING', enabledBy: `${SCA}; sca-service ReservedNamespace entry`, needs: 'the purpose and a General-scope M2M token',
+  },
+  {
+    id: 'fourth-pending-authorization-refused', source: 'ADR-0385 Throttling',
+    title: 'The 4th pending authorization for a party',
+    expected: 'refused and audited',
+    status: 'PENDING', enabledBy: '#16590 D5 / ADR-0385 D4 consent-flood caps', needs: 'the pending-authorization counter',
+  },
+  {
+    id: 'per-client-budget-429', source: 'ADR-0385 Throttling',
+    title: 'Per-client budget exceeded across parties',
+    expected: 'HTTP 429 with Retry-After for that client\'s parties',
+    status: 'PENDING', enabledBy: '#16590 D5 — Valkey buckets (P4)', needs: 'several seeded parties on one client and a lowered budget',
+  },
+  {
+    id: 'suspend-revokes-client', source: 'ADR-0385 Throttling',
+    title: 'Emergency suspend of a client',
+    expected: 'Keycloak tokens revoked, credential disabled, next MCP call denied (401)',
+    status: 'PENDING', enabledBy: 'ADR-0384 D4 kill switch (#16607)', needs: 'the suspend operation',
   },
 ]
 

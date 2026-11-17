@@ -20,6 +20,18 @@ moving a case to ACTIVE is a deliberate one-line edit. Exit codes: 1 = an ACTIVE
 `npm test` is the known-positive proof: every case with a body must pass against a correct stub and
 fail against a stub with exactly the defence it targets switched off.
 
+## Target guard
+
+The harness forges tokens, replays proofs and approves SCA challenges, so `src/guard.ts` refuses
+every target host (resource URL, authorization server, discovered endpoints, SCA URL, and every
+browser navigation) unless it is loopback, `*.localhost`, `*.test`, or carries a
+`sandbox|staging|dev|qa` label below the TLD. `MCP_HARNESS_I_UNDERSTAND_NON_LOCAL=<exact host>`
+accepts one other host. URLs with userinfo are always refused. The software SCA device has no
+override: it self-approves only against loopback, `*.localhost`, `*.test` or a sandbox-labelled host.
+
+`--list --trace` maps every ADR-0383/0385 delivery-check line to its cases, or to the layer that
+owns it (`src/delivery-checks.ts`; a test keeps the two in step).
+
 ## Running
 
 ```

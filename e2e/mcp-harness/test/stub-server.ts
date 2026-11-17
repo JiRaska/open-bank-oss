@@ -13,7 +13,11 @@ import type { IncomingMessage, Server } from 'node:http'
 export type Flaw =
   | 'leak-tools-list' | 'leak-read-data' | 'leak-propose' | 'accept-any-token'
   | 'dpop-accept-bearer' | 'dpop-no-replay-store' | 'dpop-ignore-htu' | 'dpop-ignore-key'
+  | 'dpop-proof-optional' | 'dpop-ignore-signature' | 'dpop-ignore-htm' | 'dpop-ignore-ath' | 'dpop-ignore-iat'
   | 'as-accept-plain-pkce' | 'as-accept-missing-pkce' | 'as-reusable-request-uri' | 'as-accept-any-resource'
+  | 'as-ignore-client-binding' | 'as-ignore-extra-params' | 'as-allow-front-channel' | 'as-no-iss-support'
+  /** not a defence: the protected-resource metadata names a non-local authorization server */
+  | 'prm-foreign-as'
 
 export interface Stub {
   url: string
@@ -43,19 +47,19 @@ export async function startStub(flaws: Flaw[] = []): Promise<Stub> {
     if (!jkt) return 'ok'
     if (scheme !== 'DPoP') return has('dpop-accept-bearer') ? 'ok' : 'reject'
     const proof = req.headers.dpop as string | undefined
-    if (!proof) return 'reject'
+    if (!proof) return has('dpop-proof-optional') ? 'ok' : 'reject'
     try {
       const [h64, p64, s64] = proof.split('.')
       const header = JSON.parse(Buffer.from(h64, 'base64url').toString())
       const p = JSON.parse(Buffer.from(p64, 'base64url').toString())
       const key = createPublicKey({ key: header.jwk, format: 'jwk' })
-      if (!verify('sha256', Buffer.from(`${h64}.${p64}`), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(s64, 'base64url'))) return 'reject'
+      if (!has('dpop-ignore-signature') && !verify('sha256', Buffer.from(`${h64}.${p64}`), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(s64, 'base64url'))) return 'reject'
       const thumb = createHash('sha256').update(JSON.stringify({ crv: header.jwk.crv, kty: header.jwk.kty, x: header.jwk.x, y: header.jwk.y })).digest('base64url')
       if (thumb !== jkt && !has('dpop-ignore-key')) return 'reject'
-      if (p.htm !== req.method) return 'reject'
+      if (p.htm !== req.method && !has('dpop-ignore-htm')) return 'reject'
       if (p.htu !== `${base}${req.url}` && !has('dpop-ignore-htu')) return 'reject'
-      if (p.ath !== createHash('sha256').update(token).digest('base64url')) return 'reject'
-      if (Math.abs(Date.now() / 1000 - p.iat) > 60) return 'reject'
+      if (p.ath !== createHash('sha256').update(token).digest('base64url') && !has('dpop-ignore-ath')) return 'reject'
+      if (Math.abs(Date.now() / 1000 - p.iat) > 60 && !has('dpop-ignore-iat')) return 'reject'
       if (!has('dpop-no-replay-store')) { if (seenJti.has(p.jti)) return 'reject'; seenJti.add(p.jti) }
       return 'ok'
     } catch { return 'reject' }
@@ -66,9 +70,9 @@ export async function startStub(flaws: Flaw[] = []): Promise<Stub> {
     const raw = await body(req)
     const u = new URL(req.url ?? '/', base)
     if (u.pathname === '/.well-known/oauth-authorization-server') {
-      return json(200, { issuer: base, authorization_endpoint: `${base}/authorize`, token_endpoint: `${base}/token`, pushed_authorization_request_endpoint: `${base}/par`, require_pushed_authorization_requests: true, code_challenge_methods_supported: ['S256'], dpop_signing_alg_values_supported: ['ES256'], authorization_response_iss_parameter_supported: true, response_types_supported: ['code'] })
+      return json(200, { issuer: base, authorization_endpoint: `${base}/authorize`, token_endpoint: `${base}/token`, pushed_authorization_request_endpoint: `${base}/par`, require_pushed_authorization_requests: true, code_challenge_methods_supported: ['S256'], dpop_signing_alg_values_supported: ['ES256'], authorization_response_iss_parameter_supported: !has('as-no-iss-support'), response_types_supported: ['code'] })
     }
-    if (u.pathname === '/.well-known/oauth-protected-resource/mcp') return json(200, { resource: `${base}/mcp`, authorization_servers: [base] })
+    if (u.pathname === '/.well-known/oauth-protected-resource/mcp') return json(200, { resource: `${base}/mcp`, authorization_servers: [has('prm-foreign-as') ? 'https://login.examplebank.com' : base] })
     if (u.pathname === '/par') {
       const f = new URLSearchParams(raw)
       if (f.get('resource') !== `${base}/mcp` && !has('as-accept-any-resource')) return json(400, { error: 'invalid_target' })
@@ -80,8 +84,11 @@ export async function startStub(flaws: Flaw[] = []): Promise<Stub> {
     }
     if (u.pathname === '/authorize') {
       const ru = u.searchParams.get('request_uri')
+      if (!ru && has('as-allow-front-channel') && u.searchParams.get('response_type') === 'code') { res.writeHead(200, { 'content-type': 'text/html' }); return res.end('<html>login</html>') }
       const entry = ru ? requestUris.get(ru) : undefined
-      if (!entry || entry.clientId !== u.searchParams.get('client_id') || u.searchParams.has('redirect_uri') || u.searchParams.has('scope')) return json(400, { error: 'invalid_request' })
+      if (!entry) return json(400, { error: 'invalid_request' })
+      if (entry.clientId !== u.searchParams.get('client_id') && !has('as-ignore-client-binding')) return json(400, { error: 'invalid_request' })
+      if ((u.searchParams.has('redirect_uri') || u.searchParams.has('scope')) && !has('as-ignore-extra-params')) return json(400, { error: 'invalid_request' })
       if (entry.used && !has('as-reusable-request-uri')) return json(400, { error: 'invalid_request_uri' })
       entry.used = true
       res.writeHead(200, { 'content-type': 'text/html' }); return res.end('<html>login</html>')

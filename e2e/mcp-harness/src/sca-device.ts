@@ -10,6 +10,7 @@
 // device does not need one: it signs exactly what DeviceApproval.kt verifies.
 import { createSign, generateKeyPairSync, randomUUID } from 'node:crypto'
 import type { KeyObject } from 'node:crypto'
+import { assertScaTarget } from './guard.ts'
 import { send } from './http.ts'
 
 export interface PendingChallenge {
@@ -60,6 +61,7 @@ export class SoftwareScaDevice implements ScaApprover {
   private readonly token: string
 
   constructor(baseUrl: string, partyId: string, token: string) {
+    assertScaTarget(baseUrl)
     this.baseUrl = baseUrl.replace(/\/$/, '')
     this.partyId = partyId
     this.token = token
@@ -117,7 +119,11 @@ export class SoftwareScaDevice implements ScaApprover {
   }
 }
 
-/** Fallback when no sca-service is configured: a human approves on a real phone. */
+/**
+ * Fallback when no sca-service is configured: a human approves on a real phone. It only prompts and
+ * returns at once — it cannot observe the approval. The journey still waits for the redirect, so a
+ * missing approval surfaces as the browser step's timeout, never as a silent pass.
+ */
 export class ManualApprover implements ScaApprover {
   async approve(_m: (c: PendingChallenge) => boolean, o: { timeoutMs: number }): Promise<PendingChallenge> {
     process.stderr.write(`approve the connect in the bank app within ${Math.round(o.timeoutMs / 1000)} s\n`)

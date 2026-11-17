@@ -51,3 +51,12 @@ test('known-positive: with no passkey on the authenticator, no redirect happens'
     await assert.rejects(authorizeInBrowser(b.page, s.url, redirect, { timeoutMs: 8_000 }), /no redirect/)
   } finally { await b.close(); s.close() }
 })
+
+test('a login page that navigates to a non-allowed host is stopped by the target guard', { skip: !enabled && 'no browser configured' }, async () => {
+  const srv = createServer((_, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<script>location.href="https://mcp.examplebank.com/login"</script>') })
+  await new Promise<void>((ok) => srv.listen(0, '127.0.0.1', ok))
+  const b = await openPasskeyBrowser({ headless: true })
+  try {
+    await assert.rejects(authorizeInBrowser(b.page, `http://localhost:${(srv.address() as AddressInfo).port}/`, 'http://127.0.0.1:53682/callback', { timeoutMs: 8_000 }), /mcp\.examplebank\.com is not loopback/)
+  } finally { await b.close(); srv.close() }
+})

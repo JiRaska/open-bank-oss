@@ -6,7 +6,7 @@
 // Each step fails loudly with the step name; nothing is skipped silently. Against today's main
 // the first step fails (mcp-service serves no RFC 9728 metadata) — that is the expected state
 // until the ADR-0383 D1 slice lands, not a harness defect.
-import { writeFileSync } from 'node:fs'
+import { chmodSync, writeFileSync } from 'node:fs'
 import type { HarnessConfig } from './config.ts'
 import type { DpopKey } from './dpop.ts'
 import { exportDpopKey, generateDpopKey } from './dpop.ts'
@@ -21,6 +21,13 @@ import type { AuthorizationParams } from './oauth.ts'
 import { pkcePair, randomState } from './pkce.ts'
 import type { ScaApprover } from './sca-device.ts'
 import { ManualApprover, SoftwareScaDevice } from './sca-device.ts'
+
+/** Only the error text, truncated — never the whole tool payload (it may carry customer data). */
+export function toolErrorText(content: unknown): string {
+  const texts = Array.isArray(content) ? content.map((c: { text?: unknown }) => (typeof c?.text === 'string' ? c.text : '')).filter(Boolean) : []
+  const t = texts.join(' ') || '(no error text)'
+  return t.length > 200 ? `${t.slice(0, 200)}…` : t
+}
 
 export interface StepResult { step: string; ok: boolean; detail: string }
 
@@ -113,6 +120,7 @@ export async function runJourney(cfg: HarnessConfig, log: (r: StepResult) => voi
       dpopPrivateJwk: dpop ? await exportDpopKey(dpop) : undefined,
     }
     writeFileSync(cfg.sessionFile, JSON.stringify(s), { mode: 0o600 })
+    chmodSync(cfg.sessionFile, 0o600) // `mode` applies only on creation; an existing file keeps its old mode
   }
 
   const client = await step('MCP initialize (SDK)', () => connectMcp(cfg.resourceUrl, cred))
@@ -121,12 +129,12 @@ export async function runJourney(cfg: HarnessConfig, log: (r: StepResult) => voi
     if (!tools.tools.some((t) => t.name === cfg.readTool)) throw new Error(`read tool ${cfg.readTool} not listed`)
     await step(`tools/call ${cfg.readTool}`, async () => {
       const r = await client.callTool({ name: cfg.readTool, arguments: cfg.readToolArgs })
-      if (r.isError) throw new Error(`tool error: ${JSON.stringify(r.content)}`)
+      if (r.isError) throw new Error(`tool error: ${toolErrorText(r.content)}`)
       return r
     })
     await step('tools/call propose_payment (proposal only, never a debit)', async () => {
       const r = await client.callTool({ name: 'propose_payment', arguments: cfg.proposeArgs })
-      if (r.isError) throw new Error(`tool error: ${JSON.stringify(r.content)}`)
+      if (r.isError) throw new Error(`tool error: ${toolErrorText(r.content)}`)
       return r
     })
   } finally {

@@ -50,7 +50,7 @@ test('SCA linking payloads match sca-service DeviceApproval.kt', () => {
 })
 
 test('software SCA device signs DER ECDSA that verifies against its enrolled SPKI', () => {
-  const d = new SoftwareScaDevice('http://unused', 'p', 't')
+  const d = new SoftwareScaDevice('http://sca.test', 'p', 't')
   const sig = d.sign('payload')
   const key = createPublicKey({ key: Buffer.from(d.publicKeySpkiB64, 'base64'), format: 'der', type: 'spki' })
   assert.ok(verify('sha256', Buffer.from('payload'), key, Buffer.from(sig, 'base64')))
