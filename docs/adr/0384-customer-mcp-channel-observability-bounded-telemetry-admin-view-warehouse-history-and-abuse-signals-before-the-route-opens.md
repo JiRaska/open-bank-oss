@@ -66,8 +66,8 @@ Each point was checked against `origin/main` on 2026-11-17.
    `AuditEventPublisher` implementation on `main` is libs-runtime's `LoggingAuditEventPublisher`,
    and its log line carries `eventId, at, actor, actorType, op, resource, resourceId, result,
    traceId` — not `channel`, `actChain` or `payload`. So for MCP, ADR-0226 D1 is a type, not a
-   trail. This ADR does not build the audit transport (that is ADR-0226/ADR-0323 work), and it
-   refuses to treat telemetry as a substitute for it.
+   trail. This ADR makes the durable audit transport a prerequisite (D0) and refuses to treat
+   telemetry as a substitute for it.
 3. **mcp-service has no outbox and no Kafka.** Its tree holds `McpRateLimiter` and
    `UnwiredProposalPort`, a Postgres database `openbank_mcp`, and no `outgoing` channel. A per-call
    event "over the existing outbox" does not exist to reuse; it must be built (ADR-0003).
@@ -122,6 +122,16 @@ We will make the customer MCP channel observable before it is reachable, using t
 existing signal paths, and we will not open the ADR-0383 route until every delivery check below
 passes in the sandbox.
 
+### D0 — Prerequisite: a durable, hash-linked MCP audit trail
+
+mcp-service adopts the ADR-0323 producer-side hash-linked audit envelope (producer, seq, prevHash,
+SHA-256 over canonical JSON), delivered through a transactional outbox. This is mcp-service's
+first outbox, and the D2 tool-call outbox shares it. Every customer-channel `tools/call` and
+`tools/list` event then carries the ADR-0226 `channel`, `actChain` and `sessionId` fields into
+audit-service. ADR-0323 is `proposed/partial` on 2026-11-17, so this is real prerequisite work,
+not adoption of a finished primitive. **Until mcp-service's audit events land in audit-service
+through that outbox, the route stays closed.**
+
 ### D1 — Live metrics: extend the existing MCP series; labels are closed sets
 
 - The existing four MCP series gain `channel ∈ {agent, operator, customer}`, derived from the
@@ -129,8 +139,11 @@ passes in the sandbox.
 - Customer-channel series additionally carry `client`. This is allowed **only because** ADR-0383
   D1 admits allowlisted, bank-registered clients with dynamic registration off, so the value set is
   the allowlist. The value is the allowlist entry's short id from mcp-service config; anything else
-  is `unlisted`. A unit test fails when the allowlist exceeds **25** entries, because at that size
-  `client` stops being a safe label and per-client views must move to the warehouse.
+  is `unlisted`. The allowlist is capped at **25** entries, because above that `client` stops
+  being a safe label and per-client views must move to the warehouse. The cap is enforced where
+  the allowlist is loaded: mcp-service refuses to start with more than 25 entries, and a unit test
+  proves the refusal. Registering a 26th client therefore needs a superseding decision, not a
+  config edit.
 - Customer-channel series carry `synthetic ∈ {true,false}` from the ADR-0252 taint (fail-to-real,
   `SyntheticTaint.isTainted`), so the synthetic journey's outcome is readable as the availability
   signal and real-traffic panels can exclude it.
@@ -149,8 +162,10 @@ passes in the sandbox.
   - `openbank_mcp_customer_proposals_total{stage,client,synthetic}`,
     `stage ∈ {created, deduplicated, refused_limit, approved, rejected, expired}`, and
     `openbank_mcp_customer_proposal_decision_seconds{outcome}` (histogram, `standardPercentiles`).
-    The stages after `created` are counted by whichever service owns the proposal store
-    (ADR-0383 D6; today `UnwiredProposalPort`, so none exist).
+    **This part depends on the ADR-0383 D6 proposal store**, which does not exist today
+    (`UnwiredProposalPort`). The proposal-funnel signals (these series, the D2 proposal events,
+    `gold_mcp_proposal_funnel` and the D6 rejection alert) are delivered with that store, and
+    their delivery status follows it. They are not invented ahead of it.
   - `openbank_mcp_customer_replay_store_up` (0/1) — the fail-closed dependency, scraped, not inferred.
 - Gauges from a delegation-service projection, not from MCP and never per party:
   `openbank_delegation_mcp_active_grants{client}` and `openbank_delegation_mcp_connected_clients`.
@@ -228,12 +243,22 @@ A `Customer MCP` page under the existing `/delegations` area. Every request goes
   tool and outcome. The lookup is audit-stamped as a staff read of customer data.
 - **Abuse** — `gold_mcp_abuse_indicators` via the registry, permission `compliance:view`, with a
   link into the ADR-0304 fraud lens when a case exists.
-- **Actions, both four-eyes (ADR-0155), both new distinct actions** (Context 10):
-  `delegation.operatorRevoke` (one grant) and `delegation.mcpClientSuspend` (all grants of one
-  client, and MCP stops admitting that `azp`). Each needs a reason code, lands in `rules.yaml:
-  four_eyes.actions`, and delegation-service wires the shared `ApprovalStore` for exactly these two.
-  Customer self-revoke keeps its current exemption. The faster lever for a whole-channel stop stays
-  the GitOps one (removing the route), which already takes a reviewed PR.
+- **Actions, governed by direction** (ADR-0047 point 6: tightening is single-actor break-glass,
+  loosening needs four-eyes; break-glass actions get a mandatory, time-boxed post-hoc review by an
+  independent function). All of them are new, distinct actions (Context 10), each with a reason
+  code and an audit event:
+  - `delegation.operatorRevoke`: revokes one grant. **Single actor** (operator role), audited. It
+    only reduces access.
+  - `delegation.mcpClientSuspend`: emergency stop for one client. **Single actor** (operator role),
+    effective immediately: MCP stops admitting that `azp`, and every grant of the client is
+    denied on its next call (ADR-0383 D3 re-reads the grant). It automatically opens a four-eyes
+    **post-hoc review item** in the `ApprovalStore`, reviewed by a different person within 24h.
+    An unreviewed item stays visible on the page and in the admin approval queue.
+  - `delegation.mcpClientUnsuspend` (lifting a suspension) and `delegation.mcpClientBulkRevoke`
+    (permanently revoking every grant of a client): **four-eyes before effect** (ADR-0155). These
+    two land in `rules.yaml: four_eyes.actions`, and delegation-service wires the shared
+    `ApprovalStore` for them and for the review item.
+  - Customer self-revoke keeps its current exemption.
 
 ### D5 — Fraud: evidence at approval, account-control events, shadow first
 
@@ -295,9 +320,11 @@ sandbox. Until then no HTTPRoute or Ingress names mcp-service.
   keeps 10 years as a floor, and access logs are a 90-day class under ADR-0118.
 - **Score scraping and key reuse in fraud-service.** One risk engine. Rejected: ADR-0377 scopes
   fraud decisions to value movements, and a read has no admission step to attach a verdict to.
-- **Single-operator kill switch for speed.** Faster in an incident. Rejected for the per-client
-  switch: it revokes every customer's grant for that client and is itself an abuse vector. The
-  whole-channel stop remains available through the reviewed GitOps route removal.
+- **Four-eyes before effect for the per-client suspension.** Symmetric and simple. Rejected: it
+  delays the stop during an active abuse incident. Suspension only reduces access and is
+  reversible, so it follows ADR-0047's single-actor break-glass shape with a mandatory post-hoc
+  review. The risk-increasing directions (unsuspend, and permanent bulk revoke that cannot be
+  undone) stay four-eyes before effect.
 - **A zero-traffic alert as the liveness signal.** Simple. Rejected: at launch real traffic is
   sparse, so it would page standing (ADR-0241); the synthetic journey proves the path end to end.
 
@@ -313,7 +340,8 @@ sandbox. Until then no HTTPRoute or Ingress names mcp-service.
   becoming an exemption.
 
 **Negative**
-- mcp-service gains an outbox and a database write per customer tool call.
+- mcp-service gains its first outbox (ADR-0323 audit envelope plus telemetry) and a database write
+  per customer tool call. The route waits on ADR-0323, which is `proposed/partial`.
 - The route now also waits on the warehouse erasure backend being deployed (Context 7), and on the
   proposal store existing (ADR-0383 D6).
 - A libs-fincrime contract change (`InstructionOrigin`) and a `four_eyes` wiring in
@@ -321,8 +349,8 @@ sandbox. Until then no HTTPRoute or Ingress names mcp-service.
 - The `client` label caps the allowlist at 25 before the live views must be redesigned.
 
 **Neutral**
-- The ADR-0226 audit transport gap for MCP (Context 2) is unchanged by this ADR and stays a
-  dependency of the channel's repudiation story, tracked against ADR-0226/ADR-0323.
+- Follow-up #16608: refresh-family revocation is a realm fact, so it stays invisible until a
+  customers-realm event listener feeds the log pipeline. This is not a route prerequisite.
 
 **Enforcement.**
 - New checker `check-mcp-customer-observability.py`, gate `mcp-customer-channel-observable`
@@ -363,9 +391,17 @@ Run in the sandbox, in this order; the route stays closed until all pass.
   then cannot reproduce that party's `party_ref`.
 - **No PII on the wire.** A consumer test over the tool-call topic schema rejects any property
   named `iban`, `amount`, `reference`, `arguments`, `body` or `result`.
-- **Four-eyes.** `delegation.operatorRevoke` and `delegation.mcpClientSuspend` appear under
-  `rules.yaml: four_eyes.actions`; an IT shows the maker cannot approve their own request and the
-  grant stays active until a second operator approves.
+- **Client cap.** mcp-service started with a 26-entry allowlist fails to boot, and with 25 it
+  boots. `count(count by (client) (openbank_mcp_tool_calls_total{channel="customer"})) <= 26`
+  (25 clients plus `unlisted`).
+- **Durable audit (D0).** After the journey, audit-service holds the journey's `mcp.tool.call`
+  events with `channel` set, and its chain verify endpoint reports no broken link from
+  mcp-service.
+- **Governed actions.** An IT shows that `delegation.mcpClientSuspend` by one operator denies the
+  client's next call and creates a post-hoc review item. `delegation.mcpClientUnsuspend` and
+  `delegation.mcpClientBulkRevoke` appear under `rules.yaml: four_eyes.actions`, the maker cannot
+  approve their own request, and nothing changes until a second operator approves.
+  `delegation.operatorRevoke` takes effect with one actor and emits an audit event.
 - **Fraud evidence.** With a shadow rule reading `origin`, an approved journey proposal yields a
   fraud decision whose recorded context has `origin = MCP_CLIENT_PROPOSAL`, and the verdict is
   unchanged by the shadow rule.
@@ -384,7 +420,7 @@ Run in the sandbox, in this order; the route stays closed until all pass.
 
 - ADR-0003, ADR-0022, ADR-0023, ADR-0056, ADR-0077, ADR-0084, ADR-0088, ADR-0118, ADR-0139,
   ADR-0155, ADR-0171, ADR-0189, ADR-0226, ADR-0228, ADR-0237, ADR-0241, ADR-0252, ADR-0253,
-  ADR-0286, ADR-0303, ADR-0304, ADR-0323, ADR-0329, ADR-0354, ADR-0374, ADR-0377, ADR-0378;
+  ADR-0286, ADR-0047, ADR-0303, ADR-0304, ADR-0323, ADR-0329, ADR-0354, ADR-0374, ADR-0377, ADR-0378;
   ADR-0383 (proposed, PR #16591)
 - `openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/observability/McpMetricsAdapter.kt`
 - `openbank-mcp-service/src/main/kotlin/com/openbank/mcp/application/McpCallAuditor.kt`
@@ -394,4 +430,4 @@ Run in the sandbox, in this order; the route stays closed until all pass.
 - `openbank-libs-fincrime/src/main/kotlin/com/openbank/libs/fincrime/FraudRiskContext.kt`
 - `openbank-admin-ui/src/lib/reporting/registry.ts`
 - `openbank-libs/governance/journeys.yaml`
-- Issues #16590, #16605
+- Issues #16590, #16605, #16608
