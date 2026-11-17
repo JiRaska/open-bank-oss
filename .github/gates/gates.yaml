@@ -6130,7 +6130,7 @@ gates:
     mode: enforced
     when: pull_request
     needs_base: required
-    budget_seconds: 20
+    budget_seconds: 45   # gate 0.6s; self-test builds ~37 git fixtures in parallel, 26s measured on a loaded laptop
     min_subjects: 20   # services carrying an outbox dispatch-enabled switch at HEAD (corpus, not PRs)
     rationale: >-
       A PR that adds the claim-fenced outbox v2 migration (claim_token on an outbox table) is safe

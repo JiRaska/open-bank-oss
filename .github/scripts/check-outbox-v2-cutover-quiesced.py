@@ -16,6 +16,7 @@ Fail closed: unparseable / valueFrom / no workload found. No label escape.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import os
 import pathlib
 import re
@@ -27,17 +28,29 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import gatelib  # noqa: E402
 
-GIT_ENV = gatelib.hermetic_git_env()
+GIT_ENV = {**gatelib.hermetic_git_env(), "GIT_CONFIG_COUNT": "2", "GIT_CONFIG_KEY_0": "core.fsync",
+           "GIT_CONFIG_VALUE_0": "none", "GIT_CONFIG_KEY_1": "gc.auto", "GIT_CONFIG_VALUE_1": "0"}
 
 ENV_NAME = "OPENBANK_OUTBOX_DISPATCH_ENABLED"
-MIGRATION_RE = re.compile(r"^(openbank-[^/]+)/src/main/resources/db/migration/[^/]+\.sql$")
-# Introduces the v2 claim column: `ADD [COLUMN] [IF NOT EXISTS] claim_token` or a CREATE TABLE
-# column definition. A later migration that merely INDEXES or mentions it (after the cutover,
-# with dispatch re-enabled) is deliberately not a subject.
-CLAIM_ADD_RE = re.compile(r'\bADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?claim_token"?\b', re.I)
-CLAIM_DEF_RE = re.compile(r'^\s*"?claim_token"?\s+(?:uuid|text|varchar)', re.I | re.M)
+# Per-service override of the env key, for the rare service whose dispatcher switch is not the
+# fleet-standard property. Add a line here (with the reason) when a service's own
+# @ConfigProperty / manifest uses another name; otherwise the fleet key applies.
+ENV_KEYS = {
+    "openbank-pricing-service": "PRICING_OUTBOX_DISPATCH_ENABLED",  # pricing/workloads.yaml
+}
+
+
+def env_name_for(svc: str) -> str:
+    return ENV_KEYS.get(svc, ENV_NAME)
+
+
+# Any added file under db/migration/ (any depth, any case). Renames count: a moved v2 file is still v2.
+MIGRATION_RE = re.compile(r"^(openbank-[^/]+)/src/main/resources/db/migration/.+\.(sql|java|kt)$", re.I)
+CLAIM_ADD_RE = re.compile(r'\bADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?claim_token"?(?![\w])', re.I)
+CLAIM_RENAME_RE = re.compile(r'\bRENAME\s+(?:COLUMN\s+)?"?\w+"?\s+TO\s+"?claim_token"?(?![\w])', re.I)
+CLAIM_TOKEN_RE = re.compile(r'(?<![\w])"?claim_token"?(?![\w])', re.I)
 WORKLOAD_KINDS = {"Rollout", "Deployment", "StatefulSet", "DaemonSet", "CronJob", "Job"}
-RUNBOOK = "docs/runbooks/<service>-outbox-v2-cutover.md, step 2 (set OPENBANK_OUTBOX_DISPATCH_ENABLED=false through GitOps and verify old dispatchers are drained)"
+RUNBOOK = "docs/runbooks/<service>-outbox-v2-cutover.md, step 2 (set the dispatch switch to false through GitOps, roll it out to every pod and let in-flight claims drain; this gate checks only the DECLARED state on the base, so verify the rollout yourself before arming)"
 
 
 def git_out(repo: str, *args: str, check_rc: bool = True) -> str:
@@ -47,14 +60,56 @@ def git_out(repo: str, *args: str, check_rc: bool = True) -> str:
     return r.stdout
 
 
-def strip_sql_comments(sql: str) -> str:
-    sql = re.sub(r"/\*.*?\*/", "", sql, flags=re.S)
-    return re.sub(r"--[^\n]*", "", sql)
+def sql_statements(sql: str) -> list[str]:
+    """Split SQL into statements with comments removed. String-literal and quoted-identifier aware:
+    `--`, `/*` and `;` inside '...' or "..." are data, not syntax."""
+    out: list[str] = []
+    cur: list[str] = []
+    i, n, quote = 0, len(sql), ""
+    while i < n:
+        ch = sql[i]
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                if i + 1 < n and sql[i + 1] == quote:  # doubled quote escape
+                    cur.append(sql[i + 1])
+                    i += 1
+                else:
+                    quote = ""
+        elif ch in "'\"":
+            quote = ch
+            cur.append(ch)
+        elif sql.startswith("--", i):
+            j = sql.find("\n", i)
+            i = n if j < 0 else j - 1
+        elif sql.startswith("/*", i):
+            j = sql.find("*/", i + 2)
+            i = n if j < 0 else j + 1
+            cur.append(" ")
+        elif ch == ";":
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+        i += 1
+    out.append("".join(cur))
+    return [x.strip() for x in out if x.strip()]
 
 
 def introduces_outbox_v2(sql: str) -> bool:
-    body = strip_sql_comments(sql)
-    return "outbox" in body.lower() and bool(CLAIM_ADD_RE.search(body) or CLAIM_DEF_RE.search(body))
+    """True when ONE statement both names an outbox table and introduces claim_token as a column
+    (ADD [COLUMN], RENAME ... TO, or a CREATE TABLE definition, any type, any schema qualifier).
+    CREATE INDEX / DROP on it, and a claim_token elsewhere in the file, are not the introduction."""
+    for st in sql_statements(sql):
+        low = st.lower()
+        if "outbox" not in low or re.match(r"create\s+(unique\s+)?index\b", low):
+            continue
+        if re.match(r"create\s+(?:\w+\s+)*table\b", low):
+            if CLAIM_TOKEN_RE.search(st):
+                return True
+        elif CLAIM_ADD_RE.search(st) or CLAIM_RENAME_RE.search(st):
+            return True
+    return False
 
 
 def truthy(v: object) -> bool | None:
@@ -67,6 +122,7 @@ def truthy(v: object) -> bool | None:
 
 
 PROP = "dispatch-enabled"
+ABSENT = "ABSENT: "
 # Env names that can re-point config resolution; any presence on the container is UNKNOWN.
 CONFIG_ENV = {"QUARKUS_PROFILE", "SMALLRYE_CONFIG_PROFILE", "SMALLRYE_CONFIG_LOCATIONS",
               "QUARKUS_CONFIG_LOCATIONS", "SMALLRYE_CONFIG_PROFILE_PARENT", "QUARKUS_CONFIG_PROFILE_PARENT"}
@@ -123,7 +179,7 @@ def app_default(repo: str, base: str, svc: str) -> tuple[bool | None, str]:
         if node is not None:
             value = node
     if value is None:
-        return None, f"application.yaml does not set openbank.outbox.{PROP}"
+        return None, f"{ABSENT}application.yaml does not set openbank.outbox.{PROP}"
     if isinstance(value, str):
         m = re.fullmatch(r"\$\{([^:}]+):([^}]*)\}", value.strip())
         if m:
@@ -132,10 +188,13 @@ def app_default(repo: str, base: str, svc: str) -> tuple[bool | None, str]:
     return t, "" if t is not None else "application.yaml value is not a boolean literal"
 
 
-def container_taint(c: dict) -> str:
+def container_taint(c: dict, env_name: str = ENV_NAME) -> str:
     """A reason another source could override the switch, or '' when none."""
     if c.get("envFrom"):
         return "container has envFrom"
+    for arg in [*(c.get("command") or []), *(c.get("args") or [])]:
+        if "-D" in str(arg) or "dispatch" in str(arg).lower():
+            return "container command/args carry a -D / dispatch override"
     for e in c.get("env") or []:
         name = str(e.get("name", ""))
         val = str(e.get("value", ""))
@@ -143,7 +202,7 @@ def container_taint(c: dict) -> str:
             return f"env {name} changes profile/config location"
         if name in JVM_ENV and ("-D" in val or PROP in val or "dispatch" in val.lower()):
             return f"env {name} carries a -D / dispatch override"
-        if name != ENV_NAME and (PROP in val or "dispatch-enabled" in name.lower()
+        if name != env_name and (PROP in val or "dispatch-enabled" in name.lower()
                                  or name.upper().endswith("DISPATCH_ENABLED")):
             return f"env {name} mentions {PROP}"
     return ""
@@ -171,18 +230,22 @@ def workloads(repo: str, base: str, svc: str) -> list[tuple[str, str, bool | Non
     """Every GitOps workload at base running this service's image -> (file, name, paused?, why-unknown).
 
     paused is True ONLY for a proven pause: the container carries the literal env
-    OPENBANK_OUTBOX_DISPATCH_ENABLED=false, or no env sets it and application.yaml literally says
+    the per-service dispatch env (OPENBANK_OUTBOX_DISPATCH_ENABLED by default) =false, or no env sets it and application.yaml literally says
     false — and in both cases nothing else could override it. Everything else is None (UNKNOWN,
     which fails the gate) or False (enabled)."""
     found = []
     default, default_why = app_default(repo, base, svc)
+    env_name = env_name_for(svc)
     image_re = re.compile(rf"/{re.escape(svc)}[:@]")
-    for path in git_out(repo, "ls-tree", "-r", "--name-only", base, "openbank-infra/gitops").splitlines():
+    # ONE grep over the base tree finds the files naming this image; parsing every manifest (1000+)
+    # one `git show` at a time took minutes against a 20 s budget.
+    sha = git_out(repo, "rev-parse", base).strip()
+    hits = git_out(repo, "grep", "-l", "-E", rf"/{svc}[:@]", sha, "--", "openbank-infra/gitops", check_rc=False)
+    for line in sorted(hits.splitlines()):
+        path = line[len(sha) + 1:]
         if not path.endswith((".yaml", ".yml")):
             continue
         text = git_out(repo, "show", f"{base}:{path}")
-        if not image_re.search(text):
-            continue
         for doc in gatelib.loads_all(text):
             if not isinstance(doc, dict) or doc.get("kind") not in WORKLOAD_KINDS:
                 continue
@@ -192,29 +255,33 @@ def workloads(repo: str, base: str, svc: str) -> list[tuple[str, str, bool | Non
                 if not image_re.search(str(c.get("image", ""))):
                     continue
                 name = (doc.get("metadata") or {}).get("name", "?")
-                taint = container_taint(c) or kustomize_taint(repo, base, path)
+                taint = container_taint(c, env_name) or kustomize_taint(repo, base, path)
                 if taint:
                     found.append((path, name, None, taint))
                     continue
-                if default is None:
-                    # Unknown application.yaml state still permits a proven env literal below, but
-                    # profile sections / properties files could override even that: stay UNKNOWN.
+                soft = default is None and default_why.startswith(ABSENT)
+                if default is None and not soft:
+                    # Missing/unreadable yaml, profile section, properties file, expression: something
+                    # other than the container env could decide the value, so stay UNKNOWN.
                     found.append((path, name, None, default_why))
                     continue
                 env_val: object = None
                 unresolvable = False
                 for e in c.get("env") or []:
-                    if e.get("name") == ENV_NAME:
+                    if e.get("name") == env_name:
                         if "value" in e:
                             env_val, unresolvable = e["value"], False
                         else:
                             env_val, unresolvable = None, True
                 if unresolvable:
-                    found.append((path, name, None, f"{ENV_NAME} comes from valueFrom, not a literal"))
+                    found.append((path, name, None, f"{env_name} comes from valueFrom, not a literal"))
+                    continue
+                if soft and env_val is None:
+                    found.append((path, name, None, default_why + f" and no literal {env_name} on the container"))
                     continue
                 enabled = default if env_val is None else truthy(env_val)
                 if enabled is None:
-                    found.append((path, name, None, f"{ENV_NAME} value `{env_val}` is not a boolean literal"))
+                    found.append((path, name, None, f"{env_name} value `{env_val}` is not a boolean literal"))
                 else:
                     found.append((path, name, not enabled, ""))
     return found
@@ -231,16 +298,31 @@ def check(repo: str, base: str, head: str) -> tuple[int, int]:
             print(f"::error::`{ref}` is not a commit in this checkout — refusing to run vacuously")
             return 1, 0
     # Corpus: every service that carries an outbox dispatch switch at HEAD (floor for the manifest).
-    corpus = sum(1 for p in git_out(repo, "ls-tree", "-r", "--name-only", head).splitlines()
-                 if re.fullmatch(r"openbank-[^/]+/src/main/resources/application\.yaml", p)
-                 and "dispatch-enabled" in git_out(repo, "show", f"{head}:{p}"))
+    hsha = git_out(repo, "rev-parse", head).strip()
+    corpus = sum(1 for ln in git_out(repo, "grep", "-l", "dispatch-enabled", hsha, "--",
+                                     "openbank-*/src/main/resources/application.yaml", check_rc=False).splitlines() if ln)
     subjects: dict[str, list[str]] = {}
-    for line in git_out(repo, "diff", "--name-status", "--diff-filter=A", f"{base}...{head}").splitlines():
-        _, _, path = line.partition("\t")
+    unknown: dict[str, list[str]] = {}
+    # A/R/C: an added, renamed or copied file is new at this path; a moved v2 migration is still v2.
+    for line in git_out(repo, "diff", "--name-status", "-M", "-C", f"{base}...{head}").splitlines():
+        cols = line.split("\t")
+        if cols[0][:1] not in ("A", "R", "C"):
+            continue
+        path = cols[-1]
         m = MIGRATION_RE.match(path)
-        if m and introduces_outbox_v2(git_out(repo, "show", f"{head}:{path}")):
-            subjects.setdefault(m.group(1), []).append(path)
+        if not m:
+            continue
+        if path.lower().endswith(".sql"):
+            if introduces_outbox_v2(git_out(repo, "show", f"{head}:{path}")):
+                subjects.setdefault(m.group(1), []).append(path)
+        else:  # Java/Kotlin Flyway migration: its SQL is invisible to this gate
+            unknown.setdefault(m.group(1), []).append(path)
     rc = 0
+    for svc, files in sorted(unknown.items()):
+        print(f"::error file={files[0]}::{svc}: this PR adds a Java/Kotlin Flyway migration ({files[0]}), whose SQL "
+              f"this gate cannot read, so it cannot rule out an outbox v2 (claim_token) change. Fail closed. "
+              f"Express the migration as SQL, or pause dispatch on the base first. Runbook: {RUNBOOK}")
+        rc = 1
     for svc, files in sorted(subjects.items()):
         wl = workloads(repo, base, svc)
         if not wl:
@@ -254,8 +336,8 @@ def check(repo: str, base: str, head: str) -> tuple[int, int]:
             why = "dispatch is ENABLED" if paused is False else f"a paused dispatcher cannot be PROVEN ({unk}) — unknown is treated as enabled"
             print(f"::error file={files[0]}::{svc}: this PR adds the outbox v2 migration ({files[0]}) but on the base: "
                   f"{why} for workload `{name}` ({path}). A v2 migration under a live v1 dispatcher gives a mixed "
-                  f"dispatcher window. First merge a GitOps PR setting {ENV_NAME}=\"false\" on {svc}, wait for it to "
-                  f"roll, then update this branch. Runbook: {RUNBOOK}. There is no label override.")
+                  f"dispatcher window. First merge a GitOps PR setting {env_name_for(svc)}=\"false\" on {svc}, wait for it to "
+                  f"roll out to every pod and for in-flight claims to drain (this gate checks the DECLARED state only), then update this branch. Runbook: {RUNBOOK}. There is no label override.")
             rc = 1
     return rc, corpus
 
@@ -294,11 +376,12 @@ APP_YAML = "openbank:\n  outbox:\n    dispatch-enabled: %s\n"
 
 
 def fixture(base_app: str | None, base_env: str | None, head_files: dict[str, str], head_env: str | None = None,
-            extra: str = "", app_text: str | None = None, kustomization: str | None = None) -> tuple[str, str, str]:
+            extra: str = "", app_text: str | None = None, kustomization: str | None = None,
+            base_files: dict[str, str] | None = None, rename: dict[str, str] | None = None) -> tuple[str, str, str]:
     """A tiny repo: base commit carries config, head commit adds `head_files` (and maybe a manifest edit)."""
     root = pathlib.Path(tempfile.mkdtemp(prefix="outbox-v2-fixture-"))
     repo = str(root)
-    subprocess.run(["git", "-C", repo, "init", "-q", "-b", "main"], check=True, env=GIT_ENV)
+    subprocess.run(["git", "-C", repo, "init", "-q", "-b", "main", "--template="], check=True, env=GIT_ENV)
 
     def env_block(v: str | None) -> str:
         if v is None:
@@ -316,9 +399,14 @@ def fixture(base_app: str | None, base_env: str | None, head_files: dict[str, st
         write(root, "openbank-infra/gitops/components/foo/kustomization.yaml", kustomization)
     write(root, "openbank-infra/gitops/components/foo/foo-service.yaml", MANIFEST % (SVC, env_block(base_env), extra))
     write(root, f"{SVC}/src/main/resources/db/migration/V1__init.sql", "CREATE TABLE foo_outbox (id BIGINT);\n")
+    for rel, text in (base_files or {}).items():
+        write(root, rel, text)
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "base")
     base = git(repo, "rev-parse", "HEAD").strip()
+    for old, new in (rename or {}).items():
+        (root / new).parent.mkdir(parents=True, exist_ok=True)
+        git(repo, "mv", old, new)
     for rel, text in head_files.items():
         write(root, rel, text)
     if head_env is not None:
@@ -344,7 +432,26 @@ def self_test() -> int:
         ("comment-only mention of claim_token is not a subject", "true", None,
          {unrelated: "-- ADD COLUMN claim_token later\nALTER TABLE foo ADD COLUMN note TEXT;\n"}, None, 0),
         ("re-enable PR (config only, no migration) is not a subject", "true", "false", {}, "true", 0),
+        ("claim_token in a DIFFERENT statement than the outbox table is not a subject", "true", None,
+         {unrelated: "ALTER TABLE foo ADD COLUMN claim_token UUID;\nCREATE TABLE foo_outbox (id INT);\n"}, None, 0),
+        ("index-only migration on claim_token is not a subject (post-cutover)", "true", None,
+         {unrelated: "CREATE INDEX ix_c ON foo_outbox (claim_token);\n"}, None, 0),
     ]
+    cases.append(("application.yaml lacks the key but the container carries literal false", "x", "false",
+                  {mig: V2_SQL}, None, 0, dict(app_text="openbank:\n  other: 1\n")))
+    d = f"{SVC}/src/main/resources/db/migration"
+    detect = [  # subject-detection gaps: each must be a subject, dispatch enabled, so exit 1
+        ("one-line CREATE TABLE with bigint claim_token", {mig: "CREATE TABLE foo_outbox (id BIGINT, claim_token BIGINT);\n"}, {}),
+        ("RENAME COLUMN ... TO claim_token", {mig: "ALTER TABLE foo_outbox RENAME COLUMN tok TO claim_token;\n"}, {}),
+        ("schema-qualified outbox table", {mig: "ALTER TABLE public.foo_outbox ADD COLUMN claim_token UUID;\n"}, {}),
+        ("uppercase .SQL extension", {f"{d}/V2__OUTBOX.SQL": V2_SQL}, {}),
+        ("migration in a db/migration subfolder", {f"{d}/sub/V2__outbox_v2.sql": V2_SQL}, {}),
+        ("'--' inside a string literal must not hide the statement", {mig: "ALTER TABLE foo_outbox ADD COLUMN n TEXT DEFAULT '--'; ALTER TABLE foo_outbox ADD COLUMN claim_token UUID;\n"}, {}),
+        ("RENAMED migration file", {}, dict(base_files={f"{d}/V2__draft.sql": V2_SQL}, rename={f"{d}/V2__draft.sql": f"{d}/V3__outbox_v2.sql"})),
+        ("Java Flyway migration added is an unknown subject", {f"{d}/V2__Outbox.java": "class V2__Outbox {}\n"}, {}),
+        ("Kotlin Flyway migration added is an unknown subject", {f"{d}/V2__Outbox.kt": "class V2__Outbox\n"}, {}),
+    ]
+    cases_detect = [(f"detect: {lbl}", "true", None, files, None, 1, kw) for lbl, files, kw in detect]
     # Fail-closed cases: each has an explicit literal `false` (or yaml false) AND a second source
     # that could override it, or no provable source at all. Each must FAIL (exit 1).
     cases_unknown = [
@@ -363,14 +470,25 @@ def self_test() -> int:
          dict(app_text="openbank:\n  other: 1\n")),
         ("kustomize patches touch the workload", "true", "false", {mig: V2_SQL}, None, 1,
          dict(kustomization="resources: [foo-service.yaml]\npatches:\n  - path: p.yaml\n")),
+        ("container args carry a -D override", "true", "false", {mig: V2_SQL}, None, 1,
+         dict(extra='          args: ["-Dopenbank.outbox.dispatch-enabled=true"]\n')),
+        ("container command mentions dispatch", "true", "false", {mig: V2_SQL}, None, 1,
+         dict(extra='          command: ["sh", "-c", "export DISPATCH=1; exec java -jar x"]\n')),
     ]
     failures = 0
     made: list[str] = []
-    cases = [(*c, {}) for c in cases] + cases_unknown
-    for label, app, env, files, head_env, want, kw in cases:
-        if not files:
-            files = {"README.md": "x\n"}
-        repo, base, head = fixture(app, env, files, head_env, **kw)
+    cases = [c if len(c) == 7 else (*c, {}) for c in cases] + cases_detect + cases_unknown
+    prepared = []
+    for c in cases:
+        c = list(c)
+        if not c[3]:
+            c[3] = {"README.md": "x\n"}
+        prepared.append(c)
+    # Building fixtures is git-process bound; do it in parallel, then check sequentially
+    # (check() prints, and redirect_stdout is process-global).
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        repos = list(pool.map(lambda c: fixture(c[1], c[2], c[3], c[4], **c[6]), prepared))
+    for (label, app, env, files, head_env, want, kw), (repo, base, head) in zip(prepared, repos):
         made.append(repo)
         import contextlib
         import io
@@ -383,6 +501,9 @@ def self_test() -> int:
         if want == 1 and ok and "::error" not in buf.getvalue():
             print(f"  FAIL {label}: failed without an ::error:: annotation")
             failures += 1
+    if env_name_for("openbank-pricing-service") != "PRICING_OUTBOX_DISPATCH_ENABLED" or env_name_for("x") != ENV_NAME:
+        print("  FAIL env-key map")
+        failures += 1
     for d in made:
         shutil.rmtree(d, ignore_errors=True)
     print("self-test: " + ("falsifiable" if not failures else f"{failures} FAILED"))
