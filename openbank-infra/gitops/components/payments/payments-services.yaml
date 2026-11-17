@@ -844,7 +844,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-3cf5c536@sha256:240defc36329096bb52593e5d0f90c2c145a401eb4c0b59818380cb59bf3339b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-4351e46e@sha256:45208fb5f4f0ccc124decfed3b24f2efb4c4a58a485b69d3eb2e5094417d9e85
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -2240,7 +2240,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-3cf5c536@sha256:a8dca49deb8c1a96c869309aaa7f5fdb66de589a2423fe5225545074e784888f
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-4351e46e@sha256:2ed94f134e0db9f15ce0435b5b81d7ec743a1a9aeafee4caa21f00d7f48bb254
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
