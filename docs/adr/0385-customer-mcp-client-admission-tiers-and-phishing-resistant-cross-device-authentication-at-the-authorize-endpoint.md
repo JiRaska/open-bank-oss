@@ -112,11 +112,15 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
 - **Unauthenticated callers get nothing.** An unauthenticated MCP call gets 401 with RFC 9728
   metadata, no tools and no data. A token with any other `aud`, including an `openbank-app` token,
   is rejected.
-- **The tier comes from server-side config, never from the token.** Tier is a field of the MCP
-  client allowlist in mcp-service and authorization-server config, keyed by `azp`. It is never
-  read from a token claim or from client-supplied metadata. It is assigned by the client's
-  registration behaviour (redirect type, whether it authenticates, whether it sends DPoP), never
-  by product name.
+- **The tier comes from server-side config, never from the token.** Tier is a field of the
+  single MCP client allowlist declaration, keyed by `azp`. It is never read from a token claim
+  or from client-supplied metadata. It is assigned by the client's registration behaviour
+  (redirect type, whether it authenticates, whether it sends DPoP), never by product name.
+- **One declaration drives both mcp-service and Keycloak.**
+  - The same declaration drives mcp-service's admission and the realm client config.
+  - A realm assertion fails the gate on any mismatch, and mcp-service refuses to boot on one.
+  - For Tier H the assertion requires `publicClient=false` with a client authenticator.
+  - For Tier L it requires DPoP-bound tokens (`dpop.bound.access.tokens=true`).
 - **No public hosted clients.** A hosted client that behaves as a public client (no client
   authentication) is not admitted, whatever its popularity.
 - **Every MCP client in the realm is asserted to have:**
@@ -147,6 +151,8 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
 - **Client secret: exception only.** A client secret is allowed only as a recorded, time-boxed
   exception (≤ 6 months, owner risk acceptance) when the platform offers nothing else. The secret
   is ≥ 256 bits, per bank, rotated ≤ 90 days and never logged.
+  - The exception's expiry date is a field of the allowlist declaration.
+  - After that date the authorization server refuses the client's secret authentication.
 - **Bearer access tokens** are allowed only under these conditions. This is the sole exception to
   ADR-0383's "no bearer fallback".
 - **DPoP when supported.** If a Tier H client supports DPoP it is used. Once a grant has recorded
@@ -187,8 +193,16 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
    - A `request_uri` presented by another `client_id` is rejected.
    - PKCE that is absent or `plain` is rejected.
 2. **A fresh passkey in the browser that started the flow.**
-   - MCP clients use a dedicated authentication flow (ACR step-up) with **no `auth-cookie`
-     alternative**, or `max_age=0`. An existing SSO session never skips the WebAuthn assertion.
+   - Every MCP client is bound per client to a dedicated authentication flow override with
+     **no `auth-cookie` alternative**. That binding is the control.
+   - `max_age` is not relied on: a client may omit it or misstate it, and the binding still
+     requires a fresh assertion.
+   - With a valid SSO cookie:
+     - `prompt=none` yields `login_required` and never a code;
+     - `prompt=create` (registration) is refused;
+     - `kc_action` is ignored or refused;
+     - `login_hint` and `kc_idp_hint` cannot skip the assertion;
+     - no refresh or silent-renew path issues a code without a fresh assertion.
    - If the passkey is on the phone, the browser and OS offer WebAuthn hybrid. The customer scans
      the OS-provided QR with the phone camera, and the protocol requires proximity.
    - Authenticator attachment is relaxed for this flow if `platform` hides hybrid. P3 verifies
@@ -199,8 +213,12 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
    device, enrolled less than 72 h ago cannot authorize an MCP connect. Account recovery is
    explicitly out of this path.
 4. **Same device** (the assistant runs on the phone):
-   - The flow switches app-to-app through an opaque single-use handle bound to the browser's
-     authentication session.
+   - The fresh passkey assertion still runs in the phone's browser.
+   - The flow then switches app-to-app through an opaque single-use handle bound to the
+     browser's authentication session.
+   - The SCA challenge's `partyId`, and `expectedPartyId` at consume, must equal the party that
+     asserted the passkey in that session.
+   - A handle presented by another party's app is refused.
    - The app approval completes only that session, and the code is returned only to that session.
      A handle presented from another browser session is refused.
    - The link path is new and claimed only by the `tech.openbank.app` app id. It is not matched
@@ -230,6 +248,21 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
 - **A code only after consume.** The authorization code (single-use, ≤ 60 s) is issued only after
   the challenge is consumed for **that** `approvalRequestId`.
 - **consent-service refuses `MCP_CLIENT_CONNECT`** as evidence for a PSD2 consent.
+- **The purpose is a reserved namespace.** It is registered in sca-service `ReservedNamespace`
+  (ADR-0335), so `ConsumerScope.General` cannot spend it. That matters because `consume()` does
+  not compare the purpose. Only the authorization server's scoped consumer can spend it.
+- **A push text is required.** `MCP_CLIENT_CONNECT` gets a `STATIC_PUSH_MESSAGES` entry, because
+  without one `buildPushMessage` fails initiate at its `checkNotNull`.
+- **The withheld-code authenticator** in Keycloak follows this spec:
+  1. The `challengeId` lives only in a Keycloak auth-session note and is never taken from the
+     browser.
+  2. At consume it recomputes `approvalRequestId` and `payloadSha256` from the stored PAR request.
+  3. It consumes with `expectedPartyId` equal to the session's party.
+  4. The consume is atomic (CAS) and comes before code issuance. A failure after the consume
+     fails closed: no code, and a fresh connect is required.
+  5. A forked or multi-tab session issues at most one code.
+  6. The auth-session lifespan is ≤ the 300 s challenge TTL.
+  7. The poll endpoint is rate-limited.
 - **No location or device-mismatch warning.** It is not a control here; it is the wrong signal.
   The defences are proximity, the 60 s `request_uri` and facts from the vendor session.
 
@@ -239,9 +272,11 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
 - **Fail-closed limiters only.** Throttling uses per-`(party, azp)` buckets, with a per-client
   aggregate budget as their ceiling, in fail-closed mode. **The ADR-0320 P4 fail-open limiter is
   not reused for this channel.**
-- **Shared vendor egress.** Allowlisted vendor egress ranges are exempt from the edge per-IP
-  limit, because many customers share one vendor IP. Per-`(party, azp)` buckets replace it for
-  them.
+- **Shared vendor egress.** Many customers share one vendor egress IP.
+  - Allowlisted vendor egress ranges get a separate, higher edge limit, not an exemption, because
+    the ranges are shared and may change.
+  - Per-`(party, azp)` buckets bound each customer.
+  - The per-party cap is set well below the per-client ceiling: at most 1/20 of it by default.
 - **Consent-flood caps.** At most 3 pending authorizations and 5 new connections per party per
   day. A breach is refused and audited.
 - **Breadth signals** to ADR-0384:
@@ -304,8 +339,9 @@ All of this is bounded by read + propose only (ADR-0383 D4/D6).
 5. A fresh-WebAuthn flow with no cookie alternative, and hybrid offered in real browsers.
 6. The issued code withheld until an external SCA consume.
 7. Offline-token refresh lifetime.
-8. Whether CIMD is supported.
-9. The ADR-0383 D4 exchange.
+8. The per-client flow binding, and the withheld-code authenticator (D3).
+9. Whether CIMD is supported.
+10. The ADR-0383 D4 exchange.
 
 Any failure keeps the channel closed.
 
@@ -372,7 +408,16 @@ exists. Fixing `openbank-app` `http://localhost:*` is tracked in #16612.
   → rejected.
 - PKCE absent or `plain` → rejected.
 - `iss` is present in the authorization response.
-- IT against a live Keycloak **with a valid SSO cookie**: a WebAuthn assertion is still required.
+- ITs against a live Keycloak **with a valid SSO cookie**:
+  - `prompt=none` → `login_required`, no code;
+  - `prompt=create` → refused;
+  - `kc_action` → no effect;
+  - `max_age` omitted → a fresh WebAuthn assertion is still required;
+  - `login_hint`/`kc_idp_hint` → no skip;
+  - no silent-renew path issues a code.
+- Realm and allowlist parity: Tier H ⇒ `publicClient=false` plus a client authenticator; Tier L ⇒
+  DPoP-bound. A seeded mismatch fails the gate, and mcp-service refuses to boot.
+- A client secret used after its exception expiry → `invalid_client`.
 - The registration endpoint cannot be reached from an MCP authorize.
 - A passkey or SCA device younger than 72 h → connect refused.
 
@@ -381,11 +426,18 @@ exists. Fixing `openbank-app` `http://localhost:*` is tracked in #16612.
 - An approval for request A cannot release request B.
 - Two concurrent flows → two challenges.
 - consent-service rejects an `MCP_CLIENT_CONNECT` challenge as consent evidence.
+- A `ConsumerScope.General` consumer trying to spend an `MCP_CLIENT_CONNECT` challenge → refused.
+- `MCP_CLIENT_CONNECT` initiate succeeds, so the push message exists.
+- Two concurrent polls on one auth session → exactly one code.
+- A consume that succeeds while code issuance fails → no code, and a retry is refused.
+- An auth session older than 300 s → no code.
 - No code before the consume.
 - An app denial → no code and an audited `DENIED`.
 
 **Same device**
 - A handle presented from another browser session → refused.
+- A handle presented by another party's app → refused.
+- The same-device flow without a fresh passkey assertion in the phone browser → no code.
 - An `apple-app-site-association`/`assetlinks` check: the new path is claimed only by
   `tech.openbank.app` and is not matched by `/pay/v1*`.
 
@@ -412,6 +464,7 @@ exists. Fixing `openbank-app` `http://localhost:*` is tracked in #16612.
 ## References
 
 - ADR-0021, ADR-0065, ADR-0066, ADR-0086, ADR-0090, ADR-0095, ADR-0260, ADR-0320, ADR-0335, ADR-0383, ADR-0384 (#16607); issue #16612
+- `openbank-sca-service/.../domain/model/ConsumerScope.kt` (`ReservedNamespace`, `ConsumerScope.General`), `ScaService.kt` (`buildPushMessage`, `STATIC_PUSH_MESSAGES`, `ttlSeconds = 300`)
 - `openbank-sca-service/src/main/kotlin/com/openbank/sca/domain/model/DeviceApproval.kt`, `.../application/usecase/ScaService.kt` (`requireApprovalLinking`, `buildIdempotencyKey`)
 - `openbank-consent-service/src/main/kotlin/com/openbank/consent/application/usecase/ConsentService.kt`
 - `openbank-infra/gitops/components/keycloak/customers-realm-template.json`, `keycloak.yaml`
