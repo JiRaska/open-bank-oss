@@ -6,6 +6,7 @@ package com.openbank.mcp.infrastructure.read
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.mcp.application.McpInputBounds
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
 import jakarta.enterprise.context.ApplicationScoped
@@ -57,12 +58,14 @@ class RealAccountReadPort(
     }
 
     override fun getBalance(consentContext: ConsentContext, accountId: String): JsonNode {
+        McpInputBounds.requireIban(accountId)
         gate.validate(consentContext, ConsentScopes.BALANCES_READ, accountIban = accountId)
         val internalId = resolveAccountId(accountId)
         return balances.getBalances(internalId)
     }
 
     override fun listTransactions(consentContext: ConsentContext, accountId: String, limit: Int): JsonNode {
+        McpInputBounds.requireIban(accountId)
         gate.validate(consentContext, ConsentScopes.TRANSACTIONS_READ, accountIban = accountId)
         val internalId = resolveAccountId(accountId)
         return transactions.listTransactions(internalId, limit, cursor = null)
