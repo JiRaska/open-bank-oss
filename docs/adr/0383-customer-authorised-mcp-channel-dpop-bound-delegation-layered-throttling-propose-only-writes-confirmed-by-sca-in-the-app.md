@@ -7,12 +7,26 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ai-agents, authn, security, payments]
-summary: "Customers reach MCP only via allowlisted OAuth 2.1+PKCE clients on the customer realm with DPoP-bound 5-min tokens and consent bound to party+client; throttled pre-auth and per party; MCP only proposes, the app authorises via SCA."
+summary: "Customer MCP clients are AGENT delegation grantees with zero execution capability: allowlisted OAuth+PKCE, DPoP 5-min tokens, grant bound to party+client+key, throttled before OPA; MCP only proposes, the app authorises via SCA."
 ---
 
 # ADR-0383 — Customer-authorised MCP channel: DPoP-bound delegation, layered throttling, propose-only writes confirmed by SCA in the app
 
 ## Context
+
+**Adjacent decisions and why they do not cover this.**
+- ADR-0090: TPPs reach the bank through the Berlin Group XS2A interface, so TPP access is out of
+  scope here.
+- ADR-0232: delegated access lives in `delegation-service`, not consent-service.
+- ADR-0233 (proposed): chartered agents can be delegation grantees that **execute within
+  ceilings** and only propose above them.
+- ADR-0193: an AP2 mandate is evidence into an SCA decision and may yield a
+  delegated-authentication exemption.
+- ADR-0374/0375: every outbound payment passes one admission chain whose first step is Authority.
+
+None of these decides how a customer admits a third-party MCP client. Two of them, if applied
+unchanged to that client, would let a model complete a payment without the customer
+authenticating in the bank app. This ADR closes that gap for this channel.
 
 ADR-0195 made `openbank-mcp-service` an OAuth 2.1 resource server for **governed agents**: the
 token `sub` is an `agent:<id>` principal, its `consent_id` is live-validated at consent-service,
@@ -86,13 +100,20 @@ We will expose MCP to customers as a **delegation channel** with these propertie
 - The customer sees connected clients in the app, can revoke them, and is notified when a new
   client is connected.
 
-**D3 — Consent bound to customer AND client AND key**
-- The delegation consent (consent-service, ADR-0126) is validated against a triple:
-  - the customer `sub`/`party_id` from the token;
-  - the client `azp`;
-  - the token's `cnf.jkt` recorded at grant time.
-- `consent_id` is looked up server-side from that triple. A client never supplies it, and a
-  claim the client can influence is never trusted.
+**D3 — The client is an AGENT delegation grantee bound to customer AND client AND key**
+- Connecting a client creates a `DelegationGrant` in `delegation-service` (ADR-0232 home,
+  ADR-0233 `granteeType: AGENT`):
+  - grantor is the customer's party;
+  - grantee is the allowlisted client;
+  - the grant records the token's `cnf.jkt` at connection time.
+- Capabilities are drawn **only** from `account.read-*` and `account.propose-payment` (ADR-0232
+  D2 vocabulary). `account.initiate-payment` and every other executing or managing capability
+  are structurally refused for this grantee class, whatever ceiling is set. This restricts
+  ADR-0233 D2 for third-party MCP clients.
+- MCP looks the grant up server-side from the triple (customer `sub`/`party_id`, `azp`,
+  `cnf.jkt`). No grant or consent id is ever taken from a client-influenced claim.
+- Each read is checked against the grant through a declared enforcer and ownership oracle
+  (ADR-0375, enforced gate `delegation-capability-enforcement`).
 - `ConsentGate` fails closed when the grant list is absent.
 
 **D4 — Downstream reads carry the customer, not a shared operator**
@@ -105,7 +126,7 @@ We will expose MCP to customers as a **delegation channel** with these propertie
 - The shared `openbank-services` principal is not used on this channel.
 
 **D5 — Layered throttling, cheapest first**
-1. Gateway/WAF: per-IP and new-connection limits, plus a body-size cap, **before** any token
+1. Edge gateway (Envoy Gateway, ADR-0324): per-IP and new-connection limits, plus a body-size cap, **before** any token
    validation.
 2. Per `(party, client)` cost-weighted token bucket in Valkey (ADR-0320 primitive, ADR-0132 key
    shape), applied **before** the OPA call. Tool costs are data in the charter.
@@ -127,8 +148,13 @@ Throttled and denied calls are audited and metered like any other deny.
   weaker variant.
 - The approval screen shows **bank-rendered** fields only: payee name from the bank's own
   resolution, IBAN and amount. Model-supplied free text is never shown as if it were authoritative.
-- **No SCA exemption** applies to a proposal that originates on this channel, including own-account
-  and trusted-beneficiary exemptions. A proposal never adds the payee to trusted beneficiaries.
+- **No SCA exemption** applies to a proposal that originates on this channel, including
+  own-account and trusted-beneficiary exemptions, and including an ADR-0193 delegated-authentication
+  exemption derived from an AP2 mandate. A mandate presented on this channel is recorded as
+  evidence only. A proposal never adds the payee to trusted beneficiaries.
+- An approved proposal then passes the full ADR-0374 admission chain. Its Authority step
+  (ADR-0375 D1) sees the customer as the actor, because the customer authorised it; the MCP
+  client is never the debiting actor.
 - Proposals expire, are rate-limited per party, and cannot be approved in bulk, so an injected
   model cannot cause approval fatigue.
 
@@ -150,6 +176,10 @@ Throttled and denied calls are audited and metered like any other deny.
 - **Per-customer mTLS client certificates.** Strong binding. Rejected for retail: customers cannot
   operate a PKI, and DPoP gives the same proof-of-possession property. Kept for a future corporate
   channel.
+- **Apply ADR-0233 unchanged: execution within ceilings.** Gives agents real autonomy for small
+  payments. Rejected for third-party MCP clients: the ceiling bounds the loss, not the
+  likelihood. An injected model drains up to the ceiling on every grant, and the customer never
+  saw the payment. ADR-0233 stays applicable to bank-chartered agents.
 - **Let MCP authorise low-value payments directly (with an exemption).** Better UX. Rejected: a
   third-party model reads attacker-written data, so any write the model can complete alone is an
   injection-to-debit path. The owner requires the same in-app authorisation as for app-entered
@@ -164,7 +194,8 @@ Throttled and denied calls are audited and metered like any other deny.
 - Floods are shed before token validation or OPA calls, and money-path reads have a global ceiling.
 
 **Negative**
-- New work: a customer-realm OIDC tenant in MCP, DPoP verification, a consent binding triple,
+- New work: a customer-realm OIDC tenant in MCP, DPoP verification, an AGENT-grant binding triple
+  in delegation-service,
   token exchange plus downstream party enforcement, a Valkey limiter, a proposal store with an
   in-app approval UI.
 - Clients that do not support DPoP cannot connect. Customers must re-consent at least every 180
@@ -187,6 +218,8 @@ Throttled and denied calls are audited and metered like any other deny.
 ### Delivery check
 
 - `git grep -n 'granted != null' openbank-mcp-service/src/main` prints nothing.
+- `git grep -n 'initiate-payment' openbank-delegation-service/src/main` shows it refused for the
+  MCP-client grantee class (aggregate invariant plus unit test).
 - An MCP request without a DPoP proof, or with a proof for another key, answers 401, asserted by
   an IT driving real HTTP.
 - An IT with customer A's token against a consent of customer B answers deny.
@@ -205,8 +238,9 @@ Throttled and denied calls are audited and metered like any other deny.
 
 ## References
 
-- ADR-0021, ADR-0034, ADR-0065, ADR-0086, ADR-0089, ADR-0126, ADR-0132, ADR-0195, ADR-0224,
-  ADR-0225, ADR-0226, ADR-0320
+- ADR-0021, ADR-0034, ADR-0065, ADR-0086, ADR-0089, ADR-0090, ADR-0126, ADR-0132, ADR-0193,
+  ADR-0195, ADR-0224, ADR-0225, ADR-0226, ADR-0232, ADR-0233, ADR-0320, ADR-0324, ADR-0374,
+  ADR-0375
 - `openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/mcp/CallerContextResolver.kt`
 - `openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/read/ConsentGate.kt`
 - `openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/ratelimit/McpRateLimiter.kt`
