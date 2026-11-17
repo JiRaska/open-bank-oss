@@ -7,6 +7,7 @@ package com.openbank.mcp.infrastructure.read
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.openbank.mcp.application.McpInputBounds
 import com.openbank.mcp.application.StatementEntryCategorizer
 import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.application.port.out.StatementReadPort
@@ -44,6 +45,7 @@ class RealStatementReadPort(
         currency: String?,
         legalSequence: Long?,
     ): JsonNode {
+        McpInputBounds.requireIban(accountId)
         gate.validate(consentContext, ConsentScopes.STATEMENTS_READ, accountIban = accountId)
         val internalId = directory.idByIban(accountId)
 

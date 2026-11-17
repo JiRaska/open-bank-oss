@@ -80,3 +80,27 @@ Každé spotřebování odvodí z principálu `ConsumerScope`. `service-account-
 kromě tohoto jmenného prostoru. Odmítnutý pokus vrátí 403 ještě před compare-and-consume, takže výzvu
 nespálí. Rozsah deklaruje `rules.yaml: scoped_sca_consumers` a `ConsumerScopesRulesParityTest` drží
 kód v souladu. Flyway V17 rozšiřuje sloupec approval id.
+
+## Připojení MCP klienta (ADR-0385 D3)
+
+`MCP_CLIENT_CONNECT` je schválení v aplikaci, kterým zákazník připojí MCP klienta. Je vázané na
+jeden autorizační požadavek PAR.
+
+- **Vlastnictví jmenného prostoru.** `ReservedNamespace.MCP_CONNECT` vlastní tento účel celý:
+  každá výzva tohoto účelu patří do jmenného prostoru bez ohledu na podepsané id. `General` i
+  pension jsou odmítnuti (403) a odmítnutí výzvu nespálí. Prefix `mcp-connect:` je při inicializaci
+  odmítnut u všech ostatních účelů, takže žádný stávající účel do jmenného prostoru nevstoupí.
+- **Vazba.** Inicializace vyžaduje `approvalRequestId` = `mcp-connect:<id požadavku PAR>` a
+  `payloadSha256` nad kanonickým kontextem připojení (client_id, hostitel přesměrování, URL zdroje,
+  scopes, hash request_uri, expirace) a odmítá platební, dokumentová i karetní pole (400). Obě pole
+  jsou součástí idempotenčního klíče, takže dvě souběžná připojení dostanou dvě výzvy.
+- **Podepsaný tvar.** Zařízení podepisuje
+  `challengeId|decision|MCP_CLIENT_CONNECT|approvalRequestId|payloadSha256`, tedy tvar `APPROVAL`
+  s vlastním segmentem účelu výzvy. Spotřebování znovu porovná obě pole i stranu před jednorázovým
+  compare-and-set.
+- **Minimální stáří zařízení 72 h.** Zařízení zapsané před méně než 72 h nemůže připojení schválit
+  (403 při rozhodnutí, nic se nezaznamená). Zamítnutí je přijato. Polovina pravidla pro passkey patří
+  do autentikátoru v Keycloaku, ne sem.
+- **Selhání do bezpečného stavu.** Jmenný prostor zatím nedrží žádný principál, takže každé
+  spotřebování výzvy připojení je odmítnuto, dokud spotřebitel autorizačního serveru nebude
+  deklarován v `ConsumerScopes` a `rules.yaml: scoped_sca_consumers`.
