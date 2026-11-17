@@ -50,5 +50,5 @@ forwarded (`McpInputBounds`, #16628):
 - `list_transactions.limit`: integer in `1..500`, default `50` when absent; anything else
   is `-32602`.
 - Audit `argument_keys`: at most 32 keys, each at most 64 characters.
-- `accountId` on `get_balance` / `list_transactions` must be a valid IBAN (shape and
+- `accountId` on `get_balance` / `list_transactions` / `get_statement` must be a valid IBAN (shape and
   mod-97) before consent-service is called; otherwise `-32602`.
