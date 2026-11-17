@@ -104,8 +104,9 @@ class RestLedgerPostingAdapter(
         val request = buildRequest(posting)
         return guard.postJournal(request).map { receipt ->
             check(receipt.status == "POSTED" && receipt.transactionId == request.transactionId) {
-                "Ledger did not confirm the FOS disbursement"
+                "Ledger did not confirm the passport disbursement"
             }
+            check(receipt.branchBookId == request.branchBookId) { "Ledger confirmed a different disbursement book" }
         }
     }
 

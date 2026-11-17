@@ -73,6 +73,7 @@ class RestLedgerPostingAdapterTest {
         assertThat(requests).hasSize(2)
         assertThat(requests[0]).isEqualTo(requests[1])
         assertThat(adapter.objectMapper.writeValueAsString(requests[0])).isEqualTo(stored.requestJson)
+        assertThat(stored.requestJson).doesNotContain("branchBookId")
         for (invalid in listOf(
             JournalResponse(journal, stored.transactionId, "POSTED"),
             JournalResponse(journal, stored.transactionId, "PENDING", "2026-05-30"),
@@ -117,6 +118,30 @@ class RestLedgerPostingAdapterTest {
             .containsExactly(eurAccounts.loansReceivable, eurAccounts.fundingClearing)
         assertThat(request.lines.map { it.currencyCode }).containsOnly("EUR")
         verify(exactly = 1) { guard.postJournal(any()) }
+    }
+
+    @Test
+    fun `branch disbursement requires a receipt for the same book`() {
+        val book = UUID.randomUUID()
+        val journal = UUID.randomUUID()
+        val submitted = slot<PostJournalRequest>()
+        every { config.systemActorId() } returns actor
+        every { guard.postJournal(capture(submitted)) } answers {
+            Uni.createFrom().item(JournalResponse(journal, submitted.captured.transactionId, "POSTED"))
+        }
+
+        assertThatThrownBy {
+            adapter.postConfirmedDisbursement(posting().copy(branchBookId = book)).await().indefinitely()
+        }
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(submitted.captured.branchBookId).isEqualTo(book)
+
+        every { guard.postJournal(capture(submitted)) } answers {
+            val request = submitted.captured
+            Uni.createFrom().item(JournalResponse(journal, request.transactionId, "POSTED", branchBookId = book))
+        }
+        assertThat(adapter.postConfirmedDisbursement(posting().copy(branchBookId = book)).await().indefinitely())
+            .isEqualTo(Unit)
     }
 
     @Test

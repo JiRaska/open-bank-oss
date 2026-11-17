@@ -61,6 +61,7 @@ object LendingJournalFactory {
         description = "Lending ${posting.kind.name.lowercase().replace('_', ' ')}: ${posting.reference}",
         lines = buildLines(posting, accounts),
         createdBy = systemActorId,
+        branchBookId = posting.branchBookId,
     )
 
     fun buildLines(posting: LedgerPosting, accounts: LendingGlAccounts): List<JournalLineRequest> {

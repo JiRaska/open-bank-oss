@@ -1164,3 +1164,8 @@ establishment under the grant lock before admitting an action or returning the m
 Until B2 routes the loan and cash entries to branch books, normal runtime refuses branch origination
 and branch commitment execution, including replay. Synthetic integration tests exercise the shared
 recovery path, the revocation race and refusal before any loan or borrower credit is created.
+
+Branch disbursement derives its book from the immutable catalogue route and checks the matching
+posted receipt before releasing the borrower credit. The recovery scheduler uses the original
+journal key and borrower credit key after an unknown outcome. Bank-wide cash settlement continues
+to use the Transaction service idempotency fence.

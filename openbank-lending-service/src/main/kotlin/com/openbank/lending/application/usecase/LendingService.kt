@@ -1377,10 +1377,18 @@ class LendingService @Inject constructor(
             }
         }
     }.flatMap { loan ->
-        if (operation.completed) Uni.createFrom().item(loan) else finishFosCash(operation, loan)
+        if (operation.completed) {
+            Uni.createFrom().item(loan)
+        } else {
+            fosOperations.route(operation.applicationId).flatMap { pin ->
+                val route = checkNotNull(pin).route
+                val branchBookId = route.establishmentId.takeIf { route.mode == PassportMode.BRANCH }
+                finishFosCash(operation, loan, branchBookId)
+            }
+        }
     }
 
-    private fun finishFosCash(operation: FosOperation, loan: Loan): Uni<Loan> {
+    private fun finishFosCash(operation: FosOperation, loan: Loan, branchBookId: UUID?): Uni<Loan> {
         val cash = checkNotNull(operation.command.cash)
         return ledger.postConfirmedDisbursement(
             LedgerPosting(
@@ -1389,6 +1397,7 @@ class LendingService @Inject constructor(
                 loan.principal,
                 PostingKind.DISBURSEMENT,
                 accountingDate = cash.date,
+                branchBookId = branchBookId,
             ),
         ).flatMap {
             borrowerCredit.creditOn(

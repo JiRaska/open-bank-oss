@@ -33,6 +33,7 @@ data class LedgerPosting(
      * event date here instead of back-dating into closed days.
      */
     val valueDate: java.time.LocalDate? = null,
+    val branchBookId: UUID? = null,
 )
 
 /** Immutable internal command; the outbox retries this exact amount, key and accounting date. */

@@ -154,3 +154,8 @@ original intent after interruption; a refused disbursement cannot post to the le
 BRANCH is exercised in the isolated C3 integration runtime. Normal runtime rejects branch origination
 and commitment recovery until B2 provides branch-aware booking. Deploy Catalogue V21 before
 upgrading Lending. An older Lending binary should only run where no branch intents were written.
+
+B2 sends the verified branch establishment to Ledger as the book for the disbursement journal.
+The journal key, borrower credit key and value date survive recovery. Lending requires the
+journal receipt to identify the same book before requesting the borrower credit. Live branch
+operation still needs approved branch scope, cash and servicing attribution, and rollout evidence.

@@ -10,6 +10,7 @@ import com.openbank.lending.application.port.out.FosAction
 import com.openbank.lending.application.port.out.FosCommitmentRefused
 import com.openbank.lending.application.port.out.FosRoute
 import com.openbank.lending.application.port.out.FosRoutePin
+import com.openbank.lending.application.port.out.LedgerPosting
 import com.openbank.lending.domain.model.CatalogLoanSnapshot
 import com.openbank.lending.infrastructure.client.CatalogFosLoanAdapter
 import com.openbank.lending.infrastructure.client.RestCatalogLoanProfilePort
@@ -92,7 +93,9 @@ class SignatureRecoveryIT {
     @TestSecurity(user = SIGNER, roles = ["ROLE_LENDING_OFFICER", "ROLE_ADMIN"])
     fun `passport lending recovers each original signature and cash operation`(mode: PassportMode) {
         val route = if (mode == PassportMode.BRANCH) ROUTE.copy(hostCountry = "AT", mode = mode) else ROUTE
-        val payments = installCashBackends()
+        val journals = ConcurrentHashMap<String, LedgerPosting>()
+        val branchBook = route.establishmentId.takeIf { mode == PassportMode.BRANCH }
+        val payments = installCashBackends(journals, branchBook)
         val receipts = installCatalogue(route)
         val application = createPassportApplication(route)
         moveToSignature(application)
@@ -108,12 +111,18 @@ class SignatureRecoveryIT {
         assertThat(payments).isEmpty()
         assertThat(receipts.values).containsExactly(FosAction.SIGN)
         releaseFosLease(application, FosAction.DISBURSE)
+        if (branchBook != null) {
+            awaitCondition { journals.isNotEmpty() }
+            assertThat(payments).isEmpty()
+            releaseFosLease(application, FosAction.DISBURSE)
+        }
         awaitCondition { payments.isNotEmpty() }
         assertThat(status(application)).isEqualTo("DISBURSED")
         recoverFos(application, FosAction.DISBURSE)
         assertThat(disburse(application)).isEqualTo(201)
         assertThat(receipts.values).containsExactlyInAnyOrder(FosAction.SIGN, FosAction.DISBURSE)
         assertThat(payments).hasSize(1)
+        assertThat(journals.values.single().branchBookId).isEqualTo(branchBook)
         assertThat(scalar("SELECT count(*) FROM loan WHERE application_id = ?", application)).isEqualTo(1L)
         assertThat(outboxCount(application)).isEqualTo(1L)
         assertThat(
@@ -195,13 +204,25 @@ class SignatureRecoveryIT {
         return receipts
     }
 
-    private fun installCashBackends(): Map<String, LocalDate> {
+    private fun installCashBackends(
+        journals: MutableMap<String, LedgerPosting> = ConcurrentHashMap(),
+        branchBook: UUID? = null,
+    ): Map<String, LocalDate> {
         val payments = ConcurrentHashMap<String, LocalDate>()
         val accounts = mockk<TestBorrowerAccountLookupPort>()
         every { accounts.findCurrentAccount(PARTY, "CZK") } returns Uni.createFrom().item(ACCOUNT)
         QuarkusMock.installMockForType(accounts, TestBorrowerAccountLookupPort::class.java)
         val ledger = mockk<TestRecordingLedgerPostingPort>()
-        every { ledger.postConfirmedDisbursement(any()) } returns Uni.createFrom().item(Unit)
+        every { ledger.postConfirmedDisbursement(any()) } answers {
+            val posting = firstArg<LedgerPosting>()
+            val previous = journals.putIfAbsent(posting.reference, posting)
+            check(previous == null || previous == posting) { "Journal replay changed the original posting" }
+            if (branchBook != null && previous == null) {
+                Uni.createFrom().failure(IllegalStateException("synthetic lost branch journal response"))
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
         QuarkusMock.installMockForType(ledger, TestRecordingLedgerPostingPort::class.java)
         val credit = mockk<TestBorrowerCreditPort>()
         every { credit.creditOn(any(), ACCOUNT, any(), any()) } answers {
