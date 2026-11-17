@@ -50,6 +50,18 @@ interface McpMetricsPort {
     /** Record one `tools/list` discovery, by outcome (ADR-0225 D4 — discovery recon is countable). */
     fun toolsListCompleted(outcome: ToolsListOutcome)
 
+    /**
+     * Record one request refused by the throttle (rate window or in-flight cap). Metered per request
+     * even where the audit trail is sampled to one row per window, so the aggregate stays exact.
+     */
+    fun requestThrottled(surface: ThrottleSurface, caller: ThrottleCaller)
+
+    /** Which JSON-RPC surface was throttled. A closed enum, so safe as a tag. */
+    enum class ThrottleSurface { TOOLS_CALL, TOOLS_LIST }
+
+    /** Whether the throttled request carried a resolvable caller identity. */
+    enum class ThrottleCaller { AUTHENTICATED, ANONYMOUS }
+
     /** Bounded `tools/list` outcome set — a closed enum, so it is safe as a metric tag. */
     enum class ToolsListOutcome {
         /** Discovery completed (possibly filtered to a subset, or empty on a policy deny). */
