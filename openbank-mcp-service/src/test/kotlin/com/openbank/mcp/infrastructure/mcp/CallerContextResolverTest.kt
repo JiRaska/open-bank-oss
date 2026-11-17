@@ -18,7 +18,9 @@ class CallerContextResolverTest {
     @Test
     fun `resolves agent id and consent from an agent token`(): Unit = runBlocking {
         val ctx = CallerContextResolver(
-            TestJsonWebToken(mapOf("sub" to "agent:mcp-tpp-42", "consent_id" to "c-123")),
+            TestJsonWebToken(
+                mapOf("sub" to "agent:mcp-tpp-42", "aud" to "openbank-mcp-service", "consent_id" to "c-123"),
+            ),
         ).resolveOrNull()
 
         assertThat(ctx).isNotNull
@@ -46,7 +48,14 @@ class CallerContextResolverTest {
     fun `fails closed when an agent token carries no consent_id`() {
         assertThatThrownBy {
             runBlocking {
-                CallerContextResolver(TestJsonWebToken(mapOf("sub" to "agent:mcp-tpp-42"))).resolveOrNull()
+                CallerContextResolver(
+                    TestJsonWebToken(
+                        mapOf(
+                            "sub" to "agent:mcp-tpp-42",
+                            "aud" to "openbank-mcp-service",
+                        ),
+                    ),
+                ).resolveOrNull()
             }
         }.isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("consent_id")
@@ -57,9 +66,47 @@ class CallerContextResolverTest {
         assertThatThrownBy {
             runBlocking {
                 CallerContextResolver(
-                    TestJsonWebToken(mapOf("sub" to "agent:mcp-tpp-42", "consent_id" to "  ")),
+                    TestJsonWebToken(
+                        mapOf(
+                            "sub" to "agent:mcp-tpp-42",
+                            "aud" to "openbank-mcp-service",
+                            "consent_id" to "  ",
+                        ),
+                    ),
                 ).resolveOrNull()
             }
         }.isInstanceOf(IllegalStateException::class.java)
+    }
+
+    // #16622: RFC 8707 — a valid agent token issued for another resource is never accepted.
+    @Test
+    fun `returns null for an agent token issued for another audience`(): Unit = runBlocking {
+        val jwt = TestJsonWebToken(
+            mapOf(
+                "sub" to "agent:mcp-tpp-42",
+                "aud" to "openbank-admin-ui",
+                "consent_id" to "c-1",
+            ),
+        )
+        assertThat(CallerContextResolver(jwt).resolveOrNull()).isNull()
+        assertThat(CallerContextResolver(jwt).presentsForeignAudience()).isTrue()
+    }
+
+    @Test
+    fun `accepts the audience when it is one entry of an array`(): Unit = runBlocking {
+        val jwt = TestJsonWebToken(
+            mapOf(
+                "sub" to "agent:mcp-tpp-42",
+                "aud" to listOf("account", "openbank-mcp-service"),
+                "consent_id" to "c-1",
+            ),
+        )
+        assertThat(CallerContextResolver(jwt).resolveOrNull()).isNotNull
+        assertThat(CallerContextResolver(jwt).presentsForeignAudience()).isFalse()
+    }
+
+    @Test
+    fun `an anonymous caller is not a foreign audience`() {
+        assertThat(CallerContextResolver(TestJsonWebToken()).presentsForeignAudience()).isFalse()
     }
 }

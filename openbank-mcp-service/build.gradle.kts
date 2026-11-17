@@ -48,6 +48,12 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
 }
 
+// The fuzz layer (#16617) deliberately sends 1 MiB and 11 MiB bodies; the harness, RestAssured and
+// the response capture each hold a copy, which does not fit the default 512 MiB worker heap.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
+
 kover {
     reports {
         verify {

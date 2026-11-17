@@ -28,6 +28,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from enum import Enum
 from pathlib import Path
 from merge_authorization_proof import BOT, GitHub, app_authorization, authorize_backfill, instant
 
@@ -285,17 +286,33 @@ def verify_stored(payload, stored):
             raise ValueError("stored authorization differs: " + key)
 
 
+class CapabilityReadStage(Enum):
+    OWNER = "owner verification"
+    CONFIGURATION = "reader configuration"
+    REQUEST = "backend GET or response decoding"
+    SCHEMA = "capability schema"
+
+
+class CapabilityReadFailure(ValueError):
+    def __init__(self, stage: CapabilityReadStage):
+        super().__init__(stage.value)
+        self.stage = stage
+
+
 def read_only_backend(args, payload=None):
     """Observe capabilities and optionally an existing row; never create or repair one."""
     base_url = (os.environ.get("AGENT_SERVICE_URL") or "").strip()
     token, _ = resolve_token(args.token_file)
     if not base_url or token is None:
-        raise ValueError("read configuration unavailable")
-    capability = read_backend(base_url, token, "/capabilities")
+        raise CapabilityReadFailure(CapabilityReadStage.CONFIGURATION)
+    try:
+        capability = read_backend(base_url, token, "/capabilities")
+    except (OSError, ValueError):
+        raise CapabilityReadFailure(CapabilityReadStage.REQUEST) from None
     if (type(capability.get("evidenceSchemaVersion")) is not int
             or capability["evidenceSchemaVersion"] != 2
             or capability.get("policyPrAuthorization") is not True):
-        raise ValueError("unsupported read capabilities")
+        raise CapabilityReadFailure(CapabilityReadStage.SCHEMA)
     if payload is not None:
         verify_stored(payload, read_backend(base_url, token, f"/{payload['prNumber']}"))
 
@@ -317,12 +334,20 @@ def main(argv=None):
 
     if args.read_capabilities or args.read_existing:
         # Backend data, addresses and exception text must never enter public read-mode logs.
+        stage = None
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             try:
                 result = execute(args)
+            except CapabilityReadFailure as error:
+                result = 1
+                if args.read_capabilities:
+                    stage = error.stage
             except Exception:
                 result = 1
-        print("record-agent-merge: read-only verification " + ("passed" if result == 0 else "failed"),
+        verdict = "passed" if result == 0 else "failed"
+        if stage is not None:
+            verdict += f" at {stage.value}"
+        print("record-agent-merge: read-only verification " + verdict,
               file=sys.stdout if result == 0 else sys.stderr)
         return result
     return execute(args)
@@ -340,7 +365,10 @@ def execute(args):
             repo = os.environ.get("GITHUB_REPOSITORY", "")
             if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
                 return 1
-            authorize_backfill(repo, GitHub(), os.environ)
+            try:
+                authorize_backfill(repo, GitHub(), os.environ)
+            except (OSError, ValueError):
+                raise CapabilityReadFailure(CapabilityReadStage.OWNER) from None
             read_only_backend(args)
             return 0
 
