@@ -55,7 +55,7 @@ class McpSpecConformanceTest {
 
     private val mapper: ObjectMapper = jacksonObjectMapper()
     private val meters = SimpleMeterRegistry()
-    private val limiter = McpRateLimiter()
+    private val limiter = McpRateLimiter.withDefaults()
 
     private fun endpoint(): McpEndpoint {
         val stub = ConformanceReads(mapper)
