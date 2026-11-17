@@ -350,3 +350,27 @@ reporting outage window. Domestic Payment logged six OPA deadline errors at the 
 The Customer Edge payment status route maps the upstream non-200 result to 404.
 The 145.9-second recovery window completed 13,128 error-free reads. All three recovered
 trial balances matched the index digests and balanced independently.
+
+### OPA response timing in the enforced run
+
+The OPA HTTP logs record a short cluster of slow Domestic Payment responses around the
+six client deadlines. In the continuous log window from 09:30:47 to 09:35:07 UTC, the
+policy endpoint reported these server-side response durations in milliseconds.
+
+| Policy instance | Responses | p50 | p95 | p99 | Maximum |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Domestic Payment | 7,791 | 0.762 | 3.036 | 8.006 | 544.908 |
+| Account | 31,158 | 0.677 | 3.010 | 7.505 | 75.952 |
+| Balance | 7,791 | 0.729 | 2.871 | 7.224 | 139.474 |
+| Customer Edge | 23,373 | 0.776 | 3.625 | 10.961 | 179.122 |
+
+Two Domestic Payment responses took 542.586 ms and 544.908 ms against the caller's
+500 ms exchange deadline. Several nearby responses took 152–449 ms. OPA's server-side
+duration covers request handling and response generation. The caller's deadline covers
+the entire HTTP exchange, including receipt of the body. The logs have no common request
+identifier across this boundary, so the six client failures cannot be paired individually
+with the server responses. The underlying source of the brief slowdown remains unresolved.
+
+The follow-up Edge build was checked by pausing Domestic Payment's OPA instance. The
+same domestic payment status request returned HTTP 200, 503 and 200 across the pause
+and recovery. Account and balance reads returned HTTP 200 throughout the check.
