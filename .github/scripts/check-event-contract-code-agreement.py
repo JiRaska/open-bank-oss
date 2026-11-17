@@ -1002,8 +1002,8 @@ def self_test() -> int:
         "openbank-delegation-service",
         lambda t: edit(
             t / "openbank-delegation-service" / "src/main/kotlin/com/openbank/delegation/domain/event/DelegationEvents.kt",
-            "    val reason: String,\n    override val occurredAt: Instant,\n) : DomainEvent(occurredAt) {\n    override val aggregateType = \"DelegationGrant\"\n    override val eventType = \"DelegationRevoked\"",
-            "    val reason: String,\n    val suppressedBy: String,\n    override val occurredAt: Instant,\n) : DomainEvent(occurredAt) {\n    override val aggregateType = \"DelegationGrant\"\n    override val eventType = \"DelegationRevoked\"",
+            "data class DelegationRevoked(\n    override val aggregateId: UUID,\n",
+            "data class DelegationRevoked(\n    override val aggregateId: UUID,\n    val suppressedBy: String,\n",
         ),
         "does not document it",
     )
