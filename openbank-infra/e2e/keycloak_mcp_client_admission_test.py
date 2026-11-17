@@ -485,5 +485,26 @@ class McpClientAdmission(unittest.TestCase):
         self.assertEqual(successor.status, 400, "reuse must revoke the family (confidential client too)")
 
 
+    # ---- D1: no token exchange for an MCP client ----------------------------------------------
+    @unittest.expectedFailure
+    def test_token_exchange_refused_for_mcp_client(self):
+        # KNOWN GAP (measured on 26.8.1, tracked in the issue cited by the PR): the image enables
+        # the legacy `token-exchange` (v1) feature for the bank's own app, and v1 lets a
+        # confidential client exchange ITS OWN access token for a fresh access + refresh token
+        # whatever `standard.token.exchange.enabled` says. A realm client policy keyed on the
+        # `grant-type` condition does not fire for that exchange either. Kept as an expected
+        # failure so the day it is closed this flips to an unexpected success.
+        query, verifier = self.code_for(H, H_CB)
+        resp = self.post(self.token_url, {"grant_type": "authorization_code", "client_id": H, "code": query["code"][0],
+                                          "redirect_uri": H_CB, "code_verifier": verifier, **self.client_auth()})
+        self.assertEqual(resp.status, 200, resp.text[:200])
+        exchange = self.post(self.token_url, {
+            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange", "client_id": H,
+            "subject_token": resp.json()["access_token"],
+            "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+            "requested_token_type": "urn:ietf:params:oauth:token-type:access_token", **self.client_auth()})
+        self.assertIn(exchange.status, (400, 401, 403), exchange.text[:200])
+        self.assertNotIn("access_token", exchange.text)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

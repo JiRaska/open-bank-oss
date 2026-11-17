@@ -46,6 +46,7 @@ ALLOWLIST = ROOT / "openbank-mcp-service/src/main/resources/mcp-client-allowlist
 TEMPLATE = ROOT / "openbank-infra/gitops/components/keycloak/customers-realm-template.json"
 TIER_ATTR = "openbank.mcp.tier"
 MAX_EXCEPTION_DAYS = 183
+EXPECTED_MAPPERS = ("sub", "party-id", "mcp-service-audience")
 LOOPBACK_PREFIXES = ("http://127.0.0.1/", "http://[::1]/")
 
 
@@ -209,7 +210,8 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
                          ("serviceAccountsEnabled", "service account")):
             if c.get(key) is not False:
                 f.append(f"{p}: {key} must be false — no {why} (ADR-0385 D1)")
-        for key, why in (("oauth2.device.authorization.grant.enabled", "device grant"), ("oidc.ciba.grant.enabled", "CIBA grant")):
+        for key, why in (("oauth2.device.authorization.grant.enabled", "device grant"), ("oidc.ciba.grant.enabled", "CIBA grant"),
+                         ("standard.token.exchange.enabled", "token exchange")):
             if _true(a.get(key)) or key not in a:
                 f.append(f"{p}: {key} must be explicitly false — no {why}")
         if not _true(a.get("require.pushed.authorization.requests")):
@@ -225,6 +227,15 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
             f.append(f"{p}: realm redirectUris {c.get('redirectUris')} differ from the allowlist {d.get('redirect_uris')}")
         if any("*" in u for u in c.get("redirectUris") or []):
             f.append(f"{p}: wildcard redirect URI in the realm")
+        if c.get("defaultClientScopes") != []:
+            f.append(f"{p}: defaultClientScopes must be exactly [], got {c.get('defaultClientScopes')}")
+        if c.get("optionalClientScopes") != ["offline_access"]:
+            f.append(f"{p}: optionalClientScopes must be exactly ['offline_access'], got {c.get('optionalClientScopes')}")
+        if c.get("consentRequired") is not False:
+            f.append(f"{p}: consentRequired must be false (consent is the D3 SCA challenge, not a Keycloak screen)")
+        mapper_names = sorted(str(m.get("name")) for m in c.get("protocolMappers") or [])
+        if mapper_names != sorted(EXPECTED_MAPPERS):
+            f.append(f"{p}: protocol mappers must be exactly {sorted(EXPECTED_MAPPERS)}, got {mapper_names}")
         if c.get("fullScopeAllowed") is not False:
             f.append(f"{p}: fullScopeAllowed must be false")
         if mappings.get(cid) != ["offline_access"]:
@@ -325,6 +336,21 @@ def self_test() -> int:
     run("extra audience mapper flagged",
         mutate_realm=lambda r: client(r, L)["protocolMappers"].append(
             {"protocolMapper": "oidc-audience-mapper", "config": {"included.client.audience": "openbank-edge"}}), needle="audience")
+    run("token exchange enabled flagged",
+        mutate_realm=lambda r: client(r, L)["attributes"].update({"standard.token.exchange.enabled": "true"}), needle="token exchange")
+    run("token exchange attribute absent flagged",
+        mutate_realm=lambda r: client(r, H)["attributes"].pop("standard.token.exchange.enabled"), needle="token exchange")
+    run("defaultClientScopes non-empty flagged",
+        mutate_realm=lambda r: client(r, L).update(defaultClientScopes=["profile"]), needle="defaultClientScopes")
+    run("optionalClientScopes extra scope flagged",
+        mutate_realm=lambda r: client(r, H).update(optionalClientScopes=["offline_access", "email"]), needle="optionalClientScopes")
+    run("consentRequired=true flagged", mutate_realm=lambda r: client(r, L).update(consentRequired=True), needle="consentRequired")
+    run("extra protocol mapper flagged",
+        mutate_realm=lambda r: client(r, H)["protocolMappers"].append({"name": "email", "protocolMapper": "oidc-usermodel-property-mapper"}),
+        needle="protocol mappers")
+    run("party-id mapper removed flagged",
+        mutate_realm=lambda r: client(r, L).update(protocolMappers=[m for m in client(r, L)["protocolMappers"] if m["name"] != "party-id"]),
+        needle="protocol mappers")
     run("realm refreshTokenMaxReuse raised flagged", mutate_realm=lambda r: r.update(refreshTokenMaxReuse=1), needle="refreshTokenMaxReuse")
     run("realm revokeRefreshToken off flagged", mutate_realm=lambda r: r.update(revokeRefreshToken=False), needle="revokeRefreshToken")
 
