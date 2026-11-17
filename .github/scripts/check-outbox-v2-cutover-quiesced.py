@@ -36,7 +36,7 @@ ENV_NAME = "OPENBANK_OUTBOX_DISPATCH_ENABLED"
 # fleet-standard property. Add a line here (with the reason) when a service's own
 # @ConfigProperty / manifest uses another name; otherwise the fleet key applies.
 ENV_KEYS = {
-    "openbank-pricing-service": "PRICING_OUTBOX_DISPATCH_ENABLED",  # pricing/workloads.yaml
+    "openbank-pricing-service": "PRICING_OUTBOX_DISPATCH_ENABLED",  # pricing/workloads.yaml; its literal QUARKUS_PROFILE is resolvable
 }
 
 
@@ -65,12 +65,15 @@ def sql_statements(sql: str) -> list[str]:
     `--`, `/*` and `;` inside '...' or "..." are data, not syntax."""
     out: list[str] = []
     cur: list[str] = []
-    i, n, quote = 0, len(sql), ""
+    i, n, quote, esc = 0, len(sql), "", False
     while i < n:
         ch = sql[i]
         if quote:
             cur.append(ch)
-            if ch == quote:
+            if esc and ch == "\\" and i + 1 < n:  # E'...' string: backslash escapes the next char
+                cur.append(sql[i + 1])
+                i += 1
+            elif ch == quote:
                 if i + 1 < n and sql[i + 1] == quote:  # doubled quote escape
                     cur.append(sql[i + 1])
                     i += 1
@@ -78,6 +81,7 @@ def sql_statements(sql: str) -> list[str]:
                     quote = ""
         elif ch in "'\"":
             quote = ch
+            esc = ch == "'" and bool(cur) and cur[-1] in "eE" and (len(cur) < 2 or not (cur[-2].isalnum() or cur[-2] == "_"))
             cur.append(ch)
         elif sql.startswith("--", i):
             j = sql.find("\n", i)
@@ -99,10 +103,11 @@ def sql_statements(sql: str) -> list[str]:
 def introduces_outbox_v2(sql: str) -> bool:
     """True when ONE statement both names an outbox table and introduces claim_token as a column
     (ADD [COLUMN], RENAME ... TO, or a CREATE TABLE definition, any type, any schema qualifier).
-    CREATE INDEX / DROP on it, and a claim_token elsewhere in the file, are not the introduction."""
+    An index or DROP naming it, and a claim_token elsewhere in the file, are not the introduction
+    (they match none of the three shapes below)."""
     for st in sql_statements(sql):
         low = st.lower()
-        if "outbox" not in low or re.match(r"create\s+(unique\s+)?index\b", low):
+        if "outbox" not in low:
             continue
         if re.match(r"create\s+(?:\w+\s+)*table\b", low):
             if CLAIM_TOKEN_RE.search(st):
@@ -124,6 +129,7 @@ def truthy(v: object) -> bool | None:
 PROP = "dispatch-enabled"
 ABSENT = "ABSENT: "
 # Env names that can re-point config resolution; any presence on the container is UNKNOWN.
+PROFILE_ENV = {"QUARKUS_PROFILE", "SMALLRYE_CONFIG_PROFILE"}
 CONFIG_ENV = {"QUARKUS_PROFILE", "SMALLRYE_CONFIG_PROFILE", "SMALLRYE_CONFIG_LOCATIONS",
               "QUARKUS_CONFIG_LOCATIONS", "SMALLRYE_CONFIG_PROFILE_PARENT", "QUARKUS_CONFIG_PROFILE_PARENT"}
 JVM_ENV = {"JAVA_TOOL_OPTIONS", "JAVA_OPTS", "JAVA_OPTS_APPEND", "JDK_JAVA_OPTIONS", "JAVA_OPTIONS"}
@@ -164,6 +170,10 @@ def app_default(repo: str, base: str, svc: str) -> tuple[bool | None, str]:
             return None, "application.properties mentions dispatch-enabled"
     except RuntimeError:
         pass
+    for fn in git_out(repo, "ls-tree", "--name-only", base, f"{res}/", check_rc=False).splitlines():
+        if re.fullmatch(r"application-[^/]+\.(ya?ml|properties)", fn.rsplit("/", 1)[-1]) and \
+                PROP in git_out(repo, "show", f"{base}:{fn}", check_rc=False):
+            return None, f"profile-specific {fn.rsplit('/', 1)[-1]} mentions {PROP}"
     value: object = None
     for doc in docs:
         node: object = doc
@@ -198,6 +208,8 @@ def container_taint(c: dict, env_name: str = ENV_NAME) -> str:
     for e in c.get("env") or []:
         name = str(e.get("name", ""))
         val = str(e.get("value", ""))
+        if name in PROFILE_ENV and "value" in e and str(e["value"]).strip() and "," not in str(e["value"]):
+            continue  # a literal profile is resolvable; app_default vetoes any profile-specific dispatch config
         if name in CONFIG_ENV:
             return f"env {name} changes profile/config location"
         if name in JVM_ENV and ("-D" in val or PROP in val or "dispatch" in val.lower()):
@@ -320,8 +332,8 @@ def check(repo: str, base: str, head: str) -> tuple[int, int]:
     rc = 0
     for svc, files in sorted(unknown.items()):
         print(f"::error file={files[0]}::{svc}: this PR adds a Java/Kotlin Flyway migration ({files[0]}), whose SQL "
-              f"this gate cannot read, so it cannot rule out an outbox v2 (claim_token) change. Fail closed. "
-              f"Express the migration as SQL, or pause dispatch on the base first. Runbook: {RUNBOOK}")
+              f"this gate cannot read. Only SQL v2 migrations can be verified, so a Java/Kotlin migration always fails "
+              f"closed: provide an SQL equivalent (pausing dispatch does not help here).")
         rc = 1
     for svc, files in sorted(subjects.items()):
         wl = workloads(repo, base, svc)
@@ -437,6 +449,9 @@ def self_test() -> int:
         ("index-only migration on claim_token is not a subject (post-cutover)", "true", None,
          {unrelated: "CREATE INDEX ix_c ON foo_outbox (claim_token);\n"}, None, 0),
     ]
+    cases.append(("QUARKUS_PROFILE literal, no profile-specific dispatch config anywhere: resolvable, paused", "true",
+                  "raw:            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED\n              value: \"false\"\n"
+                  "            - name: QUARKUS_PROFILE\n              value: prod", {mig: V2_SQL}, None, 0, {}))
     cases.append(("application.yaml lacks the key but the container carries literal false", "x", "false",
                   {mig: V2_SQL}, None, 0, dict(app_text="openbank:\n  other: 1\n")))
     d = f"{SVC}/src/main/resources/db/migration"
@@ -446,6 +461,8 @@ def self_test() -> int:
         ("schema-qualified outbox table", {mig: "ALTER TABLE public.foo_outbox ADD COLUMN claim_token UUID;\n"}, {}),
         ("uppercase .SQL extension", {f"{d}/V2__OUTBOX.SQL": V2_SQL}, {}),
         ("migration in a db/migration subfolder", {f"{d}/sub/V2__outbox_v2.sql": V2_SQL}, {}),
+        ("E'\\'' escape must not desync the scanner and swallow the next statement",
+         {mig: "CREATE INDEX ix ON foo_outbox (a) WHERE note = E'it\\'s'; ALTER TABLE foo_outbox ADD COLUMN claim_token uuid;\n"}, {}),
         ("'--' inside a string literal must not hide the statement", {mig: "ALTER TABLE foo_outbox ADD COLUMN n TEXT DEFAULT '--'; ALTER TABLE foo_outbox ADD COLUMN claim_token UUID;\n"}, {}),
         ("RENAMED migration file", {}, dict(base_files={f"{d}/V2__draft.sql": V2_SQL}, rename={f"{d}/V2__draft.sql": f"{d}/V3__outbox_v2.sql"})),
         ("Java Flyway migration added is an unknown subject", {f"{d}/V2__Outbox.java": "class V2__Outbox {}\n"}, {}),
@@ -461,8 +478,14 @@ def self_test() -> int:
          dict(app_text="openbank:\n  outbox:\n    dispatch-enabled: false\n\"%prod\":\n  openbank:\n    outbox:\n      dispatch-enabled: true\n")),
         ("JAVA_TOOL_OPTIONS carries a -D override", "true", "raw:            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED\n              value: \"false\"\n"
          "            - name: JAVA_TOOL_OPTIONS\n              value: \"-Dopenbank.outbox.dispatch-enabled=true\"", {mig: V2_SQL}, None, 1, {}),
-        ("QUARKUS_PROFILE changes the profile", "true", "raw:            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED\n              value: \"false\"\n"
-         "            - name: QUARKUS_PROFILE\n              value: other", {mig: V2_SQL}, None, 1, {}),
+        ("QUARKUS_PROFILE from valueFrom is unresolvable", "true", "raw:            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED\n              value: \"false\"\n"
+         "            - name: QUARKUS_PROFILE\n              valueFrom:\n                configMapKeyRef: {name: cm, key: k}", {mig: V2_SQL}, None, 1, {}),
+        ("QUARKUS_PROFILE=prod and a %prod section sets dispatch-enabled", "false", "raw:            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED\n              value: \"false\"\n"
+         "            - name: QUARKUS_PROFILE\n              value: prod", {mig: V2_SQL}, None, 1,
+         dict(app_text="openbank:\n  outbox:\n    dispatch-enabled: false\n\"%prod\":\n  openbank:\n    outbox:\n      dispatch-enabled: true\n")),
+        ("QUARKUS_PROFILE=prod and application-prod.yaml sets dispatch-enabled", "false", "raw:            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED\n              value: \"false\"\n"
+         "            - name: QUARKUS_PROFILE\n              value: prod", {mig: V2_SQL}, None, 1,
+         dict(base_files={f"{SVC}/src/main/resources/application-prod.yaml": "openbank:\n  outbox:\n    dispatch-enabled: true\n"})),
         ("QUARKUS_CONFIG_LOCATIONS adds a config file", "true", "raw:            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED\n              value: \"false\"\n"
          "            - name: QUARKUS_CONFIG_LOCATIONS\n              value: /x/y.yaml", {mig: V2_SQL}, None, 1, {}),
         ("application.yaml missing and no env", None, None, {mig: V2_SQL}, None, 1, {}),
