@@ -62,4 +62,42 @@ class McpRateLimiterTest {
         limiter.callsPerMinute = 1
         repeat(5) { assertThat(limiter.check("agent:a")).isEqualTo(McpRateLimiter.Outcome.ALLOWED) }
     }
+
+    @Test
+    fun `the anonymous bucket is shared and separate from caller windows`() {
+        val limiter = limiterAt(start)
+        limiter.anonymousCallsPerMinute = 2
+
+        assertThat(limiter.checkAnonymous()).isEqualTo(McpRateLimiter.Outcome.ALLOWED)
+        assertThat(limiter.checkAnonymous()).isEqualTo(McpRateLimiter.Outcome.ALLOWED)
+        assertThat(limiter.checkAnonymous()).isEqualTo(McpRateLimiter.Outcome.THROTTLED_BURST)
+        // A caller literally named "anonymous" is a different key and keeps its own window.
+        assertThat(limiter.check("anonymous")).isEqualTo(McpRateLimiter.Outcome.ALLOWED)
+    }
+
+    @Test
+    fun `the in-flight cap is per caller and frees on release`() {
+        val limiter = limiterAt(start)
+        limiter.maxInFlight = 2
+
+        assertThat(limiter.tryAcquire("agent:a")).isTrue()
+        assertThat(limiter.tryAcquire("agent:a")).isTrue()
+        assertThat(limiter.tryAcquire("agent:a")).isFalse()
+        assertThat(limiter.tryAcquire("agent:b")).isTrue()
+
+        limiter.release("agent:a")
+        assertThat(limiter.tryAcquire("agent:a")).isTrue()
+    }
+
+    @Test
+    fun `a refused in-flight attempt does not leak a slot`() {
+        val limiter = limiterAt(start)
+        limiter.maxInFlight = 1
+        assertThat(limiter.tryAcquire("agent:a")).isTrue()
+        repeat(5) { assertThat(limiter.tryAcquire("agent:a")).isFalse() }
+
+        limiter.release("agent:a")
+
+        assertThat(limiter.tryAcquire("agent:a")).isTrue()
+    }
 }

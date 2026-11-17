@@ -224,8 +224,7 @@ class McpEndpoint(
         // Caller authentication (ADR-0195): the acting agent + presented consent come from the
         // validated OAuth token. A malformed agent token (e.g. no consent_id) fails CLOSED — a
         // money-adjacent surface never degrades to an unscoped identity.
-        val ctx = resolveCaller(toolName, argumentKeys)
-            ?: return toolError(id, "Authorization unavailable")
+        val ctx = resolveCaller(toolName, argumentKeys) ?: return unauthenticated(id)
 
         // Audit and meter together, at every terminal branch, so the aggregate can never disagree
         // with the per-call trail about what happened.
@@ -252,8 +251,47 @@ class McpEndpoint(
             metrics.toolCallCompleted(toolTag, decision, result, Duration.ofNanos(System.nanoTime() - startedAt))
         }
 
-        // Deny-by-default: no capability mapping ⇒ no OPA action ⇒ refuse.
+        // Throttle BEFORE any policy call or tool execution (ADR-0383 D5): a denied flood must not
+        // cost one PDP round trip per request. A throttled call is a DENY like any other: same
+        // audit event, same meter, so the aggregate cannot disagree with the trail.
         val capability = registry.capabilities[toolName]
+        val limit = rateLimiter.check(ctx.agentId)
+        if (limit != McpRateLimiter.Outcome.ALLOWED) {
+            audit(capability, McpCallAuditor.Decision.DENY, AuditResult.DENIED, limit.reason)
+            return toolError(id, "Rate limit exceeded: ${limit.reason}")
+        }
+        if (!rateLimiter.tryAcquire(ctx.agentId)) {
+            audit(capability, McpCallAuditor.Decision.DENY, AuditResult.DENIED, rateLimiter.inFlightReason)
+            return toolError(id, "Rate limit exceeded: ${rateLimiter.inFlightReason}")
+        }
+        try {
+            return authorizeAndExecute(id, toolName, arguments, ctx, capability, ::audit)
+        } finally {
+            rateLimiter.release(ctx.agentId)
+        }
+    }
+
+    /** No resolvable caller: bounded by the shared anonymous bucket, then denied as before. */
+    private fun unauthenticated(id: JsonNode): Response {
+        val limit = rateLimiter.checkAnonymous()
+        return if (limit == McpRateLimiter.Outcome.ALLOWED) {
+            toolError(id, "Authorization unavailable")
+        } else {
+            toolError(id, "Rate limit exceeded: ${limit.reason}")
+        }
+    }
+
+    /** The PDP gate and the tool run; only reached once the caller is inside its throttle budget. */
+    @Suppress("ReturnCount", "TooGenericExceptionCaught", "LongParameterList")
+    private fun authorizeAndExecute(
+        id: JsonNode,
+        toolName: String,
+        arguments: JsonNode,
+        ctx: ConsentContext,
+        capability: String?,
+        audit: (String?, McpCallAuditor.Decision, AuditResult, String?) -> Unit,
+    ): Response {
+        // Deny-by-default: no capability mapping ⇒ no OPA action ⇒ refuse.
         if (capability == null) {
             audit(null, McpCallAuditor.Decision.DENY, AuditResult.DENIED, "no capability mapping")
             return toolError(id, "Tool not permitted: $toolName")
@@ -288,16 +326,6 @@ class McpEndpoint(
             val reason = decision.reason ?: "no matching allow rule"
             audit(capability, McpCallAuditor.Decision.DENY, AuditResult.DENIED, reason)
             return toolError(id, "Denied by policy: $reason")
-        }
-
-        // Rate limit AFTER the PDP decision, so a denied caller cannot burn the acting agent's
-        // window, and BEFORE the tool executes, which is the fan-out into consent/account/balance/
-        // transaction-service this bounds (#2409). A throttled call is a DENY like any other: same
-        // audit event, same meter, so the aggregate cannot disagree with the trail.
-        val limit = rateLimiter.check(ctx.agentId)
-        if (limit != McpRateLimiter.Outcome.ALLOWED) {
-            audit(capability, McpCallAuditor.Decision.DENY, AuditResult.DENIED, limit.reason)
-            return toolError(id, "Rate limit exceeded: ${limit.reason}")
         }
 
         return execute(id, toolName, arguments, ctx) { result, reason ->
