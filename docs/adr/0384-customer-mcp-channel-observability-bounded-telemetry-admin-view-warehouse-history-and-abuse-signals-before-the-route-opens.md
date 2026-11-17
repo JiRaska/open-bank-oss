@@ -7,14 +7,14 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [observability, ai-agents, fraud, privacy-gdpr]
-summary: "The customer MCP channel opens only once it is observable: bounded metrics on the existing MCP series, outbox-fed warehouse facts with keyed party refs, an admin page with four-eyes revoke, and approval-time fraud evidence."
+summary: "The customer MCP channel opens only once observable: hash-linked MCP audit, closed-label metrics on the existing series, warehouse facts under a per-party shreddable key, break-glass client suspend, approval-time fraud evidence."
 ---
 
 # ADR-0384 — Customer MCP channel observability: bounded telemetry, admin view, warehouse history and abuse signals before the route opens
 
 ## Context
 
-**What this ADR is for.** ADR-0383 (proposed, PR #16591, not yet on `main` on 2026-11-17) decides
+**What this ADR is for.** ADR-0383 (proposed/planned, on `main` since PR #16591) decides
 how a customer admits a third-party MCP client: an `MCP_CLIENT` delegation grant, DPoP-bound
 tokens, layered throttling, and proposals that execute only after SCA in the bank app. It decides
 the controls. It does not decide how anyone sees whether the controls carry work, how the channel
@@ -25,8 +25,8 @@ for that. This ADR decides it, and makes it a precondition of ADR-0383's "Exposu
 - ADR-0077 / ADR-0087 / ADR-0088: the metrics, traces, logs, alerting and Pyrra SLO-as-code
   substrate. They say *how* to instrument; nothing about this channel's signals, labels or alerts.
 - ADR-0226: every audit event carries `channel` (`ui|mcp|api`), `act_chain` and `session_id`. It is
-  the per-action trail. It is not a metric, not a warehouse fact, and (see below) it does not reach
-  a store for MCP today.
+  the per-action trail. It is not a metric, not a warehouse fact, and (see below) mcp-service does
+  not yet send it to a store.
 - ADR-0022 / ADR-0023: event-fed ClickHouse medallion, bronze as the 10-year log of record, PII
   masked at the sink, crypto-shredding by per-subject key. They decide the pipeline, not which
   channel facts enter it or under what retention.
@@ -54,29 +54,38 @@ alerts" as a mitigation for a stolen DPoP key plus refresh token, and nothing de
 Each point was checked against `origin/main` on 2026-11-17.
 
 1. **MCP already emits bounded metrics; a second family would split one channel into two.**
-   `McpMetricsAdapter` emits `openbank_mcp_requests_total{method}`,
+   `McpMetricsAdapter` emits five series: `openbank_mcp_requests_total{method}`,
    `openbank_mcp_tool_calls_total{tool,decision,result}`,
-   `openbank_mcp_tool_call_duration_seconds{tool}` and
-   `openbank_mcp_caller_identity_total{source}`, all `service="mcp"`, with `tool` mapped to a bounded
+   `openbank_mcp_tool_call_duration_seconds{tool}`,
+   `openbank_mcp_caller_identity_total{source}` and `openbank_mcp_tools_list_total{outcome}`, all
+   `service="mcp"`, with `tool` mapped to a bounded
    value and no agent id, consent id or argument as a tag. The issue's
    `openbank_mcp_customer_calls_total{tool,outcome}` would duplicate it. The repo wins: the
    existing series gain a `channel` label instead.
-2. **The MCP audit event does not reach a store.** `McpCallAuditor` builds the ADR-0226 envelope
-   (`channel = mcp`, `actChain`, `sessionId`, payload with argument *keys* only). The only
-   `AuditEventPublisher` implementation on `main` is libs-runtime's `LoggingAuditEventPublisher`,
-   and its log line carries `eventId, at, actor, actorType, op, resource, resourceId, result,
-   traceId` — not `channel`, `actChain` or `payload`. So for MCP, ADR-0226 D1 is a type, not a
-   trail. This ADR makes the durable audit transport a prerequisite (D0) and refuses to treat
-   telemetry as a substitute for it.
+2. **The durable audit publisher exists; mcp-service does not use it.** `McpCallAuditor` builds the
+   ADR-0226 envelope (`channel = mcp`, `actChain`, `sessionId`, payload with argument *keys* only).
+   libs-runtime carries two publishers. `LoggingAuditEventPublisher` is the `@Default`, and its log
+   line carries `eventId, at, actor, actorType, op, resource, resourceId, result, traceId`, but not
+   `channel`, `actChain` or `payload`. `HashLinkedOutboxAuditEventPublisher` (ADR-0323 phase 1) is
+   an opt-in `@Alternative`, selected by the build property
+   `openbank.audit.publisher=hash-linked-outbox`. A service that opts in must supply an
+   `AuditChainOutbox` bean, which appends under a per-producer DB lock in one transaction, and an
+   outbox dispatcher to relay to the audit topic. mcp-service has not opted in, so its audit events
+   end as the reduced log line. D0 makes opting in a prerequisite.
 3. **mcp-service has no outbox and no Kafka.** Its tree holds `McpRateLimiter` and
    `UnwiredProposalPort`, a Postgres database `openbank_mcp`, and no `outgoing` channel. A per-call
    event "over the existing outbox" does not exist to reuse; it must be built (ADR-0003).
-4. **delegation-service already publishes grant lifecycle, and nobody consumes it.**
-   `openbank.delegation.events` carries `DelegationOffered`, `DelegationActivated`,
-   `DelegationRevoked`, `DelegationExpired`, `DelegationSuspended`, `DelegationReinstated` and more,
-   and `rules.yaml` records it as producer-only. analytics-sink's topic list does not include it.
-   The issue's new event names (`connected`, `revoked`, `expired`) are these events with a grantee
-   type; they are not new types.
+4. **delegation-service's grant lifecycle topic has six consumers, and its schema assumes a party
+   grantee.** `openbank.delegation.events` carries `DelegationOffered`, `DelegationActivated`,
+   `DelegationRevoked`, `DelegationExpired`, `DelegationSuspended`, `DelegationReinstated` and more.
+   It is consumed by account-service, card-issuance-service, notification-service,
+   tax-reporting-service, context-service and audit-service. analytics-sink does not consume it.
+   The AsyncAPI contract (`openbank-contracts/openbank-delegation-service/asyncapi.yaml`) requires
+   `grantorPartyId` and `granteePartyId` as UUIDs, and Pacts exist between delegation-service and
+   account-service and card-issuance-service. An `MCP_CLIENT` grant has no grantee party:
+   PR #16599 adds `DelegationGranteeType { PARTY, MCP_CLIENT }` with `PARTY` as the default. The
+   issue's `connected` / `revoked` / `expired` are these lifecycle facts with a grantee type, but
+   putting them on this topic would hand every existing consumer a grant it cannot interpret.
 5. **Refresh-token family revocation is not a delegation-service fact.** ADR-0383 D2 puts refresh
    rotation and reuse detection in the customers realm. delegation-service never sees a refresh
    token, so it cannot emit `refreshed-family-revoked`. That signal comes from the realm's event
@@ -96,22 +105,24 @@ Each point was checked against `origin/main` on 2026-11-17.
    opens a case; ADR-0374 maps a hold to its `HELD` state. `FraudRiskContext` (libs-fincrime) has
    closed `InitiationMode` and `InitiationChannel` sets, neither naming MCP. The customer approves
    in the app (ADR-0383 D6), so `CUSTOMER_PRESENT` / `MOBILE_APP` is the truthful value; where the
-   instruction came from is missing evidence, and adding it is a contract change (D5).
+   instruction came from is missing evidence, and adding it is a contract change (D5, which also argues `CUSTOMER_PRESENT` over `DELEGATE`).
 9. **Scraping and key reuse are not fraud-service decisions.** ADR-0377 D1 scopes fraud decisions
    to value movements. A read sweep moves no value. Those detections belong to the channel's own
    abuse analytics and alerts, with a human acting on them (D3, D4), not to a fraud verdict.
 10. **Customer self-revoke is exempt from four-eyes, and must stay so; the operator actions are
-    not built.** `rules.yaml` defers four-eyes for delegation-service because `delegation.revoke`
-    is customer self-service through the edge M2M identity and the service wires no
-    `ApprovalStore`. The `rules.yaml` pattern for this case (the SDD note) is that an operator path
+    not built.** `rules.yaml` defers four-eyes enforcement for delegation-service (expiry
+    2027-03-10) because `delegation.revoke`, `disclosure.release` and `reserve.release` are granted
+    to the edge M2M identity and the service wires no `ApprovalStore`. The `ApprovalStore` is
+    before-effect only: it parks a request until a second person approves. The `rules.yaml` pattern for this case (the SDD note) is that an operator path
     gets its own distinct action, and that action is gated.
 11. **A zero-traffic alert on real traffic is a standing false alarm at launch.** ADR-0241's goal is
     zero standing criticals. The repo's liveness answer for a customer-visible capability is a
     journey in `openbank-libs/governance/journeys.yaml`, run by a CronJob and held by the enforced
     `journey-catalog-integrity` and `journey-money-path-accountability` gates (ADR-0252 phase 2).
-12. **Pyrra SLOs are registry-checked for money-path services only.** `check-slo-registry.py` reads
-    `rules.yaml: slo` and `pyrra-slo-money-path.yaml`. mcp-service is not in
-    `money_path_services`, so its SLO needs its own governed entry, not a hand-edited CR.
+12. **There is no per-service SLO schema.** `rules.yaml: slo` is one fleet-wide target
+    (availability 99.9 % and latency 99 % under 1 s, both over 30 days), and `check-slo-registry.py`
+    applies it to every `money_path_services` entry in `pyrra-slo-money-path.yaml`. mcp-service is
+    not money-path. A per-service SLO entry and the matching checker extension are new work.
 
 **Deadline.** None regulatory. The binding order is ADR-0383's: no route to mcp-service until its
 delivery checks hold. This ADR adds its own checks to that list.
@@ -122,27 +133,39 @@ We will make the customer MCP channel observable before it is reachable, using t
 existing signal paths, and we will not open the ADR-0383 route until every delivery check below
 passes in the sandbox.
 
-### D0 — Prerequisite: a durable, hash-linked MCP audit trail
+### D0 — Prerequisite: mcp-service opts in to the hash-linked audit publisher
 
-mcp-service adopts the ADR-0323 producer-side hash-linked audit envelope (producer, seq, prevHash,
-SHA-256 over canonical JSON), delivered through a transactional outbox. This is mcp-service's
-first outbox, and the D2 tool-call outbox shares it. Every customer-channel `tools/call` and
-`tools/list` event then carries the ADR-0226 `channel`, `actChain` and `sessionId` fields into
-audit-service. ADR-0323 is `proposed/partial` on 2026-11-17, so this is real prerequisite work,
-not adoption of a finished primitive. **Until mcp-service's audit events land in audit-service
-through that outbox, the route stays closed.**
+mcp-service sets `openbank.audit.publisher=hash-linked-outbox` and supplies the two parts the
+libs-runtime publisher needs: an `AuditChainOutbox` over its own `openbank_mcp` database (outbox
+table plus chain-head row, appended under a per-producer advisory transaction lock), and an outbox
+dispatcher (ADR-0013 / ADR-0050, `dispatch-enabled: true`) relaying to the audit topic with the
+usual DLQ, `KafkaTopic` CR and ACLs. This is mcp-service's first outbox. ADR-0323 is
+`proposed/partial`, and its phase-1 publisher is what is being adopted.
+
+**Cost.** Every audited MCP call takes the per-producer lock, so audit writes of one mcp-service
+deployment are serialised: the chain's append rate is a ceiling on audited calls. Before the
+route opens, the ADR-0383 D5 limits are set below a measured append rate, from a perf scenario
+`mcp-audit-chain-append` in `perf/scenarios.yaml`. Tool-call telemetry (D2) uses plain outbox rows
+in the same database, **not** the chain, so it never waits on the lock.
+
+**Until mcp-service's audit events land in audit-service with `channel` set and an unbroken chain,
+the route stays closed.**
 
 ### D1 — Live metrics: extend the existing MCP series; labels are closed sets
 
-- The existing four MCP series gain `channel ∈ {agent, operator, customer}`, derived from the
+- All five existing MCP series gain `channel ∈ {agent, operator, customer}`, derived from the
   ADR-0383 D1 resolution path (`iss` + path), never from a token claim the client controls.
+- **Tag keys are identical across channels.** Prometheus accepts a meter name with only one tag-key
+  set, so every series that carries `client` and `synthetic` carries them on every channel:
+  agent and operator calls emit fixed placeholders `client="none"` and `synthetic="false"`.
 - Customer-channel series additionally carry `client`. This is allowed **only because** ADR-0383
   D1 admits allowlisted, bank-registered clients with dynamic registration off, so the value set is
   the allowlist. The value is the allowlist entry's short id from mcp-service config; anything else
   is `unlisted`. The allowlist is capped at **25** entries, because above that `client` stops
   being a safe label and per-client views must move to the warehouse. The cap is enforced where
-  the allowlist is loaded: mcp-service refuses to start with more than 25 entries, and a unit test
-  proves the refusal. Registering a 26th client therefore needs a superseding decision, not a
+  the allowlist is loaded and at client registration: mcp-service refuses to start with more than
+  25 entries, and the registration tooling refuses a 26th. Both are proven by tests (Delivery
+  check). Registering a 26th client therefore needs a superseding decision, not a
   config edit.
 - Customer-channel series carry `synthetic ∈ {true,false}` from the ADR-0252 taint (fail-to-real,
   `SyntheticTaint.isTainted`), so the synthetic journey's outcome is readable as the availability
@@ -175,14 +198,20 @@ through that outbox, the route stays closed.**
 
 ### D2 — Facts at the source
 
-- **Connection lifecycle:** delegation-service's existing `DelegationActivated / Revoked /
-  Expired / Suspended / Reinstated` events, unchanged in type, carry for an `MCP_CLIENT` grant:
-  `granteeType`, allowlisted client id, capabilities, `expiresAt`, a revocation `reasonCode` from a
-  closed set (`customer, operator, client_kill_switch, expiry, family_revoked_reported`), and
-  `jktRef`. `jktRef` is an HMAC of the thumbprint under a delegation-service key; the raw `jkt`
-  stays only on the grant row (ADR-0383 D3 needs it there).
-- **Tool calls:** mcp-service gains a transactional outbox (ADR-0003, ADR-0013, `dispatch-enabled:
-  true`, SENT purge per ADR-0329) and publishes one `mcp.customer.tool-call.v1` fact per
+- **Connection lifecycle on its own topic.** Lifecycle facts for `MCP_CLIENT` grants go to a new
+  topic `openbank.delegation.mcp-client-events`, with its own AsyncAPI channel and schema version,
+  and **never** to `openbank.delegation.events`. The existing topic's schema and Pacts are
+  unchanged, so this is backward compatible by construction. As defence in depth, every existing
+  consumer of `openbank.delegation.events` ignores a record whose `granteeType` is not `PARTY`,
+  using the guard PR #16599 introduces, with a consumer test each. The new topic carries
+  `Activated / Revoked / Expired / Suspended / Reinstated` with grantor party id, `granteeType`,
+  allowlisted client id, capabilities, `expiresAt`, a revocation `reasonCode` from a closed set
+  (`customer, operator, client_kill_switch, client_bulk_revoke, expiry, family_revoked_reported`),
+  and `jktRef`. It also carries the per-client `McpClientSuspended / McpClientUnsuspended` facts
+  (D4). `jktRef` is an HMAC of the thumbprint under a delegation-service key; the raw `jkt` stays
+  only on the grant row, where ADR-0383 D3 needs it. Consumer Pacts are added for analytics-sink
+  and fraud-service.
+- **Tool calls:** through the D0 outbox (plain rows, SENT purge per ADR-0329), mcp-service publishes one `mcp.customer.tool-call.v1` fact per
   customer-channel `tools/call`, **after** the ADR-0383 D5 token step (tokenless floods are counted
   in D1, never written per request). Fields: event id, occurred-at, client id, party id (raw, on the
   authenticated in-cluster hop only), tool, capability, decision, outcome, reject layer/reason,
@@ -191,23 +220,47 @@ through that outbox, the route stays closed.**
   - The topic follows the fleet's DLQ rule: explicit nested `dead-letter-queue: topic:`, a
     `KafkaTopic` CR, and Write/Read ACLs (CLAUDE.md, #5745).
   - This fact is **telemetry, not audit.** The ADR-0226 audit event stays the per-action record and
-    is not replaced by it; Context 2 is tracked as a dependency, not solved here.
+    is not replaced by it (D0).
 - **Proposals:** the ADR-0383 proposal store emits `proposal.created|approved|rejected|expired`
   with client id, party id, `createdAt`, `decidedAt`. No payee, amount or reference on this topic;
   those live on the proposal row and reach fraud-service through D5.
 
 ### D3 — Warehouse history
 
-- analytics-sink adds `openbank.delegation.events`, the tool-call topic and the proposal topic to
-  its explicit topic list with Read ACLs, and the producer-only note for `openbank.delegation.events`
-  is removed in the same change.
-- **Pseudonymisation at the sink, by the existing per-subject key.** The sink replaces party id with
-  `party_ref = HMAC(per-subject Transit key, party_id)`, using the same per-subject key model as
-  `VaultCryptoErasure` (ADR-0023 F6), cached per subject in the sink. Erasure destroys that key, so
-  nobody can recompute a `party_ref` from a party id afterwards and existing rows become unlinkable
-  without mutating them. Until `ANALYTICS_ERASURE_BACKEND=vault` is deployed (Context 7), these
-  topics are **not** ingested; a `NO_BACKEND` sink must not start collecting party-keyed channel
-  history.
+- analytics-sink adds `openbank.delegation.mcp-client-events`, the tool-call topic and the proposal
+  topic to its explicit topic list, with Read ACLs.
+- **Pseudonymisation at the sink: a new keyed party reference.** Nothing on `main` creates or uses
+  per-subject keys for HMAC. `VaultCryptoErasure` only *destroys* a Transit key named
+  `analytics-<aggregateType>-<aggregateId>`, using `keyName` sanitisation. The scheme below is new
+  design:
+  - **One key holder.** analytics-sink is the only service that holds or uses the key. For a party
+    it creates, on first use, the Transit key `analytics-party-<partyId>`: exactly the name
+    `VaultCryptoErasure.keyName(AggregateKey("party", partyId))` destroys, so existing erasure
+    reaches it with no new code path.
+  - **Derivation.** `party_ref = Transit HMAC-SHA-256(key = analytics-party-<partyId>, input =
+    partyId)`, computed by Vault; the key material never leaves Vault. The sink replaces every party
+    id on the three channel topics with `party_ref` before writing, so raw party ids never land in
+    ClickHouse for this channel.
+  - **No cache that outlives the key.** The sink keeps an in-memory `partyId → party_ref` map with
+    a 15-minute TTL, dropped on restart. The erasure path evicts the entry before it destroys the
+    key. So after erasure, at most the in-flight batch is written under the old ref.
+  - **No silent re-creation after erasure.** Before creating a key, the sink checks an
+    `erased_subjects` table (new, keyed by aggregate key, written by `ErasureService` on `ERASED`).
+    An erased party gets `party_ref = NULL`, so its new events are counted in aggregates and linked
+    to nothing. A re-onboarded person is a new party id and a new key.
+  - **Connections lookup without a second key holder.** The admin Connections view does not
+    compute `party_ref`. The BFF calls one analytics-sink endpoint,
+    `GET /api/v1/mcp/party-activity/{partyId}` (permission-gated, audit-stamped). The sink derives
+    the ref and runs a fixed query over `silver_mcp_tool_calls`. This is the single, named
+    exception to ADR-0286's registry-only read path, and it exists because only the sink may hold
+    the key.
+  - **Prerequisite.** Until `ANALYTICS_ERASURE_BACKEND=vault` is deployed (Context 7), these topics
+    are **not** ingested. A `NO_BACKEND` sink must not start collecting party-keyed channel history.
+  - **Residual linkage, stated.** Erasure severs `party_ref`, but `jktRef` plus event timestamps on
+    the retained lifecycle rows can still be joined to delegation-service's grant row (party, jkt,
+    times) by anyone who holds both, until delegation-service's own erasure handles that row
+    (ADR-0118 table). The warehouse alone cannot re-link; the bank as a whole can, for as long as
+    the grant record is retained.
 - **Retention by class (ADR-0118), not by the bronze floor.** Tool-call facts are access logs:
   they go to a dedicated `silver_mcp_tool_calls` table with `TTL occurred_at + INTERVAL 90 DAY`,
   **not** into `bronze_events`, whose 10-year TTL is a floor that cannot be lowered (ADR-0022 §5).
@@ -218,50 +271,83 @@ through that outbox, the route stays closed.**
   `gold_mcp_client_scorecard` (per client: active grants, calls, reject mix, proposal approval
   rate); `gold_mcp_connection_cohorts` (by connect week: retention, revocation `reasonCode`);
   `gold_mcp_proposal_funnel` (stage counts, time-to-decision); `gold_mcp_abuse_indicators` (below).
-  Gold rows aggregate across parties and carry no `party_ref`, so they fall outside the 90-day
-  class and keep the warehouse default.
+  The first four marts aggregate across parties and carry no `party_ref`, so they fall outside the
+  90-day class and keep the warehouse default.
 - **Abuse indicators** are measurements, not judgements (V15's posture), with thresholds as
   registry parameters: distinct `party_ref` per `jktRef` (> 1 means a key reused across parties);
   new grants per client per 10 minutes; read-sweep score per `party_ref` and day (pages × window
   days over the tool cost table); proposals created per `party_ref` and day against the ADR-0383
   D6 limits; reject-ratio by client.
-  `gold_mcp_abuse_indicators` exposes `party_ref` only for rows above a threshold, and only to the
-  fraud permission (D4).
+  `gold_mcp_abuse_indicators` is a materialised table with `TTL day + INTERVAL 90 DAY`, because
+  its per-party rows carry `party_ref`. It exposes `party_ref` only for rows above a threshold,
+  only under `compliance:view`, which is the admin-ui permission that already covers `/fraud` and
+  `/aml` in `roles.ts`.
 
-### D4 — Admin UI: one page, three reads, two gated actions
+### D4 — Admin UI: one page, four reads, actions governed by direction
 
 A `Customer MCP` page under the existing `/delegations` area. Every request goes through the BFF
 (ADR-0056).
 - **Overview** — embedded Grafana dashboard-as-code over D1 (ADR-0286 exploration path): calls,
   rejects by layer, p95, SLO burn, replay-store up, active grants, proposal funnel. Real traffic by
   default, with a synthetic toggle.
-- **Clients** — one row per allowlisted client from mcp-service config joined with
-  `gold_mcp_client_scorecard` via the query registry (permission `delegations:view`).
+- **Clients** — one row per allowlisted client from mcp-service config, joined with
+  `gold_mcp_client_scorecard` via the query registry (permission `delegations:view`), plus its
+  suspension state.
 - **Connections** — party lookup through the existing party search and
   `/api/delegations/effective-access/[partyId]` (ADR-0228 is not a dependency), showing the party's
-  `MCP_CLIENT` grants and, from the warehouse, the last 90 days of that party's tool-call counts by
-  tool and outcome. The lookup is audit-stamped as a staff read of customer data.
+  `MCP_CLIENT` grants and, from the analytics-sink endpoint (D3), the last 90 days of that party's
+  tool-call counts by tool and outcome. The lookup is audit-stamped as a staff read of customer
+  data.
 - **Abuse** — `gold_mcp_abuse_indicators` via the registry, permission `compliance:view`, with a
   link into the ADR-0304 fraud lens when a case exists.
-- **Actions, governed by direction** (ADR-0047 point 6: tightening is single-actor break-glass,
-  loosening needs four-eyes; break-glass actions get a mandatory, time-boxed post-hoc review by an
-  independent function). All of them are new, distinct actions (Context 10), each with a reason
-  code and an audit event:
-  - `delegation.operatorRevoke`: revokes one grant. **Single actor** (operator role), audited. It
-    only reduces access.
-  - `delegation.mcpClientSuspend`: emergency stop for one client. **Single actor** (operator role),
-    effective immediately: MCP stops admitting that `azp`, and every grant of the client is
-    denied on its next call (ADR-0383 D3 re-reads the grant). It automatically opens a four-eyes
-    **post-hoc review item** in the `ApprovalStore`, reviewed by a different person within 24h.
-    An unreviewed item stays visible on the page and in the admin approval queue.
+- **Actions, governed by direction** (ADR-0047 point 6: tightening and halting is single-actor
+  break-glass; loosening and resuming needs four-eyes; break-glass actions are also recorded as
+  DORA-reportable operational events with a mandatory, time-boxed post-hoc review by an independent
+  function). Every action below is new and distinct (Context 10), takes a reason code, and emits an
+  audit event.
+  - `delegation.operatorRevoke` revokes one grant. **Single actor** (operator role), effective
+    immediately, audited. It only reduces access.
+  - `delegation.mcpClientSuspend` is the emergency stop for one client. **Single actor** (operator
+    role), effective immediately.
+    - **State.** A new `McpClientSuspension` aggregate in delegation-service, keyed by `azp`, with
+      state `ACTIVE | SUSPENDED`, actor, reason and time. It is separate from per-grant
+      `DelegationSuspended`: grants are not touched, so lifting the suspension restores exactly the
+      grants that existed.
+    - **Effect.** mcp-service needs no new read path. The ADR-0383 D3 per-call grant lookup in
+      delegation-service answers "no grant" while the grant's `azp` is suspended, and MCP rejects
+      with `layer="grant", reason="client_suspended"`. The `McpClientSuspended` fact (D2) feeds the
+      warehouse and the page.
+    - **Post-hoc review (new mechanism).** The suspension writes, in the same transaction, a
+      `BreakGlassReview` record: `OPEN`, a 24h due time, and the suspending actor. A different
+      operator closes it as `CONFIRMED` or `DISPUTED`; the domain refuses the suspending actor. It
+      is not an `ApprovalStore` item, because nothing waits on it. A gauge
+      `openbank_delegation_breakglass_review_overdue` (count of `OPEN` items past due) drives a
+      warning alert. `DISPUTED` does not lift the suspension; lifting is the four-eyes action below.
+    - **DORA event.** ADR-0047 requires break-glass actions to be recorded as DORA-reportable
+      operational events. The suspension emits that record as an audit event with operation
+      `breakglass.mcpClientSuspend`. Which register holds it is decided with ADR-0047's Tier-A
+      break-glass queue, which ADR-0047 itself lists as not yet wired.
   - `delegation.mcpClientUnsuspend` (lifting a suspension) and `delegation.mcpClientBulkRevoke`
-    (permanently revoking every grant of a client): **four-eyes before effect** (ADR-0155). These
-    two land in `rules.yaml: four_eyes.actions`, and delegation-service wires the shared
-    `ApprovalStore` for them and for the review item.
-  - Customer self-revoke keeps its current exemption.
+    (permanently revoking every grant of a client) are **four-eyes before effect** (ADR-0155). They
+    land in `rules.yaml: four_eyes.actions`, and delegation-service wires the shared
+    `ApprovalStore`.
+  - **The four-eyes interaction.** Wiring an `ApprovalStore` is what the delegation-service
+    deferral waits for, so the same change must keep customer self-service flowing. It adds a
+    `four_eyes.exemptions` entry `delegation.revoke` for the edge's verified service account (the
+    principal behind the `edge-service-delegation` grant), and the same for `disclosure.release`
+    and `reserve.release`, the other two actions the deferral names. It also replaces the
+    delegation-service deferral entry. Customer self-revoke therefore stays single-party and is
+    never parked.
 
 ### D5 — Fraud: evidence at approval, account-control events, shadow first
 
+- **`CUSTOMER_PRESENT`, not `DELEGATE`.** `DELEGATE` means "instructed by a person acting under a
+  delegation granted by the holder". The MCP client holds a delegation, but it does not instruct:
+  its grant carries no payment capability (ADR-0383 D3). The holder authenticates in this session
+  and authorises with SCA in the app (ADR-0383 D6), and the ADR-0375 Authority step sees the
+  customer as the actor. `DELEGATE` would misstate who instructed, and it would point a
+  delegated-authority check at a grant that cannot authorise anything. The proposal origin is
+  carried as evidence instead.
 - **At approval** the payment is scored like any app payment, with `initiationMode =
   CUSTOMER_PRESENT`, `channel = MOBILE_APP`, `vopResult` from ADR-0171, and one new optional typed
   evidence field in `FraudRiskEvidence`: `origin: InstructionOrigin? ∈ {MCP_CLIENT_PROPOSAL}` with
@@ -294,9 +380,10 @@ PrometheusRules, warning unless stated, each with a runbook line:
   `journeys.yaml` (status `active`, severity `ticket`, `money_moving: false`) connects a synthetic
   party's client through the full DPoP path, calls one read tool and one `propose_payment`, and
   rejects the proposal in the app API. The enforced journey gates then hold it.
-- **SLO:** availability and p95 latency of customer-channel read tools, as Pyrra objects in a
-  governed `rules.yaml: slo` entry for mcp-service; `check-slo-registry.py` is extended to that
-  entry rather than the CR being hand-edited. Synthetic traffic counts toward it (ADR-0252: the
+- **SLO:** availability and p95 latency of customer-channel read tools, as Pyrra objects. Because
+  `rules.yaml: slo` is one fleet target (Context 12), this needs **new planned work**: a per-service
+  SLO schema in `rules.yaml` and a `check-slo-registry.py` extension that holds an mcp-service
+  object to it, rather than a hand-edited CR (see Enforcement). Synthetic traffic counts toward it (ADR-0252: the
   canary's outcome is the availability metric).
 
 ### D7 — Order
@@ -314,8 +401,14 @@ sandbox. Until then no HTTPRoute or Ingress names mcp-service.
   party's live call rate. Rejected: unbounded cardinality, and a pseudonym in a 30-day metrics store
   outside the erasure model. Per-party history lives in the warehouse, keyed by a shreddable ref.
 - **Derive tool-call history from the audit trail instead of a telemetry fact.** One stream fewer.
-  Rejected: the MCP audit event reaches no store today (Context 2), and audit retention (5 years)
-  and immutability are wrong for high-volume access telemetry (90 days).
+  Rejected: audit retention (5 years), immutability and the chain lock are wrong for high-volume
+  access telemetry (90 days).
+- **MCP_CLIENT lifecycle on `openbank.delegation.events` behind a `granteeType` guard.** One topic.
+  Rejected: six consumers and two Pacts assume a party grantee. A guard missing in any one of them
+  misreads a client grant as a party grant, and the schema's required `granteePartyId` has no
+  honest value.
+- **One global HMAC key for `party_ref`.** Simple and cheap. Rejected: it cannot be destroyed per
+  party, so erasure could not sever one subject.
 - **Tool-call facts in `bronze_events` like every other event.** Uniform ingestion. Rejected: bronze
   keeps 10 years as a floor, and access logs are a 90-day class under ADR-0118.
 - **Score scraping and key reuse in fraud-service.** One risk engine. Rejected: ADR-0377 scopes
@@ -340,12 +433,15 @@ sandbox. Until then no HTTPRoute or Ingress names mcp-service.
   becoming an exemption.
 
 **Negative**
-- mcp-service gains its first outbox (ADR-0323 audit envelope plus telemetry) and a database write
-  per customer tool call. The route waits on ADR-0323, which is `proposed/partial`.
+- mcp-service gains its first outbox: chained audit rows under a per-producer lock, which caps
+  audited-call throughput (D0), plus plain telemetry rows. That is two database writes per customer
+  tool call.
+- A new topic, a new Vault key per party with an `erased_subjects` table, a new sink endpoint, a new
+  suspension aggregate and a break-glass review record are all new design, not reuse.
 - The route now also waits on the warehouse erasure backend being deployed (Context 7), and on the
   proposal store existing (ADR-0383 D6).
-- A libs-fincrime contract change (`InstructionOrigin`) and a `four_eyes` wiring in
-  delegation-service, which today has none.
+- A libs-fincrime contract change (`InstructionOrigin`), and the first `four_eyes` wiring in
+  delegation-service, together with the exemptions it forces.
 - The `client` label caps the allowlist at 25 before the live views must be redesigned.
 
 **Neutral**
@@ -359,54 +455,83 @@ sandbox. Until then no HTTPRoute or Ingress names mcp-service.
   `channel` tag in `McpMetricsAdapter`, the D6 PrometheusRule names, the `mcp-customer-read`
   journey with `status: active`, the gold migrations, and the registry entries. It also fails on a
   forbidden label name (`party`, `party_ref`, `jkt`, `sub`, `grant`) in any `openbank.mcp.*` meter.
+- New planned work in the SLO registry: a per-service SLO schema in `rules.yaml` and a
+  `check-slo-registry.py` extension that validates the mcp-service Pyrra objects against it.
 - Existing enforced gates that will hold parts of it: `scheduler liveness adoption` (D1
   projection), `journey-catalog-integrity` and `journey-money-path-accountability` (D6 journey),
   the ADR-0252 synthetic-taint outbox gate (D2 outbox), and `check-duplicate-yaml-keys.sh`.
 - `docs/threat-models/openbank-mcp-service.md` and `openbank-delegation-service.md` gain the
-  telemetry and the two operator actions.
+  telemetry, the key scheme and the four operator actions.
 
 ### Delivery check
 
-Run in the sandbox, in this order; the route stays closed until all pass.
+Every test named below is new unless marked *(exists)*, and each one must fail when its control is
+removed. In the sandbox the route stays closed until all pass.
 
-- **Labels are closed.** `count by (__name__)({__name__=~"openbank_mcp_.*", party=~".+"})` and the
-  same for `party_ref`, `jkt`, `sub` return no series; `count(count by (client)
-  (openbank_mcp_tool_calls_total{channel="customer"}))` ≤ the allowlist size + 1.
+- **Durable audit (D0).** `./gradlew :openbank-mcp-service:test --tests '*McpAuditChainOutboxIT'`
+  shows a `tools/call` commits one chained outbox row, and that removing the build property makes
+  the test fail (the bean disappears). In the sandbox, after the journey, audit-service holds the
+  journey's `mcp.tool.call` events with `channel` set, and its chain verify endpoint reports no
+  broken link for producer `openbank-mcp-service`.
+- **Client cap.** `McpClientAllowlistCapTest` shows a 26-entry allowlist fails to boot and a
+  25-entry one boots. `McpMetricsAdapterTest` *(exists, extended)* drives a 25-client fixture plus
+  one unknown `azp` and asserts exactly 26 `client` values (25 plus `unlisted`). With the mapping
+  to `unlisted` removed, it asserts 26 distinct raw ids and fails.
+- **Identical tag keys.** `McpMetricsAdapterTest` *(extended)* records one agent and one customer
+  call into a `PrometheusMeterRegistry` and asserts the scrape contains both, with
+  `client="none",synthetic="false"` on the agent series. Dropping the placeholders makes the
+  registry reject the second registration, and the test fails.
+- **No forbidden labels.** The `mcp-customer-channel-observable` gate's self-test feeds a fixture
+  meter tagged `party_ref` and must fail. In the sandbox,
+  `count({__name__=~"openbank_mcp_.*", party_ref=~".+"})` returns empty, confirmed against a
+  deliberately mislabelled canary series in the gate's self-test run.
 - **Every control carries work.** After the `mcp-customer-read` journey and its negative twin (no
-  DPoP proof; replayed `jti`; flood without a token), `openbank_mcp_customer_rejected_total` has
-  non-zero increments for `layer="dpop",reason="replay"`, `layer="dpop",reason="missing"` and
+  DPoP proof, replayed `jti`, a tokenless flood), `increase(openbank_mcp_customer_rejected_total
+  {layer="dpop",reason="replay"}[15m]) > 0`, likewise for `reason="missing"` and
   `layer="throttle",reason="unauth_bucket"`, and `openbank_mcp_tool_calls_total{channel="customer",
   synthetic="true",result="SUCCESS"}` increased.
 - **Synthetic appears where the taint includes it.** The journey's party is visible on the admin
   Connections view (marked synthetic), its approval produced a fraud-service decision record, and
-  `SELECT count() FROM openbank_analytics.bronze_events WHERE synthetic = 1 AND aggregate_id =
-  '<journey grant id>'` and `SELECT count() FROM silver_mcp_tool_calls WHERE synthetic = 1` are > 0.
-- **…and is absent where it excludes it.** The journey uses an allowlisted client id that only
-  canaries use. `SELECT sum(calls) FROM gold_mcp_channel_daily WHERE client = '<canary client>'`
-  returns 0 while `openbank_mcp_tool_calls_total{channel="customer",client="<canary client>"}` is
-  > 0; removing `synthetic = 0` from the migration must make this check fail.
-- **Retention.** `SELECT engine_full FROM system.tables WHERE name = 'silver_mcp_tool_calls'`
-  contains `INTERVAL 90 DAY`.
-- **Erasure.** An erasure request for a test party returns `ERASED`, not `NO_BACKEND`, and the sink
-  then cannot reproduce that party's `party_ref`.
-- **No PII on the wire.** A consumer test over the tool-call topic schema rejects any property
-  named `iban`, `amount`, `reference`, `arguments`, `body` or `result`.
-- **Client cap.** mcp-service started with a 26-entry allowlist fails to boot, and with 25 it
-  boots. `count(count by (client) (openbank_mcp_tool_calls_total{channel="customer"})) <= 26`
-  (25 clients plus `unlisted`).
-- **Durable audit (D0).** After the journey, audit-service holds the journey's `mcp.tool.call`
-  events with `channel` set, and its chain verify endpoint reports no broken link from
-  mcp-service.
-- **Governed actions.** An IT shows that `delegation.mcpClientSuspend` by one operator denies the
-  client's next call and creates a post-hoc review item. `delegation.mcpClientUnsuspend` and
-  `delegation.mcpClientBulkRevoke` appear under `rules.yaml: four_eyes.actions`, the maker cannot
-  approve their own request, and nothing changes until a second operator approves.
-  `delegation.operatorRevoke` takes effect with one actor and emits an audit event.
+  `SELECT count() FROM openbank_analytics.silver_mcp_tool_calls WHERE synthetic = 1` is > 0.
+- **…and is absent where it excludes it.** The journey uses a canary-only allowlisted client.
+  `SELECT sum(calls) FROM gold_mcp_channel_daily WHERE client = '<canary client>'` returns 0 while
+  `openbank_mcp_tool_calls_total{channel="customer",client="<canary client>"}` is > 0. Removing
+  `synthetic = 0` from the migration must make this check fail.
+- **Retention.** `SELECT name, engine_full FROM system.tables WHERE name IN
+  ('silver_mcp_tool_calls','gold_mcp_abuse_indicators')` shows `INTERVAL 90 DAY` on both.
+- **Key derivation and erasure.** `PartyRefDerivationIT` in analytics-sink, against a dev OpenBao
+  with Transit, runs these steps:
+  1. An event for party P creates the key `analytics-party-<P>`.
+  2. The stored `party_ref` equals a direct Transit HMAC under that key.
+  3. An erasure request for P returns `ERASED`, not `NO_BACKEND`, and the key is gone.
+  4. Recomputing the HMAC is impossible (404).
+  5. A new event for P stores `party_ref = NULL`, and `erased_subjects` holds P.
+  With the `erased_subjects` check removed, step 5 recreates a key and the test fails.
+- **No PII on the wire.** `McpToolCallEventSchemaTest` rejects any property named `iban`, `amount`,
+  `reference`, `arguments`, `body` or `result` in the tool-call AsyncAPI schema.
+- **Topic separation.** A consumer test in each of account-service, card-issuance-service,
+  notification-service, tax-reporting-service and context-service feeds an `MCP_CLIENT` record and
+  asserts it is ignored. `grep -c MCP_CLIENT` over the `openbank.delegation.events` channel of the
+  delegation AsyncAPI returns 0.
+- **Governed actions.** `McpClientSuspensionTest` and `BreakGlassReviewTest` in delegation-service
+  show that:
+  - a single operator's suspend makes the next grant lookup for that `azp` deny, and opens an
+    `OPEN` review;
+  - the suspending actor cannot close the review;
+  - an overdue review raises the gauge.
+
+  `McpClientFourEyesIT` shows unsuspend and bulk revoke change nothing until a second operator
+  approves, and that the maker cannot approve their own request. `DelegationRevokeExemptionIT`
+  shows the edge service account's `delegation.revoke` is not parked once the `ApprovalStore` is
+  wired.
 - **Fraud evidence.** With a shadow rule reading `origin`, an approved journey proposal yields a
-  fraud decision whose recorded context has `origin = MCP_CLIENT_PROPOSAL`, and the verdict is
-  unchanged by the shadow rule.
+  fraud decision whose recorded context has `initiationMode = CUSTOMER_PRESENT` and
+  `origin = MCP_CLIENT_PROPOSAL`, and the shadow rule leaves the verdict unchanged.
+- **Proposal funnel** (delivered with the ADR-0383 D6 store, and its status follows that store): a
+  journey proposal rejected in the app increments `openbank_mcp_customer_proposals_total
+  {stage="rejected"}`.
 - **Order.** `kubectl get httproute,ingress -A | grep mcp` lists nothing until every line above
-  holds; the gate fails if one is added earlier.
+  holds, and the gate fails if one is added earlier.
 
 ## Compliance impact
 
@@ -421,13 +546,15 @@ Run in the sandbox, in this order; the route stays closed until all pass.
 - ADR-0003, ADR-0022, ADR-0023, ADR-0056, ADR-0077, ADR-0084, ADR-0088, ADR-0118, ADR-0139,
   ADR-0155, ADR-0171, ADR-0189, ADR-0226, ADR-0228, ADR-0237, ADR-0241, ADR-0252, ADR-0253,
   ADR-0286, ADR-0047, ADR-0303, ADR-0304, ADR-0323, ADR-0329, ADR-0354, ADR-0374, ADR-0377, ADR-0378;
-  ADR-0383 (proposed, PR #16591)
+  ADR-0383
 - `openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/observability/McpMetricsAdapter.kt`
 - `openbank-mcp-service/src/main/kotlin/com/openbank/mcp/application/McpCallAuditor.kt`
 - `openbank-libs-runtime/src/main/kotlin/com/openbank/libs/audit/AuditEventPublisher.kt`
+- `openbank-libs-runtime/src/main/kotlin/com/openbank/libs/audit/HashLinkedOutboxAuditEventPublisher.kt`
+- `openbank-contracts/openbank-delegation-service/asyncapi.yaml`
 - `openbank-analytics-sink/src/main/resources/clickhouse/V9__synthetic_provenance.sql`
 - `openbank-analytics-sink/src/main/kotlin/com/openbank/analytics/infrastructure/erasure/VaultCryptoErasure.kt`
 - `openbank-libs-fincrime/src/main/kotlin/com/openbank/libs/fincrime/FraudRiskContext.kt`
 - `openbank-admin-ui/src/lib/reporting/registry.ts`
 - `openbank-libs/governance/journeys.yaml`
-- Issues #16590, #16605, #16608
+- Issues #16590, #16605, #16608; PR #16599 (`DelegationGranteeType`)
