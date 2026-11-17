@@ -22,7 +22,11 @@ class KeycloakAdminClientPartyIdTest {
         val user = """{"id":"u1","username":"a@b.c","email":"a@b.c","firstName":"A","lastName":"B",
             "enabled":true,"attributes":{"locale":["cs"],"party_id":["old"]}}"""
         val out = mapper.readTree(client.withPartyId(user, "11111111-1111-4111-8111-111111111111"))
-        assertThat(out["attributes"]["party_id"].map { it.asText() }).containsExactly("11111111-1111-4111-8111-111111111111")
+        assertThat(
+            out["attributes"]["party_id"].map {
+                it.asText()
+            },
+        ).containsExactly("11111111-1111-4111-8111-111111111111")
         assertThat(out["attributes"]["locale"].map { it.asText() }).containsExactly("cs")
         listOf("id", "username", "email", "firstName", "lastName", "enabled").forEach {
             assertThat(out[it]).`as`(it).isEqualTo(mapper.readTree(user)[it])

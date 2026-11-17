@@ -123,7 +123,11 @@ class McpClientConnectScaTest {
     @Test
     fun `no other purpose may initiate with an mcp-connect id`() {
         ScaPurpose.entries.filter { it != ScaPurpose.MCP_CLIENT_CONNECT }.forEach { purpose ->
-            assertThatThrownBy { runBlocking { service.initiate(command(linking()).copy(purpose = purpose, scope = ConsumerScope.General)) } }
+            assertThatThrownBy {
+                runBlocking {
+                    service.initiate(command(linking()).copy(purpose = purpose, scope = ConsumerScope.General))
+                }
+            }
                 .`as`(purpose.name)
                 .isInstanceOf(IllegalArgumentException::class.java)
                 .hasMessageContaining("reserved to MCP_CLIENT_CONNECT")
@@ -288,7 +292,11 @@ class McpClientConnectScaTest {
     fun `the scoped connect consumer may not initiate any other purpose`() {
         listOf(ScaPurpose.APPROVAL, ScaPurpose.PAYMENT_INITIATION, ScaPurpose.CONSENT_GRANT).forEach { purpose ->
             assertThatThrownBy {
-                runBlocking { service.initiate(command(linking(requestId = "other-op:1")).copy(purpose = purpose, scope = mcpScope)) }
+                runBlocking {
+                    service.initiate(
+                        command(linking(requestId = "other-op:1")).copy(purpose = purpose, scope = mcpScope),
+                    )
+                }
             }.`as`(purpose.name).isInstanceOf(ScaInitiateScopeViolationException::class.java)
         }
         assertThat(challenges).isEmpty()
