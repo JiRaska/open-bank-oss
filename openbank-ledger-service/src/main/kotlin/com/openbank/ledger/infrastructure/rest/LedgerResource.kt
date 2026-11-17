@@ -233,12 +233,7 @@ class LedgerResource(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @Context requestContext: ContainerRequestContext,
     ): Response {
-        val token = callerIdentity.principal as? JsonWebToken ?: throw ForbiddenException()
-        val trusted = token.getClaim<String>("azp") == "openbank-transaction" &&
-            token.getClaim<String>("preferred_username") == "service-account-openbank-transaction"
-        if (!trusted) {
-            throw ForbiddenException()
-        }
+        requireTransactionWorkload()
         requireNotNull(request) { "a booked journal body is required" }
         requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
         require(idempotencyKey.isNotBlank() && idempotencyKey == request.journal.idempotencyKey) {
@@ -248,6 +243,15 @@ class LedgerResource(
         val suppliedOrigin = requireNotNull(request.synthetic) { "synthetic is required" }
         if (suppliedOrigin != synthetic) throw ForbiddenException("Journal origin does not match the trusted origin")
         return bookJournal(request.journal, synthetic, request.booking.toDomain())
+    }
+
+    private fun requireTransactionWorkload() {
+        val token = callerIdentity.principal as? JsonWebToken ?: throw ForbiddenException()
+        val trusted = token.getClaim<String>("azp") == "openbank-transaction" &&
+            token.getClaim<String>("preferred_username") == "service-account-openbank-transaction"
+        if (!trusted) {
+            throw ForbiddenException()
+        }
     }
 
     // Both values carry the filter's authenticated trust decision. Either true value wins.
