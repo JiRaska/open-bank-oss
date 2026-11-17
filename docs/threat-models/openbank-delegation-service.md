@@ -242,10 +242,27 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
   the client id (`azp`) and the DPoP key thumbprint (`cnf.jkt`) at grant time, and a DB CHECK pins
   the shape so a half-bound MCP grant or a PARTY grant with client bindings cannot be stored. The
   grantee id of an MCP client is derived from its `azp`, so there is no party for it to impersonate.
-  No new endpoint, caller, event field or privilege ships in this change. Nothing creates an
-  `MCP_CLIENT` grant yet, and the triple lookup `(grantor, azp, jkt)` is indexed but not yet served.
-  Residual risk: until that lookup exists, enforcement of the key binding depends on the future
-  caller. Rollback: a forward migration dropping the three columns, after confirming there are no
+  A PARTY grant may not use a name-based (version 3) UUID as grantee id, so an MCP client cannot
+  be smuggled in as a PARTY grant. An MCP_CLIENT grant is never accepted by a party; it is activated
+  by the future SCA-bound connect flow (ADR-0383 D1), and `accept()` refuses it before any SCA
+  challenge is spent. **Dormancy guard:** every write path in `DelegationService` refuses an
+  MCP_CLIENT grant (`MCP_CLIENT_GRANTEE_DORMANT`), and no lifecycle event can be constructed for one,
+  which also covers the lifecycle-approval executor and the expiration sweep. No new endpoint, caller
+  or privilege ships. Nothing creates an MCP_CLIENT grant yet, and the `(grantor, azp, jkt)` lookup
+  is indexed but not served.
+  Residual risks:
+  - **Event field.** The lifecycle events and the AsyncAPI contract (1.7.0) gain optional
+    `granteeType` (default PARTY) and `granteeClientId`. Today's consumers (account-service,
+    card-issuance-service, context-service) ignore unknown fields, so they would read an MCP grant
+    as a grant to a party with that id. The dormancy guard is what keeps that from happening, and it
+    may only be lifted after every consumer skips `granteeType != PARTY`.
+  - **Tampered row.** The DB pins the binding shape but cannot check the capability allow-list. A
+    row edited to give an MCP_CLIENT grant an executing capability fails closed on read: the
+    aggregate refuses it. The trade-off is availability, not authority: a list endpoint that
+    contains such a row answers 500 for that grantor or grantee until the row is corrected.
+  - **Key binding.** Until the triple lookup exists, enforcing the `jkt` binding depends on the
+    future caller.
+  Rollback: a forward migration dropping the three columns, after confirming there are no
   `MCP_CLIENT` rows.
 
 - **2026-11-12** — **Document ownership read added as a sixth outbound edge** (ADR-0375 D5).

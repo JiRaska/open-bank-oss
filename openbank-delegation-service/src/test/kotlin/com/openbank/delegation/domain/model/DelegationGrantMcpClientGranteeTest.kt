@@ -140,4 +140,31 @@ class DelegationGrantMcpClientGranteeTest {
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("only recorded for MCP_CLIENT")
     }
+
+    @Test
+    fun `an MCP_CLIENT grant is never accepted by a party`() {
+        val offered = mcpGrant(setOf(DelegationCapability.ACCOUNT_READ_BALANCES))
+        assertThatThrownBy { offered.accept(UUID.randomUUID(), now) }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("never accepted by a party")
+    }
+
+    @Test
+    fun `a PARTY grant may not use a derived MCP grantee id`() {
+        assertThatThrownBy {
+            DelegationGrant(
+                grantorPartyId = grantor,
+                granteePartyId = DelegationGrant.mcpClientGranteeId(clientId),
+                resourceType = DelegationResourceType.ACCOUNT,
+                resourceId = UUID.randomUUID(),
+                capabilities = setOf(DelegationCapability.ACCOUNT_INITIATE_PAYMENT),
+                validFrom = now,
+                validTo = null,
+                createdAt = now,
+                updatedAt = now,
+            )
+        }.isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("name-based UUID")
+        assertThat(DelegationGrant.mcpClientGranteeId(clientId).version()).isEqualTo(3)
+    }
 }

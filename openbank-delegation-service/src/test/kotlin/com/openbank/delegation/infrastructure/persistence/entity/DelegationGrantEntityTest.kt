@@ -84,6 +84,38 @@ class DelegationGrantEntityTest {
         assertThat(restored.granteeType).isEqualTo(DelegationGranteeType.MCP_CLIENT)
     }
 
+    /**
+     * Fail-closed on a tampered row: a row claiming MCP_CLIENT but carrying a capability the class
+     * may not hold (the DB cannot check the capability allow-list) does not read back as a grant.
+     * The aggregate refuses it, so the read fails rather than handing out the right. Trade-off,
+     * recorded in the threat model: a list endpoint containing such a row answers 500.
+     */
+    @Test
+    fun `a tampered MCP_CLIENT row with an executing capability fails closed on read`() {
+        val clientId = "registered-mcp-client"
+        val entity = DelegationGrantEntity.fromDomain(
+            DelegationGrant(
+                grantorPartyId = UUID.randomUUID(),
+                granteePartyId = DelegationGrant.mcpClientGranteeId(clientId),
+                granteeType = DelegationGranteeType.MCP_CLIENT,
+                granteeClientId = clientId,
+                granteeKeyThumbprint = "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs",
+                resourceType = DelegationResourceType.ACCOUNT,
+                resourceId = UUID.randomUUID(),
+                capabilities = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
+                validFrom = now,
+                validTo = null,
+                createdAt = now,
+                updatedAt = now,
+            ),
+        )
+        entity.capabilities.add(DelegationCapability.ACCOUNT_INITIATE_PAYMENT)
+
+        org.assertj.core.api.Assertions.assertThatThrownBy { entity.toDomain() }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("refused for an MCP_CLIENT grantee")
+    }
+
     @Test
     fun `round-trip preserves limits and closed state`() {
         val grant = DelegationGrant(

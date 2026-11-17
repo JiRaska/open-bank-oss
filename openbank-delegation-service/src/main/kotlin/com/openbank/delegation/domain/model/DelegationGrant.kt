@@ -201,8 +201,16 @@ data class DelegationGrant(
      */
     private fun requireGranteeShape() {
         when (granteeType) {
-            DelegationGranteeType.PARTY -> require(granteeClientId == null && granteeKeyThumbprint == null) {
-                "client id and key thumbprint are only recorded for MCP_CLIENT grantees"
+            DelegationGranteeType.PARTY -> {
+                require(granteeClientId == null && granteeKeyThumbprint == null) {
+                    "client id and key thumbprint are only recorded for MCP_CLIENT grantees"
+                }
+                // A derived MCP grantee id is a name-based (version 3) UUID; no party id ever is.
+                // Refusing the version closes the one way to smuggle an MCP client in as a PARTY
+                // grant and inherit every PARTY capability.
+                require(granteePartyId.version() != NAME_BASED_UUID_VERSION) {
+                    "a PARTY grantee id must not be a name-based UUID (that shape is reserved for MCP clients)"
+                }
             }
             DelegationGranteeType.MCP_CLIENT -> {
                 val clientId = requireNotNull(granteeClientId) { "an MCP_CLIENT grant must record the client id (azp)" }
@@ -278,7 +286,16 @@ data class DelegationGrant(
         return amount.amount.compareTo(perTransactionLimit.amount) <= 0
     }
 
+    /**
+     * Acceptance model. A PARTY grant is accepted by its grantee under SCA. An MCP_CLIENT grant is
+     * NEVER accepted by a party: there is no party on the grantee side to accept it. It is
+     * activated by the SCA-bound connect flow in the bank app (ADR-0383 D1), which does not exist
+     * yet, so this refuses it explicitly rather than letting a generic grantee path activate it.
+     */
     fun accept(scaSessionId: UUID, now: OffsetDateTime): DelegationGrant {
+        check(granteeType == DelegationGranteeType.PARTY) {
+            "an MCP_CLIENT grant is never accepted by a party; it is activated by the SCA-bound connect flow (ADR-0383 D1)"
+        }
         check(status == DelegationStatus.OFFERED) { "only an OFFERED grant can be accepted (is $status)" }
         return copy(
             status = DelegationStatus.ACTIVE,
@@ -374,6 +391,8 @@ data class DelegationGrant(
             DelegationCapability.ACCOUNT_DOWNLOAD_STATEMENTS,
             DelegationCapability.ACCOUNT_PROPOSE_PAYMENT,
         )
+
+        private const val NAME_BASED_UUID_VERSION = 3
 
         /** Matches the `varchar(255)` of `grantee_client_id` in V34. */
         const val CLIENT_ID_MAX_LENGTH = 255
