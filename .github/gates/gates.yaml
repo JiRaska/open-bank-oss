@@ -7023,6 +7023,25 @@ gates:
       # the first run of these probes reported "rejected" on a YAML error in the fixture itself,
       # which is why the output is read and not the exit code.
       python3 .github/scripts/check-delegation-capability-enforcement.py --enforce
+  - id: mcp-customer-channel-propose-only
+    name: "MCP REST clients declare no non-GET call to a payment, limit, beneficiary, SCA, card or delegation target (ADR-0383 D6, enforced)"
+    group: security
+    mode: enforced
+    rationale: "ADR-0383 D6 makes the customer MCP channel propose-only: MCP may create a proposal, the customer authorises it in the bank app. A tool-layer promise is not that rule; a REST client that can POST to a payment or SCA route is the capability itself. This gate makes the client surface the control, including methods a client INHERITS from a generated API."
+    review_after: "2027-05-17"
+    verified: "2026-11-17 — self-test: four known-positive fixtures (POST to a payments path, PUT to an SCA challenge caught by configKey, DELETE on cards inherited from a source supertype, an unresolvable supertype) each produce findings; a known-negative (GET reads, consent POST validate, @POST inside a KDoc and a line comment) is clean; a stale baseline entry is a finding; a write in a generated openbank-client-* API's tag is a finding and one in another tag is not. The self-test was itself falsified (POST/PUT/DELETE treated as safe -> self-test FAILED). Sabotage on the real tree (an @POST added to SepaPaymentServiceClient) exited 1. First real run found three inherited writes on AccountServiceClient via the generated AccountsApi, baselined so the list can only shrink."
+    budget_seconds: 30
+    min_subjects: 7
+    selftest: python3 .github/scripts/check-mcp-customer-channel-propose-only.py --self-test
+    selftest_expect: pass
+    selftest_inputs:
+      - ".github/scripts/check-mcp-customer-channel-propose-only.py"
+    run: |
+      # Subjects are DERIVED: every @RegisterRestClient interface under openbank-mcp-service/src/main,
+      # with supertypes followed into repo source and into openbank-client-* generated APIs (read from
+      # the provider openapi.yaml, restricted to the generated tags). An unresolvable supertype is a
+      # finding, not a pass. The allow-list is empty; the inherited baseline may only shrink.
+      python3 .github/scripts/check-mcp-customer-channel-propose-only.py
   - id: value-movement-admission-coverage
     name: "every value-moving module is classified, and an instructed one binds the admission chain with a real FRAUD check (ADR-0377 D2, enforced)"
     group: kotlin
