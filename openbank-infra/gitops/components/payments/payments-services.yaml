@@ -335,6 +335,13 @@ spec:
           - clusterScope: true
             templateName: openbank-money-path-canary
         startingStep: 1
+        # Canary pods get NO production traffic: stableService pins the DNS Service to the stable
+        # ReplicaSet and there is no trafficRouting, so the canary-hash queries are empty and the
+        # strict analysis would go Inconclusive and pause every deploy. Dry-run keeps the analysis
+        # visible (dryRunSummary) without pretending it gates. Tracked exemption, enforced by
+        # openbank-infra/tests/canary/check.py; remove when the canary receives traffic (#16630).
+        dryRun:
+          - metricName: "*"
         args:
           - name: namespace
             valueFrom:
@@ -745,6 +752,13 @@ spec:
           - clusterScope: true
             templateName: openbank-money-path-canary
         startingStep: 1
+        # Canary pods get NO production traffic: stableService pins the DNS Service to the stable
+        # ReplicaSet and there is no trafficRouting, so the canary-hash queries are empty and the
+        # strict analysis would go Inconclusive and pause every deploy. Dry-run keeps the analysis
+        # visible (dryRunSummary) without pretending it gates. Tracked exemption, enforced by
+        # openbank-infra/tests/canary/check.py; remove when the canary receives traffic (#16630).
+        dryRun:
+          - metricName: "*"
         args:
           - name: namespace
             valueFrom:
@@ -1149,6 +1163,13 @@ spec:
           - clusterScope: true
             templateName: openbank-money-path-canary
         startingStep: 1
+        # Canary pods get NO production traffic: stableService pins the DNS Service to the stable
+        # ReplicaSet and there is no trafficRouting, so the canary-hash queries are empty and the
+        # strict analysis would go Inconclusive and pause every deploy. Dry-run keeps the analysis
+        # visible (dryRunSummary) without pretending it gates. Tracked exemption, enforced by
+        # openbank-infra/tests/canary/check.py; remove when the canary receives traffic (#16630).
+        dryRun:
+          - metricName: "*"
         args:
           - name: namespace
             valueFrom:
@@ -1495,6 +1516,13 @@ spec:
           - clusterScope: true
             templateName: openbank-money-path-canary
         startingStep: 1
+        # Canary pods get NO production traffic: stableService pins the DNS Service to the stable
+        # ReplicaSet and there is no trafficRouting, so the canary-hash queries are empty and the
+        # strict analysis would go Inconclusive and pause every deploy. Dry-run keeps the analysis
+        # visible (dryRunSummary) without pretending it gates. Tracked exemption, enforced by
+        # openbank-infra/tests/canary/check.py; remove when the canary receives traffic (#16630).
+        dryRun:
+          - metricName: "*"
         args:
           - name: namespace
             valueFrom:
@@ -1815,6 +1843,13 @@ spec:
           - clusterScope: true
             templateName: openbank-money-path-canary
         startingStep: 1
+        # Canary pods get NO production traffic: stableService pins the DNS Service to the stable
+        # ReplicaSet and there is no trafficRouting, so the canary-hash queries are empty and the
+        # strict analysis would go Inconclusive and pause every deploy. Dry-run keeps the analysis
+        # visible (dryRunSummary) without pretending it gates. Tracked exemption, enforced by
+        # openbank-infra/tests/canary/check.py; remove when the canary receives traffic (#16630).
+        dryRun:
+          - metricName: "*"
         args:
           - name: namespace
             valueFrom:
@@ -3067,6 +3102,13 @@ spec:
           - clusterScope: true
             templateName: openbank-money-path-canary
         startingStep: 1
+        # Canary pods get NO production traffic: stableService pins the DNS Service to the stable
+        # ReplicaSet and there is no trafficRouting, so the canary-hash queries are empty and the
+        # strict analysis would go Inconclusive and pause every deploy. Dry-run keeps the analysis
+        # visible (dryRunSummary) without pretending it gates. Tracked exemption, enforced by
+        # openbank-infra/tests/canary/check.py; remove when the canary receives traffic (#16630).
+        dryRun:
+          - metricName: "*"
         args:
           - name: namespace
             valueFrom:
@@ -3521,6 +3563,13 @@ spec:
           - clusterScope: true
             templateName: openbank-money-path-canary
         startingStep: 1
+        # Canary pods get NO production traffic: stableService pins the DNS Service to the stable
+        # ReplicaSet and there is no trafficRouting, so the canary-hash queries are empty and the
+        # strict analysis would go Inconclusive and pause every deploy. Dry-run keeps the analysis
+        # visible (dryRunSummary) without pretending it gates. Tracked exemption, enforced by
+        # openbank-infra/tests/canary/check.py; remove when the canary receives traffic (#16630).
+        dryRun:
+          - metricName: "*"
         args:
           - name: namespace
             valueFrom:
@@ -3807,6 +3856,13 @@ spec:
           - clusterScope: true
             templateName: openbank-money-path-canary
         startingStep: 1
+        # Canary pods get NO production traffic: stableService pins the DNS Service to the stable
+        # ReplicaSet and there is no trafficRouting, so the canary-hash queries are empty and the
+        # strict analysis would go Inconclusive and pause every deploy. Dry-run keeps the analysis
+        # visible (dryRunSummary) without pretending it gates. Tracked exemption, enforced by
+        # openbank-infra/tests/canary/check.py; remove when the canary receives traffic (#16630).
+        dryRun:
+          - metricName: "*"
         args:
           - name: namespace
             valueFrom:

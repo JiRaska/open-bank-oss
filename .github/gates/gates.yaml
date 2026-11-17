@@ -1486,6 +1486,7 @@ gates:
       - "ci/artifacts.lock"
       - "openbank-infra/tests/promtool/run.sh"
       - "openbank-infra/tests/canary/check.py"
+      - "openbank-infra/tests/canary/no-traffic-exemptions.yaml"
       - "openbank-infra/tests/canary/evaluate.go"
       - "openbank-infra/tests/canary/go.mod"
       - "openbank-infra/tests/canary/go.sum"

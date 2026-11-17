@@ -29,7 +29,9 @@ def consumers() -> list[dict]:
                 continue
             analysis = doc.get("spec", {}).get("strategy", {}).get("canary", {}).get("analysis", {})
             if any(t.get("templateName") == TEMPLATE for t in analysis.get("templates", [])):
-                found.append({"path": str(path.relative_to(ROOT)), "name": doc["metadata"]["name"], "analysis": analysis})
+                canary = doc["spec"]["strategy"]["canary"]
+                found.append({"path": str(path.relative_to(ROOT)), "name": doc["metadata"]["name"], "analysis": analysis,
+                              "stableService": canary.get("stableService"), "trafficRouting": canary.get("trafficRouting")})
     return found
 
 
@@ -39,6 +41,34 @@ def validate_consumer(consumer: dict) -> None:
     assert args.get("canary-hash") == {"name": "canary-hash", "valueFrom": {"podTemplateHashValue": "Latest"}}, consumer
     assert args.get("namespace") == {"name": "namespace", "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}}}, consumer
     assert any(t.get("templateName") == TEMPLATE and t.get("clusterScope") is True for t in analysis["templates"]), consumer
+
+
+def exemptions() -> set[tuple[str, str]]:
+    data = gatelib.load_yaml(HERE / "no-traffic-exemptions.yaml")
+    assert isinstance(data.get("issue"), int), "exemption list must name its tracking issue"
+    return {(r["path"], r["name"]) for r in data["rollouts"]}
+
+
+def canary_gets_traffic(consumer: dict) -> bool:
+    # Argo pins stableService's selector to the stable ReplicaSet even without trafficRouting, so a
+    # stableService that callers resolve leaves the canary pods with no traffic to measure.
+    return bool(consumer.get("trafficRouting")) or not consumer.get("stableService")
+
+
+def validate_coverage(actual: list[dict], exempt: set[tuple[str, str]]) -> None:
+    """Strict analysis on a canary with no traffic pauses every deploy; dry-run without an
+    exemption hides a gate that could work. Both directions fail, and so does a stale entry."""
+    keys = {(c["path"], c["name"]) for c in actual}
+    assert not exempt - keys, f"exemption names no shared-template Rollout: {sorted(exempt - keys)}"
+    for c in actual:
+        key = (c["path"], c["name"])
+        dry = [d.get("metricName") for d in c["analysis"].get("dryRun", [])]
+        if canary_gets_traffic(c):
+            assert key not in exempt, f"stale exemption, canary now receives traffic: {key}"
+            assert not dry, f"dryRun on a canary that receives traffic: {key}"
+        else:
+            assert key in exempt, f"canary receives no traffic and is not an exemption (would pause every deploy): {key}"
+            assert dry == ["*"], f"exempt Rollout must dry-run every metric, got {dry}: {key}"
 
 
 def metrics() -> list[dict]:
@@ -137,6 +167,23 @@ def self_test(shipped: list[dict], actual_consumers: list[dict]) -> None:
             else:
                 raise AssertionError(f"consumer guard accepted {bad!r}: {consumer['path']}")
     print(f"SELF-TEST PASS: {4 * len(actual_consumers)} parsed-consumer mutations rejected")
+    exempt = exemptions()
+    first = actual_consumers[0]
+    key = (first["path"], first["name"])
+    coverage_mutations = {
+        "exempt-without-dryRun": ([dict(first, analysis={**first["analysis"], "dryRun": []})] + actual_consumers[1:], exempt),
+        "partial-dryRun": ([dict(first, analysis={**first["analysis"], "dryRun": [{"metricName": "error-rate"}]})] + actual_consumers[1:], exempt),
+        "no-traffic-not-exempt": (actual_consumers, exempt - {key}),
+        "stale-exemption": ([dict(first, trafficRouting={"plugins": {}})] + actual_consumers[1:], exempt),
+        "orphan-exemption": (actual_consumers, exempt | {("nowhere.yaml", "ghost")}),
+    }
+    for name, (consumers_, exempt_) in coverage_mutations.items():
+        try:
+            validate_coverage(consumers_, exempt_)
+        except AssertionError:
+            print(f"SELF-TEST PASS: rejected {name}")
+        else:
+            raise AssertionError(f"coverage guard accepted {name}")
     mutations = {
         "allow-empty": lambda m: m.update(successCondition="len(result) == 0 || (" + m["successCondition"] + ")"),
         "allow-nan": lambda m: m.update(successCondition=m["successCondition"].replace("!isNaN(result[0]) && !isInf(result[0]) && result[0] >= 0 && result[0] <", "isNaN(result[0]) || result[0] <")),
@@ -168,6 +215,7 @@ if __name__ == "__main__":
     assert actual, "no shared-template consumers found"
     for consumer in actual:
         validate_consumer(consumer)
+    validate_coverage(actual, exemptions())
     gatelib.subjects(len(actual), "Rollouts using shared canary analysis")
     shipped = metrics()
     prove(shipped)
