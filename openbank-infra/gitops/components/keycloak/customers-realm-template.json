@@ -332,6 +332,7 @@
         "openbank.mcp.tier": "H",
         "pkce.code.challenge.method": "S256",
         "require.pushed.authorization.requests": "true",
+        "standard.token.exchange.enabled": "false",
         "token.endpoint.auth.signing.alg": "ES256",
         "use.jwks.string": "true",
         "use.jwks.url": "false",
@@ -418,6 +419,7 @@
         "openbank.mcp.tier": "L",
         "pkce.code.challenge.method": "S256",
         "require.pushed.authorization.requests": "true",
+        "standard.token.exchange.enabled": "false",
         "use.refresh.tokens": "true"
       }
     }

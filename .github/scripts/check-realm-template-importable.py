@@ -42,8 +42,9 @@
 #     R3  a confidential client (`publicClient: false`) with no `secret`. Keycloak generates a
 #         random one on import, so a rebuilt realm issues credentials the service does not
 #         present — an auth outage that looks nothing like a missing JSON field. Exempt:
-#         `clientAuthenticatorType: client-jwt` (private_key_jwt, ADR-0385 Tier H) — it
-#         authenticates with its pinned key set and no secret is ever presented.
+#         an ADR-0385 MCP client (attribute `openbank.mcp.tier`) with `clientAuthenticatorType:
+#         client-jwt` — it authenticates with its pinned key set and presents no secret. Any
+#         other client-jwt client still needs a placeholder secret.
 #     R4  a `secret` or `credentials[].value` that is NOT a `__PLACEHOLDER__` token. This repo is
 #         PUBLIC; a literal secret in a realm template is a disclosure, not a style problem.
 #     R5  a login-capable user missing `firstName`/`lastName`/`email` — Keycloak 26 answers
@@ -191,7 +192,8 @@ def check_realm(name, realm):
                 f"{DESCRIPTION_MAX} cap (R2) — a longer one fails the entire import."
             )
         if c.get("publicClient") is False:
-            if "secret" not in c and c.get("clientAuthenticatorType") == "client-jwt":
+            if ("secret" not in c and c.get("clientAuthenticatorType") == "client-jwt"
+                    and "openbank.mcp.tier" in (c.get("attributes") or {})):
                 pass  # R3 carve-out: a private_key_jwt client authenticates with its key, never a secret
             elif "secret" not in c:
                 findings.append(
@@ -400,7 +402,10 @@ def self_test():
     del d["clients"][1]["secret"]
     d["clients"][1]["clientAuthenticatorType"] = "client-jwt"
     f, _ = check_realm("t", d)
-    cases.append(("R3 secret-less private_key_jwt client NOT flagged (ADR-0385 Tier H)", f == [], f))
+    cases.append(("R3 secret-less client-jwt client WITHOUT the MCP marker still flagged", any("declares no" in x for x in f), f))
+    d["clients"][1]["attributes"] = {"openbank.mcp.tier": "H"}
+    f, _ = check_realm("t", d)
+    cases.append(("R3 secret-less private_key_jwt MCP client NOT flagged (ADR-0385 Tier H)", f == [], f))
 
     d = _clean()
     d["clients"][1]["secret"] = "s3cr3t-literal"

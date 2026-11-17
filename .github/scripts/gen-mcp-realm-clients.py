@@ -96,6 +96,7 @@ def build_client(decl: dict, c: dict, base: Path) -> dict:
         "require.pushed.authorization.requests": "true",
         "oauth2.device.authorization.grant.enabled": "false",
         "oidc.ciba.grant.enabled": "false",
+        "standard.token.exchange.enabled": "false",
         "use.refresh.tokens": "true",
         "client_credentials.use_refresh_token": "false",
         "access.token.lifespan": str(ACCESS_TOKEN_LIFESPAN_S),

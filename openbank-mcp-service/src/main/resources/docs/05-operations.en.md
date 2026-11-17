@@ -75,3 +75,14 @@ If the OIDC issuer cannot be reached, Quarkus OIDC fails a presented token with 
 - **Request body cap:** `quarkus.http.limits.max-body-size` (`MCP_MAX_BODY_SIZE`, default 64K) rejects oversize bodies with HTTP 413 before parsing. It is service-wide.
 - **Config keys** (env override in parentheses): `openbank.mcp.rate-limit.enabled` (`MCP_RATE_LIMIT_ENABLED`), `calls-per-minute` (`MCP_RATE_LIMIT_PER_MINUTE`), `calls-per-day` (`MCP_RATE_LIMIT_PER_DAY`), `anonymous-calls-per-minute` (`MCP_RATE_LIMIT_ANON_PER_MINUTE`), `max-in-flight` (`MCP_RATE_LIMIT_MAX_IN_FLIGHT`).
 - **State is in-process** (replicas: 1), so the caps multiply by the replica count and reset on a pod roll until the shared-store slice lands.
+
+## MCP client allowlist (ADR-0385 D1)
+
+`src/main/resources/mcp-client-allowlist.yaml` is the one declaration of which third-party MCP clients may connect, and in which tier. The tier is assigned by how the client registers, never by product name, and never from a token claim or client-supplied metadata.
+
+- **Tier H (hosted):** a confidential client with a fixed HTTPS redirect and client authentication at the token and refresh endpoints. The default is `private_key_jwt`, whose key set is committed under `mcp-clients/` and pinned by its sha256 in the declaration. Keycloak receives it inline, so it never fetches keys. A client secret is allowed only under a recorded `secret_exception` of at most six months, and it fails CI after its `expires` date.
+- **Tier L (local):** a public client with loopback redirects (`http://127.0.0.1/…`, `http://[::1]/…`, any port; `localhost` is not accepted). Its tokens must be DPoP-bound.
+
+The declaration currently drives the customers-realm client config. `.github/scripts/gen-mcp-realm-clients.py` writes each client into `customers-realm-template.json`. Every client gets PAR, PKCE S256, exact redirects, no direct, implicit, device or token-exchange grant, `offline_access` as its only role, the `openbank-mcp-service` audience, and the cookie-free fresh-passkey browser flow. The `mcp-client-realm-parity` gate fails CI on any mismatch between the declaration and the realm.
+
+This service does **not** read the file yet. Tier admission keyed by `azp`, and refusing to boot on a mismatch, are later work. Until then, the file affects no runtime behaviour of this service, and every declared client stays `enabled: false` in line with ADR-0383's exposure order.
