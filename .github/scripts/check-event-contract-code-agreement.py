@@ -1002,8 +1002,8 @@ def self_test() -> int:
         "openbank-delegation-service",
         lambda t: edit(
             t / "openbank-delegation-service" / "src/main/kotlin/com/openbank/delegation/domain/event/DelegationEvents.kt",
-            "    val reason: String,\n    override val occurredAt: Instant,\n) : DomainEvent(occurredAt) {\n    override val aggregateType = \"DelegationGrant\"\n    override val eventType = \"DelegationRevoked\"",
-            "    val reason: String,\n    val suppressedBy: String,\n    override val occurredAt: Instant,\n) : DomainEvent(occurredAt) {\n    override val aggregateType = \"DelegationGrant\"\n    override val eventType = \"DelegationRevoked\"",
+            "    val reason: String,\n    override val occurredAt: Instant,\n    /** ADR-0383 D3 / ADR-0260: optional, defaults to PARTY. Consumers must ignore a grant whose class they do not know. */\n    val granteeType: DelegationGranteeType = DelegationGranteeType.PARTY,\n    /** The admitted MCP client's `azp` when [granteeType] is MCP_CLIENT; absent otherwise. */\n    val granteeClientId: String? = null,\n) : DomainEvent(occurredAt) {\n    init {\n        requirePublishableGrantee(granteeType)\n    }\n\n    override val aggregateType = \"DelegationGrant\"\n    override val eventType = \"DelegationRevoked\"",
+            "    val reason: String,\n    val suppressedBy: String,\n    override val occurredAt: Instant,\n    /** ADR-0383 D3 / ADR-0260: optional, defaults to PARTY. Consumers must ignore a grant whose class they do not know. */\n    val granteeType: DelegationGranteeType = DelegationGranteeType.PARTY,\n    /** The admitted MCP client's `azp` when [granteeType] is MCP_CLIENT; absent otherwise. */\n    val granteeClientId: String? = null,\n) : DomainEvent(occurredAt) {\n    init {\n        requirePublishableGrantee(granteeType)\n    }\n\n    override val aggregateType = \"DelegationGrant\"\n    override val eventType = \"DelegationRevoked\"",
         ),
         "does not document it",
     )
