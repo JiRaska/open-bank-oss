@@ -78,6 +78,8 @@ Validace selže (`valid:false`) s jedním ze strojově čitelných `code`:
 | `CONSENT_NOT_ACTIVE` | není `ACTIVE`, nebo po `validTo` |
 | `CONSENT_SCOPE_MISSING` | požadovaný scope není udělen |
 | `CONSENT_ACCOUNT_NOT_COVERED` | IBAN je mimo seznam účtů souhlasu |
+| `CONSENT_ACCOUNT_NOT_OWNED` | souhlas bez seznamu účtů: IBAN nepatří straně, která souhlas udělila |
+| `CONSENT_ACCOUNT_UNVERIFIABLE` | souhlas bez seznamu účtů: vlastnictví nešlo ověřit u account-service, validace proto selže |
 
 Validace vždy vrací HTTP `200`; rozhodnutí nese boolean `valid`.
 

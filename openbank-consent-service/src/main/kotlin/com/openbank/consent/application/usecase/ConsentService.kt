@@ -13,6 +13,7 @@ import com.openbank.consent.application.port.`in`.RevokeConsentCommand
 import com.openbank.consent.application.port.`in`.RevokeConsentUseCase
 import com.openbank.consent.application.port.`in`.ValidateConsentCommand
 import com.openbank.consent.application.port.`in`.ValidateConsentUseCase
+import com.openbank.consent.application.port.out.AccountOwnershipPort
 import com.openbank.consent.application.port.out.ConsentRepository
 import com.openbank.consent.application.port.out.ScaChallengeClient
 import com.openbank.consent.domain.event.ConsentGranted
@@ -28,9 +29,11 @@ import com.openbank.libs.domain.error.ResourceNotFoundException
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
+import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.OffsetDateTime
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
 
 // #10911 phase 2: extends the libs-domain base so libs-runtime's Resource{NotFound,Conflict}
 // ExceptionMapper handles the response; default codes NOT_FOUND/CONFLICT match the deleted local
@@ -65,6 +68,7 @@ class ConsentGranteeMismatchException(id: UUID, expectedGranteeId: String) :
 class ConsentService(
     private val consentRepository: ConsentRepository,
     private val scaChallengeClient: ScaChallengeClient,
+    private val accountOwnership: AccountOwnershipPort,
     private val clock: Clock,
 ) : CreateConsentUseCase,
     RevokeConsentUseCase,
@@ -76,7 +80,8 @@ class ConsentService(
     constructor(
         consentRepository: ConsentRepository,
         scaChallengeClient: ScaChallengeClient,
-    ) : this(consentRepository, scaChallengeClient, Clock.systemUTC())
+        accountOwnership: AccountOwnershipPort,
+    ) : this(consentRepository, scaChallengeClient, accountOwnership, Clock.systemUTC())
 
     override suspend fun createConsent(command: CreateConsentCommand): Consent {
         val now = OffsetDateTime.now(clock)
@@ -294,13 +299,56 @@ class ConsentService(
             )
         }
 
-        if (command.accountIban != null && !consent.coversAccount(command.accountIban)) {
+        val accountIban = command.accountIban ?: return ConsentValidationResult.Valid(consent)
+        return accountCoverage(consent, accountIban) ?: ConsentValidationResult.Valid(consent)
+    }
+
+    /**
+     * Whether [consent] covers [iban]; `null` when it does, the denial otherwise.
+     *
+     * An explicit account list is decided by the aggregate alone. An unrestricted consent
+     * (`accountIbans == null`) means "the consenting party's own accounts", so it covers [iban]
+     * only when account-service confirms that [Consent.partyId] owns it. Fail closed: a lookup
+     * that cannot complete is a denial with its own code, never a pass.
+     */
+    private suspend fun accountCoverage(consent: Consent, iban: String): ConsentValidationResult.Invalid? {
+        if (consent.restrictsAccounts()) {
+            return if (consent.listsAccount(iban)) {
+                null
+            } else {
+                ConsentValidationResult.Invalid(
+                    "Consent does not cover account $iban",
+                    "CONSENT_ACCOUNT_NOT_COVERED",
+                )
+            }
+        }
+        // runCatching, then cancellation re-raised: a cancelled caller must not be recorded as an
+        // ownership denial, and every other failure (timeout, transport, auth) must deny.
+        val lookup = runCatching { accountOwnership.isOwnedBy(iban, consent.partyId) }
+        lookup.exceptionOrNull()?.let { failure ->
+            if (failure is CancellationException) throw failure
+            LOG.warnf(
+                "Account ownership could not be verified for consent %s: %s",
+                consent.id,
+                failure.javaClass.simpleName,
+            )
             return ConsentValidationResult.Invalid(
-                "Consent does not cover account ${command.accountIban}",
-                "CONSENT_ACCOUNT_NOT_COVERED",
+                "Account ownership could not be verified",
+                "CONSENT_ACCOUNT_UNVERIFIABLE",
             )
         }
+        val owned = lookup.getOrThrow()
+        return if (owned) {
+            null
+        } else {
+            ConsentValidationResult.Invalid(
+                "Account is not held by the consenting party",
+                "CONSENT_ACCOUNT_NOT_OWNED",
+            )
+        }
+    }
 
-        return ConsentValidationResult.Valid(consent)
+    private companion object {
+        val LOG: Logger = Logger.getLogger(ConsentService::class.java)
     }
 }

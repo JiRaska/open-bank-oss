@@ -46,6 +46,25 @@ quarkus:
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
 
+  # Outbound M2M identity. The default client stays the shared one (no rest-client selects it); the
+  # account-ownership lookup selects the NAMED client `m2m` (@OidcClientFilter("m2m")), so its
+  # bearer's principal is service-account-openbank-consent (ROLE_API only), which
+  # account_rest_ext.rego admits to account.verifyOwnership and nothing else.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-consent
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
+
   smallrye-reactive-messaging:
     kafka:
       bootstrap-servers: localhost:29092
@@ -76,6 +95,13 @@ quarkus:
       url: ${SCA_SERVICE_URL:http://localhost:8110}
       connect-timeout: 2000
       read-timeout: 2000
+    # Ownership of an IBAN named under an unrestricted consent (accountIbans == null) — validate
+    # fails closed when this cannot be asked.
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      connect-timeout: 2000
+      read-timeout: 2000
+      scope: jakarta.inject.Singleton
 
   dev-ui:
     enabled: false
@@ -199,3 +225,21 @@ authz:
             paths: /api/*
             policy: permit
             auth-mechanism: bearer
+    # account-service's private-CA mTLS listener (8443, client auth REQUIRED). The client
+    # certificate is this pod's own consent-service-internal-tls leaf (no usage restriction), the
+    # trust anchor the same openbank-ca. Local/test fixtures speak plain HTTP.
+    tls:
+      account-authority:
+        reload-period: 1h
+        key-store:
+          pem:
+            client:
+              cert: /mnt/internal-tls/tls.crt
+              key: /mnt/internal-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/internal-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      account-service:
+        tls-configuration-name: account-authority

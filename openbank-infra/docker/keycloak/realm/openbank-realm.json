@@ -902,6 +902,23 @@
       "attributes": {}
     },
     {
+      "clientId": "openbank-consent",
+      "name": "OpenBank Consent Service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "attributes": {}
+    },
+    {
       "clientId": "openbank-standing-order",
       "name": "OpenBank Standing Order Service",
       "enabled": true,
@@ -1546,6 +1563,14 @@
       "username": "service-account-openbank-sdd",
       "enabled": true,
       "serviceAccountClientId": "openbank-sdd",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-consent",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-consent",
       "realmRoles": [
         "ROLE_API"
       ]

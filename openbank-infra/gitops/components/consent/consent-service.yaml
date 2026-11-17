@@ -109,6 +109,20 @@ spec:
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: SCA_SERVICE_URL
               value: http://sca-service.sca.svc:8110
+            # account-service's private-CA mTLS listener (client cert consent-service-internal-tls,
+            # /mnt/internal-tls): ownership of an IBAN named under an unrestricted consent (#16590).
+            - name: ACCOUNT_SERVICE_URL
+              value: https://account-service.accounts.svc:8443
+            # consent-service's OWN Keycloak client (openbank-consent, ROLE_API only) for that lookup
+            # (AccountOwnershipClient, named oidc-client `m2m`), granted account.verifyOwnership by
+            # identity in account_rest_ext.rego. optional: false so an unseeded Vault entry is a loud
+            # CreateContainerConfigError. Create the client and seed Vault BEFORE this syncs (runbook 0009).
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: consent-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:

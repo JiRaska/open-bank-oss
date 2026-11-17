@@ -5,6 +5,7 @@
 package com.openbank.consent.application.usecase
 
 import com.openbank.consent.application.port.`in`.CreateConsentCommand
+import com.openbank.consent.application.port.out.AccountOwnershipPort
 import com.openbank.consent.application.port.out.ConsentRepository
 import com.openbank.consent.application.port.out.ScaChallengeClient
 import com.openbank.consent.application.port.out.ScaChallengeSnapshot
@@ -40,8 +41,9 @@ class ConsentSupersedeTest {
 
     private val consentRepository = mockk<ConsentRepository>()
     private val scaChallengeClient = mockk<ScaChallengeClient>()
+    private val accountOwnership = mockk<AccountOwnershipPort>()
     private val fixedClock = Clock.fixed(Instant.parse("2024-01-15T10:00:00Z"), ZoneOffset.UTC)
-    private val service = ConsentService(consentRepository, scaChallengeClient, fixedClock)
+    private val service = ConsentService(consentRepository, scaChallengeClient, accountOwnership, fixedClock)
 
     private val partyId = UUID.randomUUID()
     private val consentId = UUID.randomUUID()

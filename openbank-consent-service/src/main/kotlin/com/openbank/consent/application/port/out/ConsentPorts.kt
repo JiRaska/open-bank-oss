@@ -75,3 +75,17 @@ interface ScaChallengeClient {
 
     suspend fun getChallenge(challengeId: UUID): ScaChallengeSnapshot
 }
+
+/**
+ * Outbound port to account-service, the system of record for which party holds an account.
+ *
+ * Asked only for an UNRESTRICTED consent (`accountIbans == null`, "the party's own accounts"):
+ * such a consent covers an IBAN exactly when the consenting party owns it, and nothing in the
+ * consent aggregate can establish that. Answers `true` only on a positive ownership verdict; an
+ * unknown IBAN and another party's IBAN both answer `false`. Throws when account-service cannot
+ * be asked (timeout, transport or auth failure) — the caller treats that as "not verified".
+ */
+interface AccountOwnershipPort {
+
+    suspend fun isOwnedBy(iban: String, partyId: UUID): Boolean
+}

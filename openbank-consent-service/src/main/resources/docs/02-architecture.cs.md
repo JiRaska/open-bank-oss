@@ -33,7 +33,7 @@ Služba dodržuje hexagonální architekturu OpenBank (ADR 0002): doménu bez fr
   - alespoň jeden scope,
   - `validTo > validFrom`,
   - **strop PSD2 RTS čl. 10**: AIS scopy ⇒ max 90 dní platnosti; jinak 365 dní.
-  - přechody jsou čisté funkce vracející novou kopii: `activate(scaSessionId)`, `revoke(reason)`, `reject()`; dotazy `isActive()`, `hasScope()`, `coversAccount(iban)`.
+  - přechody jsou čisté funkce vracející novou kopii: `activate(scaSessionId)`, `revoke(reason)`, `reject()`; dotazy `isActive()`, `hasScope()`, `restrictsAccounts()`, `listsAccount(iban)`.
 - enumy v `model`: `ConsentScope`, `GranteeType`, `ConsentStatus` a sealed typ `ConsentValidationResult` (`Valid` / `Invalid(reason, code)`).
 - `event/ConsentEvents.kt` — `ConsentGranted`, `ConsentRevoked`, `ConsentExpired`, `ConsentRejected`, každá rozšiřuje sdílený `com.openbank.libs.domain.event.DomainEvent` (aggregateType `"Consent"`, version `1`).
 

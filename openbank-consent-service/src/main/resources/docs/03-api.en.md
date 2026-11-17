@@ -79,6 +79,8 @@ Validation fails (`valid:false`) with one of the machine-readable `code`s:
 | `CONSENT_NOT_ACTIVE` | not `ACTIVE`, or past `validTo` |
 | `CONSENT_SCOPE_MISSING` | required scope not granted |
 | `CONSENT_ACCOUNT_NOT_COVERED` | the IBAN is outside the consent's account list |
+| `CONSENT_ACCOUNT_NOT_OWNED` | unrestricted consent (no account list): the consenting party does not hold the IBAN |
+| `CONSENT_ACCOUNT_UNVERIFIABLE` | unrestricted consent: ownership could not be confirmed with account-service, so validation fails closed |
 
 Validation always returns HTTP `200`; the boolean `valid` carries the decision.
 

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: account-service
     app.kubernetes.io/part-of: accounts
   annotations:
-    openbank.tech/policy-checksum: "bb044805aafe6e8c"
+    openbank.tech/policy-checksum: "fb328b65720e6ddf"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1028,6 +1028,7 @@ data:
     	some caller in {
     		"service-account-openbank-pension", # payout / own-account checks (#12385)
     		"service-account-openbank-sdd", # debtor-party check for a scoped mandate initiator (#12387)
+    		"service-account-openbank-consent", # IBAN under an unrestricted consent belongs to its party (#16590)
     	}
     	machine_named(caller)
     	input.action == "account.verifyOwnership"

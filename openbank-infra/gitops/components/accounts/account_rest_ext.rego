@@ -204,6 +204,7 @@ allowed_reasons contains "service-account-verify-ownership" if {
 	some caller in {
 		"service-account-openbank-pension", # payout / own-account checks (#12385)
 		"service-account-openbank-sdd", # debtor-party check for a scoped mandate initiator (#12387)
+		"service-account-openbank-consent", # IBAN under an unrestricted consent belongs to its party (#16590)
 	}
 	machine_named(caller)
 	input.action == "account.verifyOwnership"

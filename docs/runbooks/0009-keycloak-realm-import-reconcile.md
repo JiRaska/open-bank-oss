@@ -380,6 +380,16 @@ pension-fund-service admits `pension-fund.reporting.read` and pension-service ad
 `pension.reporting.aggregate` for this identity alone among machines; it reaches nothing else on
 either service.
 
+### Consent — account ownership behind an unrestricted consent (#16590)
+
+Same recipe, same script, one client. consent-service uses it only for `account.verifyOwnership`, through
+the named oidc-client `m2m`. Create the client and seed its KV entry BEFORE the gitops change syncs: the
+env ref is `optional: false`.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-consent` | `keycloak/consent-service` | `consent-service-m2m-oidc` (consent) | `CONSENT_CLIENT_SECRET` |
+
 ### Pension company ledger instance (ledger-pension-co)
 
 Same recipe, one client, with one difference: **no `add-roles` step**. The instance used to project

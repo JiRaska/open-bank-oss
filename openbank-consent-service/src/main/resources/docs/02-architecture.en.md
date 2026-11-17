@@ -33,7 +33,7 @@ The service follows the OpenBank hexagonal architecture (ADR 0002): a framework-
   - at least one scope,
   - `validTo > validFrom`,
   - **PSD2 RTS Art. 10 cap**: AIS scopes ⇒ max 90 days validity; otherwise 365 days.
-  - transitions are pure functions returning a new copy: `activate(scaSessionId)`, `revoke(reason)`, `reject()`; queries `isActive()`, `hasScope()`, `coversAccount(iban)`.
+  - transitions are pure functions returning a new copy: `activate(scaSessionId)`, `revoke(reason)`, `reject()`; queries `isActive()`, `hasScope()`, `restrictsAccounts()`, `listsAccount(iban)`.
 - `model` enums: `ConsentScope`, `GranteeType`, `ConsentStatus`, and the `ConsentValidationResult` sealed type (`Valid` / `Invalid(reason, code)`).
 - `event/ConsentEvents.kt` — `ConsentGranted`, `ConsentRevoked`, `ConsentExpired`, `ConsentRejected`, each extending the shared `com.openbank.libs.domain.event.DomainEvent` (aggregateType `"Consent"`, version `1`).
 

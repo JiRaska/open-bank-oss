@@ -38,17 +38,29 @@ class ConsentTest {
     }
 
     @Test
-    fun `coversAccount returns true when accountIbans is null`() {
+    fun `an unrestricted consent lists no account and says it is unrestricted`() {
         val consent = consent(accountIbans = null)
 
-        assertThat(consent.coversAccount("CZ6508000000192000145399")).isTrue()
+        assertThat(consent.restrictsAccounts()).isFalse()
+        // Ownership is the use case's decision (account-service); the aggregate never assumes it.
+        assertThat(consent.listsAccount("CZ6508000000192000145399")).isFalse()
     }
 
     @Test
-    fun `coversAccount returns false when IBAN not in list`() {
+    fun `an explicit account list covers exactly its members`() {
         val consent = consent(accountIbans = listOf("CZ6508000000192000145399"))
 
-        assertThat(consent.coversAccount("CZ7108000000192000145399")).isFalse()
+        assertThat(consent.restrictsAccounts()).isTrue()
+        assertThat(consent.listsAccount("CZ6508000000192000145399")).isTrue()
+        assertThat(consent.listsAccount("CZ7108000000192000145399")).isFalse()
+    }
+
+    @Test
+    fun `an empty explicit list restricts to nothing`() {
+        val consent = consent(accountIbans = emptyList())
+
+        assertThat(consent.restrictsAccounts()).isTrue()
+        assertThat(consent.listsAccount("CZ6508000000192000145399")).isFalse()
     }
 
     @Test

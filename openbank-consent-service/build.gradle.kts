@@ -12,6 +12,8 @@ plugins {
 dependencies {
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
+    // Own M2M identity (named oidc-client `m2m`) for the account-service ownership lookup.
+    implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)

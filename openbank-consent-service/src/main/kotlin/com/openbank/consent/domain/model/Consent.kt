@@ -132,7 +132,19 @@ data class Consent(
 
     fun hasScope(scope: ConsentScope): Boolean = scope in scopes
 
-    fun coversAccount(iban: String): Boolean = accountIbans == null || iban in accountIbans
+    /**
+     * True when the consent names its accounts explicitly. A consent with `accountIbans == null`
+     * means "the consenting party's own accounts" — which IBANs those are is a fact held by
+     * account-service, not by this aggregate, so the domain cannot answer coverage for it alone.
+     */
+    fun restrictsAccounts(): Boolean = accountIbans != null
+
+    /**
+     * True only when [iban] is in the explicit account list. Never true for an unrestricted
+     * consent: ownership of the IBAN by [partyId] is decided by the validate use case through
+     * account-service (fail closed), never assumed here.
+     */
+    fun listsAccount(iban: String): Boolean = accountIbans?.contains(iban) == true
 
     fun revoke(reason: String, now: OffsetDateTime): Consent = copy(
         status = ConsentStatus.REVOKED,

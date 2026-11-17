@@ -8,6 +8,7 @@ import com.openbank.consent.application.port.`in`.CheckConsentCommand
 import com.openbank.consent.application.port.`in`.CreateConsentCommand
 import com.openbank.consent.application.port.`in`.RevokeConsentCommand
 import com.openbank.consent.application.port.`in`.ValidateConsentCommand
+import com.openbank.consent.application.port.out.AccountOwnershipPort
 import com.openbank.consent.application.port.out.ConsentRepository
 import com.openbank.consent.application.port.out.ScaChallengeClient
 import com.openbank.consent.application.port.out.ScaChallengeSnapshot
@@ -25,6 +26,7 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
 import jakarta.ws.rs.NotFoundException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -39,8 +41,9 @@ class ConsentServiceTest {
 
     private val consentRepository = mockk<ConsentRepository>()
     private val scaChallengeClient = mockk<ScaChallengeClient>()
+    private val accountOwnership = mockk<AccountOwnershipPort>()
     private val fixedClock = Clock.fixed(Instant.parse("2024-01-15T10:00:00Z"), ZoneOffset.UTC)
-    private val service = ConsentService(consentRepository, scaChallengeClient, fixedClock)
+    private val service = ConsentService(consentRepository, scaChallengeClient, accountOwnership, fixedClock)
 
     private val partyId = UUID.randomUUID()
     private val consentId = UUID.randomUUID()
@@ -603,11 +606,89 @@ class ConsentServiceTest {
         assertThat((result as ConsentValidationResult.Invalid).code).isEqualTo("CONSENT_ACCOUNT_NOT_COVERED")
     }
 
+    @Test
+    fun `validateConsent accepts a listed account without asking account-service`(): Unit = runBlocking {
+        coEvery { consentRepository.findById(consentId) } returns consent()
+
+        val result = service.validateConsent(
+            ValidateConsentCommand(consentId, granteeId, ConsentScope.ACCOUNTS_READ, LISTED_IBAN),
+        )
+
+        assertThat(result).isInstanceOf(ConsentValidationResult.Valid::class.java)
+        coVerify(exactly = 0) { accountOwnership.isOwnedBy(any(), any()) }
+    }
+
+    @Test
+    fun `validateConsent on an unrestricted consent accepts an IBAN the party owns`(): Unit = runBlocking {
+        coEvery { consentRepository.findById(consentId) } returns consent(accountIbans = null)
+        coEvery { accountOwnership.isOwnedBy(OTHER_IBAN, partyId) } returns true
+
+        val result = service.validateConsent(
+            ValidateConsentCommand(consentId, granteeId, ConsentScope.ACCOUNTS_READ, OTHER_IBAN),
+        )
+
+        assertThat(result).isInstanceOf(ConsentValidationResult.Valid::class.java)
+        coVerify(exactly = 1) { accountOwnership.isOwnedBy(OTHER_IBAN, partyId) }
+    }
+
+    @Test
+    fun `validateConsent on an unrestricted consent denies an IBAN the party does not own`(): Unit = runBlocking {
+        coEvery { consentRepository.findById(consentId) } returns consent(accountIbans = null)
+        coEvery { accountOwnership.isOwnedBy(OTHER_IBAN, partyId) } returns false
+
+        val result = service.validateConsent(
+            ValidateConsentCommand(consentId, granteeId, ConsentScope.ACCOUNTS_READ, OTHER_IBAN),
+        )
+
+        assertThat((result as ConsentValidationResult.Invalid).code).isEqualTo("CONSENT_ACCOUNT_NOT_OWNED")
+    }
+
+    @Test
+    fun `validateConsent on an unrestricted consent denies when ownership cannot be verified`(): Unit =
+        runBlocking {
+            coEvery { consentRepository.findById(consentId) } returns consent(accountIbans = null)
+            coEvery { accountOwnership.isOwnedBy(any(), any()) } throws IllegalStateException("account-service down")
+
+            val result = service.validateConsent(
+                ValidateConsentCommand(consentId, granteeId, ConsentScope.ACCOUNTS_READ, OTHER_IBAN),
+            )
+
+            assertThat((result as ConsentValidationResult.Invalid).code).isEqualTo("CONSENT_ACCOUNT_UNVERIFIABLE")
+        }
+
+    @Test
+    fun `validateConsent does not turn a cancelled ownership lookup into a decision`() {
+        coEvery { consentRepository.findById(consentId) } returns consent(accountIbans = null)
+        coEvery { accountOwnership.isOwnedBy(any(), any()) } throws CancellationException("caller went away")
+
+        assertThrows<CancellationException> {
+            runBlocking {
+                service.validateConsent(
+                    ValidateConsentCommand(consentId, granteeId, ConsentScope.ACCOUNTS_READ, OTHER_IBAN),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `validateConsent on an unrestricted consent without an IBAN does not ask account-service`(): Unit =
+        runBlocking {
+            coEvery { consentRepository.findById(consentId) } returns consent(accountIbans = null)
+
+            val result = service.validateConsent(
+                ValidateConsentCommand(consentId, granteeId, ConsentScope.ACCOUNTS_READ, null),
+            )
+
+            assertThat(result).isInstanceOf(ConsentValidationResult.Valid::class.java)
+            coVerify(exactly = 0) { accountOwnership.isOwnedBy(any(), any()) }
+        }
+
     private fun consent(
         granteeId: String = this.granteeId,
         status: ConsentStatus = ConsentStatus.ACTIVE,
         scopes: Set<ConsentScope> = setOf(ConsentScope.ACCOUNTS_READ),
         id: UUID = this.consentId,
+        accountIbans: List<String>? = listOf(LISTED_IBAN),
     ): Consent = Consent(
         id = id,
         partyId = partyId,
@@ -615,7 +696,7 @@ class ConsentServiceTest {
         granteeType = GranteeType.TPP,
         granteeName = "Test TPP",
         scopes = scopes,
-        accountIbans = listOf("CZ6508000000192000145399"),
+        accountIbans = accountIbans,
         status = status,
         validFrom = now,
         validTo = now.plusDays(1),
@@ -715,5 +796,7 @@ class ConsentServiceTest {
     private companion object {
         /** ADR-0205 D3's fixed internal grantee. */
         const val MARKETING_GRANTEE = "party-service:marketing-comms"
+        const val LISTED_IBAN = "CZ6508000000192000145399"
+        const val OTHER_IBAN = "CZ7108000000192000145399"
     }
 }

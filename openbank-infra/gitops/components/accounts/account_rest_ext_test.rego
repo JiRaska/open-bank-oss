@@ -232,6 +232,30 @@ test_sdd_may_verify_ownership_and_nothing_else if {
 		with data.rules as rules_mock
 }
 
+# #16590: consent-service verifies that an IBAN named under an unrestricted consent belongs to the
+# consenting party. The ownership projection only; every other account action stays denied.
+consent_sa := {"type": "HUMAN", "service_account": true, "client_id": "openbank-consent", "id": "service-account-openbank-consent", "roles": ["ROLE_API"]}
+
+test_consent_may_verify_ownership_and_nothing_else if {
+	rest.allow with input as verify_input(consent_sa) with data.rules as rules_mock
+	"service-account-verify-ownership" in rest.allowed_reasons with input as verify_input(consent_sa)
+		with data.rules as rules_mock
+	every action in {
+		"account.read", "account.list", "account.search", "account.create", "account.update",
+		"account.close", "account.freeze", "account.unfreeze", "account.authorize",
+	} {
+		not rest.allow with input as {"principal": consent_sa, "action": action, "resource": {"type": "account", "id": "a-1"}}
+			with data.rules as rules_mock
+	}
+}
+
+# The grant is keyed on the verified client, not the principal name: a token whose name says
+# consent but whose client is another one must not reach the projection.
+test_consent_name_on_another_client_may_not_verify_ownership if {
+	impostor := object.union(consent_sa, {"client_id": "openbank-services"})
+	not rest.allow with input as verify_input(impostor) with data.rules as rules_mock
+}
+
 # Current PEP marker must be explicit true with the matching client. Absent is the
 # deliberate legacy ABI; explicit null is malformed and must not borrow that path.
 tax_reporting_guard_identity := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}

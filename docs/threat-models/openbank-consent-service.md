@@ -258,3 +258,35 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## 2026-11-17 - Unrestricted consents are bounded to the consenting party's own accounts (#16590)
+
+A consent with no account list (`accountIbans == null`) means "the consenting party's own accounts".
+`POST /api/v1/consents/{id}/validate` now treats it that way. When the caller names an IBAN, the consent
+covers it only if account-service confirms that the consent's `partyId` owns it. The domain no longer
+assumes coverage: `Consent.restrictsAccounts()` / `listsAccount(iban)` decide an explicit list alone, and
+the use case decides the unrestricted case through `AccountOwnershipPort`.
+
+- **Elevation of privilege / information disclosure:** a grantee holding an unrestricted consent can no
+  longer have it validated for an account the consenting party does not hold (`CONSENT_ACCOUNT_NOT_OWNED`).
+  The mcp-service and psd2-service per-account reads both trust this answer, so the bound reaches them
+  with no change on their side.
+- **Fail closed:** a lookup that times out, fails in transport, is refused or is cancelled never reads
+  as ownership. Failures answer `CONSENT_ACCOUNT_UNVERIFIABLE`. A cancellation propagates and makes no
+  decision. A response body with the field missing reads as not owned.
+- **New egress:** consent-service calls account-service's ownership projection
+  (`POST /api/v1/accounts/ownership-verifications`, action `account.verifyOwnership`) over the
+  private-CA mTLS listener (8443), using its own certificate. It authenticates as its own Keycloak client
+  `openbank-consent` (ROLE_API only, named oidc-client `m2m`), not as the shared principal.
+  `account_rest_ext.rego` grants that identity this one action and nothing else, keyed on the verified
+  client. The projection returns only `{owned, active}`, and an unknown IBAN answers the same as another
+  party's, so the new edge is no account oracle. account-service audits each verification.
+- **Availability:** validate for an unrestricted consent with an IBAN now depends on account-service
+  (2 s timeout, one retry, circuit breaker). If it is down, those validations deny. An explicit account
+  list, and any validate with no IBAN, makes no call.
+
+Tests: `ConsentTest`, `ConsentServiceTest` (owned, foreign, failure, cancellation, no IBAN, explicit
+list), `UnrestrictedConsentAccountOwnershipIT` (real HTTP, stand-in account-service: foreign IBAN
+denied, owned IBAN valid, failure denied, explicit list makes no call, bearer is the consent client's),
+`ConsentAccountOwnershipPactConsumerTest` (replayed by account-service's folder provider test),
+`M2mOidcClientIdentityWiringTest`, `account_rest_ext_test.rego`.

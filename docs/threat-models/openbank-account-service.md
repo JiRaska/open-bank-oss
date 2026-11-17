@@ -1055,6 +1055,12 @@ foreign IBAN, so the no-oracle property holds. A second declared caller,
 `service-account-openbank-sdd`, verifies the debtor party of a scoped mandate initiator (D6).
 Every other identity is still denied (`account_rest_ext_test.rego`).
 
+Update 2026-11-17 (#16590): a third declared caller, `service-account-openbank-consent` (ROLE_API,
+client `openbank-consent`), checks that an IBAN named under an unrestricted consent belongs to the
+consenting party. It gets the same projection and nothing else. `account.read` and every write stay
+denied to it, and a token carrying that name for a different client is denied too
+(`account_rest_ext_test.rego`). The consent namespace is added to account-service's ingress allow-list.
+
 
 ### Pension client identity prerequisite (ADR-0335)
 
