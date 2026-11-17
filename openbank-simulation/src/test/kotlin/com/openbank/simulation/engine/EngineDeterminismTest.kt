@@ -36,4 +36,17 @@ class EngineDeterminismTest {
         assertThat(order).containsExactly("early-1", "early-2", "late")
         assertThat(scheduler.pendingCount()).isZero()
     }
+
+    @Test
+    fun `generated ids are version 4 IETF-variant UUIDs and stay reproducible from the seed`() {
+        val ids = SimulationRandom(7L).let { r -> List(SAMPLE) { r.nextUuid() } }
+        // 1 in 16 unstamped draws carries version 3; 4096 draws makes a miss ~impossible.
+        assertThat(ids.map { it.version() }.toSet()).containsExactly(4)
+        assertThat(ids.map { it.variant() }.toSet()).containsExactly(2)
+        assertThat(SimulationRandom(7L).let { r -> List(SAMPLE) { r.nextUuid() } }).isEqualTo(ids)
+    }
+
+    private companion object {
+        const val SAMPLE = 4096
+    }
 }

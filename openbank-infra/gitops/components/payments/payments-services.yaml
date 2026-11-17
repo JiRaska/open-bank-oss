@@ -846,7 +846,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-3cf5c536@sha256:240defc36329096bb52593e5d0f90c2c145a401eb4c0b59818380cb59bf3339b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-ec4e56af@sha256:33a12727f642b2e99850b678101945784bf4d43ec7dacf7938198f890f5b12f0
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -857,6 +857,10 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # Outbox v2 cutover pause (#15665): the dispatcher claims no rows while paused; events accumulate
+            # in the outbox table and are dispatched after the re-enable PR. Remove once no v1 pod remains.
+            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED
+              value: "false"
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: "/mnt/internal-tls/tls.crt"
             # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
