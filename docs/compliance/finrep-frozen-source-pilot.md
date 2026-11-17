@@ -594,3 +594,108 @@ These data cannot attribute the slowdown to reporting alone. A deployment on
 independent reporting hosts with an independently provisioned durable storage budget
 remains unmeasured. The runner saves acceptance counts and exits nonzero for HTTP
 errors or dropped iterations so this outcome stays visible in automated runs.
+
+### Remote host and independent CSI storage
+
+The runner accepts `--remote-context` and `--remote-namespace` for an existing
+isolated Kubernetes worker. The banking fixture continues to run locally.
+`perf/k6/reporting-worker/worker.yaml` declares the namespace, a 2 GiB durable
+claim, two-CPU/1 GiB worker, resource quota, restricted pod security and deny-all
+ingress/egress policy. Create its `reporting-scripts` ConfigMap from the two source
+scripts and select the test environment's CSI storage class before applying it.
+Keep the selected context, node identity and volume identity machine-local.
+
+The optional comparison flag `--policy-cpus 8-9` reserves CPUs 0–7 for local
+banking services and k6, and 8–9 for their OPA instances. Without this flag the
+bank and OPA share CPUs 0–9. Local reporting uses 10–11; remote reporting runs on
+the cluster node. The runner verifies the effective affinity and retains the
+500 ms policy exchange deadline and fail-closed authorization behavior.
+The separated policy CPU configuration is an experiment, not a confirmed fix.
+
+Recovery recreates only the worker pod, using the same PVC, then verifies the
+persisted manifest and replays the entire journal. The export window includes
+fsync; the recovery window includes pod creation, readiness, digest verification,
+replay and fsync. The outage window includes the interrupted replay, pod deletion
+and the 45-second wait. The runner also writes whole-run API statistics, covering
+warm-up and phase transitions, and applies its error/missed-demand check to those
+whole-run samples. A successful run establishes the observed outcome at the
+declared request rate and synthetic identity count.
+
+#### Remote placement comparison, 2026-11-17
+
+The synthetic reporter ran in a remote test cluster on a node with no bank pods,
+using a newly provisioned EBS CSI volume. Its CPU and memory limits were verified
+as two CPUs and 1 GiB. The client services, database, synthetic issuer and OPA
+remained in the local isolated Docker VM. Machine-local evidence retains the pod,
+node and CSI volume identities; they are excluded from this public report.
+
+With the client services and OPA sharing CPUs 0–9, the reporter exported and fsynced
+six million lines in 23.7 seconds. The outage, including interrupted replay and
+pod deletion, took 59.5 seconds. Recreation and complete replay took 143.3 seconds.
+The whole-run account p95/p99 was 191.9/733.4 ms, balance 354.4/984.0 ms, and
+payment 243.1/826.7 ms. There was one balance HTTP 503 among 8,608 balance reads,
+zero errors among 8,629 account and 8,624 payment reads, and 73 dropped iterations
+over the whole run. The failed balance policy exchange waited 618 ms for response
+headers and had no matched OPA decision.
+
+A comparison reserved CPUs 8–9 for OPA and 0–7 for the client stack and k6. The
+reporter continued on the remote host and its independent CSI volume. All three
+recovered scope snapshots reconciled and matched their output digests. Each cell
+below gives p95 / p99 milliseconds and HTTP errors / requests.
+
+| Phase | Seconds | Account | Balance | Payment | Dropped iterations (A / B / P) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Baseline | 45.0 | 145.0 / 741.3 · 0/1354 | 249.0 / 869.5 · 0/1356 | 181.2 / 823.6 · 0/1354 | 0 / 0 / 0 |
+| Export with fsync | 21.1 | 71.5 / 127.9 · 0/632 | 137.7 / 224.5 · 0/632 | 100.2 / 157.5 · 0/632 | 0 / 0 / 0 |
+| Interrupted replay and outage | 58.7 | 260.5 / 1042.1 · 7/1752 | 414.2 / 1407.4 · 6/1741 | 335.7 / 1248.3 · 2/1749 | 9 / 20 / 12 |
+| Worker recreation and complete replay | 144.3 | 250.2 / 726.5 · 0/4326 | 477.1 / 1148.3 · 0/4304 | 312.9 / 959.3 · 0/4321 | 0 / 17 / 5 |
+
+| Entire load, including warm-up and transitions | p95 ms | p99 ms | Errors / reads | Failure rate | Dropped iterations |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Account | 251.1 | 859.6 | 7 / 8590 | 0.0815% | 16 |
+| Balance | 430.0 | 1256.9 | 6 / 8525 | 0.0704% | 70 |
+| Payment | 310.5 | 1032.9 | 2 / 8570 | 0.0233% | 32 |
+
+The comparison failed acceptance with 15 HTTP errors and 118 missed schedules.
+All HTTP errors occurred during the reporter outage. Five Edge and ten Account
+OPA exchanges timed out in the same cluster. For matched Account calls OPA HTTP
+handling finished in 141–340 ms, but the caller spent 776–940 ms without receiving
+headers. In one Edge call OPA responded in 2 ms while the caller waited 843 ms.
+The policy CPU split did not eliminate the client-side failure.
+
+Linux scheduler samples observed runnable-thread wait during the cluster, including
+a 214 ms per-thread wait increment. These observations do not establish the unique
+cause of the JVM HTTP-exchange delay. The configured policy deadline was retained.
+The ownership lookup also converts non-200 Account responses to a false ownership
+result, which can lead to 403 instead of exposing the upstream outage. This remains
+a distinct error-reporting defect; the benchmark counts those responses as failures.
+
+The two remote runs stopped k6 when replay ended, leaving four and seven in-flight
+iterations interrupted, respectively. Whole-run statistics describe completed
+requests. The runner now waits for the full planned eight-minute load to end,
+records a post-recovery window and checks whole-run errors and dropped schedules.
+That natural-finish change has not yet been exercised in a full remote drill.
+
+#### JVM profile during a reproduced failure without reporting
+
+A subsequent five-minute, 90-GET/s control ran with no reporting worker and with
+JFR active in Edge and Account. It completed 26,891 HTTP 200 responses, ten HTTP
+503 and 15 HTTP 500, with 86 dropped iterations. All HTTP failures fell within
+approximately 1.5 seconds. This demonstrates that an active reporting worker was
+not required for that failure. JFR and the diagnostic load introduce their own
+overhead, so this control is diagnostic evidence rather than a capacity result.
+
+The maximum recorded GC pause was 1.1 ms in Edge and 1.9 ms in Account. Those
+pauses do not account for the observed hundreds of milliseconds of exchange delay.
+In the failing interval Edge recorded four StructuredFormatter monitor waits of
+55–119 ms and two socket-read events of about 105 ms. The Account profile did not
+record a matching monitor or file-write blockage over 50 ms in that interval.
+No single application blocking site explains all failures. The Java and native
+execution samples, scheduler samples and policy-exchange correlation are retained
+machine-locally for further host/runtime analysis.
+
+The policy CPU comparison remains optional in the runner. It is not promoted as
+a timeout fix. The remote-host and independent-storage handoff was exercised, but
+the customer-path availability requirement and the underlying JVM/host delay remain
+open on #16356. Temporary reporting namespaces and their PVCs were removed after
+recovering and validating the synthetic artifacts.
