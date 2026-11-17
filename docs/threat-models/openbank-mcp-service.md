@@ -497,17 +497,26 @@ a stub (T-T2/T-D2).
 
 - **2026-11-17** — **ADR-0383 D7 tool-result sanitisation (#16620, refs #16590).** A new
   `McpToolResultSanitiser` runs at the existing single seam in `McpToolRegistry.call`, after
-  `McpPiiMasker` and before `McpUntrustedData.wrap`. It covers every string value in a tool result.
-  Each string is NFKC-normalised and loses control, format, tag and separator code points. Link and
-  image markup, HTML and URLs are replaced with a placeholder, and IBAN- and phone-shaped substrings
-  are masked. Marker look-alikes (case, spacing, NBSP, zero-width, homoglyph and fullwidth variants)
-  are neutralised, and the string is capped at 140 characters. `logoUrl` is kept only as `https` on
-  the bank CDN host allow-list and is dropped otherwise. This narrows T-I3 and T-I4 (exfiltration
-  through rendered URLs, marker breakout and oversized instructions). It does not change the
-  security boundary, which is still D4, D6 and OPA. The layer-4 red-team pack closes 52 of its
-  53 recorded gaps. **Residual:** a natural-person name embedded in a free-text field the masker
-  does not redact wholesale (for example a payment reference) still passes, because a name has no
-  shape to match. It stays in `known-gaps.json`. Over-masking is possible too: an uppercase
-  IBAN-shaped token, or a 9-digit group inside free text, is masked even when it is not an
-  identifier. Rollback: revert the commit. The red-team ratchet then fails until `known-gaps.json`
-  is restored.
+  `McpPiiMasker` and before `McpUntrustedData.wrap`. It covers every string value and object key in
+  a tool result:
+  - Input is cut to 560 code points before any step, and all patterns are linear. 1 MiB of each
+    pathological pattern is processed in well under 200 ms, against about 30 s for one before.
+  - Strings are NFKC-normalised and lose control, format, tag and separator code points.
+  - Percent and HTML-entity encodings are decoded first. Link and image markup, HTML and URLs
+    (including `www.` and protocol-relative forms) are then replaced with a placeholder.
+  - IBANs (registry country and length, any grouping) and phone numbers (3-3-3, 3-2-2-2, `+CC`)
+    inside free text are masked. Identifier and amount fields are exempt, so ids chain unchanged.
+  - Marker look-alikes are neutralised on a UTS #39-style skeleton covering case, separators,
+    combining marks, and Cyrillic, Greek, Armenian, Cherokee and fullwidth forms.
+  - Strings are capped at 140 characters.
+  - `logoUrl` is kept only as `https` on the bank CDN host allow-list and is dropped otherwise.
+
+  This narrows T-I3 and T-I4 (exfiltration through rendered URLs, marker breakout and oversized
+  instructions). It does not change the security boundary, which is still D4, D6 and OPA. The
+  layer-4 red-team pack closes 52 of its original 53 recorded gaps, and its 11 added payloads all
+  pass. **Residual:** a natural-person name embedded in a free-text field the masker does not
+  redact wholesale (for example a payment reference) still passes, because a name has no shape to
+  match. It stays in `known-gaps.json`. The marker skeleton is a minimal confusables subset for the
+  marker's own letters, not the full UTS #39 table. IBAN detection deliberately skips mod-97: an RF
+  reference passes it and a mistyped IBAN fails it. Rollback: revert the commit. The red-team
+  ratchet then fails until `known-gaps.json` is restored.
