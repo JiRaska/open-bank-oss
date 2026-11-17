@@ -55,12 +55,23 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
-    # Prometheus remote-write receiver (kube-prometheus-stack-prometheus service -> prometheus pod).
+    # Prometheus remote-write receiver (kube-prometheus-stack-prometheus Service -> prometheus pod).
+    # The podSelector MUST be exactly the Service's own selector
+    # (app.kubernetes.io/name + operator.prometheus.io/name). The AWS VPC CNI network-policy
+    # controller adds a Service ClusterIP to this pod's PolicyEndpoint only when the peer
+    # podSelector matches the Service's selector labels; otherwise it adds the pod IP alone and
+    # every remote write to the Service name times out ("context deadline exceeded", exporter
+    # dropping data) while the OTLP receiver keeps answering 200 to CI.
+    # Measured 2026-11-16: with {name, instance} (instance is NOT in the Service selector) the
+    # PolicyEndpoint held only the pod IP and wget to the Service timed out, with or without a
+    # namespaceSelector (#16348's theory, falsified live); with {name, operator.prometheus.io/name}
+    # it held the ClusterIP too and wget answered "Prometheus Server is Ready". Removing the rule
+    # again restored the timeout. rum-gateway's Tempo rule works for the same reason.
     - to:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: prometheus
-              app.kubernetes.io/instance: kube-prometheus-stack-prometheus
+              operator.prometheus.io/name: kube-prometheus-stack-prometheus
       ports:
         - protocol: TCP
           port: 9090

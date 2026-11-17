@@ -1,14 +1,16 @@
 # Kafka mTLS identity + ACLs for openbank-delegation-service (ADR-0137 Tier 2).
 #
-# delegation-service is a PRODUCER only: it publishes the grant lifecycle
+# delegation-service publishes the grant lifecycle
 # (offered/accepted/declined/revoked/suspended/reinstated/renounced/expired) onto
 # openbank.delegation.events via the transactional outbox (ADR-0232 D3). The consumers
 # are the product services building local enforcement projections — account-service and
 # card-issuance — and each holds its own KafkaUser with its own Read ACL, so nothing is
 # granted here for them.
 #
-# No consumer-group ACL: this service reads no topic, so granting one would widen the
-# principal for no caller. Add one only alongside a real @Incoming channel.
+# It CONSUMES exactly one topic: openbank.domestic.payment.events, whose payment outcomes settle
+# domestic-payment spend reservations (channel `domestic-payment-events-in`, group
+# delegation-service-domestic-payment-outcomes, DLQ openbank.dlq.delegation.domestic-payment-events-in;
+# ADR-0249 D3 amendment, #16000).
 #
 # Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for
 # all of this service's Kafka traffic. The Strimzi User Operator mints the per-user
@@ -55,3 +57,24 @@ spec:
           name: openbank.delegation.approval-group-revisions
           patternType: literal
         operations: [Write, Describe]
+      # ADR-0249 D3 amendment (#16000): settle spend reservations from domestic payment outcomes.
+      # Harmless while openbank.delegation.payment-outcome-consumer.enabled is false (no channel).
+      - resource:
+          type: topic
+          name: openbank.domestic.payment.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: delegation-service-domestic-payment-outcomes
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      # The consumer must be able to write its own dead-letter records (#5745).
+      - resource:
+          type: topic
+          name: openbank.dlq.delegation.domestic-payment-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"

@@ -17,11 +17,14 @@ import com.openbank.fx.domain.model.FxConversion
 import com.openbank.fx.domain.model.FxConversionStatus
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.CounterpartyRef
 import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.InitiationMode
 import com.openbank.libs.fincrime.ScreeningDecision
 import com.openbank.libs.fincrime.ScreeningMatchStatus
 import com.openbank.libs.fincrime.ScreeningPolicy
 import com.openbank.libs.fincrime.ScreeningRole
+import com.openbank.libs.fincrime.UnknownCounterpartyReason
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
 import jakarta.enterprise.context.ApplicationScoped
@@ -146,6 +149,9 @@ open class FxActivitiesImpl(
                 rail = "FX",
                 accountId = conv.accountId,
                 counterpartyId = null,
+                // An FX conversion moves money between the holder's own currency pockets: no payee.
+                counterparty = CounterpartyRef.Unknown(UnknownCounterpartyReason.NOT_APPLICABLE_OWN_ACCOUNT),
+                initiationMode = InitiationMode.CUSTOMER_PRESENT,
             ),
         )
         if (outcome.synthetic) {

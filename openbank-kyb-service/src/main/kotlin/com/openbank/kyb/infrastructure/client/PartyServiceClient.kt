@@ -9,6 +9,8 @@ import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.MandateRequest
 import com.openbank.kyb.application.port.out.PartyGateway
 import com.openbank.kyb.application.port.out.PepProfile
+import com.openbank.kyb.application.port.out.StatutoryRepresentationEvidence
+import com.openbank.kyb.application.port.out.StatutoryRepresentationPublisher
 import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.RegisteredAddress
 import com.openbank.libs.web.SyntheticTaintClientFilter
@@ -19,6 +21,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -61,6 +64,8 @@ data class PartyCreated(val id: UUID)
 data class PartyRecord(
     val legalName: String,
     val kycStatus: String?,
+    /** `PENDING_KYC | ACTIVE | SUSPENDED | CLOSED | MERGED`; only CLOSED ends a relationship here. */
+    val status: String? = null,
     val address: PartyAddress?,
     // Compliance metadata party-service stores (`parties.pep_flag`, `pep_category`, `fatca_status`,
     // `crs_status`). Nullable and defaulted: a response that does not carry them reads as "not on
@@ -108,13 +113,22 @@ interface PartyServiceRestClient {
     @Path("/{id}/mandates")
     suspend fun grantMandate(@PathParam("id") principalPartyId: UUID, body: MandateBody): Any?
 
+    @PUT
+    @Path("/{id}/statutory-representation")
+    suspend fun publishStatutoryRule(
+        @PathParam("id") principalPartyId: UUID,
+        evidence: StatutoryRepresentationEvidence,
+    )
+
     @GET
     @Path("/{id}")
     suspend fun getParty(@PathParam("id") id: UUID): PartyRecord
 }
 
 @ApplicationScoped
-class PartyServiceGateway : PartyGateway {
+class PartyServiceGateway :
+    PartyGateway,
+    StatutoryRepresentationPublisher {
 
     @Inject @RestClient
     lateinit var client: PartyServiceRestClient
@@ -176,6 +190,11 @@ class PartyServiceGateway : PartyGateway {
         )
     }
 
+    @Timeout(PARTY_TIMEOUT_MS)
+    override suspend fun publishStatutoryRule(principalPartyId: UUID, evidence: StatutoryRepresentationEvidence) {
+        client.publishStatutoryRule(principalPartyId, evidence)
+    }
+
     /**
      * The initiator's verified identity. 404 is "no such party" (null); anything else propagates, so a
      * party-service outage is an outage and never reads as "identity does not match".
@@ -208,7 +227,19 @@ class PartyServiceGateway : PartyGateway {
         return PepProfile(pep = party.pepFlag, category = party.pepCategory)
     }
 
+    @Timeout(PARTY_TIMEOUT_MS)
+    override suspend fun partyClosed(partyId: UUID): Boolean {
+        val party = try {
+            client.getParty(partyId)
+        } catch (e: WebApplicationException) {
+            if (e.response?.status == HTTP_NOT_FOUND) return false
+            throw e
+        }
+        return party.status == PARTY_CLOSED
+    }
+
     private companion object {
+        const val PARTY_CLOSED = "CLOSED"
         const val PARTY_TIMEOUT_MS = 5000L
         const val HTTP_NOT_FOUND = 404
         const val KYC_APPROVED = "APPROVED"

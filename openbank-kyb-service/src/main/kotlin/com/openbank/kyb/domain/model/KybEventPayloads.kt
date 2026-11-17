@@ -229,6 +229,37 @@ data class BusinessOnboardingCompleted(
     }
 }
 
+/**
+ * NOT PUBLISHED (#16028 item 4). Defined by ADR-0376 D8 as the signal that an approved business
+ * relationship has to end after a confirmed sanctions match; it was never emitted on a live
+ * system (monitoring has been switched off since it shipped). `openbank.kyb.events` is read by a
+ * customer-facing projection and landed in the analytics warehouse, so a confirmed match must not
+ * travel there. The type stays as the record of the shape the contract declared; the channel an
+ * exit workflow reads is #15992's to decide.
+ */
+data class BusinessRelationshipExitRequired(
+    override val eventType: String,
+    override val caseId: UUID,
+    override val status: CaseStatus,
+    override val identifierScheme: IdentifierScheme,
+    override val identifier: String,
+    override val country: String?,
+    override val legalName: String?,
+    override val legalFormClass: LegalFormClass?,
+    override val initiatorPartyId: UUID,
+    override val entityPartyId: UUID?,
+    override val requiredSignatures: Int?,
+    override val signedCount: Int,
+    override val occurredAt: Instant,
+    override val actorId: String,
+    override val actorType: String,
+    override val sourceService: String,
+) : KybEventPayload {
+    companion object {
+        const val EVENT_TYPE = "BUSINESS_RELATIONSHIP_EXIT_REQUIRED"
+    }
+}
+
 /** An operator rejected the case. */
 data class BusinessOnboardingRejected(
     override val eventType: String,

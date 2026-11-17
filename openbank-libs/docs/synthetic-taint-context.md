@@ -35,6 +35,14 @@ correctness obligations, not guarantees established by naming a CDI scope.
    applicable identity guard allowlist. Provisioning, activation and actual
    seed postings require their own operational authorization.
 
+## Transfer fixture idempotency
+
+`SyntheticTransferDirection.idempotencyKey` binds each transfer leg to the
+fixture party and the Europe/Prague booking date. The Edge sends that key in
+`Idempotency-Key`. Transaction derives the same value from the request and
+rejects mismatches before starting the workflow. Retries keep the same key
+for that date and direction.
+
 ## Evidence and limits
 
 Filter unit tests construct holders manually and check trusted and declined

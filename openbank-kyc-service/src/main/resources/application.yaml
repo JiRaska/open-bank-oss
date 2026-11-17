@@ -246,7 +246,6 @@ openbank:
     screening-triggers:
       enabled: "${KYC_SCREENING_TRIGGERS_ENABLED:false}"
       candidate-limit: "${KYC_SCREENING_TRIGGERS_CANDIDATE_LIMIT:500}"
-      retry-enabled: "${KYC_SCREENING_TRIGGERS_RETRY_ENABLED:true}"
       retry-interval: "${KYC_SCREENING_TRIGGERS_RETRY_INTERVAL:1m}"
       retry-batch-size: "${KYC_SCREENING_TRIGGERS_RETRY_BATCH_SIZE:100}"
     case-coordinator:

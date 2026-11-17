@@ -307,6 +307,14 @@ allowed_reasons contains "synthetic-ledger-seed-post" if {
 # (GET /api/v1/journals -> ledger.list) and the trial balance (GET /api/v1/journals/trial-balance
 # -> ledger.read) to compare the nostro GL against the correspondent's camt.053. Read-only; it
 # never posts a reconciling entry.
+# The transfer canary reader can request only the fixture-specific proof.
+allowed_reasons contains "synthetic-transfer-journal-proof" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-synthetic-transfer-verifier")
+	"ROLE_API" in input.principal.roles
+	input.action == "ledger.synthetic-transfer.prove"
+}
+
 allowed_reasons contains "service-treasury-ledger-read" if {
 	input.principal.type == "HUMAN"
 	machine_named("service-account-openbank-treasury")

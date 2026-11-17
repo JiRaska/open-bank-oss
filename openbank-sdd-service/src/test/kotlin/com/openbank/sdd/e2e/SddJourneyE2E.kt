@@ -5,6 +5,10 @@
 package com.openbank.sdd.e2e
 
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.sdd.application.port.out.AmlCasePort
+import com.openbank.sdd.application.port.out.SanctionsScreeningPort
+import com.openbank.sdd.application.usecase.FakeAmlCases
+import com.openbank.sdd.application.usecase.FakeSanctions
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -18,6 +22,8 @@ import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import io.restassured.response.ValidatableResponse
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.inject.Alternative
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.util.UUID
@@ -72,7 +78,23 @@ class SddJourneyE2E {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "authz.enforce" to "false",
         )
+
+        /**
+         * The journey exercises mandate and collection policy, not sanctions: both compliance ports
+         * are swapped for fakes answering CLEAR under this profile only, so an accepted collection is
+         * still released. The gate is held by CollectionScreeningGateTest and SddMandateServiceTest.
+         */
+        override fun getEnabledAlternatives(): Set<Class<*>> =
+            setOf(ClearSanctions::class.java, NoopAmlCases::class.java)
     }
+
+    @Alternative
+    @ApplicationScoped
+    class ClearSanctions : SanctionsScreeningPort by FakeSanctions()
+
+    @Alternative
+    @ApplicationScoped
+    class NoopAmlCases : AmlCasePort by FakeAmlCases()
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> {

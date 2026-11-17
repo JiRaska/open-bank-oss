@@ -152,6 +152,46 @@ class SanctionsServiceTest {
     }
 
     @Test
+    fun `a shared given name with a different surname is not a match`(): Unit = runBlocking {
+        coEvery { repo.findByIdempotencyKey(any()) } returns null
+        coEvery { repo.saveWithEvent(any(), any()) } answers { firstArg() }
+        // pg_trgm scored these 0.64 (shared "jiri" + "ra"). The stub scores 0.80 — a POTENTIAL_HIT on
+        // its own, under the HIT threshold at which a strong trigram score is never removed — so only
+        // the name-structure score can keep the screen CLEAR.
+        val rathousky = sampleEntry(listType = SanctionsListType.PEP_GLOBAL, primaryName = "Jiří Rathouský")
+        val ratas =
+            sampleEntry(listType = SanctionsListType.PEP_GLOBAL, primaryName = "Jüri Ratas", externalId = "ext-2")
+        // The test importer only lowercases (setUp), so diacritics stay in the query.
+        coEvery { entryRepo.search("jiří raška", any(), any(), any()) } returns listOf(
+            SanctionsEntryMatch(entry = rathousky, matchedName = "Jiří Rathouský", score = 0.80),
+            SanctionsEntryMatch(entry = ratas, matchedName = "Jüri Ratas", score = 0.80),
+        )
+
+        val result = service.screen(sampleScreenCommand(name = "Jiří Raška"))
+
+        assertThat(result.status).isEqualTo(SanctionsCheckStatus.CLEAR)
+        assertThat(result.matches).isEmpty()
+    }
+
+    @Test
+    fun `a profile-less screen keeps a trigram HIT the name structure cannot refute`(): Unit = runBlocking {
+        coEvery { repo.findByIdempotencyKey(any()) } returns null
+        coEvery { repo.saveWithEvent(any(), any()) } answers { firstArg() }
+        // Two of three parts align (structure ~0.67): not enough to confirm, not enough to refute.
+        // Lowering the score would turn a blocking HIT into POTENTIAL_HIT, which payment policy
+        // treats as REVIEW (or CLEAR for an internal transfer) — fail-open. The HIT stands.
+        val entry = sampleEntry(primaryName = "Ahmad Karimi Tehrani")
+        coEvery { entryRepo.search("ahmad karimi abadi", any(), any(), any()) } returns listOf(
+            SanctionsEntryMatch(entry = entry, matchedName = "Ahmad Karimi Tehrani", score = 0.90),
+        )
+
+        val result = service.screen(sampleScreenCommand(name = "Ahmad Karimi Abadi"))
+
+        assertThat(result.status).isEqualTo(SanctionsCheckStatus.HIT)
+        assertThat(result.matches.single().matchScore).isEqualTo(0.90)
+    }
+
+    @Test
     fun `screen checks aliases — hit via alias search wins`(): Unit = runBlocking {
         coEvery { repo.findByIdempotencyKey(any()) } returns null
         coEvery { repo.saveWithEvent(any(), any()) } answers { firstArg() }

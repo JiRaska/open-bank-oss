@@ -257,3 +257,48 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## 2026-11-14 - Sanctions screening before a collection is released (ADR-0032, ADR-0353 D4)
+
+**Gap closed.** The service authorised a collection and emitted `sdd.collection.authorised.v1` (which
+books the debtor-side debit) without screening anyone. Neither name on the mandate reached
+sanctions-service, and no upstream screened it either. A mandate naming a listed creditor or debtor
+moved money.
+
+**Control.** `CollectionScreeningGate` runs after `CollectionAuthorisationPolicy` accepts, and before
+the collection is stamped or the event is written. It screens the mandate's debtor and creditor names
+through `POST /api/v1/sanctions/screen` and decides with the shared libs-fincrime `ScreeningPolicy`,
+the same copy sepa-payment, domestic-payment and fx use:
+
+- CLEAR / WHITELISTED: released as before.
+- BLOCK (HIT, ESCALATED, or POTENTIAL_HIT above 0.85): `REJECT` with EPC reason `RR04`, CRITICAL AML case.
+- REVIEW (POTENTIAL_HIT at or below 0.85): `REJECT` `RR04` ("held for sanctions review"), HIGH AML case.
+- sanctions-service unreachable after retry / breaker: `REJECT` `RR04` (fail-closed hold), MEDIUM case.
+  An unknown wire status parses as ESCALATED, never CLEAR.
+
+A held collection is never stamped, so the replay guard (keyed on the stamped collection date) does
+not swallow a re-presentation: it is screened again. Opening the AML case is best effort and never
+changes the verdict (`CollectionScreeningGateTest` proves a case-store outage still blocks).
+
+**New edges (STRIDE-S/E).** Two outbound calls on the existing named oidc-client `m2m`
+(`service-account-openbank-sdd`, ROLE_API only): sanctions `screen` (already granted to any service
+account by base `rest.rego`'s m2m sanctions screening), and `amlCase.create`, newly granted by identity
+in `aml_rest_ext.rego` and in aml-service's `AML_CASE_CREATE_MOVEMENT_SERVICES` (the two are pinned
+equal by `AmlCaseCreateCallerGuardTest`). aml-service is reached on its private-CA mTLS listener with
+the existing `sdd-internal-tls` client certificate. The regenerated ingress allow-lists admit the
+`sdd` namespace to sanctions-service (8123) and aml-service; sdd carries no egress policy. No new
+listener, no new data at rest.
+
+**Information disclosure.** The debtor and creditor names (already held here) are now sent to
+sanctions-service, and the matched entity and score to aml-service. Both are in-cluster compliance
+services that already receive the same data from the other rails.
+
+**Residual risks.**
+- The AML case's `partyId` carries the debtor ACCOUNT id, because sdd has no account-to-party lookup
+  grant yet (the shape sepa-payment fixed in #8505). It is logged as `aml.case.party_unresolved` so
+  those rows are identifiable. Follow-up: resolve the party through account-service.
+- A held collection is reported to the creditor bank as a rejection. A REVIEW that compliance later
+  clears needs the creditor to re-present the collection; there is no in-service release queue.
+- Screening is name-based (ADR-0032 scope note); aliases, country and date of birth are not sent.
+
+**Rollback.** Revert the commit. The gate disappears and collections release un-screened again.

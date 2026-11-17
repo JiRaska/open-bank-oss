@@ -138,6 +138,31 @@ class CaseScreeningTest {
     }
 
     @Test
+    fun `an ownership lookup that could not be made removes nobody from the subject list`() {
+        val before = CaseScreening(
+            CaseScreening.subjectsOf(
+                extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
+                listOf(owner("Karel Vlastník")),
+            ).map { it.copy(sanctions = ScreeningVerdict.CLEAR) },
+            UboSource.REGISTER,
+        )
+        // What an outage of the register produces: the same case, no owners.
+        val withoutOwners = CaseScreening.subjectsOf(
+            extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
+            emptyList(),
+        )
+
+        val duringOutage = before.rebuilt(withoutOwners, UboSource.UNAVAILABLE)
+
+        // The owner is still a current subject (and so still monitored), and nothing is approvable.
+        assertThat(duringOutage.subjects.filter { it.current }.map { it.name }).contains("Karel Vlastník")
+        assertThat(duringOutage.complete).isFalse()
+        // Control: when the register ANSWERS without the owner, the owner has left.
+        assertThat(before.rebuilt(withoutOwners, UboSource.REGISTER).subjects.map { it.name })
+            .doesNotContain("Karel Vlastník")
+    }
+
+    @Test
     fun `a hit and a PEP both require review, and everyone clear does not`() {
         val subjects = CaseScreening.subjectsOf(
             extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
@@ -156,5 +181,41 @@ class CaseScreeningTest {
         val pep = subjects.map { if (it.kind == ScreeningSubjectKind.REPRESENTATIVE) it.copy(pep = true) else it }
         assertThat(CaseScreening(hit).requiresReview).isTrue()
         assertThat(CaseScreening(pep).requiresReview).isTrue()
+    }
+
+    @Test
+    fun `identities carry the register country, dates of birth and nationality, merged for a person listed twice`() {
+        val base = extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, emptyList())
+        val ex = base.copy(
+            representatives = listOf(
+                Representative("Ing. Jana Nováková", java.time.LocalDate.of(1980, 1, 2), "jednatelé", "jednatel", null),
+            ),
+        )
+        val owners = listOf(
+            owner("NOVÁKOVÁ Jana").copy(nationality = "CZ", countryOfResidence = "SK"),
+            owner("Holding Alfa a.s.", corporate = true).copy(countryRegistered = "CY"),
+        )
+        val subjects = CaseScreening.subjectsOf(ex, owners).associateBy { it.kind }
+        val ids = CaseScreening.identitiesOf(ex, owners)
+
+        assertThat(ids.getValue(subjects.getValue(ScreeningSubjectKind.ENTITY).key).single().country).isEqualTo("CZ")
+        val jana = ids.getValue(subjects.getValue(ScreeningSubjectKind.REPRESENTATIVE).key).single()
+        assertThat(jana.dateOfBirth).isEqualTo(java.time.LocalDate.of(1980, 1, 2))
+        assertThat(jana.nationality).isEqualTo("CZ")
+        assertThat(jana.country).isEqualTo("SK")
+        assertThat(ids.getValue(subjects.getValue(ScreeningSubjectKind.BENEFICIAL_OWNER).key).single().country)
+            .isEqualTo("CY")
+    }
+
+    @Test
+    fun `contradicting listings under one name stay separate identities instead of merging first-wins`() {
+        val ex = extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, emptyList())
+        val owners = listOf(
+            owner("Jan Dvořák").copy(countryOfResidence = "CZ"),
+            owner("DVOŘÁK Jan").copy(countryOfResidence = "IR"),
+        )
+        val key = CaseScreening.subjectsOf(ex, owners).single { it.kind == ScreeningSubjectKind.BENEFICIAL_OWNER }.key
+        assertThat(CaseScreening.identitiesOf(ex, owners).getValue(key).map { it.country })
+            .containsExactly("CZ", "IR")
     }
 }

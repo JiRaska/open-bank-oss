@@ -9,12 +9,15 @@ import com.openbank.kyb.application.port.`in`.AnswerQuestionnaireCommand
 import com.openbank.kyb.application.port.`in`.AttestRepresentationCommand
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
+import com.openbank.kyb.application.port.`in`.ConfirmExitCommand
+import com.openbank.kyb.application.port.`in`.DecideMonitoringFindingCommand
 import com.openbank.kyb.application.port.`in`.DisposeFindingCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.LookupCommand
 import com.openbank.kyb.application.port.`in`.MakeDeclarationsCommand
 import com.openbank.kyb.application.port.`in`.MatchInitiatorCommand
 import com.openbank.kyb.application.port.`in`.PrepareAgreementCommand
+import com.openbank.kyb.application.port.`in`.ProposeExitCommand
 import com.openbank.kyb.application.port.`in`.RegistryLookupUseCase
 import com.openbank.kyb.application.port.`in`.RegistrySearchUseCase
 import com.openbank.kyb.application.port.`in`.RejectCaseCommand
@@ -23,6 +26,7 @@ import com.openbank.kyb.application.port.`in`.ResolveReviewCommand
 import com.openbank.kyb.application.port.`in`.SearchRegistryCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
+import com.openbank.kyb.application.port.`in`.WithdrawExitCommand
 import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.domain.model.CaseStatus
@@ -30,12 +34,14 @@ import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistrySearchQuery
+import com.openbank.kyb.domain.model.RepresentationMode
 import com.openbank.kyb.infrastructure.rest.dto.AcceptDisclosuresRequest
 import com.openbank.kyb.infrastructure.rest.dto.AttestRepresentationRequest
 import com.openbank.kyb.infrastructure.rest.dto.AttestationResponse
 import com.openbank.kyb.infrastructure.rest.dto.BusinessAgreementResponse
 import com.openbank.kyb.infrastructure.rest.dto.CaseResponse
 import com.openbank.kyb.infrastructure.rest.dto.ClaimInvitationRequest
+import com.openbank.kyb.infrastructure.rest.dto.CompleteExitRequest
 import com.openbank.kyb.infrastructure.rest.dto.DeclarationsRequest
 import com.openbank.kyb.infrastructure.rest.dto.DisposeFindingRequest
 import com.openbank.kyb.infrastructure.rest.dto.ExtractResponse
@@ -54,12 +60,16 @@ import com.openbank.kyb.infrastructure.rest.dto.SignRequest
 import com.openbank.kyb.infrastructure.rest.dto.StartCaseRequest
 import com.openbank.kyb.infrastructure.rest.dto.UboResponse
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
+import com.openbank.libs.governance.StaffIdentity
 import com.openbank.libs.security.Roles
+import com.openbank.libs.security.StaffIdentities
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
@@ -70,6 +80,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.net.URI
@@ -281,7 +292,9 @@ class KybResource {
         } else {
             requireOperator()
         }
-        return Response.ok(CaseResponse.from(case, customerPartyId)).build()
+        // Where each subject stands with the registry is the operator's to see, on this one-case read only.
+        val registry = if (customerPartyId == null) onboarding.monitoringStates(id) else emptyMap()
+        return Response.ok(CaseResponse.from(case, customerPartyId, registry)).build()
     }
 
     @POST
@@ -503,6 +516,10 @@ class KybResource {
         requireNotNull(identifier) { "path parameter 'identifier' is required" }
         val signers = requireNotNull(request?.confirmedSigners) { "confirmedSigners is required" }
         val hash = requireNotNull(request.ruleTextHash) { "ruleTextHash is required" }
+        val mode = request.confirmedMode?.let { RepresentationMode.valueOf(it.name) }
+        if (mode != null && !ServiceAccountIdentity.isHumanStaff(identity)) {
+            throw ForbiddenException("confirmed representation mode requires an authenticated staff reviewer")
+        }
         val attested = representation.attest(
             AttestRepresentationCommand(
                 scheme = IdentifierScheme.valueOf(scheme.uppercase()),
@@ -512,6 +529,7 @@ class KybResource {
                 confirmedRoles = request.confirmedRoles.orEmpty(),
                 operator = identity.principal?.name ?: "operator",
                 note = request.note,
+                confirmedMode = mode,
             ),
         )
         return Response.ok(AttestationResponse.from(attested)).build()
@@ -568,6 +586,120 @@ class KybResource {
     }
 
     @POST
+    @Path("/cases/{id}/monitoring/findings/{findingId}/disposition")
+    @RolesAllowed(Roles.KYC_REVIEWER)
+    // Its own action (#16028 item 3): deciding whether a listed person IS this customer's
+    // subject is not resolving an onboarding review, and the audit trail must say which it was.
+    // Granted to human reviewer roles only; until rules.yaml grants it the policy denies it,
+    // which is harmless only because monitoring is switched off and no finding can exist.
+    @Authorize(action = "kyb.monitoring.finding.decide", resource = "#id")
+    @Operation(summary = "Operator decides one finding of ongoing monitoring on an approved case")
+    suspend fun decideMonitoringFinding(
+        @PathParam("id") id: UUID,
+        @PathParam("findingId") findingId: UUID,
+        request: DisposeFindingRequest?,
+    ): Response {
+        requireMonitoringReviewer()
+        val disposition = requireNotNull(request?.disposition) { "disposition is required" }.let {
+            runCatching { FindingDisposition.valueOf(it.uppercase()) }
+                .getOrElse { _ -> throw IllegalArgumentException("unknown disposition '$it'") }
+        }
+        val case = onboarding.decideMonitoringFinding(
+            DecideMonitoringFindingCommand(
+                id,
+                findingId,
+                disposition,
+                requireNotNull(request.reason) { "reason is required" },
+                operator(),
+            ),
+        )
+        return Response.ok(CaseResponse.from(case, null, onboarding.monitoringStates(id))).build()
+    }
+
+    /**
+     * The operators' queue of monitoring holds, oldest first: a finding awaiting a decision, or a
+     * confirmed sanctions match whose exit is not yet recorded. Its own route and action (#16028
+     * item 3) rather than a filter of the case list, which customers also call. Refused for ANY
+     * request made on a customer's behalf before anything is looked up, so its answer to an
+     * applicant cannot depend on whether a finding exists.
+     */
+    @GET
+    @Path("/monitoring/holds")
+    @RolesAllowed(Roles.KYC_REVIEWER)
+    @Authorize(action = "kyb.monitoring.queue.list")
+    @Operation(summary = "Operators' queue of cases ongoing monitoring holds")
+    suspend fun monitoringHolds(
+        @QueryParam("page") @DefaultValue("0") page: Int,
+        @QueryParam("size") @DefaultValue("20") size: Int,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        if (customerPartyId != null) throw CaseCallerMismatchException("the monitoring queue is an operator route")
+        requireMonitoringReviewer()
+        return Response.ok(
+            onboarding.listMonitoringHolds(page.coerceAtLeast(0), size.coerceIn(1, MAX_PAGE)).map {
+                CaseResponse.from(it, null)
+            },
+        ).build()
+    }
+
+    @POST
+    @Path("/cases/{id}/monitoring/exit/propose")
+    @RolesAllowed(Roles.KYC_REVIEWER)
+    @Authorize(action = "kyb.monitoring.exit.propose", resource = "#id")
+    @Operation(summary = "A reviewer proposes that the exit a confirmed sanctions match requires has been carried out")
+    suspend fun proposeExit(@PathParam("id") id: UUID, request: CompleteExitRequest?): Response {
+        requireMonitoringReviewer()
+        val evidence = requireNotNull(request?.evidence) { "evidence is required" }
+        val case = onboarding.proposeExit(ProposeExitCommand(id, evidence, staff()))
+        return Response.ok(CaseResponse.from(case, null, onboarding.monitoringStates(id))).build()
+    }
+
+    /**
+     * A DIFFERENT reviewer confirms the pending proposal (four-eyes); only this ends monitoring.
+     * Its own action, separate from proposing, so the two halves can be granted apart.
+     */
+    @POST
+    @Path("/cases/{id}/monitoring/exit/complete")
+    @RolesAllowed(Roles.KYC_REVIEWER)
+    @Authorize(action = "kyb.monitoring.exit.confirm", resource = "#id")
+    @Operation(summary = "A second reviewer confirms the proposed exit; monitoring ends")
+    suspend fun completeExit(@PathParam("id") id: UUID, request: CompleteExitRequest?): Response {
+        requireMonitoringReviewer()
+        val evidence = requireNotNull(request?.evidence) { "evidence is required" }
+        val case = onboarding.confirmExit(ConfirmExitCommand(id, evidence, staff()))
+        return Response.ok(CaseResponse.from(case, null, onboarding.monitoringStates(id))).build()
+    }
+
+    /**
+     * The proposer — the same PERSON, from any of their accounts — withdraws the pending exit
+     * proposal so a corrected one can be made. Nobody else can; another reviewer waits for expiry.
+     */
+    @POST
+    @Path("/cases/{id}/monitoring/exit/withdraw")
+    @RolesAllowed(Roles.KYC_REVIEWER)
+    @Authorize(action = "kyb.monitoring.exit.withdraw", resource = "#id")
+    @Operation(summary = "The proposer withdraws their pending exit proposal")
+    suspend fun withdrawExit(@PathParam("id") id: UUID): Response {
+        requireMonitoringReviewer()
+        val case = onboarding.withdrawExit(WithdrawExitCommand(id, staff()))
+        return Response.ok(CaseResponse.from(case, null, onboarding.monitoringStates(id))).build()
+    }
+
+    /**
+     * The acting reviewer as a PERSON, from the verified token: person id and second factor. Four-eyes
+     * compares the person id; a token without one can neither propose nor confirm.
+     */
+    private fun staff(): StaffIdentity {
+        operator()
+        return StaffIdentities.from(identity.principal as? JsonWebToken)
+    }
+
+    /** The decider is the authenticated principal. No identity, no decision. */
+    private fun operator(): String = requireNotNull(identity.principal?.name?.takeIf { it.isNotBlank() }) {
+        "an authenticated operator is required"
+    }
+
+    @POST
     @Path("/cases/{id}/reject")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
     @Authorize(action = "kyb.case.reject", resource = "#id")
@@ -591,6 +723,14 @@ class KybResource {
         } else if (customerPartyId != claimed) {
             throw CaseCallerMismatchException("party $claimed is not the authenticated customer")
         }
+    }
+
+    /**
+     * Monitoring decisions are a KYC reviewer's (#16028 item 3): a human role no service account
+     * holds in any realm. Checked here as well as by `@RolesAllowed`, like [requireOperator].
+     */
+    private fun requireMonitoringReviewer() {
+        if (Roles.KYC_REVIEWER !in identity.roles) throw CaseCallerMismatchException("KYC reviewer role required")
     }
 
     private fun requireOperator() {

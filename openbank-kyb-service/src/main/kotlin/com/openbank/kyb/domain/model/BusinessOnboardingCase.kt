@@ -6,6 +6,7 @@ package com.openbank.kyb.domain.model
 
 import com.openbank.kyb.domain.czech.CzechRepresentationRuleParser
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.governance.StaffIdentity
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -50,7 +51,7 @@ data class Signer(
     val isInitiator: Boolean,
 )
 
-class CaseTransitionException(message: String) : IllegalStateException(message)
+class CaseTransitionException(message: String, cause: Throwable? = null) : IllegalStateException(message, cause)
 
 /**
  * The multi-party business onboarding aggregate (ADR-0284 D1). Every transition is a pure function
@@ -83,6 +84,8 @@ data class BusinessOnboardingCase(
     val agreement: AgreementRecord? = null,
     /** Sanctions / PEP screening of the entity and its related parties; null until first attempted. */
     val screening: CaseScreening? = null,
+    /** What ongoing monitoring reported about this case after approval, and what was decided. */
+    val monitoring: CaseMonitoring = CaseMonitoring(),
     /**
      * The row version this copy was read at. The repository refuses to write a copy whose version
      * is no longer the stored one, so a decision made in between is never overwritten.
@@ -90,6 +93,7 @@ data class BusinessOnboardingCase(
     val version: Long = 0,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val representationAttestationId: UUID? = null,
 ) {
 
     val initiator: Signer? get() = signers.firstOrNull { it.isInitiator }
@@ -97,6 +101,114 @@ data class BusinessOnboardingCase(
     val signedCount: Int get() = signers.count { it.status == SignerStatus.SIGNED }
 
     private val signedSigners: List<Signer> get() = signers.filter { it.status == SignerStatus.SIGNED }
+
+    /**
+     * Whether the entity and its related parties must be registered for ongoing monitoring. This
+     * is the ONE definition; nothing sets or clears monitoring anywhere else.
+     *
+     *  - an approved case (SIGNED, ACTIVE) is monitored;
+     *  - a case with a monitoring [CaseMonitoring.hold] stays monitored WHATEVER its status
+     *    becomes — an applicant who abandons it, an idle timer and an operator's rejection all
+     *    change the status as they always did, and none of them ends monitoring while a finding
+     *    is undecided or a confirmed match has not been exited;
+     *  - a completed exit ends it, and is the only thing that does for a case that owed one.
+     */
+    val monitored: Boolean
+        get() = monitoring.exitCompleted == null &&
+            (status == CaseStatus.SIGNED || status == CaseStatus.ACTIVE || monitoring.hold)
+
+    /**
+     * Whether this case can have registrations at all: only one that is or was approved. The
+     * repository skips the registration store for every other write.
+     */
+    val everApproved: Boolean
+        get() = status == CaseStatus.SIGNED ||
+            status == CaseStatus.ACTIVE ||
+            status == CaseStatus.REJECTED ||
+            status == CaseStatus.ABANDONED
+
+    /**
+     * Who must be registered right now: every current screened subject of a [monitored] case, and
+     * nobody for any other case. The registration store is brought to this set in the
+     * transaction of every write of the case, so it defines both "register" and "withdraw".
+     */
+    val monitoredSubjects: List<ScreeningSubject>
+        get() = if (monitored) screening?.subjects.orEmpty().filter { it.current } else emptyList()
+
+    /**
+     * Ongoing monitoring reports a match on the subject [MonitoringFinding.subjectKey]. It is
+     * recorded for an operator and changes nothing an applicant can read: not the status, not
+     * `updatedAt`. Returns the SAME instance for a finding already recorded. Refused for a case
+     * that is not [monitored] and for a subject the case does not currently carry.
+     */
+    fun monitoringMatched(finding: MonitoringFinding): BusinessOnboardingCase {
+        if (!monitored) throw CaseTransitionException("case is not under ongoing monitoring (status $status)")
+        if (monitoredSubjects.none { it.key == finding.subjectKey }) {
+            throw CaseTransitionException("no current subject of this case has that key")
+        }
+        val next = monitoring.recorded(finding)
+        return if (next === monitoring) this else copy(monitoring = next)
+    }
+
+    /**
+     * An operator decides ONE monitoring finding. See [MonitoringFinding.decided]. The decision
+     * that clears the last hold applies an activation the hold kept pending ([activatedIfClear]);
+     * `updatedAt` stays where the activation put it, so the case reads as if it had never waited.
+     */
+    fun monitoringFindingDecided(
+        findingId: UUID,
+        disposition: FindingDisposition,
+        operator: String,
+        reason: String,
+        at: Instant,
+    ): BusinessOnboardingCase =
+        copy(monitoring = monitoring.decided(findingId, disposition, operator, reason, at)).activatedIfClear()
+
+    /**
+     * A reviewer proposes that the owed exit has been carried out; see [CaseMonitoring.exitProposed].
+     * [entityPartyClosed] is party-service's word that the entity party is CLOSED.
+     */
+    fun exitProposed(
+        operator: StaffIdentity,
+        evidence: String,
+        entityPartyClosed: Boolean,
+        at: Instant,
+    ): BusinessOnboardingCase =
+        copy(monitoring = monitoring.exitProposed(operator, evidence, relationshipEnded(entityPartyClosed), at))
+
+    /** A DIFFERENT reviewer confirms it; monitoring ends with it. See [CaseMonitoring.exitConfirmed]. */
+    fun exitConfirmed(
+        checker: StaffIdentity,
+        evidence: String,
+        entityPartyClosed: Boolean,
+        at: Instant,
+    ): BusinessOnboardingCase =
+        copy(monitoring = monitoring.exitConfirmed(checker, evidence, relationshipEnded(entityPartyClosed), at))
+
+    /** The proposing person withdraws the pending exit proposal. See [CaseMonitoring.exitWithdrawn]. */
+    fun exitWithdrawn(by: StaffIdentity, at: Instant): BusinessOnboardingCase =
+        copy(monitoring = monitoring.exitWithdrawn(by, at))
+
+    /**
+     * The relationship has demonstrably ended: kyb no longer treats the case as approved (it was
+     * rejected or abandoned, never SIGNED or ACTIVE) AND the entity party is closed. Either alone
+     * is not enough — a closed case over a live party is still a customer.
+     */
+    private fun relationshipEnded(entityPartyClosed: Boolean): Boolean =
+        (status == CaseStatus.REJECTED || status == CaseStatus.ABANDONED) && entityPartyClosed
+
+    /**
+     * The ONE rule for becoming ACTIVE (#16028 item 1): signed, the entity party active, and no
+     * monitoring finding open or sanctions match confirmed. Every path to ACTIVE goes through here.
+     * A held case stays SIGNED with [entityPartyActive] set — that IS the pending activation, and
+     * the decision that clears the hold applies it; an owed exit means it is never applied.
+     */
+    private fun activatedIfClear(): BusinessOnboardingCase =
+        if (status == CaseStatus.SIGNED && entityPartyActive && !monitoring.blocksActivation) {
+            copy(status = CaseStatus.ACTIVE)
+        } else {
+            this
+        }
 
     /**
      * The register record has been fetched. Decides between the automatic path and manual review.
@@ -132,28 +244,14 @@ data class BusinessOnboardingCase(
         decision: RepresentationDecision,
         at: Instant,
     ): BusinessOnboardingCase = when (decision) {
-        is RepresentationDecision.Attested -> {
-            val a = decision.attestation
-            if (a.confirmedRoles.isNotEmpty()) {
-                // The operator confirmed the rule names WHICH offices sign. Who signs is checked
-                // against those offices when co-signers are invited; the count alone is not enough.
-                copy(
-                    status = CaseStatus.REGISTRY_VERIFIED,
-                    extract = extract,
-                    requiredSignatures = a.confirmedSigners,
-                    requiredSignerRoles = a.confirmedRoles,
-                    updatedAt = at,
-                )
-            } else {
-                copy(
-                    status = CaseStatus.REGISTRY_VERIFIED,
-                    extract = extract,
-                    requiredSignatures = a.confirmedSigners,
-                    requiredSignerRoles = emptyList(),
-                    updatedAt = at,
-                )
-            }
-        }
+        is RepresentationDecision.Attested -> copy(
+            status = CaseStatus.REGISTRY_VERIFIED,
+            extract = extract,
+            requiredSignatures = decision.attestation.confirmedSigners,
+            requiredSignerRoles = decision.attestation.confirmedRoles,
+            updatedAt = at,
+            representationAttestationId = decision.attestation.id,
+        )
 
         // The rule text CHANGED since the last confirmation. Say so rather than present a blank
         // form: this is the event the whole control exists for, and a reviewer who is not told
@@ -205,6 +303,8 @@ data class BusinessOnboardingCase(
         }
     }
 
+    fun mandateEvidenceRef(signer: Signer): String = "kyb-case:$id:signature:${signer.signatureRef}"
+
     private fun foldedRoles(ex: RegistryExtract, chosen: List<Signer>): List<String?> = chosen.map { s ->
         // getOrNull: a sole trader's initiatorMatched does not bounce an out-of-range index, and a
         // raw IndexOutOfBounds here would surface as an unmapped 500.
@@ -254,6 +354,18 @@ data class BusinessOnboardingCase(
      */
     private fun masculine(folded: String): String =
         FEMININE_OFFICES.entries.fold(folded) { acc, (f, m) -> acc.replace(f, m) }
+
+    /** Projects the existing register-office matching into the attested office slot order. */
+    internal fun statutoryOfficeSlots(chosen: List<Signer>): Map<UUID, Set<Int>> {
+        val register = requireNotNull(extract)
+        val roles = foldedRoles(register, chosen)
+        return chosen.mapIndexed { index, signer ->
+            val slots = requiredSignerRoles.indices.filter {
+                holdsOffice(roles[index], requiredSignerRoles[it])
+            }.toSet()
+            requireNotNull(signer.partyId) to slots
+        }.toMap()
+    }
 
     private fun roleSuffix(roles: List<String>) = if (roles.isEmpty()) "" else ", offices: ${roles.joinToString(", ")}"
 
@@ -498,7 +610,7 @@ data class BusinessOnboardingCase(
                 updatedAt = at,
             )
         }
-        return if (entityPartyActive) next.copy(status = CaseStatus.ACTIVE) else next.copy(status = CaseStatus.SIGNED)
+        return next.copy(status = CaseStatus.SIGNED).activatedIfClear()
     }
 
     fun riskFlags(highRiskCountries: Set<String>): List<String> = AmlRiskFlags.of(
@@ -677,8 +789,10 @@ data class BusinessOnboardingCase(
     /** The entity party passed the KYC + AML activation gate (ADR-0267); the relationship is live. */
     fun entityPartyActivated(at: Instant): BusinessOnboardingCase {
         require(!status.isTerminal) { "case is already $status" }
-        val flagged = copy(entityPartyActive = true, updatedAt = at)
-        return if (status == CaseStatus.SIGNED) flagged.copy(status = CaseStatus.ACTIVE) else flagged
+        // A redelivered activation is the SAME instance: no write, and `updatedAt` does not move,
+        // so a case a monitoring hold keeps SIGNED cannot be told apart by its timestamp.
+        if (entityPartyActive) return this
+        return copy(entityPartyActive = true, updatedAt = at).activatedIfClear()
     }
 
     fun rejected(reason: String, at: Instant): BusinessOnboardingCase {
@@ -723,11 +837,7 @@ data class BusinessOnboardingCase(
         if (next.signedCount >= requiredSignatures && next.officeShortfall(next.signedSigners).isEmpty()) {
             // An operator may decide a screening FINDING; nobody may approve past a missing one.
             next.requireScreened(screeningRequired)
-            return if (next.entityPartyActive) {
-                next.copy(status = CaseStatus.ACTIVE)
-            } else {
-                next.copy(status = CaseStatus.SIGNED)
-            }
+            return next.copy(status = CaseStatus.SIGNED).activatedIfClear()
         }
         return next.copy(status = CaseStatus.INITIATOR_MATCHED).recomputeReadiness(at)
     }
@@ -760,7 +870,7 @@ data class BusinessOnboardingCase(
      * missing: a case that stops moving without naming the reason is the failure mode this whole
      * check exists to avoid, one step later.
      */
-    private fun officeShortfall(chosen: List<Signer>): List<String> {
+    internal fun officeShortfall(chosen: List<Signer>): List<String> {
         val offices = requiredSignerRoles.filter { it.isNotBlank() }
         if (offices.isEmpty()) return emptyList()
         val ex = extract ?: return offices

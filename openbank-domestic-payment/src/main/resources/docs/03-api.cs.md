@@ -205,3 +205,19 @@ Postgres uloží tuto vazbu spolu s původní platbou.
 Odpověď se neukládá do mezipaměti. `FOUND` vrátí `paymentId` a aktuální `status`.
 Při chybějícím záznamu, rozdílném účtu nebo chybějící vazbě na zákazníka vrátí
 `UNKNOWN`. Nejdříve nasaďte tuto službu, potom customer-edge.
+
+## Delegovaná platba vázaná na rezervaci (#16000)
+
+`POST /api/v1/domestic-payments/delegated` smí volat jen ověřený servisní účet customer-edge (ostatní
+dostanou 403). Tělo nese `reservationId`, `delegationId`, `actingPartyId` a údaje platby. Platební
+kanál je ověří proti své projekci rezervací z delegation-service: rezervace musí být RESERVED a
+delegace, zmocněnec, účet plátce, částka, měna i `Idempotency-Key` musí odpovídat. Odmítnutí je
+`409` s `code`: `RESERVATION_PROJECTION_PENDING` (lze opakovat, `Retry-After`),
+`RESERVATION_NOT_RESERVED`, `RESERVATION_MISMATCH` (neutrální) nebo `IDEMPOTENCY_KEY_REUSED`;
+`503 ACCOUNT_AUTHORITY_UNAVAILABLE` lze opakovat. Opakování se stejným klíčem vrátí tutéž platbu.
+Události platby nesou `delegationId` a `reservationId`.
+
+Kontrola oprávnění při vytvoření (ADR-0375 D1) odpoví `409 DELEGATION_AUTHORITY_WITHDRAWN`, když
+byla delegace odvolána nebo už účet nepokrývá. Odmítá jen NOVOU platbu: opakování s klíčem platby,
+která je k rezervaci už navázaná, vrátí tuto platbu, protože peníze odešly ještě za platné delegace.
+Nový klíč proti navázané rezervaci se dál odmítne.

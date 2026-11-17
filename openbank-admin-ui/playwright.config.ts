@@ -73,11 +73,19 @@ export default defineConfig({
     reducedMotion: 'reduce',
   },
 
+  // ADR-0370 U8: Firefox and WebKit run only when OPENBANK_E2E_ENGINES=all (the nightly
+  // admin-ui-engines workflow); every PR keeps the single Chromium project and its wall time.
   projects: [
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    ...(process.env.OPENBANK_E2E_ENGINES === 'all'
+      ? [
+          { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+          { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+        ]
+      : []),
   ],
 
   webServer: [{

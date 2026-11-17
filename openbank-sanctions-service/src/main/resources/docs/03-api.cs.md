@@ -125,6 +125,8 @@ profilu. Jen profil `CUSTOMER` vrací i jména se skóre 0,65–0,85, jako `POTE
 poslat k přezkumu. `PAYMENT` a prověření bez profilu pod 0,85 nehledají, takové jméno tam vyjde
 `CLEAR` — platba zatím nemá stav, ve kterém by na přezkum počkala (#15724).
 
+Pod 0,85 navíc porovnání po jednotlivých částech jména vyřadí kandidáty, kteří sdílí jen jednu část jména (třeba běžné křestní jméno s jiným příjmením). Skóre celého jména 0,85 a vyšší nikdy nesníží: takový kandidát zůstane `HIT` v každém profilu, včetně `CUSTOMER` a monitoringu změn (#16284).
+
 `/api/v1` je zmrazené: všechny tři vstupy odmítá s 400 a prověření vytvořené s nimi přes
 `/api/v1` nelze číst.
 
@@ -145,6 +147,14 @@ Authorization: Bearer <token>
 `newStatus` ∈ `CLEAR | HIT | POTENTIAL_HIT | WHITELISTED | ESCALATED`
 
 Přezkoumávající zaznamenaný u rozhodnutí je přihlášený principal (`preferred_username` z tokenu). Přezkoumávajícího v těle neposílejte: pole `reviewedBy` se z důvodu kompatibility přijme, ale ignoruje se.
+
+**Identita agenta (maker v rámci čtyř očí).** `service-account-openbank-agent` (MCP nástroj
+`sanctions_review_check` v agent-service) smí tento endpoint volat, a to pouze s `newStatus: CLEAR`;
+jakýkoli jiný stav vrátí 403. Čtyři oči jeho volání pozastaví (`202` + `approvalId`), dokud jej
+lidský checker neschválí v `/api/v1/sanctions/approvals/{id}`; agent pak stejný požadavek zopakuje
+s `X-Approval-Id`. Jako přezkoumávající se zaznamená tento lidský checker. Dokud čtyři oči nejsou
+vynucené, je agent odmítnut vždy. Identita agenta nikdy nedostává `sanctions.approval.decide`. `/api/v1/.../review`
+zůstává jen pro lidi.
 
 ### Získat konkrétní prověření
 
