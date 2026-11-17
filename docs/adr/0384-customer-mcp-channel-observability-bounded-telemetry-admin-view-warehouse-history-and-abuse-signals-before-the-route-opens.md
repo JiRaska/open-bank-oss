@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [observability, ai-agents, fraud, privacy-gdpr]
-summary: "The customer MCP channel opens only once observable: hash-linked MCP audit, closed-label metrics on the existing series, warehouse facts under a per-party shreddable key, break-glass client suspend, approval-time fraud evidence."
+summary: "Customer MCP opens only once observable: hash-linked audit, closed-label metrics, warehouse facts under per-party shreddable keys, single-actor client suspend and connection revoke, four-eyes unsuspend and bulk revoke."
 ---
 
 # ADR-0384 — Customer MCP channel observability: bounded telemetry, admin view, warehouse history and abuse signals before the route opens
@@ -111,7 +111,7 @@ Each point was checked against `origin/main` on 2026-11-17.
    abuse analytics and alerts, with a human acting on them (D3, D4), not to a fraud verdict.
 10. **Customer self-revoke is exempt from four-eyes, and must stay so; the operator actions are
     not built.** `rules.yaml` defers four-eyes enforcement for delegation-service (expiry
-    2027-03-10) because `delegation.revoke`, `disclosure.release` and `reserve.release` are granted
+    2027-03-10) because `delegation.revoke`, `delegation.disclosure.release` and `delegation.reserve.release` are granted
     to the edge M2M identity and the service wires no `ApprovalStore`. The `ApprovalStore` is
     before-effect only: it parks a request until a second person approves. The `rules.yaml` pattern for this case (the SDD note) is that an operator path
     gets its own distinct action, and that action is gated.
@@ -211,7 +211,8 @@ the route stays closed.**
   (D4). `jktRef` is an HMAC of the thumbprint under a delegation-service key; the raw `jkt` stays
   only on the grant row, where ADR-0383 D3 needs it. Consumer Pacts are added for analytics-sink
   and fraud-service.
-- **Tool calls:** through the D0 outbox (plain rows, SENT purge per ADR-0329), mcp-service publishes one `mcp.customer.tool-call.v1` fact per
+- **Tool calls:** through the D0 outbox (plain rows, SENT purge per ADR-0329), mcp-service publishes one `mcp.customer.tool-call.v1` fact on topic
+  `openbank.mcp.customer.tool-calls` per
   customer-channel `tools/call`, **after** the ADR-0383 D5 token step (tokenless floods are counted
   in D1, never written per request). Fields: event id, occurred-at, client id, party id (raw, on the
   authenticated in-cluster hop only), tool, capability, decision, outcome, reject layer/reason,
@@ -241,19 +242,51 @@ the route stays closed.**
     partyId)`, computed by Vault; the key material never leaves Vault. The sink replaces every party
     id on the three channel topics with `party_ref` before writing, so raw party ids never land in
     ClickHouse for this channel.
+  - **Only ingest creates keys.** A key is created when the first channel event for a party is
+    ingested, and nowhere else. The lookup endpoint below is derive-only.
   - **No cache that outlives the key.** The sink keeps an in-memory `partyId → party_ref` map with
-    a 15-minute TTL, dropped on restart. The erasure path evicts the entry before it destroys the
-    key. So after erasure, at most the in-flight batch is written under the old ref.
-  - **No silent re-creation after erasure.** Before creating a key, the sink checks an
-    `erased_subjects` table (new, keyed by aggregate key, written by `ErasureService` on `ERASED`).
-    An erased party gets `party_ref = NULL`, so its new events are counted in aggregates and linked
-    to nothing. A re-onboarded person is a new party id and a new key.
+    a 15-minute TTL, lost on restart. The erasure path evicts the entry before it destroys the key.
+    So after erasure, at most the in-flight batch is written under the old ref.
+  - **No silent re-creation after erasure.** Before creating a key, the sink reads an
+    `erased_subjects` table, which is new.
+    - **Contents.** Raw party id, aggregate type and erased-at time.
+    - **When it is written.** `ErasureService` writes the row on `ERASED`, **before** it destroys
+      the key.
+    - **How it is read.** Read-through on every key creation, with no cache. So there is no
+      window in which an erased party can be keyed again.
+    - **Effect.** An erased party gets `party_ref = NULL`: its new events are counted in aggregates
+      and linked to nothing. A re-onboarded person is a new party id and a new key.
+    - **Classification (ADR-0118).** A compliance tombstone: the record that an erasure was done.
+      It has the same class and retention as the `ErasureDecision` audit record, which ADR-0023
+      makes the record of what was erased.
+    - **Containment.** It is sink-internal. It is never exposed through the query registry,
+      Grafana, a mart or the lookup endpoint, and analytics-sink's ClickHouse grants give other
+      readers no access to it.
+    - **Backup and replication.** It follows the warehouse's own backup and replication. A restore
+      that lost it would lose erasures, so the restore runbook checks it against audit-service's
+      `ErasureDecision` records.
+    - **Exempt from further erasure.** Erasing the tombstone would undo the erasure it guards,
+      under GDPR Art. 17(3)(b), the legal-obligation hold ADR-0118 already applies, to demonstrate
+      that the erasure was carried out.
   - **Connections lookup without a second key holder.** The admin Connections view does not
     compute `party_ref`. The BFF calls one analytics-sink endpoint,
-    `GET /api/v1/mcp/party-activity/{partyId}` (permission-gated, audit-stamped). The sink derives
-    the ref and runs a fixed query over `silver_mcp_tool_calls`. This is the single, named
-    exception to ADR-0286's registry-only read path, and it exists because only the sink may hold
-    the key.
+    `GET /api/v1/mcp/party-activity/{partyId}?purpose=<closed enum>`.
+    - **Who may call it.** analytics-sink runs no OPA sidecar, so a caller guard is the
+      authorization. It is modelled on `CreditProfileCallerGuard`: a pinned principal-id set,
+      checked by a test against the caller's own client configuration. The machine caller must be
+      `service-account-openbank-admin-ui`, identified by principal id per the CLAUDE.md OPA rule,
+      never by principal type.
+    - **Which operator.** The request must also carry the operator's own staff-realm token, and the
+      guard requires the role that `ErasureResource` already uses for compliance reads
+      (`Roles.COMPLIANCE`, or `Roles.ADMIN`). The BFF additionally checks the admin-ui permission
+      `compliance:view` before calling.
+    - **Audit.** Every call, allowed or denied, writes an audit event with the operator, the
+      machine caller, the `partyId` and the purpose.
+    - **Derive-only.** The lookup never creates a key. If `analytics-party-<partyId>` does not
+      exist, the answer is "no activity". The same is true for a party in `erased_subjects`.
+    - **The query.** One fixed parameterised query over `silver_mcp_tool_calls`, with no SQL from
+      the caller. It is the **sole per-party read exception** to ADR-0286's registry-only path, and
+      it exists only because the sink is the only key holder.
   - **Prerequisite.** Until `ANALYTICS_ERASURE_BACKEND=vault` is deployed (Context 7), these topics
     are **not** ingested. A `NO_BACKEND` sink must not start collecting party-keyed channel history.
   - **Residual linkage, stated.** Erasure severs `party_ref`, but `jktRef` plus event timestamps on
@@ -334,8 +367,8 @@ A `Customer MCP` page under the existing `/delegations` area. Every request goes
   - **The four-eyes interaction.** Wiring an `ApprovalStore` is what the delegation-service
     deferral waits for, so the same change must keep customer self-service flowing. It adds a
     `four_eyes.exemptions` entry `delegation.revoke` for the edge's verified service account (the
-    principal behind the `edge-service-delegation` grant), and the same for `disclosure.release`
-    and `reserve.release`, the other two actions the deferral names. It also replaces the
+    principal behind the `edge-service-delegation` grant), and the same for
+    `delegation.disclosure.release` and `delegation.reserve.release`, the other two actions the deferral names. It also replaces the
     delegation-service deferral entry. Customer self-revoke therefore stays single-party and is
     never parked.
 
@@ -501,14 +534,23 @@ removed. In the sandbox the route stays closed until all pass.
   ('silver_mcp_tool_calls','gold_mcp_abuse_indicators')` shows `INTERVAL 90 DAY` on both.
 - **Key derivation and erasure.** `PartyRefDerivationIT` in analytics-sink, against a dev OpenBao
   with Transit, runs these steps:
+  0. A lookup for a never-seen party Q returns "no activity", and no key `analytics-party-<Q>`
+     exists afterwards.
   1. An event for party P creates the key `analytics-party-<P>`.
   2. The stored `party_ref` equals a direct Transit HMAC under that key.
   3. An erasure request for P returns `ERASED`, not `NO_BACKEND`, and the key is gone.
   4. Recomputing the HMAC is impossible (404).
   5. A new event for P stores `party_ref = NULL`, and `erased_subjects` holds P.
-  With the `erased_subjects` check removed, step 5 recreates a key and the test fails.
+  With the `erased_subjects` check removed, step 5 recreates a key and the test fails. With the
+  lookup's derive-only guard removed, step 0 leaves a key behind and the test fails.
+  `PartyActivityCallerGuardTest` shows that another service account, and the admin-ui account
+  without a compliance-role operator token, both get 403. It also shows that each call writes one
+  audit event.
 - **No PII on the wire.** `McpToolCallEventSchemaTest` rejects any property named `iban`, `amount`,
   `reference`, `arguments`, `body` or `result` in the tool-call AsyncAPI schema.
+- **Topic registry.** `openbank-libs-domain/.../analytics/TopicProducers.kt` lists
+  `openbank.delegation.mcp-client-events` (producer delegation-service) and
+  `openbank.mcp.customer.tool-calls` (producer mcp-service).
 - **Topic separation.** A consumer test in each of account-service, card-issuance-service,
   notification-service, tax-reporting-service and context-service feeds an `MCP_CLIENT` record and
   asserts it is ignored. `grep -c MCP_CLIENT` over the `openbank.delegation.events` channel of the
@@ -522,8 +564,11 @@ removed. In the sandbox the route stays closed until all pass.
 
   `McpClientFourEyesIT` shows unsuspend and bulk revoke change nothing until a second operator
   approves, and that the maker cannot approve their own request. `DelegationRevokeExemptionIT`
-  shows the edge service account's `delegation.revoke` is not parked once the `ApprovalStore` is
-  wired.
+  shows the edge service account's `delegation.revoke`, `delegation.disclosure.release` and
+  `delegation.reserve.release` are each not parked once the `ApprovalStore` is wired.
+  The persistence is new Flyway migrations in delegation-service (`mcp_client_suspension`,
+  `breakglass_review`), and the four actions are new operations in delegation-service's
+  `openapi.yaml`, classified by the ADR-0048 contract gate. Both ship with the tests above.
 - **Fraud evidence.** With a shadow rule reading `origin`, an approved journey proposal yields a
   fraud decision whose recorded context has `initiationMode = CUSTOMER_PRESENT` and
   `origin = MCP_CLIENT_PROPOSAL`, and the shadow rule leaves the verdict unchanged.
