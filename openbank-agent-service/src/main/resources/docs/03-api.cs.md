@@ -51,6 +51,7 @@ Nástroje jsou seskupeny podle charter capability, kterou vyžadují (`McpToolRe
 | `read.catalog` | `list_products`, `get_product`, `get_product_fees` |
 | `query.compliance.readonly` | `aml_list_cases`, `aml_get_case`, `sanctions_list_checks`, `sanctions_get_check`, `sanctions_list_pending` |
 | `propose.aml.decision` | `aml_propose_case_decision` — pouze HITL návrh; případ se změní až rozhodnutím člověka |
+| `sanctions.review.maker` | `sanctions_review_check` — podá review hitu jako maker; účinné až po schválení jiným člověkem (checker) |
 | `query.payments.readonly` | `fx_list_rates`, `fx_get_rate`, `clearing_list_batches`, `clearing_get_batch`, `clearing_get_batch_items`, `sepa_instant_list`, `sepa_instant_get`, `sepa_instant_list_by_debtor` |
 | `query.interest.readonly` | `interest_list_accruals`, `interest_get_accruals`, `interest_accrual_summary` |
 | `query.disputes.readonly` | `dispute_list`, `dispute_get`, `dispute_list_by_account`, `dispute_get_timeline` |

@@ -270,6 +270,24 @@ browser-provider hiding and the unchanged client-credentials fallback.
 
 ## 4. Change log
 
+- **2026-11-16 (sanctions false-positive triage, #16381):** New MCP tool `sanctions_review_check`,
+  capability `sanctions.review.maker`, compliance-officer only. **New upstream WRITE grant:**
+  `service-account-openbank-agent` may call `sanctions.clear` on `POST /api/v3/sanctions/review` as the
+  four-eyes MAKER (rule `service-agent-sanctions-review-maker`). It is never granted
+  `sanctions.approval.decide`, and self-approval is refused by the approval store, so a human is always
+  the checker. **STRIDE-E:** an injected prompt can at most queue pending approvals (bounded by the
+  store's per-maker pending limit) that a human must approve one by one; the tool refuses to confirm a
+  hit (target CLEAR only) and any check not awaiting review. **Dependency:**
+  the control rests on sanctions-service `AUTHZ_FOUR_EYES_ENFORCE="true"`; with it off the review would
+  execute unapproved, so `AgentMachineGrantCharterAlignmentTest` fails unless the deployed value is
+  `"true"`. **STRIDE-R:** maker is the agent identity (approval `makerActorKind`), checker the human id.
+  **Unattended runs cannot submit (#16455 review):** the oversight sweep shares the compliance-officer
+  charter, so `sanctions_review_check` is INTERACTIVE_ONLY: never offered to, and refused at
+  execution by, the chat loop the sweep runs through, and refused by the tool itself unless a
+  verified person drives the MCP session. **Accepted risk (owner, 2026-11-16):** the person who instructed the agent may also be the checker,
+  so one human plus the agent can clear a hit; see the sanctions-service threat model for rationale.
+  Rollback: revert (drops the rego rule, the ROLE_API admission and the tool together).
+
 - **2026-11-15 (AML false-positive triage):** New MCP tool `aml_propose_case_decision`, capability
   `propose.aml.decision` (tier `write_proposal`), granted to the `compliance-officer` charter only.
   It reads the case through the existing `aml_get_case` path, refuses an unknown target status, a

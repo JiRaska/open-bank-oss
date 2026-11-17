@@ -27,4 +27,12 @@ data class ReviewRequest(val checkId: UUID, val note: String, val newStatus: San
         note = note,
         newStatus = newStatus,
     )
+
+    /** For an approved agent review: [reviewedBy] is the human checker, the note records the maker. */
+    fun toCommand(reviewedBy: String, noteSuffix: String) = ReviewCommand(
+        checkId = checkId,
+        reviewedBy = reviewedBy,
+        note = note + noteSuffix,
+        newStatus = newStatus,
+    )
 }
