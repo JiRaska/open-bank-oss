@@ -101,4 +101,4 @@ data class BranchPaymentRequest(
     val valueDate: java.time.LocalDate,
     val createdBy: UUID,
 )
-data class BranchPaymentReceipt(val transactionId: UUID, val bankId: UUID, val journalIds: List<UUID>)
+data class BranchPaymentReceipt(val transactionId: UUID, val bankId: UUID, val journalIds: List<UUID?>)

@@ -13,7 +13,10 @@ BEGIN
     IF ROW(NEW.source_booking_bank_id,NEW.source_booking_establishment_id,NEW.source_booking_host_country,NEW.source_booking_mode,
            NEW.target_booking_bank_id,NEW.target_booking_establishment_id,NEW.target_booking_host_country,NEW.target_booking_mode)
        IS DISTINCT FROM ROW(OLD.source_booking_bank_id,OLD.source_booking_establishment_id,OLD.source_booking_host_country,OLD.source_booking_mode,
-           OLD.target_booking_bank_id,OLD.target_booking_establishment_id,OLD.target_booking_host_country,OLD.target_booking_mode) THEN
+           OLD.target_booking_bank_id,OLD.target_booking_establishment_id,OLD.target_booking_host_country,OLD.target_booking_mode)
+       OR ((OLD.source_booking_bank_id IS NOT NULL OR OLD.target_booking_bank_id IS NOT NULL)
+           AND ROW(NEW.source_account_id,NEW.target_account_id)
+               IS DISTINCT FROM ROW(OLD.source_account_id,OLD.target_account_id)) THEN
         RAISE EXCEPTION 'Transaction booking context is immutable' USING ERRCODE='23514';
     END IF;
     RETURN NEW;

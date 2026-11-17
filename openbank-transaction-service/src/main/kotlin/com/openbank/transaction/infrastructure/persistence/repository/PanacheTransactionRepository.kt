@@ -152,6 +152,14 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
                             "(expected version ${transaction.version})",
                     )
                 }
+                val stored = entity.toDomain()
+                val sameAccounts = stored.sourceAccountId == transaction.sourceAccountId &&
+                    stored.targetAccountId == transaction.targetAccountId
+                val sameContext = stored.sourceBookingContext == transaction.sourceBookingContext &&
+                    stored.targetBookingContext == transaction.targetBookingContext
+                if (!sameAccounts || !sameContext) {
+                    throw TransactionUpdateConflictException("Transaction booking route cannot be changed")
+                }
                 entity.apply {
                     status = transaction.status.name
                     completedAt = transaction.completedAt

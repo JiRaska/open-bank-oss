@@ -131,6 +131,51 @@ class BranchPaymentRecoveryIT {
     }
 
     @org.junit.jupiter.api.Test
+    fun `status update rejects an altered route before emitting a misleading completed event`() {
+        val seeded = seedPendingTransfer(false)
+        java.sql.DriverManager.getConnection(jdbc, databaseUser, databasePassword).use { db ->
+            val bindingChange = runCatching {
+                db.createStatement().use {
+                    it.execute(
+                        "UPDATE transactions SET source_account_id='${UUID.randomUUID()}' WHERE id='${seeded.id}'",
+                    )
+                }
+            }.exceptionOrNull()
+            assertThat(bindingChange).isInstanceOf(java.sql.SQLException::class.java)
+        }
+        val changed = seeded.copy(
+            sourceBookingContext = seeded.sourceBookingContext!!.copy(establishmentId = UUID.randomUUID()),
+        )
+        val failure = runCatching {
+            onVertxContext {
+                transactionRepository.update(
+                    changed,
+                    OutboxMessage(
+                        aggregateId = seeded.id,
+                        eventType = COMPLETED_EVENT,
+                        payload = "{}",
+                    ),
+                )
+            }
+        }.exceptionOrNull()
+        assertThat(
+            generateSequence(failure) { it.cause }.any {
+                it is com.openbank.transaction.application.usecase.TransactionUpdateConflictException
+            },
+        ).isTrue()
+        val stored = onVertxContext { transactionRepository.findById(seeded.id) }!!
+        assertThat(stored.sourceBookingContext).isEqualTo(seeded.sourceBookingContext)
+        assertThat(stored.status).isEqualTo(TransactionStatus.PENDING)
+        val events = onVertxContext {
+            Panache.withSession {
+                outboxRepository.find("aggregateId = ?1 and eventType = ?2", seeded.id, COMPLETED_EVENT).list()
+            }
+                .awaitSuspending()
+        }
+        assertThat(events).isEmpty()
+    }
+
+    @org.junit.jupiter.api.Test
     @io.quarkus.test.security.TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
     fun `HTTP ingestion obtains the account-owned route and commits it before async settlement`() {
         val source = UUID.randomUUID()

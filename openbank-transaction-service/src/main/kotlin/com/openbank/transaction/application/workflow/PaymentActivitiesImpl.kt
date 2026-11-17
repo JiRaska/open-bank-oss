@@ -126,10 +126,11 @@ open class PaymentActivitiesImpl(
         } else {
             1
         }
-        check(receipt.journalIds.size == expected && receipt.journalIds.distinct().size == expected) {
+        val journalIds = receipt.journalIds.map { checkNotNull(it) { "Branch receipt contains a missing journal" } }
+        check(journalIds.size == expected && journalIds.distinct().size == expected) {
             "Incomplete branch payment receipt"
         }
-        return receipt.journalIds.first()
+        return journalIds.first()
     }
 
     // Best-effort compensation: balance-service TTL-expires the hold and the ledger reversal is
