@@ -151,7 +151,8 @@ The `renderFrozenFinrep` Gradle task reads a staged JSON trial balance and an
 independently approved SHA-256 digest. Its arguments are the input path, digest,
 approved context identifier, reporting date and a new output path. It verifies
 the exact scope, date, input shape and balance verdict before mapping F01.01.
-The input is bounded to one MiB and the output path must not already exist.
+The input is bounded to eight MiB and 50,000 trial-balance lines; the output
+path must not already exist.
 
 The input scope identifies its company, domestic/FOS/branch mode, establishment
 when applicable and accounting perimeter version. Produce and reconcile that
