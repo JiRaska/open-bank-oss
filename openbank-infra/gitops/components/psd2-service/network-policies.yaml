@@ -31,7 +31,7 @@ metadata:
   namespace: psd2
   labels:
     app.kubernetes.io/part-of: psd2
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -73,7 +73,7 @@ metadata:
   namespace: psd2
   labels:
     app.kubernetes.io/part-of: psd2
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

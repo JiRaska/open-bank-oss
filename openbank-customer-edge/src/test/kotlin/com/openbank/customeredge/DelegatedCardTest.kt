@@ -306,6 +306,68 @@ class DelegatedCardTest {
         verify(exactly = 0) { upstream.post(match { it.endsWith("/api/v1/cards") }, any(), any(), any()) }
     }
 
+    // ── ADR-0375 D7: the action's OWN capability, not whichever one happened to be checked ──
+
+    @Test
+    fun `freezing a shared card asks for CARD_MANAGE_STATUS, not the limits capability`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/cards/$cardId") }, any()) } returns cardJson(holder = grantor)
+        every { upstream.get(match { it.contains("/accounts/$account") }, any()) } returns accountJson(grantor)
+        val asked = slot<String>()
+        every {
+            upstream.post(match { it.contains("/delegations/check") }, any(), capture(asked))
+        } returns granted(true)
+        every {
+            upstream.post(match { it.contains("/cards/$cardId/suspend") }, any(), any(), any(), any())
+        } returns Response.ok("{}").build()
+
+        val resp = resourceFor(upstream, grantee).freezeCard(cardId)
+
+        assertThat(resp.status).isEqualTo(200)
+        // This is the assertion the change exists for. Before it, freeze/unfreeze/block were gated
+        // on CARD_MANAGE_LIMITS, so CARD_MANAGE_STATUS was grantable and read by nothing while a
+        // different authority stood in for it. Asserting the capability ASKED is the only thing
+        // that can tell the two apart — the response was 200 either way.
+        assertThat(asked.captured).contains("CARD_MANAGE_STATUS")
+        assertThat(asked.captured).doesNotContain("CARD_MANAGE_LIMITS")
+    }
+
+    @Test
+    fun `a grantee holding only CARD_MANAGE_LIMITS cannot freeze the card`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/cards/$cardId") }, any()) } returns cardJson(holder = grantor)
+        every { upstream.get(match { it.contains("/accounts/$account") }, any()) } returns accountJson(grantor)
+        // delegation-service is asked for CARD_MANAGE_STATUS and says no: a limit is not a status.
+        every { upstream.post(match { it.contains("/delegations/check") }, any(), any()) } returns granted(false)
+
+        val resp = resourceFor(upstream, grantee).freezeCard(cardId)
+
+        assertThat(resp.status).isEqualTo(403)
+        verify(exactly = 0) { upstream.post(match { it.contains("/suspend") }, any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `changing card channels asks for CARD_MANAGE_CHANNELS`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/cards/$cardId") }, any()) } returns cardJson(holder = grantor)
+        every { upstream.get(match { it.contains("/accounts/$account") }, any()) } returns accountJson(grantor)
+        val asked = slot<String>()
+        every {
+            upstream.post(match { it.contains("/delegations/check") }, any(), capture(asked))
+        } returns granted(true)
+        every { upstream.put(any(), any(), any(), any(), any()) } returns Response.ok("{}").build()
+
+        val resp = resourceFor(upstream, grantee).updateCardControls(
+            cardId,
+            """{"contactlessEnabled":true,"onlineEnabled":false,"atmEnabled":true,"abroadEnabled":false}""",
+        )
+
+        assertThat(resp.status).isEqualTo(200)
+        // /controls toggles contactless, online, ATM and abroad — channels, not limits.
+        assertThat(asked.captured).contains("CARD_MANAGE_CHANNELS")
+        assertThat(asked.captured).doesNotContain("CARD_MANAGE_LIMITS")
+    }
+
     @Test
     fun `a grantee holding only CARD_VIEW cannot move the limits`() {
         val upstream = mockk<UpstreamClient>()

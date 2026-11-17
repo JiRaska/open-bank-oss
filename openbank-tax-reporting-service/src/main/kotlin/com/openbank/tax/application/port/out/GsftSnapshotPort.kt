@@ -38,7 +38,13 @@ data class GsftSnapshot(
     val specialShares: List<SpecialRegimeShare>,
     /** § 41e odst. 3 credits a depositor has claimed; claim-based, so empty until one is filed. */
     val qualifyingCredits: List<QualifyingCredit>,
+    /** Unique synthetic roster accounts removed before fetching principal, outside [accounts]. */
+    val syntheticAccountsDroppedAtSource: Int = 0,
 ) {
+    init {
+        require(syntheticAccountsDroppedAtSource >= 0) { "Synthetic account count cannot be negative" }
+    }
+
     val complete: Boolean get() = gaps.isEmpty()
 
     /** Refuses a snapshot that still carries an unsourced field — the GSFT delivery must not use it. */
@@ -54,7 +60,7 @@ data class GsftSnapshot(
 
 /** A field of the GSFT delivery with no verified upstream source (gsft-depositor-data.md, "Data sourcing"). */
 enum class GsftDataGap {
-    /** Roster is account-service's CURRENT ACTIVE list: dormant/frozen deposits and day-D state are missing. */
+    /** Historical snapshot marker for packages built before the date-bound deposit roster. */
     ROSTER_ACTIVE_ONLY_CURRENT,
 
     /** account-service carries one partyId per account: joint holders and shares are unknown. */

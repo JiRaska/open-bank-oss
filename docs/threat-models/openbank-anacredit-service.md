@@ -18,7 +18,7 @@ service — read-only access to internal data, write-only to the regulator's end
 ## 2. Data flow (DFD)
 
 ```
-[lending-service]  --read--> [openbank-anacredit-service] --submit--> [ECB/CNB endpoint (HTTPS)]
+[lending-service]  --Kafka lending events--> [openbank-anacredit-service] --submit--> [ECB/CNB endpoint (HTTPS)]
 [ledger-service]   --read--> [openbank-anacredit-service]
 ```
 
@@ -57,6 +57,12 @@ service — read-only access to internal data, write-only to the regulator's end
 ## 5. Residual risks / assumptions
 
 - **ECB credential rotation:** submission credentials in OpenBao must be rotated before expiry — manual process for now, tracked in the operational runbook.
+- **Dated lending facts (#9890):** The existing lending-topic ACL scopes source authority.
+  AnaCredit's `LoanExposureFactConsumer` validates the event version, kind, identifiers, amounts
+  and effective time before `LoanExposureFactStore` appends. Event and source-reference uniqueness
+  accept exact replays and reject conflicting reuse. The stored loan, application and party
+  identifiers and native amounts remain within the reporting service's Postgres boundary. The
+  fact history is separate from the exposure register used to submit reports.
 - **Data completeness gate:** if lending-service returns partial data (circuit open), the service should skip and alarm rather than submit incomplete records — this is a compliance risk, currently mitigated by a health-check gate before submission.
 
 ## 6. Change log

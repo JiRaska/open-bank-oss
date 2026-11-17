@@ -31,7 +31,7 @@ metadata:
   namespace: aml
   labels:
     app.kubernetes.io/part-of: aml
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -66,6 +66,9 @@ spec:
               kubernetes.io/metadata.name: platform
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: sdd
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP
@@ -92,7 +95,7 @@ metadata:
   namespace: aml
   labels:
     app.kubernetes.io/part-of: aml
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

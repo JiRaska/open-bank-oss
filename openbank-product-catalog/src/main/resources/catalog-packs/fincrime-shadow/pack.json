@@ -1,0 +1,43 @@
+{
+  "pack": "fincrime-shadow",
+  "schemas": [
+    {
+      "id": "org.openbank.fincrime.aml-count-shadow",
+      "version": 1,
+      "resource": "aml-count-shadow-v1.schema.json",
+      "approvalPolicy": {
+        "roles": [
+          {
+            "code": "AML_REVIEWER",
+            "authority": "FINCRIME_AML_APPROVER"
+          }
+        ],
+        "requireEffectiveFrom": true,
+        "requireStablePrincipal": true,
+        "requiredAttributes": {
+          "mode": "SHADOW",
+          "evidenceClass": "SYNTHETIC"
+        }
+      }
+    },
+    {
+      "id": "org.openbank.fincrime.fraud-count-shadow",
+      "version": 1,
+      "resource": "fraud-count-shadow-v1.schema.json",
+      "approvalPolicy": {
+        "roles": [
+          {
+            "code": "FRAUD_REVIEWER",
+            "authority": "FINCRIME_FRAUD_APPROVER"
+          }
+        ],
+        "requireEffectiveFrom": true,
+        "requireStablePrincipal": true,
+        "requiredAttributes": {
+          "mode": "SHADOW",
+          "evidenceClass": "SYNTHETIC"
+        }
+      }
+    }
+  ]
+}

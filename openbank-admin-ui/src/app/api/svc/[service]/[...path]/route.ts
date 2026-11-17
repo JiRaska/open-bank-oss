@@ -113,7 +113,7 @@ async function proxy(
   // upstream bearer, so backend RBAC sees the real caller. We never overwrite an
   // explicit Authorization already on the request (service-to-service / tests).
   const session = await auth()
-  if (!headers.has('authorization')) {
+  if (!headers.has('authorization') && session?.user?.error !== 'RefreshAccessTokenError') {
     const accessToken = session?.user?.accessToken
     if (accessToken) headers.set('authorization', `Bearer ${accessToken}`)
   }

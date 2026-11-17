@@ -38,6 +38,17 @@ allowed_reasons contains "operator-party-write" if {
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	startswith(input.action, "party.")
+    input.action != "party.pii.reveal"
+}
+
+# Full personal data has a distinct grant. The REST endpoint additionally requires a verified
+# interactive staff token and persists the disclosure record before it returns data.
+allowed_reasons contains "staff-party-pii-reveal" if {
+    input.principal.type == "HUMAN"
+    not principal_is_machine
+    some role in {"ROLE_ADMIN", "ROLE_KYC"}
+    role in input.principal.roles
+    input.action == "party.pii.reveal"
 }
 
 # M2M callers (verified in-repo).
@@ -136,4 +147,18 @@ allowed_reasons contains "service-delegation-mandate-read" if {
 	input.principal.type == "HUMAN"
 	machine_named("service-account-openbank-delegation")
 	input.action in {"party.mandate.read"}
+}
+
+allowed_reasons contains "kyb-publishes-statutory-representation" if {
+    input.principal.type == "HUMAN"
+    input.principal.service_account == true
+    machine_named("service-account-openbank-kyb")
+    input.action == "party.statutory-representation.publish"
+}
+
+allowed_reasons contains "delegation-inspects-statutory-representation" if {
+    input.principal.type == "HUMAN"
+    input.principal.service_account == true
+    machine_named("service-account-openbank-delegation")
+    input.action == "party.statutory-representation.inspect"
 }

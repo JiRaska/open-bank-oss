@@ -12,7 +12,7 @@
 // operator whose password lives only in an Actions secret (#13171).
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 
 // One entry per money-path admin screen (rules.yaml: money_path_services).
 const MONEY_PATH_SCREENS = [

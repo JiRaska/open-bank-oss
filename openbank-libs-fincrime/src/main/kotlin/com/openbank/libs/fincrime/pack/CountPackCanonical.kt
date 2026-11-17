@@ -31,7 +31,7 @@ internal object CountPackCanonical {
         ),
     )
 
-    private fun vocabulary(ref: VocabularyRef) = mapOf(
+    fun vocabulary(ref: VocabularyRef) = mapOf(
         "id" to ref.id,
         "revision" to ref.revision,
         "hash" to ref.contentHash,
@@ -43,7 +43,7 @@ internal object CountPackCanonical {
         "hash" to ref.contentHash,
     )
 
-    private fun effect(effect: CountEffect): Map<String, String> = when (effect) {
+    fun effect(effect: CountEffect): Map<String, String> = when (effect) {
         is CountEffect.AmlTriage -> mapOf("type" to "AML_TRIAGE", "severity" to effect.severity.value)
         is CountEffect.FraudAssessment -> mapOf("type" to "FRAUD_ASSESSMENT", "verdict" to effect.verdict.name)
     }

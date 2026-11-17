@@ -11,7 +11,7 @@ metadata:
   # Admit each declared caller only on the port its URL names: customer-edge reaches the
   # participant API over internal TLS 8443 and never over cleartext 8171.
   annotations:
-    openbank.io/port-scoped-ingress: "true"
+    open-bank.tech/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: pension-service
     app.kubernetes.io/part-of: pension
@@ -36,7 +36,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-pension-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "69416a548337c543"
+        openbank.tech/policy-checksum: "7dbe4c1de63a8986"
       labels:
         app.kubernetes.io/name: pension-service
         app.kubernetes.io/part-of: pension
@@ -52,7 +52,7 @@ spec:
         - name: pension-service
           # First build lands via auto-deploy on the merge that adds openbank-pension-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-service:sandbox-e8e3b10a@sha256:6e92cf01195e33ac891aa3469dc510a0a95f6ae5a390261181fc5ad2613be129
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-service:sandbox-44fff644@sha256:233e742b3cfe15c9c4ce333a841db67c737b32f5da174b29ff2b752cd1f71e7b
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8171 and management 8090 — both read off the service's own application.yaml
@@ -69,12 +69,20 @@ spec:
             # Production must supply its assigned provider identity before real-money launch.
             - name: OPENBANK_PENSION_PROVIDER_ENTITY_ID
               value: "00000000-0000-4000-8000-000000000001"
+            # Private-CA TLS listener (8443) for in-cluster service callers, same shape as
+            # pension-fund-service: tax-reporting reads its aggregates over it. Plain 8171 stays
+            # open for the existing callers until their own HTTPS cutover.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
               value: "8443"
+            # Verify the caller's client certificate against openbank-ca. The image requires one on
+            # 8443 (%prod quarkus.http.ssl.client-auth, build-time); tax-reporting presents
+            # tax-reporting-internal-tls.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
             # Keep old callers working until the separately verified HTTPS cutover.
             - name: QUARKUS_HTTP_INSECURE_REQUESTS
               value: enabled

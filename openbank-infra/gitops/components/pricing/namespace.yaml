@@ -4,5 +4,5 @@ metadata:
   labels:
     app.kubernetes.io/part-of: openbank
     kubernetes.io/metadata.name: pricing
-    openbank.io/component: pricing
+    open-bank.tech/component: pricing
   name: pricing

@@ -26,3 +26,25 @@ healthy DB). These bounds make the pool discard suspect connections on its own.
 This service does not use a reactive datasource pool.
 
 
+
+## Advisory authorization for regulatory reporting
+
+The FINREP template, COREP template, reporting period list and XBRL-CSV preflight
+routes send their authorization decisions to the local OPA sidecar. The policy
+allows verified human operators and administrators. The existing JWT role gate
+continues to decide HTTP access while `authz.enforce` is false. The application
+records advisory decisions in `openbank.authz.decisions`. The default OPA request
+timeout is 500 ms.
+
+The ledger and risk-engine calls keep their respective outbound identities
+`openbank-services` and `openbank-finrep`. Those grants are evaluated by the
+upstream services.
+
+## Client certificate reload (outbound mTLS)
+
+Every named `quarkus.tls.<name>` configuration that presents a client certificate to a peer's
+8443 listener sets `reload-period: 1h`. cert-manager renews the mounted client certificate
+before it expires; without a reload period the process would keep presenting the old one until
+the peer rejects it, while every expiry signal measured the renewed Secret and read healthy.
+After a renewal the new certificate is in use within an hour, with no restart. The
+`tls-certificate-reload` gate keeps every such configuration covered.

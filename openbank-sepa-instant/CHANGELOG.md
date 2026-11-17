@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.13.0...sepa-instant-v0.13.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **sdd,sepa-instant,sepa-payment:** reload outbound mTLS client certificates ([#16417](https://github.com/JiRaska/open-bank-oss/issues/16417)) ([ed923ee](https://github.com/JiRaska/open-bank-oss/commit/ed923ee0ce431dcd37a2b5a35c899e9184752632))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.12.3...sepa-instant-v0.13.0) (2026-11-14)
+
+
+### Features
+
+* **sepa-payment,sepa-instant,fx:** send the payee to fraud scoring through the typed risk context (ADR-0377 D3) ([#16034](https://github.com/JiRaska/open-bank-oss/issues/16034)) ([d889ed6](https://github.com/JiRaska/open-bank-oss/commit/d889ed6b793c20480902cf0951df792c68267e98))
+
+## [0.12.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.12.2...sepa-instant-v0.12.3) (2026-11-12)
+
+
+### Bug Fixes
+
+* **sepa-instant:** preserve synthetic payment origin in outbox events ([#15664](https://github.com/JiRaska/open-bank-oss/issues/15664)) ([a3eda52](https://github.com/JiRaska/open-bank-oss/commit/a3eda52f53b40f50b9b2afea8cdb8e983e8e4097)), closes [#12181](https://github.com/JiRaska/open-bank-oss/issues/12181) [#4348](https://github.com/JiRaska/open-bank-oss/issues/4348)
+
 ## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.12.1...sepa-instant-v0.12.2) (2026-10-26)
 
 

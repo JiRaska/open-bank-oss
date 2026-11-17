@@ -76,6 +76,12 @@ The #12181 source candidate writes each event-producing payment transition and i
 
 An idempotent repeat of an existing submission returns the existing payment without creating a second event. Historical transitions are not reconstructed by this migration; any missing audit fact needs separate approved reconciliation.
 
+A trusted synthetic service account may assert the marker through the shared ingress filter. The submission stores the filter's decision on the payment. Each event-producing transition copies that persisted marker to its outbox row and then to the Kafka header. Payment responses and Kafka payloads keep their existing schemas. Legacy payments keep unknown provenance in PostgreSQL and remain unmarked when an event is sent.
+
 ## Resilience & rate limiting
 
 Configured under `openbank.resilience` / `openbank.rate-limit` (SmallRye Fault Tolerance): circuit breaker (volume 20, failure ratio 0.3, success threshold 10, 5 s delay), retry (max 2, 100 ms delay, 50 ms jitter), timeout (10 s), and a concurrency cap (`max-concurrent-requests: 500`).
+
+## Fraud scoring call (ADR-0084, ADR-0377 D3)
+
+After screening, the rail calls fraud-service `POST /api/v1/fraud/score` through `FraudScoringPort` over the existing mutually-authenticated internal hop. The request now carries the payee: the creditor IBAN as a typed counterparty (`CounterpartyRef.fromIban`, never null) plus the initiation mode. The client DTO redacts the value in `toString()`, so it does not reach logs. fraud-service keys it into an HMAC pseudonym and drops the raw value; this service never hashes or stores it for fraud purposes. Scoring stays shadow-only on this rail: a non-ALLOW verdict is logged, the payment is not held, and a scoring failure is fail-open.

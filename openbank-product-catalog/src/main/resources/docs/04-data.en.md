@@ -69,6 +69,13 @@ erDiagram
 
 The model is the Kotlin domain in `domain/Product.kt`. PostgreSQL stores the complete representation in JSONB while canonical identity, lookup/filter fields and the optimistic row version remain relational and indexed.
 
+The opt-in `fincrime-shadow` pack provides separate AML and fraud synthetic replay schemas.
+An approval digest covers the candidate and baseline artifact pins, the replay digest and counts,
+and the revision's effective date. AML and fraud use distinct human role and scope bindings.
+Maker and checker identities use a derived issuer-and-subject key, so account renaming does not
+change who authored the revision. Editing any approved field requires fresh approval. Catalog
+publication preserves the revision for the SHADOW publisher to verify against recomputed replay.
+
 The additive v2 model keeps identity, lifecycle, effective dates, locks and lookups relational:
 `catalog_schemas`, `catalog_specifications`, `catalog_offerings`, immutable
 `catalog_revisions`, exact `catalog_price_components NUMERIC(38,18)`, relationships, approvals,

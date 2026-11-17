@@ -5,6 +5,7 @@
 package com.openbank.sanctions.contract
 
 import au.com.dius.pact.provider.junit5.HttpTestTarget
+import au.com.dius.pact.provider.junit5.MessageTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
@@ -12,6 +13,7 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.sanctions.contract.message.SanctionsListChangeMessageProducers
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
@@ -51,8 +53,9 @@ import javax.sql.DataSource
  * ADR-0029 D3 warns about is two BROKER-sourced classes both pulling every pact for one provider,
  * or HTTP and MESSAGE targets fighting over the same `@BeforeEach`. This is the sanctioned pair
  * CLAUDE.md documents — `@PactFolder` plus `@PactBroker` gated on `pactbroker.url` — as
- * openbank-ledger-service already carries. sanctions-service has no message-consumer contracts
- * and both classes use [HttpTestTarget] exclusively.
+ * openbank-ledger-service already carries. Both classes select the target per interaction in
+ * the same way: [HttpTestTarget] for the REST pacts, a message target for the kyc-service
+ * list-change pact, whose producers live in one place for both twins.
  *
  * Gated on `pactbroker.url`: skipped locally and on the PR lane (`_service-ci.yml` blanks
  * `PACT_BROKER_URL`; the broker has no public ingress, ADR-0056). It runs on main-push with
@@ -82,8 +85,16 @@ class SanctionsPactBrokerProviderVerificationTest {
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
-        context?.target = HttpTestTarget("localhost", testPort.toInt())
-        context?.addStateChangeHandlers(this)
+        if (context == null) return
+        // Per-interaction dispatch: the kyc list-change MESSAGE pact answers from the
+        // @PactVerifyProvider producers, everything else from the running HTTP endpoint. The scan
+        // is limited to the producers' own package — one definition serves both twins.
+        context.target = if (context.interaction.isAsynchronousMessage()) {
+            MessageTestTarget(listOf(SanctionsListChangeMessageProducers.PACKAGE))
+        } else {
+            HttpTestTarget("localhost", testPort.toInt())
+        }
+        context.addStateChangeHandlers(this)
     }
 
     @TestTemplate
@@ -93,6 +104,15 @@ class SanctionsPactBrokerProviderVerificationTest {
         // authenticates every broker replay, including those, and would produce a 201.
         if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
             testIdentityAssociation.setTestIdentity(null)
+        }
+        // The ongoing-monitoring interactions name their caller in the provider state.
+        context?.let {
+            MonitoringPactStates.actAs(
+                it.interaction.providerStates.mapNotNull { s ->
+                    s.name
+                },
+                testIdentityAssociation,
+            )
         }
         context?.verifyInteraction()
     }
@@ -124,4 +144,37 @@ class SanctionsPactBrokerProviderVerificationTest {
         val missingId = UUID.fromString("6e6e6e6e-6e6e-4e6e-8e6e-6e6e6e6e6e6e")
         io.restassured.RestAssured.given().get("/api/v1/sanctions/$missingId").then().statusCode(404)
     }
+
+    /**
+     * Message states (kyc-service list-change pact, issue #15908). Nothing to arrange here: the
+     * state and the publication are one flow, driven end to end by
+     * [SanctionsListChangeMessageProducers] through the production publisher and outbox path.
+     */
+    @State("a sanctions list diff with a changed and a deactivated entry has been published")
+    fun stateListDiffPublished() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    @State("a sanctions list refresh has been withheld by the storm guard")
+    fun stateListRefreshWithheld() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * Ongoing-monitoring states (kyb-service pact, ADR-0376). The caller each of them names is
+     * applied in [verifyPacts], as in [SanctionsPactProviderVerificationTest]; what is arranged here is the registry and the feature switch.
+     */
+    @State(MonitoringPactStates.KYB_CALLER)
+    fun stateKybCallerMonitoringEnabled() = MonitoringPactStates.kybCallerWithMonitoringEnabled(dataSource)
+
+    @State(MonitoringPactStates.KYB_SUBJECT_REGISTERED)
+    fun stateKybSubjectRegistered() = MonitoringPactStates.kybSubjectRegistered(dataSource)
+
+    /** 403 comes from who is calling, before anything is read; the switch is on so that it cannot be a 503. */
+    @State(MonitoringPactStates.SHARED_CLIENT)
+    fun stateSharedFleetClient() = MonitoringPactStates.enableMonitoring()
+
+    /** The registration, the list change and the match are one flow in MonitoredSubjectMatchedMessageProducers. */
+    @State(MonitoringPactStates.KYB_SUBJECT_MATCHED)
+    fun stateKybSubjectMatched() = MonitoringPactStates.enableMonitoring()
 }

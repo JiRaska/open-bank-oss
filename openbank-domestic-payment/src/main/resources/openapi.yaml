@@ -11,13 +11,24 @@ info:
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
   # 1.12.0 -> 1.13.0: additive durable company-scoped business payment batch drafts.
-  version: 1.13.0
+  # 1.14.0 -> 1.16.0: optional original-submission digest header and bound approval release route (1.15.0 is claimed by #15976).
+  # 1.16.0 -> 1.17.0 (ADR-0374): additive. The payment resource may report status HELD to
+  # operators while the admission chain is switched on for this rail (the customer edge reads a
+  # hold as RECEIVED, here and on the submission lookup, whose published enum is unchanged); the
+  # status transition documents its 409, now also the answer for a payment that payment admission
+  # owns. No request shape changes.
+  # 1.17.0 -> 1.18.0 (#16000 part 3): additive route POST /api/v1/domestic-payments/delegated, a
+  # delegated payment bound to its spend reservation, for the verified customer-edge identity only.
+  version: 1.18.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
     VALIDATED, a sanctions hit is returned REJECTED (SANCTIONS_HIT) with an AML case opened, and a
     sub-threshold potential hit or a screening-service outage holds the payment in RECEIVED for review
-    (fail-closed).
+    (fail-closed). With the payment admission chain switched on (ADR-0374, off by default) the
+    controls run in one fixed order before the payment is sent (account standing, sanctions, fraud)
+    and a payment that needs a decision, or whose control could not answer, is HELD: it leaves HELD
+    only by the decision on its case, by a later automatic re-evaluation, or by expiring into REJECTED.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -38,6 +49,8 @@ paths:
         X-Idempotency-Replayed=true. Reusing the key for a different normalized payment command,
         actor scope, delegation or reservation is refused with 409 IDEMPOTENCY_KEY_REUSED. A
         pre-upgrade row without a durable request fingerprint also fails closed with that response.
+        For a mode-bound business approval release, verified customer-edge supplies the original-key digest.
+        The digest binds that release to the same namespace as prior direct payments and is required on exact replay.
         A ROLE_API machine may create only as a scoped initiator declared in rules.yaml
         scoped_payment_initiators (ADR-0335 D5, e.g. pension-service), and only from its one
         configured debtor account; anything else is 403 before the key is claimed.
@@ -48,6 +61,13 @@ paths:
           required: true
           schema:
             type: string
+        - name: X-OpenBank-Original-Submission-Key-Digest
+          in: header
+          required: false
+          description: Original business submission digest for approval releases by verified customer-edge only.
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
       requestBody:
         required: true
         content:
@@ -68,7 +88,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/DomesticPaymentResponse'
         '409':
-          description: Idempotency-Key is already bound to a different or unverifiable legacy request
+          description: Rail or original submission key is already bound to a different or unverifiable request
           content:
             application/problem+json:
               schema:
@@ -110,6 +130,158 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/DomesticPaymentResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/domestic-payments/approval-releases:
+    post:
+      tags: [Domestic Payments]
+      summary: Release a mode-bound domestic approval
+      description: >-
+        Verified customer-edge sends the approval ID as the rail key and the original business
+        submission digest as separate metadata. Uses the unchanged frozen domestic instruction.
+      operationId: releaseDomesticPaymentApproval
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: The approval ID used as the rail transport key.
+          schema: {type: string, minLength: 1, maxLength: 128}
+        - name: X-OpenBank-Original-Submission-Key-Digest
+          in: header
+          required: true
+          schema: {type: string, pattern: '^[0-9a-f]{64}$'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDomesticPaymentRequest'
+      responses:
+        '201':
+          description: Payment created, or the durable result of an exact approval release replay
+          headers:
+            X-Idempotency-Replayed:
+              description: Present and true only when this response replays an existing payment.
+              schema: {type: string, enum: ['true']}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomesticPaymentResponse'
+        '400':
+          description: Missing or malformed release metadata or invalid domestic instruction
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Rail or original submission key is already bound to a different or unverifiable request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/IdempotencyConflictResponse'
+
+  /api/v1/domestic-payments/delegated:
+    post:
+      tags: [Domestic Payments]
+      summary: Create a delegated domestic payment bound to its spend reservation
+      description: >-
+        Customer-edge only (its verified service account; any other caller is 403). The rail reads
+        the reservation from its own projection of delegation-service's reservation stream and
+        refuses the payment unless the reservation is RESERVED and the delegation, acting party,
+        debtor account, amount, currency and Idempotency-Key all match it. The payment carries the
+        delegation and reservation ids on every event, so its terminal outcome settles the
+        reservation. At most one payment exists per reservation.
+      operationId: createDelegatedDomesticPayment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: The key the reservation was taken under; a retry with it replays the one payment.
+          schema: {type: string, minLength: 1, maxLength: 128}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDelegatedDomesticPaymentRequest'
+      responses:
+        '201':
+          description: Payment created and bound, or the replay of the payment already bound under this key
+          headers:
+            X-Idempotency-Replayed:
+              description: Present and true only when this response replays an existing payment.
+              schema: {type: string, enum: ['true']}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomesticPaymentResponse'
+        '400':
+          description: Missing Idempotency-Key, a missing required field, or an invalid domestic instruction
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: >-
+            RESERVATION_PROJECTION_PENDING (retryable, with Retry-After: the reservation is not known
+            to the rail yet), RESERVATION_NOT_RESERVED, RESERVATION_MISMATCH (neutral; the differing
+            field is not disclosed), DELEGATION_AUTHORITY_WITHDRAWN (the grant, re-read at create
+            time, no longer covers this debit), or IDEMPOTENCY_KEY_REUSED.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/DelegatedPaymentRefusal'
+        '503':
+          description: Debit-account ownership could not be verified (ACCOUNT_AUTHORITY_UNAVAILABLE, retryable)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/DelegatedPaymentRefusal'
+
+  /api/v1/domestic-payments/submissions/lookup:
+    post:
+      tags: [Domestic Payments]
+      summary: Look up a customer payment submission
+      description: >-
+        Read-only endpoint for the verified customer-edge workload. Matches the rail key, debit account,
+        stored customer submission scope and original submission digest. For ordinary direct submissions
+        omit the digest and supply the original key. For mode-bound releases supply the approval ID as
+        the rail key and the original digest. A missing or mismatched record returns UNKNOWN.
+      operationId: lookupDomesticPaymentSubmission
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 128}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [debtorAccountId, customerSubmissionScope]
+              properties:
+                debtorAccountId: {type: string, format: uuid}
+                customerSubmissionScope: {type: string, pattern: '^[0-9a-f]{64}$'}
+                originalSubmissionKeyDigest:
+                  type: string
+                  pattern: '^[0-9a-f]{64}$'
+                  description: Required to reconcile a mode-bound approval release.
+      responses:
+        '200':
+          description: Current durable state, or UNKNOWN when the exact submission cannot be established
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomesticPaymentSubmission'
+        '400':
+          description: Malformed lookup
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -190,6 +362,17 @@ paths:
           description: Updated payment
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: >-
+            The transition is not allowed from the payment's current status. Always the answer for
+            a HELD payment. While the admission chain is switched on it is also the answer for a
+            RECEIVED payment that a re-drive attempt or an open workflow run can still act on, and
+            for any target other than REJECTED or CANCELLED once neither can: those statuses are
+            left through payment admission (ADR-0374), and this endpoint starts no workflow.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /api/v1/domestic-payments/approvals:
     get:
@@ -515,6 +698,31 @@ components:
           items: {$ref: '#/components/schemas/BusinessPaymentBatchDraft'}
         page: {type: integer, minimum: 0, maximum: 1000}
         size: {type: integer, minimum: 1, maximum: 20}
+    DomesticPaymentSubmission:
+      oneOf:
+        - type: object
+          required: [outcome]
+          properties:
+            outcome: {type: string, enum: [UNKNOWN]}
+          additionalProperties: false
+        - type: object
+          required: [outcome, paymentId, status]
+          properties:
+            outcome: {type: string, enum: [FOUND]}
+            paymentId: {type: string, format: uuid}
+            status:
+              type: string
+              description: >-
+                The customer-facing status. A payment HELD by payment admission (ADR-0374) is
+                reported here as RECEIVED: this lookup serves the customer channel, which is not
+                told that a payment is held.
+              enum: [RECEIVED, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
+            originalSubmissionKeyDigest:
+              type: string
+              pattern: '^[0-9a-f]{64}$'
+              description: Stored digest echoed on an exact mode-bound release match only.
+          additionalProperties: false
+
     CreateDomesticPaymentRequest:
       type: object
       # Property names and optionality mirror the DTO the resource deserializes into
@@ -526,6 +734,10 @@ components:
       required: [debtorAccountId, debtorAccountNumber, debtorBankCode, debtorName,
                  creditorAccountNumber, creditorBankCode, creditorName, amount, currency, priority]
       properties:
+        customerSubmissionScope:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: Optional correlation binding accepted only from the verified customer-edge workload.
         debtorAccountId:
           type: string
           format: uuid
@@ -569,6 +781,85 @@ components:
         statementLabel:
           type: string
         endToEndId:
+          type: string
+
+    CreateDelegatedDomesticPaymentRequest:
+      type: object
+      # Mirrors CreateDelegatedDomesticPaymentRequest in DomesticPaymentDtos.kt.
+      required: [reservationId, delegationId, actingPartyId, debtorAccountId, debtorAccountNumber,
+                 debtorBankCode, debtorName, creditorAccountNumber, creditorBankCode, creditorName,
+                 amount, currency]
+      properties:
+        reservationId:
+          type: string
+          format: uuid
+          description: The delegation-service spend reservation this payment consumes.
+        delegationId:
+          type: string
+          format: uuid
+          description: Checked against the reservation, never trusted in its place.
+        actingPartyId:
+          type: string
+          format: uuid
+          description: The delegate the edge acts for; must be the reservation's grantee.
+        debtorAccountId:
+          type: string
+          format: uuid
+        debtorAccountNumber:
+          type: string
+        debtorBankCode:
+          type: string
+          example: "0800"
+        debtorName:
+          type: string
+        creditorAccountNumber:
+          type: string
+        creditorBankCode:
+          type: string
+          example: "0100"
+        creditorName:
+          type: string
+        amount:
+          type: number
+          description: Must equal the reserved amount exactly.
+        currency:
+          type: string
+          example: CZK
+        variableSymbol:
+          type: string
+        specificSymbol:
+          type: string
+        constantSymbol:
+          type: string
+        messageForPayee:
+          type: string
+        priority:
+          type: string
+          description: Defaults to STANDARD.
+        statementLabel:
+          type: string
+        endToEndId:
+          type: string
+
+    DelegatedPaymentRefusal:
+      type: object
+      required: [code, status, detail]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        code:
+          type: string
+          enum: [RESERVATION_PROJECTION_PENDING, RESERVATION_NOT_RESERVED, RESERVATION_MISMATCH,
+                 ACCOUNT_AUTHORITY_UNAVAILABLE, DELEGATION_AUTHORITY_WITHDRAWN, IDEMPOTENCY_KEY_REUSED]
+        retryable:
+          type: boolean
+        error:
           type: string
 
     TransitionStatusRequest:

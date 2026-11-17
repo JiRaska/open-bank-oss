@@ -10,7 +10,7 @@
 // The evidence matrix counts these as e2e coverage for the iaops route group, which
 // previously had none outside the trigger flow.
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 interface Finding {

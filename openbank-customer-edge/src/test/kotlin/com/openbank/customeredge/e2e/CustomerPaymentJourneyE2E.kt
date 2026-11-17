@@ -127,6 +127,71 @@ class CustomerPaymentJourneyE2E {
     }
 
     @Test
+    @TestSecurity(user = "customer:$OWNER", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = OWNER)])
+    fun `after an ambiguous submission the edge reads the same scoped payment without paying again`() {
+        val key = "journey-ambiguous-submission"
+        StubUpstreamResource.stub(PAYMENTS, status = 504, body = """{"error":"gateway timeout"}""")
+        pay(challenge = CHALLENGE, key = key).then().statusCode(504)
+        val submitted = StubUpstreamResource.requests(PAYMENTS).single()
+
+        StubUpstreamResource.stub(
+            LOOKUP,
+            body = """{"outcome":"FOUND","paymentId":"$PAYMENT","status":"RECEIVED","debtorName":"private"}""",
+        )
+        val found = lookup(key)
+        found.then().statusCode(200).header("Cache-Control", "no-store")
+            .body("outcome", equalTo("FOUND")).body("paymentId", equalTo(PAYMENT)).body("status", equalTo("RECEIVED"))
+        assertThat(found.body.asString()).doesNotContain("debtorName", key)
+        val lookup = StubUpstreamResource.requests(LOOKUP).single()
+        assertThat(header(lookup, "Idempotency-Key")).containsExactly(key)
+        val lookupBody = mapper.readTree(lookup.body)
+        assertThat(lookupBody.path("debtorAccountId").asText()).isEqualTo(ACCOUNT)
+        assertThat(lookupBody.path("customerSubmissionScope").asText())
+            .matches("[a-f0-9]{64}")
+            .isEqualTo(mapper.readTree(submitted.body).path("customerSubmissionScope").asText())
+        assertThat(lookup.body).doesNotContain(key)
+        assertThat(StubUpstreamResource.requests(PAYMENTS)).hasSize(1)
+        assertThat(StubUpstreamResource.requests(consume(CHALLENGE))).hasSize(1)
+
+        StubUpstreamResource.stub(LOOKUP, status = 503, body = """{"error":"temporarily unavailable"}""")
+        val unknown = lookup(key)
+        unknown.then().statusCode(200).body("outcome", equalTo("UNKNOWN"))
+        assertThat(unknown.body.asString()).doesNotContain(PAYMENT, key)
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$STRANGER", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = STRANGER)])
+    fun `only the same active grant can see a delegated submission`() {
+        val grant = "00000000-0000-4000-8000-0000000000f1"
+        val reservation = "00000000-0000-4000-8000-0000000000f2"
+        val authorization = "$ACCOUNTS/$ACCOUNT/delegation/payment-authorization"
+        val reservations = "/api/v1/delegations/$grant/reservations"
+        StubUpstreamResource.stub(
+            authorization,
+            body = """{"authorized":true,"outcome":"DELEGATED","delegationId":"$grant","grantorPartyId":"$OWNER"}""",
+        )
+        StubUpstreamResource.stub(reservations, status = 201, body = """{"reservationId":"$reservation"}""")
+        val key = "journey-delegated-submission"
+        pay(challenge = CHALLENGE, key = key).then().statusCode(201)
+        val sent = mapper.readTree(StubUpstreamResource.requests(PAYMENTS).single().body)
+        StubUpstreamResource.stub(
+            LOOKUP,
+            body = """{"outcome":"FOUND","paymentId":"$PAYMENT","status":"RECEIVED"}""",
+        )
+
+        lookup(key, amount = "150.25").then().statusCode(200).body("paymentId", equalTo(PAYMENT))
+        val scopedRead = mapper.readTree(StubUpstreamResource.requests(LOOKUP).single().body)
+        assertThat(scopedRead.path("customerSubmissionScope").asText())
+            .matches("[a-f0-9]{64}").isEqualTo(sent.path("customerSubmissionScope").asText())
+
+        StubUpstreamResource.stub(authorization, body = """{"authorized":false,"outcome":"NO_GRANT"}""")
+        lookup(key, amount = "150.25").then().statusCode(200).body("outcome", equalTo("UNKNOWN"))
+        assertThat(StubUpstreamResource.requests(LOOKUP)).hasSize(1)
+    }
+
+    @Test
     @TestSecurity(user = "customer:$STRANGER", roles = ["ROLE_CUSTOMER"])
     @OidcSecurity(claims = [Claim(key = "party_id", value = STRANGER)])
     fun `another customer's token reads nothing, spends no challenge and moves no money`() {
@@ -142,6 +207,19 @@ class CustomerPaymentJourneyE2E {
         val response = given().get("/customer/v1/domestic-payments/$PAYMENT")
         assertThat(response.statusCode).isEqualTo(404)
         assertThat(response.body.asString()).doesNotContain(ACCOUNT, "SETTLED")
+
+        val submission = lookup("someones-key")
+        submission.then().statusCode(200).body("outcome", equalTo("UNKNOWN"))
+        assertThat(StubUpstreamResource.requests(LOOKUP)).isEmpty()
+    }
+
+    private fun lookup(key: String, amount: String? = null): io.restassured.response.Response {
+        val body = mapper.createObjectNode().put("debtorAccountId", ACCOUNT)
+        amount?.let { body.put("amount", it) }
+        return given().contentType(ContentType.JSON)
+            .header("Idempotency-Key", key)
+            .body(body.toString())
+            .post("/customer/v1/domestic-payments/submissions/lookup")
     }
 
     private fun pay(challenge: String?, currency: String = "CZK", key: String = "journey-key-0") = given()
@@ -165,6 +243,7 @@ class CustomerPaymentJourneyE2E {
         const val ACCOUNTS = "/api/v1/accounts"
         const val BALANCE = "/api/v1/balances/$ACCOUNT"
         const val PAYMENTS = "/api/v1/domestic-payments"
+        const val LOOKUP = "$PAYMENTS/submissions/lookup"
         const val DEBTOR_IBAN = "CZ6508000000192000145399"
         const val CREDITOR = "123456789/0100"
 

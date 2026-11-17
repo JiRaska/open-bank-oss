@@ -140,3 +140,45 @@ Several upstreams scope only by `accountId` (the party header is advisory there)
 3. **Edge is the IDOR boundary** — ownership enforced here whenever an upstream scopes only by id.
 4. **Stateless** — no DB, no outbox, no domain state; horizontally scalable, cheap to scale to zero.
 5. **Enrich at the edge** — keep banking detail (IBAN/BBAN split, legal name, payment defaults) out of the mobile client.
+
+## Delegated card actions ask for the action's own capability (ADR-0375 D7)
+
+A shared card is reached through `mayControlCard(id, party, capability)`: the holder and the account
+owner pass outright, anyone else needs an ACTIVE delegation grant carrying **that action's**
+capability. Which capability each action asks for is the whole control, and it used to be the same
+one for everything:
+
+| action | capability asked |
+|---|---|
+| list a shared card, read its details | `CARD_VIEW` |
+| `PUT /cards/{id}/limits` | `CARD_MANAGE_LIMITS` |
+| `POST /cards/{id}/freeze`, `/unfreeze`, `/block` | `CARD_MANAGE_STATUS` |
+| `PUT /cards/{id}/controls` (contactless, online, ATM, abroad) | `CARD_MANAGE_CHANNELS` |
+
+Before ADR-0375 D7 the last two rows also asked for `CARD_MANAGE_LIMITS`, so two capabilities the
+grant vocabulary offers were grantable and read by nothing, and a delegate given limits alone could
+freeze a card and switch its channels off. Both card role presets grant all five card capabilities,
+so a preset-based delegate is unaffected; a hand-built limits-only grant is the case that changes.
+
+There is no per-card transaction route here, which is why `CARD_VIEW_TRANSACTIONS` still has no
+enforcer — it has nothing to gate rather than the wrong gate.
+
+### Account reads follow the same rule (ADR-0375 D7)
+
+| read | capability asked |
+|---|---|
+| `GET /accounts/{id}` — the account record | `ACCOUNT_VIEW_DETAILS` |
+| `GET /balances/{id}` | `ACCOUNT_READ_BALANCES` |
+| `GET /accounts/{id}/transactions` | `ACCOUNT_READ_TRANSACTIONS` |
+| `GET /statements/{id}` and the single-statement render | `ACCOUNT_DOWNLOAD_STATEMENTS` |
+
+The detail read asked for `ACCOUNT_READ_BALANCES` until 2026-11-12, so the account record was
+reachable on the balances authority. Both statement routes asked ownership alone, so a delegate
+holding the statements capability was refused every time they used it; they now share one
+`mayReadStatements` helper, because the list and the render are the same authority and two copies
+of that test are two things that drift.
+
+Note the asymmetry with the card correction: **this one is not free.** The `Účetní` and `Pokladník`
+presets grant `ACCOUNT_READ_BALANCES` without `ACCOUNT_VIEW_DETAILS` — which is exactly why they
+could drill into the record. The preset catalog is corrected forward by a migration; grants already
+minted keep what they were given and lose the drill-down until the grantor re-shares.

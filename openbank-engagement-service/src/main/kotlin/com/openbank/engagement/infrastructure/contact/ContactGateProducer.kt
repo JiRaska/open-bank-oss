@@ -24,9 +24,10 @@ import java.util.UUID
  *
  * - `impressionsInWindow` is real here, not the `0` campaign-service returns — that comment
  *   said outright "the D1 impression counter arrives with the engagement service, not here."
- * - `suppression` stays the honest empty port `ContactSuppressionPort { emptyList() }`, same as
- *   campaign-service, for the same reason: no ADR-0219 D3 platform suppression *store* exists
- *   yet. This is NOT where the D2 repeated-dismissal exclusion lives — that is a separate, local
+ * - `suppression` is the live consent-service list (ADR-0219 D3), the same read campaign-service
+ *   and notification-service make. An unavailable read propagates into the gate, which fails
+ *   closed with GATE_UNAVAILABLE — no promotional impression is shown on an outage. This is NOT
+ *   where the D2 repeated-dismissal exclusion lives — that is a separate, local
  *   check in `ResolveSurfaceUseCase` against this service's own event history, because the
  *   shared `SuppressionReason` vocabulary has no value that describes it (see that use case's
  *   KDoc). `sendsInWindow` is unused by `PROMOTIONAL_IMPRESSION` and returns 0 rather than being
@@ -40,6 +41,7 @@ class ContactGateProducer {
     fun contactPolicyGate(
         consentCheck: ConsentCheckPort,
         events: EngagementEventRepository,
+        suppression: ContactSuppressionPort,
         @ConfigProperty(name = "openbank.engagement.impression-budget-per-window", defaultValue = "1")
         impressionBudget: Int,
     ): ContactPolicyGate = ContactPolicyGate(
@@ -49,7 +51,7 @@ class ContactGateProducer {
             override suspend fun impressionsInWindow(partyId: UUID, windowStart: Instant): Int =
                 events.impressionsInWindow(partyId, windowStart)
         },
-        suppression = ContactSuppressionPort { emptyList() },
+        suppression = suppression,
         policy = ContactPolicy(impressionBudgetPerWindow = impressionBudget),
     )
 }

@@ -49,6 +49,11 @@ spec:
               == on (namespace, owner_name) group_left ()
               openbank:cronjob_latest_job_created
             )
+            unless on (namespace, owner_name)
+            label_replace(
+              kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_failure_is_finding="true"},
+              "owner_name", "$1", "cronjob", "(.*)"
+            )
           for: 10m
           labels:
             severity: warning
@@ -138,6 +143,8 @@ spec:
             )
               unless on (namespace, cronjob)
             (kube_cronjob_spec_suspend{job="kube-state-metrics"} == 1)
+              unless on (namespace, cronjob)
+            kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_failure_is_finding="true"}
           for: 15m
           labels:
             severity: warning

@@ -32,7 +32,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-pid-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "48c6e2f90bc41f61"
+        openbank.tech/policy-checksum: "a9fe42723d315d66"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: pid-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pid-service:sandbox-e8e3b10a@sha256:04de103ffd8d23e14f8546aaa996a9175bb29df9497be02be54082e5f78d88f4
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pid-service:sandbox-4a97efb4@sha256:9f46887f40ab734ef423288233f6f7c60af68558d8039830201c134b401af2ef
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

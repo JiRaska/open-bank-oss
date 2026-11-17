@@ -7,11 +7,13 @@ package com.openbank.transaction.integration
 import com.github.tomakehurst.wiremock.WireMockServer
 import com.github.tomakehurst.wiremock.client.WireMock.aResponse
 import com.github.tomakehurst.wiremock.client.WireMock.delete
+import com.github.tomakehurst.wiremock.client.WireMock.equalTo
 import com.github.tomakehurst.wiremock.client.WireMock.okJson
 import com.github.tomakehurst.wiremock.client.WireMock.post
 import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
 import com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration.options
+import com.openbank.libs.synthetic.SyntheticTaint
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 
 // Stands in for every synchronous downstream the PaymentSaga touches over HTTP — the ledger
@@ -67,6 +69,7 @@ class LedgerWireMockResource : QuarkusTestResourceLifecycleManager {
         fun isStarted() = ::server.isInitialized
 
         const val JOURNALS_PATH = "/api/v1/journals"
+        const val SYNTHETIC_JOURNALS_PATH = "/api/v1/journals/synthetic"
 
         // balance-service cover endpoints (BalanceCoverRestClient): the saga only places and releases
         // the cover hold now — booked debit/credit moved to the ledger projection (ADR-0039 Phase D-2).
@@ -75,17 +78,19 @@ class LedgerWireMockResource : QuarkusTestResourceLifecycleManager {
         private const val RELEASE_HOLD_PATH = "/api/v1/balances/holds/[^/]+"
 
         fun stubLedgerSuccess() {
+            val posted =
+                """{"id":"b0000000-0000-0000-0000-000000000001",""" +
+                    """"transactionId":"00000000-0000-0000-0000-000000000000",""" +
+                    """"status":"POSTED"}"""
             server.stubFor(
                 post(urlEqualTo(JOURNALS_PATH)).willReturn(
-                    aResponse()
-                        .withStatus(201)
-                        .withHeader("Content-Type", "application/json")
-                        .withBody(
-                            """{"id":"b0000000-0000-0000-0000-000000000001",""" +
-                                """"transactionId":"00000000-0000-0000-0000-000000000000",""" +
-                                """"status":"POSTED"}""",
-                        ),
+                    okJson(posted).withStatus(201),
                 ),
+            )
+            server.stubFor(
+                post(urlEqualTo(SYNTHETIC_JOURNALS_PATH))
+                    .withHeader(SyntheticTaint.KAFKA_HEADER, equalTo(SyntheticTaint.TRUE_VALUE))
+                    .willReturn(okJson(posted).withStatus(201)),
             )
         }
 

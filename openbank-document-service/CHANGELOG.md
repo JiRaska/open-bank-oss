@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v1.2.0...document-service-v1.3.0) (2026-11-16)
+
+
+### Features
+
+* **document:** export seal certificate expiry and show it on the keys page ([#16371](https://github.com/JiRaska/open-bank-oss/issues/16371)) ([b21fbc2](https://github.com/JiRaska/open-bank-oss/commit/b21fbc2ea2378e0903bcbe13998d932147ae66bd))
+
+## [1.2.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v1.1.2...document-service-v1.2.0) (2026-11-12)
+
+
+### Features
+
+* **document:** ownership projection for delegated object grants, with ADR-0375 and its D4 gate ([#15824](https://github.com/JiRaska/open-bank-oss/issues/15824)) ([f15f8c1](https://github.com/JiRaska/open-bank-oss/commit/f15f8c133d3afbabd9bc34b65749559c1bc8eaf3))
+
 ## [1.1.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v1.1.1...document-service-v1.1.2) (2026-11-06)
 
 

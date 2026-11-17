@@ -79,10 +79,16 @@ class DelegationResourceOwnershipException(message: String) : RuntimeException(m
  *
  * `approvalPolicy` other than SOLO remains refused, unchanged: nothing counts approvals.
  *
- * `exposure` remains persisted for audit of historical grants but is refused on new offers until
- * document delivery can create a transformed artifact and atomically enforce every declared view
- * constraint. Returning the original object bytes with a redaction, watermark or view-count field
- * merely echoed would be a confidentiality defect.
+ * `exposure` remains persisted for audit of historical grants and is refused on new offers — and
+ * ADR-0375 D6 makes that refusal the DECLARED END STATE rather than a gap waiting to be closed.
+ * Returning the original object bytes with a redaction, watermark or view-count field merely
+ * echoed is a confidentiality defect that reads, from the grantor's screen, exactly like an
+ * enforced control, and `maxViews` on a streaming route could never be atomic anyway.
+ *
+ * The mechanism is not missing, it is elsewhere: a redacted, watermarked, view-counted share is a
+ * rendered sealed artifact delivered as an `ExternalDisclosure`, whose view consumption is a
+ * locked read-modify-write inside one transaction. `check-delegation-exposure-sealed.py` keeps
+ * both halves honest — the refusal here, and the absence of any live-read consumer anywhere.
  */
 class DelegationUnsupportedConstraintException(val code: String, message: String) : RuntimeException(message) {
     companion object {
@@ -94,6 +100,14 @@ class DelegationUnsupportedConstraintException(val code: String, message: String
 
         /** Exposure needs transformed-artifact and atomic view-count enforcement before it can be offered. */
         const val CODE_EXPOSURE_UNSUPPORTED = "EXPOSURE_UNSUPPORTED"
+
+        /**
+         * ADR-0375 D5+D6 — the resource type cannot be delivered, so it cannot be offered.
+         * Distinct from an ownership failure on purpose: this one is a property of the TYPE and no
+         * amount of verification changes it, so a grantor retrying with a different resource id
+         * learns nothing from an ownership error.
+         */
+        const val CODE_RESOURCE_TYPE_NOT_OFFERABLE = "RESOURCE_TYPE_NOT_OFFERABLE"
     }
 }
 
@@ -214,6 +228,7 @@ class DelegationService(
     }
 
     private suspend fun validateCandidate(command: DelegationCandidate): ValidatedCandidate {
+        rejectUnofferableResourceType(command)
         rejectUnsupportedExposure(command)
         requireCallerIs(command.callerPartyId, command.grantorPartyId)
         val grantorAuthority = verifyGrantorAuthority(command)
@@ -258,8 +273,10 @@ class DelegationService(
         val authority = grantorAuthorityClient.authorityFor(command.grantorPartyId, actor)
         return when (authority.verdict) {
             GrantorAuthorityVerdict.AUTHORIZED -> authority
-            GrantorAuthorityVerdict.DENIED -> throw DelegationGrantorAuthorityException(
-                "actor $actor has no active authority for grantor ${command.grantorPartyId}",
+            GrantorAuthorityVerdict.DENIED,
+            GrantorAuthorityVerdict.MANDATE_ONLY,
+            -> throw DelegationGrantorAuthorityException(
+                "actor $actor has no verified sole authority for grantor ${command.grantorPartyId}",
             )
             GrantorAuthorityVerdict.UNVERIFIABLE -> throw DelegationGrantorAuthorityUnavailableException(
                 "authority for grantor ${command.grantorPartyId} could not be established",
@@ -275,13 +292,33 @@ class DelegationService(
         command.actorPartyId ?: command.grantorPartyId
     }
 
+    /**
+     * ADR-0375 D5+D6. PAYMENT and STATEMENT have no ownership oracle AND no delivery mechanism —
+     * the sealed disclosure accepts DOCUMENT only — so they are refused here, before the ownership
+     * lookup that would also have refused them. Checked in `validateCandidate`, which offer and
+     * preview share, so preview cannot promise what offer will refuse.
+     */
+    private fun rejectUnofferableResourceType(command: DelegationCandidate) {
+        if (command.resourceType !in DelegationGrant.OFFERABLE_RESOURCE_TYPES) {
+            throw DelegationUnsupportedConstraintException(
+                code = DelegationUnsupportedConstraintException.CODE_RESOURCE_TYPE_NOT_OFFERABLE,
+                message = "resourceType ${command.resourceType} cannot be offered: it has no " +
+                    "ownership oracle and no delivery mechanism (ADR-0375 D5/D6). Share a statement " +
+                    "as the DOCUMENT its render produces, or use ACCOUNT_DOWNLOAD_STATEMENTS for " +
+                    "ongoing access to an account's statements. Historical grants of this type stay " +
+                    "readable for audit.",
+            )
+        }
+    }
+
     private fun rejectUnsupportedExposure(command: DelegationCandidate) {
         if (command.exposure != null) {
             throw DelegationUnsupportedConstraintException(
                 code = DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED,
-                message = "exposure is not supported: this platform cannot yet transform the shared object " +
-                    "or atomically enforce redaction, watermark or maxViews. Omit exposure; existing " +
-                    "historical exposure grants remain readable for audit but never authorize access.",
+                message = "exposure is not a grant-level control (ADR-0375 D6): redaction, watermark and " +
+                    "maxViews are enforced by issuing a sealed external disclosure over the document, not by " +
+                    "shaping a live read. Omit exposure; historical exposure grants remain readable for audit " +
+                    "but never authorize access.",
             )
         }
     }
@@ -290,8 +327,9 @@ class DelegationService(
         if (grant.exposure != null) {
             throw DelegationUnsupportedConstraintException(
                 code = DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED,
-                message = "this historical grant carries unsupported exposure metadata and cannot be activated " +
-                    "or reinstated until transformed-artifact enforcement exists",
+                message = "this historical grant carries grant-level exposure metadata, which is never " +
+                    "enforced (ADR-0375 D6), so it cannot be activated or reinstated; re-offer without it and " +
+                    "issue a sealed external disclosure if the share needs view controls",
             )
         }
     }

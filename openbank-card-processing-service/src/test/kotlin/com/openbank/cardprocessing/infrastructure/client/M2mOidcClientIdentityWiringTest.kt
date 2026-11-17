@@ -15,8 +15,8 @@ import org.junit.jupiter.api.Test
 /**
  * ADR-0319 moved [TransactionServiceClient] from a hand-written interface to a sub-interface of the
  * generated one. The outbound identity must not have moved with it: this client authenticates as the
- * DEFAULT oidc-client (card-processing has no named `m2m` client), which `@OidcClientFilter` with no
- * value selects - exactly as on `main`.
+ * DEFAULT oidc-client, which `@OidcClientFilter` with no value selects. The issuer REST client
+ * selects the separate card-issuer client for the two issuer operations.
  *
  * Two ways to get that wrong and neither fails at runtime: naming a client that does not exist in
  * `application.yaml` (the first call fails, not the build), or ALSO registering
@@ -49,5 +49,14 @@ class M2mOidcClientIdentityWiringTest {
         val rest = TransactionServiceClient::class.java.getAnnotation(RegisterRestClient::class.java)
 
         assertThat(rest.configKey).isEqualTo("transaction-api")
+    }
+
+    @Test
+    fun `only the card issuance client selects the dedicated issuer identity`() {
+        val issuer = CardIssuanceClient::class.java.getAnnotation(OidcClientFilter::class.java)
+        val transaction = TransactionServiceClient::class.java.getAnnotation(OidcClientFilter::class.java)
+
+        assertThat(issuer.value).isEqualTo("card-issuer")
+        assertThat(transaction.value).isEmpty()
     }
 }

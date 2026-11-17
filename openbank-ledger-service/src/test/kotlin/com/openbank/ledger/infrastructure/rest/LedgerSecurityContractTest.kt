@@ -41,9 +41,11 @@ class LedgerSecurityContractTest {
         // #10486: ROLE_API lets a per-service machine identity (interest-service's
         // `openbank-interest`) past RBAC; WHICH ROLE_API holder may post is decided by identity in
         // ledger_rest_ext.rego. Never viewer/auditor/admin here: widening further is a new decision.
-        assertThat(rolesOf("postJournal"))
-            .describedAs("postJournal roles (book-of-record write)")
-            .containsExactlyInAnyOrder("ROLE_API", "ROLE_OPERATOR")
+        listOf("postJournal", "postSyntheticJournal").forEach { name ->
+            assertThat(rolesOf(name))
+                .describedAs("%s roles (book-of-record write)", name)
+                .containsExactlyInAnyOrder("ROLE_API", "ROLE_OPERATOR")
+        }
     }
 
     @Test

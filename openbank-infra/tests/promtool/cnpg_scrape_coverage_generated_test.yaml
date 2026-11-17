@@ -110,6 +110,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finrep",pod="finrep-db-1",job="finrep-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finrep",pod="finrep-db-2",job="finrep-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
@@ -150,9 +154,13 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-3",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-3",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
@@ -359,6 +367,8 @@ tests:
       - series: 'kube_namespace_created{namespace="engagement"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="finops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="finrep"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="flaky-test-hunter"}'
         values: "1600000000+0x40"
@@ -562,6 +572,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finrep",pod="finrep-db-1",job="finrep-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finrep",pod="finrep-db-2",job="finrep-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
@@ -602,9 +616,13 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-3",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-3",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
@@ -812,6 +830,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="finops-agent"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="finrep"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="flaky-test-hunter"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="fraud"}'
@@ -991,6 +1011,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finrep",pod="finrep-db-1",job="finrep-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finrep",pod="finrep-db-2",job="finrep-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
@@ -1031,9 +1055,13 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-3",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-3",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
@@ -1243,6 +1271,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="finops-agent"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="finrep"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="flaky-test-hunter"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="fraud"}'
@@ -1426,6 +1456,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finrep",pod="finrep-db-1",job="finrep-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finrep",pod="finrep-db-2",job="finrep-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
@@ -1466,9 +1500,13 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-3",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-3",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
@@ -1675,6 +1713,8 @@ tests:
       - series: 'kube_namespace_created{namespace="engagement"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="finops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="finrep"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="flaky-test-hunter"}'
         values: "1600000000+0x40"
@@ -1864,6 +1904,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finrep",pod="finrep-db-1",job="finrep-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finrep",pod="finrep-db-2",job="finrep-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
@@ -1904,9 +1948,13 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-3",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-3",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
@@ -2111,6 +2159,8 @@ tests:
       - series: 'kube_namespace_created{namespace="engagement"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="finops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="finrep"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="flaky-test-hunter"}'
         values: "1600000000+0x40"
@@ -2293,6 +2343,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finrep",pod="finrep-db-1",job="finrep-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finrep",pod="finrep-db-2",job="finrep-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
@@ -2333,9 +2387,13 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-3",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-3",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
@@ -2540,6 +2598,8 @@ tests:
       - series: 'kube_namespace_created{namespace="engagement"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="finops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="finrep"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="flaky-test-hunter"}'
         values: "1600000000+0x40"

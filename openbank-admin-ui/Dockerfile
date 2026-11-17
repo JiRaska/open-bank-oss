@@ -18,7 +18,7 @@
 # Stage 1a: Collect docs trees into a single bundle/ directory.
 # Lightweight alpine, no node, just shell + cp.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS docs-collector
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS docs-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -42,7 +42,7 @@ RUN set -e; \
 # Re-uses the root .dockerignore exception added for SBOM coverage:
 #   !openbank-*/build/reports/bom.json
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS sbom-collector
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS sbom-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -69,7 +69,7 @@ RUN set -e; \
 # catalog work for ALL services regardless of deploy state, with no external
 # GitHub dependency. Mirrors the docs/sbom collectors above.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS openapi-collector
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS openapi-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -98,7 +98,7 @@ RUN set -e; \
 # Communication Studio: openbank-libs/ is .dockerignore'd out of the runtime fs, so without this
 # copy /communication renders "registry not available" in the image while looking correct in local
 # dev, where the repo tree is one level up.
-FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS governance-collector
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS governance-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -121,7 +121,7 @@ RUN set -e; \
 # (read-only) at /docs/flags (ADR-0067). Mirrors the collectors above; the loader
 # (src/lib/governance/flags.ts) parses the ConfigMap YAML + embedded flags.json.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS flags-collector
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS flags-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -145,7 +145,7 @@ RUN set -e; \
 # Release notes are derived from these same files. Re-uses the root .dockerignore
 # exception (!openbank-*/CHANGELOG.md). Mirrors the docs/sbom/openapi collectors.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS changelog-collector
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS changelog-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -181,7 +181,7 @@ RUN set -e; \
 # Staged as its own collector rather than widening the build COPY: the image context stays the
 # admin-ui directory plus explicitly named bundles, which is what every other input here does.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS origination-collector
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS origination-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -201,7 +201,7 @@ RUN set -e; \
 # (substrate tofu, finops EKS lifecycle table, and the GitOps YAML for image/chart pins), staged at
 # their repo-relative paths. Only these are copied; the rest of openbank-infra stays out of the image.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS platform-versions-collector
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS platform-versions-collector
 COPY . /repo
 RUN set -e; \
     mkdir -p /pv-src/openbank-infra/aws/envs/sandbox-substrate /pv-src/openbank-infra/aws/finops; \
@@ -211,7 +211,7 @@ RUN set -e; \
     find openbank-infra/gitops -name '*.yaml' | while read -r f; do mkdir -p "/pv-src/$(dirname "$f")"; cp "$f" "/pv-src/$f"; done; \
     test -s /pv-src/openbank-infra/gitops/components/kafka/kafka.yaml
 
-FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS deps
+FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS deps
 WORKDIR /app
 COPY openbank-admin-ui/package.json openbank-admin-ui/package-lock.json* ./
 # Resilient install: the registry/network can flake (ECONNRESET mid-download) and a bare
@@ -236,7 +236,7 @@ RUN npm config set fetch-retries 5 \
 # copy into the arm64 runtime stage. Running on the native arch avoids
 # QEMU overhead (~10× slower) and SIGILL crashes on x86 hosts.
 # ──────────────────────────────────────────────────────────────────────
-FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS build
+FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS build
 WORKDIR /app
 
 # BuildInfo — passed in via docker-compose build args, stamped into the bundle.
@@ -309,7 +309,7 @@ RUN echo "maps before prune: $(find .next/static -name '*.map' | wc -l)" \
 # ──────────────────────────────────────────────────────────────────────
 # Stage 4: Runtime image — minimal surface, non-root.
 # ──────────────────────────────────────────────────────────────────────
-FROM node:26-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS runtime
+FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

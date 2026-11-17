@@ -9,6 +9,7 @@ import com.openbank.kyb.domain.model.AcceptedDisclosure
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.Declarations
+import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.KnownPerson
 import com.openbank.kyb.domain.model.Questionnaire
@@ -17,6 +18,8 @@ import com.openbank.kyb.domain.model.RegistrySearchQuery
 import com.openbank.kyb.domain.model.RegistrySearchResult
 import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.domain.model.RepresentationDecision
+import com.openbank.kyb.domain.model.RepresentationMode
+import com.openbank.libs.governance.StaffIdentity
 import java.time.LocalDate
 import java.util.UUID
 
@@ -91,6 +94,7 @@ data class AttestRepresentationCommand(
     val confirmedRoles: List<String>,
     val operator: String,
     val note: String? = null,
+    val confirmedMode: RepresentationMode? = null,
 )
 
 interface RepresentationAttestationUseCase {
@@ -103,6 +107,23 @@ interface RepresentationAttestationUseCase {
 }
 
 data class RejectCaseCommand(val caseId: UUID, val reason: String, val operator: String)
+
+data class DecideMonitoringFindingCommand(
+    val caseId: UUID,
+    val findingId: UUID,
+    val disposition: FindingDisposition,
+    val reason: String,
+    val operator: String,
+)
+
+/** One reviewer proposes that the owed exit has been carried out, on [evidence]. */
+data class ProposeExitCommand(val caseId: UUID, val evidence: String, val operator: StaffIdentity)
+
+/** The proposing person withdraws the pending exit proposal. */
+data class WithdrawExitCommand(val caseId: UUID, val operator: StaffIdentity)
+
+/** A DIFFERENT reviewer confirms the pending proposal; [evidence] is the proposal's, as read. */
+data class ConfirmExitCommand(val caseId: UUID, val evidence: String, val operator: StaffIdentity)
 
 /**
  * Find a company by name instead of by identifier (issue #9707). [country] selects the register
@@ -132,6 +153,15 @@ interface RegistryLookupUseCase {
     suspend fun lookup(cmd: LookupCommand): RegistryExtract?
 }
 
+/** [operator] is the AUTHENTICATED principal, never a name from the request body. */
+data class DisposeFindingCommand(
+    val caseId: UUID,
+    val subjectKey: String,
+    val disposition: FindingDisposition,
+    val reason: String,
+    val operator: String,
+)
+
 // One method per state transition: the count belongs to the state machine, not to this interface.
 @Suppress("TooManyFunctions")
 interface BusinessOnboardingUseCase {
@@ -151,6 +181,30 @@ interface BusinessOnboardingUseCase {
     suspend fun abandon(caseId: UUID, callerPartyId: UUID): BusinessOnboardingCase
     suspend fun resolveReview(cmd: ResolveReviewCommand): BusinessOnboardingCase
     suspend fun reject(cmd: RejectCaseCommand): BusinessOnboardingCase
+
+    /** An operator decides one screening finding. Never approves anything by itself. */
+    suspend fun disposeFinding(cmd: DisposeFindingCommand): BusinessOnboardingCase
+
+    /** An operator decides ONE finding of ongoing monitoring on an approved case. */
+    suspend fun decideMonitoringFinding(cmd: DecideMonitoringFindingCommand): BusinessOnboardingCase
+
+    /** A reviewer proposes that the exit a confirmed sanctions match requires has been carried out. */
+    suspend fun proposeExit(cmd: ProposeExitCommand): BusinessOnboardingCase
+
+    /** A different reviewer confirms that proposal (four-eyes); monitoring ends with it. */
+    suspend fun confirmExit(cmd: ConfirmExitCommand): BusinessOnboardingCase
+
+    /** The proposing person withdraws the pending exit proposal; nothing ends. */
+    suspend fun withdrawExit(cmd: WithdrawExitCommand): BusinessOnboardingCase
+
+    /** Cases with a monitoring hold: an undecided finding, or an exit owed. The operators' queue. */
+    suspend fun listMonitoringHolds(page: Int, size: Int): List<BusinessOnboardingCase>
+
+    /**
+     * Where each monitored subject of the case stands with the registry, by subject key:
+     * `PENDING`, `SYNCED` or `REFUSED`. Operators only; `REFUSED` is approved and NOT monitored.
+     */
+    suspend fun monitoringStates(caseId: UUID): Map<String, String>
 
     /** Consumer entry: the entity party for some case reached ACTIVE. Idempotent; no-op when no case owns [entityPartyId]. */
     suspend fun entityPartyActivated(entityPartyId: UUID)

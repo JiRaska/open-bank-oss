@@ -35,4 +35,5 @@ data class SubmitSctInstCommand(
     val amount: Money,
     val remittanceInfo: String?,
     val endToEndId: String,
+    val synthetic: Boolean = false,
 )

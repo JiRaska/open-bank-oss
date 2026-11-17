@@ -16,6 +16,8 @@ import com.openbank.fx.application.port.out.FraudScoringPort
 import com.openbank.fx.application.port.out.FxConversionRepository
 import com.openbank.fx.application.port.out.FxRateRepository
 import com.openbank.fx.application.port.out.OpenAmlCaseCommand
+import com.openbank.fx.application.port.out.PartyNamePort
+import com.openbank.fx.application.port.out.PartyNameUnavailableException
 import com.openbank.fx.application.port.out.SanctionsScreeningPort
 import com.openbank.fx.application.port.out.ScreeningUnavailableException
 import com.openbank.fx.domain.event.FxConversionExecuted
@@ -25,12 +27,15 @@ import com.openbank.fx.domain.model.FxConversionStatus
 import com.openbank.fx.domain.model.FxRate
 import com.openbank.fx.domain.model.RateType
 import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.CounterpartyRef
 import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.InitiationMode
 import com.openbank.libs.fincrime.ScreeningDecision
 import com.openbank.libs.fincrime.ScreeningMatchStatus
 import com.openbank.libs.fincrime.ScreeningPolicy
 import com.openbank.libs.fincrime.ScreeningResult
 import com.openbank.libs.fincrime.ScreeningRole
+import com.openbank.libs.fincrime.UnknownCounterpartyReason
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
@@ -48,6 +53,7 @@ class FxService(
     private val convRepo: FxConversionRepository,
     private val objectMapper: ObjectMapper,
     private val screeningPort: SanctionsScreeningPort,
+    private val partyNamePort: PartyNamePort,
     private val amlCasePort: AmlCasePort,
     private val metrics: DomainMetrics,
     private val fraudScoringPort: FraudScoringPort,
@@ -137,21 +143,18 @@ class FxService(
     ): FxConversion {
         val conversionId = UUID.randomUUID()
 
+        // The screened identity is the party RECORD: every name party-service holds for the party
+        // (legal name as the subject, any other as an alias) and its kind. Nothing the caller sent
+        // is screened — a caller-supplied name would let the caller pick the name it is cleared
+        // under. An unknown party, or one with no name, is an unavailable screen: both hold the
+        // conversion for review, neither lets it settle as though it had been screened.
         val result = try {
-            screeningPort.screen(cmd.partyName, ScreeningRole.DEBTOR, "$conversionId:party")
+            val subject = partyNamePort.screeningSubject(cmd.partyId)
+            screeningPort.screen(subject, ScreeningRole.DEBTOR, "$conversionId:party")
+        } catch (ex: PartyNameUnavailableException) {
+            return holdUnscreened(cmd, rate, toAmountMinorUnits, feeMinorUnits, conversionId, ex)
         } catch (ex: ScreeningUnavailableException) {
-            log.warnf(ex, "Sanctions screening unavailable for conversion %s; holding in PENDING", conversionId)
-            return hold(
-                cmd,
-                rate,
-                toAmountMinorUnits,
-                feeMinorUnits,
-                conversionId,
-                AmlCaseSeverity.MEDIUM,
-                ALERT_SCREENING_UNAVAILABLE,
-                ex.message,
-                null,
-            )
+            return holdUnscreened(cmd, rate, toAmountMinorUnits, feeMinorUnits, conversionId, ex)
         }
         metrics.sanctionsScreening("party")
         val results = listOf(result)
@@ -184,6 +187,29 @@ class FxService(
                     matchedEntity(results),
                 )
         }
+    }
+
+    /** Fail closed: no screening verdict was obtained, so the conversion waits for a human. */
+    private suspend fun holdUnscreened(
+        cmd: ConvertCommand,
+        rate: FxRate,
+        toAmountMinorUnits: Long,
+        feeMinorUnits: Long,
+        conversionId: UUID,
+        ex: RuntimeException,
+    ): FxConversion {
+        log.warnf(ex, "Sanctions screening unavailable for conversion %s; holding in PENDING", conversionId)
+        return hold(
+            cmd,
+            rate,
+            toAmountMinorUnits,
+            feeMinorUnits,
+            conversionId,
+            AmlCaseSeverity.MEDIUM,
+            ALERT_SCREENING_UNAVAILABLE,
+            ex.message,
+            null,
+        )
     }
 
     private suspend fun settle(
@@ -347,6 +373,9 @@ class FxService(
                 rail = "FX",
                 accountId = cmd.accountId,
                 counterpartyId = null,
+                // An FX conversion moves money between the holder's own currency pockets: no payee.
+                counterparty = CounterpartyRef.Unknown(UnknownCounterpartyReason.NOT_APPLICABLE_OWN_ACCOUNT),
+                initiationMode = InitiationMode.CUSTOMER_PRESENT,
             ),
         )
         if (outcome.synthetic) {

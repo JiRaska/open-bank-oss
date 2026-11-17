@@ -31,7 +31,7 @@ metadata:
   namespace: billing
   labels:
     app.kubernetes.io/part-of: billing
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -70,7 +70,7 @@ metadata:
   namespace: billing
   labels:
     app.kubernetes.io/part-of: billing
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

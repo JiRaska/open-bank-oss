@@ -508,3 +508,17 @@ outbox event. Consumers must not infer released funds from an absent row. Tests 
 HTTP/DB filtering and unchanged rows, anonymous/wrong-role rejection, and owner-guard delegation;
 consumer/provider Pact replay pins the response and the missing-identity refusal. These checks
 do not replace review of trusted header provenance, live OPA policy or production credentials.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.
+
+## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
+
+The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `BALANCE_SERVICE_URL=http://balance-service.balances.svc:8103`. The read is the CRS/FATCA statement `asOf` balance under `service-account-openbank-tax-reporting` (ROLE_API), already admitted in `balance_rest_ext.rego`. **Residual risk, accepted and tracked:** balance-service has no private-CA mTLS listener, so this hop carries the bearer token in plaintext inside the cluster, like its five existing callers (customer-edge, agent, mcp, statements, payments). The new line is declared as V9.1 debt in `.github/asvs-l3-baseline.txt`. Retiring it means adding an 8443 client-auth-required, bearer-only listener (#16075). Mitigations in the meantime: the namespace-scoped ingress allow-list, an OPA decision pinned to the principal id, and a short-lived Keycloak token. A replayed token only reaches the reporting read it was issued for.

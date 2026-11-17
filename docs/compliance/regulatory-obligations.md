@@ -17,6 +17,7 @@ kódu (CEÚ, GSFT) nebyly vidět. Registr to obrací — každá povinnost je ř
   Před podáním vždy ověřte lhůtu v aktuálním znění předpisu.
 - **Pokrytí** popisuje stav na `main`:
   - `filed-return` — výkaz v katalogu, počítá backend
+  - `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport)
   - `bff-only` — výkaz v katalogu, počítá jen admin-ui (dluh ADR-0367)
   - `data-only` — data existují, výkaz chybí
   - `missing` — chybí
@@ -34,10 +35,11 @@ Celkem povinností: **70**.
 
 | Stav | Počet |
 |---|---|
-| `filed-return` — výkaz v katalogu, počítá backend | 3 |
+| `filed-return` — výkaz v katalogu, počítá backend | 0 |
+| `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport) | 7 |
 | `bff-only` — výkaz v katalogu, počítá jen admin-ui (dluh ADR-0367) | 5 |
 | `data-only` — data existují, výkaz chybí | 10 |
-| `missing` — chybí | 35 |
+| `missing` — chybí | 31 |
 | `external` — mimo platformu záměrně | 6 |
 | `conditional` — jen za podmínky | 11 |
 
@@ -53,8 +55,8 @@ Celkem povinností: **70**.
 - **Lhůta:** Každý pracovní den do 12:00 za změny předchozího pracovního dne. *(ověřeno)*
 - **Druh / kanál:** granular-feed · SDAT
 - **Osobní údaje:** yes
-- **Pokrytí:** `missing` — chybí; služby `openbank-tax-reporting-service`; sleduje ADR-0367
-- **Poznámka:** Registrový feed, ne součet za období — hlásí se delta stavu účtů a osob s nimi spojených. Syntetické klienty (ADR-0252) je nutné vyloučit.
+- **Pokrytí:** `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport); výkazy `cz-ceu`; služby `openbank-tax-reporting-service`; sleduje ADR-0367
+- **Poznámka:** Backend sestavuje denní přehled (katalog cz-ceu, CeuDailyOverviewScheduler); drátový soubor CEUSIFE10 se nevykresluje (XSD jen v SDAT, wireFormatVerified: false), podání je ruční a operátor zaznamená referenci. Viz openbank-tax-reporting-service/src/main/resources/docs/ceu-daily-account-register.md. Registrový feed, ne součet za období — hlásí se delta stavu účtů a osob s nimi spojených. Syntetické klienty (ADR-0252) je nutné vyloučit.
 
 ### CEÚ – úplné předání stavu
 
@@ -66,7 +68,8 @@ Celkem povinností: **70**.
 - **Lhůta:** Při zahájení činnosti a na žádost ČNB. *(NEOVĚŘENO)*
 - **Druh / kanál:** register · SDAT
 - **Osobní údaje:** yes
-- **Pokrytí:** `missing` — chybí; služby `openbank-tax-reporting-service`; sleduje ADR-0367
+- **Pokrytí:** `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport); výkazy `cz-ceu`; služby `openbank-tax-reporting-service`; sleduje ADR-0367
+- **Poznámka:** Úplné předání je tatáž návratka cz-ceu s initial_load = 1; odmítnuta, dokud openbank.ceu.initial-load-attested není true. Roster seed neexistuje.
 
 ### AnaCredit – granulární údaje o úvěrech
 
@@ -105,8 +108,8 @@ Celkem povinností: **70**.
 - **Lhůta:** Do 3 pracovních dnů od rozhodného dne (údaje podle § 41f odst. 7–8 do 10 pracovních dnů); evidenci je nutné vést trvale. *(ověřeno)*
 - **Druh / kanál:** event · Dávka CSV (CP-1250) souborů DIW/DIC/DIA/DIL/DII, ZIP, šifrováno PGP nebo jiným dohodnutým způsobem (příloha vyhlášky 71/2011 Sb., bod 1.1.6)
 - **Osobní údaje:** yes
-- **Pokrytí:** `missing` — chybí; sleduje #15356
-- **Poznámka:** Evidence pojištěných pohledávek na klienta (souhrn přes účty, limit 100 000 EUR, výjimky, dočasně vysoké zůstatky). Syntetické klienty nutno vyloučit — jinak by se vyplácela náhrada fiktivním osobám.
+- **Pokrytí:** `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport); výkazy `cz-gsft`; služby `openbank-tax-reporting-service`; sleduje #15356
+- **Poznámka:** Backend sestavuje a šifruje dávku (katalog cz-gsft, GSFT-DIW-TEST / GSFT-DIW-LIVE) — náhled, ne podání; kanál předání GSFT není modelován a produkční sestavení je odmítnuto, dokud jsou otevřené mezery ve zdrojích dat (#15356). Evidence pojištěných pohledávek na klienta (souhrn přes účty, limit 100 000 EUR, výjimky, dočasně vysoké zůstatky). Syntetické klienty nutno vyloučit — jinak by se vyplácela náhrada fiktivním osobám.
 
 ### Testovací předání údajů GSFT
 
@@ -118,7 +121,7 @@ Celkem povinností: **70**.
 - **Lhůta:** GSFT ověřuje systém vyplácení nejméně jednou ročně; údaje na žádost ve lhůtě nejméně 3 pracovních dnů; zátěžový test nejméně jednou za 3 roky. Testovací dávky nesou atribut TEST. *(ověřeno)*
 - **Druh / kanál:** event · dávkové soubory pro GSFT
 - **Osobní údaje:** yes
-- **Pokrytí:** `missing` — chybí; sleduje #15356
+- **Pokrytí:** `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport); výkazy `cz-gsft`; služby `openbank-tax-reporting-service`; sleduje #15356
 
 ### Podklady pro příspěvek do Fondu pojištění vkladů
 
@@ -181,7 +184,8 @@ Celkem povinností: **70**.
 - **Lhůta:** Čtvrtletně (12. 5., 11. 8., 11. 11., 11. 2.); některé šablony pololetně/ročně. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT (XBRL-CSV)
 - **Osobní údaje:** no
-- **Pokrytí:** `filed-return` — výkaz v katalogu, počítá backend; výkazy `cnb-finrep`; služby `openbank-finrep-service`
+- **Pokrytí:** `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport); výkazy `cnb-finrep`; služby `openbank-finrep-service`; sleduje #5914
+- **Poznámka:** Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914.
 
 ### COREP – kapitál a kapitálové požadavky
 
@@ -193,7 +197,8 @@ Celkem povinností: **70**.
 - **Lhůta:** Čtvrtletně, stejné termíny jako FINREP. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT
 - **Osobní údaje:** no
-- **Pokrytí:** `filed-return` — výkaz v katalogu, počítá backend; výkazy `cnb-capital`; služby `openbank-finrep-service`
+- **Pokrytí:** `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport); výkazy `cnb-capital`; služby `openbank-finrep-service`; sleduje #5914
+- **Poznámka:** Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914.
 
 ### Ukazatel krytí likviditou (LCR)
 
@@ -205,7 +210,8 @@ Celkem povinností: **70**.
 - **Lhůta:** Měsíčně, 15 kalendářních dnů po referenčním dni. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT
 - **Osobní údaje:** no
-- **Pokrytí:** `filed-return` — výkaz v katalogu, počítá backend; výkazy `cnb-lcr`; služby `openbank-finrep-service`, `openbank-risk-engine`
+- **Pokrytí:** `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport); výkazy `cnb-lcr`; služby `openbank-finrep-service`, `openbank-risk-engine`; sleduje #5914
+- **Poznámka:** Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914.
 
 ### Ukazatel čistého stabilního financování (NSFR)
 
@@ -565,7 +571,8 @@ Celkem povinností: **70**.
 - **Lhůta:** Do 72 hodin od zjištění. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** event · formulář ÚOOÚ / datová schránka
 - **Osobní údaje:** yes
-- **Pokrytí:** `missing` — chybí
+- **Pokrytí:** `missing` — chybí; sleduje #15756
+- **Poznámka:** Interim runbook docs/runbooks/0035-personal-data-breach-notification.md; skutečný rejstřík se vede mimo veřejné repo, v repu je jen šablona docs/compliance/personal-data-breach-register.md; workflow v kódu zatím neexistuje.
 
 ## AML a mezinárodní sankce
 

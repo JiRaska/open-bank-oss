@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.6.0...product-catalog-v1.7.0) (2026-11-12)
+
+
+### Features
+
+* **product-catalog:** bind fincrime replay reviews to stable actors ([#15696](https://github.com/JiRaska/open-bank-oss/issues/15696)) ([f821367](https://github.com/JiRaska/open-bank-oss/commit/f82136778ac2c84e32d1b25bfbc703b941edaa55))
+
 ## [1.6.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.5.3...product-catalog-v1.6.0) (2026-11-08)
 
 

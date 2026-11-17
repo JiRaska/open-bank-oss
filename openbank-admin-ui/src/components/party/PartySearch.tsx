@@ -136,7 +136,7 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
             value={term}
             onChange={e => setTerm(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') run() }}
-            placeholder={placeholder ?? t('Jméno, příjmení, rodné číslo / národní identifikátor, telefon nebo jméno + datum narození', 'Name, surname, national ID (birth number, SSN, PESEL…), phone, or name + date of birth')}
+            placeholder={placeholder ?? t('Jméno nebo obchodní název klienta', 'Client name or trading name')}
             aria-label={t('Vyhledat stranu', 'Search parties')}
             aria-controls="party-search-results"
             style={{

@@ -84,7 +84,8 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 1. Je výprava zastavená? `GET /api/v1/ops/dispatch` — pokud `state=HALTED`, operátor sáhl po break-glass. Obnovte přes four-eyes (`/resume/propose` + *jiný* aktér `/approve`).
 2. Zkontrolujte consumer lag na `openbank.notification.requests`; zkontrolujte logy `NotificationConsumer` na parse/processing chyby.
 3. EMAIL zaseknutý v `PENDING`/`FAILED`? Ověřte SMTP (`quarkus.mailer.*`); v dev je mailer mockovaný.
-   Který kanál drží řádky bez výsledku, ukáže `openbank_notification_pending_stale_by_channel{channel=...}`: řádky PENDING starší než 15 minut rozdělené podle kanálu (`EMAIL`, `PUSH`, `INBOX`). Součet kanálů odpovídá `openbank_notification_pending_stale`. Hodnota `-1` znamená, že dotaz selhal, ne nula řádků. Čtení produkční tabulky není potřeba.
+   Který kanál drží řádky bez výsledku, ukáže `openbank_notification_pending_stale_by_channel{channel=...}`: řádky PENDING starší než 15 minut rozdělené podle kanálu (`EMAIL`, `PUSH`, `INBOX` a `OTHER` pro uložený kanál, na který se už nedoručuje, např. zrušené `SMS`/`IN_APP`). Součet kanálů odpovídá `openbank_notification_pending_stale`. Hodnota `-1` znamená, že dotaz selhal, ne nula řádků. Čtení produkční tabulky není potřeba.
+   Migrace V21 uzavřela řádky PENDING, které nic nemohlo dokončit: zrušený kanál jako `FAILED`/`channel_retired` a jakýkoli jiný řádek PENDING starší než 30 dní jako `FAILED`/`outcome_unknown`. Řádek PENDING nic znovu neodesílá, takže starší řádek je k prošetření, ne rozeslání v běhu.
 4. PUSH `FAILED` s "no active devices"? Party nemá žádné ACTIVE `device_tokens`, nebo jsou FCM/APNs adaptéry vypnuté (pak je push no-op SENT).
 
 ### Zastavení / obnovení výpravy (break-glass)
@@ -118,3 +119,12 @@ Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTT
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Obnova klientského certifikátu (odchozí mTLS)
+
+Každá pojmenovaná konfigurace `quarkus.tls.<name>`, kterou se služba prokazuje vůči
+naslouchání 8443 jiné služby, nastavuje `reload-period: 1h`. cert-manager klientský certifikát
+obnoví před expirací; bez této volby by proces dál předkládal ten starý, dokud by ho protistrana
+neodmítla, zatímco všechny signály expirace měřily obnovený Secret a hlásily zelenou. Po obnově
+se nový certifikát použije do hodiny, bez restartu. Gate `tls-certificate-reload` hlídá, aby
+žádná taková konfigurace nevypadla.

@@ -43,6 +43,7 @@ dependencies {
     implementation(project(":openbank-libs-runtime"))
 
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.mockk)
     testImplementation(libs.wiremock.standalone)
     // Consumer-driven contract tests (ADR-0063 P1 ledger, P2 fx + balance cover).

@@ -39,9 +39,10 @@ function renderCs(reg: ObligationRegister) {
 describe('RegulatoryObligations', () => {
   it('lists a missing duty first, with its legal source and authority', () => {
     renderCs(register)
-    const items = screen.getAllByRole('listitem')
-    expect(within(items[0]).getByRole('heading', { name: 'Údaje pro výplatu náhrad' })).toBeInTheDocument()
+    const items = screen.getAllByRole('row').slice(1)
+    expect(within(items[0]).getByText('Údaje pro výplatu náhrad')).toBeInTheDocument()
     expect(screen.getByTestId('status-gsft-depositor-data')).toHaveTextContent('Chybí')
+    fireEvent.click(within(items[0]).getByText('Právní základ a podrobnosti'))
     expect(within(items[0]).getByRole('link', { name: 'Znění předpisu' })).toHaveAttribute('href', 'https://www.zakonyprolidi.cz/cs/2011-71')
     expect(within(items[0]).getByText('Garanční systém finančního trhu')).toBeInTheDocument()
   })
@@ -60,7 +61,40 @@ describe('RegulatoryObligations', () => {
     renderCs(register)
     expect(screen.getByTestId('count-missing')).toHaveTextContent('1')
     fireEvent.click(screen.getByTestId('count-missing').closest('button')!)
-    expect(screen.getAllByRole('listitem')).toHaveLength(1)
+    expect(screen.getAllByRole('row')).toHaveLength(2)
+  })
+
+  it('combines accent-insensitive search, authority and coverage and resets an empty result', () => {
+    renderCs(register)
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'UDAJE' } })
+    expect(screen.getAllByRole('row')).toHaveLength(2)
+    fireEvent.change(screen.getByLabelText('Adresát'), { target: { value: 'gsft' } })
+    fireEvent.change(screen.getByLabelText('Pokrytí'), { target: { value: 'filed-return' } })
+    expect(screen.getByRole('status')).toHaveTextContent('Žádná povinnost')
+    fireEvent.click(screen.getByRole('button', { name: 'Zrušit filtry' }))
+    expect(screen.getAllByRole('row')).toHaveLength(3)
+    expect(screen.getByRole('searchbox')).toHaveValue('')
+  })
+
+  it('bounds the rendered rows and resets the page when a filter changes', () => {
+    renderCs({ ...register, obligations: Array.from({ length: 31 }, (_, i) => ({
+      ...register.obligations[0], id: `duty-${i}`, name: { cs: `Povinnost ${i}`, en: `Duty ${i}` },
+    })) })
+    expect(screen.getAllByRole('row')).toHaveLength(26)
+    fireEvent.click(screen.getByRole('button', { name: 'Další' }))
+    expect(screen.getAllByRole('row')).toHaveLength(7)
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Povinnost 30' } })
+    expect(screen.getAllByRole('row')).toHaveLength(2)
+    expect(screen.getByText('Povinnost 30')).toBeInTheDocument()
+  })
+
+  it('filters confidence independently from coverage and renders English controls', () => {
+    render(<LanguageProvider initialLanguage="en"><RegulatoryObligations register={register} /></LanguageProvider>)
+    fireEvent.change(screen.getByLabelText('Deadline verification'), { target: { value: 'unverified' } })
+    expect(screen.getByRole('status')).toHaveTextContent('No obligation')
+    fireEvent.change(screen.getByLabelText('Deadline verification'), { target: { value: 'verified' } })
+    expect(screen.getByText('Depositor data')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'cnb-lcr' })).not.toBeInTheDocument()
   })
 
   it('says the register is not baked instead of rendering an empty list', () => {

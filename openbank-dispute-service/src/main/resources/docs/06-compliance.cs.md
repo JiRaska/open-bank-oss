@@ -39,6 +39,10 @@
 
 Žádná data neopouštějí region EU/EHP.
 
+### Trestně-průkazný řetězec důkazů (ADR-0117)
+
+Každá položka důkazu je řetězena hashem přes svou identitu, hash předchozí položky a časové razítko `submittedAt`. Razítko vstupuje do hashe v **round-trip-kanonické podobě** — UTC okamžik zkrácený na mikrosekundy, což je přesně to, co sloupec Postgres `TIMESTAMPTZ` ukládá a vrací. Hashování aplikačního `OffsetDateTime.toString()` verbatim je skrytá vada: nanosekundová přesnost a posun `+01:00`/`+02:00` nepřežijí round trip přes databázi, takže `GET /api/v1/disputes/{id}/evidence/verify` by přepočítal jiný hash a neporušený řetězec označil jako porušený. Kanonizace v okamžiku zápisu udržuje řetězec ověřitelný přes reálnou persistenční cestu (#16473).
+
 ### Retence (čl. 5(1)(e))
 
 | Záznam | Retence |

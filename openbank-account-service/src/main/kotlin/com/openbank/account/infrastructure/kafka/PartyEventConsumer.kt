@@ -12,6 +12,7 @@ import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.NotificationRequestPort
 import com.openbank.account.application.port.out.PartyMandateProjectionRepository
 import com.openbank.account.application.port.out.WelcomeBonusPort
+import com.openbank.account.application.usecase.PartyStandingService
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.PartyMandateProjection
@@ -56,7 +57,10 @@ private data class PartyEvent(
  *   idempotency key, so never two) — the self-heal for business parties created before
  *   account-service opened business accounts. Then activate the party's pending accounts; the
  *   welcome bonus lands on the retail CURRENT account only (never once per account).
- * - party SUSPENDED → freeze any active account (defence in depth).
+ * - party SUSPENDED or CLOSED → freeze every ACTIVE account it owns (ADR-0374 D4). party-service
+ *   suspends on a rejected or expired KYC and on an AML block, so all three arrive here as
+ *   SUSPENDED. When the party is ACTIVE again the freezes this consumer placed are lifted; a freeze
+ *   placed by an operator is not. See [PartyStandingService].
  *
  * Idempotent: one onboarding account per party AND type; re-delivered events are no-ops.
  *
@@ -121,6 +125,7 @@ class PartyEventConsumer(
     // Must equal the business product's currency — AccountService rejects a product/currency mismatch.
     @ConfigProperty(name = "openbank.account.onboarding.business-currency", defaultValue = "EUR")
     private val businessCurrency: String,
+    private val partyStanding: PartyStandingService,
 ) {
     private val log = Logger.getLogger(PartyEventConsumer::class.java)
 
@@ -313,19 +318,28 @@ class PartyEventConsumer(
 
     private suspend fun reconcileToPartyStatus(partyId: UUID, status: String) {
         when (status) {
-            "ACTIVE" -> accountRepository.findByPartyId(partyId, 50, null)
-                .filter { it.status == AccountStatus.PENDING_ACTIVATION }
-                .forEach {
-                    accountUseCase.activateAccount(it.id)
-                    log.infof("Activated onboarding account %s for party %s", it.id, partyId)
-                    // The incentive is one credit per CUSTOMER, not per account — the savings
-                    // account activates dry and gets funded by the customer's own transfers.
-                    // A business account never gets it: the incentive is retail-only and its CZK
-                    // amount does not match the business product's currency.
-                    if (it.accountType == AccountType.CURRENT && it.productId != UUID.fromString(businessProductId)) {
-                        grantWelcomeBonus(it.id, partyId)
+            in STANDING_LOST -> {
+                val frozen = partyStanding.freezeAccountsOf(partyId, status)
+                if (frozen > 0) log.infof("Party %s is %s: froze %d account(s)", partyId, status, frozen)
+            }
+            "ACTIVE" -> {
+                val restored = partyStanding.restoreAccountsOf(partyId)
+                if (restored > 0) log.infof("Party %s is ACTIVE again: unfroze %d account(s)", partyId, restored)
+                accountRepository.findByPartyId(partyId, 50, null)
+                    .filter { it.status == AccountStatus.PENDING_ACTIVATION }
+                    .forEach {
+                        accountUseCase.activateAccount(it.id)
+                        log.infof("Activated onboarding account %s for party %s", it.id, partyId)
+                        // The incentive is one credit per CUSTOMER, not per account — the savings
+                        // account activates dry and gets funded by the customer's own transfers.
+                        // A business account never gets it: the incentive is retail-only and its CZK
+                        // amount does not match the business product's currency.
+                        val retail = it.productId != UUID.fromString(businessProductId)
+                        if (it.accountType == AccountType.CURRENT && retail) grantWelcomeBonus(it.id, partyId)
                     }
-                }
+            }
+            // PENDING_KYC, MERGED and anything unknown: no account standing follows from them.
+            else -> Unit
         }
     }
 
@@ -370,5 +384,8 @@ class PartyEventConsumer(
         const val RETRY_BACKOFF_MS = 500L
         const val BUSINESS_CURRENT_PRODUCT_ID = "d4275d2a-1343-3052-a6c0-8a99149b6c62"
         val BUSINESS_PARTY_TYPES = BusinessOnboardingAccount.BUSINESS_PARTY_TYPES
+
+        /** Party statuses under which no money may leave the party's accounts. */
+        val STANDING_LOST = setOf("SUSPENDED", "CLOSED")
     }
 }

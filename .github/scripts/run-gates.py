@@ -878,7 +878,22 @@ ICON = {
 }
 
 
-def report(results, jobs):
+# A shard whose ONLY failures are NOT EVALUATED gates found nothing: every red row means "could
+# not read its subject" (an exhausted installation API quota, an unreachable endpoint), not "found
+# a defect". Measured 2026-11-10..12: `pdp-flag-rollout-complete` and `ruleset-bypass-actors` went
+# red that way in every quota burst, and the job summary read exactly like a real finding. This
+# line (stdout) plus the job-summary block make the two distinguishable, and
+# `spot-kill-retry.sh` keys its quota-reset re-run on the verdict roster this report prints.
+ONLY_NOT_EVALUATED_LINE = "GATES_RUN_VERDICT=NOT_EVALUATED_ONLY"
+
+
+def only_not_evaluated(failed) -> bool:
+    return bool(failed) and all(
+        r.status == "failed" and r.failure_kind == "not_evaluated" for r in failed
+    )
+
+
+def report(results, jobs, summary_path=None):
     # ZERO GATES IS NOT A PASS (#6068). Without this, report([]) printed "0 gates" and
     # returned 0 — the one line in this file that could answer "everything is fine" about
     # a run that evaluated nothing. Every other vacuity guard here (empty manifest, empty
@@ -936,6 +951,24 @@ def report(results, jobs):
     for r in failed:
         why = "self-test verdict wrong — gate is unfalsified" if r.status == "unfalsified" else "gate failed"
         print(f"::error title={r.gate['id']}::{why}: {r.gate['name']}")
+    if only_not_evaluated(failed):
+        ids = ", ".join(r.gate["id"] for r in failed)
+        print(ONLY_NOT_EVALUATED_LINE)
+        print(f"::notice title=gates NOT EVALUATED, no finding::{len(failed)} gate(s) could not "
+              f"read their subject ({ids}); none reported a finding. Usually the installation "
+              "API quota; the auto-retry re-runs this after the quota resets.")
+        if summary_path:
+            try:
+                with open(summary_path, "a", encoding="utf-8") as fh:
+                    fh.write(
+                        "\n### Gates NOT EVALUATED, no finding\n\n"
+                        f"Every failing gate in this shard ({ids}) is NOT EVALUATED: it could not "
+                        "read its subject (usually an exhausted GitHub API quota). No gate "
+                        "reported a finding. Re-run once the quota has reset; "
+                        "`auto-retry-cancelled.yml` does that automatically for attempt 1.\n"
+                    )
+            except OSError as exc:
+                sys.stderr.write(f"::warning::run-gates: could not write the job summary: {exc}\n")
     return 1 if failed else 0
 
 
@@ -1128,7 +1161,7 @@ def main(argv=None):
             pathlib.Path(args.json).write_text(json.dumps(json_records(results), indent=2))
         except OSError as exc:
             sys.stderr.write(f"::warning::run-gates: could not write --json {args.json}: {exc}\n")
-    return report(results, jobs)
+    return report(results, jobs, os.environ.get("GITHUB_STEP_SUMMARY"))
 
 
 # ---------------------------------------------------------------------------
@@ -1398,6 +1431,18 @@ def self_test():
             bad.append("report() did not emit the expected fixture error annotations")
         if annotation_ids(report_output, "warning") != expected_warnings:
             bad.append("report() did not emit the expected fixture warning annotations")
+        # NOT EVALUATED ONLY (quota burst) must be told apart from a finding, in both directions.
+        ne_only = [r for r in results if r.id in ("passing", "not-evaluated")]
+        summary_file = tmp / "summary.md"
+        rc_ne, ne_output = capture_fixture_output(lambda: report(ne_only, 1, str(summary_file)))
+        if rc_ne != 1:
+            bad.append(f"report() returned {rc_ne!r} for a NOT EVALUATED shard, want 1 (never a pass)")
+        if ONLY_NOT_EVALUATED_LINE not in ne_output.splitlines():
+            bad.append("report() did not mark a NOT-EVALUATED-only shard as such")
+        if not summary_file.exists() or "NOT EVALUATED, no finding" not in summary_file.read_text():
+            bad.append("report() did not write the NOT-EVALUATED-only job summary")
+        if ONLY_NOT_EVALUATED_LINE in report_output.splitlines():
+            bad.append("report() marked a shard with a real finding as NOT-EVALUATED-only")
         rc_advisory, advisory_output = capture_fixture_output(
             lambda: report([r for r in results if r.id in ("passing", "advisory-failing")], 1)
         )

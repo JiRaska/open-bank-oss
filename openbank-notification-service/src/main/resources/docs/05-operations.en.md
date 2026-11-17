@@ -84,7 +84,8 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 1. Is dispatch halted? `GET /api/v1/ops/dispatch` — if `state=HALTED`, an operator hit the break-glass. Resume via four-eyes (`/resume/propose` + a *different* actor `/approve`).
 2. Check consumer lag on `openbank.notification.requests`; check `NotificationConsumer` logs for parse/processing errors.
 3. EMAIL stuck `PENDING`/`FAILED`? Verify SMTP (`quarkus.mailer.*`); in dev the mailer is mocked.
-   To see which channel holds rows that never got an outcome, read `openbank_notification_pending_stale_by_channel{channel=...}`: the PENDING rows older than 15 minutes, split by channel (`EMAIL`, `PUSH`, `INBOX`). Its channels sum to `openbank_notification_pending_stale`. `-1` means the count query failed, not zero rows. No read of the production table is needed.
+   To see which channel holds rows that never got an outcome, read `openbank_notification_pending_stale_by_channel{channel=...}`: the PENDING rows older than 15 minutes, split by channel (`EMAIL`, `PUSH`, `INBOX`, and `OTHER` for a stored channel no longer delivered on, e.g. the retired `SMS`/`IN_APP`). Its channels sum to `openbank_notification_pending_stale`. `-1` means the count query failed, not zero rows. No read of the production table is needed.
+   Migration V21 closed PENDING rows that nothing could finish: a retired channel as `FAILED`/`channel_retired`, and any other PENDING row older than 30 days as `FAILED`/`outcome_unknown`. Nothing retries a PENDING row, so an older one is an investigation, not an in-flight send.
 4. PUSH `FAILED` with "no active devices"? The party has no ACTIVE `device_tokens`, or FCM/APNs adapters are disabled (then push is a no-op SENT).
 
 ### Halt / resume the dispatch loop (break-glass)
@@ -118,3 +119,12 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Client certificate reload (outbound mTLS)
+
+Every named `quarkus.tls.<name>` configuration that presents a client certificate to a peer's
+8443 listener sets `reload-period: 1h`. cert-manager renews the mounted client certificate
+before it expires; without a reload period the process would keep presenting the old one until
+the peer rejects it, while every expiry signal measured the renewed Secret and read healthy.
+After a renewal the new certificate is in use within an hour, with no restart. The
+`tls-certificate-reload` gate keeps every such configuration covered.

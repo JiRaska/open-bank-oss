@@ -56,10 +56,11 @@ class CreditRiskInsightService(
     ): Uni<List<com.openbank.lending.domain.model.CreditPortfolioSummary>> = provisioning.summariseActive(asOf)
 
     override fun activePolicy(asOf: LocalDate): Uni<CreditPolicyView> = creditPolicy.activeBundle(asOf).map { bundle ->
+        val codeSeeded = creditPolicy.isCodeSeeded(bundle)
         CreditPolicyView(
             asOf = asOf,
-            source = policySource(),
-            codeSeeded = creditPolicy is StarterCreditPolicy,
+            source = if (codeSeeded) StarterCreditPolicy::class.java.simpleName else policySource(),
+            codeSeeded = codeSeeded,
             tables = bundle.tables,
         )
     }

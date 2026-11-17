@@ -129,3 +129,18 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Lending lifecycle evidence (#9890)
+
+The existing lending consumer stores version 1 `loan.exposure_fact` events in
+`loan_exposure_facts`. The raw event is stored as JSONB with its event ID, lending source
+reference, loan ID and effective instant. Exact replays are accepted, including after out-of-order
+delivery. Conflicting payloads or reused identities use the existing consumer dead-letter route.
+Deploy the AnaCredit consumer before publishing lending facts. A prior consumer version
+acknowledges unfamiliar event types, which advances its offsets. Keep the additive V3 table on
+application rollback and reconcile any consumer downtime or older-version window against the
+retained lending events before using the facts for reporting.
+
+The report still reads the existing exposure register. #9890 tracks historical population and
+reconciliation at the reference date, debtor classification, the reference-date FX conversion,
+and regulatory arrears and default attributes needed before these facts can supply report rows.

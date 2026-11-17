@@ -23,6 +23,14 @@ interface FlakyTestHunterConfig {
     /** Fine-grained token limited to contents:write and pull_requests:write on this repository. */
     fun githubToken(): Optional<String>
 
+    /**
+     * ADR-0031 D9 phase-3 qualification: the ONE branch the bounded writer reads from and targets.
+     * A closed enum, not a free string — an unknown value fails at boot, so no configuration can
+     * point the writer at an arbitrary ref. Production stays [WriterBaseRef.MAIN].
+     */
+    @WithDefault("main")
+    fun writerBaseRef(): WriterBaseRef
+
     @WithDefault("http://litellm.ai-platform:4000")
     fun llmGatewayUrl(): String
 
@@ -52,4 +60,16 @@ interface FlakyTestHunterConfig {
         @WithDefault("PT0.5S")
         fun timeout(): Duration
     }
+}
+
+/**
+ * Every ref the phase-3 writer may read or open a pull request against. `QUALIFICATION` exists
+ * because the writer's only eligible repair is a defect the enforced `test-runblocking-unit-guard`
+ * gate keeps off `main`; a seeded, protected qualification branch is the one place a live repair
+ * can be proven (ADR-0031 D9, amendment 2026-11-14). Adding a value here widens the write surface
+ * and is held by `check-agent-bounded-write-surface.py`.
+ */
+enum class WriterBaseRef(val ref: String) {
+    MAIN("main"),
+    QUALIFICATION("qualification/flaky-test-hunter"),
 }
