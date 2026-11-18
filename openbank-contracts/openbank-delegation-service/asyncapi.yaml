@@ -16,7 +16,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Delegation Service — events
-  version: 1.6.0
+  version: 1.7.0
   description: |
     Domain events emitted when a customer-to-party delegation grant changes state (ADR-0232).
 
@@ -514,7 +514,23 @@ components:
         granteePartyId:
           type: string
           format: uuid
-          description: The party the grant was given to.
+          description: |
+            The party the grant was given to. For `granteeType: MCP_CLIENT` this is not a party:
+            it is a name-based UUID derived from the client id.
+        granteeType:
+          type: string
+          enum: [PARTY, MCP_CLIENT]
+          default: PARTY
+          description: |
+            ADR-0383 D3. Optional and additive (ADR-0260): absent means PARTY, which is every grant
+            published before this field existed. A consumer MUST ignore a grant whose
+            `granteeType` is not PARTY unless it has been written for that class; an MCP client
+            grant is propose-and-read only and is never a party. No producer publishes
+            MCP_CLIENT yet (dormancy guard in delegation-service).
+        granteeClientId:
+          type: string
+          maxLength: 255
+          description: The admitted MCP client's OAuth client id (`azp`). Present only for MCP_CLIENT.
     resource:
       type: object
       required: [resourceType, resourceId]

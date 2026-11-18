@@ -482,6 +482,23 @@ class ConsentServiceTest {
         }
     }
 
+    /**
+     * ADR-0385 D3: approving an MCP client connect is not a PSD2 consent. A COMPLETED
+     * MCP_CLIENT_CONNECT challenge of the consent's own party must never activate it.
+     */
+    @Test
+    fun `activateConsent refuses a completed MCP_CLIENT_CONNECT challenge as consent evidence`() {
+        val scaSessionId = UUID.randomUUID()
+        coEvery { consentRepository.findById(consentId) } returns consent(status = ConsentStatus.PENDING_SCA)
+        coEvery { scaChallengeClient.getChallenge(scaSessionId) } returns
+            ScaChallengeSnapshot(scaSessionId, partyId, "MCP_CLIENT_CONNECT", "COMPLETED")
+
+        assertThrows<ConsentScaChallengeMismatchException> {
+            runBlocking { service.activateConsent(consentId, scaSessionId) }
+        }
+        coVerify(exactly = 0) { consentRepository.saveSuperseding(any(), any(), any()) }
+    }
+
     @Test
     fun `activateConsent throws not-completed when challenge status is not COMPLETED`() {
         val scaSessionId = UUID.randomUUID()

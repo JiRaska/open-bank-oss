@@ -4,7 +4,7 @@
 
 `openbank-consent-service` is the **system of record for consents** in the OpenBank platform — the explicit authorisations a customer (party) gives to a third party or agent to access account data or initiate payments. It holds:
 
-- **Consent aggregate** — who granted it (`partyId`), to whom (`granteeId` + `granteeType`), the set of `scopes`, the optional list of `accountIbans` (null = all accounts), the validity window (`validFrom`/`validTo`) and lifecycle `status`.
+- **Consent aggregate** — who granted it (`partyId`), to whom (`granteeId` + `granteeType`), the set of `scopes`, the optional list of `accountIbans` (only listed accounts are covered; no list covers none), the validity window (`validFrom`/`validTo`) and lifecycle `status`.
 - **Consent scopes** — PSD2 AISP (`ACCOUNTS_READ`, `BALANCES_READ`, `TRANSACTIONS_READ`, `STATEMENTS_READ`, plus ČOBS-specific `PAYMENT_ACCOUNTS_READ`, `STANDING_ORDERS_READ`, `DIRECT_DEBITS_READ`), PISP (`PAYMENTS_INITIATE`, `PAYMENTS_STATUS_READ`, `DOMESTIC_PAYMENT_INITIATE`, `SIPO_PAYMENT_INITIATE`), CBPII (`FUNDS_CONFIRMATION`), and AI-agent extension scopes (`AGENT_QUERY`, `AGENT_INITIATE`, `AGENT_NOTIFY`, `AGENT_ANALYZE`).
 - **Grantee types** — `TPP` (eIDAS-certified Third Party Provider), `BANK_AGENT`, `CUSTOMER_AGENT`, `INTERNAL_SERVICE`.
 - **Lifecycle state machine** — `PENDING_SCA → ACTIVE → (EXPIRED | REVOKED)`, plus `REJECTED` and `SUPERSEDED`.
