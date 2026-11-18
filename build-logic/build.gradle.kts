@@ -88,7 +88,7 @@ configurations.all {
         // Kover's coverage reporter otherwise resolves FreeMarker 2.3.32, vulnerable to template
         // path traversal (GHSA-27j2-h3m2-8237, fixed in 2.3.35). Build-time classpath only.
         force("org.freemarker:freemarker:2.3.35")
-        force("org.codehaus.plexus:plexus-utils:4.1.0")
+        force("org.codehaus.plexus:plexus-utils:4.2.0")
         force("com.fasterxml.jackson.core:jackson-databind:2.23.0")
         force("com.fasterxml.jackson.core:jackson-core:2.23.0")
         // Match the platform and runtime security floor across the complete Netty family.
