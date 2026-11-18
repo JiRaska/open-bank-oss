@@ -37,8 +37,12 @@ class TestPolicyDecisionPoint : PolicyDecisionPoint {
         if (customerOutage) error("opa unavailable")
         val need = CUSTOMER_TOOLS[query.attributes["tool"]]
         val granted = query.attributes["grantedCapabilities"] as? List<*> ?: emptyList<Any>()
-        val ok = !customerDeny && need != null && query.action == need.first && need.second in granted &&
-            !query.principal.serviceAccount && query.principal.roles.isEmpty()
+        val ok = !customerDeny &&
+            need != null &&
+            query.action == need.first &&
+            need.second in granted &&
+            !query.principal.serviceAccount &&
+            query.principal.roles.isEmpty()
         return if (ok) AuthzDecision(allow = true) else AuthzDecision(allow = false, reason = "customer channel denied")
     }
 

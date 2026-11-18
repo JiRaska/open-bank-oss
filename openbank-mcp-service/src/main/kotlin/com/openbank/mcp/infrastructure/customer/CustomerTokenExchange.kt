@@ -106,24 +106,23 @@ class KeycloakCustomerTokenExchange @Inject constructor(
     }
 
     internal fun validated(answer: JsonNode, subject: String, audience: DownstreamAudience): String {
-        val token = answer.path("access_token").takeIf { it.isTextual && it.asText().isNotBlank() }?.asText()
-            ?: throw TokenExchangeRefused("token exchange returned no access token")
+        val token = answer.path("access_token").takeIf { it.isTextual }?.asText().orEmpty()
+        refuseUnless(token.isNotBlank(), "token exchange returned no access token")
         val lifetime = answer.path("expires_in")
-        if (!lifetime.canConvertToLong() || lifetime.asLong() !in 1..MAX_LIFETIME_SECONDS) {
-            throw TokenExchangeRefused("exchanged token lifetime must be 1..$MAX_LIFETIME_SECONDS s")
-        }
+        refuseUnless(
+            lifetime.canConvertToLong() && lifetime.asLong() in 1..MAX_LIFETIME_SECONDS,
+            "exchanged token lifetime must be 1..$MAX_LIFETIME_SECONDS s",
+        )
         val claims = claimsOf(token)
-        if (claims.path("sub").asText(null) != subject) {
-            throw TokenExchangeRefused("exchanged token is not the customer's")
-        }
+        refuseUnless(claims.path("sub").asText(null) == subject, "exchanged token is not the customer's")
         val aud = claims.path("aud")
         val audiences = if (aud.isArray) aud.map { it.asText() } else listOf(aud.asText(""))
-        if (audience.clientId !in
-            audiences
-        ) {
-            throw TokenExchangeRefused("exchanged token is not for ${audience.clientId}")
-        }
+        refuseUnless(audience.clientId in audiences, "exchanged token is not for ${audience.clientId}")
         return token
+    }
+
+    private fun refuseUnless(condition: Boolean, reason: String) {
+        if (!condition) throw TokenExchangeRefused(reason)
     }
 
     @Suppress("TooGenericExceptionCaught")

@@ -32,7 +32,11 @@ class CustomerReadToolsTest {
         }
     }
     private val tools = CustomerReadTools(pdp, exchange, downstream, McpPiiMasker(mapper), mapper)
-    private val caller = CustomerReadTools.Caller("c0ffee00-0000-0000-0000-000000000001", "customer-token", "mcp-local-test")
+    private val caller = CustomerReadTools.Caller(
+        "c0ffee00-0000-0000-0000-000000000001",
+        "customer-token",
+        "mcp-local-test",
+    )
     private val account = UUID.randomUUID()
 
     private fun grant(vararg caps: String, accountId: UUID = account) =
@@ -144,7 +148,12 @@ class CustomerReadToolsTest {
     fun `the PDP sees the customer on the customer channel with the grant's capabilities`() {
         every { exchange.exchange(any(), any(), any()) } returns "exchanged"
         every { downstream.balances(any(), any()) } returns mapper.readTree("{}")
-        tools.call(CustomerReadTools.GET_BALANCE, args("accountId" to account.toString()), caller, listOf(grant(CustomerCapabilities.READ_BALANCES)))
+        tools.call(
+            CustomerReadTools.GET_BALANCE,
+            args("accountId" to account.toString()),
+            caller,
+            listOf(grant(CustomerCapabilities.READ_BALANCES)),
+        )
         val q = queries.single()
         assertThat(q.action).isEqualTo("query.balance.readonly")
         assertThat(q.principal.type).isEqualTo("HUMAN")
@@ -158,7 +167,12 @@ class CustomerReadToolsTest {
     @Test
     fun `a policy deny refuses before any exchange`() {
         verdict = { AuthzDecision(allow = false, reason = "no") }
-        val out = tools.call(CustomerReadTools.GET_BALANCE, args("accountId" to account.toString()), caller, listOf(grant(CustomerCapabilities.READ_BALANCES)))
+        val out = tools.call(
+            CustomerReadTools.GET_BALANCE,
+            args("accountId" to account.toString()),
+            caller,
+            listOf(grant(CustomerCapabilities.READ_BALANCES)),
+        )
         assertThat(out).isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)
         verify(exactly = 0) { exchange.exchange(any(), any(), any()) }
     }
@@ -166,7 +180,12 @@ class CustomerReadToolsTest {
     @Test
     fun `a PDP error refuses as unavailable before any exchange`() {
         verdict = { throw IllegalStateException("opa down") }
-        val out = tools.call(CustomerReadTools.GET_BALANCE, args("accountId" to account.toString()), caller, listOf(grant(CustomerCapabilities.READ_BALANCES)))
+        val out = tools.call(
+            CustomerReadTools.GET_BALANCE,
+            args("accountId" to account.toString()),
+            caller,
+            listOf(grant(CustomerCapabilities.READ_BALANCES)),
+        )
         assertThat((out as CustomerReadTools.Outcome.Refused).unavailable).isTrue()
         verify(exactly = 0) { exchange.exchange(any(), any(), any()) }
     }

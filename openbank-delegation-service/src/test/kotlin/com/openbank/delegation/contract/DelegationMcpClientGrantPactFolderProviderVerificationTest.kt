@@ -21,7 +21,10 @@ import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.integration.SpendReservationOutboxWriteIT
 import com.openbank.delegation.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.junit.QuarkusMock
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.inject.Alternative
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
@@ -45,6 +48,7 @@ import java.util.UUID
  * the only identity the handler admits.
  */
 @QuarkusTest
+@TestProfile(DelegationMcpClientGrantPactFolderProviderVerificationTest.ResolverDouble::class)
 @QuarkusTestResource(SpendReservationOutboxWriteIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresTestResource::class)
 @TestSecurity(user = "service-account-openbank-mcp", roles = ["ROLE_API"])
@@ -75,14 +79,25 @@ class DelegationMcpClientGrantPactFolderProviderVerificationTest {
         context?.verifyInteraction()
     }
 
+    /** Enables [FakeResolver] for this class only (a Kotlin bean class is final, so no QuarkusMock). */
+    class ResolverDouble : QuarkusTestProfile {
+        override fun getEnabledAlternatives(): Set<Class<*>> = setOf(FakeResolver::class.java)
+    }
+
+    @Alternative
+    @ApplicationScoped
+    class FakeResolver : ResolveMcpClientGrantUseCase {
+        override suspend fun resolve(grantorPartyId: UUID, clientId: String, keyThumbprint: String) =
+            if (grantorPartyId == PARTY && clientId == CLIENT && keyThumbprint == JKT) answer else emptyList()
+
+        companion object {
+            @Volatile
+            var answer: List<DelegationGrant> = emptyList()
+        }
+    }
+
     private fun answer(grants: List<DelegationGrant>) {
-        QuarkusMock.installMockForType(
-            object : ResolveMcpClientGrantUseCase {
-                override suspend fun resolve(grantorPartyId: UUID, clientId: String, keyThumbprint: String) =
-                    if (grantorPartyId == PARTY && clientId == CLIENT && keyThumbprint == JKT) grants else emptyList()
-            },
-            ResolveMcpClientGrantUseCase::class.java,
-        )
+        FakeResolver.answer = grants
     }
 
     @State("an active MCP_CLIENT grant exists for the pact party, client and key")
@@ -113,7 +128,7 @@ class DelegationMcpClientGrantPactFolderProviderVerificationTest {
     @State("no MCP_CLIENT grant exists for the pact party, client and key")
     fun noGrant() = answer(emptyList())
 
-    private companion object {
+    companion object {
         val PARTY: UUID = UUID.fromString("d3d3d3d3-0000-4000-8000-000000000001")
         val GRANT: UUID = UUID.fromString("d3d3d3d3-0000-4000-8000-000000000002")
         val ACCOUNT: UUID = UUID.fromString("d3d3d3d3-0000-4000-8000-000000000003")

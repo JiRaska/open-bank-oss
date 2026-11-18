@@ -6,15 +6,15 @@ package com.openbank.mcp.infrastructure.customer
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.authz.AuthzQuery
+import com.openbank.libs.authz.PolicyDecisionPoint
+import com.openbank.libs.authz.Principal
 import com.openbank.mcp.application.McpInputBounds
 import com.openbank.mcp.application.McpPiiMasker
 import com.openbank.mcp.application.McpUntrustedData
 import com.openbank.mcp.application.protocol.ToolCallResult
 import com.openbank.mcp.application.protocol.ToolContent
 import com.openbank.mcp.application.protocol.ToolDefinition
-import com.openbank.libs.authz.AuthzQuery
-import com.openbank.libs.authz.PolicyDecisionPoint
-import com.openbank.libs.authz.Principal
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
@@ -153,7 +153,14 @@ class CustomerReadTools @Inject constructor(
         } catch (e: Exception) {
             return Outcome.Refused("pdp unavailable: ${e.javaClass.simpleName}", tool.capability, unavailable = true)
         }
-        return if (decision.allow) null else Outcome.Refused("denied by policy: ${decision.reason ?: "no matching allow rule"}", tool.capability)
+        return if (decision.allow) {
+            null
+        } else {
+            Outcome.Refused(
+                "denied by policy: ${decision.reason ?: "no matching allow rule"}",
+                tool.capability,
+            )
+        }
     }
 
     private class Read(val tool: String, val accountId: UUID, val limit: Int)
@@ -215,25 +222,25 @@ class CustomerReadTools @Inject constructor(
         .takeIf { it.isTextual && UUID_SHAPE.matches(it.asText()) }
         ?.let { UUID.fromString(it.asText()) }
 
-    private fun uuidProp() = mapOf(
-        "type" to "string",
-        "pattern" to UUID_PATTERN,
-        "description" to "accountId from list_accounts",
-    )
-
-    private fun schema(props: Map<String, Any>, required: List<String>): Map<String, Any> = buildMap {
-        put("type", "object")
-        put("properties", props)
-        if (required.isNotEmpty()) put("required", required)
-    }
-
     companion object {
         private const val HUMAN = "HUMAN"
         const val LIST_ACCOUNTS = "list_accounts"
         const val GET_BALANCE = "get_balance"
         const val LIST_TRANSACTIONS = "list_transactions"
         private const val ACCOUNT_ID = "accountId"
-        private const val UUID_PATTERN = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        const val UUID_PATTERN = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
         private val UUID_SHAPE = Regex(UUID_PATTERN)
     }
+}
+
+private fun uuidProp() = mapOf(
+    "type" to "string",
+    "pattern" to CustomerReadTools.UUID_PATTERN,
+    "description" to "accountId from list_accounts",
+)
+
+private fun schema(props: Map<String, Any>, required: List<String>): Map<String, Any> = buildMap {
+    put("type", "object")
+    put("properties", props)
+    if (required.isNotEmpty()) put("required", required)
 }
