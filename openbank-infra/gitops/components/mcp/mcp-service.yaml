@@ -81,6 +81,11 @@ spec:
             # and the admin-ui OBO_MCP_ENABLED relay (#2850).
             - name: MCP_OBO_ENABLED
               value: "true"
+            # ADR-0383 P4: the customer channel's shared DPoP replay store and budgets
+            # (mcp-valkey.yaml here). Without hosts configured Quarkus deactivates the
+            # redis extension's beans and the first customer request 500s (#2872).
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://mcp-valkey.platform.svc:6379
             # ADR-0034 PDP: the OPA sidecar in this pod (localhost:8181), serving
             # data.openbank.rest.allow (mcp-opa-bundle ConfigMap). A PDP connectivity error
             # still fails CLOSED in McpEndpoint (money-adjacent surface — never fail-open).
