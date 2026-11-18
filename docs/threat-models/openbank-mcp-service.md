@@ -454,9 +454,18 @@ a stub (T-T2/T-D2).
     an unauthenticated call gets 401 with `resource_metadata`. Values come from config, never the request.
   - *Boot gate.* `CustomerChannel` is `@Startup`: with the channel on, a missing issuer or a
     missing/malformed allowlist stops the service from starting.
+  - *Review hardening (same PR).* The fleet NUL guard now runs before the customer branch and the
+    audience check, so no path echoes a U+0000 id. A per-(subject, client) window is spent BEFORE
+    the DPoP replay claim (D5.3), and refused customer calls write at most one audit row per subject
+    per minute. Boot also refuses an allowlist whose `audience` differs from the staff path's, and
+    any parser failure (including a YAML syntax error). Measured with real signed tokens: Quarkus's
+    issuer resolver returns no tenant for an unknown `iss` and the request FALLS BACK to the default
+    (staff) tenant, so a foreign or forged issuer is stopped by that tenant's signature and issuer
+    checks — with the issuer check off (`token.issuer=any`) a third-issuer token signed by the staff
+    key is accepted. Production relies on the discovered issuer for that check.
   - **Residual, and why the channel must stay off:** the replay store is the single-pod
-    in-memory one (ADR-0383 P4 — a pod roll reopens the replay window); no server nonce; no
-    per-(party, azp) limiter runs before the replay claim (D5.3); an admitted customer reaches NO
+    in-memory one (ADR-0383 P4 — a pod roll reopens the replay window); no server nonce; the
+    D5.3 window is the in-process limiter, not the shared Valkey bucket; an admitted customer reaches NO
     tool (empty `tools/list`, refused `tools/call`), because the `MCP_CLIENT` grant lookup (P2/D3)
     and downstream party enforcement (P5) do not exist; the customers tenant config is not yet
     verified against a live Keycloak (P3).

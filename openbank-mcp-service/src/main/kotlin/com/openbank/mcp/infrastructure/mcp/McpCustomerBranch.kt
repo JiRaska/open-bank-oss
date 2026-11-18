@@ -16,6 +16,7 @@ import com.openbank.mcp.application.protocol.ToolContent
 import com.openbank.mcp.application.protocol.ToolsListResult
 import com.openbank.mcp.infrastructure.customer.CustomerChannelAdmission
 import com.openbank.mcp.infrastructure.customer.CustomerChannelAdmission.Outcome
+import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.jwt.JsonWebToken
@@ -30,6 +31,9 @@ import org.jboss.logging.Logger
  * - any other token → `null`, the staff path handles it (and [CallerContextResolver] refuses a
  *   customers-realm token there independently).
  *
+ * Admitted calls are bounded by the per-(subject, client) window spent inside admission, BEFORE the
+ * DPoP replay claim; an admitted call is therefore audited each time, within that window.
+ *
  * An ADMITTED customer reaches no tool in this slice: `tools/list` is empty and `tools/call` is
  * refused and audited under the customer's own subject. Customer reads need the `MCP_CLIENT` grant
  * lookup (ADR-0383 P2/D3) and per-service party enforcement (P5), neither of which exists yet; the
@@ -39,6 +43,7 @@ internal class McpCustomerBranch(
     private val admission: CustomerChannelAdmission,
     private val auditor: McpCallAuditor,
     private val metrics: McpMetricsPort,
+    private val limiter: McpRateLimiter,
 ) {
     private val log = Logger.getLogger(McpCustomerBranch::class.java)
 
@@ -57,16 +62,33 @@ internal class McpCustomerBranch(
                 .build()
         }
         if (!admission.isCustomerToken(jwt)) return null
-        return when (val outcome = runBlocking { admission.admit(jwt, authorization, dpop) }) {
-            is Outcome.Refused -> refuse(outcome, method, params)
+        val outcome = runBlocking { admission.admit(jwt, authorization, dpop, ::spendWindow) }
+        return when (outcome) {
+            is Outcome.Refused -> refuse(outcome, jwt.subject, method, params)
             is Outcome.Admitted -> admitted(outcome, method, id, params)
         }
     }
 
-    private fun refuse(outcome: Outcome.Refused, method: String, params: JsonNode): Response {
-        log.warnf("customer channel refused %s: %s", McpInputBounds.logSafe(method), outcome.reason)
+    /** One slot of the per-(subject, client) window (ADR-0383 D5.3); the refusal reason, or null. */
+    private fun spendWindow(key: String): String? =
+        limiter.check(key).takeUnless { it == McpRateLimiter.Outcome.ALLOWED }?.let {
+            metrics.requestThrottled(
+                McpMetricsPort.ThrottleSurface.TOOLS_CALL,
+                McpMetricsPort.ThrottleCaller.AUTHENTICATED,
+            )
+            it.reason ?: "rate limit exceeded"
+        }
+
+    /**
+     * A refusal writes at most ONE audit row per subject per minute (the same window the staff path
+     * uses for throttled calls, `McpRateLimiter.shouldAuditThrottle`), so a flood of refused calls —
+     * throttled or not — cannot become an unbounded audit-write amplifier. Every refusal is metered.
+     */
+    private fun refuse(outcome: Outcome.Refused, subject: String?, method: String, params: JsonNode): Response {
         metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
-        if (method == TOOLS_CALL && !McpInputBounds.containsNul(params)) {
+        val auditable = limiter.shouldAuditThrottle(REFUSAL_KEY_PREFIX + (subject ?: UNKNOWN))
+        if (auditable) log.warnf("customer channel refused %s: %s", McpInputBounds.logSafe(method), outcome.reason)
+        if (auditable && method == TOOLS_CALL && !McpInputBounds.containsNul(params)) {
             audit(UNKNOWN, McpInputBounds.echo(params.path("name").asText("")), params, outcome.reason, emptyList())
         }
         val builder = Response.status(outcome.status)
@@ -137,6 +159,7 @@ internal class McpCustomerBranch(
         const val WWW_AUTHENTICATE = "WWW-Authenticate"
         const val TOOLS_CALL = "tools/call"
         const val UNKNOWN = "unknown"
+        const val REFUSAL_KEY_PREFIX = "customer-refused:"
         const val NO_CONSENT = "none"
         const val NOT_ENABLED = "customer channel tools not enabled (ADR-0383 P2/P5)"
     }

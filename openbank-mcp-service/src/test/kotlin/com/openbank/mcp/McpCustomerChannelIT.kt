@@ -34,6 +34,8 @@ class McpCustomerChannelIT {
             "mcp.customer.enabled" to "true",
             "mcp.customer.issuer" to "https://kc.test.example/realms/openbank-customers",
             "mcp.customer.allowlist" to "classpath:test-mcp-client-allowlist.yaml",
+            // Every test below spends this window; the throttle test uses its own subject.
+            "openbank.mcp.rate-limit.calls-per-minute" to "8",
         )
 
         override fun getEnabledAlternatives(): Set<Class<*>> = setOf(CustomerTokenSource::class.java)
@@ -149,7 +151,9 @@ class McpCustomerChannelIT {
 
     @Test
     fun `an unknown client is refused and the attempt is audited`() {
-        CustomerTokenSource.claims = customerClaims(azp = "mcp-not-declared")
+        // Its own subject: refusal audits share one window per subject (see the flood test).
+        CustomerTokenSource.claims =
+            customerClaims(azp = "mcp-not-declared", sub = "unknown-client-0000-0000-000000000004")
         post(CALL).statusCode(401).header("WWW-Authenticate", containsString("invalid_token"))
         assertThat(recorder.events.single().result).isEqualTo(AuditResult.DENIED)
     }
@@ -166,5 +170,32 @@ class McpCustomerChannelIT {
         const val LIST = """{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"""
         val CALL = """{"jsonrpc":"2.0","id":1,"method":"tools/call",""" +
             """"params":{"name":"${TestPolicyDecisionPoint.ALLOWED_TOOL}","arguments":{}}}"""
+    }
+
+    @Test
+    fun `a NUL in the JSON-RPC id is refused before the customer branch and never echoed`() {
+        CustomerTokenSource.claims = customerClaims()
+        val body = post("""{"jsonrpc":"2.0","id":"a\u0000b","method":"tools/list","params":{}}""")
+            .statusCode(400)
+            .extract().asString()
+        assertThat(body).doesNotContain("\\u0000").doesNotContain("\u0000")
+        assertThat(body).contains("\"id\":null")
+    }
+
+    @Test
+    fun `an admitted customer is throttled per subject and client before the proof is checked`() {
+        CustomerTokenSource.claims = customerClaims(sub = "throttle-subject-0000-0000-000000000002")
+        val statuses = (1..20).map { post(LIST).extract().statusCode() }
+        assertThat(statuses).contains(429)
+        assertThat(statuses.first()).isEqualTo(200)
+    }
+
+    @Test
+    fun `a flood of refused calls writes at most one audit row per subject per window`() {
+        CustomerTokenSource.claims =
+            customerClaims(azp = "mcp-not-declared", sub = "flood-subject-0000-0000-000000000003")
+        repeat(10) { post(CALL).statusCode(401) }
+        // One per minute window; two only if the run straddles a minute boundary.
+        assertThat(recorder.events.size).isBetween(1, 2)
     }
 }

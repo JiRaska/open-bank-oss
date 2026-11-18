@@ -55,4 +55,22 @@ class CustomerChannelTest {
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("issuer")
     }
+
+    @Test
+    fun `an allowlist naming another audience refuses to start`(@TempDir dir: Path) {
+        val text = javaClass.classLoader.getResource("test-mcp-client-allowlist.yaml")!!.readText()
+            .replace("audience: openbank-mcp-service", "audience: openbank-app")
+        val file = Files.writeString(dir.resolve("aud.yaml"), text)
+        assertThatThrownBy { channel(true, DpopTestProofs.ISSUER, file.toString()) }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("audience")
+    }
+
+    @Test
+    fun `a YAML syntax error is a clean boot refusal, not a parser exception`(@TempDir dir: Path) {
+        val file = Files.writeString(dir.resolve("broken.yaml"), "schema_version: 1\nclients: [ {client_id: a\n")
+        assertThatThrownBy { channel(true, DpopTestProofs.ISSUER, file.toString()) }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("malformed")
+    }
 }
