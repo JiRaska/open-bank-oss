@@ -60,8 +60,16 @@ class SchemeGatewayAdapter(
 
     @Suppress("TooGenericExceptionCaught")
     override suspend fun submit(payment: DomesticPayment): SchemeSubmissionOutcome {
-        val debtorIban = bbanToIban(payment.debtorAccountNumber, payment.debtorBankCode)
-        val creditorIban = bbanToIban(payment.creditorAccountNumber, payment.creditorBankCode)
+        // #16772: an account that is not issuable is refused BEFORE anything is transmitted, and
+        // must say so — a bare IllegalArgumentException reads to the activity as an ambiguous
+        // dispatch and would hold the payment in VALIDATED forever.
+        val (debtorIban, creditorIban) = try {
+            bbanToIban(payment.debtorAccountNumber, payment.debtorBankCode) to
+                bbanToIban(payment.creditorAccountNumber, payment.creditorBankCode)
+        } catch (ex: IllegalArgumentException) {
+            log.warnf("Payment %s carries a non-issuable Czech account; not transmitted", payment.id)
+            throw SchemeGatewayUnavailableException(ex, requestLeftThisProcess = false)
+        }
         val creditorAgentBic = bankCodeToBic(payment.creditorBankCode)
 
         val pacs008 = builder.build(instruction(payment, debtorIban, creditorIban, creditorAgentBic))

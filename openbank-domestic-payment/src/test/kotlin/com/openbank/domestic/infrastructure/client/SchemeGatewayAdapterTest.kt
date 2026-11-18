@@ -15,6 +15,7 @@ import com.openbank.libs.iso20022.PaymentStatus
 import com.openbank.libs.iso20022.PaymentStatusReport
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -91,16 +92,28 @@ class SchemeGatewayAdapterTest {
     fun `bbanToIban refuses an account that fails the national mod-11 checksum`() {
         every { client.submitCreditTransfer(any()) } returns Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
 
+        // #16772 review: must read as "never left this process", or the activity treats it as an
+        // ambiguous dispatch and holds the payment in VALIDATED forever.
         assertThatThrownBy { runBlocking { adapter.submit(payment().copy(creditorAccountNumber = "1234567890")) } }
-            .isInstanceOf(IllegalArgumentException::class.java)
+            .isInstanceOfSatisfying(SchemeGatewayUnavailableException::class.java) {
+                assertThat(it.requestLeftThisProcess).isFalse()
+                assertThat(it.cause).isInstanceOf(IllegalArgumentException::class.java)
+            }
+        verify(exactly = 0) { client.submitCreditTransfer(any()) }
     }
 
     @Test
     fun `bbanToIban refuses a base longer than ten digits`() {
         every { client.submitCreditTransfer(any()) } returns Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
 
+        // #16772 review: must read as "never left this process", or the activity treats it as an
+        // ambiguous dispatch and holds the payment in VALIDATED forever.
         assertThatThrownBy { runBlocking { adapter.submit(payment().copy(creditorAccountNumber = "12000145399")) } }
-            .isInstanceOf(IllegalArgumentException::class.java)
+            .isInstanceOfSatisfying(SchemeGatewayUnavailableException::class.java) {
+                assertThat(it.requestLeftThisProcess).isFalse()
+                assertThat(it.cause).isInstanceOf(IllegalArgumentException::class.java)
+            }
+        verify(exactly = 0) { client.submitCreditTransfer(any()) }
     }
 
     private fun payment() = DomesticPayment(
