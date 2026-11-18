@@ -94,6 +94,8 @@ class DelegationExpirationJob {
                             lifecycleRevision = Math.addExact(grant.lifecycleRevision, 1),
                             grantorPartyId = grant.grantorPartyId,
                             granteePartyId = grant.granteePartyId,
+                            granteeType = grant.granteeType,
+                            granteeClientId = grant.granteeClientId,
                             resourceType = grant.resourceType,
                             resourceId = grant.resourceId,
                             occurredAt = threshold.toInstant(),

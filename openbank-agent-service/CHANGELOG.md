@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.34.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.34.0...agent-service-v1.34.1) (2026-11-17)
+
+
+### Security
+
+* **sanctions:** agent as four-eyes maker on behalf of a person, human checker ([#16455](https://github.com/JiRaska/open-bank-oss/issues/16455)) ([5748892](https://github.com/JiRaska/open-bank-oss/commit/57488924909878bba2957fdf4a787e8dfaedde2b))
+
 ## [1.34.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.5...agent-service-v1.34.0) (2026-11-16)
 
 

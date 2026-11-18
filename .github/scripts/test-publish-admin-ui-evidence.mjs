@@ -81,6 +81,8 @@ for (const [dataset, body, timestamp] of [['readiness', readiness, collectedAt],
       assert.match(h.puts[0].key, new RegExp(`^admin-ui/${dataset}/snapshots/123-1-[a-f0-9]{64}\\.json$`))
       assert.equal(h.puts[1].key, `admin-ui/${dataset}/current.json`)
       assert.equal(h.puts[1].body.collectedAt, timestamp)
+      const expectedTtl = dataset === 'security-kpis' ? 8 * 24 * 60 * 60 * 1000 : 60 * 60 * 1000
+      assert.equal(Date.parse(h.puts[1].body.expiresAt) - now(), expectedTtl)
       assert.equal(h.puts[1].body.sourceSha, sha)
       assert.ok(h.puts.every(put => put.conditional === '*'))
     } finally { h.cleanup() }

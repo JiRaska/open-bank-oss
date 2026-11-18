@@ -132,6 +132,10 @@ class DisputeEvidenceEntity : PanacheEntityBase() {
 
     @Column(name = "record_hash")
     var recordHash: String? = null
+
+    /** NULL = legacy canonical form (pre-V12); see `EvidenceChain.HASH_VERSION_ID_MICROS`. */
+    @Column(name = "hash_version")
+    var hashVersion: Short? = null
 }
 
 @Entity

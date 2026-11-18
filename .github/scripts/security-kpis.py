@@ -131,27 +131,24 @@ def collect_mttr() -> dict:
     """
     import os
     import statistics
-    import urllib.error
-    import urllib.request
+    import subprocess
 
-    # GITHUB_TOKEN has no permission class for the dependabot-alerts API and gets a flat 403;
-    # the workflow passes the elevated METADATA_REFRESH_PAT (when the secret exists) via
-    # MTTR_GH_TOKEN. With neither, stay unavailable with a reason that names the cause —
-    # never invent a number.
-    token = (os.environ.get("MTTR_GH_TOKEN") or os.environ.get("GH_TOKEN")
-             or os.environ.get("GITHUB_TOKEN"))
-    repo = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
+    token = os.environ.get("MTTR_GH_TOKEN")
     if not token:
-        return {"available": False, "reason": "no GH token"}
+        return {"available": False, "reason": "dependabot_access_unavailable"}
+    repo = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
     try:
-        req = urllib.request.Request(
-            f"https://api.github.com/repos/{repo}/dependabot/alerts?per_page=100&state=all",
-            headers={"Authorization": f"Bearer {token}",
-                     "Accept": "application/vnd.github+json"})
-        alerts = json.loads(urllib.request.urlopen(req, timeout=30).read())
+        result = subprocess.run(
+            ["gh", "api", "--hostname", "github.com", "--paginate", "--slurp",
+             f"repos/{repo}/dependabot/alerts?per_page=100&state=open,fixed&severity=critical,high"],
+            env={**os.environ, "GH_TOKEN": token}, capture_output=True, check=True, timeout=120,
+        )
+        pages = json.loads(result.stdout)
+        if not isinstance(pages, list) or not pages or any(not isinstance(page, list) for page in pages):
+            return {"available": False, "reason": "dependabot_invalid_response"}
         now = dt.datetime.now(dt.timezone.utc)
         fixed_days, open_crit = [], []
-        for a in alerts:
+        for a in (alert for page in pages for alert in page):
             sev = (a.get("security_advisory") or {}).get("severity", "")
             if sev not in ("critical", "high"):
                 continue
@@ -166,13 +163,10 @@ def collect_mttr() -> dict:
                 "medianFixDays": round(statistics.median(fixed_days), 1) if fixed_days else None,
                 "openCount": len(open_crit),
                 "oldestOpenDays": round(max(open_crit)) if open_crit else 0}
-    except urllib.error.HTTPError as exc:
-        if exc.code == 403:
-            return {"available": False,
-                    "reason": "dependabot alerts API answered 403 — the token lacks access "
-                              "(GITHUB_TOKEN can never read it; set a security-scoped "
-                              "METADATA_REFRESH_PAT)"}
-        return {"available": False, "reason": f"dependabot fetch failed: HTTP {exc.code}"}
+    except subprocess.CalledProcessError as exc:
+        if any(code in (exc.stderr or b"") for code in (b"(HTTP 401)", b"(HTTP 403)")):
+            return {"available": False, "reason": "dependabot_access_unavailable"}
+        return {"available": False, "reason": "dependabot_request_failed"}
     except Exception as exc:  # API degradation must not kill the other collectors
         return {"available": False, "reason": f"dependabot fetch failed: {exc.__class__.__name__}"}
 

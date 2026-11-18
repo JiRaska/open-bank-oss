@@ -1,5 +1,31 @@
 # Changelog
 
+## [4.21.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.21.0...admin-ui-v4.21.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore security excellence evidence ([#16493](https://github.com/JiRaska/open-bank-oss/issues/16493)) ([19698b6](https://github.com/JiRaska/open-bank-oss/commit/19698b6dd1984e30799d59afd17418b699e744ca))
+
+## [4.21.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.20.0...admin-ui-v4.21.0) (2026-11-17)
+
+
+### Features
+
+* **admin-ui:** explain the customer MCP channel with repo-derived control status ([#16610](https://github.com/JiRaska/open-bank-oss/issues/16610)) ([88a1002](https://github.com/JiRaska/open-bank-oss/commit/88a10024593737e759ab70e8b95407657b8a1351))
+
+## [4.20.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.19.1...admin-ui-v4.20.0) (2026-11-17)
+
+
+### Features
+
+* **infra:** produce the standing-critical digest in-cluster behind a GET-only Alertmanager relay ([#16557](https://github.com/JiRaska/open-bank-oss/issues/16557)) ([a1c1b84](https://github.com/JiRaska/open-bank-oss/commit/a1c1b8423cc79e5331d8f4302e60ee10114b5518))
+
+
+### Security
+
+* **sanctions:** agent as four-eyes maker on behalf of a person, human checker ([#16455](https://github.com/JiRaska/open-bank-oss/issues/16455)) ([5748892](https://github.com/JiRaska/open-bank-oss/commit/57488924909878bba2957fdf4a787e8dfaedde2b))
+
 ## [4.19.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.19.0...admin-ui-v4.19.1) (2026-11-16)
 
 
