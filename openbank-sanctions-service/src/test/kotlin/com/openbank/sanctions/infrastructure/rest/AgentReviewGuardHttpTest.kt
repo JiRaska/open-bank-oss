@@ -4,7 +4,7 @@
 
 package com.openbank.sanctions.infrastructure.rest
 
-import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -37,7 +37,7 @@ private fun review(newStatus: String) = given()
  * the interceptor and answer 503.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(PostgresRedisTestResource::class)
 @TestProfile(AgentReviewGuardHttpTest.EnforcedFourEyes::class)
 class AgentReviewGuardHttpTest {
 
@@ -87,7 +87,7 @@ class AgentReviewGuardHttpTest {
 
 /** With four-eyes off, the agent path fails closed even for CLEAR — before anything else runs. */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(PostgresRedisTestResource::class)
 @TestProfile(AgentReviewGuardFourEyesOffHttpTest.FourEyesOff::class)
 class AgentReviewGuardFourEyesOffHttpTest {
 
