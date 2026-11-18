@@ -50,9 +50,12 @@ class WebFetchService(
         val renderer = if (allowed.grant.render == RenderMode.JS) c.js else c.plain
         val envelope = when (val r = renderer.render(RenderRequest(allowed.uri, mode, grants))) {
             is RenderResult.Rendered -> {
-                // Sanitise BEFORE the cap: neutralising can lengthen the text (`>>>` -> `> > >`).
-                val clean = UntrustedContent.sanitise(r.text)
-                val truncated = clean.length > maxContentChars
+                // Cap, sanitise, cap again: the first cut bounds the work NFKC and neutralising do on
+                // a hostile page, the second bounds what neutralising can add (`>>>` -> `> > >`).
+                // A prefix of sanitised text is still sanitised, so the second cut is safe.
+                val sanitised = UntrustedContent.sanitise(r.text.take(maxContentChars))
+                val truncated = r.text.length > maxContentChars || sanitised.length > maxContentChars
+                val clean = sanitised.take(maxContentChars)
                 FetchEnvelope(
                     url = url,
                     finalUrl = r.finalUrl,
