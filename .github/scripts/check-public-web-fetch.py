@@ -31,12 +31,22 @@
 #   - no charter declares `data_scope.public_web` WITHOUT allowing the resource (a dead allowlist
 #     reads as a control and is not one);
 #   - under openbank-infra/gitops, the Browser Run secret name is referenced by at most one
-#     workload, and that workload is the fetch broker.
+#     workload, and that workload is the fetch broker;
+#   - (ADR-0387 D7) no NetworkPolicy selecting an agent-plane pod reaches the internet, except the
+#     broker's own `openbank-fetch-broker-egress`. "Internet" is judged on parsed CIDRs: an ipBlock
+#     whose cidr-minus-except leaves anything outside RFC 1918 / link-local / loopback / ULA, and
+#     any egress rule with no `to` (which admits every destination). Pod/namespace selector peers,
+#     `namespaceSelector: {}` included, are in-cluster and out of scope here;
+#   - the broker's policy lives in the broker's namespace, selects it by matchLabels and selects no
+#     other agent-plane pod; its internet rules leave none of 10/8, 172.16/12, 192.168/16,
+#     169.254/16 (so 169.254.169.254) reachable, and allow exactly TCP 443 with no endPort;
+#   - a gitops manifest that does not parse is a finding (fail closed).
 #
 # Run:
 #   python3 .github/scripts/check-public-web-fetch.py [--self-test]
 
 import argparse
+import ipaddress
 import pathlib
 import re
 import sys
@@ -197,7 +207,6 @@ def evaluate_gitops(files: dict[str, str]) -> list[str]:
 # containers runs an image of an AGPL agent module (rules.yaml agpl_modules, the canonical list
 # of that plane). Its pods' labels decide which NetworkPolicies are agent-plane.
 WORKLOAD_KINDS = {"Deployment", "Rollout", "StatefulSet", "DaemonSet", "Job", "CronJob"}
-OPEN_CIDRS = {"0.0.0.0/0", "::/0"}
 REQUIRED_EXCEPT = {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "169.254.169.254/32"}
 BROKER_EGRESS = f"{BROKER}-egress"
 RULES_YAML = REPO / "openbank-libs" / "governance" / "rules.yaml"
@@ -243,64 +252,161 @@ def _selects(selector: dict | None, labels: dict) -> bool:
     return all(labels.get(k) == v for k, v in (selector.get("matchLabels") or {}).items())
 
 
-def _open_blocks(policy: dict) -> list[dict]:
-    blocks = []
+# Destinations that are NOT the public internet. An ipBlock is "internet egress" when anything is
+# left of it, after its `except`, outside these ranges — so splitting 0.0.0.0/0 into 0.0.0.0/1 +
+# 128.0.0.0/1, or writing 8.0.0.0/7 or 2000::/3, is internet egress exactly like 0.0.0.0/0.
+NON_INTERNET = tuple(
+    ipaddress.ip_network(n)
+    for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8",
+              "fc00::/7", "fe80::/10", "::1/128")
+)
+REQUIRED_EXCEPT_NETS = tuple(ipaddress.ip_network(n) for n in REQUIRED_EXCEPT)
+
+
+class PolicyError(ValueError):
+    """A NetworkPolicy this gate cannot read is a finding, never a skip."""
+
+
+def _residual(ip: dict) -> list:
+    """The networks an ipBlock admits: its cidr minus every except entry."""
+    try:
+        nets = [ipaddress.ip_network(str(ip.get("cidr")), strict=False)]
+        excepts = [ipaddress.ip_network(str(e), strict=False) for e in (ip.get("except") or [])]
+    except ValueError as e:
+        raise PolicyError(f"unparseable ipBlock {ip!r}: {e}") from e
+    for ex in excepts:
+        out = []
+        for n in nets:
+            if n.version != ex.version or not n.overlaps(ex):
+                out.append(n)
+            elif n.subnet_of(ex):
+                continue
+            elif ex.subnet_of(n):
+                out.extend(n.address_exclude(ex))
+            else:
+                out.append(n)
+        nets = out
+    return nets
+
+
+def _is_internet(nets: list) -> bool:
+    return any(not any(n.version == m.version and n.subnet_of(m) for m in NON_INTERNET) for n in nets)
+
+
+def _internet_rules(policy: dict) -> list[tuple[list, list, bool]]:
+    """(residual networks, ports, open_to) for every egress rule that reaches the internet.
+
+    A rule with a missing or empty `to` admits every destination, so it is internet egress with no
+    except at all (open_to=True). A namespaceSelector/podSelector peer — including
+    `namespaceSelector: {}` — selects in-cluster pods only and is never internet egress here; the
+    ingress side of every callee bounds those edges.
+    """
+    found = []
     for rule in ((policy.get("spec") or {}).get("egress") or []):
-        for peer in (rule.get("to") or []):
-            ip = (peer or {}).get("ipBlock") or {}
-            if ip.get("cidr") in OPEN_CIDRS:
-                blocks.append({"ipBlock": ip, "ports": rule.get("ports") or []})
-    return blocks
+        if not isinstance(rule, dict):
+            raise PolicyError(f"egress rule is not a mapping: {rule!r}")
+        peers = rule.get("to")
+        ports = rule.get("ports") or []
+        if not peers:
+            found.append(([ipaddress.ip_network("0.0.0.0/0"), ipaddress.ip_network("::/0")], ports, True))
+            continue
+        for peer in peers:
+            ip = (peer or {}).get("ipBlock")
+            if ip is None:
+                continue
+            nets = _residual(ip)
+            if _is_internet(nets):
+                found.append((nets, ports, False))
+    return found
 
 
-def evaluate_network(docs_by_path: dict[str, list[dict]], modules: set[str]) -> list[str]:
+def _port_set(ports: list) -> set | None:
+    """{(protocol, port)}; None when the rule is not a plain list of single ports (no ports = all,
+    endPort = a range, a named or missing port = unknowable here)."""
+    if not ports:
+        return None
+    out = set()
+    for p in ports:
+        if not isinstance(p, dict) or "endPort" in p or not isinstance(p.get("port"), int):
+            return None
+        out.add((str(p.get("protocol", "TCP")), p["port"]))
+    return out
+
+
+def evaluate_network(docs_by_path: dict[str, list[dict] | None], modules: set[str]) -> list[str]:
     findings: list[str] = []
-    all_docs = [d for ds in docs_by_path.values() for d in ds if isinstance(d, dict)]
+    for path, docs in sorted(docs_by_path.items()):
+        if docs is None:
+            findings.append(f"{path}: cannot be parsed — a manifest this gate cannot read cannot be cleared")
+    all_docs = [d for ds in docs_by_path.values() if ds for d in ds if isinstance(d, dict)]
     pods = agent_plane_pods(all_docs, modules)
+    broker_pods = [(ns, lb) for ns, lb in pods if lb.get("app.kubernetes.io/name") == BROKER]
+    other_pods = [(ns, lb) for ns, lb in pods if lb.get("app.kubernetes.io/name") != BROKER]
+    broker_ns = {ns for ns, _ in broker_pods}
     broker_seen = False
     for path, docs in sorted(docs_by_path.items()):
-        for doc in docs:
+        for doc in docs or []:
             if not isinstance(doc, dict) or doc.get("kind") != "NetworkPolicy":
                 continue
             meta = doc.get("metadata") or {}
             name, ns = meta.get("name"), meta.get("namespace", "default")
             sel = (doc.get("spec") or {}).get("podSelector")
-            if not any(pns == ns and _selects(sel, labels) for pns, labels in pods):
+            hits_other = any(pns == ns and _selects(sel, labels) for pns, labels in other_pods)
+            hits_broker = any(pns == ns and _selects(sel, labels) for pns, labels in broker_pods)
+            if not (hits_other or hits_broker):
                 continue
-            blocks = _open_blocks(doc)
+            try:
+                rules = _internet_rules(doc)
+            except PolicyError as e:
+                findings.append(f"{path}: {ns}/{name}: {e}")
+                continue
             is_broker = path.startswith(BROKER_DIR) and name == BROKER_EGRESS
-            if is_broker:
-                broker_seen = True
-                if not blocks:
-                    findings.append(f"{path}: {name} has no internet egress rule — the broker cannot fetch")
-                for b in blocks:
-                    missing = sorted(REQUIRED_EXCEPT - set(b["ipBlock"].get("except") or []))
-                    if missing:
-                        findings.append(f"{path}: {name} egress to {b['ipBlock']['cidr']} does not except {missing}")
-                    ports = {(p.get("protocol", "TCP"), p.get("port")) for p in b["ports"]}
-                    if ports != {("TCP", 443)}:
-                        findings.append(f"{path}: {name} internet egress must be TCP 443 only, got {sorted(map(str, ports)) or 'all ports'}")
+            if not is_broker:
+                if rules:
+                    findings.append(
+                        f"{path}: NetworkPolicy {ns}/{name} gives agent-plane pods internet egress — "
+                        f"only {BROKER_EGRESS} in {BROKER_DIR} may (ADR-0387 D7)"
+                    )
                 continue
-            if blocks:
-                findings.append(
-                    f"{path}: NetworkPolicy {ns}/{name} gives agent-plane pods internet egress — "
-                    f"only {BROKER_EGRESS} in {BROKER_DIR} may (ADR-0387 D7)"
-                )
-    if any(BROKER in str(labels.get("app.kubernetes.io/name", "")) for _, labels in pods) and not broker_seen:
+            broker_seen = True
+            # Identity: the broker's policy must select the broker and nothing else.
+            match_labels = (sel or {}).get("matchLabels") or {}
+            if ns not in broker_ns:
+                findings.append(f"{path}: {name} is in namespace {ns}, the broker runs in {sorted(broker_ns)}")
+            if not match_labels or (sel or {}).get("matchExpressions"):
+                findings.append(f"{path}: {name} must select the broker by matchLabels only, not {sel!r}")
+            if hits_other:
+                findings.append(f"{path}: {name} also selects other agent-plane pods — internet egress would reach them")
+            if not rules:
+                findings.append(f"{path}: {name} has no internet egress rule — the broker cannot fetch")
+            for nets, ports, open_to in rules:
+                if open_to:
+                    findings.append(f"{path}: {name} has an egress rule with no `to` — every destination, no except")
+                    continue
+                leaked = sorted({str(r) for r in REQUIRED_EXCEPT_NETS for n in nets
+                                 if n.version == r.version and n.overlaps(r)})
+                if leaked:
+                    findings.append(f"{path}: {name} internet egress does not except {leaked}")
+                got = _port_set(ports)
+                if got != {("TCP", 443)}:
+                    findings.append(f"{path}: {name} internet egress must be exactly TCP 443 (no endPort), got {ports or 'all ports'}")
+    if broker_pods and not broker_seen:
         findings.append(f"{BROKER} is deployed but {BROKER_DIR} declares no NetworkPolicy {BROKER_EGRESS}")
     return findings
 
 
-def _gitops_docs() -> dict[str, list[dict]]:
-    out: dict[str, list[dict]] = {}
+def _gitops_docs() -> dict[str, list[dict] | None]:
+    """path -> documents, or None when the file does not parse (a finding, fail closed)."""
+    out: dict[str, list[dict] | None] = {}
     if not GITOPS.is_dir():
         return out
     for p in (*gatelib.rglob(GITOPS, "*.yaml"), *gatelib.rglob(GITOPS, "*.yml")):
+        rel = str(p.relative_to(REPO))
         try:
             docs = gatelib.loads_all(gatelib.read_text(p, errors="replace"))
-        except Exception:  # noqa: BLE001 — not a manifest this gate can read; others own parsing
+        except Exception:  # noqa: BLE001 — reported by evaluate_network
+            out[rel] = None
             continue
-        rel = str(p.relative_to(REPO))
         out[rel] = [d for d in docs if isinstance(d, dict)]
     return out
 
@@ -394,8 +500,10 @@ def self_test() -> int:
     agent_wl = wl("docs-truth-agent", "docs-truth-agent", "openbank-docs-truth-agent")
     ncases = [
         ("broker egress with all exceptions", {bdir + "w.yaml": [broker_wl], bdir + "np.yaml": [good_broker]}, 0),
-        ("broker missing metadata except", {bdir + "w.yaml": [broker_wl],
-                                            bdir + "np.yaml": [np(BROKER_EGRESS, "fetch-broker", BROKER, except_=[c for c in full if c != "169.254.169.254/32"])]}, 1),
+        ("broker without the /32 is still covered by 169.254.0.0/16 (effect, not text)", {bdir + "w.yaml": [broker_wl],
+                                            bdir + "np.yaml": [np(BROKER_EGRESS, "fetch-broker", BROKER, except_=[c for c in full if c != "169.254.169.254/32"])]}, 0),
+        ("broker missing link-local /16 except", {bdir + "w.yaml": [broker_wl],
+                                                  bdir + "np.yaml": [np(BROKER_EGRESS, "fetch-broker", BROKER, except_=[c for c in full if c != "169.254.0.0/16"])]}, 1),
         ("broker missing RFC1918 except", {bdir + "w.yaml": [broker_wl],
                                            bdir + "np.yaml": [np(BROKER_EGRESS, "fetch-broker", BROKER, except_=["169.254.0.0/16", "169.254.169.254/32"])]}, 1),
         ("broker no except at all", {bdir + "w.yaml": [broker_wl], bdir + "np.yaml": [np(BROKER_EGRESS, "fetch-broker", BROKER)]}, 1),
@@ -415,6 +523,63 @@ def self_test() -> int:
                                                         "x/np.yaml": [np("litellm-egress", "ai-platform", "litellm")]}, 0),
         ("agent pod with a private-only ipBlock", {"x/w.yaml": [agent_wl],
                                                    "x/np.yaml": [np("a", "docs-truth-agent", cidr="10.0.0.0/8")]}, 0),
+    ]
+
+    def raw_np(name, ns, sel, egress):
+        return {"kind": "NetworkPolicy", "metadata": {"name": name, "namespace": ns},
+                "spec": {"podSelector": sel, "policyTypes": ["Egress"], "egress": egress}}
+
+    bsel = {"matchLabels": {"app.kubernetes.io/name": BROKER}}
+    asel = {"matchLabels": {"app.kubernetes.io/name": "docs-truth-agent"}}
+    t443 = [{"protocol": "TCP", "port": 443}]
+
+    def ipb(cidr, except_=None):
+        b = {"cidr": cidr}
+        if except_ is not None:
+            b["except"] = except_
+        return {"ipBlock": b}
+
+    awl = {"x/w.yaml": [agent_wl]}
+    bwl = {bdir + "w.yaml": [broker_wl]}
+    ncases += [
+        # 1. a rule with no `to` admits every destination
+        ("agent egress rule with no `to`", {**awl, "x/np.yaml": [raw_np("a", "docs-truth-agent", asel, [{"ports": t443}])]}, 1),
+        ("agent egress rule with empty `to`", {**awl, "x/np.yaml": [raw_np("a", "docs-truth-agent", asel, [{"to": []}])]}, 1),
+        ("broker egress rule with no `to`", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel, [{"ports": t443}])]}, 1),
+        ("agent namespaceSelector {} is in-cluster, not internet",
+         {**awl, "x/np.yaml": [raw_np("a", "docs-truth-agent", asel, [{"to": [{"namespaceSelector": {}}]}])]}, 0),
+        # 2. CIDRs are parsed, not string-compared
+        ("agent 0.0.0.0/1 + 128.0.0.0/1", {**awl, "x/np.yaml": [raw_np("a", "docs-truth-agent", asel,
+                                                                        [{"to": [ipb("0.0.0.0/1"), ipb("128.0.0.0/1")], "ports": t443}])]}, 1),
+        ("agent 8.0.0.0/7", {**awl, "x/np.yaml": [raw_np("a", "docs-truth-agent", asel, [{"to": [ipb("8.0.0.0/7")], "ports": t443}])]}, 1),
+        ("agent IPv6 2000::/3", {**awl, "x/np.yaml": [raw_np("a", "docs-truth-agent", asel, [{"to": [ipb("2000::/3")], "ports": t443}])]}, 1),
+        ("agent 0.0.0.0/0 minus everything public is still internet",
+         {**awl, "x/np.yaml": [raw_np("a", "docs-truth-agent", asel, [{"to": [ipb("0.0.0.0/0", ["10.0.0.0/8"])], "ports": t443}])]}, 1),
+        ("broker split /1 halves without excepts", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+                                                                                    [{"to": [ipb("0.0.0.0/1"), ipb("128.0.0.0/1", full)], "ports": t443}])]}, 1),
+        ("broker split /1 halves, both excepted", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+                                                                                   [{"to": [ipb("0.0.0.0/1", ["10.0.0.0/8"]), ipb("128.0.0.0/1", ["172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"])], "ports": t443}])]}, 0),
+        ("broker unparseable cidr", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel, [{"to": [ipb("not-a-cidr")], "ports": t443}])]}, 1),
+        # 3. broker identity
+        ("broker policy in another namespace", {**bwl, **awl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "docs-truth-agent", {}, [{"to": [ipb("0.0.0.0/0", full)], "ports": t443}])]}, 1),
+        ("broker policy with empty podSelector", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", {}, [{"to": [ipb("0.0.0.0/0", full)], "ports": t443}])]}, 1),
+        ("broker policy also selects a co-located agent",
+         {**bwl, "x/w2.yaml": [wl("docs-truth-agent", "fetch-broker", "openbank-docs-truth-agent")],
+          bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", {"matchLabels": {"app.kubernetes.io/part-of": "fetch-broker"}},
+                                    [{"to": [ipb("0.0.0.0/0", full)], "ports": t443}])]}, 1),
+        ("broker policy by matchExpressions", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker",
+                                                                                {"matchExpressions": [{"key": "x", "operator": "Exists"}]},
+                                                                                [{"to": [ipb("0.0.0.0/0", full)], "ports": t443}])]}, 1),
+        # 4. ports
+        ("broker endPort range", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+                                                                  [{"to": [ipb("0.0.0.0/0", full)], "ports": [{"protocol": "TCP", "port": 443, "endPort": 65535}]}])]}, 1),
+        ("broker 443 plus 80", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+                                                                [{"to": [ipb("0.0.0.0/0", full)], "ports": t443 + [{"protocol": "TCP", "port": 80}]}])]}, 1),
+        ("broker no ports (= all ports)", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel, [{"to": [ipb("0.0.0.0/0", full)]}])]}, 1),
+        ("broker UDP 443", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+                                                            [{"to": [ipb("0.0.0.0/0", full)], "ports": [{"protocol": "UDP", "port": 443}]}])]}, 1),
+        # 5. fail closed
+        ("unparseable manifest", {"x/broken.yaml": None}, 1),
     ]
     for name, docs, want in ncases:
         got = len(evaluate_network(docs, mods))
@@ -441,7 +606,7 @@ def main() -> int:
         findings.append("rules.yaml agpl_modules is empty or moved — the agent plane cannot be derived")
     docs = _gitops_docs()
     findings += evaluate_network(docs, modules)
-    pods = agent_plane_pods([d for ds in docs.values() for d in ds], modules)
+    pods = agent_plane_pods([d for ds in docs.values() if ds for d in ds], modules)
     print(f"network: {len(pods)} agent-plane workloads derived from {len(modules)} agent modules")
     gatelib.subjects(count, "agent charters examined for public-web access")
     for f in findings:
