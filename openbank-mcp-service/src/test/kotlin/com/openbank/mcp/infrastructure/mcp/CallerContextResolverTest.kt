@@ -109,4 +109,28 @@ class CallerContextResolverTest {
     fun `an anonymous caller is not a foreign audience`() {
         assertThat(CallerContextResolver(TestJsonWebToken()).presentsForeignAudience()).isFalse()
     }
+
+    @Test
+    fun `a customers-realm token is never resolved as an agent or OBO caller, whatever its claims`(): Unit = runBlocking {
+        val jwt = TestJsonWebToken(
+            mapOf(
+                "iss" to "https://kc.test.example/realms/openbank-customers",
+                "sub" to "agent:mcp-tpp-42",
+                "aud" to "openbank-mcp-service",
+                "consent_id" to "c-123",
+            ),
+        )
+        val resolver = CallerContextResolver(
+            jwt,
+            oboEnabled = true,
+            customerIssuer = java.util.Optional.of("https://kc.test.example/realms/openbank-customers"),
+        )
+        assertThat(resolver.resolveOrNull()).isNull()
+        // Control: the same claims from the staff issuer still resolve — the issuer is what decides.
+        val staff = TestJsonWebToken(jwt.claimNames.associateWith { jwt.getClaim<Any?>(it) } + ("iss" to "https://kc.test.example/realms/openbank"))
+        assertThat(
+            CallerContextResolver(staff, customerIssuer = java.util.Optional.of("https://kc.test.example/realms/openbank-customers"))
+                .resolveOrNull(),
+        ).isNotNull()
+    }
 }
