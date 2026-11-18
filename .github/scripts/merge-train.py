@@ -196,6 +196,18 @@ CARRIER_PRIORITY_S = 120 * 60
 # from the App's own marker on main's head; a fast merge moves main and ends the trigger itself.
 FAST_TURN_S = 30 * 60
 FAST_TURN_CONTEXT = "merge-train/fast-turn"   # App marker on main's head: "opened <epoch>"
+# Fast pass (ADR-0343 amendment 2026-11-18): the fast lane merges DURING a strict reservation when the
+# holder's verdict provably cannot depend on what the fast lane changes, so the holder then merges over the
+# moved main with no re-run. Measured 2026-11-17/18: ~1 merge/h, fast PRs (#16701 at 06:31Z) green and held
+# for whole ~45-60 min strict reservations with 12 strict PRs queued behind #16597. The proof is the fast
+# lane's own disjointness argument applied in both directions, and is decided only for holders whose every
+# changed path is a NON-judge `.github/scripts/` file (judge_path False: no workflow, action or gates.yaml
+# names it, so no CI job executes it) that no regen inventory line names; a fast PR touches no protected
+# path (no `.github/`, libs, build-logic, ADR, regen input), so neither side judges the other. A JUDGE
+# holder keeps today's hold: what it changes judges every file, and no git-only proof can replace its run.
+# Bounded: the holder merges behind main only while every commit main gained since its head is fast-lane
+# shaped and disjoint; else it re-updates once, and the head that re-update produces never passes again.
+FAST_PASS_CONTEXT = "merge-train/fast-pass"   # App marker on a holder head: the fast lane merged past it
 SQUASH_PR_RE = re.compile(r"(?:\(#|^#)(\d+)\)?$")
 OK_STATES = frozenset({"success"})
 # A cancelled (or stale) check ran nothing that could be judged — "Canceling since a higher priority
@@ -3810,7 +3822,20 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     # is open (#15827): a disjoint PR released by native auto-merge moves main under the carrier, and
     # settle then rejects the green carrier as "main moved since publish" — the carrier always lost.
     train_open = next((p["number"] for p in gh.open_prs() if is_carrier(p, repo)), None)   # re-read: may have changed
-    hold = (f"main reserved for strict-lane #{holder}" if holder is not None
+    holder_view = next((v for _st, v in strict if v["number"] == holder), None) if holder is not None else None
+    if holder_view is not None:
+        mark_passed_parent(gh, git, holder_view)
+    pass_why = (fast_pass_blocker(git, base, holder_view, fragments, regen_text) if holder_view is not None
+                else "no holder")
+    other_hold = (f"a strict carrier is open over main (#{summary.get('strict_carrier', '?')})" if strict_carrier_open
+                  else "strict-lane update-branch requested" if summary["updated"]
+                  else "a strict-lane PR merged; main moved" if summary["strict"]
+                  else f"train carrier #{train_open} is in flight over main" if train_open is not None else None)
+    passing = holder is not None and pass_why is None and other_hold is None and not shadow
+    if holder is not None and not passing:
+        log(f"fast lane may not pass strict-lane #{holder}: {pass_why or other_hold or 'shadow'}")
+    hold = (None if passing
+            else f"main reserved for strict-lane #{holder}" if holder is not None
             else f"a strict carrier is open over main (#{summary.get('strict_carrier', '?')})" if strict_carrier_open
             else "strict-lane update-branch requested" if summary["updated"]
             else "a strict-lane PR merged; main moved" if summary["strict"]
@@ -3819,6 +3844,17 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         if hold:
             log(f"#{m.number:>6} fast      held: {hold} — next tick")
             continue
+        if passing:
+            clash = fast_pass_overlap(m.files, holder_view)
+            if clash:
+                log(f"#{m.number:>6} fast      held: shares {clash} with strict-lane #{holder} — next tick")
+                continue
+            if (holder_view.get("app") or {}).get(FAST_PASS_CONTEXT, ("", ""))[0] != "success":
+                gh.post_status(holder_view["head_sha"], "success", f"fast lane passed over main {base[:12]}",
+                               context=FAST_PASS_CONTEXT)
+                holder_view.setdefault("app", {})[FAST_PASS_CONTEXT] = ("success", "")
+            log(f"#{m.number:>6} fast      passes strict-lane #{holder}: disjoint, holder is no judge")
+            summary.setdefault("fast_pass", []).append(m.number)
         if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success":
             gh.post_status(m.head_sha, "success", f"fast lane: disjoint from main {base[:12]} and the batch",
                            source_number=m.number)
@@ -3872,6 +3908,7 @@ def _settle_view(gh, git, repo: str, required: list[str]):
                                   strict=strict, red=red,
                                   main_red=main_red, cache=main_cache)
     cands = promote_fixes(gh, git, repo, base, cands, strict, main_red, main_cache)
+    annotate_fast_pass(gh, git, base, strict, regen_text)
     return base, regen_text, strict, red, cands, apps, main_red, main_cache
 
 
@@ -4239,6 +4276,92 @@ def fast_turn(gh, git, base: str, fast_unposted: list, reservation_ended: bool, 
     return f"fast lane's turn after a reservation ended ({len(fast_unposted)} fast-lane PR(s) waiting)"
 
 
+def _holder_files(view: dict) -> list[str]:
+    return [f for f in view.get("files") or [] if f]
+
+
+def fast_pass_blocker(git, base: str, view: dict, fragments: list[str], regen_text: str,
+                      bound: bool = True) -> str | None:
+    """Why the fast lane must NOT merge while `view` holds main (FAST_PASS_CONTEXT), or None. Fail closed:
+    unknown paths, a judge path, anything a regen inventory line names, or (bound) a head that is itself
+    the re-update of a head the fast lane already passed."""
+    files = _holder_files(view)
+    if not files:
+        return "holder's changed paths unknown"
+    refs = referenced_scripts(git, base)
+    for f in files:
+        if judge_path(f, refs):
+            return f"holder touches judge path {f}"
+        if any(frag in f for frag in fragments) or f.rsplit("/", 1)[-1] in (regen_text or ""):
+            return f"holder touches regen-inventory path {f}"
+    if bound and view.get("passed_parent"):
+        return "holder head is the re-update after a fast pass (bound: once)"
+    return None
+
+
+def fast_pass_overlap(fast_files: list[str], view: dict) -> str | None:
+    """A path a fast PR shares with the holder, or None (disjoint)."""
+    both = sorted(set(fast_files) & set(_holder_files(view)))
+    return both[0] if both else None
+
+
+def fast_pass_equivalent(git, base: str, view: dict, fragments: list[str], regen_text: str) -> str | None:
+    """None when a holder the fast lane passed may merge BEHIND main with the verdict of its own head:
+    the head carries FAST_PASS_CONTEXT, still passes fast_pass_blocker over live main, every path main
+    changed since the merge-base is fast-lane shaped (is_protected None) and disjoint from the holder, and
+    `git merge-tree` of main and the head is clean. The landed tree is then the verified head's tree plus
+    only paths that neither the holder's verdict nor any CI job the holder changes reads. Otherwise why."""
+    head = view["head_sha"]
+    if (view.get("app") or {}).get(FAST_PASS_CONTEXT, ("", ""))[0] != "success":
+        return "no fast pass on this head"
+    why = fast_pass_blocker(git, base, view, fragments, regen_text, bound=False)
+    if why:
+        return why
+    mb = git("merge-base", base, head, check=False)
+    if mb.returncode != 0 or not mb.stdout.strip():
+        return "no merge-base"
+    r = git("diff-tree", "-r", "--no-renames", "--name-only", mb.stdout.strip(), base, check=False)
+    if r.returncode != 0:
+        return "main's changes unreadable"
+    moved = [ln for ln in r.stdout.splitlines() if ln]
+    for f in moved:
+        if is_protected(f, fragments):
+            return f"main gained a non-fast-lane path {f}"
+    both = sorted(set(moved) & set(_holder_files(view)))
+    if both:
+        return f"main changed holder path {both[0]}"
+    if git("merge-tree", "--write-tree", base, head, check=False).returncode != 0:
+        return "merge-tree with main is not clean"
+    return None
+
+
+def annotate_fast_pass(gh, git, base: str, strict: list, regen_text: str) -> None:
+    """Sets view["fast_pass_equivalent"] for every strict head the fast lane passed that may still merge
+    over live main. Spawns only for heads that carry the marker."""
+    fragments = regen_inventory_fragments(regen_text)
+    for _st, view in strict:
+        view["fast_pass_equivalent"] = False
+        if FAST_PASS_CONTEXT in (view.get("app") or {}):
+            if git("merge-base", "--is-ancestor", base, view["head_sha"], check=False).returncode != 0:
+                why = fast_pass_equivalent(git, base, view, fragments, regen_text)
+                view["fast_pass_equivalent"] = why is None
+                if why:
+                    log(f"#{view['number']:>6} strict    fast pass does not hold over main {base[:12]}: {why}")
+
+
+def mark_passed_parent(gh, git, view: dict) -> None:
+    """view["passed_parent"]: the head is an update-branch merge whose first parent the fast lane passed."""
+    parents = git("rev-list", "--parents", "-n", "1", view["head_sha"], check=False).stdout.split()
+    view["passed_parent"] = (len(parents) == 3 and gh is not None
+                             and gh.app_statuses(parents[1]).get(FAST_PASS_CONTEXT, ("", ""))[0] == "success")
+
+
+def strict_current(git, base: str, view: dict) -> bool:
+    """The head contains live main, or the fast lane passed it and the pass still proves it (annotate_fast_pass)."""
+    return (git("merge-base", "--is-ancestor", base, view["head_sha"], check=False).returncode == 0
+            or bool(view.get("fast_pass_equivalent")))
+
+
 def reservation_expired(git, head: str, now: float, activity=None, green: bool = False) -> str | None:
     """Why the reservation on `head` is over, or None while its CI is live (ADR-0343, #13400).
     Expired when the head is future-dated (the committer time is author-supplied, #13485), older
@@ -4503,7 +4626,7 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
         n, head = view["number"], view["head_sha"]
         if state not in ("pending", "green"):
             continue
-        if git("merge-base", "--is-ancestor", base, head, check=False).returncode != 0:
+        if not strict_current(git, base, view):
             continue
         if state == "green" and shadow:
             continue  # shadow never merges it, so it must not hold anything
@@ -4759,7 +4882,7 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
             continue
         if state == "waiting":
             continue
-        current = git("merge-base", "--is-ancestor", base, head, check=False).returncode == 0
+        current = strict_current(git, base, view)
         if current and state == "pending" and n in (timed_out or []):
             continue
         fix = fixes.get(n)
@@ -4777,7 +4900,8 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         # re-updated now rather than after that worthless CI finishes — otherwise further carriers are
         # built while it runs behind main and the one-yield bound does not hold.
         preempted = (not current and state == "pending"
-                     and gh.app_statuses(head).get(DEFER_CONTEXT, ("", ""))[0] == "success")
+                     and any(gh.app_statuses(head).get(c, ("", ""))[0] == "success"
+                             for c in (DEFER_CONTEXT, FAST_PASS_CONTEXT)))
         if state != "green" and not preempted:
             continue
         if not current:
@@ -4844,7 +4968,11 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         if not live_source_intent(gh, n, head):
             log(f"#{n:>6} strict    source intent or head changed — next tick")
             continue
-        if fix:
+        if view.get("fast_pass_equivalent") and git("merge-base", "--is-ancestor", base, head,
+                                                     check=False).returncode != 0:
+            desc = f"strict lane: green head, main {base[:12]} moved only by disjoint fast-lane paths"
+            log(f"#{n:>6} strict    green; main moved only by disjoint fast-lane paths since its head: merging")
+        elif fix:
             desc = f"strict lane: fix for {', '.join(fix)} red on main {base[:12]}, verified on its up-to-date head"
             log(f"#{n:>6} strict    fix for {', '.join(fix)} red on main {base[:12]}: combined head verified, merging")
         else:
@@ -6596,6 +6724,72 @@ def prefetch_self_test(check) -> None:
         API_STATS.update(saved[3])
 
 
+def fast_pass_self_test(check) -> None:
+    """ADR-0343 amendment 2026-11-18 (fast pass): real git, nothing stubbed but the App statuses."""
+    with tempfile.TemporaryDirectory() as root:
+        git = Git(root)
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@example.invalid"); git("config", "user.name", "t")
+        def write(path, text):
+            fp = pathlib.Path(root, path)
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fp.write_text(text)
+            git("add", path)
+        def commit(msg):
+            git("commit", "-q", "-m", msg)
+            return git("rev-parse", "HEAD").stdout.strip()
+        write(".github/workflows/ci.yml", "run: python3 .github/scripts/judged.py\n")
+        write(".github/scripts/judged.py", "x\n"); write(".github/scripts/tool.py", "x\n")
+        write("openbank-a-service/A.kt", "a\n"); write("openbank-b-service/B.kt", "b\n")
+        m0 = commit("base")
+        write(".github/scripts/tool.py", "y\n"); h = commit("holder: non-judge script")
+        git("checkout", "-q", "-b", "judge", m0)
+        write(".github/scripts/judged.py", "y\n"); hj = commit("holder: judge script")
+        git("checkout", "-q", "main")
+        write("openbank-a-service/A.kt", "a2\n"); m1 = commit("fast: disjoint service file")
+        frags: list[str] = []
+        view = lambda head, files, app=None, **kw: {"number": 1, "head_sha": head, "files": files,  # noqa: E731
+                                                     "app": dict(app or {}), **kw}
+        holder = view(h, [".github/scripts/tool.py"])
+        judge = view(hj, [".github/scripts/judged.py"])
+        check("fast pass: a non-judge holder lets a disjoint fast PR merge during its reservation",
+              fast_pass_blocker(git, m0, holder, frags, "") is None
+              and fast_pass_overlap(["openbank-a-service/A.kt"], holder) is None)
+        check("fast pass: a fast PR sharing a path with the holder is held",
+              fast_pass_overlap([".github/scripts/tool.py"], holder) is not None)
+        check("fast pass: a JUDGE holder (a workflow runs its script) holds the fast lane as before",
+              fast_pass_blocker(git, m0, judge, frags, "") is not None)
+        check("fast pass: a holder a regen inventory names holds the fast lane",
+              fast_pass_blocker(git, m0, holder, frags, "GEN=.github/scripts/tool.py") is not None)
+        check("fast pass: unknown holder paths hold the fast lane", fast_pass_blocker(git, m0, view(h, []), frags, "") is not None)
+        passed = {FAST_PASS_CONTEXT: ("success", "")}
+        hv = view(h, [".github/scripts/tool.py"], passed)
+        annotate_fast_pass(None, git, m1, [("green", hv)], "")
+        check("fast pass: after a disjoint fast merge the passed holder is current with NO re-run",
+              strict_current(git, m1, hv) and fast_pass_equivalent(git, m1, hv, frags, "") is None)
+        unmarked = view(h, [".github/scripts/tool.py"])
+        annotate_fast_pass(None, git, m1, [("green", unmarked)], "")
+        check("fast pass: a holder the fast lane never passed is NOT current behind main", not strict_current(git, m1, unmarked))
+        write(".github/x.yml", "z\n"); m2 = commit("main gains a protected path")
+        hv2 = view(h, [".github/scripts/tool.py"], passed)
+        annotate_fast_pass(None, git, m2, [("green", hv2)], "")
+        check("fast pass: main gaining a non-fast-lane path voids the proof -> the holder re-updates",
+              not strict_current(git, m2, hv2), str(fast_pass_equivalent(git, m2, hv2, frags, "")))
+        tree = git("merge-tree", "--write-tree", h, m2).stdout.split()[0]
+        h2 = git("commit-tree", tree, "-p", h, "-p", m2, "-m", "update-branch").stdout.strip()   # first parent = h
+        class _G:
+            def app_statuses(self, sha):
+                return passed if sha == h else {}
+        rv = view(h2, [".github/scripts/tool.py"])
+        mark_passed_parent(_G(), git, rv)
+        check("fast pass: the re-updated head is never passed again (bounded: one re-update, no livelock)",
+              rv["passed_parent"] and fast_pass_blocker(git, m2, rv, frags, "") is not None)
+        write(".github/scripts/tool.py", "w\n"); m3 = commit("main changes the holder's path")
+        hv3 = view(h, [".github/scripts/tool.py"], passed)
+        check("fast pass: main changing the holder's own path voids the proof",
+              fast_pass_equivalent(git, m3, hv3, frags, "") is not None)
+
+
 def self_test() -> int:
     fails: list[str] = []
     last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
@@ -6614,6 +6808,7 @@ def self_test() -> int:
     prefetch_self_test(check)
     git_memo_self_test(check)
     packed_fixture_self_test(check)
+    fast_pass_self_test(check)
 
     freshness = subprocess.run(
         [sys.executable, ".github/scripts/test-merge-train-main-red-freshness.py"],
@@ -10205,8 +10400,11 @@ def self_test() -> int:
                 s = settle_now()
                 gh.prs[34]["state"] = "open"                # a fast PR arrives during pW2's reservation
                 s2 = settle_now()
-                check("fast turn: no fast PR waiting -> no turn; one arriving under a running reservation is held",
-                      gh.updates == [36] and s2["in_flight"] and s2["fast"] == [], f"{s} {s2} updates={gh.updates}")
+                # Fast pass (2026-11-18): pW2 changes only an unreferenced .github/scripts file (no judge), so
+                # a disjoint fast PR merges DURING its reservation; a judge holder stays held (fast_pass_self_test).
+                check("fast turn: no fast PR waiting -> no turn; one arriving under a NON-judge reservation passes it",
+                      gh.updates == [36] and s2["in_flight"] and s2["fast"] == [34] and s2.get("fast_pass") == [34],
+                      f"{s} {s2} updates={gh.updates}")
                 gh.updates.clear()
                 reset()
             finally:
