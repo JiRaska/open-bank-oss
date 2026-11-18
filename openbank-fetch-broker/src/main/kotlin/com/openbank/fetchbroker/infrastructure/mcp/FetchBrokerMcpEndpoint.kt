@@ -16,7 +16,7 @@ import com.openbank.fetchbroker.domain.HostAllowlist
 import com.openbank.libs.authz.AuthzQuery
 import com.openbank.libs.authz.PolicyDecisionPoint
 import com.openbank.libs.authz.Principal
-import io.quarkus.security.identity.SecurityIdentity
+import io.quarkus.security.Authenticated
 import io.smallrye.common.annotation.Blocking
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
@@ -26,6 +26,7 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.jboss.logging.Logger
 
 /**
@@ -38,6 +39,7 @@ import org.jboss.logging.Logger
  * neither layer alone is trusted. `@Blocking`: the fetch is socket I/O and must not run on the
  * event loop.
  */
+@Authenticated
 @Path("/mcp")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
@@ -45,7 +47,7 @@ import org.jboss.logging.Logger
 class FetchBrokerMcpEndpoint(
     private val service: WebFetchService,
     private val pdp: PolicyDecisionPoint,
-    private val identity: SecurityIdentity,
+    private val jwt: JsonWebToken,
     private val mapper: ObjectMapper,
     @ConfigProperty(name = "mcp.server.name", defaultValue = "openbank-fetch-broker") private val serverName: String,
     @ConfigProperty(name = "mcp.server.version", defaultValue = "0.1.0") private val serverVersion: String,
@@ -57,6 +59,12 @@ class FetchBrokerMcpEndpoint(
     @POST
     fun handle(body: JsonNode): Response {
         val id = body.path("id").let { if (it.isMissingNode) NullNode.instance else it }
+        // RFC 8707: a token issued for another resource server is refused before any method runs.
+        val caller = AgentCaller.resolve(jwt.subject, jwt.getClaim<Any?>("aud"))
+        if (caller is AgentCaller.Resolution.ForeignAudience) {
+            return Response.status(Response.Status.UNAUTHORIZED).header("WWW-Authenticate", AUDIENCE_CHALLENGE).build()
+        }
+        val agent = (caller as? AgentCaller.Resolution.Agent)?.agentId
         val result: Any = when (val method = body.path("method").asText("")) {
             "initialize" -> mapOf(
                 "protocolVersion" to protocolVersion,
@@ -67,18 +75,18 @@ class FetchBrokerMcpEndpoint(
             "notifications/initialized" -> return Response.noContent().build()
             "ping" -> mapOf("pong" to true)
             // Discovery is capability-shaped (ADR-0225): an unauthenticated caller sees nothing.
-            "tools/list" -> mapOf("tools" to if (agentId() == null) emptyList() else listOf(WebFetchTool.DEFINITION))
-            "tools/call" -> return toolCall(id, body.path("params"))
+            "tools/list" -> mapOf("tools" to if (agent == null) emptyList() else listOf(WebFetchTool.DEFINITION))
+            "tools/call" -> return toolCall(id, body.path("params"), agent)
             else -> return rpcError(id, McpErrorCode.METHOD_NOT_FOUND, "Method not found: ${method.take(MAX_ECHO)}")
         }
         return Response.ok(McpResponse(id = id, result = result)).build()
     }
 
     @Suppress("ReturnCount", "TooGenericExceptionCaught")
-    private fun toolCall(id: JsonNode, params: JsonNode): Response {
+    private fun toolCall(id: JsonNode, params: JsonNode, caller: String?): Response {
         val tool = params.path("name").asText("")
         if (tool != WebFetchTool.NAME) return toolError(id, "Tool not permitted: ${tool.take(MAX_ECHO)}")
-        val agent = agentId() ?: return toolError(id, "Authorization unavailable")
+        val agent = caller ?: return toolError(id, "Authorization unavailable")
         val args = params.path("arguments")
         val url = args.path("url").takeIf { it.isTextual }?.asText()
             ?: return rpcError(id, McpErrorCode.INVALID_PARAMS, "argument 'url' is required")
@@ -137,12 +145,6 @@ class FetchBrokerMcpEndpoint(
         isError = e.outcome != FetchOutcome.FETCHED,
     )
 
-    /** `agent:<id>` from the validated token; any other caller class is not an agent and is refused. */
-    private fun agentId(): String? = identity.takeUnless { it.isAnonymous }?.principal?.name?.takeIf {
-        it.startsWith(AGENT_PREFIX) &&
-            it.length > AGENT_PREFIX.length
-    }
-
     private fun toolError(id: JsonNode, message: String) =
         Response.ok(McpResponse(id = id, result = ToolCallResult(listOf(ToolContent(message)), isError = true))).build()
 
@@ -150,7 +152,8 @@ class FetchBrokerMcpEndpoint(
         Response.ok(McpResponse(id = id, error = McpError(code, message))).build()
 
     companion object {
-        private const val AGENT_PREFIX = "agent:"
+        private const val AUDIENCE_CHALLENGE =
+            "Bearer error=\"invalid_token\", error_description=\"token audience does not include this server\""
         private const val PRINCIPAL_TYPE = "AI_AGENT"
         private const val MAX_ECHO = 64
         private const val INSTRUCTIONS =

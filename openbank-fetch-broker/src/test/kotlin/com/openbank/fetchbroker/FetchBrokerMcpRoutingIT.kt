@@ -11,6 +11,8 @@ import com.openbank.libs.authz.AuthzQuery
 import com.openbank.libs.authz.PolicyDecisionPoint
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import jakarta.annotation.Priority
@@ -60,6 +62,7 @@ class FetchBrokerMcpRoutingIT {
 
     @Test
     @TestSecurity(user = "agent:web-reader")
+    @OidcSecurity(claims = [Claim(key = "sub", value = "agent:web-reader"), Claim(key = "aud", value = AUD)])
     fun `tools list advertises exactly web fetch to an agent`() {
         given().contentType(ContentType.JSON).body("""{"jsonrpc":"2.0","id":1,"method":"tools/list"}""")
             .post("/mcp").then().statusCode(200)
@@ -67,16 +70,20 @@ class FetchBrokerMcpRoutingIT {
     }
 
     @Test
-    fun `an anonymous caller discovers nothing and cannot call`() {
+    fun `an anonymous caller is refused before any tool is listed or called`() {
         given().contentType(ContentType.JSON).body("""{"jsonrpc":"2.0","id":1,"method":"tools/list"}""")
-            .post("/mcp").then().statusCode(200)
-            .extract().path<List<Any>>("result.tools").let { assertThat(it).isEmpty() }
-        val result = call("https://example.org/")["result"] as Map<*, *>
-        assertThat(result["isError"]).isEqualTo(true)
+            .post("/mcp").then().statusCode(401)
+        given().contentType(ContentType.JSON)
+            .body(
+                """{"jsonrpc":"2.0","id":2,"method":"tools/call",""" +
+                    """"params":{"name":"web.fetch","arguments":{"url":"https://example.org/"}}}""",
+            )
+            .post("/mcp").then().statusCode(401)
     }
 
     @Test
     @TestSecurity(user = "agent:web-reader")
+    @OidcSecurity(claims = [Claim(key = "sub", value = "agent:web-reader"), Claim(key = "aud", value = AUD)])
     fun `an off-list host is DENIED by the broker even though the policy allowed it`() {
         val env = envelope(call("https://other.example/"))
         assertThat(env["outcome"]).isEqualTo("DENIED")
@@ -85,12 +92,14 @@ class FetchBrokerMcpRoutingIT {
 
     @Test
     @TestSecurity(user = "agent:web-reader")
+    @OidcSecurity(claims = [Claim(key = "sub", value = "agent:web-reader"), Claim(key = "aud", value = AUD)])
     fun `a query string is DENIED`() {
         assertThat(envelope(call("https://example.org/a?x=1"))["outcome"]).isEqualTo("DENIED")
     }
 
     @Test
     @TestSecurity(user = "agent:opa-denied")
+    @OidcSecurity(claims = [Claim(key = "sub", value = "agent:opa-denied"), Claim(key = "aud", value = AUD)])
     fun `a policy deny is DENIED before the broker fetches anything`() {
         val env = envelope(call("https://example.org/"))
         assertThat(env["outcome"]).isEqualTo("DENIED")
@@ -99,6 +108,7 @@ class FetchBrokerMcpRoutingIT {
 
     @Test
     @TestSecurity(user = "agent:web-reader")
+    @OidcSecurity(claims = [Claim(key = "sub", value = "agent:web-reader"), Claim(key = "aud", value = AUD)])
     fun `a js host with no renderer configured is NOT_RENDERABLE`() {
         val env = envelope(call("https://js.example.org/portal"))
         assertThat(env["outcome"]).isEqualTo("NOT_RENDERABLE")
@@ -108,14 +118,43 @@ class FetchBrokerMcpRoutingIT {
 
     @Test
     @TestSecurity(user = "agent:web-reader")
+    @OidcSecurity(claims = [Claim(key = "sub", value = "agent:web-reader"), Claim(key = "aud", value = AUD)])
     fun `an unknown tool is refused`() {
         val result = call("https://example.org/", tool = "web.post")["result"] as Map<*, *>
         assertThat(result["isError"]).isEqualTo(true)
     }
 
     @Test
+    @TestSecurity(user = "agent:web-reader")
+    @OidcSecurity(
+        claims = [Claim(key = "sub", value = "agent:web-reader"), Claim(key = "aud", value = "openbank-mcp-service")],
+    )
+    fun `a token issued for another audience is refused with 401 on list and call`() {
+        given().contentType(ContentType.JSON).body("""{"jsonrpc":"2.0","id":1,"method":"tools/list"}""")
+            .post("/mcp").then().statusCode(401)
+            .header("WWW-Authenticate", org.hamcrest.Matchers.containsString("invalid_token"))
+        given().contentType(ContentType.JSON)
+            .body(
+                """{"jsonrpc":"2.0","id":2,"method":"tools/call",""" +
+                    """"params":{"name":"web.fetch","arguments":{"url":"https://example.org/"}}}""",
+            )
+            .post("/mcp").then().statusCode(401)
+    }
+
+    @Test
+    @TestSecurity(user = "agent:web-reader")
+    @OidcSecurity(claims = [Claim(key = "sub", value = "agent:opa-denied"), Claim(key = "aud", value = AUD)])
+    fun `the agent identity is the token sub, not the principal name`() {
+        assertThat(envelope(call("https://example.org/"))["reason"] as String).startsWith("denied by policy")
+    }
+
+    @Test
     fun `the metric and liveness gauge are exported`() {
         val metrics = given().get("/q/metrics").then().statusCode(200).extract().asString()
         assertThat(metrics).contains("openbank_workflow_last_success_age_seconds{workflow=\"web-fetch\"")
+    }
+
+    private companion object {
+        const val AUD = "openbank-fetch-broker"
     }
 }

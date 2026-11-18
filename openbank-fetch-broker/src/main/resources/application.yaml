@@ -8,6 +8,11 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    token:
+      # RFC 8707 / ADR-0383 D1: only tokens issued FOR this broker are accepted (the endpoint
+      # re-checks it, so the 401 does not depend on this key alone); the caller is the `sub`.
+      audience: openbank-fetch-broker
+      principal-claim: sub
   shutdown:
     timeout: 30S
   log:

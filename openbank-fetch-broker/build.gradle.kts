@@ -22,6 +22,9 @@ dependencies {
     implementation(project(":openbank-libs-runtime"))
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.quarkus.test.security)
+    // @OidcSecurity(claims=...) — drives the sub/aud checks without a real IdP.
+    testImplementation(libs.quarkus.test.security.oidc)
+    testImplementation(libs.pdfbox)
 }
 
 // ADR-0387 D1: package the agent charters so the broker re-checks each caller's

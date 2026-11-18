@@ -15,8 +15,6 @@ import com.openbank.fetchbroker.domain.UrlDecision
 import com.openbank.libs.security.EgressDeniedException
 import com.openbank.libs.security.EgressRequest
 import com.openbank.libs.security.EgressResponse
-import org.apache.pdfbox.Loader
-import org.apache.pdfbox.text.PDFTextStripper
 import java.io.IOException
 import java.net.URI
 import java.nio.charset.Charset
@@ -30,6 +28,7 @@ class PlainHttpRenderer(
     private val transport: HttpTransport,
     private val robots: RobotsGate,
     private val userAgent: String,
+    private val pdf: PdfTextExtractor = PdfTextExtractor(),
 ) : RendererPort {
     override val name = NAME
 
@@ -68,7 +67,7 @@ class PlainHttpRenderer(
         val contentType = resp.header("content-type").orEmpty().lowercase()
         val text = when {
             "html" in contentType -> HtmlTextExtractor.extract(decode(resp, contentType), mode)
-            "application/pdf" in contentType -> pdfText(resp.body)
+            "application/pdf" in contentType -> pdf.extract(resp.body)
                 ?: return RenderResult.NotRenderable("unreadable pdf")
             contentType.startsWith("text/plain") -> decode(resp, contentType)
             else -> return RenderResult.NotRenderable("unsupported content type")
@@ -81,13 +80,6 @@ class PlainHttpRenderer(
         val charset = contentType.substringAfter("charset=", "").substringBefore(';').trim('"', ' ')
         val cs = runCatching { Charset.forName(charset) }.getOrDefault(Charsets.UTF_8)
         return String(resp.body, cs)
-    }
-
-    @Suppress("TooGenericExceptionCaught")
-    private fun pdfText(bytes: ByteArray): String? = try {
-        Loader.loadPDF(bytes).use { PDFTextStripper().getText(it) }
-    } catch (_: Exception) {
-        null
     }
 
     companion object {

@@ -104,10 +104,12 @@ class WebFetchServiceTest {
         assertThat(env.bytes).isEqualTo(page.toByteArray().size)
         assertThat(env.renderer).isEqualTo(PlainHttpRenderer.NAME)
         val content = env.content!!
-        assertThat(content).startsWith(UntrustedContent.NOTICE).endsWith(UntrustedContent.END)
+        assertThat(
+            content,
+        ).startsWith(UntrustedContent.NOTICE).containsPattern("<<<END_UNTRUSTED_WEB_CONTENT [0-9a-f]{24}>>>$")
         assertThat(content).contains("# Act 1").contains("Section & text").doesNotContain("evil()")
         // The page's own copy of the closing delimiter is neutralised: exactly one END remains.
-        assertThat(content.windowed(UntrustedContent.END.length).count { it == UntrustedContent.END }).isEqualTo(1)
+        assertThat(Regex("<<<").findAll(content).count()).isEqualTo(2)
         assertThat(metrics.outcomes).containsExactly(FetchOutcome.FETCHED to "example.org")
         assertThat(metrics.successes).isEqualTo(1)
         assertThat(audit.events.single().sha256).isEqualTo(expected)

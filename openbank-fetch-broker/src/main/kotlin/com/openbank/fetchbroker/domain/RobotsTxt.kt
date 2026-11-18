@@ -18,7 +18,7 @@ class RobotsTxt private constructor(private val groups: List<Group>) {
             buildString {
                 append('^')
                 val anchored = pattern.endsWith("$")
-                val body = if (anchored) pattern.dropLast(1) else pattern
+                val body = normalisePath(if (anchored) pattern.dropLast(1) else pattern)
                 body.split('*').forEachIndexed { i, part ->
                     if (i > 0) append(".*")
                     append(Regex.escape(part))
@@ -35,12 +35,45 @@ class RobotsTxt private constructor(private val groups: List<Group>) {
         val group = groups.firstOrNull { g -> g.agents.any { it != "*" && token.startsWith(it) } }
             ?: groups.firstOrNull { "*" in it.agents }
             ?: return true
-        val best = group.rules.filter { it.matches(path) }
+        val normalised = normalisePath(path)
+        val best = group.rules.filter { it.matches(normalised) }
             .maxWithOrNull(compareBy<Rule> { it.pattern.length }.thenBy { it.allow })
         return best?.allow ?: true
     }
 
     companion object {
+        private const val HEX = 16
+        private const val ESCAPE_LEN = 3
+        private val UNRESERVED: Set<Char> = (('a'..'z') + ('A'..'Z') + ('0'..'9') + "-._~".toList()).toSet()
+
+        /**
+         * RFC 9309 §2.2.2 / RFC 3986 §6.2.2: percent-encoded UNRESERVED characters are decoded and
+         * the remaining escapes upper-cased, on BOTH the rule and the request path. Without it
+         * `/%70rivate` and `Disallow: /private` name the same resource and compare unequal.
+         */
+        fun normalisePath(raw: String): String {
+            val out = StringBuilder(raw.length)
+            var i = 0
+            while (i < raw.length) {
+                val c = raw[i]
+                val hex = if (c == '%' && i + ESCAPE_LEN <= raw.length) raw.substring(i + 1, i + ESCAPE_LEN) else null
+                val code = hex?.toIntOrNull(HEX)
+                if (code != null) {
+                    val ch = code.toChar()
+                    if (ch in UNRESERVED) {
+                        out.append(ch)
+                    } else {
+                        out.append('%').append(hex.uppercase())
+                    }
+                    i += ESCAPE_LEN
+                } else {
+                    out.append(c)
+                    i++
+                }
+            }
+            return out.toString()
+        }
+
         val ALLOW_ALL = RobotsTxt(emptyList())
         val DENY_ALL = RobotsTxt(listOf(Group(listOf("*"), listOf(Rule(allow = false, pattern = "/")))))
 
