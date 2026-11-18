@@ -75,6 +75,8 @@ jobs:
               "openbank-sepa-payment",
               "openbank-sanctions-service",
               "openbank-standing-order-service",
+              "openbank-sdd-service",
+              "openbank-interest-service",
               "openbank-card-processing-service",
               "openbank-card-issuance-service",
               "openbank-treasury-service",
