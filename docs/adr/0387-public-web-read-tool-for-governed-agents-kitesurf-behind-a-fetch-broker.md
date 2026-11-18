@@ -146,8 +146,8 @@ grep -A3 'id: public-web-fetch' .github/gates/gates.yaml | grep -q 'mode: enforc
 # 2. no agent pod can reach the internet (expect: only the fetch-broker policy listed)
 grep -rl '0.0.0.0/0' openbank-infra/gitops/components/ai-platform/ | grep -v fetch-broker
 # 3. OPA denies an off-list host and allows a listed one (expect: false, then true)
-opa eval -d <bundle> 'data.openbank.mcp.allow' -i deny-host.json
-opa eval -d <bundle> 'data.openbank.mcp.allow' -i allow-host.json
+opa eval -d <bundle> 'data.openbank.agents.allow' -i deny-host.json
+opa eval -d <bundle> 'data.openbank.agents.allow' -i allow-host.json
 # 4. the broker carried work (expect: >0), not merely runs (ADR-0253)
 #    sum(increase(openbank_web_fetch_total{outcome="fetched"}[7d]))
 # 5. the liveness gauge exists for the broker (expect: one series, age < 2x schedule)
