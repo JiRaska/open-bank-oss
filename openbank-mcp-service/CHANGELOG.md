@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.10](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.9...mcp-service-v0.17.10) (2026-11-18)
+
+
+### Security
+
+* **mcp:** bound JSON-RPC input before dispatch, audit and downstream calls ([#16644](https://github.com/JiRaska/open-bank-oss/issues/16644)) ([6c37533](https://github.com/JiRaska/open-bank-oss/commit/6c3753381a47674a0c9b2971fd5f1b6a23e157da))
+
 ## [0.17.9](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.8...mcp-service-v0.17.9) (2026-11-17)
 
 

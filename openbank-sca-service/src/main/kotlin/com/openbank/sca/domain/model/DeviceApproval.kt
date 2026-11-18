@@ -90,12 +90,12 @@ data class DeviceApprovalDecision(
  * against the one challenge whose stored linking data produced those bytes, and `consume`
  * compares the document and card fields independently rather than positionally.
  *
- * An [ScaPurpose.APPROVAL] challenge signs its own canonical form instead — see
- * [approvalLinkingPayload]. No challenge of any other purpose ever carries approval fields, so
- * every payload that existed before keeps its bytes.
+ * An [ScaPurpose.APPROVAL] or [ScaPurpose.MCP_CLIENT_CONNECT] challenge signs its own canonical
+ * form instead — see [approvalLinkingPayload]. No challenge of any other purpose ever carries
+ * approval fields, so every payload that existed before keeps its bytes.
  */
 fun ScaChallenge.dynamicLinkingPayload(decision: DeviceDecisionType): ByteArray {
-    if (purpose == ScaPurpose.APPROVAL) return approvalLinkingPayload(decision)
+    if (purpose in REQUEST_LINKED_PURPOSES) return approvalLinkingPayload(decision)
     val dl = dynamicLinkingData
     val segments = listOf(
         id.toString(),
@@ -125,16 +125,23 @@ fun ScaChallenge.dynamicLinkingPayload(decision: DeviceDecisionType): ByteArray 
  *  - `currency`: upper-case ISO code;
  *  - `creditorIban`: upper-case, all spaces removed.
  *
+ * An [ScaPurpose.MCP_CLIENT_CONNECT] challenge (ADR-0385 D3) signs the same form with its own
+ * purpose segment and never carries payment segments:
+ * `<challengeId>|<decision>|MCP_CLIENT_CONNECT|<approvalRequestId>|<payloadSha256>`.
+ *
  * The payment segments are present iff the challenge carries an amount (a PAYMENT approval).
  * `reference` and `creditorName` are display-only and never signed here: the payload hash already
  * binds the whole frozen instruction.
  */
 fun ScaChallenge.approvalLinkingPayload(decision: DeviceDecisionType): ByteArray {
     val dl = dynamicLinkingData
+    // The purpose segment is the challenge's own: `APPROVAL` for every challenge that signed this
+    // form before ADR-0385 (byte-identical), `MCP_CLIENT_CONNECT` for a connect — so a signature
+    // over one can never verify as the other.
     val segments = mutableListOf(
         id.toString(),
         decision.name,
-        ScaPurpose.APPROVAL.name,
+        purpose.name,
         dl?.approvalRequestId.orEmpty(),
         dl?.payloadSha256.orEmpty().lowercase(),
     )
@@ -145,6 +152,9 @@ fun ScaChallenge.approvalLinkingPayload(decision: DeviceDecisionType): ByteArray
     }
     return segments.joinToString("|").toByteArray(Charsets.UTF_8)
 }
+
+/** Purposes whose device signature is the request-linked canonical form of [approvalLinkingPayload]. */
+val REQUEST_LINKED_PURPOSES: Set<ScaPurpose> = setOf(ScaPurpose.APPROVAL, ScaPurpose.MCP_CLIENT_CONNECT)
 
 /** Plain decimal with exactly two fractional digits; throws for a malformed or over-precise amount. */
 fun canonicalAmount(amount: String): String =

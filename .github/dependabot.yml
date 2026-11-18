@@ -15,6 +15,12 @@ updates:
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
+    ignore:
+      # webauthn4j 0.31+ pulls the Jackson 3 `tools.jackson` artifacts, which clash with the
+      # Jackson 2 line Quarkus ships; the version catalog already pins 0.28.x for this reason.
+      # Lift this once the fleet moves to Jackson 3 (#16448 reverted the 0.32 bump).
+      - dependency-name: "com.webauthn4j:*"
+        versions: [">= 0.31.0"]
     groups:
       quarkus:
         patterns:

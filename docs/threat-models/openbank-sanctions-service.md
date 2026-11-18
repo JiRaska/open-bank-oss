@@ -10,7 +10,7 @@ ADR-0032 documents the synchronous AML/sanctions screening gate. Reviewed in PR.
 
 - **Status:** Draft (first pass, written alongside the real-feed-registration wiring; §6 added
   with the review-path persistence fix)
-- **Last reviewed:** 2026-11-16 (agent as four-eyes maker on sanctions.clear)
+- **Last reviewed:** 2026-11-18 (machine principals excluded from operator-sanctions-write)
 - **Owner:** sanctions/AML CODEOWNERS
 - **Related ADRs:** ADR-0002 (hexagonal), ADR-0032 (synchronous AML/sanctions screening gate),
   ADR-0100 (injected Clock, Layer 1 determinism), ADR-0116 (KYC engine — `SANCTIONS_SCREENING`
@@ -217,6 +217,44 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
 | M10 | **A disabled feature read as a working one** | Registration is refused with 503 while disabled; a disabled run reports `DISABLED`, counted apart from `completed`; the registry gauges read NaN until a run has observed the registry | None known |
 
 ## 7. Change log
+
+- **2026-11-18 (follow-up to #16593):** **EoP closed: a machine principal can no longer act as the
+  four-eyes CHECKER.** `operator-sanctions-write` granted every `sanctions.*` action, including
+  `sanctions.approval.decide`, to any `HUMAN`-typed principal holding `ROLE_OPERATOR`/`ROLE_ADMIN`.
+  Keycloak service-accounts are classified `HUMAN`, and the docker/CI realms give the shared
+  `service-account-openbank-services` `ROLE_OPERATOR` (the deployed realm gives it to
+  `service-account-openbank-edge`), so in those environments a machine could decide a paused
+  `sanctions.clear` and the maker/checker split reduced to two service identities. The rule now
+  carries `not principal_is_machine` (staff only; an absent `service_account` marker also counts as
+  machine). **Caller inventory** (every REST client targeting sanctions-service): account,
+  domestic-payment, sepa-payment, sepa-instant, fx, swift, sdd, kyc, kyb call `POST .../screen`
+  and kyb `PUT/DELETE .../monitored-subjects` — all `sanctions.create`, granted to machines by base
+  `rest.rego`'s `m2m-sanctions-screening`, unaffected; agent-service reads and submits
+  `sanctions.clear` as maker through its own named rules, unaffected; admin-ui relays the signed-in
+  operator's token (human), unaffected. No machine calls `sanctions.update`, `.trigger` or
+  `.approval.decide`. `sanctions_rest_ext_test.rego` pins must-DENY for a `ROLE_OPERATOR` machine
+  (marker present and absent) on decide/clear/update/trigger, and must-ALLOW for a human operator's
+  decide and the machine's screen; the deny cases fail against the previous rule. Checked with
+  `opa eval` against the regenerated `sanctions-opa-bundle` ConfigMap. This closes the residual
+  recorded in the 2026-10-08 entry. Rollback: revert the one-line condition and regenerate the bundle.
+
+- **2026-11-17 (#16593, follow-up to #16455):** Trust-boundary change on the same surface
+  (`POST /api/v3/sanctions/review`, agent path). Three controls tightened, no new caller:
+  (1) `X-Approval-Id` is read from the request headers, not a method parameter — as a parameter it
+  entered the four-eyes request fingerprint, so the agent's retry never matched its approval and
+  minted a new pending one each time (fail-closed, but the agent path never executed);
+  (2) **the approval is bound to the request that consumed it**: `@Authorize` records the approval
+  it consumed for THIS call (libs-runtime `FourEyesConsumption`, request-scoped) and the resource
+  accepts only that id, and `checkerOf` accepts `EXECUTED` only. **Tampering/EoP closed:** before
+  this, an approval consumed by an earlier call (EXECUTED, same check, same maker) would have
+  authorised a replayed CLEAR had the policy ever stopped flagging `four_eyes_required`;
+  (3) `AgentReviewGuard` refuses a review body whose target method or caller cannot be resolved,
+  instead of passing it to `@Authorize`. Evidence: `AgentClearFourEyesFlowIT` (202 → human decide →
+  200 with the human as reviewer → replay 202 → replay with the gate off 403), each step sabotaged
+  red; `sanctions_rest_ext_test.rego` pins the OPA grant (allow + four-eyes for the agent's clear,
+  deny for decide/update/trigger, another machine and a name-only impostor). **Open:** v1 `/review`
+  is protected from the agent only by `@RolesAllowed` (the agent holds `ROLE_API` only in every
+  realm file), because the OPA grant is keyed on the action, not the path.
 
 - **2026-11-16 (#16381):** Trust-boundary change. `POST /api/v3/sanctions/review` (`sanctions.clear`)
   now admits `ROLE_API` at the `@RolesAllowed` layer so that ONE machine principal,

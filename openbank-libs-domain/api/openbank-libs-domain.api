@@ -4788,6 +4788,112 @@ public final class com/openbank/libs/security/BlindIndexTokenizer {
 	public final fun tokenize (Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
 }
 
+public final class com/openbank/libs/security/DpopPolicy {
+	public fun <init> ()V
+	public fun <init> (Ljava/time/Duration;Ljava/time/Duration;)V
+	public synthetic fun <init> (Ljava/time/Duration;Ljava/time/Duration;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/time/Duration;
+	public final fun component2 ()Ljava/time/Duration;
+	public final fun copy (Ljava/time/Duration;Ljava/time/Duration;)Lcom/openbank/libs/security/DpopPolicy;
+	public static synthetic fun copy$default (Lcom/openbank/libs/security/DpopPolicy;Ljava/time/Duration;Ljava/time/Duration;ILjava/lang/Object;)Lcom/openbank/libs/security/DpopPolicy;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFutureSkew ()Ljava/time/Duration;
+	public final fun getMaxAge ()Ljava/time/Duration;
+	public final fun getReplayTtl ()Ljava/time/Duration;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/security/DpopProof {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZZLjava/lang/String;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Z
+	public final fun component5 ()Z
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun component8 ()Ljava/time/Instant;
+	public final fun component9 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZZLjava/lang/String;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/security/DpopProof;
+	public static synthetic fun copy$default (Lcom/openbank/libs/security/DpopProof;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZZLjava/lang/String;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/security/DpopProof;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlg ()Ljava/lang/String;
+	public final fun getAth ()Ljava/lang/String;
+	public final fun getHtm ()Ljava/lang/String;
+	public final fun getHtu ()Ljava/lang/String;
+	public final fun getIat ()Ljava/time/Instant;
+	public final fun getJti ()Ljava/lang/String;
+	public final fun getJwkHasPrivateMaterial ()Z
+	public final fun getJwkThumbprint ()Ljava/lang/String;
+	public final fun getSignatureValid ()Z
+	public final fun getTyp ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/openbank/libs/security/DpopProofParser {
+	public abstract fun parse (Ljava/lang/String;)Lcom/openbank/libs/security/DpopProof;
+}
+
+public final class com/openbank/libs/security/DpopProofVerifier {
+	public static final field Companion Lcom/openbank/libs/security/DpopProofVerifier$Companion;
+	public static final field TYP Ljava/lang/String;
+	public fun <init> (Lcom/openbank/libs/security/DpopProofParser;Lcom/openbank/libs/security/DpopReplayStore;Lcom/openbank/libs/security/DpopPolicy;)V
+	public synthetic fun <init> (Lcom/openbank/libs/security/DpopProofParser;Lcom/openbank/libs/security/DpopReplayStore;Lcom/openbank/libs/security/DpopPolicy;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun verify (Lcom/openbank/libs/security/DpopRequest;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/openbank/libs/security/DpopProofVerifier$Companion {
+	public final fun accessTokenHash (Ljava/lang/String;)Ljava/lang/String;
+	public final fun getALLOWED_ALGORITHMS ()Ljava/util/Set;
+	public final fun normaliseHtu (Ljava/lang/String;)Ljava/lang/String;
+}
+
+public abstract interface class com/openbank/libs/security/DpopReplayStore {
+	public abstract fun firstUse (Ljava/lang/String;Ljava/lang/String;Ljava/time/Duration;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/openbank/libs/security/DpopRequest {
+	public fun <init> (Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun copy (Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/security/DpopRequest;
+	public static synthetic fun copy$default (Lcom/openbank/libs/security/DpopRequest;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/security/DpopRequest;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccessToken ()Ljava/lang/String;
+	public final fun getBoundJkt ()Ljava/lang/String;
+	public final fun getDpopHeaderValues ()Ljava/util/List;
+	public final fun getMethod ()Ljava/lang/String;
+	public final fun getRequestUri ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/security/DpopResult : java/lang/Enum {
+	public static final field ALG_NOT_ALLOWED Lcom/openbank/libs/security/DpopResult;
+	public static final field ATH_MISMATCH Lcom/openbank/libs/security/DpopResult;
+	public static final field BAD_SIGNATURE Lcom/openbank/libs/security/DpopResult;
+	public static final field HTM_MISMATCH Lcom/openbank/libs/security/DpopResult;
+	public static final field HTU_MISMATCH Lcom/openbank/libs/security/DpopResult;
+	public static final field IAT_OUT_OF_WINDOW Lcom/openbank/libs/security/DpopResult;
+	public static final field JKT_MISMATCH Lcom/openbank/libs/security/DpopResult;
+	public static final field MALFORMED Lcom/openbank/libs/security/DpopResult;
+	public static final field MISSING_PROOF Lcom/openbank/libs/security/DpopResult;
+	public static final field PRIVATE_KEY_IN_JWK Lcom/openbank/libs/security/DpopResult;
+	public static final field RATE_LIMITED Lcom/openbank/libs/security/DpopResult;
+	public static final field REPLAYED Lcom/openbank/libs/security/DpopResult;
+	public static final field REPLAY_STORE_UNAVAILABLE Lcom/openbank/libs/security/DpopResult;
+	public static final field VALID Lcom/openbank/libs/security/DpopResult;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/security/DpopResult;
+	public static fun values ()[Lcom/openbank/libs/security/DpopResult;
+}
+
 public final class com/openbank/libs/security/EgressAddressClass : java/lang/Enum {
 	public static final field Companion Lcom/openbank/libs/security/EgressAddressClass$Companion;
 	public static final field LINK_LOCAL Lcom/openbank/libs/security/EgressAddressClass;
@@ -4948,6 +5054,16 @@ public final class com/openbank/libs/security/PiiMask {
 	public final fun nationalId (Ljava/lang/String;)Ljava/lang/String;
 	public final fun pan (Ljava/lang/String;)Ljava/lang/String;
 	public final fun phone (Ljava/lang/String;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/security/ReplayClaim : java/lang/Enum {
+	public static final field FIRST_USE Lcom/openbank/libs/security/ReplayClaim;
+	public static final field QUOTA_EXCEEDED Lcom/openbank/libs/security/ReplayClaim;
+	public static final field REPLAYED Lcom/openbank/libs/security/ReplayClaim;
+	public static final field UNAVAILABLE Lcom/openbank/libs/security/ReplayClaim;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/security/ReplayClaim;
+	public static fun values ()[Lcom/openbank/libs/security/ReplayClaim;
 }
 
 public final class com/openbank/libs/security/Roles {

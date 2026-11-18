@@ -45,7 +45,7 @@ class AgentMachineGrantCharterAlignmentTest {
             "sepa_instant_get",
             "sepa_instant_list_by_debtor",
             // #10486 batch 8: aml / sanctions / dispute reads (query.compliance.readonly,
-            // query.disputes.readonly) are granted by aml_rest_ext.rego, the sanctions bundle generator
+            // query.disputes.readonly) are granted by aml_rest_ext.rego, sanctions_rest_ext.rego
             // and dispute_rest_ext.rego because a charter holds them.
             "aml_list_cases",
             "aml_get_case",
@@ -84,7 +84,8 @@ class AgentMachineGrantCharterAlignmentTest {
         assertThat(registry.capabilityOf("sanctions_review_check")).isEqualTo("sanctions.review.maker")
         assertThat(allowedByAnyCharter).contains("sanctions.review.maker")
 
-        val gen = File("../openbank-infra/gitops/components/sanctions-service/gen-sanctions-opa-bundle.sh").readText()
+        // The rule source (#16593 moved it out of the bundle generator's heredoc; the bundle embeds it).
+        val gen = File("../openbank-infra/gitops/components/sanctions-service/sanctions_rest_ext.rego").readText()
         val makerRule = gen.substringAfter("allowed_reasons contains \"service-agent-sanctions-review-maker\" if {")
             .substringBefore("}")
         assertThat(makerRule).contains("machine_named(\"service-account-openbank-agent\")")
