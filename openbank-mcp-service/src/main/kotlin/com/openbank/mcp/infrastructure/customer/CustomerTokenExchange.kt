@@ -6,6 +6,7 @@ package com.openbank.mcp.infrastructure.customer
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.web.SyntheticTaintExternalBoundary
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
@@ -45,6 +46,7 @@ class TokenExchangeRefused(message: String, cause: Throwable? = null) : RuntimeE
 
 /** The customers-realm token endpoint (`{realm}/protocol/openid-connect/token`). */
 @RegisterRestClient(configKey = "customer-token-exchange")
+@SyntheticTaintExternalBoundary("Keycloak token endpoint (identity provider), not a banking service edge")
 @Path("/protocol/openid-connect/token")
 interface CustomerTokenEndpointClient {
     @POST
