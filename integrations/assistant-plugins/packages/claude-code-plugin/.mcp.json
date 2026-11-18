@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "openbank": {
+      "type": "http",
+      "url": "https://customer.open-bank.tech/mcp",
+      "oauth": {
+        "scopes": "openbank-mcp.read openbank-mcp.propose"
+      }
+    }
+  }
+}
