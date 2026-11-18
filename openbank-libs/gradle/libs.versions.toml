@@ -46,7 +46,7 @@ pact = "4.7.7"
 # detekt 1.23.8 bundles its own kotlin-compiler-embeddable, so it parses sources
 # independently of the project Kotlin version (2.3.x here).
 detekt = "1.23.8"
-ktlint-plugin = "13.1.0"
+ktlint-plugin = "14.2.0"
 # pitest-plugin = "1.15.0"       # deferred: crashes on Gradle 9.5 (ADR-0063 Phase 2)
 # pitest-junit5-plugin = "1.2.1" # deferred: see above
 # AWS SDK v2, Apache-2.0 (ADR-0161 D2): S3ObjectStore, the production ObjectStorePort

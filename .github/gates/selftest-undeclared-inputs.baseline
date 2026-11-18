@@ -39,7 +39,6 @@ edge-decoy-rule-parity openbank-infra/
 event-consumer-liveness build-logic/
 event-consumer-liveness openbank-*/
 event-contract-code-agreement build-logic/
-event-contract-code-agreement openbank-*/
 event-contract-coverage-ratchet build-logic/
 event-contract-coverage-ratchet openbank-*/
 event-handler-swallows fuzz/
@@ -92,6 +91,7 @@ gate-script-registration fuzz/
 gate-script-registration gradle.properties
 gate-script-registration gradle/
 gate-script-registration gradlew
+gate-script-registration integrations/
 gate-script-registration openbank-*/
 gate-script-registration openbank-admin-ui/
 gate-script-registration openbank-infra/
@@ -121,6 +121,7 @@ license-header-consistency codecov.yml
 license-header-consistency config/
 license-header-consistency docs/
 license-header-consistency fuzz/
+license-header-consistency integrations/
 license-header-consistency openbank-*/
 license-header-consistency openbank-admin-ui/
 license-header-consistency openbank-infra/
