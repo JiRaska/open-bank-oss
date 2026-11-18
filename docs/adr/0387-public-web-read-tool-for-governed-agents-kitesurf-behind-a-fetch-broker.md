@@ -1,13 +1,14 @@
 ---
 date: 2026-11-18
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ai-agents, security, compliance, networking]
 summary: "Agents read the public web only via one in-cluster fetch-broker MCP tool: per-charter host allowlist, GET-only, no PII; plain HTTP first, Cloudflare Kitesurf only for JS pages; content is untrusted data."
+followup: "#16754 — fetch broker service, gitops and network policy, OPA host projection, and enabling regulatory-obligations-watcher remain; the charter gate is enforced"
 ---
 
 # ADR-0387 — Public-web read tool for governed agents: Kitesurf behind a fetch broker
