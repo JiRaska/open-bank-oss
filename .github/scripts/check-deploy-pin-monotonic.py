@@ -70,6 +70,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import os
 import pathlib
 import re
@@ -199,7 +201,28 @@ def ancestry_local(root: str, old: str, new: str) -> str | None:
         return OK
     if git(root, "merge-base", "--is-ancestor", new, old, check=False).returncode == 0:
         return DOWNGRADE
+    # A NEGATIVE answer is only evidence in a complete history. In a shallow checkout (the gates run
+    # at fetch-depth 1 plus a few targeted fetches) both commits can be present as objects while the
+    # path between them is cut at the shallow boundary, so `--is-ancestor` answers "no" in BOTH
+    # directions for a plain forward move — which used to be reported as DIVERGED (#16696:
+    # ec4e56af -> 19698b6d, a forward move on main). Unproven is not diverged: defer to the API.
+    if is_shallow(root):
+        return None
     return DIVERGED
+
+
+def is_shallow(root: str) -> bool:
+    r = git(root, "rev-parse", "--is-shallow-repository", check=False)
+    return r.returncode != 0 or r.stdout.strip() != "false"   # cannot tell -> treat as incomplete
+
+
+def resolve_ancestry(root: str, repo: str, old: str, new: str,
+                     api: Callable[[str, str, str], str] | None = None) -> str:
+    """Local history when it can PROVE the answer, else the compare API, else UNKNOWN (never DIVERGED)."""
+    local = ancestry_local(root, old, new)
+    if local is not None:
+        return local
+    return (api or ancestry_api)(repo, old, new)
 
 
 def ancestry_api(repo: str, old: str, new: str) -> str:
@@ -367,8 +390,7 @@ def run_gate(root: str, base: str, repo: str, number: str, head_ref: str, event:
         return 2
 
     def decide(old: str, new: str) -> str:
-        local = ancestry_local(root, old, new)
-        return local if local is not None else ancestry_api(repo, old, new)
+        return resolve_ancestry(root, repo, old, new)
 
     ref: str | None = None
     if live_pins is None or live_tree is None:
@@ -397,6 +419,12 @@ def run_gate(root: str, base: str, repo: str, number: str, head_ref: str, event:
             print(f"::notice::explicit revert: {image} {old[:8]} -> {new[:8]} is {verdict} ({why})")
         return 0
     for path, image, old, new, verdict in bad:
+        if verdict == UNKNOWN:
+            print(f"::error file={path}::{image}: {old[:8]} -> {new[:8]} is NOT_EVALUATED — ancestry could not be "
+                  f"determined (commit missing from the checkout and the compare API did not answer). This is NOT a "
+                  f"finding that the pin moved backward; the gate fails closed because it cannot show it did not. "
+                  f"Re-run the job; if it persists, check that both commits exist on {branch}. {why}.")
+            continue
         print(f"::error file={path}::{image}: {old[:8]} -> {new[:8]} is {verdict.upper()} — a deploy may never move a pin "
               f"backward from what main holds now. {why}. Re-dispatch auto-deploy for current main, or label the PR `{REVERT_LABEL}` "
               f"to make the revert explicit.")
@@ -587,6 +615,46 @@ def self_test() -> int:
             check("compare API error -> UNKNOWN", ancestry_api("o/r", "a" * 8, "b" * 8) == UNKNOWN)
         finally:
             subprocess.run = real_run
+        # #16696: a FORWARD move judged in a SHALLOW checkout. Both commits are present as objects, but
+        # the path between them crosses the shallow boundary, so `--is-ancestor` says no both ways.
+        g("config", "uploadpack.allowAnySHA1InWant", "true")
+        shallow = os.path.join(root, "shallow")
+        subprocess.run(["git", "clone", "-q", "--depth=1", "--branch", "main", f"file://{root}", shallow],
+                       check=True, capture_output=True, env=env)
+        for sha in (c2, c3, c1):
+            subprocess.run(["git", "-C", shallow, "fetch", "-q", "--depth=1", "origin", sha], check=True,
+                           capture_output=True, env=env)
+        check("shallow fixture really is shallow, with c2/c3 present but disconnected",
+              is_shallow(shallow) and git(shallow, "merge-base", "--is-ancestor", c2, c3, check=False).returncode != 0)
+        check("full history still answers locally: forward OK", ancestry_local(root, c2, c3) == OK)
+        check("full history: true backward is DOWNGRADE", ancestry_local(root, c3, c1) == DOWNGRADE)
+        check("full history: true divergence is DIVERGED", ancestry_local(root, c2, side) == DIVERGED)
+        check("shallow, unproven ancestry is NOT reported as DIVERGED locally", ancestry_local(shallow, c2, c3) is None,
+              str(ancestry_local(shallow, c2, c3)))
+        api_calls: list[tuple[str, str]] = []
+
+        def api_says(status: str) -> Callable[[str, str, str], str]:
+            def f(_repo: str, o: str, n: str) -> str:
+                api_calls.append((o, n))
+                return status
+            return f
+        check("shallow forward move resolved by the compare API passes (OK)",
+              resolve_ancestry(shallow, "o/r", c2, c3, api=api_says(OK)) == OK and api_calls == [(c2, c3)])
+        check("shallow true backward via API stays DOWNGRADE",
+              resolve_ancestry(shallow, "o/r", c3, c1, api=api_says(DOWNGRADE)) == DOWNGRADE)
+        check("shallow, API cannot answer -> UNKNOWN (never DIVERGED, never OK)",
+              resolve_ancestry(shallow, "o/r", c2, c3, api=api_says(UNKNOWN)) == UNKNOWN)
+        api_calls.clear()
+        check("full history never consults the API", resolve_ancestry(root, "o/r", c2, c3, api=api_says(UNKNOWN)) == OK
+              and api_calls == [])
+        # The unresolvable case is reported as NOT_EVALUATED, distinct from DIVERGED, and still fails.
+        pr(c3[:8])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = gate(ancestry=lambda o, n: UNKNOWN)
+        out = buf.getvalue()
+        check("unresolvable ancestry fails closed with a distinct NOT_EVALUATED error",
+              rc == 1 and "NOT_EVALUATED" in out and "DIVERGED" not in out, out)
         # Push to main: no base, counts subjects, exits 0; PR without base: exit 2.
         pr(c3[:8]);   check("push with no base exits 0", gate(base="", event="push") == 0)
         check("pull_request with no base exits 2", gate(base="") == 2)
