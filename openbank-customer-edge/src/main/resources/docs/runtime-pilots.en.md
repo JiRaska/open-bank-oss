@@ -35,3 +35,21 @@ registration, authentication and interactions with response filters.
 
 References: [component tests](https://quarkus.io/guides/testing-components/),
 [load shedding](https://quarkus.io/guides/load-shedding-reference/).
+
+## Customer quota Redis pool and payment availability
+
+The per-party quota uses the named `rate-limit` Redis client with 32 connections,
+64 waiting acquisitions and a one-second command timeout. A Lua operation increments
+the minute counter and applies its expiry atomically, including repair of a legacy
+counter without an expiry. Quota demand therefore has its own connection budget.
+The configured customer quota and bucket semantics continue to apply.
+
+A domestic payment status read returns HTTP 503 with a temporary-unavailability
+message when its upstream returns HTTP 502, 503 or 504. Invalid payment identifiers,
+missing payments and failed ownership checks retain the route's existing visibility
+rules. The committed OpenAPI documents the availability response.
+
+The reporting drills for issue #16356 exercise accounts, balances and payments with
+OPA enforcement. Redis wait-queue recovery and a successful offline report do not
+establish the customer-service latency budget; retain HTTP errors and missed load
+iterations in the measurement.

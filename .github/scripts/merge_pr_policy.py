@@ -85,6 +85,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     'bc0c3a48a9c1508194982f8538e3efd1ba2b94f9',
     # merge-train.py of #16700 (a train fix pre-empts strict carriers), reviewed with that PR.
     '964c354b0c4d18cce3ac9f8ff61b4b6e014304d0',
+    # merge-train.py of #16675 (unfalsified gates cannot back a fix claim), reviewed with that PR.
+    '67d8f953ed7ccf43ad395711306b457f95388de1',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
