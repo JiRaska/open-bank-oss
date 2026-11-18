@@ -6,10 +6,13 @@ package com.openbank.ledger.application.usecase
 import com.openbank.ledger.application.port.`in`.JournalLineRequest
 import com.openbank.ledger.application.port.`in`.PostJournalCommand
 import com.openbank.ledger.domain.model.JournalSide
+import com.openbank.libs.market.BranchPaymentCurrency
 import java.math.BigDecimal
 import java.security.MessageDigest
 import java.time.LocalDate
 import java.util.UUID
+
+private const val GBP_ACCOUNT_INDEX = 3
 
 data class BranchPaymentReceipt(val transactionId: UUID, val bankId: UUID, val journalIds: List<UUID>)
 
@@ -37,6 +40,7 @@ data class BranchPaymentRequest(
         require((targetAccountId == null) == (targetBookId == null)) { "Target book attribution is required" }
         require(amount.signum() > 0) { "Amount must be positive" }
         com.openbank.libs.domain.money.Money.of(amount, currency)
+        BranchPaymentCurrency.of(currency)
     }
 
     fun digest(synthetic: Boolean): String = MessageDigest.getInstance("SHA-256").digest(
@@ -72,6 +76,7 @@ data class BranchPaymentRequest(
                     listOf(line(clearing, JournalSide.DEBIT), line(deposit, JournalSide.CREDIT, target)),
                 ),
             )
+
             source != null && target != null -> listOf(
                 journal(
                     "same-book",
@@ -79,6 +84,7 @@ data class BranchPaymentRequest(
                     listOf(line(deposit, JournalSide.DEBIT, source), line(deposit, JournalSide.CREDIT, target)),
                 ),
             )
+
             source != null -> listOf(
                 journal(
                     "source",
@@ -86,6 +92,7 @@ data class BranchPaymentRequest(
                     listOf(line(deposit, JournalSide.DEBIT, source), line(clearing, JournalSide.CREDIT)),
                 ),
             )
+
             else -> listOf(
                 journal(
                     "target",
@@ -97,8 +104,12 @@ data class BranchPaymentRequest(
     }
 
     private fun account(prefix: String): UUID {
-        val index = listOf("CZK", "EUR", "USD", "GBP").indexOf(currency)
-        require(index >= 0) { "No branch payment accounts for currency" }
+        val index = when (BranchPaymentCurrency.of(currency)) {
+            BranchPaymentCurrency.CZK -> 0
+            BranchPaymentCurrency.EUR -> 1
+            BranchPaymentCurrency.USD -> 2
+            BranchPaymentCurrency.GBP -> GBP_ACCOUNT_INDEX
+        }
         val suffix = when (prefix) {
             "210" -> if (index == 0) "000002" else "00210$index"
             "110" -> if (index == 0) "000001" else "00110$index"

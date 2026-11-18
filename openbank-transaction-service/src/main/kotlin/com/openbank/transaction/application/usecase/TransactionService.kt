@@ -480,6 +480,7 @@ private fun validateBranchRoute(
     base: Money,
 ) {
     if (listOfNotNull(source, target).none { it.mode == "BRANCH" }) return
+    com.openbank.libs.market.BranchPaymentCurrency.of(amount.currency.code)
     check(command.sourceAccountId == null || command.sourceAccountId != command.targetAccountId) {
         "Branch payment requires distinct accounts"
     }

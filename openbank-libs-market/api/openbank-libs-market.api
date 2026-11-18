@@ -15,6 +15,21 @@ public final class com/openbank/libs/market/BookingContext {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class com/openbank/libs/market/BranchPaymentCurrency : java/lang/Enum {
+	public static final field CZK Lcom/openbank/libs/market/BranchPaymentCurrency;
+	public static final field Companion Lcom/openbank/libs/market/BranchPaymentCurrency$Companion;
+	public static final field EUR Lcom/openbank/libs/market/BranchPaymentCurrency;
+	public static final field GBP Lcom/openbank/libs/market/BranchPaymentCurrency;
+	public static final field USD Lcom/openbank/libs/market/BranchPaymentCurrency;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/market/BranchPaymentCurrency;
+	public static fun values ()[Lcom/openbank/libs/market/BranchPaymentCurrency;
+}
+
+public final class com/openbank/libs/market/BranchPaymentCurrency$Companion {
+	public final fun of (Ljava/lang/String;)Lcom/openbank/libs/market/BranchPaymentCurrency;
+}
+
 public abstract interface class com/openbank/libs/market/IdentityVerification {
 }
 

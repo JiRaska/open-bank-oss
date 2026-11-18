@@ -58,8 +58,15 @@ class BranchBookResource(private val pool: Pool) {
 
     private companion object {
         val SNAPSHOT = """
-            WITH bank AS (
+            WITH RECURSIVE bank AS (
                 SELECT DISTINCT bank_id FROM ledger_branch_books WHERE bank_id = $1
+            ), payment_journals(operation_key, journal_id) AS (
+                SELECT p.operation_key, e.id FROM ledger_branch_payments p
+                JOIN journal_entries e ON e.id=p.first_journal_id OR e.id=p.second_journal_id
+                WHERE p.bank_id=$1
+                UNION
+                SELECT p.operation_key, e.id FROM payment_journals p
+                JOIN journal_entries e ON e.reversal_of=p.journal_id
             ), totals AS (
                 SELECT e.branch_book_id, l.currency_code AS currency, l.base_currency,
                     sum(CASE WHEN l.side='D' THEN l.base_amount ELSE 0 END) AS debit,
@@ -77,10 +84,10 @@ class BranchBookResource(private val pool: Pool) {
             )
             SELECT (SELECT count(DISTINCT bank_id)=1 FROM ledger_branch_books) AS single_bank,
                 NOT EXISTS (
-                    SELECT p.operation_key FROM ledger_branch_payments p
-                    JOIN journal_entries e ON e.id=p.first_journal_id OR e.id=p.second_journal_id
+                    SELECT p.operation_key FROM payment_journals p
+                    JOIN journal_entries e ON e.id=p.journal_id
                     JOIN journal_lines l ON l.journal_id=e.id JOIN gl_accounts g ON g.id=l.gl_account_id
-                    WHERE p.bank_id=$1 AND e.entry_date <= $2 AND NOT e.synthetic
+                    WHERE e.entry_date <= $2 AND NOT e.synthetic AND e.status IN ('POSTED','REVERSED')
                         AND g.code IN ('1290','1291','1292','1293')
                     GROUP BY p.operation_key,l.currency_code
                     HAVING sum(CASE WHEN l.side='D' THEN l.amount ELSE -l.amount END) <> 0

@@ -176,6 +176,50 @@ class BranchPaymentRecoveryIT {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = ["PLN", "HUF", "CHF"])
+    @io.quarkus.test.security.TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `unsupported branch accounting currency refuses before any durable operation or cover hold`(currency: String) {
+        val account = UUID.randomUUID()
+        val key = "unsupported-branch-${UUID.randomUUID()}"
+        LedgerWireMockResource.server.stubFor(
+            com.github.tomakehurst.wiremock.client.WireMock.get(urlEqualTo("/api/v1/accounts/$account"))
+                .willReturn(
+                    com.github.tomakehurst.wiremock.client.WireMock.okJson(
+                        """{"id":"$account","currencyCode":"$currency","bookingContext":{"bankId":"${UUID.randomUUID()}","establishmentId":"${UUID.randomUUID()}","hostCountry":"AT","mode":"BRANCH"}}""",
+                    ),
+                ),
+        )
+        val response = io.restassured.RestAssured.given().contentType("application/json").body(
+            mapOf(
+                "idempotencyKey" to key,
+                "type" to "DEBIT",
+                "sourceAccountId" to account,
+                "amount" to "100.00",
+                "currencyCode" to currency,
+                "valueDate" to LocalDate.now().toString(),
+            ),
+        ).post("/api/v1/transactions")
+        assertThat(response.statusCode).isEqualTo(400)
+        java.sql.DriverManager.getConnection(jdbc, databaseUser, databasePassword).use { db ->
+            db.createStatement().use { statement ->
+                statement.executeQuery("SELECT count(*) FROM transactions WHERE idempotency_key='$key'").use {
+                    assertThat(it.next()).isTrue()
+                    assertThat(it.getLong(1)).isZero()
+                }
+            }
+        }
+        LedgerWireMockResource.server.verify(
+            0,
+            postRequestedFor(urlEqualTo("/api/v1/balances/$account/holds")),
+        )
+        LedgerWireMockResource.server.verify(
+            0,
+            postRequestedFor(urlEqualTo("/api/v1/journals/branch-payments"))
+                .withRequestBody(matchingJsonPath("$.sourceAccountId", equalTo(account.toString()))),
+        )
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = ["EUR", ""])
     @io.quarkus.test.security.TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
     fun `branch incoming credit refuses a different or unknown account currency before persisting`(currency: String) {

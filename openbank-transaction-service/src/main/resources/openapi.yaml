@@ -1247,6 +1247,10 @@ components:
           type: number
         currencyCode:
           type: string
+          description: >-
+            Payment denomination. Attributed BRANCH payments require a GL-backed currency
+            (CZK, EUR, USD or GBP); unsupported branch accounting routes are rejected with
+            400 before a transaction or cover hold is created.
         baseAmount:
           type: number
           nullable: true

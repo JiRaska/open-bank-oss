@@ -32,6 +32,7 @@ dependencies {
     implementation(libs.quarkus.scheduler)
 
     implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-market"))
     implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
 

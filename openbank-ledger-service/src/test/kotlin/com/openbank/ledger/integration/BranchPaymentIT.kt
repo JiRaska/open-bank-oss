@@ -249,6 +249,73 @@ class BranchPaymentIT {
         }
     }
 
+    @Test
+    fun `opposite one-sided reversals stay broken per payment until reversal chains restore both pairs`() {
+        connection().use { db ->
+            val first = Payment()
+            val second = Payment(
+                sourceBook = first.targetBook,
+                targetBook = first.sourceBook,
+                source = first.target,
+                target = first.source,
+            )
+            register(db, first)
+            val firstIds = postedIds(first)
+            val secondIds = postedIds(second)
+            val firstReversal = reverse(db, firstIds.first())
+            val secondReversal = reverse(db, secondIds.last())
+            try {
+                val broken = snapshot(first)
+                assertThat(broken.getList<Number>("lines.clearing").sumOf { it.toDouble() }).isZero()
+                assertThat(broken.getBoolean("clearingBalanced")).isFalse()
+            } finally {
+                reverse(db, firstReversal)
+                reverse(db, secondReversal)
+            }
+            assertThat(snapshot(first).getBoolean("clearingBalanced")).isTrue()
+        }
+    }
+
+    @Test
+    fun `future reversals affect their payment only at the requested snapshot date`() {
+        connection().use { db ->
+            val future = Payment(date = LocalDate.of(2026, 11, 19))
+            register(db, future)
+            val ids = postedIds(future)
+            reverse(db, ids.first())
+            try {
+                assertThat(snapshot(future, future.date.minusDays(1)).getBoolean("clearingBalanced")).isTrue()
+                assertThat(snapshot(future).getBoolean("clearingBalanced")).isFalse()
+            } finally {
+                reverse(db, ids.last())
+            }
+            assertThat(snapshot(future).getBoolean("clearingBalanced")).isTrue()
+        }
+    }
+
+    private fun postedIds(payment: Payment): List<UUID> = post(payment.payload()).then().statusCode(200)
+        .extract().jsonPath().getList<String>("journalIds").map(UUID::fromString)
+
+    private fun reverse(db: Connection, id: UUID): UUID {
+        given().contentType("application/json").body(
+            mapOf(
+                "reason" to "clearing regression",
+                "reversedBy" to UUID.fromString("00000000-0000-0000-0000-000000000001"),
+            ),
+        ).post("/api/v1/journals/$id/reverse").then().statusCode(200)
+        return db.prepareStatement("SELECT id FROM journal_entries WHERE reversal_of=?").use { statement ->
+            statement.setObject(1, id)
+            statement.executeQuery().use { rows ->
+                assertThat(rows.next()).isTrue()
+                rows.getObject(1, UUID::class.java)
+            }
+        }
+    }
+
+    private fun snapshot(payment: Payment, date: LocalDate = payment.date) = given()
+        .queryParam("bankId", payment.bank).queryParam("asOf", date.toString())
+        .get("/api/v1/journals/branch-books").then().statusCode(200).extract().jsonPath()
+
     private fun assertEconomics(db: Connection, p: Payment) {
         db.createStatement().use { st ->
             st.executeQuery(
