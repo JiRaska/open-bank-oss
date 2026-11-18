@@ -1300,6 +1300,22 @@ class CustomerEdgeResourceTest {
     }
 
     @Test
+    fun `getDomesticPaymentStatus reports a dependency outage without exposing upstream details`() {
+        val caller = UUID.randomUUID()
+        val paymentId = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val resource = statusResourceFor(upstream, caller)
+        for (status in 502..504) {
+            every { upstream.get(match { it.endsWith("/domestic-payments/$paymentId") }, any()) } returns
+                Response.status(status).entity("internal policy deadline").build()
+
+            val response = resource.getDomesticPaymentStatus(paymentId.toString())
+            assertThat(response.status).isEqualTo(503)
+            assertThat(response.entity).isEqualTo(mapOf("error" to "Payment status temporarily unavailable"))
+        }
+    }
+
+    @Test
     fun `getSepaPaymentStatus returns the status for the caller's own payment`() {
         val caller = UUID.randomUUID()
         val acct = UUID.randomUUID()
