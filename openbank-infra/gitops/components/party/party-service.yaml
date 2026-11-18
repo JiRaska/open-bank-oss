@@ -22,7 +22,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-party-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "86691b159c85640b"
+        openbank.tech/policy-checksum: "2841cb44e7b8a588"
       labels:
         app.kubernetes.io/name: party-service
         app.kubernetes.io/part-of: party
@@ -36,7 +36,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: party-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-party-service:sandbox-893c4e64@sha256:d8de202d27172df8cfe2d9c023774ad9863a63dcc492c3254576592249744ccc
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-party-service:sandbox-1d0ff238@sha256:1c41b757f1e63406efc5140af8a89f0c56643ab5a8b6f5974cc7bbdd09aef1ca
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

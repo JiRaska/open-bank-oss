@@ -937,6 +937,87 @@ INCONCLUSIVE_GATE_KINDS = frozenset({"budget", "not_evaluated"})
 GATE_SHARD_JOB_RE = re.compile(r"^gates \(([a-z0-9-]+)\)$")   # ci.yml `gates (${{ matrix.slug }})`
 GATE_AGGREGATE_JOB = "Validate manifests"                      # red exactly when a shard is red
 GATE_ARTIFACT_PREFIX = "gate-results-"                         # ci.yml uploads gate-results-<slug>-a<attempt>
+# Mirror of run-gates.py UNIVERSAL_SELFTEST_INPUTS: a pull request touching any of these re-runs EVERY
+# self-test. The train runs alone under `python3 -I -S` from $RUNNER_TEMP, so it cannot import the
+# runner; the self-test holds this tuple equal to the runner's on any checkout that carries it.
+UNIVERSAL_SELFTEST_INPUTS = (
+    ".github/gates/gates.yaml",
+    ".github/scripts/run-gates.py",
+    ".github/scripts/gatelib.py",
+    ".github/scripts/selftest_input_trace.py",
+    ".github/gates/selftest-undeclared-inputs.baseline",
+)
+SELFTEST_INPUTS_RE = re.compile(r"^\s+selftest_inputs:\s*(\[(.*)\])?\s*(#.*)?$")
+
+
+def parse_selftest_inputs(text: str) -> dict[str, list[str]]:
+    """gate id -> its declared `selftest_inputs` from gates.yaml text, by line scan (no YAML under
+    `python3 -I -S`): a flow list on the key's line, or a block list of `- path` lines under it. A gate
+    with no declaration maps to []: run-gates runs its self-test on every pull request."""
+    out: dict[str, list[str]] = {}
+    gid, block = None, False
+    for ln in text.splitlines():
+        m = GATE_ID_RE.match(ln)
+        if m:
+            gid, block = m.group(1), False
+            out.setdefault(gid, [])
+            continue
+        if gid is None:
+            continue
+        m = SELFTEST_INPUTS_RE.match(ln)
+        if m:
+            block = m.group(1) is None
+            if not block:
+                out[gid] = [p.strip().strip("\"'") for p in m.group(2).split(",") if p.strip()]
+            continue
+        if block:
+            item = re.fullmatch(r"\s+-\s+(\S.*?)\s*(#.*)?", ln)
+            if item:
+                out[gid].append(item.group(1).strip("\"'"))
+            elif ln.strip() and not ln.lstrip().startswith("#"):
+                block = False
+    return out
+
+
+def selftest_skip_refusal(main_jobs: dict[str, str | None] | None, records: dict[str, list | None] | None,
+                          head_files: list[str], declared: dict[str, list[str]] | None) -> str | None:
+    """Why a head green on every gate shard red on main still does NOT prove it fixes that shard, or
+    None. run-gates skips a gate's self-test on a pull request unless one of the gate's declared
+    `selftest_inputs` changed (selftest_is_needed), while every push to main runs every self-test. So
+    when main's red is a self-test (`unfalsified` in the shard's --json records), a head whose shard job
+    SKIPPED that self-test is green about it structurally — 2026-11-17: #16599 left
+    `event-contract-code-agreement` unfalsified on main, and the train then served #16627 and #16644 as
+    "fixes" of it, one full CI each, because their shard jobs ran green without the self-test. The head
+    proves the fix only when its own run executed the self-test: it changed a universal input, or one of
+    THAT gate's declared inputs as read from the head's own gates.yaml (`declared`; None = unreadable), or
+    the gate declares none (then run-gates always runs it). A failed job that is no gate shard needs no
+    records. Fails closed: unreadable records or declaration, or a gate the head's gates.yaml does not
+    declare (its self-test cannot have run there), refuse. A content/budget failure is untouched."""
+    failed = sorted(n for n, c in (main_jobs or {}).items() if c is not None and c not in FIX_JOB_OK)
+    slugs = [m.group(1) for n in failed for m in [GATE_SHARD_JOB_RE.fullmatch(n)] if m]
+    if not slugs:
+        return None
+    if records is None:
+        return "gate results of main's red run unreadable"
+    if any(f in UNIVERSAL_SELFTEST_INPUTS for f in head_files):
+        return None   # every self-test ran on this head
+    for slug in slugs:
+        recs = records.get(slug)
+        if not isinstance(recs, list):
+            return f"gate results of shard `{slug}` on main unreadable"
+        for r in recs:
+            if not isinstance(r, dict) or "unfalsified" not in (r.get("status"), r.get("failure_kind")):
+                continue
+            gid = str(r.get("id") or "?")
+            if declared is None:
+                return f"self-test of gate `{gid}` failed on main and {GATES_YAML} is unreadable on the head"
+            if gid not in declared:
+                return f"self-test of gate `{gid}` failed on main and the head's {GATES_YAML} does not declare it: it never ran there"
+            inputs = declared[gid]
+            if inputs and not any(f == d or f.startswith(d.rstrip("/") + "/") for f in head_files for d in inputs):
+                return (f"self-test of gate `{gid}` failed on main (unfalsified) and was skipped on the head: "
+                        f"no declared selftest input changed ({', '.join(inputs)})")
+    return None
 
 
 def gate_failures_inconclusive(failed_jobs: list[str], records: dict[str, list | None]) -> tuple[bool, str]:
@@ -2575,6 +2656,38 @@ class GitHub:
             return None
         return data if isinstance(data, list) else None
 
+    def gate_shard_records(self, sha: str, ctx: str, slugs: list[str]) -> dict[str, list | None] | None:
+        """The --json records of gate shards `slugs` from the CURRENT attempt of the workflow run behind
+        check run `ctx` on `sha`: slug -> records (None = that shard's artifact missing or unreadable).
+        None = the run itself is unreadable (no such check run, no run id, no current attempt). Only the
+        named shards' artifacts are downloaded (a few KB each); a rerun keeps attempt-1 artifacts under
+        the same run id, so the artifact name carries the attempt (ci.yml `gate-results-<slug>-a<n>`)."""
+        latest = None
+        for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
+            if check.get("name") == ctx and (latest is None or check["id"] > latest["id"]):
+                latest = check
+        if latest is None:
+            return None
+        m = re.search(r"/actions/runs/([0-9]+)/job", latest.get("details_url") or latest.get("html_url") or "")
+        if not m:
+            return None
+        run = int(m.group(1))
+        code, info = api("GET", f"/repos/{self.repo}/actions/runs/{run}")
+        attempt = info.get("run_attempt") if code == 200 and isinstance(info, dict) else None
+        if type(attempt) is not int or attempt < 1:
+            return None
+        arts: dict[str, dict] = {}
+        for a in paginate(f"/repos/{self.repo}/actions/runs/{run}/artifacts", "artifacts"):
+            name = a.get("name") or ""
+            if name.startswith(GATE_ARTIFACT_PREFIX) and not a.get("expired") and (
+                    name not in arts or a["id"] > arts[name]["id"]):
+                arts[name] = a
+        out: dict[str, list | None] = {}
+        for slug in sorted(set(slugs)):
+            a = arts.get(f"{GATE_ARTIFACT_PREFIX}{slug}-a{attempt}")
+            out[slug] = self.artifact_json(a["id"]) if a else None
+        return out
+
     def update_branch(self, n: int, head: str) -> bool:
         """Merge main into the PR branch, pinned to the head the strict lane judged.
 
@@ -3941,6 +4054,129 @@ def carrier_holds_strict(p: dict, now: float | None = None) -> bool:
     return age is None or age <= CARRIER_PRIORITY_S
 
 
+def selftest_skip_fix_self_test(check) -> None:
+    """A head green on a gate shard whose red on main is a SELF-TEST (unfalsified) is a fix only if its
+    own run executed that self-test (2026-11-17: #16627/#16644 served as fixes of
+    `event-contract-code-agreement`, which their shard jobs never ran). Pure rule first, then the live
+    path (fix_contexts -> fix_evidence) over a stubbed GitHub and git, then the declaration parser and
+    the universal-input mirror against the real runner."""
+    MR = "Validate manifests"
+    main_jobs = {MR: "failure", "gates (data)": "failure"}
+    unf = {"data": [{"id": "g1", "status": "unfalsified", "failure_kind": "unfalsified"}]}
+    content = {"data": [{"id": "g1", "status": "failed", "failure_kind": "content"}]}
+    decl = {"g1": [".github/scripts/check-g1.py", "openbank-x/src/"], "g2": []}
+    for label, records, files, declared, want in [
+        ("unfalsified gate, head changed no declared input -> refused", unf, ["openbank-y/Foo.kt"], decl, "skipped on the head"),
+        ("unfalsified gate, head changed the gate script -> accepted", unf, [".github/scripts/check-g1.py"], decl, None),
+        ("unfalsified gate, head changed a file under a declared dir -> accepted", unf, ["openbank-x/src/a/B.kt"], decl, None),
+        ("unfalsified gate, head changed a universal input -> accepted", unf, [".github/gates/gates.yaml"], decl, None),
+        ("unfalsified gate that declares no inputs (always runs) -> accepted",
+         {"data": [{"id": "g2", "status": "unfalsified", "failure_kind": "unfalsified"}]}, ["openbank-y/Foo.kt"], decl, None),
+        ("content failure on the shard -> unchanged, accepted", content, ["openbank-y/Foo.kt"], decl, None),
+        ("records of main's run unreadable -> refused", None, [".github/scripts/check-g1.py"], decl, "unreadable"),
+        ("the red shard's artifact unreadable -> refused", {"data": None}, ["openbank-y/Foo.kt"], decl, "unreadable"),
+        ("gates.yaml unreadable on the head -> refused", unf, ["openbank-y/Foo.kt"], None, "unreadable on the head"),
+        ("gate not declared on the head -> refused", unf, ["openbank-y/Foo.kt"], {"g2": []}, "never ran there"),
+        ("a prefix that is not a path component is not a match", unf, ["openbank-xy/src/a.kt"], decl, "skipped on the head"),
+    ]:
+        got = selftest_skip_refusal(main_jobs, records, files, declared)
+        check(f"self-test skip: {label}", (got is None) if want is None else (got is not None and want in got), str(got))
+    check("self-test skip: no gate shard failed on main -> nothing read, accepted",
+          selftest_skip_refusal({MR: "failure", "Admin UI": "failure"}, None, [], None) is None)
+    check("self-test skip: an unfalsified record is found by failure_kind as well as status",
+          "skipped on the head" in (selftest_skip_refusal(
+              main_jobs, {"data": [{"id": "g1", "status": "failed", "failure_kind": "unfalsified"}]}, ["x"], decl) or ""))
+
+    # The live path: fix_contexts over a stubbed GitHub and git.
+    main_c, head, mb = "m" * 40, "h" * 40, "b" * 40
+    gates_text = ("gates:\n  - id: g1\n    selftest: |\n      x\n"
+                  "    selftest_inputs:\n      - \".github/scripts/check-g1.py\"\n      - openbank-x/src/\n"
+                  "  - id: g2\n    selftest: |\n      y\n")
+
+    class _R:
+        def __init__(self, rc=0, out=""):
+            self.returncode, self.stdout = rc, out
+
+    def mk_git(files, gates=gates_text):
+        def git(*a, **_k):
+            if a[0] == "merge-base":
+                return _R(0, mb)
+            if a[0] == "show" and a[1] == f"{head}:{GATES_YAML}":
+                return _R(0 if gates is not None else 128, gates or "")
+            if a[0] == "show":
+                return _R(0, "merge_train:\n  extra_gates:\n")   # rules.yaml: no extra gates
+            if a[0] == "rev-list":
+                return _R(0, main_c + "\n")
+            if a[0] == "diff":
+                return _R(0, "".join(f":100644 100644 a b M\0{f}\0" for f in files))
+            return _R(0, "")
+        return git
+
+    class _Gh:
+        def __init__(self, records):
+            self.records, self.reads = records, 0
+
+        def checks(self, sha):
+            return {MR: "failure"} if sha == main_c else {MR: "success"}
+
+        def ctx_jobs(self, sha, _ctx):
+            return dict(main_jobs) if sha == main_c else {MR: "success", "gates (data)": "success"}
+
+        def extra_checks(self, _sha, _gates):
+            return {}
+
+        def gate_shard_records(self, _sha, _ctx, slugs):
+            self.reads += 1
+            return None if self.records is None else {s: self.records.get(s) for s in slugs}
+
+    def live(records, files, gates=gates_text):
+        gh, cache = _Gh(records), {}
+        got = fix_contexts(gh, mk_git(files, gates), mb, {"number": 7, "head_sha": head}, {MR: main_c}, cache)
+        return got, (cache.get(NOT_FIX_KEY) or {}).get(7, ""), gh, cache
+
+    got, why, gh, cache = live(unf, ["openbank-y/Foo.kt"])
+    check("live: a green head that skipped the red self-test is not a fix, and the reason reaches not_fix",
+          got == [] and "self-test of gate `g1`" in why and "skipped on the head" in why, f"{got} {why}")
+    check("live: the records are read once per main commit and shared by every context",
+          gh.reads == 1 and fix_contexts(gh, mk_git(["openbank-y/Foo.kt"]), mb, {"number": 8, "head_sha": head},
+                                         {MR: main_c, "gates (data)": main_c}, cache) == [] and gh.reads == 1, str(gh.reads))
+    got, why, gh, _c = live(unf, [".github/scripts/check-g1.py"])
+    check("live: a head that changed the gate's declared input (its self-test ran) is the fix", got == [MR], f"{got} {why}")
+    got, why, gh, _c = live(unf, ["openbank-x/src/k/E.kt"])
+    check("live: a block-list declared directory counts", got == [MR], f"{got} {why}")
+    got, why, gh, _c = live(content, ["openbank-y/Foo.kt"])
+    check("live: a content failure on the shard keeps today's behaviour (the fix is accepted)", got == [MR], f"{got} {why}")
+    got, why, gh, _c = live(None, [".github/scripts/check-g1.py"])
+    check("live: an unreadable run fails closed", got == [] and "unreadable" in why, f"{got} {why}")
+    got, why, gh, _c = live(unf, ["openbank-y/Foo.kt"], gates=None)
+    check("live: gates.yaml unreadable on the head fails closed", got == [] and "unreadable on the head" in why, f"{got} {why}")
+
+    class _GhLeaf(_Gh):
+        def ctx_jobs(self, sha, _ctx):
+            return {MR: "failure", "Admin UI": "failure"} if sha == main_c else {MR: "success", "Admin UI": "success"}
+    gh, cache = _GhLeaf(None), {}
+    got = fix_contexts(gh, mk_git(["openbank-y/Foo.kt"]), mb, {"number": 9, "head_sha": head}, {MR: main_c}, cache)
+    check("live: a non-gate job red on main (build, Admin UI) is judged by job evidence alone, no artifact read",
+          got == [MR] and gh.reads == 0, f"{got} reads={gh.reads}")
+
+    parsed = parse_selftest_inputs(gates_text + "  - id: g3\n    selftest_inputs: ['a/b.py', \"c/\"]  # flow\n"
+                                   "  - id: g4\n    selftest_inputs:\n      - d.py   # c\n    run: true\n")
+    check("declaration parser: block list, flow list, quotes, comments, and a gate with none",
+          parsed == {"g1": [".github/scripts/check-g1.py", "openbank-x/src/"], "g2": [], "g3": ["a/b.py", "c/"], "g4": ["d.py"]},
+          str(parsed))
+    real = pathlib.Path(GATES_YAML)
+    if real.is_file():
+        got = parse_selftest_inputs(real.read_text(encoding="utf-8")).get("event-contract-code-agreement")
+        check("declaration parser: the real gates.yaml names the event-contract gate's two scripts",
+              got is not None and ".github/scripts/check-event-contract-code-agreement.py" in got, str(got))
+    runner = pathlib.Path(".github/scripts/run-gates.py")
+    if runner.is_file():
+        m = re.search(r"^UNIVERSAL_SELFTEST_INPUTS = \((.*?)^\)", runner.read_text(encoding="utf-8"), re.S | re.M)
+        theirs = tuple(re.findall(r"\"([^\"]+)\"", re.sub(r"#.*", "", m.group(1)))) if m else None
+        check("universal self-test inputs: the train's mirror equals run-gates.py's tuple",
+              theirs == UNIVERSAL_SELFTEST_INPUTS, f"runner={theirs} train={UNIVERSAL_SELFTEST_INPUTS}")
+
+
 def fix_preempts_strict_self_test(check) -> None:
     """ADR-0343 amendment 2026-11-14: on a red main a fix pre-empts a strict reservation whose CI is still
     running (#15991 behind #16005/#16009, #16096 behind #15976); a GREEN holder, which merges this tick,
@@ -4648,6 +4884,39 @@ def cached_ctx_jobs(gh, sha: str, ctx: str, cache: dict | None) -> dict[str, str
     return out
 
 
+def cached_gate_records(gh, sha: str, ctx: str, slugs: list[str], cache: dict | None) -> dict[str, list | None] | None:
+    """gh.gate_shard_records once per tick per (main commit, shard set): the aggregate `Validate manifests` and
+    every red `gates (<slug>)` context name the same run, so they share the read."""
+    key = ("gate_records", sha, tuple(sorted(set(slugs))))
+    if cache is not None and key in cache:
+        return cache[key]
+    out = gh.gate_shard_records(sha, ctx, slugs)
+    if cache is not None:
+        cache[key] = out
+    return out
+
+
+def fix_evidence(gh, git, base: str, ctx: str, main_commit: str, head: str, cache: dict | None) -> str | None:
+    """Why `head` does NOT prove it fixes `ctx`, red on main at `main_commit`, or None when it does:
+    fix_job_evidence (every job red on main ran green on the head), then selftest_skip_refusal (a red
+    gate SELF-TEST on main must have RUN on the head, not been skipped by run-gates' input gating). The
+    second read costs API only when a gate shard failed on main, and is cached per main commit; the
+    head's changed set is the pull request's own side (`base...head`, what run-gates judged) and the
+    declaration is the head's own gates.yaml (what its runner read)."""
+    main_jobs = cached_ctx_jobs(gh, main_commit, ctx, cache)
+    why = fix_job_evidence(main_jobs, cached_ctx_jobs(gh, head, ctx, cache))
+    if why:
+        return why
+    failed = sorted(n for n, c in (main_jobs or {}).items() if c is not None and c not in FIX_JOB_OK)
+    slugs = [m.group(1) for n in failed for m in [GATE_SHARD_JOB_RE.fullmatch(n)] if m]
+    if not slugs:
+        return None
+    r = git("show", f"{head}:{GATES_YAML}", check=False)
+    declared = parse_selftest_inputs(r.stdout) if r.returncode == 0 else None
+    return selftest_skip_refusal(main_jobs, cached_gate_records(gh, main_commit, ctx, slugs, cache),
+                                 changed_paths(git, f"{base}...{head}"), declared)
+
+
 def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache: dict | None = None,
                  head_checks: dict[str, str | None] | None = None, record: bool = True) -> list[str]:
     """The main-red contexts this green PR demonstrably fixes: red in main's CI at the PR's own
@@ -4670,7 +4939,7 @@ def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache
         at_base = main_ci_result(gh, git, ctx, mb, cache)
         if not at_base or at_base[1] != "failure":
             continue
-        why = fix_job_evidence(cached_ctx_jobs(gh, at_base[0], ctx, cache), cached_ctx_jobs(gh, view["head_sha"], ctx, cache))
+        why = fix_evidence(gh, git, base, ctx, at_base[0], view["head_sha"], cache)
         if why:
             note_not_fix(cache if record else None, view, f"{ctx} {why}")
             continue
@@ -4711,7 +4980,7 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
         mb = git("merge-base", claim_from, base, check=False).stdout.strip()
         for c in claimed:
             at_base = main_ci_result(gh, git, c, mb, cache) if mb else None
-            why = (fix_job_evidence(cached_ctx_jobs(gh, at_base[0], c, cache), cached_ctx_jobs(gh, head, c, cache))
+            why = (fix_evidence(gh, git, base, c, at_base[0], head, cache)
                    if at_base else "no main verdict at the claim's base")
             if why:
                 note_not_fix(cache, view, f"combined head: {c} {why}")
@@ -5613,6 +5882,7 @@ class FakeGitHub:
         self.head_checks: dict[str, dict] = {}   # PR head sha -> check overrides (red, pending, guard)
         self.jobs: dict[str, dict] = {}          # sha -> job overrides for ctx_jobs (job name -> conclusion)
         self.head_jobs: dict = {}                # job overrides on EVERY PR head (claim and combined)
+        self.gate_records_by: dict = {}          # (sha, slug) -> --json records of a red shard; default: content
         self.pending_shas: set[str] = set()      # carrier heads whose CI is still running
         self.updates: list[int] = []             # update-branch calls, in order
         self.update_refuse = False               # True: update-branch answers as GitHub does on a refusal
@@ -5697,6 +5967,11 @@ class FakeGitHub:
         if any(p["head"]["sha"] == sha for p in self.prs.values()):
             out.update(self.head_jobs)
         return {**out, **self.jobs.get(sha, {})}
+
+    def gate_shard_records(self, sha, ctx, slugs):
+        """A red shard failed for CONTENT unless a fixture says otherwise (today's conclusive verdict)."""
+        return {s: self.gate_records_by.get((sha, s), [{"id": s, "status": "failed", "failure_kind": "content"}])
+                for s in slugs}
 
     def extra_checks(self, sha, gates):
         """Pinned runs: `self.pinned[sha]` = {name: [states]} from the declared workflow; with none set, a
@@ -6609,6 +6884,7 @@ def self_test() -> int:
     retry_planner_self_test(check)
     train_turn_main_red_self_test(check)
     fix_preempts_strict_self_test(check)
+    selftest_skip_fix_self_test(check)
     train_turn_fairness_self_test(check)
     branch_updater_self_test(check)
     prefetch_self_test(check)
@@ -10516,6 +10792,31 @@ def self_test() -> int:
             check("main red with a TIMED-OUT leaf beside the failed aggregate: a head that skipped it is REFUSED",
                   gh.updates == [] and gh.merged == [] and "Admin UI (skipped)" in (s1.get("not_fix") or {}).get(36, ""),
                   f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            main_red_done()
+            # Main red on a gate SELF-TEST (unfalsified): a head whose shard job ran green without that
+            # self-test is no fix (2026-11-17, #16627/#16644 over event-contract-code-agreement). The
+            # synthetic gates.yaml declares g-one and g-two with no inputs (their self-tests always run)
+            # and no g-nine; the fixture's shard records default to a content failure.
+            unf = lambda gid: [{"id": gid, "status": "unfalsified", "failure_kind": "unfalsified"}]   # noqa: E731
+            def shard_red(records):
+                return lambda _p: (gh.jobs.update({base0: {"gates (data)": "failure"}}),
+                                   gh.head_jobs.update({"gates (data)": "success"}),
+                                   gh.gate_records_by.update({(base0, "data"): records}))
+            s1, s2 = fix_behind({}, tamper=shard_red(unf("g-nine")))
+            check("main red on an UNFALSIFIED gate the head does not declare: a head green on the shard is REFUSED",
+                  gh.updates == [] and gh.merged == [] and "self-test of gate `g-nine`" in (s1.get("not_fix") or {}).get(36, ""),
+                  f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            gh.gate_records_by.clear()
+            main_red_done()
+            s1, s2 = fix_behind({}, tamper=shard_red(unf("g-one")))
+            check("main red on an UNFALSIFIED gate whose self-test always runs on a PR: the green head is the fix",
+                  gh.updates == [36] and gh.merged == [36], f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            gh.gate_records_by.clear()
+            main_red_done()
+            s1, s2 = fix_behind({}, tamper=shard_red([{"id": "g-one", "status": "failed", "failure_kind": "content"}]))
+            check("main red on a gate shard for CONTENT: a head green on the shard is the fix, as before",
+                  gh.updates == [36] and gh.merged == [36], f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            gh.gate_records_by.clear()
             main_red_done()
 
             # The fix path takes manual-lane paths exactly as the strict lane does (pW2 touches

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.12.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.12.1...customer-edge-v1.12.2) (2026-11-18)
+
+
+### Bug Fixes
+
+* **customer-edge:** isolate Redis quotas and preserve payment outages ([#16692](https://github.com/JiRaska/open-bank-oss/issues/16692)) ([6de680f](https://github.com/JiRaska/open-bank-oss/commit/6de680f182174776e68292bc3a0707da8d2454b7))
+
+## [1.12.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.12.0...customer-edge-v1.12.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* **customer-edge:** release the spend reservation on a withdrawn-delegation refusal ([#16558](https://github.com/JiRaska/open-bank-oss/issues/16558)) ([6895e98](https://github.com/JiRaska/open-bank-oss/commit/6895e985eeadab02bc7e7e8d09582a1469fdf4b7))
+
 ## [1.12.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.11.1...customer-edge-v1.12.0) (2026-11-15)
 
 

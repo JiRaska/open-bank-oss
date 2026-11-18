@@ -44,6 +44,8 @@ class McpToolRegistry {
 
     @Inject lateinit var amlDecisions: AmlDecisionProposalTool
 
+    @Inject lateinit var sanctionsReview: SanctionsReviewTool
+
     @Inject lateinit var objectMapper: ObjectMapper
 
     @Inject lateinit var auditPublisher: AuditEventPublisher
@@ -181,6 +183,7 @@ class McpToolRegistry {
             ),
         ),
         // ── Sanctions (compliance) ────────────────────────────────────────────
+        SanctionsReviewTool.DEFINITION,
         ToolDefinition(
             name = "sanctions_list_checks",
             description = "List recent sanctions screening checks.",
@@ -432,6 +435,8 @@ class McpToolRegistry {
         "aml_get_case" to "query.compliance.readonly",
         // The AML disposition proposal — a write_proposal capability, never a direct decision.
         AML_PROPOSE_DECISION to "propose.aml.decision",
+        // Sanctions hit review as the four-eyes MAKER (ADR-0155): no effect until a distinct human approves.
+        SanctionsReviewTool.NAME to "sanctions.review.maker",
         "sanctions_list_checks" to "query.compliance.readonly",
         "sanctions_get_check" to "query.compliance.readonly",
         "sanctions_list_pending" to "query.compliance.readonly",
@@ -477,13 +482,23 @@ class McpToolRegistry {
      * not data access), everything else is a downstream read resolved through [downstream].
      * Every outcome is audited exactly once (ADR-0031 D5).
      */
-    fun call(toolName: String, arguments: JsonNode?, actorId: String = "unknown"): ToolCallResult {
+    fun call(
+        toolName: String,
+        arguments: JsonNode?,
+        actorId: String = "unknown",
+        interactivePerson: String? = null,
+    ): ToolCallResult {
         val args = arguments ?: objectMapper.createObjectNode()
         return try {
             when {
                 toolName == "flip_feature_flag" -> flipFeatureFlag(args, actorId)
                 toolName == "draft_ticket" -> succeed(toolName, actorId, draftTicket(args, actorId))
                 toolName == AML_PROPOSE_DECISION -> succeed(toolName, actorId, amlDecisions.propose(args, actorId))
+                toolName == SanctionsReviewTool.NAME -> succeed(
+                    toolName,
+                    actorId,
+                    sanctionsReview.review(args, interactivePerson),
+                )
                 toolName in ProductAuthoringTools.READ_TOOLS -> productResult(
                     toolName,
                     actorId,
@@ -733,9 +748,16 @@ class McpToolRegistry {
         }
     }
 
-    private companion object {
-        const val AML_PROPOSE_DECISION = AmlDecisionProposalTool.NAME
-        const val MIN_RATIONALE_LENGTH = AmlDecisionProposalTool.MIN_RATIONALE_LENGTH
+    companion object {
+        /**
+         * Tools that act as a four-eyes MAKER upstream. Offered and executable only on an MCP
+         * session driven by a signed-in person — never by the chat loop or the unattended
+         * oversight sweep, which share the compliance-officer charter (#16455 review).
+         */
+        val INTERACTIVE_ONLY_TOOLS = setOf(SanctionsReviewTool.NAME)
+
+        private const val AML_PROPOSE_DECISION = AmlDecisionProposalTool.NAME
+        private const val MIN_RATIONALE_LENGTH = AmlDecisionProposalTool.MIN_RATIONALE_LENGTH
 
         /**
          * Flags no approval can ever flip. Mirrors `rules.yaml:feature_flags` and the OPA

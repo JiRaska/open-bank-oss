@@ -7,7 +7,7 @@ info:
   # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  version: 1.15.0
+  version: 1.15.1
   description: >-
     Data sharing consent lifecycle — create, activate, reject, revoke, validate. GET /approvals
     lists pending four-eyes work for checkers; PATCH /approvals/{id} decides an approval paused by
@@ -270,7 +270,7 @@ paths:
                   grantedAccounts:
                     type: array
                     nullable: true
-                    description: Covered account IBANs; null (when valid) = all of the party's accounts.
+                    description: Account IBANs the consent explicitly covers. A consent without an explicit account list covers no account.
                     items:
                       type: string
                   frequencyPerDay:
