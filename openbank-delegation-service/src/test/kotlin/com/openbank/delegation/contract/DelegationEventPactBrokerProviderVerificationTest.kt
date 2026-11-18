@@ -12,7 +12,6 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
-import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -70,10 +69,6 @@ import java.util.UUID
  * former delegate must cross the equivalent of a 403 boundary instead of retaining access.
  */
 @Provider("openbank-delegation-service")
-// Messages only: mcp-service's HTTP pact (states naming an MCP_CLIENT grant) is replayed against the
-// running service by DelegationMcpClientGrantPactFolderProviderVerificationTest. Every message
-// interaction carries a provider state, so this negative filter excludes exactly the HTTP ones.
-@PactFilter("^(?!.*MCP_CLIENT grant exists for the pact party).*$")
 @PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
