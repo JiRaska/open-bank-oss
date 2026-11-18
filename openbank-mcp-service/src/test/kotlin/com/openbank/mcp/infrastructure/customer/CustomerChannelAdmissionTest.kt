@@ -143,8 +143,11 @@ class CustomerChannelAdmissionTest {
     fun `a header token that differs from the validated raw token is refused`() {
         val jwt = TestJsonWebToken(
             mapOf(
-                "iss" to DpopTestProofs.ISSUER, "sub" to "s", "azp" to "mcp-local-test",
-                "aud" to "openbank-mcp-service", "cnf" to mapOf("jkt" to DpopTestProofs.jkt(key)),
+                "iss" to DpopTestProofs.ISSUER,
+                "sub" to "s",
+                "azp" to "mcp-local-test",
+                "aud" to "openbank-mcp-service",
+                "cnf" to mapOf("jkt" to DpopTestProofs.jkt(key)),
                 "raw_token" to "the-token-quarkus-validated",
             ),
         )

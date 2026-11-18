@@ -50,14 +50,17 @@ class McpCustomerChannelIT {
         CustomerTokenSource.claims = emptyMap()
     }
 
-    private fun customerClaims(azp: String = "mcp-local-test", sub: String = CUSTOMER, extra: Map<String, Any?> = emptyMap()) =
-        mapOf(
-            "iss" to DpopTestProofs.ISSUER,
-            "sub" to sub,
-            "aud" to "openbank-mcp-service",
-            "azp" to azp,
-            "cnf" to mapOf("jkt" to DpopTestProofs.jkt(key)),
-        ) + extra
+    private fun customerClaims(
+        azp: String = "mcp-local-test",
+        sub: String = CUSTOMER,
+        extra: Map<String, Any?> = emptyMap(),
+    ) = mapOf(
+        "iss" to DpopTestProofs.ISSUER,
+        "sub" to sub,
+        "aud" to "openbank-mcp-service",
+        "azp" to azp,
+        "cnf" to mapOf("jkt" to DpopTestProofs.jkt(key)),
+    ) + extra
 
     private fun post(body: String, proof: String? = DpopTestProofs.proof(key), scheme: String? = "DPoP") =
         given().contentType(ContentType.JSON)
@@ -82,7 +85,9 @@ class McpCustomerChannelIT {
             .header("WWW-Authenticate", containsString("DPoP"))
             .header(
                 "WWW-Authenticate",
-                containsString("resource_metadata=\"https://mcp.test.example/.well-known/oauth-protected-resource/mcp\""),
+                containsString(
+                    "resource_metadata=\"https://mcp.test.example/.well-known/oauth-protected-resource/mcp\"",
+                ),
             )
     }
 

@@ -86,7 +86,11 @@ class CustomerChannelAdmission(
             )
             DpopResult.JKT_MISMATCH -> invalidToken("proof key is not the token's key")
             DpopResult.RATE_LIMITED -> Outcome.Refused(STATUS_TOO_MANY, null, "dpop proof quota exceeded")
-            DpopResult.REPLAY_STORE_UNAVAILABLE -> Outcome.Refused(STATUS_UNAVAILABLE, null, "dpop replay store unavailable")
+            DpopResult.REPLAY_STORE_UNAVAILABLE -> Outcome.Refused(
+                STATUS_UNAVAILABLE,
+                null,
+                "dpop replay store unavailable",
+            )
             else -> Outcome.Refused(
                 STATUS_UNAUTHORIZED,
                 challenge("invalid_dpop_proof", "dpop proof rejected"),

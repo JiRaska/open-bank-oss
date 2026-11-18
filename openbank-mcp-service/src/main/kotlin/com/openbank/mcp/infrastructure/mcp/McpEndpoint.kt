@@ -132,7 +132,23 @@ class McpEndpoint(
     private val audienceRefusal by lazy { McpAudienceRefusal(throttle, metrics) }
 
     private val customerBranch by lazy {
+        if (!::customerChannel.isInitialized || !::httpRequest.isInitialized) return@lazy null
         customerChannel.admission?.let { McpCustomerBranch(it, auditor, metrics) }
+    }
+
+    /**
+     * Refusals decided before any method runs, in order: the customer-channel branch (ADR-0383 D1 /
+     * ADR-0385 D1), then the RFC 8707 audience refusal (#16622). Null means dispatch normally.
+     */
+    private val preDispatch: (String, JsonNode, JsonNode) -> Response? = { method, id, params ->
+        customerBranch?.handle(
+            callerResolver.token,
+            httpRequest.getHeader(AUTHORIZATION_HEADER),
+            httpRequest.headers().getAll(DPOP_HEADER).orEmpty(),
+            method,
+            id,
+            params,
+        ) ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
     }
 
     @POST
@@ -149,22 +165,11 @@ class McpEndpoint(
         // ADR-0383 D1 / ADR-0385 D1: while the customer channel is on, a call with no token gets the
         // RFC 9728 401 and a customers-realm token is admitted (or refused) on its own branch — it
         // never reaches the staff audience check, the agent/OBO resolver, or a staff tool.
-        if (::customerChannel.isInitialized && ::httpRequest.isInitialized) {
-            customerBranch?.handle(
-                callerResolver.token,
-                httpRequest.getHeader(AUTHORIZATION_HEADER),
-                httpRequest.headers().getAll(DPOP_HEADER).orEmpty(),
-                method,
-                id,
-                params,
-            )?.let { return it }
-        }
-
         // RFC 8707 / ADR-0383 D1 (#16622): a token issued for another resource is refused before
         // any method runs, on every method. The tenant-wide `quarkus.oidc.token.audience` cannot do
         // this, because /api/v1/mcp/sessions is called with the operator's own token, whose
         // audience is not this server.
-        if (callerResolver.presentsForeignAudience()) return audienceRefusal.respond(method, params)
+        preDispatch(method, id, params)?.let { return it }
 
         // Fleet NUL rule (#5913, #16628): refused after the audience check and before dispatch, so
         // no tool, consent call or audit write ever sees the raw value. The id is echoed only if it
