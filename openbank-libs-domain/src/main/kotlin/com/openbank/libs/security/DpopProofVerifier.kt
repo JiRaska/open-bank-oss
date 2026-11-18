@@ -108,6 +108,20 @@ data class DpopPolicy(
 }
 
 /**
+ * Outcome of the STATELESS part of a proof check ([DpopProofVerifier.check]): either a rejection,
+ * or a proof whose signature, request binding, freshness and `cnf.jkt` binding all hold and whose
+ * `jti` has NOT been claimed yet. A caller that needs to spend a budget only on proofs bound to the
+ * token (and not on junk) runs its limiter between [DpopProofVerifier.check] and
+ * [DpopProofVerifier.claim].
+ */
+sealed interface DpopCheck {
+    data class Rejected(val result: DpopResult) : DpopCheck
+
+    /** Bound to the token's key; [jkt] is the verified proof-key thumbprint (== `cnf.jkt`). */
+    data class Bound(val jkt: String, val jti: String) : DpopCheck
+}
+
+/**
  * The request a proof must be bound to.
  *
  * @property dpopHeaderValues every `DPoP` header value on the request; more than one is MALFORMED.
@@ -133,13 +147,34 @@ class DpopProofVerifier(
     private val replayStore: DpopReplayStore,
     private val policy: DpopPolicy = DpopPolicy(),
 ) {
-    suspend fun verify(request: DpopRequest, now: Instant): DpopResult {
-        val values = request.dpopHeaderValues
-        if (values.isEmpty() || values.all { it.isBlank() }) return DpopResult.MISSING_PROOF
-        if (values.size != 1) return DpopResult.MALFORMED
-        val proof = parseSafely(values.single().trim()) ?: return DpopResult.MALFORMED
-        return structural(proof) ?: binding(proof, request, now) ?: replay(proof, now)
+    /** The full check: [check], then [claim] for a bound proof. Unchanged for existing callers. */
+    suspend fun verify(request: DpopRequest, now: Instant): DpopResult = when (val checked = check(request, now)) {
+        is DpopCheck.Rejected -> checked.result
+        is DpopCheck.Bound -> claim(checked, now)
     }
+
+    /**
+     * Every check EXCEPT the replay claim. Touches no state: a rejected or bound result costs the
+     * replay store nothing, so this is safe to run before any budget is spent.
+     */
+    fun check(request: DpopRequest, now: Instant): DpopCheck {
+        val values = request.dpopHeaderValues
+        if (values.isEmpty() || values.all { it.isBlank() }) return DpopCheck.Rejected(DpopResult.MISSING_PROOF)
+        if (values.size != 1) return DpopCheck.Rejected(DpopResult.MALFORMED)
+        val proof = parseSafely(values.single().trim()) ?: return DpopCheck.Rejected(DpopResult.MALFORMED)
+        val rejection = structural(proof) ?: binding(proof, request, now)
+        return rejection?.let(DpopCheck::Rejected)
+            ?: DpopCheck.Bound(checkNotNull(proof.jwkThumbprint), checkNotNull(proof.jti))
+    }
+
+    /** The replay claim for a proof [check] bound; VALID exactly once per (`jkt`, `jti`). */
+    suspend fun claim(bound: DpopCheck.Bound, now: Instant): DpopResult =
+        when (replayStore.firstUse(bound.jkt, bound.jti, policy.replayTtl, now)) {
+            ReplayClaim.FIRST_USE -> DpopResult.VALID
+            ReplayClaim.REPLAYED -> DpopResult.REPLAYED
+            ReplayClaim.QUOTA_EXCEEDED -> DpopResult.RATE_LIMITED
+            ReplayClaim.UNAVAILABLE -> DpopResult.REPLAY_STORE_UNAVAILABLE
+        }
 
     /** A parser that throws despite its contract still fails closed; cancellation propagates. */
     @Suppress("TooGenericExceptionCaught") // deliberate: any parser defect must read as MALFORMED, never escape
@@ -175,14 +210,6 @@ class DpopProofVerifier(
             else -> null
         }
     }
-
-    private suspend fun replay(proof: DpopProof, now: Instant): DpopResult =
-        when (replayStore.firstUse(checkNotNull(proof.jwkThumbprint), checkNotNull(proof.jti), policy.replayTtl, now)) {
-            ReplayClaim.FIRST_USE -> DpopResult.VALID
-            ReplayClaim.REPLAYED -> DpopResult.REPLAYED
-            ReplayClaim.QUOTA_EXCEEDED -> DpopResult.RATE_LIMITED
-            ReplayClaim.UNAVAILABLE -> DpopResult.REPLAY_STORE_UNAVAILABLE
-        }
 
     companion object {
         const val TYP = "dpop+jwt"
