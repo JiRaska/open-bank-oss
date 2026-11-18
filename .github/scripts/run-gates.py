@@ -99,6 +99,7 @@ DEFAULT_TIMEOUT = 420
 # Headroom warning threshold: a gate at or above this share of its budget or timeout (this run,
 # or the main p95 in gate-runtime-measurements.json) is flagged BEFORE it reddens main.
 HEADROOM_WARN = 0.8
+MAX_TIMEOUT = 1800  # cap on a per-gate `timeout_seconds`
 MEASUREMENTS = ".github/gates/gate-runtime-measurements.json"
 VALID_EXPECT = {"pass", "fail"}
 
@@ -242,6 +243,12 @@ def load(root: pathlib.Path, path: str = MANIFEST):
         if tmo is not None and (isinstance(tmo, bool) or not isinstance(tmo, (int, float)) or tmo <= 0):
             sys.stderr.write(
                 f"::error::gate {g['id']}: timeout_seconds `{tmo}` must be a positive number\n"
+            )
+            sys.exit(2)
+        if tmo is not None and tmo > MAX_TIMEOUT:
+            sys.stderr.write(
+                f"::error::gate {g['id']}: timeout_seconds {tmo} exceeds the cap of {MAX_TIMEOUT}s "
+                f"(a gate that needs longer belongs in its own shard or a faster self-test)\n"
             )
             sys.exit(2)
         eff_timeout = tmo if tmo is not None else DEFAULT_TIMEOUT
@@ -761,7 +768,7 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
                 traced_cost = (r.selftest_seconds, cpu)
                 r.traced_wall = r.selftest_seconds
             buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
-            if trace_file and (rc == 0) == want_pass:
+            if trace_file and rc != 124 and (rc == 0) == want_pass:
                 found = _judge_trace(gate, root, trace_file, r, buf)
                 # Tracing happens only on a pull request (_selftest_trace_file), where a self-test
                 # runs because the gate or its declared inputs changed — the moment a new
@@ -774,6 +781,19 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
                     os.unlink(trace_file)
                 except OSError:
                     pass
+        if rc == 124:
+            # KILLED by the timeout: the self-test never completed, so it says nothing either way.
+            # Without this, a `selftest_expect: fail` gate read the kill's non-zero exit as "the
+            # known-positive was rejected" and counted as falsified, and a tiny per-gate
+            # timeout_seconds made a broken self-test look healthy.
+            r.status, r.failure_kind = "unfalsified", "timeout"
+            buf.append(
+                "\n[run-gates] the self-test was KILLED by the timeout before it finished, so it "
+                "proves nothing about this gate, whichever way it was expected to exit: unfalsified.\n"
+            )
+            r.output = "".join(buf)
+            r.seconds = time.monotonic() - t0
+            return r
         if (rc == 0) != want_pass:
             r.status, r.failure_kind = "unfalsified", "unfalsified"
             buf.append(
@@ -1345,6 +1365,13 @@ gates:
     group: t
     timeout_seconds: 1
     run: "sleep 30"
+  - id: killed-selftest-expect-fail
+    name: "a self-test KILLED by the timeout is never a satisfied must-FAIL"
+    group: t
+    timeout_seconds: 1
+    selftest_expect: fail
+    selftest: "sleep 30"
+    run: "true"
   - id: slow
     name: "a gate that exceeds its timeout"
     group: t
@@ -1377,6 +1404,7 @@ EXPECTED = {
     "known-positive-accepted": "unfalsified",
     "pr-only": "skipped",
     "slow": "failed",
+    "killed-selftest-expect-fail": "unfalsified",
     "timeout-override-raises": "ok",
     "timeout-override-kills": "failed",
 }
@@ -1428,7 +1456,7 @@ def self_test():
                 bad.append("wall-over-budget: wall-only overrun not reported as such")
             # failure_kind is the machine-readable WHY that merge-train settle reads (#13400).
             want_kind = {"over-budget": "budget", "not-evaluated": "not_evaluated",
-                         "over-budget-and-finding": "content", "failing": "content", "slow": "timeout",
+                         "over-budget-and-finding": "content", "failing": "content", "slow": "timeout", "killed-selftest-expect-fail": "timeout",
                          "harness-broken": "unfalsified", "passing": None, "not-evaluated-exit-zero": None}
             if r.id in want_kind and r.failure_kind != want_kind[r.id]:
                 bad.append(f"{r.id}: failure_kind want {want_kind[r.id]}, got {r.failure_kind}")
@@ -1551,6 +1579,8 @@ def self_test():
             ("budget_seconds: 500\n    timeout_seconds: 400", True),
             ("budget_seconds: 500\n    timeout_seconds: 600", False),
             ("budget_seconds: 420", False),
+            ("timeout_seconds: 1800", False),
+            ("timeout_seconds: 1801", True),
             ("timeout_seconds: 0", True),
             ('timeout_seconds: "9"', True),
         ):
