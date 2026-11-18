@@ -458,6 +458,15 @@ a stub (T-T2/T-D2).
     ride on them. The grant LOOKUP uses mcp-service's own `m2m` identity, which delegation-service
     admits for that one action only (rego reason `mcp-client-grant-resolve` + an in-code client-id
     check); it reads no account data.
+  - *Policy (D4.1).* After the grant check and before any exchange, every customer call is
+    evaluated by mcp-service's own PDP as principal HUMAN (id = customer `sub`, not a service
+    account, no roles) with `channel = mcp-customer`, `client = azp`, the tool and the grant's
+    server-resolved capabilities. `mcp_rest_ext.rego` admits only the three read tools under their
+    own action and matching capability, and VETOES every other action on the channel, so no base
+    reason (e.g. `operator-read-any`) can widen it. Deny or PDP error is a refusal. Proven by
+    `opa test` (10/10; veto and grant check each removed went red) and by `opa eval` against the
+    regenerated `mcp-opa-bundle` (must-ALLOW balance read; must-DENY scope escalation,
+    propose_payment, operator on the channel; control operator read off-channel ALLOW).
   - *Fail-closed.* Lookup error, empty grant set, exchange failure (including an unconfigured
     exchange secret) and a downstream 401/403 are all refusals, audited `DENIED`
     (`UNAVAILABLE` for lookup/exchange outages). Only positive lookups are cached, at most
@@ -469,9 +478,7 @@ a stub (T-T2/T-D2).
     they accept that issuer and enforce party ownership on it (ADR-0383 P5) — the path fails closed
     until then; (2) Keycloak standard exchange of a DPoP-bound subject token has not been run against
     a live Keycloak of the deployed version (realm template checked statically only); (3) a revoked
-    grant stays usable for up to the cache TTL; (4) MCP's own PDP is not yet consulted on the
-    customer channel — the read-only boundary is the code allow-list plus the grant, and the D4 PDP
-    rule (`channel = mcp-customer`) is a follow-up; (5) no deployed route, netpol or env wiring for
+    grant stays usable for up to the cache TTL; (4) no deployed route, netpol or env wiring for
     delegation-service / the token endpoint is added; the exchange secret must be provisioned in
     OpenBao (`keycloak/mcp-service-customer-exchange`) before the channel can work.
     Rollback: revert the commit; nothing is persisted.

@@ -171,40 +171,50 @@ internal class McpCustomerBranch(
         // The subject token of the D4 exchange is the customer's own token — the one admission just
         // matched against the DPoP proof's `ath`. Never any credential of mcp-service's.
         val subjectToken = jwt.rawToken ?: authorization?.substringAfter(DPOP_SCHEME, "").orEmpty()
-        val caller = CustomerReadTools.Caller(ctx.agentId, subjectToken)
-        return when (val result = tools.call(tool, args, caller, known.grants)) {
-            is CustomerReadTools.Outcome.Allowed -> {
-                audit(
-                    ctx.agentId,
-                    tool,
-                    params,
-                    null,
-                    ctx.actChain,
-                    decision = McpCallAuditor.Decision.ALLOW,
-                    capability = result.capability,
-                    consentId = result.grantId?.let { DELEGATION_PREFIX + it } ?: DELEGATION_PREFIX.trimEnd(':'),
-                )
-                Response.ok(McpResponse(id = id, result = result.result)).build()
-            }
-            is CustomerReadTools.Outcome.Refused -> {
-                val decision = if (result.unavailable) UNAVAILABLE else McpCallAuditor.Decision.DENY
-                audit(ctx.agentId, tool, params, result.reason, ctx.actChain, decision, result.capability)
-                toolError(id, if (result.unavailable) AUTHZ_UNAVAILABLE else NOT_PERMITTED)
-            }
-            is CustomerReadTools.Outcome.DownstreamRejected -> {
-                // The grant may have been revoked since it was cached: forget it, so the next call asks again.
-                grantCache.invalidate(known.key)
-                audit(
-                    ctx.agentId,
-                    tool,
-                    params,
-                    result.reason,
-                    ctx.actChain,
-                    McpCallAuditor.Decision.DENY,
-                    result.capability,
-                )
-                toolError(id, NOT_PERMITTED)
-            }
+        val caller = CustomerReadTools.Caller(ctx.agentId, subjectToken, outcome.client.clientId)
+        return respond(tools.call(tool, args, caller, known.grants), known.key, ctx, tool, params, id)
+    }
+
+    @Suppress("LongParameterList")
+    private fun respond(
+        result: CustomerReadTools.Outcome,
+        key: GrantKey,
+        ctx: ConsentContext,
+        tool: String,
+        params: JsonNode,
+        id: JsonNode,
+    ): Response = when (result) {
+        is CustomerReadTools.Outcome.Allowed -> {
+            audit(
+                ctx.agentId,
+                tool,
+                params,
+                null,
+                ctx.actChain,
+                decision = McpCallAuditor.Decision.ALLOW,
+                capability = result.capability,
+                consentId = result.grantId?.let { DELEGATION_PREFIX + it } ?: DELEGATION_PREFIX.trimEnd(':'),
+            )
+            Response.ok(McpResponse(id = id, result = result.result)).build()
+        }
+        is CustomerReadTools.Outcome.Refused -> {
+            val decision = if (result.unavailable) UNAVAILABLE else McpCallAuditor.Decision.DENY
+            audit(ctx.agentId, tool, params, result.reason, ctx.actChain, decision, result.capability)
+            toolError(id, if (result.unavailable) AUTHZ_UNAVAILABLE else NOT_PERMITTED)
+        }
+        is CustomerReadTools.Outcome.DownstreamRejected -> {
+            // The grant may have been revoked since it was cached: forget it, so the next call asks again.
+            grantCache.invalidate(key)
+            audit(
+                ctx.agentId,
+                tool,
+                params,
+                result.reason,
+                ctx.actChain,
+                McpCallAuditor.Decision.DENY,
+                result.capability,
+            )
+            toolError(id, NOT_PERMITTED)
         }
     }
 

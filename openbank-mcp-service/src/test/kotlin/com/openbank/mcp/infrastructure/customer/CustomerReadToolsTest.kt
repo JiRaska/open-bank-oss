@@ -6,6 +6,9 @@ package com.openbank.mcp.infrastructure.customer
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.authz.AuthzDecision
+import com.openbank.libs.authz.AuthzQuery
+import com.openbank.libs.authz.PolicyDecisionPoint
 import com.openbank.mcp.application.McpPiiMasker
 import com.openbank.mcp.application.McpUntrustedData
 import io.mockk.every
@@ -20,8 +23,16 @@ class CustomerReadToolsTest {
     private val mapper = ObjectMapper()
     private val exchange: CustomerTokenExchange = mockk()
     private val downstream: CustomerDownstream = mockk()
-    private val tools = CustomerReadTools(exchange, downstream, McpPiiMasker(mapper), mapper)
-    private val caller = CustomerReadTools.Caller("c0ffee00-0000-0000-0000-000000000001", "customer-token")
+    private val queries = mutableListOf<AuthzQuery>()
+    private var verdict: () -> AuthzDecision = { AuthzDecision(allow = true) }
+    private val pdp = object : PolicyDecisionPoint {
+        override suspend fun allow(query: AuthzQuery): AuthzDecision {
+            queries += query
+            return verdict()
+        }
+    }
+    private val tools = CustomerReadTools(pdp, exchange, downstream, McpPiiMasker(mapper), mapper)
+    private val caller = CustomerReadTools.Caller("c0ffee00-0000-0000-0000-000000000001", "customer-token", "mcp-local-test")
     private val account = UUID.randomUUID()
 
     private fun grant(vararg caps: String, accountId: UUID = account) =
@@ -127,5 +138,36 @@ class CustomerReadToolsTest {
     fun `a write tool is not on this channel`() {
         val out = tools.call("propose_payment", args(), caller, listOf(grant(CustomerCapabilities.READ_BALANCES)))
         assertThat(out).isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)
+    }
+
+    @Test
+    fun `the PDP sees the customer on the customer channel with the grant's capabilities`() {
+        every { exchange.exchange(any(), any(), any()) } returns "exchanged"
+        every { downstream.balances(any(), any()) } returns mapper.readTree("{}")
+        tools.call(CustomerReadTools.GET_BALANCE, args("accountId" to account.toString()), caller, listOf(grant(CustomerCapabilities.READ_BALANCES)))
+        val q = queries.single()
+        assertThat(q.action).isEqualTo("query.balance.readonly")
+        assertThat(q.principal.type).isEqualTo("HUMAN")
+        assertThat(q.principal.serviceAccount).isFalse()
+        assertThat(q.principal.roles).isEmpty()
+        assertThat(q.attributes["channel"]).isEqualTo("mcp-customer")
+        assertThat(q.attributes["client"]).isEqualTo("mcp-local-test")
+        assertThat(q.attributes["grantedCapabilities"]).isEqualTo(listOf(CustomerCapabilities.READ_BALANCES))
+    }
+
+    @Test
+    fun `a policy deny refuses before any exchange`() {
+        verdict = { AuthzDecision(allow = false, reason = "no") }
+        val out = tools.call(CustomerReadTools.GET_BALANCE, args("accountId" to account.toString()), caller, listOf(grant(CustomerCapabilities.READ_BALANCES)))
+        assertThat(out).isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)
+        verify(exactly = 0) { exchange.exchange(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a PDP error refuses as unavailable before any exchange`() {
+        verdict = { throw IllegalStateException("opa down") }
+        val out = tools.call(CustomerReadTools.GET_BALANCE, args("accountId" to account.toString()), caller, listOf(grant(CustomerCapabilities.READ_BALANCES)))
+        assertThat((out as CustomerReadTools.Outcome.Refused).unavailable).isTrue()
+        verify(exactly = 0) { exchange.exchange(any(), any(), any()) }
     }
 }

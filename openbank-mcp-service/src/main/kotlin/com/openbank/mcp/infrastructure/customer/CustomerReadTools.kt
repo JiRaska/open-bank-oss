@@ -12,9 +12,14 @@ import com.openbank.mcp.application.McpUntrustedData
 import com.openbank.mcp.application.protocol.ToolCallResult
 import com.openbank.mcp.application.protocol.ToolContent
 import com.openbank.mcp.application.protocol.ToolDefinition
+import com.openbank.libs.authz.AuthzQuery
+import com.openbank.libs.authz.PolicyDecisionPoint
+import com.openbank.libs.authz.Principal
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import kotlinx.coroutines.runBlocking
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * The customer channel's tool surface (ADR-0383 D3/D4): three READS, each offered only while one of
@@ -23,7 +28,7 @@ import java.util.UUID
  * not on this channel in this slice.
  *
  * Order on a call, cheapest refusal first: unknown tool → argument shape → is this account in a
- * grant that carries this tool's capability → exchange the customer's token for a 60-second token
+ * grant that carries this tool's capability → mcp-service's PDP → exchange the customer's token for a 60-second token
  * scoped to that one downstream service and read scope → read. No step falls back to a staff or
  * service credential; a failed exchange is a refusal.
  *
@@ -32,13 +37,14 @@ import java.util.UUID
  */
 @ApplicationScoped
 class CustomerReadTools @Inject constructor(
+    private val pdp: PolicyDecisionPoint,
     private val exchange: CustomerTokenExchange,
     private val downstream: CustomerDownstream,
     private val masker: McpPiiMasker,
     private val mapper: ObjectMapper,
 ) {
     /** The authenticated caller, as admission verified it. */
-    data class Caller(val subject: String, val rawToken: String)
+    data class Caller(val subject: String, val rawToken: String, val clientId: String)
 
     sealed interface Outcome {
         /** [grantId] is the grant the call ran under; null for `list_accounts` (it reads no account). */
@@ -50,7 +56,8 @@ class CustomerReadTools @Inject constructor(
         data class DownstreamRejected(val reason: String, val capability: String) : Outcome
     }
 
-    private class Tool(val definition: ToolDefinition, val capability: String)
+    /** [action] is the PDP action (McpToolRegistry's capability name); [capability] the delegation one. */
+    private class Tool(val definition: ToolDefinition, val capability: String, val action: String)
 
     private val tools: Map<String, Tool> = listOf(
         Tool(
@@ -61,6 +68,7 @@ class CustomerReadTools @Inject constructor(
                 service = "openbank-delegation-service",
             ),
             CustomerCapabilities.VIEW_DETAILS,
+            "query.account.readonly",
         ),
         Tool(
             ToolDefinition(
@@ -70,6 +78,7 @@ class CustomerReadTools @Inject constructor(
                 service = "openbank-balance-service",
             ),
             CustomerCapabilities.READ_BALANCES,
+            "query.balance.readonly",
         ),
         Tool(
             ToolDefinition(
@@ -89,6 +98,7 @@ class CustomerReadTools @Inject constructor(
                 service = "openbank-transaction-service",
             ),
             CustomerCapabilities.READ_TRANSACTIONS,
+            "query.transaction.readonly",
         ),
     ).associateBy { it.definition.name }
 
@@ -106,30 +116,74 @@ class CustomerReadTools @Inject constructor(
         if (tool == LIST_ACCOUNTS) {
             val shared = grants.filter { it.allows(capability) }
             if (shared.isEmpty()) return Outcome.Refused("no active grant carries $capability", capability)
+            policy(spec, caller, shared.flatMap { it.capabilities }.toSet())?.let { return it }
             return Outcome.Allowed(render(accounts(shared)), capability, null)
         }
-        val accountId = accountIdOf(arguments) ?: return Outcome.Refused("accountId must be a UUID", capability)
+        val read = readOf(tool, arguments) ?: return Outcome.Refused("invalid arguments", capability)
+        val grant = grants.firstOrNull { it.accountId == read.accountId && it.allows(capability) }
+            ?: return Outcome.Refused("account is not shared with this client for $capability", capability)
+        policy(spec, caller, grant.capabilities)?.let { return it }
+        return exchangeAndRead(read, caller, capability, grant)
+    }
+
+    /**
+     * ADR-0383 D4.1: mcp-service's own PDP, consulted for every customer call AFTER the grant check
+     * and BEFORE any token is exchanged. The principal is the customer (HUMAN, not a service
+     * account, no roles) on channel `mcp-customer`; `grantedCapabilities` are the server-resolved
+     * capabilities of the grant in question. `mcp_rest_ext.rego` admits only the read tools under
+     * their own action and capability and vetoes everything else on this channel. A deny or a PDP
+     * error is a refusal. Returns null when allowed.
+     */
+    @Suppress("TooGenericExceptionCaught") // a PDP transport error of any type must fail closed
+    private fun policy(tool: Tool, caller: Caller, granted: Set<String>): Outcome? {
+        val query = AuthzQuery(
+            principal = Principal(id = caller.subject, type = HUMAN, roles = emptyList(), serviceAccount = false),
+            action = tool.action,
+            attributes = mapOf(
+                "channel" to CustomerChannelAdmission.CHANNEL,
+                "client" to caller.clientId,
+                "tool" to tool.definition.name,
+                "grantedCapabilities" to granted.sorted(),
+            ),
+        )
+        val decision = try {
+            runBlocking { pdp.allow(query) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return Outcome.Refused("pdp unavailable: ${e.javaClass.simpleName}", tool.capability, unavailable = true)
+        }
+        return if (decision.allow) null else Outcome.Refused("denied by policy: ${decision.reason ?: "no matching allow rule"}", tool.capability)
+    }
+
+    private class Read(val tool: String, val accountId: UUID, val limit: Int)
+
+    private fun readOf(tool: String, arguments: JsonNode): Read? {
+        val accountId = accountIdOf(arguments) ?: return null
         val limit = if (tool == LIST_TRANSACTIONS) {
-            runCatching { McpInputBounds.transactionLimit(arguments.path("limit")) }.getOrNull()
-                ?: return Outcome.Refused("limit out of range", capability)
+            runCatching { McpInputBounds.transactionLimit(arguments.path("limit")) }.getOrNull() ?: return null
         } else {
             0
         }
-        val grant = grants.firstOrNull { it.accountId == accountId && it.allows(capability) }
-            ?: return Outcome.Refused("account is not shared with this client for $capability", capability)
-        val audience = if (tool == GET_BALANCE) DownstreamAudience.BALANCE else DownstreamAudience.TRANSACTION
+        return Read(tool, accountId, limit)
+    }
+
+    private fun exchangeAndRead(read: Read, caller: Caller, capability: String, grant: CustomerGrant): Outcome {
+        val balance = read.tool == GET_BALANCE
+        val audience = if (balance) DownstreamAudience.BALANCE else DownstreamAudience.TRANSACTION
         val token = try {
             exchange.exchange(caller.rawToken, caller.subject, audience)
         } catch (e: TokenExchangeRefused) {
             return Outcome.Refused(e.message ?: "token exchange refused", capability, unavailable = true)
         }
         val body = try {
-            if (tool ==
-                GET_BALANCE
-            ) {
-                downstream.balances(token, accountId)
+            if (balance) {
+                downstream.balances(
+                    token,
+                    read.accountId,
+                )
             } else {
-                downstream.transactions(token, accountId, limit)
+                downstream.transactions(token, read.accountId, read.limit)
             }
         } catch (e: DownstreamRefused) {
             return Outcome.DownstreamRejected(e.message ?: "downstream refused", capability)
@@ -137,19 +191,20 @@ class CustomerReadTools @Inject constructor(
         return Outcome.Allowed(render(body), capability, grant.grantId)
     }
 
-    private fun accounts(grants: List<CustomerGrant>): JsonNode = mapper.createObjectNode().apply {
-        putArray("accounts").apply {
-            grants.forEach { g ->
-                addObject().apply {
-                    put(ACCOUNT_ID, g.accountId.toString())
-                    putArray("tools").apply {
-                        tools.values.filter { it.definition.name != LIST_ACCOUNTS && g.allows(it.capability) }
-                            .forEach { add(it.definition.name) }
-                    }
-                }
-            }
+    private fun accounts(grants: List<CustomerGrant>): JsonNode {
+        val root = mapper.createObjectNode()
+        val list = root.putArray("accounts")
+        grants.forEach { g ->
+            val entry = list.addObject().put(ACCOUNT_ID, g.accountId.toString())
+            val names = entry.putArray("tools")
+            readTools(g).forEach { names.add(it) }
         }
+        return root
     }
+
+    private fun readTools(g: CustomerGrant): List<String> = tools.values.filter {
+        it.definition.name != LIST_ACCOUNTS && g.allows(it.capability)
+    }.map { it.definition.name }
 
     private fun render(result: JsonNode): ToolCallResult {
         val masked = mapper.writeValueAsString(masker.mask(result))
@@ -173,6 +228,7 @@ class CustomerReadTools @Inject constructor(
     }
 
     companion object {
+        private const val HUMAN = "HUMAN"
         const val LIST_ACCOUNTS = "list_accounts"
         const val GET_BALANCE = "get_balance"
         const val LIST_TRANSACTIONS = "list_transactions"

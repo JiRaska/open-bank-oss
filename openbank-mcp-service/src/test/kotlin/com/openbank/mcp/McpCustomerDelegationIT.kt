@@ -19,11 +19,13 @@ import com.openbank.mcp.infrastructure.customer.GrantLookupUnavailable
 import com.openbank.mcp.infrastructure.customer.TokenExchangeRefused
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
-import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.inject.Alternative
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
@@ -40,15 +42,24 @@ import java.util.concurrent.CopyOnWriteArrayList
  * Each negative was also run with its guard removed and went red (PR evidence).
  */
 @QuarkusTest
-@TestProfile(McpCustomerChannelIT.CustomerOn::class)
+@TestProfile(McpCustomerDelegationIT.DataPlaneDoubles::class)
 @QuarkusTestResource(PostgresTestResource::class, initArgs = [ResourceArg(name = "db", value = "openbank_mcp_it")])
 class McpCustomerDelegationIT {
 
-    @Inject
-    lateinit var recorder: RecordingAuditEventPublisher
+    /** The customer channel ON, with the three ports replaced by the doubles below. */
+    class DataPlaneDoubles : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = McpCustomerChannelIT.CustomerOn().configOverrides
+
+        override fun getEnabledAlternatives(): Set<Class<*>> = setOf(
+            CustomerTokenSource::class.java,
+            Grants::class.java,
+            Exchange::class.java,
+            Downstream::class.java,
+        )
+    }
 
     @Inject
-    lateinit var mapper: ObjectMapper
+    lateinit var recorder: RecordingAuditEventPublisher
 
     private val key = DpopTestProofs.newKey()
     private val account: UUID = UUID.randomUUID()
@@ -57,28 +68,44 @@ class McpCustomerDelegationIT {
     private val party: UUID = UUID.randomUUID()
     private val subject: String = UUID.randomUUID().toString()
 
-    private class Grants : CustomerGrantSource {
-        val asked = CopyOnWriteArrayList<GrantKey>()
-        var answer: (GrantKey) -> List<CustomerGrant> = { emptyList() }
+    @Alternative
+    @ApplicationScoped
+    class Grants : CustomerGrantSource {
         override fun resolve(key: GrantKey): List<CustomerGrant> {
             asked += key
             return answer(key)
         }
+
+        companion object {
+            val asked = CopyOnWriteArrayList<GrantKey>()
+
+            @Volatile
+            var answer: (GrantKey) -> List<CustomerGrant> = { emptyList() }
+        }
     }
 
-    private class Exchange : CustomerTokenExchange {
-        val calls = CopyOnWriteArrayList<Triple<String, String, DownstreamAudience>>()
-        var fail = false
+    @Alternative
+    @ApplicationScoped
+    class Exchange : CustomerTokenExchange {
         override fun exchange(subjectToken: String, subject: String, audience: DownstreamAudience): String {
             calls += Triple(subjectToken, subject, audience)
             if (fail) throw TokenExchangeRefused("realm refused")
             return "exchanged-for-${audience.clientId}"
         }
+
+        companion object {
+            val calls = CopyOnWriteArrayList<Triple<String, String, DownstreamAudience>>()
+
+            @Volatile
+            var fail = false
+        }
     }
 
-    private inner class Downstream : CustomerDownstream {
-        val tokens = CopyOnWriteArrayList<String>()
-        var refuse = false
+    @Alternative
+    @ApplicationScoped
+    class Downstream : CustomerDownstream {
+        private val mapper = ObjectMapper()
+
         override fun balances(token: String, accountId: UUID): JsonNode {
             tokens += token
             if (refuse) throw DownstreamRefused(403)
@@ -89,18 +116,31 @@ class McpCustomerDelegationIT {
             tokens += token
             return mapper.readTree("""{"items":[]}""")
         }
+
+        companion object {
+            val tokens = CopyOnWriteArrayList<String>()
+
+            @Volatile
+            var refuse = false
+        }
     }
 
-    private val grants = Grants()
-    private val exchange = Exchange()
-    private val downstream = Downstream()
+    private val grants = Grants.Companion
+    private val exchange = Exchange.Companion
+    private val downstream = Downstream.Companion
 
     @BeforeEach
     fun install() {
         recorder.clear()
-        QuarkusMock.installMockForType(grants, CustomerGrantSource::class.java)
-        QuarkusMock.installMockForType(exchange, CustomerTokenExchange::class.java)
-        QuarkusMock.installMockForType(downstream, CustomerDownstream::class.java)
+        Grants.asked.clear()
+        Grants.answer = { emptyList() }
+        Exchange.calls.clear()
+        Exchange.fail = false
+        Downstream.tokens.clear()
+        Downstream.refuse = false
+        TestPolicyDecisionPoint.customerQueries.clear()
+        TestPolicyDecisionPoint.customerDeny = false
+        TestPolicyDecisionPoint.customerOutage = false
         CustomerTokenSource.claims = mapOf(
             "iss" to DpopTestProofs.ISSUER,
             "sub" to subject,
@@ -204,6 +244,27 @@ class McpCustomerDelegationIT {
         grants.answer = grant(CustomerCapabilities.READ_BALANCES)
         assertThat(toolNames()).isEmpty()
         assertThat(grants.asked).isEmpty()
+    }
+
+    @Test
+    fun `mcp-service's PDP is consulted as the customer on the customer channel, and its deny refuses`() {
+        grants.answer = grant(CustomerCapabilities.READ_BALANCES)
+        call("get_balance").body("result.isError", equalTo(false))
+        val q = TestPolicyDecisionPoint.customerQueries.single()
+        assertThat(q.principal.id).isEqualTo(subject)
+        assertThat(q.attributes["client"]).isEqualTo("mcp-local-test")
+        TestPolicyDecisionPoint.customerDeny = true
+        exchange.calls.clear()
+        call("get_balance").body("result.isError", equalTo(true))
+        assertThat(exchange.calls).isEmpty()
+    }
+
+    @Test
+    fun `a PDP outage on the customer channel refuses before any exchange`() {
+        grants.answer = grant(CustomerCapabilities.READ_BALANCES)
+        TestPolicyDecisionPoint.customerOutage = true
+        call("get_balance").body("result.content[0].text", equalTo("Authorization unavailable"))
+        assertThat(exchange.calls).isEmpty()
     }
 
     private companion object {

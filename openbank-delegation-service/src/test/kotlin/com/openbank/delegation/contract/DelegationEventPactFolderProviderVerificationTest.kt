@@ -121,6 +121,14 @@ class DelegationEventPactFolderProviderVerificationTest {
         context?.verifyInteraction()
     }
 
+    // mcp-service's HTTP states are served by DelegationMcpClientGrantPactFolderProviderVerificationTest;
+    // pact-jvm runs the state callback before verifyPacts can skip the HTTP interaction, so they are no-ops here.
+    @State(
+        "an active MCP_CLIENT grant exists for the pact party, client and key",
+        "no MCP_CLIENT grant exists for the pact party, client and key",
+    )
+    fun mcpClientGrantStatesServedElsewhere() = Unit
+
     @State("an ACCOUNT-scoped delegation grant has been activated")
     fun accountGrantActivated() = Unit
 
