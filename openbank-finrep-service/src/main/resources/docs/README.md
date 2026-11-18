@@ -76,7 +76,7 @@ Use `isDataGap` and `gapReason` to distinguish unavailable inputs or classificat
 
 ## Tracing
 
-The service carries `quarkus-opentelemetry`, so each inbound request opens a server span and its database work joins that trace. The deployed manifest supplies the OTLP endpoint and sampler; with no endpoint set, export is a no-op and boot is unaffected. `FinrepTraceContractIT` pins the trace contract: the request span and its INSERT share one trace and record no error span.
+The service carries `quarkus-opentelemetry`, so each inbound request opens a server span and its database work joins that trace. The deployed manifest supplies the OTLP endpoint and sampler; with no endpoint set, export is a no-op and boot is unaffected. `FinrepTraceContractIT` pins the trace contract: the submission request span and its `INSERT finrep_submission` share one trace.
 
 ## Shared configuration defaults
 
