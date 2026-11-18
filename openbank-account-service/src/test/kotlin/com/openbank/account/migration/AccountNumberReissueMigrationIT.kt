@@ -160,7 +160,8 @@ class AccountNumberReissueMigrationIT {
         .target(target)
         .load()
 
-    private fun connection(): Connection = DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password)
+    private fun connection(): Connection =
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password)
 
     private fun seed(db: Connection, id: UUID, number: String) {
         db.prepareStatement(
@@ -184,7 +185,10 @@ class AccountNumberReissueMigrationIT {
     private fun versionOf(db: Connection, id: UUID): Long =
         db.prepareStatement("SELECT version FROM accounts WHERE id = ?").use {
             it.setObject(1, id)
-            it.executeQuery().use { rs -> rs.next(); rs.getLong(1) }
+            it.executeQuery().use { rs ->
+                rs.next()
+                rs.getLong(1)
+            }
         }
 
     private fun bumpLast(base: String) = base.dropLast(1) + ((base.last() - '0' + 1) % 10)
