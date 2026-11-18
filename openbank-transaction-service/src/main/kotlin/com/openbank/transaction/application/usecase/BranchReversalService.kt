@@ -4,6 +4,7 @@
 
 package com.openbank.transaction.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.transaction.application.port.`in`.ReverseTransactionCommand
 import com.openbank.transaction.application.port.out.TransactionEventPublisher
@@ -14,8 +15,8 @@ import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.domain.settlement.SettlementDateResolver
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Clock
 import java.time.Instant
-import java.util.UUID
 
 /** A reversal inherits the committed route; current account/catalogue availability cannot rebook history. */
 @ApplicationScoped
@@ -23,6 +24,7 @@ class BranchReversalService(
     private val repository: TransactionRepository,
     private val events: TransactionEventPublisher,
     private val dispatch: BranchPaymentDispatch,
+    private val clock: Clock,
 ) {
     suspend fun reverse(original: Transaction, command: ReverseTransactionCommand): Transaction {
         require(command.originalTransactionId == original.id) { "Wrong reversal subject" }
@@ -34,7 +36,7 @@ class BranchReversalService(
         check(original.targetAccountId == null || original.targetBookingContext?.mode == "BRANCH") {
             "Missing original target branch"
         }
-        val reversal = intent(original, command, Instant.now())
+        val reversal = intent(original, command, Instant.now(clock))
         val reversed = original.reverse()
         val saved = repository.saveBranchReversal(
             reversed,
@@ -59,9 +61,10 @@ class BranchReversalService(
 
     private fun intent(original: Transaction, command: ReverseTransactionCommand, now: Instant): Transaction {
         val today = now.atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+        val id = Ids.newId()
         return Transaction(
-            id = UUID.randomUUID(),
-            referenceNumber = "TXN${UUID.randomUUID().toString().replace("-", "")}",
+            id = id,
+            referenceNumber = "TXN${id.toString().replace("-", "")}",
             type = TransactionType.REVERSAL,
             sourceAccountId = original.targetAccountId,
             targetAccountId = original.sourceAccountId,

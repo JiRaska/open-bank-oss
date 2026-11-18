@@ -136,10 +136,12 @@ class BranchReversalRecoveryIT {
         val key = "branch-reversal-${UUID.randomUUID()}"
         val dispatch = mockk<BranchPaymentDispatch>()
         coEvery { dispatch.start(any()) } throws IllegalStateException("Injected loss before Temporal start")
+        val fixedNow = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS)
         val service = BranchReversalService(
             transactionRepository,
             events,
             dispatch,
+            java.time.Clock.fixed(fixedNow, java.time.ZoneOffset.UTC),
         )
         val failure = runCatching {
             onVertxContext {
@@ -156,6 +158,8 @@ class BranchReversalRecoveryIT {
         assertThat(failure).hasMessage("Injected loss before Temporal start")
         val pending = onVertxContext { transactionRepository.findByIdempotencyKey(key) }!!
         assertThat(pending.status).isEqualTo(TransactionStatus.PENDING)
+        assertThat(pending.initiatedAt).isEqualTo(fixedNow)
+        assertThat(pending.id.version()).isEqualTo(7)
         assertThat(pending.reversalOf).isEqualTo(original.id)
         assertThat(pending.sourceBookingContext).isEqualTo(original.targetBookingContext)
         assertThat(pending.targetBookingContext).isEqualTo(original.sourceBookingContext)
@@ -235,6 +239,7 @@ class BranchReversalRecoveryIT {
             transactionRepository,
             events,
             dispatch,
+            java.time.Clock.systemUTC(),
         )
         val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
         val ready = java.util.concurrent.CountDownLatch(2)
