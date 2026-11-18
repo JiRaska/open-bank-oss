@@ -53,8 +53,37 @@ SECRET_NAME = "browser-run-api-token"
 BROKER = "openbank-fetch-broker"
 FORBIDDEN_TIERS = {"write", "execute"}
 RENDER_MODES = {"static", "js"}
-HOST_RE = re.compile(r"^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+HOST_RE = re.compile(r"(?=.{4,253})([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
+# Names that resolve inside the cluster or the host, never on the public web.
+INTERNAL_SUFFIXES = (".svc", ".local", ".internal", ".localhost", ".lan", ".home", ".corp", ".intranet", ".cluster.local")
 IPV4_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+
+
+def glob_grants(pattern: str, value: str) -> bool:
+    """Mirror agents.rego glob_match: exact, or glob.match(pattern, ["."], value).
+
+    OPA's glob with delimiter "." lets `*` and `?` match within one segment and `**` across
+    segments, so `read.*` and `*.public_web` both grant read.public_web while a bare `*` does
+    not. Deciding "grants" by exact membership would let a glob grant pass this gate unchecked.
+    """
+    if pattern == value:
+        return True
+    out = []
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            out.append("[^.]*")
+            i += 1
+        elif pattern[i] == "?":
+            out.append("[^.]")
+            i += 1
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    return re.fullmatch("".join(out), value) is not None
 
 
 def _allows(agent: dict) -> list[dict]:
@@ -86,8 +115,10 @@ def check_host(host: str) -> str | None:
         return "path or scheme"
     if host != host.lower():
         return "not lower-case"
-    if not HOST_RE.match(host):
+    if not HOST_RE.fullmatch(host):
         return "not a DNS hostname"
+    if host.endswith(INTERNAL_SUFFIXES):
+        return "internal (non-public) name"
     return None
 
 
@@ -97,7 +128,9 @@ def evaluate_agents(doc: dict) -> tuple[list[str], int]:
     for agent in agents:
         aid = agent.get("id", "<no id>")
         allows = _allows(agent)
-        grants = any(RESOURCE in (a.get("resources") or []) for a in allows)
+        grants = any(
+            glob_grants(str(r), RESOURCE) for a in allows for r in (a.get("resources") or [])
+        )
         scope = ((agent.get("data_scope") or {}).get("public_web")) or None
 
         if not grants:
@@ -128,12 +161,34 @@ def evaluate_agents(doc: dict) -> tuple[list[str], int]:
     return findings, len(agents)
 
 
+BROKER_DIR = f"openbank-infra/gitops/components/{BROKER}/"
+
+
 def evaluate_gitops(files: dict[str, str]) -> list[str]:
-    """files: relative path -> text. A reference is the secret name inside a workload manifest."""
-    holders = sorted(p for p, text in files.items() if SECRET_NAME in text and "kind: ExternalSecret" not in text)
-    findings = [f"{p}: references {SECRET_NAME} outside the fetch broker" for p in holders if BROKER not in p]
-    if len([p for p in holders if BROKER in p]) > 1:
-        findings.append(f"{SECRET_NAME} is mounted by more than one fetch-broker manifest: {holders}")
+    """files: repo-relative path -> text.
+
+    Judged per YAML DOCUMENT, not per file: only an ExternalSecret document is exempt (it creates
+    the secret, it does not consume it), so bundling one beside a Deployment cannot hide the
+    Deployment's mount. A consumer is allowed only inside the broker's own component directory
+    AND only when the document's metadata.name is the broker — a path substring is not identity.
+    """
+    findings: list[str] = []
+    for path, text in sorted(files.items()):
+        try:
+            docs = gatelib.loads_all(text)
+        except Exception as e:  # noqa: BLE001 — an unparseable manifest cannot be cleared
+            findings.append(f"{path}: cannot parse while it references {SECRET_NAME} ({e})")
+            continue
+        for doc in docs:
+            if not isinstance(doc, dict) or SECRET_NAME not in repr(doc):
+                continue
+            if doc.get("kind") == "ExternalSecret":
+                continue
+            name = (doc.get("metadata") or {}).get("name")
+            if not (path.startswith(BROKER_DIR) and name == BROKER):
+                findings.append(
+                    f"{path}: {doc.get('kind')}/{name} references {SECRET_NAME} — only {BROKER} in {BROKER_DIR} may"
+                )
     return findings
 
 
@@ -141,7 +196,7 @@ def _gitops_files() -> dict[str, str]:
     if not GITOPS.is_dir():
         return {}
     out = {}
-    for p in gatelib.rglob(GITOPS, "*.yaml"):
+    for p in (*gatelib.rglob(GITOPS, "*.yaml"), *gatelib.rglob(GITOPS, "*.yml")):
         text = gatelib.read_text(p, errors="replace")
         if SECRET_NAME in text:
             out[str(p.relative_to(REPO))] = text
@@ -169,6 +224,14 @@ def self_test() -> int:
         ("duplicate", [agent("a", ["cnb.cz", "cnb.cz"])], 1),
         ("dead allowlist", [agent("a", ["cnb.cz"], resource="read.governance")], 1),
         ("no web, no scope", [agent("a", resource="read.governance", scope=False)], 0),
+        ("glob read.* grants, no scope", [agent("a", resource="read.*", scope=False)], 1),
+        ("glob *.public_web grants, no scope", [agent("a", resource="*.public_web", scope=False)], 1),
+        ("glob ** grants, no scope", [agent("a", resource="**", scope=False)], 1),
+        ("bare * does not grant (OPA . delimiter)", [agent("a", resource="*", scope=False)], 0),
+        ("trailing newline host", [agent("a", ["cnb.cz\n"])], 1),
+        ("cluster-internal host", [agent("a", ["litellm.ai-platform.svc"])], 1),
+        ("cluster.local host", [agent("a", ["x.default.svc.cluster.local"])], 1),
+        ("localhost host", [agent("a", ["app.localhost"])], 1),
     ]
     failed = 0
     for name, agents, want in cases:
@@ -177,10 +240,18 @@ def self_test() -> int:
         failed += not ok
         print(f"  {'ok ' if ok else 'BAD'} agents/{name}: findings={got}")
 
+    def dep(name):
+        return f"kind: Deployment\nmetadata:\n  name: {name}\nspec:\n  secretName: {SECRET_NAME}\n"
+
+    es = f"kind: ExternalSecret\nmetadata:\n  name: x\nspec:\n  target:\n    name: {SECRET_NAME}\n"
+    bdir = BROKER_DIR
     gcases = [
-        ("broker only", {f"gitops/components/{BROKER}/deployment.yaml": SECRET_NAME}, 0),
-        ("externalsecret ignored", {"gitops/x/es.yaml": f"kind: ExternalSecret\n{SECRET_NAME}"}, 0),
-        ("second mount", {f"gitops/components/{BROKER}/d.yaml": SECRET_NAME, "gitops/components/agent/d.yaml": SECRET_NAME}, 1),
+        ("broker only", {bdir + "deployment.yaml": dep(BROKER)}, 0),
+        ("externalsecret alone ignored", {"openbank-infra/gitops/x/es.yaml": es}, 0),
+        ("second mount", {bdir + "d.yaml": dep(BROKER), "openbank-infra/gitops/components/agent/d.yaml": dep("agent")}, 1),
+        ("ES bundled with foreign Deployment", {"openbank-infra/gitops/x/all.yaml": es + "---\n" + dep("agent")}, 1),
+        ("path substring is not identity", {f"openbank-infra/gitops/components/not-{BROKER}/d.yaml": dep(BROKER)}, 1),
+        ("other workload in broker dir", {bdir + "d.yaml": dep("sidecar-thief")}, 1),
     ]
     for name, files, want in gcases:
         got = len(evaluate_gitops(files))
