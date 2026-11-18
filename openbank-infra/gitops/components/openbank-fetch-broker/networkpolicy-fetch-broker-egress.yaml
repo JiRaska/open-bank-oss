@@ -11,9 +11,9 @@
 #   - the internet on TCP 443 only, with every private and link-local range carved out, so a
 #     public name that resolves to an in-cluster / VPC / instance-metadata address is dropped by
 #     the network even if the application check were bypassed;
-#   - DNS, Keycloak (OIDC/JWKS), and Tempo (OTLP traces). The OPA sidecar is localhost, which a
-#     NetworkPolicy does not police. Audit events go to the log stream (collected node-side by
-#     Alloy), so no audit egress is needed.
+#   - DNS and Keycloak (OIDC/JWKS). The OPA sidecar is localhost, which a NetworkPolicy does not
+#     police. Audit events go to the log stream (collected node-side by Alloy), so no audit egress
+#     is needed; tracing is disabled in the Deployment, so there is no Tempo edge either.
 # check-public-web-fetch.py fails if the except list loses any of the ranges below, or if any
 # other agent-plane NetworkPolicy gains a 0.0.0.0/0 egress.
 apiVersion: networking.k8s.io/v1
@@ -52,17 +52,6 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
-    # Tempo OTLP gRPC (traces).
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: observability
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: tempo
-      ports:
-        - protocol: TCP
-          port: 4317
     # The deliberate internet hole: HTTPS only, never a private or link-local destination.
     - to:
         - ipBlock:
