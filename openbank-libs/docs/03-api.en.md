@@ -345,4 +345,4 @@ BuildInfo.toStack()  // returns LinkedHashMap suitable for JSON serialization
 
 - `CurrencyCode.of` rejects ISO 4217 codes withdrawn from circulation (List Three: `DEM`, `FRF`, `HRK`, `SKK`, `VEF`, `ZWL`, ...) even though `java.util.Currency` still resolves them. `CurrencyCode.isCanonical(code)` answers "is this exact string an active, upper-case code" for validators that store the string.
 - `IbanCheckDigits.compute/build` is the single ISO 7064 MOD 97-10 generator; validation stays in `Iban.isValid`.
-- `CzechPaymentSymbol.isValid` / `requireValid`: variable, specific and constant symbols are 1-10 ASCII digits.
+- `CzechPaymentSymbol.VARIABLE|SPECIFIC|CONSTANT` with `isValid` / `normalise`: VS and SS are 1-10 ASCII digits, KS 1-4 (the domestic-payment column limit); blank counts as absent.
