@@ -37,7 +37,6 @@
 
 import argparse
 import pathlib
-import re
 import sys
 
 import gatelib
