@@ -78,3 +78,11 @@ kover {
         }
     }
 }
+
+// The trace-contract IT boots its own Quarkus app under a distinct test profile; at the default
+// heap the test fork died with OutOfMemoryError in the sibling services that share this shape
+// (loyalty, copilot, referral — measured on those branches). Preventive, per-module, as
+// statement-service and kyb-service do: nothing measures test heap fleet-wide.
+tasks.test {
+    maxHeapSize = "2g"
+}
