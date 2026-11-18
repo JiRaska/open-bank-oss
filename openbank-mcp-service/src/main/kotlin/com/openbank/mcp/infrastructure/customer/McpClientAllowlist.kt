@@ -17,11 +17,7 @@ import java.net.URISyntaxException
  *
  * The tier comes from THIS declaration, keyed by `azp`, never from a token claim.
  */
-data class McpClientAllowlist(
-    val resource: String,
-    val audience: String,
-    val clients: Map<String, Client>,
-) {
+data class McpClientAllowlist(val resource: String, val audience: String, val clients: Map<String, Client>) {
     data class Client(val clientId: String, val tier: Tier, val enabled: Boolean)
 
     /** `H` hosted confidential, `L` local public (ADR-0385 D1). */
@@ -54,13 +50,15 @@ data class McpClientAllowlist(
         }
 
         private fun parseClient(raw: Any?): Client {
-            val map = raw as? Map<*, *> ?: throw IllegalArgumentException("allowlist client entry is not a mapping")
+            val map = requireNotNull(raw as? Map<*, *>) { "allowlist client entry is not a mapping" }
             val clientId = requiredString(map, "client_id")
             val tierText = requiredString(map, "tier")
-            val tier = Tier.entries.firstOrNull { it.name == tierText }
-                ?: throw IllegalArgumentException("client '$clientId' has unknown tier '$tierText'")
-            val enabled = map["enabled"] as? Boolean
-                ?: throw IllegalArgumentException("client '$clientId' must declare 'enabled' as a boolean")
+            val tier = requireNotNull(Tier.entries.firstOrNull { it.name == tierText }) {
+                "client '$clientId' has unknown tier '$tierText'"
+            }
+            val enabled = requireNotNull(map["enabled"] as? Boolean) {
+                "client '$clientId' must declare 'enabled' as a boolean"
+            }
             return Client(clientId, tier, enabled)
         }
 

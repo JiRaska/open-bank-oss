@@ -103,7 +103,10 @@ internal class McpCustomerBranch(
                 Response.ok(
                     McpResponse(
                         id = id,
-                        result = ToolCallResult(listOf(ToolContent(text = "Not available on this channel")), isError = true),
+                        result = ToolCallResult(
+                            listOf(ToolContent(text = "Not available on this channel")),
+                            isError = true,
+                        ),
                     ),
                 ).build()
             }
