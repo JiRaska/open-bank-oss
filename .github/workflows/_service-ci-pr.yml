@@ -110,7 +110,7 @@ jobs:
       continue-on-error: true
       timeout-minutes: 1
       run: bash -e "$SERVICE_CI_HELPERS/raise-aio-max-nr.sh"
-    - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78
+    - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880
       with:
         distribution: temurin
         java-version: '21
