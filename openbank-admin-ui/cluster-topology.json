@@ -1,11 +1,11 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-11-17T05:35:14.000Z",
-  "inputFingerprint": "sha256:4ea2570f9688e8e9e49fe182db517424dd207720ac46b7d2955e48dd95477bb0",
+  "generatedAt": "2026-11-18T22:20:24.000Z",
+  "inputFingerprint": "sha256:c9c55c76ca7e71a601ae8a7ad5f792673e4827777b8f06b5984f92e032eee27d",
   "counts": {
     "namespaces": 86,
-    "networkPolicies": 149,
+    "networkPolicies": 150,
     "externalSecrets": 244,
     "clusterPolicies": 0
   },
@@ -871,11 +871,11 @@
         "en": "Locked doors between floors — without a pass you cannot move between departments."
       },
       "summary": {
-        "cs": "Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno 149 NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.",
-        "en": "The zero-trust goal is deny-by-default between namespaces. GitOps declares 149 NetworkPolicies; this count cannot establish per-namespace coverage or effective traffic isolation."
+        "cs": "Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno 150 NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.",
+        "en": "The zero-trust goal is deny-by-default between namespaces. GitOps declares 150 NetworkPolicies; this count cannot establish per-namespace coverage or effective traffic isolation."
       },
       "controls": [
-        "NetworkPolicy manifests (149)",
+        "NetworkPolicy manifests (150)",
         "per-namespace deny-by-default (target)"
       ],
       "adr": [
@@ -1139,8 +1139,8 @@
         "en": "deny-by-default in every ns"
       },
       "reality": {
-        "cs": "149 NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny",
-        "en": "149 NetworkPolicies declared in GitOps; namespace coverage and runtime effectiveness unverified"
+        "cs": "150 NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny",
+        "en": "150 NetworkPolicies declared in GitOps; namespace coverage and runtime effectiveness unverified"
       },
       "status": "partial"
     },
