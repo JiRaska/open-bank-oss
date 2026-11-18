@@ -186,6 +186,7 @@ class ValkeyCustomerStoresIT {
 
         assertThat(outcome).isInstanceOf(Outcome.Refused::class.java)
         assertThat((outcome as Outcome.Refused).status).isEqualTo(503)
+        assertThat(outcome.reason).isEqualTo(CustomerChannelAdmission.REPLAY_STORE_UNAVAILABLE)
         // The replay claim alone also fails closed: UNAVAILABLE, never FIRST_USE.
         assertThat(ValkeyDpopReplayStore(down, TIMEOUT).firstUse("jkt", "j", TTL, Instant.now()))
             .isEqualTo(ReplayClaim.UNAVAILABLE)
@@ -198,6 +199,7 @@ class ValkeyCustomerStoresIT {
 
         assertThat(outcome).isInstanceOf(Outcome.Refused::class.java)
         assertThat((outcome as Outcome.Refused).status).isEqualTo(503)
+        assertThat(outcome.reason).isEqualTo(CustomerChannelAdmission.REPLAY_STORE_UNAVAILABLE)
     }
 
     private companion object {

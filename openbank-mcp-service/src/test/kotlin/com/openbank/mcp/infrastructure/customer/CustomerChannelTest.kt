@@ -9,12 +9,6 @@ import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.quarkus.runtime.LaunchMode
 import jakarta.enterprise.inject.Instance
 import org.assertj.core.api.Assertions.assertThat
-import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
-import io.mockk.every
-import io.mockk.mockk
-import io.quarkus.redis.datasource.ReactiveRedisDataSource
-import io.quarkus.runtime.LaunchMode
-import jakarta.enterprise.inject.Instance
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
