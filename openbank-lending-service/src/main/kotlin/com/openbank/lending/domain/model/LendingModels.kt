@@ -274,6 +274,7 @@ data class LoanApplicationRequest(
     val residency: String? = null,
     val employmentTenureMonths: Int? = null,
     val catalogOfferingId: UUID? = null,
+    val passportGrantId: UUID? = null,
 )
 
 /**

@@ -1126,3 +1126,35 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## ADR-0380 market scope at loan application
+
+Lending checks the distribution countries from the catalogue's published-product read before
+persisting a catalogue-backed Czech loan application. A caller-selected offering available only
+outside CZ is refused. For scoped offerings the application uses server-side CZ jurisdiction and
+rejects a contradictory jurisdiction supplied by a caller. Missing distribution metadata retains
+the existing domestic compatibility
+path for historical offerings and older catalogue replicas. The catalogue response carries current
+distribution metadata alongside the effective revision. It carries no grant or customer evidence.
+
+The authorizing boundary is the lending application service. The adapter validates country codes
+with `openbank-libs-market`. Tests cover a foreign-only offering leaving no application, malformed
+catalogue country codes, and the existing unscoped application path. Cross-border origination still
+requires the catalogue commitment fence and verified subject evidence.
+
+### Durable catalogue-backed signature (ADR-0380)
+
+The signature endpoint records an intent for the authenticated signer against the application's
+pinned product revision. Taking over work from PostgreSQL never reconstructs actor, artefact or
+product evidence from a new caller. A row lock serializes the signature transition with other
+origination state changes. The signature, outbox and completion marker commit together.
+The scheduler restores the stored synthetic taint before publishing evidence.
+
+### FOS loan authorization
+
+Application clients can supply a grant selector. The catalogue returns the verified route only for
+the party and exact published revision. Lending persists it atomically. Each staged action has a
+distinct catalogue operation and checks permission before writing the signature or loan.
+The application database blocks concurrent withdrawal or expiry while a matching commitment can
+still succeed. Recovery keeps the operation ID, audit actor, destination and economic date.
+The catalogue preserves exact refusals and the ledger and borrower credit use stable references.

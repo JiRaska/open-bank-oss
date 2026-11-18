@@ -84,17 +84,22 @@ class BorrowerCreditClient(
     // that already landed rather than paying the borrower twice.
     @Retry(maxRetries = MAX_RETRIES, delay = RETRY_DELAY_MS, jitter = RETRY_JITTER_MS)
     @Timeout(CALL_TIMEOUT_MS)
-    override fun credit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> = post(
-        reference,
-        type = "CREDIT",
-        targetAccountId = borrowerAccountId,
-        sourceAccountId = null,
-        amount = amount,
-        description = "Loan disbursement",
-    ).map { acknowledgement ->
-        // Same-key replays return the persisted transaction, which can still be pending.
-        check(acknowledgement.status == COMPLETED_TRANSACTION_STATUS) { "Borrower credit is not confirmed" }
-    }
+    override fun credit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> =
+        creditOn(reference, borrowerAccountId, amount, LocalDate.now(clock))
+
+    override fun creditOn(reference: String, borrowerAccountId: UUID, amount: Money, valueDate: LocalDate): Uni<Unit> =
+        post(
+            reference,
+            type = "CREDIT",
+            targetAccountId = borrowerAccountId,
+            sourceAccountId = null,
+            amount = amount,
+            description = "Loan disbursement",
+            valueDate = valueDate,
+        ).map { acknowledgement ->
+            // Same-key replays return the persisted transaction, which can still be pending.
+            check(acknowledgement.status == COMPLETED_TRANSACTION_STATUS) { "Borrower credit is not confirmed" }
+        }
 
     @Retry(maxRetries = MAX_RETRIES, delay = RETRY_DELAY_MS, jitter = RETRY_JITTER_MS)
     @Timeout(CALL_TIMEOUT_MS)
@@ -115,6 +120,7 @@ class BorrowerCreditClient(
         targetAccountId: UUID?,
         amount: Money,
         description: String,
+        valueDate: LocalDate = LocalDate.now(clock),
     ): Uni<TransactionAck> = client.initiate(
         InitiateTransactionBody(
             idempotencyKey = reference,
@@ -124,7 +130,7 @@ class BorrowerCreditClient(
             amount = amount.amount,
             currencyCode = amount.currency.code,
             description = description,
-            valueDate = LocalDate.now(clock).toString(),
+            valueDate = valueDate.toString(),
         ),
     )
 
