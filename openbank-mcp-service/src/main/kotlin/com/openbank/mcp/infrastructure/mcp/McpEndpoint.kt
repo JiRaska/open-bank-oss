@@ -284,7 +284,21 @@ class McpEndpoint(
                     ),
                 )
             }
-            metrics.toolCallCompleted(toolTag, decision, result, Duration.ofNanos(System.nanoTime() - startedAt))
+            metrics.toolCallCompleted(
+                toolTag,
+                decision,
+                result,
+                Duration.ofNanos(System.nanoTime() - startedAt),
+                // ADR-0384 D1: derived from how the caller was resolved on this path, never a claim.
+                // /mcp serves agents and OBO staff; the customer channel is a separate path (ADR-0383).
+                if (ctx.principalType ==
+                    "HUMAN"
+                ) {
+                    McpMetricsPort.ChannelTags.OPERATOR
+                } else {
+                    McpMetricsPort.ChannelTags.AGENT
+                },
+            )
         }
 
         // Throttle BEFORE any policy call or tool execution (ADR-0383 D5): a denied flood must not
