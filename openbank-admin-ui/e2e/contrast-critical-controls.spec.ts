@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import AxeBuilder from '@axe-core/playwright'
-import { test, expect } from '@playwright/test'
+import { test, expect } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 function contrastFailures(scan: Awaited<ReturnType<AxeBuilder['analyze']>>) {

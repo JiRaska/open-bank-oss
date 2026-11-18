@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sanctions-service
     app.kubernetes.io/part-of: sanctions
   annotations:
-    openbank.tech/policy-checksum: "1410a8048c8aca12"
+    openbank.tech/policy-checksum: "8b3cbca209684aa1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -835,7 +835,8 @@ data:
     #   sanctions.clear   — review (POST /review); decide a screening hit (renamed from
     #                       sanctions.review, issue #938 follow-up). Four-eyes gated (rules.yaml
     #                       four_eyes.verbs) — a wrongly-cleared true positive is a real sanctions
-    #                       violation. No ROLE_SERVICE on this endpoint, confirmed no M2M caller.
+    #                       violation. One M2M caller: service-account-openbank-agent, as the
+    #                       four-eyes MAKER only (rule service-agent-sanctions-review-maker below).
     #   sanctions.update  — edit a watchlist entry (#listType)
     #   sanctions.trigger — refresh one list (#listType) or all lists
     #
@@ -844,17 +845,23 @@ data:
     #
     # Base rest.rego already grants: operator-read-any / compliance-read-any for sanctions.list +
     # sanctions.read, and m2m-sanctions-screening for any service-account-* caller on
-    # sanctions.create only (deliberately NOT the whole family — sanctions.clear/.update/.trigger
-    # are real operator judgment calls and must stay human-only).
+    # sanctions.create only (deliberately NOT the whole family — .update/.trigger and the checker's
+    # sanctions.approval.decide stay human-only; sanctions.clear admits the agent as maker only).
 
     package openbank.rest
 
     import rego.v1
 
     # Operators and admins may perform ANY sanctions write — the ops/compliance console path
-    # (run a screen, decide a hit, edit a watchlist entry, refresh a feed).
+    # (run a screen, decide a hit, edit a watchlist entry, refresh a feed). STAFF ONLY: a Keycloak
+    # service-account is classified HUMAN, and the docker/CI realms give the shared
+    # service-account-openbank-services ROLE_OPERATOR, so without the machine exclusion any machine
+    # there could act as the four-eyes CHECKER (sanctions.approval.decide) on a sanctions clearance.
+    # No machine write depends on this rule: screens reach sanctions.create via base rest.rego's
+    # m2m-sanctions-screening, and the agent's maker clear has its own named rule below.
     allowed_reasons contains "operator-sanctions-write" if {
     	input.principal.type == "HUMAN"
+    	not principal_is_machine
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	startswith(input.action, "sanctions.")
@@ -864,12 +871,24 @@ data:
     # tools (SanctionsServiceClient, query.compliance.readonly, held by the compliance-officer charter only;
     # the agent gate refuses every other agent before the call). They used to reach these reads on the
     # shared service-account-openbank-services principal's ROLE_OPERATOR; they now present
-    # service-account-openbank-agent (ROLE_API only), and this rule is that principal's whole grant here:
-    # the two read verbs, never a screen, a decision or a watchlist edit.
+    # service-account-openbank-agent (ROLE_API only). This rule is its read grant: the two read verbs,
+    # never a screen or a watchlist edit. Its only other grant is the four-eyes maker rule below.
     allowed_reasons contains "service-agent-sanctions-read" if {
     	input.principal.type == "HUMAN"
     	machine_named("service-account-openbank-agent")
     	input.action in {"sanctions.list", "sanctions.read"}
+    }
+
+    # Agent false-positive triage (#16381): the same principal may submit a review as the four-eyes
+    # MAKER and nothing else. sanctions.clear is four_eyes_required (rules.yaml four_eyes.verbs) and the
+    # deployed AUTHZ_FOUR_EYES_ENFORCE is "true", so the call pauses with an approvalId until a DIFFERENT
+    # principal decides it. sanctions.approval.decide is deliberately NOT granted here, so the agent can
+    # never be its own checker. The agent gate admits the call only for a charter holding
+    # sanctions.review.maker (compliance-officer). AgentMachineGrantCharterAlignmentTest pins both halves.
+    allowed_reasons contains "service-agent-sanctions-review-maker" if {
+    	input.principal.type == "HUMAN"
+    	machine_named("service-account-openbank-agent")
+    	input.action == "sanctions.clear"
     }
 
     # AUTHZ_ENFORCE flip for sanctions: a compliance officer (ROLE_COMPLIANCE + ROLE_VIEWER, the
@@ -1094,6 +1113,28 @@ data:
     	not charter_denied
     	charter_allowed
     	skill_ok
+    	not pr_base_ref_denied
+    }
+
+    # ADR-0031 D9 amendment 2026-11-14: a pull request's TARGET is part of the write, so the policy
+    # decides it — not only the writer's code. `gh.pr.open` is allowed only when `input.base_ref` is
+    # listed in the `base_refs` of the charter's tier/resource grant that permits it. A grant naming
+    # no base_refs, or a call sending none, is denied: a PR grant that does not say where it may
+    # land is not a bounded grant. Scope: the tier/resource path (calls carrying `input.tier`), which
+    # is the only PR writer wired today. Plain-pattern `gh.pr.open` grants (ledger-domain-engineer)
+    # are unwired and unchanged here; bounding them is ADR-0031 D9 phase-4 work.
+    pr_base_ref_denied if {
+    	input.tool == "gh.pr.open"
+    	is_string(input.tier)
+    	not pr_base_ref_granted
+    }
+
+    pr_base_ref_granted if {
+    	is_string(input.base_ref)
+    	some entry in tier_resource_allow_entries
+    	entry.tier == input.tier
+    	tier_resource_resources_granted(entry.resources)
+    	input.base_ref in entry.base_refs
     }
 
     # ---------------------------------------------------------------------------------------
@@ -1105,6 +1146,7 @@ data:
     	"agent": input.agent,
     	"tool": input.tool,
     	"resource": input.resource,
+    	"base_ref": object.get(input, "base_ref", null),
     	"reason": reason,
     }
 
@@ -1117,6 +1159,8 @@ data:
     else := "skill not in agent allowlist" if not skill_ok
 
     else := "no matching allow rule" if not charter_allowed
+
+    else := "pr base ref not granted by charter" if pr_base_ref_denied
 
     else := "allowed by charter"
 
@@ -1167,6 +1211,8 @@ data:
       - product.explain
       write_proposal:
       - draft.ticket
+      - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1196,6 +1242,8 @@ data:
         - query.disputes.readonly
         - query.observability.readonly
         - flags.write
+        - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*
@@ -1500,6 +1548,9 @@ data:
         - tier: write_proposal
           resources:
           - github-pr
+          base_refs:
+          - main
+          - qualification/flaky-test-hunter
         deny:
         - tier: write
           resources:
@@ -1800,8 +1851,12 @@ data:
                                              # payment rails — the distinct-operator-only-action pattern this guardrail prescribes.
         - clear                             # sanctions: decide a screening hit (CLEAR/HIT/POTENTIAL_HIT) — a wrongly-cleared true positive
                                              # is a real sanctions violation; distinct from `release` (payment-hold release) for clean audit
-                                             # separation. Confirmed no M2M caller (@RolesAllowed on POST /sanctions/review admits only
-                                             # ROLE_OPERATOR/ROLE_ADMIN, no ROLE_SERVICE).
+                                             # separation. ONE documented M2M caller, deliberately paused (#16381/#16455):
+                                             # service-account-openbank-agent on POST /api/v3/sanctions/review, CLEAR only, as the
+                                             # four-eyes MAKER. Being paused is the point for that caller, so the GUARDRAIL below
+                                             # (no automated caller may be stalled) does not apply to it; it never holds
+                                             # sanctions.approval.decide. Every other caller is ROLE_OPERATOR/ROLE_ADMIN (no
+                                             # ROLE_SERVICE); /api/v1/sanctions/review stays human-only.
         # GUARDRAIL (issue #938 follow-up — found while wiring sca-service): four_eyes_required is
         # computed by ACTION NAME ALONE (rest.rego money_path_scopes + endswith verb match), with NO
         # awareness of the caller's identity. A verb is only safe to add here if EVERY real-world
@@ -1995,6 +2050,10 @@ data:
         # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
         # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
         - card.details.read
+        # The queue of business customers under an ongoing sanctions-monitoring hold (#16028): who is
+        # being reviewed is itself sensitive (tipping-off). Granted to ROLE_KYC_REVIEWER by the matrix
+        # only; the generic operator/admin list rule must not reach it.
+        - kyb.monitoring.queue.list
       role_action_matrix:
         ROLE_OPERATOR:
           grant:
@@ -2176,6 +2235,11 @@ data:
             - kyb.case.reject
             - kyb.case.review.resolve
             - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
+            - kyb.monitoring.finding.decide    # #16028: decide an ongoing-monitoring finding (human reviewer only)
+            - kyb.monitoring.queue.list        # #16028: ongoing-monitoring holds queue
+            - kyb.monitoring.exit.propose      # #16028: four-eyes exit, maker
+            - kyb.monitoring.exit.confirm      # #16028: four-eyes exit, checker (code refuses checker == maker)
+            - kyb.monitoring.exit.withdraw     # #16028: the proposing person withdraws their own pending exit proposal
         ROLE_AUDITOR:
           grant:
             - audit.trail.inspect

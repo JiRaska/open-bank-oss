@@ -11,7 +11,7 @@ quarkus:
       max-lifetime: 30M
       max-size: 20
     username: "${QUARKUS_DATASOURCE_USERNAME:openbank_settlement}"
-    password: "${QUARKUS_DATASOURCE_PASSWORD:settlement}"
+    password: "${QUARKUS_DATASOURCE_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}"
     # The DEFAULT (Agroal/JDBC) datasource Flyway migrates. Without it `migrate-at-start` kills
     # the boot with "Unable to find datasource '<default>'" — settlement-service has the same
     # defect as the four named in #3080, which the issue missed. Env var wins in the cluster.
@@ -181,3 +181,11 @@ mp:
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         acks: all
+
+# ADR-0007/0017: the deployed default above is the sentinel, so a pod whose Secret failed to
+# mount fails auth instead of booting on a credential baked into the image. The local-only
+# password the dev compose / test containers use lives here.
+"%dev,test":
+  quarkus:
+    datasource:
+      password: ${QUARKUS_DATASOURCE_PASSWORD:settlement}

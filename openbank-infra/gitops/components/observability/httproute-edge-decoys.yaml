@@ -117,7 +117,7 @@ metadata:
   annotations:
     # ADR-0234 declaration: a decoy is reachable by anyone by design; these paths serve no
     # tool UI and carry no data. The path list below IS the declared surface.
-    openbank.io/ungated-machine-callers: >-
+    open-bank.tech/ungated-machine-callers: >-
       ADR-0357 commodity decoys: internet scanners probing /.env, /.git/HEAD, /wp-login.php,
       /phpinfo.php, /actuator/env and /actuator/heapdump; answered by Envoy directResponse,
       no backend.
@@ -205,7 +205,7 @@ metadata:
   name: edge-decoys-targeted
   namespace: observability
   annotations:
-    openbank.io/ungated-machine-callers: >-
+    open-bank.tech/ungated-machine-callers: >-
       ADR-0357 targeted decoys: /api/v1/internal/ledger/export, /api/v1/admin/backup and
       /api/v0/accounts exist nowhere else; any caller is reconnaissance. Answered 401 by Envoy
       directResponse, no backend, no data.

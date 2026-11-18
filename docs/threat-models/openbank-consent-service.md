@@ -248,3 +248,36 @@ escalating a consent is a direct path to unauthorized data access or payment ini
   Rollback: revert the commit (re-opens the path).
 
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.
+
+## 2026-11-17 - Account coverage only for explicitly listed accounts (#16590)
+
+`Consent.coversAccount(iban)` is true only when the IBAN is in the consent's explicit account list. A
+consent with no list, or an empty one, covers no account, so `POST /api/v1/consents/{id}/validate`
+answers `CONSENT_ACCOUNT_NOT_COVERED` for any IBAN it is asked about. Storage already behaved this way:
+the list is an element collection, and a consent created without one reads back with an empty list.
+The domain default that treated "no list" as "every account" is removed, so the rule no longer depends
+on that persistence detail.
+
+- **Elevation of privilege / information disclosure:** no consent can be validated for an account it
+  does not name. The per-account reads in mcp-service and psd2-service trust this answer, so the bound
+  reaches them with no change on their side.
+- **Not added:** an "all of the party's accounts" consent covers nothing until an ownership-verified
+  lookup (does the consenting party hold the IBAN?) exists. That lookup would widen what existing
+  consents grant, so it needs its own decision. A reference implementation is kept, unmerged, on branch
+  `agent/consent-ownership-reference`.
+- **No new egress, identity, listener or grant.** The openapi change is editorial (the `grantedAccounts`
+  description); the response shape is unchanged.
+
+Tests: `ConsentTest` (no list, empty list, listed), `ConsentWithoutAccountListIT` (real HTTP and
+Postgres: a consent created without a list is not covered for an own or a foreign IBAN; an explicit
+list covers its member).

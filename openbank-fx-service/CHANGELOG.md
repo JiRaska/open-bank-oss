@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.21.2](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.21.1...fx-service-v0.21.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **fx,interest,kyb:** reload outbound mTLS client certificates ([#16414](https://github.com/JiRaska/open-bank-oss/issues/16414)) ([afceb60](https://github.com/JiRaska/open-bank-oss/commit/afceb607acaadd6a5d4e44619795f5fabf18f63c))
+
+## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.21.0...fx-service-v0.21.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **fx:** ignore the client-supplied accountId on convert ([#16216](https://github.com/JiRaska/open-bank-oss/issues/16216)) ([37ef52e](https://github.com/JiRaska/open-bank-oss/commit/37ef52e5c448ce1438f2bd39bff96596f20629fc))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.20.2...fx-service-v0.21.0) (2026-11-14)
+
+
+### Features
+
+* **sepa-payment,sepa-instant,fx:** send the payee to fraud scoring through the typed risk context (ADR-0377 D3) ([#16034](https://github.com/JiRaska/open-bank-oss/issues/16034)) ([d889ed6](https://github.com/JiRaska/open-bank-oss/commit/d889ed6b793c20480902cf0951df792c68267e98))
+
+## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.20.1...fx-service-v0.20.2) (2026-11-13)
+
+
+### Bug Fixes
+
+* **fx:** screen the party's held names on both conversion paths, not an id or a caller-supplied name ([#15767](https://github.com/JiRaska/open-bank-oss/issues/15767)) ([bc71355](https://github.com/JiRaska/open-bank-oss/commit/bc71355a5afc6be355c8c513786d5d2b1e461d64))
+
 ## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.20.0...fx-service-v0.20.1) (2026-11-06)
 
 

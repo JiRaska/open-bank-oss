@@ -511,6 +511,7 @@ public final class com/openbank/libs/authz/AuthorizeInterceptor {
 	public final fun getApprovalStore ()Ljakarta/enterprise/inject/Instance;
 	public final fun getClock ()Ljava/time/Clock;
 	public final fun getEnforce ()Z
+	public final fun getFourEyesConsumption ()Ljakarta/enterprise/inject/Instance;
 	public final fun getFourEyesEnforce ()Z
 	public final fun getHttpHeaders ()Ljakarta/enterprise/inject/Instance;
 	public final fun getIdentity ()Ljakarta/enterprise/inject/Instance;
@@ -522,6 +523,7 @@ public final class com/openbank/libs/authz/AuthorizeInterceptor {
 	public final fun setApprovalStore (Ljakarta/enterprise/inject/Instance;)V
 	public final fun setClock (Ljava/time/Clock;)V
 	public final fun setEnforce (Z)V
+	public final fun setFourEyesConsumption (Ljakarta/enterprise/inject/Instance;)V
 	public final fun setFourEyesEnforce (Z)V
 	public final fun setHttpHeaders (Ljakarta/enterprise/inject/Instance;)V
 	public final fun setIdentity (Ljakarta/enterprise/inject/Instance;)V
@@ -530,6 +532,11 @@ public final class com/openbank/libs/authz/AuthorizeInterceptor {
 	public final fun setSecurityContext (Ljakarta/enterprise/inject/Instance;)V
 	public final fun setSecurityTelemetry (Ljakarta/enterprise/inject/Instance;)V
 	public final fun setSummaryRenderer (Ljakarta/enterprise/inject/Instance;)V
+}
+
+public final class com/openbank/libs/authz/FourEyesConsumption {
+	public fun <init> ()V
+	public final fun getConsumedApprovalId ()Ljava/lang/String;
 }
 
 public final class com/openbank/libs/authz/OpaPolicyDecisionPointProducer {
@@ -828,6 +835,67 @@ public final class com/openbank/libs/contact/SuppressionScope : java/lang/Enum {
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/contact/SuppressionScope;
 	public static fun values ()[Lcom/openbank/libs/contact/SuppressionScope;
+}
+
+public final class com/openbank/libs/delegation/DelegationGrantEvent {
+	public fun <init> (Ljava/lang/String;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;Ljava/lang/String;Ljava/util/UUID;Ljava/util/Set;Ljava/time/OffsetDateTime;Ljava/time/OffsetDateTime;Ljava/lang/Long;Ljava/lang/String;Ljava/lang/Integer;Ljava/util/UUID;Ljava/lang/Long;Ljava/math/BigDecimal;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/lang/Long;
+	public final fun component11 ()Ljava/lang/String;
+	public final fun component12 ()Ljava/lang/Integer;
+	public final fun component13 ()Ljava/util/UUID;
+	public final fun component14 ()Ljava/lang/Long;
+	public final fun component15 ()Ljava/math/BigDecimal;
+	public final fun component16 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/UUID;
+	public final fun component3 ()Ljava/util/UUID;
+	public final fun component4 ()Ljava/util/UUID;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/util/UUID;
+	public final fun component7 ()Ljava/util/Set;
+	public final fun component8 ()Ljava/time/OffsetDateTime;
+	public final fun component9 ()Ljava/time/OffsetDateTime;
+	public final fun copy (Ljava/lang/String;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;Ljava/lang/String;Ljava/util/UUID;Ljava/util/Set;Ljava/time/OffsetDateTime;Ljava/time/OffsetDateTime;Ljava/lang/Long;Ljava/lang/String;Ljava/lang/Integer;Ljava/util/UUID;Ljava/lang/Long;Ljava/math/BigDecimal;Ljava/lang/String;)Lcom/openbank/libs/delegation/DelegationGrantEvent;
+	public static synthetic fun copy$default (Lcom/openbank/libs/delegation/DelegationGrantEvent;Ljava/lang/String;Ljava/util/UUID;Ljava/util/UUID;Ljava/util/UUID;Ljava/lang/String;Ljava/util/UUID;Ljava/util/Set;Ljava/time/OffsetDateTime;Ljava/time/OffsetDateTime;Ljava/lang/Long;Ljava/lang/String;Ljava/lang/Integer;Ljava/util/UUID;Ljava/lang/Long;Ljava/math/BigDecimal;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/delegation/DelegationGrantEvent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getApprovalGroupId ()Ljava/util/UUID;
+	public final fun getApprovalGroupRevision ()Ljava/lang/Long;
+	public final fun getApprovalPolicy ()Ljava/lang/String;
+	public final fun getCapabilities ()Ljava/util/Set;
+	public final fun getGrantId ()Ljava/util/UUID;
+	public final fun getGranteePartyId ()Ljava/util/UUID;
+	public final fun getGrantorPartyId ()Ljava/util/UUID;
+	public final fun getLifecycleRevision ()Ljava/lang/Long;
+	public final fun getPerTxLimitAmount ()Ljava/math/BigDecimal;
+	public final fun getPerTxLimitCurrency ()Ljava/lang/String;
+	public final fun getRequiredApprovals ()Ljava/lang/Integer;
+	public final fun getResourceId ()Ljava/util/UUID;
+	public final fun getResourceType ()Ljava/lang/String;
+	public final fun getType ()Ljava/lang/String;
+	public final fun getValidFrom ()Ljava/time/OffsetDateTime;
+	public final fun getValidTo ()Ljava/time/OffsetDateTime;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/delegation/DelegationGrantEventDecoder {
+	public static final field INSTANCE Lcom/openbank/libs/delegation/DelegationGrantEventDecoder;
+	public final fun decode (Lcom/fasterxml/jackson/databind/JsonNode;)Lcom/openbank/libs/delegation/DelegationGrantEvent;
+	public final fun decode (Lcom/fasterxml/jackson/databind/ObjectMapper;Ljava/lang/String;)Lcom/openbank/libs/delegation/DelegationGrantEvent;
+}
+
+public final class com/openbank/libs/delegation/DelegationGrantEvents {
+	public static final field ACTIVATED Ljava/lang/String;
+	public static final field EXPIRED Ljava/lang/String;
+	public static final field INSTANCE Lcom/openbank/libs/delegation/DelegationGrantEvents;
+	public static final field REINSTATED Ljava/lang/String;
+	public static final field RENOUNCED Ljava/lang/String;
+	public static final field REVOKED Ljava/lang/String;
+	public static final field SUSPENDED Ljava/lang/String;
+	public final fun getDISABLING ()Ljava/util/Set;
+	public final fun getENABLING ()Ljava/util/Set;
+	public final fun getIGNORED ()Ljava/util/Set;
+	public final fun isProjected (Ljava/lang/String;)Z
 }
 
 public final class com/openbank/libs/docs/DocsCatalogProducer {
@@ -1226,6 +1294,19 @@ public final class com/openbank/libs/persistence/lock/PostgresClusterLock : com/
 	public fun tryRunExclusively (Ljava/lang/String;Lkotlin/jvm/functions/Function1;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
+public abstract class com/openbank/libs/persistence/outbox/AbstractClaimFencedOutboxRepository : com/openbank/libs/persistence/outbox/AbstractPanacheOutboxRepository, com/openbank/libs/persistence/outbox/ClaimFencedOutboxRepositoryV2 {
+	protected fun <init> ()V
+	public fun <init> (Lcom/openbank/libs/persistence/outbox/OutboxTableShape;Ljava/lang/Class;Ljava/time/Clock;)V
+	public synthetic fun <init> (Lcom/openbank/libs/persistence/outbox/OutboxTableShape;Ljava/lang/Class;Ljava/time/Clock;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun claimProcessable (ILjava/time/Duration;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun claimWithTokens (ILjava/time/Duration;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun markClaimFailed (Lcom/openbank/libs/persistence/outbox/OutboxClaim;Ljava/lang/String;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun markClaimsSent (Ljava/util/List;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun markFailed (Ljava/util/UUID;Ljava/lang/String;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun markSent (Ljava/util/UUID;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun markSentBatch (Ljava/util/Collection;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
 public abstract class com/openbank/libs/persistence/outbox/AbstractOutboxBacklogGauge {
 	protected fun <init> ()V
 	public fun <init> (Lcom/openbank/libs/observability/DomainMetrics;)V
@@ -1334,6 +1415,7 @@ public abstract class com/openbank/libs/persistence/outbox/AbstractPanacheOutbox
 	public fun oldestProcessableAge (Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public fun purgeDead (Ljava/time/Duration;ILjava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public fun purgeSent (Ljava/time/Duration;ILjava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	protected final fun recordFailure (Ljava/util/UUID;Ljava/lang/String;Ljava/time/Instant;Ljava/util/UUID;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public final class com/openbank/libs/persistence/outbox/AbstractPanacheOutboxRepository$Companion {
@@ -1392,6 +1474,12 @@ public final class com/openbank/libs/persistence/outbox/OutboxTableShape {
 	public final fun getTable ()Ljava/lang/String;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
+}
+
+public class com/openbank/libs/persistence/outbox/PanacheClaimFencedOutboxEntityV2 : com/openbank/libs/persistence/outbox/PanacheOutboxEntityV2 {
+	public fun <init> ()V
+	public final fun getClaimToken ()Ljava/util/UUID;
+	public final fun setClaimToken (Ljava/util/UUID;)V
 }
 
 public class com/openbank/libs/persistence/outbox/PanacheOutboxEntity : io/quarkus/hibernate/reactive/panache/kotlin/PanacheEntity {
@@ -1810,6 +1898,19 @@ public final class com/openbank/libs/security/HoneytokenFilter : jakarta/ws/rs/c
 public final class com/openbank/libs/security/HoneytokenFilter$Companion {
 }
 
+public final class com/openbank/libs/security/InMemoryDpopReplayStore : com/openbank/libs/security/DpopReplayStore {
+	public fun <init> ()V
+	public fun <init> (II)V
+	public synthetic fun <init> (IIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun firstUse (Ljava/lang/String;Ljava/lang/String;Ljava/time/Duration;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public final fun size ()I
+}
+
+public final class com/openbank/libs/security/Jose4jDpopProofParser : com/openbank/libs/security/DpopProofParser {
+	public fun <init> ()V
+	public fun parse (Ljava/lang/String;)Lcom/openbank/libs/security/DpopProof;
+}
+
 public final class com/openbank/libs/security/OpenBaoKubernetesLogin {
 	public fun <init> (Lcom/openbank/libs/security/OpenBaoTransport;Ljava/lang/String;Ljava/nio/file/Path;Ljava/lang/String;Lcom/fasterxml/jackson/databind/ObjectMapper;)V
 	public synthetic fun <init> (Lcom/openbank/libs/security/OpenBaoTransport;Ljava/lang/String;Ljava/nio/file/Path;Ljava/lang/String;Lcom/fasterxml/jackson/databind/ObjectMapper;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
@@ -1924,6 +2025,14 @@ public final class com/openbank/libs/security/SecurityTelemetry$AuthzDecision : 
 }
 
 public final class com/openbank/libs/security/SecurityTelemetry$Companion {
+}
+
+public final class com/openbank/libs/security/StaffIdentities {
+	public static final field AMR_CLAIM Ljava/lang/String;
+	public static final field INSTANCE Lcom/openbank/libs/security/StaffIdentities;
+	public static final field PERSON_ID_CLAIM Ljava/lang/String;
+	public final fun from (Lorg/eclipse/microprofile/jwt/JsonWebToken;)Lcom/openbank/libs/governance/StaffIdentity;
+	public final fun getSECOND_FACTOR_AMR ()Ljava/util/Set;
 }
 
 public final class com/openbank/libs/storage/ObjectStoreBlobEntity : io/quarkus/hibernate/reactive/panache/kotlin/PanacheEntityBase {

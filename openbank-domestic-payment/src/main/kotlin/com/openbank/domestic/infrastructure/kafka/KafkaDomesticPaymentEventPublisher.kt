@@ -6,6 +6,7 @@ package com.openbank.domestic.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
+import com.openbank.domestic.domain.event.PaymentHeldEvent
 import com.openbank.domestic.domain.event.toCreatedEvent
 import com.openbank.domestic.domain.event.toFinalizedAbsentEvent
 import com.openbank.domestic.domain.event.toStatusChangedEvent
@@ -39,6 +40,8 @@ class KafkaDomesticPaymentEventPublisher(
 
     override fun delegatedSpendFinalizedAbsentPayload(binding: DelegatedSpendBinding): String =
         objectMapper.writeValueAsString(binding.toFinalizedAbsentEvent())
+
+    override fun paymentHeldPayload(event: PaymentHeldEvent): String = objectMapper.writeValueAsString(event)
 
     override suspend fun publish(entry: OutboxEntry) {
         val kafkaHeaders = RecordHeaders()

@@ -57,6 +57,9 @@ sequenceDiagram
 - **Smlouva** (čl. 6 odst. 1 písm. b) — provedení okamžité platby, kterou zákazník nařídil.
 - **Právní povinnost** (čl. 6 odst. 1 písm. c) — AML/sankční prověrka a vedení záznamů (povinné pro okamžité platby).
 
+### Předání do fraud-service (ADR-0377 D3)
+Volání fraud scoringu posílá identifikátor účtu příjemce (IBAN) do fraud-service po stávajícím vzájemně autentizovaném interním spojení. Hodnota je typovaná, takže nikdy není null, a v logu je maskovaná. Tato platební linka ji pro účely fraud nehashuje ani neukládá; fraud-service si z ní ponechá jen HMAC pseudonym, který je stále osobním údajem. Účel: signál nového příjemce pro detekci podvodů, krytý výše uvedeným právním základem právní povinnosti. Scoring je zde stále jen ve stínovém režimu: verdikt se zaloguje, platba se nepodrží.
+
 ### Práva subjektu údajů
 | Právo | Aplikace |
 |---|---|

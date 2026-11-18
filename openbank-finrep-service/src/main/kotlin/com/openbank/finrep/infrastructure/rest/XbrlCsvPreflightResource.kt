@@ -5,6 +5,7 @@ package com.openbank.finrep.infrastructure.rest
 
 import com.openbank.finrep.application.port.inbound.GetXbrlCsvPreflightQuery
 import com.openbank.finrep.application.port.inbound.XbrlCsvPreflightUseCase
+import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
@@ -27,6 +28,7 @@ import java.time.LocalDate
 class XbrlCsvPreflightResource(private val useCase: XbrlCsvPreflightUseCase, private val clock: Clock) {
 
     @GET
+    @Authorize(action = "finrep.preflight.inspect")
     suspend fun getPreflight(
         @PathParam("templateId") templateId: String,
         @QueryParam("asOf") @DefaultValue("") asOf: String,

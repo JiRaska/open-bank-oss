@@ -4,6 +4,7 @@
 
 package com.openbank.sepainstant.infrastructure.client
 
+import com.openbank.libs.fincrime.CounterpartyRef
 import com.openbank.libs.fincrime.FraudVerdict
 import com.openbank.sepainstant.application.port.out.FraudScoreCommand
 import com.openbank.sepainstant.application.port.out.FraudScoreOutcome
@@ -70,6 +71,10 @@ class FraudScoringAdapter(@RestClient private val client: FraudScoreClient, priv
             rail = command.rail,
             accountId = command.accountId,
             counterpartyId = command.counterpartyId,
+            counterparty = (command.counterparty as? CounterpartyRef.Known)?.account?.let {
+                FraudScoreClientCounterparty(scheme = it.scheme.name, value = it.value)
+            },
+            initiationMode = command.initiationMode.name,
         ),
     ).map { response ->
         FraudScoreOutcome(

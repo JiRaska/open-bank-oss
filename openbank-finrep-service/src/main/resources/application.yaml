@@ -95,7 +95,13 @@ quarkus:
     always-include: true
     path: /api/docs
 
+authz:
+  enforce: ${AUTHZ_ENFORCE:false}
+
 openbank:
+  authz:
+    opa-pdp-producer:
+      enabled: true
   finrep:
     risk-engine:
       # Off until finrep's own identity, its risk-engine read grant and the network edge are live
@@ -119,6 +125,8 @@ openbank:
     # this stays under %prod: the client certificate only exists in the cluster.
     tls:
       risk-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:

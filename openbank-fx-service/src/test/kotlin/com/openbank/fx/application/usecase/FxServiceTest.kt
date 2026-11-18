@@ -17,7 +17,11 @@ import com.openbank.fx.application.port.out.FraudScoringPort
 import com.openbank.fx.application.port.out.FxConversionRepository
 import com.openbank.fx.application.port.out.FxRateRepository
 import com.openbank.fx.application.port.out.OpenAmlCaseCommand
+import com.openbank.fx.application.port.out.PartyNamePort
+import com.openbank.fx.application.port.out.PartyNameUnavailableException
 import com.openbank.fx.application.port.out.SanctionsScreeningPort
+import com.openbank.fx.application.port.out.ScreeningEntityType
+import com.openbank.fx.application.port.out.ScreeningSubject
 import com.openbank.fx.application.port.out.ScreeningUnavailableException
 import com.openbank.fx.domain.model.FxConversion
 import com.openbank.fx.domain.model.FxConversionStatus
@@ -59,6 +63,7 @@ class FxServiceTest {
     private lateinit var amlCasePort: AmlCasePort
     private lateinit var metrics: DomainMetrics
     private lateinit var fraudScoringPort: FraudScoringPort
+    private lateinit var partyNamePort: PartyNamePort
     private lateinit var service: FxService
 
     // Must sit inside the fxRate() validity window (validFrom 2026-01-01 .. validTo 2026-12-31):
@@ -76,8 +81,20 @@ class FxServiceTest {
         fraudScoringPort = mockk()
         // Fraud scoring is SHADOW (ADR-0084): default to ALLOW; never affects conversion outcome.
         coEvery { fraudScoringPort.score(any()) } returns FraudScoreOutcome(FraudVerdict.ALLOW, 0, "v0", emptyList())
-        service =
-            FxService(rateRepo, convRepo, objectMapper, screeningPort, amlCasePort, metrics, fraudScoringPort, clock)
+        partyNamePort = mockk()
+        // By default the bank holds one name for the converting party, a natural person's.
+        coEvery { partyNamePort.screeningSubject(any()) } returns HELD_SUBJECT
+        service = FxService(
+            rateRepo,
+            convRepo,
+            objectMapper,
+            screeningPort,
+            partyNamePort,
+            amlCasePort,
+            metrics,
+            fraudScoringPort,
+            clock,
+        )
 
         // By default: not idempotent-replayed, persistence echoes the saved row, AML opens cleanly.
         coEvery { convRepo.findByIdempotencyKey(any()) } returns null
@@ -88,7 +105,13 @@ class FxServiceTest {
 
     private fun clear() {
         coEvery { screeningPort.screen(any(), any(), any()) } answers {
-            ScreeningResult(firstArg(), secondArg(), ScreeningMatchStatus.CLEAR, 0.0, null)
+            ScreeningResult(
+                firstArg<ScreeningSubject>().primaryName,
+                secondArg(),
+                ScreeningMatchStatus.CLEAR,
+                0.0,
+                null,
+            )
         }
     }
 
@@ -233,7 +256,8 @@ class FxServiceTest {
 
         assertThat(result.status).isEqualTo(FxConversionStatus.SETTLED)
         assertThat(result.settledAt).isNotNull()
-        coVerify(exactly = 1) { screeningPort.screen(command.partyName, ScreeningRole.DEBTOR, any()) }
+        coVerify(exactly = 1) { partyNamePort.screeningSubject(command.partyId) }
+        coVerify(exactly = 1) { screeningPort.screen(HELD_SUBJECT, ScreeningRole.DEBTOR, any()) }
         coVerify(exactly = 1) { convRepo.saveWithOutbox(any(), any()) }
         coVerify(exactly = 0) { amlCasePort.openCase(any()) }
         // #1033 regression: the outbox row must actually carry a serialized FxConversionExecuted
@@ -289,7 +313,7 @@ class FxServiceTest {
         val command = convertCommand()
         coEvery { rateRepo.findLatest(any(), any(), any()) } returns fxRate()
         coEvery { screeningPort.screen(any(), any(), any()) } returns
-            ScreeningResult(command.partyName, ScreeningRole.DEBTOR, ScreeningMatchStatus.HIT, 0.97, "OFAC SDN")
+            ScreeningResult(HELD_NAME, ScreeningRole.DEBTOR, ScreeningMatchStatus.HIT, 0.97, "OFAC SDN")
 
         val case = slot<OpenAmlCaseCommand>()
         coEvery { amlCasePort.openCase(capture(case)) } just Runs
@@ -309,7 +333,7 @@ class FxServiceTest {
         val command = convertCommand()
         coEvery { rateRepo.findLatest(any(), any(), any()) } returns fxRate()
         coEvery { screeningPort.screen(any(), any(), any()) } returns
-            ScreeningResult(command.partyName, ScreeningRole.DEBTOR, ScreeningMatchStatus.POTENTIAL_HIT, 0.50, null)
+            ScreeningResult(HELD_NAME, ScreeningRole.DEBTOR, ScreeningMatchStatus.POTENTIAL_HIT, 0.50, null)
 
         val case = slot<OpenAmlCaseCommand>()
         coEvery { amlCasePort.openCase(capture(case)) } just Runs
@@ -320,6 +344,52 @@ class FxServiceTest {
         assertThat(result.settledAt).isNull()
         assertThat(case.captured.riskLevel).isEqualTo(AmlCaseSeverity.HIGH)
         assertThat(case.captured.alertCode).isEqualTo("AML_HOLD")
+        coVerify(exactly = 0) { convRepo.saveWithOutbox(any(), any()) }
+    }
+
+    /**
+     * A party the bank cannot name (party-service down, unknown party, no name on the record) has
+     * nothing to screen. That is an unavailable screen, never a clear one: held, and nothing is
+     * sent to the lists in the name's place.
+     */
+    @Test
+    fun `an unavailable party name fails closed exactly as an unavailable screen does`() = runBlocking<Unit> {
+        val command = convertCommand()
+        coEvery { rateRepo.findLatest(any(), any(), any()) } returns fxRate()
+        coEvery { partyNamePort.screeningSubject(command.partyId) } throws
+            PartyNameUnavailableException(command.partyId, RuntimeException("party-service down"))
+
+        val case = slot<OpenAmlCaseCommand>()
+        coEvery { amlCasePort.openCase(capture(case)) } just Runs
+
+        val result = service.convert(command)
+
+        assertThat(result.status).isEqualTo(FxConversionStatus.PENDING)
+        assertThat(result.settledAt).isNull()
+        assertThat(case.captured.riskLevel).isEqualTo(AmlCaseSeverity.MEDIUM)
+        assertThat(case.captured.alertCode).isEqualTo("SCREENING_UNAVAILABLE")
+        coVerify(exactly = 0) { screeningPort.screen(any(), any(), any()) }
+        coVerify(exactly = 0) { convRepo.saveWithOutbox(any(), any()) }
+    }
+
+    /** Every held name reaches the lists in ONE call, with the kind the record carries. */
+    @Test
+    fun `a listed trading name behind a clean legal name blocks the conversion`() = runBlocking<Unit> {
+        val command = convertCommand()
+        val company = ScreeningSubject(listOf("Clean Legal s.r.o.", "Listed Trading"), ScreeningEntityType.ORGANIZATION)
+        coEvery { rateRepo.findLatest(any(), any(), any()) } returns fxRate()
+        coEvery { partyNamePort.screeningSubject(command.partyId) } returns company
+        coEvery { screeningPort.screen(any(), any(), any()) } answers {
+            val subject = firstArg<ScreeningSubject>()
+            val hit = "Listed Trading" in subject.names
+            val status = if (hit) ScreeningMatchStatus.HIT else ScreeningMatchStatus.CLEAR
+            ScreeningResult(subject.primaryName, ScreeningRole.DEBTOR, status, if (hit) 1.0 else 0.0, null)
+        }
+
+        val result = service.convert(command)
+
+        assertThat(result.status).isEqualTo(FxConversionStatus.FAILED)
+        coVerify(exactly = 1) { screeningPort.screen(company, ScreeningRole.DEBTOR, any()) }
         coVerify(exactly = 0) { convRepo.saveWithOutbox(any(), any()) }
     }
 
@@ -347,7 +417,7 @@ class FxServiceTest {
         val command = convertCommand()
         coEvery { rateRepo.findLatest(any(), any(), any()) } returns fxRate()
         coEvery { screeningPort.screen(any(), any(), any()) } returns
-            ScreeningResult(command.partyName, ScreeningRole.DEBTOR, ScreeningMatchStatus.POTENTIAL_HIT, 0.50, null)
+            ScreeningResult(HELD_NAME, ScreeningRole.DEBTOR, ScreeningMatchStatus.POTENTIAL_HIT, 0.50, null)
         coEvery { amlCasePort.openCase(any()) } throws RuntimeException("aml-service down")
 
         val result = service.convert(command)
@@ -437,6 +507,11 @@ class FxServiceTest {
         coVerify(exactly = 1) { fraudScoringPort.score(any()) }
     }
 
+    private companion object {
+        const val HELD_NAME = "Alice Example"
+        val HELD_SUBJECT = ScreeningSubject(listOf(HELD_NAME), ScreeningEntityType.INDIVIDUAL)
+    }
+
     private fun convertCommand(fromAmountMinorUnits: Long = 10_000L) = ConvertCommand(
         idempotencyKey = "idem-1",
         partyId = UUID.randomUUID(),
@@ -444,7 +519,6 @@ class FxServiceTest {
         fromCurrency = "EUR",
         toCurrency = "CZK",
         fromAmountMinorUnits = fromAmountMinorUnits,
-        partyName = "Alice Example",
     )
 
     private fun fxRate(validTo: Instant = Instant.parse("2026-12-31T23:59:59Z")) = FxRate(

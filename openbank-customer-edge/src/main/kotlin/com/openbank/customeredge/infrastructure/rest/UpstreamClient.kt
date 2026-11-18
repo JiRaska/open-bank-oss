@@ -300,27 +300,27 @@ class UpstreamClient {
             builder.queryParam(name, "{$parameter}")
             values[parameter] = value
         }
-        get(builder.buildFromMap(values), partyId, requestTimeoutMs)
+        sendGet(builder.buildFromMap(values).toASCIIString(), partyId, requestTimeoutMs)
     } catch (e: Exception) {
-        // Query values may contain opaque paging tokens, so do not log them.
-        Log.error("upstream call to $baseUrl failed: ${e::class.qualifiedName}: ${e.message}", e)
+        // Some request exceptions include their complete URI, which may carry opaque query values.
+        Log.error("structured upstream GET failed: ${e::class.qualifiedName}")
         Response.status(502).entity("""{"error":"upstream unavailable"}""")
             .type(MediaType.APPLICATION_JSON).build()
     }
 
     /** Cap a single call by the caller's remaining aggregate budget. */
     fun get(url: String, partyId: String?, timeoutMs: Long): Response = try {
-        get(validatedUri(url), partyId, timeoutMs)
+        sendGet(url, partyId, timeoutMs)
     } catch (e: Exception) {
         Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
         Response.status(502).entity("""{"error":"upstream unavailable"}""")
             .type(MediaType.APPLICATION_JSON).build()
     }
 
-    private fun get(uri: URI, partyId: String?, timeoutMs: Long): Response {
+    private fun sendGet(url: String, partyId: String?, timeoutMs: Long): Response {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceIn(1, requestTimeoutMs))
         val request = upstreamRequest()
-            .uri(uri)
+            .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken(deadline)}")
             .apply { if (partyId != null) header(PARTY_HEADER, partyId) }
             .header("Accept", "application/json")
@@ -540,7 +540,13 @@ class UpstreamClient {
     // Idempotency-aware POST: forwards the caller's Idempotency-Key (required by some upstreams,
     // e.g. domestic-payment) so an app retry replays rather than duplicates. A blank/absent key
     // falls back to a generated one so the upstream contract is always satisfied.
-    private fun post(uri: URI, partyId: String, body: String, idempotencyKey: String?): Response {
+    private fun post(
+        uri: URI,
+        partyId: String,
+        body: String,
+        idempotencyKey: String?,
+        keepRetryAfter: Boolean = false,
+    ): Response {
         val request = upstreamRequest()
             .uri(uri)
             .header("Authorization", "Bearer ${serviceToken()}")
@@ -551,11 +557,25 @@ class UpstreamClient {
             .timeout(Duration.ofMillis(requestTimeoutMs))
             .POST(HttpRequest.BodyPublishers.ofString(body)).build()
         val r = http.send(request, HttpResponse.BodyHandlers.ofString())
-        return jsonResponse(r)
+        if (!keepRetryAfter) return jsonResponse(r)
+        val retryAfter = r.headers().firstValue("Retry-After").orElse(null) ?: return jsonResponse(r)
+        return Response.fromResponse(jsonResponse(r)).header("Retry-After", retryAfter).build()
     }
 
     fun post(url: String, partyId: String, body: String, idempotencyKey: String? = null): Response = try {
         post(validatedUri(url), partyId, body, idempotencyKey)
+    } catch (e: Exception) {
+        Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * [post] that also keeps the upstream's `Retry-After`, for the one caller that honours it
+     * (the reservation-bound delegated create, #16000). Every other route keeps today's headers.
+     */
+    fun postKeepingRetryAfter(url: String, partyId: String, body: String, idempotencyKey: String): Response = try {
+        post(validatedUri(url), partyId, body, idempotencyKey, keepRetryAfter = true)
     } catch (e: Exception) {
         Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
         Response.status(502).entity("""{"error":"upstream unavailable"}""")

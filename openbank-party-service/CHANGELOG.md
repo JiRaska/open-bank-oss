@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.32.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.32.0...party-service-v0.32.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **party:** revoke a kyb case's mandates when the case ends after SIGNED ([#16220](https://github.com/JiRaska/open-bank-oss/issues/16220)) ([dc97cf0](https://github.com/JiRaska/open-bank-oss/commit/dc97cf009dd4e5b8f491dad4ecfb4e6a8f5119c3))
+
+## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.31.0...party-service-v0.32.0) (2026-11-14)
+
+
+### Features
+
+* **kyb:** publish verified statutory representation rules ([#15662](https://github.com/JiRaska/open-bank-oss/issues/15662)) ([3e1956f](https://github.com/JiRaska/open-bank-oss/commit/3e1956fab5bc3cc9c83adffcc5351ddf1172289e))
+
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.30.0...party-service-v0.31.0) (2026-11-13)
+
+
+### Features
+
+* **party:** let a compliance officer see who an AML case is about ([#15957](https://github.com/JiRaska/open-bank-oss/issues/15957)) ([81190ff](https://github.com/JiRaska/open-bank-oss/commit/81190ff929c640c0fd4816f3ce9786d24882168d)), closes [#15939](https://github.com/JiRaska/open-bank-oss/issues/15939)
+
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.29.2...party-service-v0.30.0) (2026-11-12)
+
+
+### Features
+
+* **party,admin-ui,audit:** mask backoffice profiles and audit full access ([#15617](https://github.com/JiRaska/open-bank-oss/issues/15617)) ([548fa68](https://github.com/JiRaska/open-bank-oss/commit/548fa683b80260e3a82e57053c4600732faa00d7))
+
 ## [0.29.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.29.1...party-service-v0.29.2) (2026-11-06)
 
 

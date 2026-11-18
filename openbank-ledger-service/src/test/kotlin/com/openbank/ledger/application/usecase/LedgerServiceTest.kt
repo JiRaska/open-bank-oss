@@ -24,6 +24,7 @@ import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.ledger.domain.model.JournalStatus
+import com.openbank.ledger.domain.model.LedgerConflictException
 import com.openbank.ledger.domain.model.LedgerValidationException
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
@@ -35,12 +36,15 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import jakarta.persistence.PersistenceException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -229,6 +233,25 @@ class LedgerServiceTest {
             assertThat(result).isEqualTo(existing)
             coVerify(exactly = 0) { journalRepository.save(any(), any(), any()) }
             coVerify(exactly = 0) { journalRepository.nextEntryNumber() }
+        }
+
+        @ParameterizedTest
+        @ValueSource(booleans = [false, true])
+        fun `raced journal replay rejects a different origin`(synthetic: Boolean): Unit = runBlocking {
+            val command = postCommand().copy(synthetic = synthetic)
+            val winner = postedEntry(command.transactionId).copy(synthetic = !synthetic)
+            coEvery { journalRepository.findByIdempotencyKey(command.idempotencyKey) } returnsMany
+                listOf(null, winner)
+            mockGlAccounts()
+            coEvery { journalRepository.nextEntryNumber() } returns 1L
+            coEvery { journalRepository.save(any(), any(), any()) } throws
+                PersistenceException("duplicate key violates unique constraint ledger_idempotency_pkey")
+
+            val failure = runCatching { service.postJournal(command) }.exceptionOrNull()
+
+            assertThat(failure).isInstanceOf(LedgerConflictException::class.java)
+            coVerify(exactly = 2) { journalRepository.findByIdempotencyKey(command.idempotencyKey) }
+            verify(exactly = 0) { metrics.ledgerPosting(any(), any()) }
         }
 
         @Test

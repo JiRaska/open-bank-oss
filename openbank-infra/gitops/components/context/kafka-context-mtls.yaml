@@ -84,7 +84,7 @@ metadata:
   namespace: context
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
-    openbank.io/rotation-deadline: "2027-09-13"
+    open-bank.tech/rotation-deadline: "2027-09-13"
 spec:
   refreshInterval: 1h
   secretStoreRef: { kind: ClusterSecretStore, name: kafka-messaging-certs }
@@ -98,7 +98,7 @@ metadata:
   namespace: context
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
-    openbank.io/rotation-deadline: "2027-09-13"
+    open-bank.tech/rotation-deadline: "2027-09-13"
 spec:
   refreshInterval: 1h
   secretStoreRef: { kind: ClusterSecretStore, name: kafka-messaging-certs }

@@ -38,7 +38,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-ledger-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "73539513109a5011"
+        openbank.tech/policy-checksum: "d6918195351ce73f"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -49,7 +49,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ledger-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ledger-service:sandbox-9e765663
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ledger-service:sandbox-bd011ccf@sha256:372d7f7704c02540573cf6ed86e102d189580917bfc5e3be0838b7582b1f1b80
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -65,6 +65,10 @@ spec:
             # until their own reviewed migrations; same shape as account-service's 8443 listener.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
@@ -172,6 +176,14 @@ spec:
             # is no posting shape in this environment that enforce would refuse.
             # Rollback is this value alone: set back to "shadow".
             - name: LEDGER_DAY_LOCK_MODE
+              value: "enforce"
+            # Period freeze lock (ADR-0096 D1) shadow -> enforce. Shadow only counts a
+            # journal dated into a FROZEN month, so the ledger could diverge from figures
+            # already reported. Readout of openbank_ledger_period_lock_decisions_total over
+            # the last 30 days (2026-11-11): 13 decisions, all outcome=allowed, zero
+            # would_refuse, so enforce refuses no posting seen in that window.
+            # Rollback is this line alone: remove it (the code default is shadow).
+            - name: LEDGER_PERIOD_LOCK_MODE
               value: "enforce"
           startupProbe:
             tcpSocket:

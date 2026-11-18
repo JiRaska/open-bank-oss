@@ -41,3 +41,64 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## Owner portfolio path parameter
 
 `GET /api/v1/delegation-portfolios/owner/{ownerPartyId}` names its path parameter `ownerPartyId`, in the OpenAPI document and in the served resource alike. It must equal the authenticated active profile; any other value is rejected with `403`. Generated clients use `ownerPartyId`; the shared `partyId` parameter does not apply to this route.
+
+
+## Business payment approval retries
+
+The original consumed SCA challenge replays only the same entity, initiator, instruction kind
+and canonical frozen payload. A changed instruction with the same challenge receives HTTP 409
+before a new request or outbox event can be written.
+
+## Which resource types a new offer may name (ADR-0375 D5 + D6)
+
+`CAPABILITY_MATRIX` still lists `PAYMENT` and `STATEMENT`, and must: historical grants carry them
+and the aggregate is how such a row is read back. `OFFERABLE_RESOURCE_TYPES` is the narrower set a
+**new** offer may name — `ACCOUNT`, `SAVINGS_GOAL`, `CARD`, `DOCUMENT` — and `validateCandidate`
+refuses anything else with `RESOURCE_TYPE_NOT_OFFERABLE`, before the ownership lookup.
+
+**Why those two, and why the type rather than the id.** D5 leaves their ownership `UNVERIFIABLE` by
+measurement: a statement is addressed by `(accountId, currency, legalSequence)` and no route
+resolves a statement id, and a payment id resolves in no single service across six rails. D6 then
+makes the rendered sealed artifact the one delivery mechanism for a shared object, and
+`ExternalDisclosureService.issue` requires `resourceType == DOCUMENT`. So even once an oracle
+existed, a grant over these two could never be *delivered* — the mechanism refuses them by type.
+Reporting that as an ownership failure would invite the grantor to retry with a different resource
+id, and no id would ever work.
+
+**Nothing is lost.** A statement already renders as a document
+(`GET /api/v1/statements/{accountId}/{currency}/{legalSequence}/document`), so sharing one with an
+outsider is a `DOCUMENT` grant over that artifact — oracle and atomic view counting included.
+Ongoing access to an account's statements is a different thing with its own capability,
+`ACCOUNT_DOWNLOAD_STATEMENTS` (D7).
+
+This turns a runtime refusal into a declared one: offers already failed on the UNVERIFIABLE oracle,
+so no working path changes — only the error the grantor sees, and the fact that the vocabulary now
+says so instead of each request discovering it. The `delegation-capability-enforcement` gate derives
+its subjects from the matrix **intersected with** this set, so a type nobody can offer needs no
+declared enforcer.
+
+## Exposure is delivered sealed, never by shaping a live read (ADR-0375 D6)
+
+`DelegationGrant.exposure` — `redactionRules`, `maxViews`, `watermark`, `allowDownload` — is
+refused on every path that could create or revive authority: a new offer, `accept`, and
+`reinstate`. That refusal is the **declared end state**, not a gap. Returning the original object
+bytes with a redaction or view-count field merely echoed is a confidentiality defect that reads,
+from the grantor's screen, exactly like an enforced control, and `maxViews` on a streaming route
+could never be atomic.
+
+The mechanism is `ExternalDisclosure`: a rendered sealed artifact over the document, with its own
+expiry, OTP, link secret and view limit, whose consumption is a locked read-modify-write inside one
+transaction (`ExternalDisclosureRepositoryImpl.mutateById`).
+
+**The defect this uncovered.** `issue` used to require `grant.exposure` to be non-null and clamp
+the disclosure's view limit to it. No grant can be ACTIVE *and* carry exposure — the offer refuses
+it and `accept`/`reinstate` refuse it — so that requirement threw for every input a real caller
+could present, and the sealed mechanism was unreachable. Its unit test did not see it because the
+fixture hand-built an ACTIVE grant *with* exposure, a combination the lifecycle cannot produce. The
+dependency also pointed the wrong way: the disclosure carries its own limit, which is the thing
+that is actually enforced.
+
+`check-delegation-exposure-sealed.py` (gate `delegation-exposure-sealed`) keeps both halves honest:
+the refusal must stay, the sealed path's row lock must stay, every file referencing grant exposure
+must be classified in `rules.yaml: delegation_exposure_delivery.referenced_in`, and `role:
+enforcement` is refused outright.

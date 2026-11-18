@@ -24,6 +24,7 @@ import com.openbank.account.application.port.`in`.UnfreezeAccountCommand
 import com.openbank.account.application.port.`in`.UpdateSavingsGoalCommand
 import com.openbank.account.infrastructure.rest.dto.AccountBalanceResponse
 import com.openbank.account.infrastructure.rest.dto.AccountResponse
+import com.openbank.account.infrastructure.rest.dto.AccountStandingResponse
 import com.openbank.account.infrastructure.rest.dto.AddPocketRequest
 import com.openbank.account.infrastructure.rest.dto.CloseAccountRequest
 import com.openbank.account.infrastructure.rest.dto.FreezeAccountRequest
@@ -589,6 +590,7 @@ private fun com.openbank.account.domain.model.Account.toResponse() = AccountResp
             pinnedAt = it.pinnedAt,
         )
     },
+    standing = standing.let { AccountStandingResponse(it.mayDebit, it.mayCredit, it.reason) },
 )
 
 private fun CursorPage<com.openbank.account.domain.model.Account>.toResponse() =

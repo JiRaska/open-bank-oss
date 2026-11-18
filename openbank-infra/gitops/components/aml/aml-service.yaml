@@ -9,7 +9,7 @@ metadata:
   annotations:
     # All cross-namespace AML callers declare their target port; keep HTTP 8117
     # available to admin-ui and security-scanner while pinning migrated callers to 8443.
-    openbank.io/port-scoped-ingress: "true"
+    open-bank.tech/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
@@ -35,7 +35,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-aml-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "b4a65007176229e8"
+        openbank.tech/policy-checksum: "f2f0c59a483a96cb"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -46,7 +46,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: aml-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-aml-service:sandbox-e8e3b10a@sha256:bed6210052ae68d116a430a611984666fde4166c4d0f5bf4257fa5b360232ae0
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-aml-service:sandbox-1d0ff238@sha256:493d9871a2c7a0a680a427ab2c8c5fd62b73da23f3df90ec2083c957ec4c0950
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -100,6 +100,10 @@ spec:
             # 8443 in a follow-up change, once this listener is live. Same shape as ledger-service.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT

@@ -5,6 +5,7 @@
 package com.openbank.dispute.domain.model
 
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
@@ -97,6 +98,150 @@ class EvidenceChainTest {
         val result = EvidenceChain.verify(disputeId, listOf(second, first))
 
         assertThat(result.intact).isFalse()
+    }
+
+    @Test
+    fun `recordHash is stable across a timestamptz database round trip`() {
+        // Postgres TIMESTAMPTZ stores microsecond precision normalised to UTC. A stamped evidence
+        // item carries OffsetDateTime.now() with nanoseconds and a zone offset (e.g. +01:00); the
+        // row read back carries the same instant as a UTC microsecond value. The hashed form must
+        // be identical for both, or verify() reports an intact chain as broken.
+        val stampedAt = OffsetDateTime.parse("2026-11-16T10:59:21.846637891+01:00")
+        val stamped = EvidenceChain.append(
+            rawEvidence("customer", "STATEMENT").copy(submittedAt = stampedAt),
+            previous = null,
+        )
+
+        val asReadBackFromPostgres = stamped.copy(
+            submittedAt = stampedAt.toInstant().atOffset(ZoneOffset.UTC),
+        )
+
+        assertThat(EvidenceChain.recordHash(asReadBackFromPostgres))
+            .isEqualTo(EvidenceChain.recordHash(stamped))
+        assertThat(
+            EvidenceChain.verify(disputeId, listOf(asReadBackFromPostgres)).intact,
+        ).isTrue()
+    }
+
+    @Test
+    fun `verify detects a swapped evidence id on a stored item`() {
+        val first = EvidenceChain.append(rawEvidence("customer", "STATEMENT"), previous = null)
+        val second = EvidenceChain.append(rawEvidence("ops", "TRANSACTION_REF"), previous = first)
+        val swapped = second.copy(id = UUID.randomUUID())
+
+        assertThat(EvidenceChain.recordHash(swapped)).isNotEqualTo(second.recordHash)
+        val result = EvidenceChain.verify(disputeId, listOf(first, swapped))
+
+        assertThat(result.intact).isFalse()
+        assertThat(result.itemsChecked).isEqualTo(1)
+        assertThat(result.firstBrokenEvidenceId).isEqualTo(swapped.id)
+    }
+
+    /**
+     * A row as stamped under a legacy (pre-V12) form: its stored recordHash is opaque — no
+     * rendering of the stored row reproduces it — and its version is NULL.
+     */
+    private fun legacyChain(n: Int): List<DisputeEvidence> {
+        var prev = EvidenceChain.GENESIS_HASH
+        return (0 until n).map { i ->
+            rawEvidence("legacy-$i", "STATEMENT").copy(
+                sequence = i.toLong(),
+                prevHash = prev,
+                recordHash = "%064x".format(i + 1),
+                hashVersion = null,
+            ).also { prev = it.recordHash!! }
+        }
+    }
+
+    @Test
+    fun `new items are stamped with the current hash version`() {
+        val item = EvidenceChain.append(rawEvidence("customer", "STATEMENT"), previous = null)
+
+        assertThat(item.hashVersion).isEqualTo(EvidenceChain.HASH_VERSION_ID_MICROS)
+    }
+
+    @Test
+    fun `hash version is covered by the hash`() {
+        val item = EvidenceChain.append(rawEvidence("customer", "STATEMENT"), previous = null)
+        val rewritten = item.copy(hashVersion = (EvidenceChain.HASH_VERSION_ID_MICROS + 1).toShort())
+
+        assertThatThrownBy { EvidenceChain.recordHash(rewritten) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        val result = EvidenceChain.verify(disputeId, listOf(rewritten))
+        assertThat(result.intact).isFalse()
+        assertThat(result.firstBrokenEvidenceId).isEqualTo(item.id)
+    }
+
+    @Test
+    fun `legacy prefix followed by versioned items is intact and reports the legacy count`() {
+        val legacy = legacyChain(3)
+        val first = EvidenceChain.append(rawEvidence("ops", "TRANSACTION_REF"), previous = legacy.last())
+        val second = EvidenceChain.append(rawEvidence("merchant", "PSD2_MESSAGE_ID"), previous = first)
+
+        val result = EvidenceChain.verify(disputeId, legacy + first + second)
+
+        assertThat(first.prevHash).isEqualTo(legacy.last().recordHash)
+        assertThat(result.intact).isTrue()
+        assertThat(result.itemsChecked).isEqualTo(2)
+        assertThat(result.legacyItems).isEqualTo(3)
+    }
+
+    @Test
+    fun `an all-legacy chain is intact but vouches for no item`() {
+        val result = EvidenceChain.verify(disputeId, legacyChain(2))
+
+        assertThat(result.intact).isTrue()
+        assertThat(result.itemsChecked).isEqualTo(0)
+        assertThat(result.legacyItems).isEqualTo(2)
+    }
+
+    @Test
+    fun `downgrading a versioned item to legacy after a versioned item breaks the chain`() {
+        val first = EvidenceChain.append(rawEvidence("customer", "STATEMENT"), previous = null)
+        val second = EvidenceChain.append(rawEvidence("ops", "TRANSACTION_REF"), previous = first)
+        val downgraded = second.copy(hashVersion = null, description = "forged description")
+
+        val result = EvidenceChain.verify(disputeId, listOf(first, downgraded))
+
+        assertThat(result.intact).isFalse()
+        assertThat(result.firstBrokenEvidenceId).isEqualTo(downgraded.id)
+        assertThat(result.itemsChecked).isEqualTo(1)
+    }
+
+    @Test
+    fun `tampering a legacy item's content is NOT detectable - known limitation`() {
+        val legacy = legacyChain(2)
+        val next = EvidenceChain.append(rawEvidence("ops", "TRANSACTION_REF"), previous = legacy.last())
+        val tampered = listOf(legacy[0].copy(description = "forged description"), legacy[1], next)
+
+        val result = EvidenceChain.verify(disputeId, tampered)
+
+        // Documented in EvidenceChain.verify KDoc and the threat model: legacy content is unverifiable.
+        assertThat(result.intact).isTrue()
+        assertThat(result.legacyItems).isEqualTo(2)
+    }
+
+    @Test
+    fun `tampering a legacy item's stored recordHash breaks the first versioned link`() {
+        val legacy = legacyChain(2)
+        val next = EvidenceChain.append(rawEvidence("ops", "TRANSACTION_REF"), previous = legacy.last())
+        val tampered = listOf(legacy[0], legacy[1].copy(recordHash = "f".repeat(64)), next)
+
+        val result = EvidenceChain.verify(disputeId, tampered)
+
+        assertThat(result.intact).isFalse()
+        assertThat(result.firstBrokenEvidenceId).isEqualTo(next.id)
+        assertThat(result.legacyItems).isEqualTo(2)
+    }
+
+    @Test
+    fun `deleting a legacy item breaks the linkage`() {
+        val legacy = legacyChain(3)
+
+        val result = EvidenceChain.verify(disputeId, listOf(legacy[0], legacy[2]))
+
+        assertThat(result.intact).isFalse()
+        assertThat(result.firstBrokenEvidenceId).isEqualTo(legacy[2].id)
     }
 
     @Test

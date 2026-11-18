@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import AxeBuilder from '@axe-core/playwright'
 
 const portal = 'http://127.0.0.1:8098'

@@ -100,6 +100,12 @@ openbank:
         PENSION_PRODUCT_OWNER:
           scope: ${CATALOG_PENSION_PRODUCT_SCOPE:pension:product-approve}
           realm-role: ROLE_PENSION_PRODUCT_OWNER
+        FINCRIME_AML_APPROVER:
+          scope: fincrime:aml-shadow-approve
+          realm-role: ROLE_COMPLIANCE
+        FINCRIME_FRAUD_APPROVER:
+          scope: fincrime:fraud-shadow-approve
+          realm-role: ROLE_RISK
       # Machine clients that may read approval evidence: azp -> service-account username.
       evidence-readers:
         openbank-pension: service-account-openbank-pension

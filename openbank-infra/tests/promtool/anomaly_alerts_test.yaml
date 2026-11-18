@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The 2026-11-14 alert-noise retune made TrafficDropAnomaly, SpanLatencyTrendAnomaly and
+# NodeDiskWillFillIn4h much quieter (backtested 16 -> 0, 17 -> 0, 66 -> 1 firing onsets over
+# 7d). A quieter rule is only an improvement if it still fires on the thing it exists for, so
+# every case here is a pair: the known positive must fire, and the noise shape that used to
+# fire must not.
+rule_files:
+  - prometheus-rules-forecast.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # --- TrafficDropAnomaly -------------------------------------------------------------
+  - interval: 1m
+    name: "traffic collapsing to zero fires (wedged consumer)"
+    input_series:
+      # 1 rps for 2h, then no calls at all for 40m.
+      - series: 'traces_spanmetrics_calls_total{service="svc"}'
+        values: "0+60x120 7200+0x40"
+    alert_rule_test:
+      - eval_time: 155m
+        alertname: TrafficDropAnomaly
+        exp_alerts:
+          - exp_labels:
+              service: svc
+              severity: warning
+            exp_annotations:
+              summary: "Traffic on svc dropped far below trend"
+              description: "Request rate is below half of (and >3σ below) its baseline from 30-90 minutes ago, for >20m — possible silent upstream outage or wedged consumer."
+              backtest: "7d to 2026-11-14: 16 recorded firing onsets before, 4 emulated after (alert-backtest.py)"
+
+  - interval: 1m
+    name: "a flat series dipping a few percent does not fire (the 3-sigma-only noise)"
+    input_series:
+      # 1 rps for 2h, then 0.95 rps: far outside a zero-width sigma band, nowhere near half.
+      - series: 'traces_spanmetrics_calls_total{service="svc"}'
+        values: "0+60x120 7200+57x40"
+    alert_rule_test:
+      - eval_time: 155m
+        alertname: TrafficDropAnomaly
+        exp_alerts: []
+
+  # --- SpanLatencyTrendAnomaly --------------------------------------------------------
+  - interval: 1m
+    name: "p99 jumping from ~50ms to ~2s for 40m fires"
+    input_series:
+      # 1 rps; for 4h every call <=0.05s, then every call in (1, 2.5].
+      - series: 'traces_spanmetrics_latency_bucket{service="svc",le="0.05"}'
+        values: "0+60x240 14400+0x50"
+      - series: 'traces_spanmetrics_latency_bucket{service="svc",le="1"}'
+        values: "0+60x240 14400+0x50"
+      - series: 'traces_spanmetrics_latency_bucket{service="svc",le="2.5"}'
+        values: "0+60x240 14400+60x50"
+      - series: 'traces_spanmetrics_latency_bucket{service="svc",le="+Inf"}'
+        values: "0+60x240 14400+60x50"
+    alert_rule_test:
+      - eval_time: 288m
+        alertname: SpanLatencyTrendAnomaly
+        exp_alerts:
+          - exp_labels:
+              service: svc
+              severity: warning
+            exp_annotations:
+              summary: "P99 latency on svc deviating above its trend"
+              description: "Span p99 is >2x and >3σ above its 3h baseline (ending 1h ago), and above 250ms, for >30m — a regime change, independent of the absolute SLO threshold."
+              backtest: "7d to 2026-11-14: 17 emulated firing onsets before (18 recorded), 3 after (alert-backtest.py)"
+
+  - interval: 1m
+    name: "a small p99 rise under the 250ms floor does not fire"
+    input_series:
+      # p99 moves from the <=0.05 bucket into (0.05, 0.1]: sigma-band breach, still tiny.
+      - series: 'traces_spanmetrics_latency_bucket{service="svc",le="0.05"}'
+        values: "0+60x240 14400+0x50"
+      - series: 'traces_spanmetrics_latency_bucket{service="svc",le="0.1"}'
+        values: "0+60x240 14400+60x50"
+      - series: 'traces_spanmetrics_latency_bucket{service="svc",le="+Inf"}'
+        values: "0+60x240 14400+60x50"
+    alert_rule_test:
+      - eval_time: 288m
+        alertname: SpanLatencyTrendAnomaly
+        exp_alerts: []
+
+  # --- NodeDiskWillFillIn4h -----------------------------------------------------------
+  # time() starts at the epoch in promtool, so boot_time 0 = "up since t=0".
+  - interval: 1m
+    name: "an old node steadily filling fires"
+    input_series:
+      # 100 GB disk losing 200 MB/min: ~5 GB free at 7h50m, so it fills well inside 4h.
+      - series: 'node_filesystem_avail_bytes{instance="n1",device="/dev/x",mountpoint="/",fstype="xfs"}'
+        values: "99000000000-200000000x480"
+      - series: 'node_filesystem_size_bytes{instance="n1",device="/dev/x",mountpoint="/",fstype="xfs"}'
+        values: "100000000000+0x480"
+      - series: 'node_boot_time_seconds{instance="n1"}'
+        values: "0+0x480"
+    alert_rule_test:
+      - eval_time: 470m
+        alertname: NodeDiskWillFillIn4h
+        exp_alerts:
+          - exp_labels:
+              instance: n1
+              device: /dev/x
+              mountpoint: /
+              fstype: xfs
+              severity: warning
+            exp_annotations:
+              summary: "Disk on n1 (/) fills within ~4h"
+              description: "Projected to reach 0 bytes within 4h on the 6h trend — extend the volume or reclaim space."
+              backtest: "7d to 2026-11-14: 66 firing onsets before (calibrated 66/66), 1 after (alert-backtest.py)"
+
+  - interval: 1m
+    name: "the same slope on a node booted under 6h ago does not fire (image-pull fill)"
+    input_series:
+      - series: 'node_filesystem_avail_bytes{instance="n1",device="/dev/x",mountpoint="/",fstype="xfs"}'
+        values: "99000000000-200000000x480"
+      - series: 'node_filesystem_size_bytes{instance="n1",device="/dev/x",mountpoint="/",fstype="xfs"}'
+        values: "100000000000+0x480"
+      # booted at t=3h, so at 7h50m it is under 5h old.
+      - series: 'node_boot_time_seconds{instance="n1"}'
+        values: "10800+0x480"
+    alert_rule_test:
+      - eval_time: 470m
+        alertname: NodeDiskWillFillIn4h
+        exp_alerts: []

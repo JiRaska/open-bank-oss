@@ -141,7 +141,7 @@ def reviewed_gitops_operations(short: str) -> bool:
             if not isinstance(document, dict) or document.get("kind") not in ("Deployment", "Rollout"):
                 continue
             annotations = (document.get("metadata") or {}).get("annotations") or {}
-            if annotations.get("openbank.io/operations-mode") == "reviewed-gitops":
+            if annotations.get("open-bank.tech/operations-mode") == "reviewed-gitops":
                 return True
     return False
 

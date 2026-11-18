@@ -46,6 +46,27 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
   `ROLE_API`/`ROLE_OPERATOR`/`ROLE_ADMIN`) — this is a new set of *callers*, not a new
   authentication or authorization boundary.
 
+### Ownership projection (added 2026-11-12, ADR-0375 D5)
+
+`GET /api/v1/documents/{id}/owner` is a new inbound boundary with its own authorization action,
+`document.verifyOwnership`, pinned by `document_rest_ext.rego` to
+`service-account-openbank-delegation` and vetoed for every other caller — including the customer
+edge, which base `rest.rego` otherwise grants the whole `document.` family.
+
+- **Why a separate action rather than `document.read`.** `document.read` returns the whole metadata
+  record (template, storage key, sha256, case and product refs). delegation-service needs only the
+  owning party, and the authority to MINT a delegation over a document must not also permit reading
+  it. Granting `document.read` to the delegation principal would have been the smaller diff and the
+  larger boundary.
+- **Information disclosure.** The response is `{id, partyId}`. A 404 is returned both for an unknown
+  document and for one with no `partyRef`, so a caller enumerating ids learns nothing about which
+  documents exist.
+- **Spoofing / elevation.** The veto is explicit rather than relying on the absence of an allow
+  reason, so a later broad `document.` rule or a role-matrix line cannot re-admit another subject.
+  Verified with `opa eval` against the generated bundle: the pinned subject allows with reason
+  `service-delegation-document-ownership`; the shared `openbank-services` subject, the edge, and the
+  same subject asking for `document.read` all resolve false.
+
 ## Threats & mitigations (STRIDE)
 | Threat | Mitigation |
 | --- | --- |
@@ -70,6 +91,13 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
   retention/erasure job — a tracked follow-up.
 
 ## Change log
+
+- **2026-11-12** — **Ownership projection endpoint added** (ADR-0375 D5). New inbound route
+  `GET /api/v1/documents/{id}/owner` returning `{id, partyId}` only, under the new OPA action
+  `document.verifyOwnership` pinned to `service-account-openbank-delegation` with an explicit veto
+  for all other callers. No change to document content paths, signing, retention or storage.
+  `openapi.yaml` 1.6.0 → 1.7.0 (additive). Rollback: revert; delegation-service then returns to
+  refusing every object grant, which is fail-closed.
 
 - **2026-09-03** — Doc correction, no behavior change: §2 named the billing ingress topic
   `openbank.billing.billing.event`, but no such topic exists — the string occurs nowhere in the

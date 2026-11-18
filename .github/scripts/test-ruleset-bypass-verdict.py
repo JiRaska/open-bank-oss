@@ -74,7 +74,7 @@ class BypassVerdictTest(unittest.TestCase):
                             guard.require_live_strict(root, None, "fixture/bank")
                     read.assert_called_once_with(
                         ["gh", "api", "repos/fixture/bank/rules/branches/main"],
-                        capture_output=True, text=True, timeout=30, check=False)
+                        capture_output=True, text=True, timeout=guard.PROTECTION_TIMEOUT, check=False)
 
     def test_checker_runner_and_json_agree(self):
         gate = next(g for g in yaml.safe_load((ROOT / ".github/gates/gates.yaml").read_text())["gates"]
@@ -180,13 +180,26 @@ print(json.dumps(value))
     def test_consumer_provenance_and_binding(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/ci.yml').read_text())
         job = workflow['jobs']['ruleset-evidence']
-        self.assertEqual(job['permissions'], {'actions': 'read'})
+        self.assertEqual(job['permissions'], {'actions': 'read', 'contents': 'read'})
         self.assertNotIn('secrets.', json.dumps(job))
         self.assertNotIn('continue-on-error', json.dumps(job))
         self.assertIn('ruleset-evidence', workflow['jobs']['gates']['needs'])
         self.assertIn('always()', workflow['jobs']['gates']['if'])
         self.assertIn('ruleset-evidence', workflow['jobs']['validate']['needs'])
-        locate, download, read = job['steps']
+        receipt = yaml.safe_load((ROOT / '.github/actions/receive-ruleset-evidence/action.yml').read_text())
+        self.assertEqual(receipt['runs']['using'], 'composite')
+        self.assertEqual(job['steps'][1]['uses'], './.github/actions/receive-ruleset-evidence')
+        self.assertEqual(job['steps'][1]['id'], 'read')
+        locate, download, read = receipt['runs']['steps']
+        rerun = next(s for s in workflow['jobs']['gates']['steps']
+                     if s.get('id') == 'current-evidence')
+        self.assertEqual(rerun['uses'], './.github/actions/receive-ruleset-evidence')
+        self.assertEqual(rerun['if'], "github.run_attempt > 1 && matrix.slug == 'lint-supplychain-security'")
+        gate = next(s for s in workflow['jobs']['gates']['steps'] if s.get('name') == 'Run gates')
+        self.assertEqual(gate['env']['RULESET_BYPASS_SNAPSHOT'],
+                         '${{ steps.current-evidence.outputs.snapshot || needs.ruleset-evidence.outputs.snapshot }}')
+        self.assertNotIn('continue-on-error', json.dumps(rerun))
+        self.assertEqual(workflow['jobs']['gates']['timeout-minutes'], 15)
         self.assertEqual(download['with']['artifact-ids'], '${{ steps.locate.outputs.artifact-id }}')
         self.assertEqual(download['with']['run-id'], '${{ steps.locate.outputs.run-id }}')
         harness = r'''

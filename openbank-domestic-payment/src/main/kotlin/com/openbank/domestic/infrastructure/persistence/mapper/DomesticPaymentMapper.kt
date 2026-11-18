@@ -9,6 +9,8 @@ import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.domestic.domain.model.HoldDecision
+import com.openbank.domestic.domain.model.RecordedFraudScore
 import com.openbank.domestic.infrastructure.persistence.entity.DomesticPaymentEntity
 import com.openbank.libs.domain.money.Money
 
@@ -43,9 +45,19 @@ fun DomesticPayment.toEntity() = DomesticPaymentEntity().also {
     it.updatedAt = updatedAt
     it.initiatedByPartyId = initiatedByPartyId
     it.requestFingerprint = requestFingerprint
+    it.customerSubmissionScope = customerSubmissionScope
+    it.originalSubmissionKeyDigest = originalSubmissionKeyDigest
     it.delegationId = delegationId
     it.reservationId = reservationId
     it.aggregateRevision = aggregateRevision
+    it.heldAt = heldAt
+    it.holdCaseRequestedAt = holdCaseRequestedAt
+    it.holdDecision = holdDecision?.name
+    it.holdReview = holdReview
+    it.holdCaseReasons = holdCaseReasons.toColumn()
+    it.admissionFraudVerdict = admissionFraudScore?.verdict
+    it.admissionFraudScore = admissionFraudScore?.score
+    it.admissionFraudRuleVersion = admissionFraudScore?.ruleVersion
 }
 
 fun DomesticPaymentEntity.toDomain() = DomesticPayment(
@@ -81,7 +93,22 @@ fun DomesticPaymentEntity.toDomain() = DomesticPayment(
     schemeDispatchedAt = schemeDispatchedAt,
     initiatedByPartyId = initiatedByPartyId,
     requestFingerprint = requestFingerprint,
+    customerSubmissionScope = customerSubmissionScope,
+    originalSubmissionKeyDigest = originalSubmissionKeyDigest,
     delegationId = delegationId,
     reservationId = reservationId,
     aggregateRevision = aggregateRevision,
+    heldAt = heldAt,
+    holdCaseRequestedAt = holdCaseRequestedAt,
+    holdDecision = holdDecision?.let(HoldDecision::valueOf),
+    holdReview = holdReview ?: 1,
+    holdCaseReasons = holdCaseReasons.toReasons(),
+    admissionFraudScore = admissionFraudVerdict?.let { verdict ->
+        RecordedFraudScore(verdict, admissionFraudScore ?: 0, admissionFraudRuleVersion.orEmpty())
+    },
 )
+
+/** The covered reasons of a hold's case as one column: sorted, comma-separated; null when there are none. */
+fun Set<String>.toColumn(): String? = sorted().joinToString(",").ifEmpty { null }
+
+fun String?.toReasons(): Set<String> = this?.split(",")?.filter { it.isNotBlank() }?.toSet().orEmpty()

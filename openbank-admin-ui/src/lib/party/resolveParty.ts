@@ -9,19 +9,16 @@
 // The KYC screen used to `Array.filter` the KYC cases it had already loaded and call the
 // input a search box. That can only ever match a party id the operator already had on
 // screen, and it can never find a customer BY NAME at all — party names are not in the
-// KYC case payload. party-service owns the searchable business keys, so the lookup has to
+// KYC case payload. party-service owns directory name matching, so the lookup has to
 // go there.
 //
 // WHAT PARTY-SERVICE ACTUALLY EXPOSES (verified against the resource + repository, not
 // only against openapi.yaml):
 //   GET /api/v1/parties/{id}     — PartyResource.getParty, exact id.
 //   GET /api/v1/parties/search   — PartyResource.searchParties, `q` >= 2 chars,
-//                                  cursor-paginated, case-insensitive substring over
-//                                  legalName, tradingName, email, phone, taxId and
-//                                  registrationNumber (PartyRepositoryImpl
-//                                  .searchByBusinessKeys). So "by name" and "by company"
-//                                  are both real server-side modes. Birth number is
-//                                  deliberately NOT searchable (GDPR data-minimisation).
+//                                  cursor-paginated staff name search over legalName and
+//                                  tradingName. Protected contact and identity fields do
+//                                  not participate in this lookup.
 //
 // THE ONE TRAP THAT DECIDES THE FAILURE STATES
 // /search is annotated `@FeatureFlag(flag = "party-search")`. When that flag is off the

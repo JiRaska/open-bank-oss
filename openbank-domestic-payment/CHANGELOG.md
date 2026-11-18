@@ -1,5 +1,62 @@
 # Changelog
 
+## [1.9.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.8.2...domestic-payment-v1.9.0) (2026-11-18)
+
+
+### Features
+
+* **domestic-payment:** adopt claim-fenced outbox v2 ([#15665](https://github.com/JiRaska/open-bank-oss/issues/15665)) ([b636fe3](https://github.com/JiRaska/open-bank-oss/commit/b636fe368ac0c9a7a76d414109237e1601ab3c56))
+
+## [1.8.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.8.1...domestic-payment-v1.8.2) (2026-11-17)
+
+
+### Bug Fixes
+
+* **domestic-payment:** replay a bound delegated payment after revocation ([#16589](https://github.com/JiRaska/open-bank-oss/issues/16589)) ([ec4e56a](https://github.com/JiRaska/open-bank-oss/commit/ec4e56af5b6e32a9e101b7e6c5bddb7cc6363905))
+
+## [1.8.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.8.0...domestic-payment-v1.8.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **delegation,domestic-payment,finrep:** reload outbound mTLS client certificates ([#16413](https://github.com/JiRaska/open-bank-oss/issues/16413)) ([cbd1aeb](https://github.com/JiRaska/open-bank-oss/commit/cbd1aeb831abe581bfd0d317808ca6d49cbf3d11))
+
+## [1.8.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.7.0...domestic-payment-v1.8.0) (2026-11-14)
+
+
+### Features
+
+* **domestic-payment:** bind the authority step to the delegated debit (ADR-0375 D1) ([#15959](https://github.com/JiRaska/open-bank-oss/issues/15959)) ([4ede591](https://github.com/JiRaska/open-bank-oss/commit/4ede5912979c22f6377e5997272fbe8b75b4e78e))
+* **domestic-payment:** create delegated payments bound to their spend reservation ([#16119](https://github.com/JiRaska/open-bank-oss/issues/16119)) ([a591471](https://github.com/JiRaska/open-bank-oss/commit/a591471c10b1ebddd9bab5a79414d37efb9601b7))
+
+## [1.7.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.6.2...domestic-payment-v1.7.0) (2026-11-14)
+
+
+### Features
+
+* **domestic-payment:** run the payment admission chain before a domestic payment is sent (ADR-0374 A3) ([#15976](https://github.com/JiRaska/open-bank-oss/issues/15976)) ([243f130](https://github.com/JiRaska/open-bank-oss/commit/243f130f2d1f097f54c136e8990e377051dd27be))
+
+## [1.6.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.6.1...domestic-payment-v1.6.2) (2026-11-13)
+
+
+### Bug Fixes
+
+* **domestic-payment:** fence original keys across direct and approved release ([#15731](https://github.com/JiRaska/open-bank-oss/issues/15731)) ([1dffe5e](https://github.com/JiRaska/open-bank-oss/commit/1dffe5e0059cd3408012002fd6c2cba07ad0b68e))
+
+## [1.6.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.6.0...domestic-payment-v1.6.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **domestic-payment:** keep outbox claims compatible with additive schema changes ([#15655](https://github.com/JiRaska/open-bank-oss/issues/15655)) ([e0ad686](https://github.com/JiRaska/open-bank-oss/commit/e0ad686f34299ed22747eb907f8ec5f1b4323e76)), closes [#11652](https://github.com/JiRaska/open-bank-oss/issues/11652)
+
+## [1.6.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.5.0...domestic-payment-v1.6.0) (2026-11-12)
+
+
+### Features
+
+* **domestic-payment,customer-edge:** look up domestic payments after a timeout ([#15609](https://github.com/JiRaska/open-bank-oss/issues/15609)) ([f93e072](https://github.com/JiRaska/open-bank-oss/commit/f93e072a5a3ec1f978206eae789f7b0530a88a69))
+
 ## [1.5.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.4.0...domestic-payment-v1.5.0) (2026-11-10)
 
 

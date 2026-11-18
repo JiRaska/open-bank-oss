@@ -4,10 +4,12 @@
 
 package com.openbank.transaction.infrastructure.client
 
+import com.openbank.libs.synthetic.SyntheticTaint
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -30,6 +32,13 @@ interface LedgerRestClient {
 
     @POST
     fun postJournal(request: PostJournalRequest): Uni<JournalResponse>
+
+    @POST
+    @Path("/synthetic")
+    fun postSyntheticJournal(
+        request: PostJournalRequest,
+        @HeaderParam(SyntheticTaint.KAFKA_HEADER) taint: String,
+    ): Uni<JournalResponse>
 
     @POST
     @Path("/{journalId}/reverse")

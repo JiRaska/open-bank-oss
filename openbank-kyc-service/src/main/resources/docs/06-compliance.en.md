@@ -15,6 +15,48 @@
 | **DORA** (Reg. (EU) 2022/2554) | Operational resilience | health probes, outbox resilience, audit events, SLO, runbooks |
 | **NIS2** | Network & info security | mTLS in-cluster, security response headers, OPA authz, audit log |
 
+## Automated customer screening at case opening
+
+When a case opens from `PARTY_CREATED`, the service asks `sanctions-service` for one screen with
+the `CUSTOMER` profile (sanctions lists, the national terrorist list and the PEP list) and settles
+two checks from the answer:
+
+| Outcome | `SANCTIONS_SCREENING` | Effect |
+|---|---|---|
+| no sanctions match | `PASSED` | — |
+| match or potential match | `MANUAL_REVIEW` | risk tier `VERY_HIGH` (match) or at least `HIGH`; the case cannot reach `UNDER_REVIEW`, so it cannot be approved and the party is not activated, until a reviewer decides the check |
+| no result (`sanctions-service` unreachable, or the event carries no legal name) | stays `PENDING` | never passed on a missing result; a pending check blocks approval the same way |
+
+A PEP match is a risk input, not a sanctions hit: it sets `PEP_SCREENING` to `MANUAL_REVIEW` and
+raises the tier to at least `HIGH`, as before.
+
+Only a `PENDING` sanctions check is settled automatically, so a redelivered event does not replace
+a reviewer's decision. The PEP check follows the same rule: a screen writes it only while it is
+`PENDING`, or while it is under review because an earlier screen was unavailable.
+
+**Retry after an outage.** A check left `PENDING` because `sanctions-service` was unavailable is
+screened again by a scheduled sweep (every minute, at most 50 cases per run, at the earliest two
+minutes after the last attempt). The retry is the same request with the same idempotency key
+(`kyc-screen-<caseId>`), so a result the provider stored but could not deliver is replayed, not
+screened twice, and it settles the case by the same rules as the opening — including the sandbox
+auto-approval, and never on a missing result. The screen needs the party's legal name, which the
+case does not otherwise store: it is kept in `kyc_cases.pending_screening_name` only while a retry
+needs it, and cleared when the check is settled, when the case closes and on GDPR erasure. It is
+never logged and never published. An erased case is not screened, written to or approved: the
+sweep skips it when it reads a batch and again immediately before each screen. A case
+the sweep has no name for (opened before this existed, or from an event without a legal name) is
+not retried; it stays visible in `openbank_kyc_sanctions_unscreened_cases` and a reviewer settles
+it through the check endpoint.
+
+**Operator PEP re-screen.** `POST /cases/{caseId}/pep-rescreen` sends an idempotency key that
+includes the time of the PEP result it replaces, so each re-screen after a recorded result is a
+new screen against the current list. A request retried before its result was recorded carries the
+same key and is replayed by the provider.
+
+**Sandbox auto-approve** (`openbank.kyc.auto-approve`) now runs after the screen and approves only
+a case screened clear. A sanctions match, a PEP match, a party that could not be screened and a
+screening outage all leave the case open.
+
 ## Four-eyes control (ADR-0068)
 
 Approval and rejection are **dual-control** actions: `POST /cases/{id}/approve` and `/reject` require `ROLE_ADMIN`/`ROLE_KYC` **and** pass through `@Authorize` (OPA, ADR-0034). The operator who opened/worked a case must not be the one approving it — enforced via the onboarding cockpit four-eyes policy. The sandbox straight-through path (`openbank.kyc.auto-approve`) bypasses this and **must be false in production**; an approval attributed to `sandbox-auto-approval` outside sandbox is a compliance incident.

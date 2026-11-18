@@ -1,5 +1,47 @@
 # Changelog
 
+## [1.34.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.34.0...agent-service-v1.34.1) (2026-11-17)
+
+
+### Security
+
+* **sanctions:** agent as four-eyes maker on behalf of a person, human checker ([#16455](https://github.com/JiRaska/open-bank-oss/issues/16455)) ([5748892](https://github.com/JiRaska/open-bank-oss/commit/57488924909878bba2957fdf4a787e8dfaedde2b))
+
+## [1.34.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.5...agent-service-v1.34.0) (2026-11-16)
+
+
+### Features
+
+* **agent:** AML decision proposal MCP tool for false-positive triage ([#16382](https://github.com/JiRaska/open-bank-oss/issues/16382)) ([fb27502](https://github.com/JiRaska/open-bank-oss/commit/fb275027dd2fa83866e520d44adfa50e38fbde43))
+
+## [1.33.5](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.4...agent-service-v1.33.5) (2026-11-16)
+
+
+### Bug Fixes
+
+* **account,agent,aml:** reload outbound mTLS client certificates ([#16411](https://github.com/JiRaska/open-bank-oss/issues/16411)) ([13b220e](https://github.com/JiRaska/open-bank-oss/commit/13b220ea13a8f2ab089bb698d6e36bbb0d1a01de))
+
+## [1.33.4](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.3...agent-service-v1.33.4) (2026-11-13)
+
+
+### Bug Fixes
+
+* **agent:** classify a missing OPA result as a PDP error, fail closed on unknown enforcement mode, correct stale fail-open text ([#15813](https://github.com/JiRaska/open-bank-oss/issues/15813)) ([bc62fba](https://github.com/JiRaska/open-bank-oss/commit/bc62fba7201951923ff5c790898a54d57b352118)), closes [#15758](https://github.com/JiRaska/open-bank-oss/issues/15758)
+
+## [1.33.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.2...agent-service-v1.33.3) (2026-11-12)
+
+
+### Bug Fixes
+
+* **agent:** fail closed when the policy decision point is unreachable for write and proposal tools ([#15770](https://github.com/JiRaska/open-bank-oss/issues/15770)) ([211468e](https://github.com/JiRaska/open-bank-oss/commit/211468e4d3e495baaff3be252c67f3d314d2add5))
+
+## [1.33.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.1...agent-service-v1.33.2) (2026-11-12)
+
+
+### Bug Fixes
+
+* **agent:** send the charter id as the OpenAI user field ([#15510](https://github.com/JiRaska/open-bank-oss/issues/15510)) ([9227598](https://github.com/JiRaska/open-bank-oss/commit/9227598e4577792f02217a3f7407ee08caadaeb0))
+
 ## [1.33.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.0...agent-service-v1.33.1) (2026-11-09)
 
 

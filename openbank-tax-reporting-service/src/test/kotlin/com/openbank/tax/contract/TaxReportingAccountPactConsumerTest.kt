@@ -18,6 +18,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.tax.infrastructure.returns.crsfatca.AccountReportingClient
 import com.openbank.tax.infrastructure.returns.crsfatca.AccountSummaryDto
+import com.openbank.tax.infrastructure.returns.crsfatca.DepositRosterAccountDto
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
 import org.assertj.core.api.Assertions.assertThat
@@ -89,6 +90,66 @@ class TaxReportingAccountPactConsumerTest {
         .status(401)
         .toPact()
 
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun gsftDepositRosterPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(STATE)
+        .uponReceiving("GET the first page of the GSFT deposit roster as of a Czech reporting date")
+        .path(GSFT_EXPECTED_PATH)
+        .method("GET")
+        .query("asOf=$GSFT_AS_OF&limit=$PAGE_LIMIT")
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.minArrayLike("data", 1) { a ->
+                    a.uuid("id")
+                    a.stringType("accountNumber", "CZ6508000000192000145399")
+                    a.uuid("partyId")
+                    a.stringType("currencyCode", "CZK")
+                    a.stringType("accountType", "CURRENT")
+                }
+                o.`object`("pagination") { p ->
+                    p.booleanType("hasNextPage", false)
+                }
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun gsftUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NEGATIVE_AUTH_STATE)
+        .uponReceiving("GET the GSFT deposit roster with no M2M identity is refused")
+        .path(GSFT_EXPECTED_PATH)
+        .method("GET")
+        .query("asOf=$GSFT_AS_OF&limit=$PAGE_LIMIT")
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "gsftDepositRosterPact")
+    fun `the GSFT roster page decodes into the cursor page the snapshot walk follows`(mockServer: MockServer) {
+        assertThat(gsftClientPath()).isEqualTo(GSFT_EXPECTED_PATH)
+        val body = given().baseUri(mockServer.getUrl())
+            .queryParam("asOf", GSFT_AS_OF)
+            .queryParam("limit", PAGE_LIMIT)
+            .get(gsftClientPath()).then().statusCode(200).extract().asString()
+        val page = mapper.readValue(body, object : TypeReference<CursorPage<DepositRosterAccountDto>>() {})
+        assertThat(page.data).isNotEmpty
+        assertThat(page.data[0].accountType).isEqualTo("CURRENT")
+        assertThat(page.pagination.hasNextPage).isFalse()
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "gsftUnauthenticatedPact")
+    fun `a GSFT roster read with no identity is refused with 401`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl())
+            .queryParam("asOf", GSFT_AS_OF)
+            .queryParam("limit", PAGE_LIMIT)
+            .get(gsftClientPath()).then().statusCode(401)
+    }
+
     @Test
     @PactTestFor(pactMethod = "activeAccountsPact")
     fun `the page decodes into the cursor page the roster walk follows`(mockServer: MockServer) {
@@ -122,6 +183,19 @@ class TaxReportingAccountPactConsumerTest {
 
         /** LITERAL, retyped from AccountResource — never derived from the client. */
         const val EXPECTED_PATH = "/api/v1/accounts/active"
+
+        /** LITERAL, retyped from GsftAccountRosterResource — never derived from the client. */
+        const val GSFT_EXPECTED_PATH = "/api/v1/accounts/reporting/deposits"
+
+        /** A past Czech reporting date; the provider refuses a future one. */
+        const val GSFT_AS_OF = "2026-06-30"
+
+        fun gsftClientPath(): String {
+            val base = AccountReportingClient::class.java.getAnnotation(Path::class.java).value
+            val sub = AccountReportingClient::class.java.methods.single { it.name == "depositRoster" }
+                .getAnnotation(Path::class.java).value
+            return base + sub
+        }
 
         fun clientPath(): String {
             val base = AccountReportingClient::class.java.getAnnotation(Path::class.java).value

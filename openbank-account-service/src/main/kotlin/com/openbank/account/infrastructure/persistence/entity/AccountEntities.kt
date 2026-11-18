@@ -86,6 +86,10 @@ class AccountEntity : PanacheEntityBase {
     @Column(name = "nickname", length = 60)
     var nickname: String? = null
 
+    /** Who froze the account (V34): OPERATOR | PARTY_STANDING. Null unless status is FROZEN. */
+    @Column(name = "freeze_origin", length = 20)
+    var freezeOrigin: String? = null
+
     /** Terms version this TERM_DEPOSIT was opened under (V24, #9044). Null = pre-V24 account. */
     @Column(name = "terms_version")
     var termsVersion: String? = null

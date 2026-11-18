@@ -141,6 +141,9 @@ class OpenAiCompatibleModelProvider : ModelProvider {
         root.put("model", model.id)
         root.put("max_tokens", request.maxTokens)
         root.put("temperature", request.temperature)
+        // OpenAI `user`: the agent's charter id, never a person. LiteLLM turns it into the OTel
+        // `user.id` attribute, which Langfuse 4.50 maps to userId (measured 2026-11-10).
+        request.endUserId?.takeIf { it.isNotBlank() }?.let { root.put("user", it) }
 
         val messages = root.putArray("messages")
         for (m in request.messages) {

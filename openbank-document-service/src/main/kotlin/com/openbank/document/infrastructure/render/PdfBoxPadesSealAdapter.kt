@@ -120,6 +120,17 @@ class PdfBoxPadesSealAdapter(
         }
     }
 
+    /**
+     * The seal certificate's notAfter, for the expiry gauge ([SealCertificateExpiryMetrics]).
+     * Public certificate metadata only; the private key never leaves this class.
+     */
+    val sealCertificateNotAfter: java.time.Instant
+        get() = identity.certificate.notAfter.toInstant()
+
+    /** True while the DEV-ONLY ephemeral identity is in use (no organizational keystore). */
+    val sealIdentityEphemeral: Boolean
+        get() = identity.ephemeral
+
     override suspend fun sealPades(pdf: ByteArray, ceremony: SignatureCeremony): ByteArray =
         withContext(Dispatchers.IO) {
             // Fail CLOSED before touching the PDF (ADR-0172 D2). An ephemeral identity produces a

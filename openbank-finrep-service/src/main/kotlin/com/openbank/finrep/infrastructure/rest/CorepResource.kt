@@ -8,6 +8,7 @@ import com.openbank.finrep.application.port.inbound.CorepUseCase
 import com.openbank.finrep.application.port.inbound.GetCorepTemplateQuery
 import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.domain.model.CorepTemplate
+import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
@@ -42,6 +43,7 @@ import java.time.LocalDate
 class CorepResource(private val corepUseCase: CorepUseCase, private val clock: Clock) {
 
     @GET
+    @Authorize(action = "finrep.corep.inspect")
     @Path("/templates/{templateId}")
     suspend fun getTemplate(
         @PathParam("templateId") templateId: String,

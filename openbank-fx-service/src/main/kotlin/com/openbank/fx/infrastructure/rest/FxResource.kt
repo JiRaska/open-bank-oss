@@ -32,10 +32,20 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
+/**
+ * [partyName] is DEPRECATED and ignored. It used to be the name the conversion was sanctions-screened
+ * under, which let the caller choose that name. The screen now uses the names party-service holds
+ * for [partyId]; the field is still accepted so existing callers keep working, and is neither
+ * screened, stored nor logged.
+ *
+ * [accountId] is DEPRECATED and ignored for the same reason: nothing checked that the account
+ * belongs to [partyId], so a caller could attribute the conversion's fraud score and AML case to
+ * any account. No caller in this repository sends it; it is accepted, never used.
+ */
 data class ConvertRequest(
     val partyId: UUID,
     val accountId: UUID?,
-    val partyName: String,
+    val partyName: String? = null,
     val fromCurrency: String,
     val toCurrency: String,
     val fromAmountMinorUnits: Long,
@@ -170,11 +180,11 @@ class FxResource(private val fxUseCase: FxUseCase, private val cnbIngestion: Cnb
             ConvertCommand(
                 idempotencyKey = key,
                 partyId = req.partyId,
-                accountId = req.accountId,
+                // Ignored, never trusted: see [ConvertRequest.accountId].
+                accountId = null,
                 fromCurrency = req.fromCurrency,
                 toCurrency = req.toCurrency,
                 fromAmountMinorUnits = req.fromAmountMinorUnits,
-                partyName = req.partyName,
             ),
         )
         return Response.created(URI.create("/api/v1/fx/conversions/${conv.id}")).entity(conv).build()

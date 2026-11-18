@@ -31,7 +31,7 @@ metadata:
   namespace: documents
   labels:
     app.kubernetes.io/part-of: documents
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

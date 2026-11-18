@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.28.7...card-issuance-service-v0.29.0) (2026-11-12)
+
+
+### Features
+
+* **card-issuance,card-processing:** scope issuer operations to named callers ([#15626](https://github.com/JiRaska/open-bank-oss/issues/15626)) ([ecdbbd0](https://github.com/JiRaska/open-bank-oss/commit/ecdbbd0cd4eb6a486cff3effbb4d08b59dde8890))
+
 ## [0.28.7](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.28.6...card-issuance-service-v0.28.7) (2026-11-06)
 
 

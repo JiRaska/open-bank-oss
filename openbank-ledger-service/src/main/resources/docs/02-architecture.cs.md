@@ -123,7 +123,13 @@ sequenceDiagram
   end
 ```
 
-**Proč outbox (ADR-0050):** zápis do DB a publikace do Kafky musí být atomické. Doručení na money-path je regulatorní: jediný in-JVM zapisovatel (`concurrentExecution = SKIP`) plus `replicas: 1` garantují, že řádek nárokuje právě jeden dispatcher; selhání jednotlivých řádků jsou izolovaná a ohraničená přechodem do DEAD. Dispatcher běží plně na Vert.x event loopu (reaktivní Panache), aby se předešlo chybám session na worker vlákně.
+**Outbox (ADR-0050, ADR-0327).** Účetní zápis a jeho outbox řádek se uloží v jedné
+transakci PostgreSQL. Dispatcher nárokuje nejstarší neodeslaný řádek každého agregátu
+a nezávislé agregáty odesílá souběžně. Potvrzení odeslání může změnit řádek pouze
+s platným tokenem jeho aktuálního nároku. Po chybě následuje prodleva před dalším
+pokusem a po vyčerpání pokusů stav `DEAD`. Kafka doručuje alespoň jednou a příjemci
+odstraňují duplicity podle ID události. Plánovač běží na Vert.x event loopu a v každé
+replice vynechá překrývající se spuštění. Přechod na V2 nejprve zastaví starší dispatcher.
 
 ## Životní cyklus partitionů
 

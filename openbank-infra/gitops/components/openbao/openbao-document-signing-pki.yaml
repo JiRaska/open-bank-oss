@@ -24,8 +24,8 @@ metadata:
   namespace: vault
   labels:
     app.kubernetes.io/part-of: openbao
-    openbank.io/plane: platform
-    openbank.io/adr: "0162"
+    open-bank.tech/plane: platform
+    open-bank.tech/adr: "0162"
 data:
   configure.sh: |
     #!/bin/sh
@@ -115,8 +115,8 @@ metadata:
   namespace: vault
   labels:
     app.kubernetes.io/part-of: openbao
-    openbank.io/plane: platform
-    openbank.io/adr: "0162"
+    open-bank.tech/plane: platform
+    open-bank.tech/adr: "0162"
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -125,8 +125,8 @@ metadata:
   namespace: vault
   labels:
     app.kubernetes.io/part-of: openbao
-    openbank.io/plane: platform
-    openbank.io/adr: "0162"
+    open-bank.tech/plane: platform
+    open-bank.tech/adr: "0162"
   annotations:
     # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '30 2 * * 0' plus slack.
     openbank.tech/max-success-age-seconds: "1296000"
@@ -149,7 +149,7 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/part-of: openbao
-            openbank.io/plane: platform
+            open-bank.tech/plane: platform
         spec:
           serviceAccountName: openbao-document-signing-admin
           restartPolicy: OnFailure

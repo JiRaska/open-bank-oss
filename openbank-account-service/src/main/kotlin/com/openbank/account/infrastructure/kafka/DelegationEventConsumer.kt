@@ -10,31 +10,15 @@ import com.openbank.account.application.port.out.ApprovalGroupRevisionRepository
 import com.openbank.account.application.port.out.DelegationProjectionRepository
 import com.openbank.account.domain.model.ApprovalGroupRevision
 import com.openbank.account.domain.model.DelegatedAccessGrant
+import com.openbank.libs.delegation.DelegationGrantEvent
+import com.openbank.libs.delegation.DelegationGrantEventDecoder
+import com.openbank.libs.delegation.DelegationGrantEvents
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.delay
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
 import java.time.OffsetDateTime
 import java.util.UUID
-
-private data class DelegationEvent(
-    val type: String,
-    val grantId: UUID,
-    val grantorPartyId: UUID,
-    val granteePartyId: UUID,
-    val resourceType: String,
-    val resourceId: UUID?,
-    val capabilities: Set<String>,
-    val approvalPolicy: String,
-    val requiredApprovals: Int?,
-    val approvalGroupId: UUID?,
-    val approvalGroupRevision: Long?,
-    val perTxLimitAmount: java.math.BigDecimal?,
-    val perTxLimitCurrency: String?,
-    val validFrom: OffsetDateTime?,
-    val validTo: OffsetDateTime?,
-    val lifecycleRevision: Long?,
-)
 
 /**
  * Maintains the local enforcement projection of delegation-service grants
@@ -78,45 +62,12 @@ class DelegationEventConsumer(
             return
         }
 
-        val event = parseDelegation(node)
+        val event = DelegationGrantEventDecoder.decode(node)
         if (event == null) {
             log.warnf("Dropping unprocessable delegation event (poison pill): %.300s", payload)
             return
         }
         withBoundedRetry(event.type, event.grantId) { dispatch(event) }
-    }
-
-    private fun parseDelegation(node: JsonNode): DelegationEvent? {
-        val grantId = runCatching { UUID.fromString(node.path("aggregateId").asText()) }.getOrNull() ?: return null
-        val grantee = runCatching { UUID.fromString(node.path("granteePartyId").asText()) }.getOrNull() ?: return null
-        // A grant with no readable grantor cannot be checked against the account owner, so it is
-        // a poison pill rather than a row to project optimistically.
-        val grantor = runCatching { UUID.fromString(node.path("grantorPartyId").asText()) }.getOrNull() ?: return null
-        val resourceId = node.path("resourceId").asText(null)
-            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
-        val caps = node.path("capabilities").takeIf { it.isArray }
-            ?.mapNotNull { it.asText(null) }?.toSet() ?: emptySet()
-        return DelegationEvent(
-            type = node.path("eventType").asText(""),
-            grantId = grantId,
-            grantorPartyId = grantor,
-            granteePartyId = grantee,
-            resourceType = node.path("resourceType").asText(""),
-            resourceId = resourceId,
-            capabilities = caps,
-            approvalPolicy = node.path("approvalPolicy").asText(DelegatedAccessGrant.APPROVAL_POLICY_SOLO),
-            requiredApprovals = node.path("requiredApprovals").takeIf { it.isIntegralNumber }?.intValue(),
-            approvalGroupId = node.path("approvalGroupId").asText(null)
-                ?.let { runCatching { UUID.fromString(it) }.getOrNull() },
-            approvalGroupRevision = node.path("approvalGroupRevision").takeIf { it.isIntegralNumber }?.longValue(),
-            perTxLimitAmount = node.path("perTransactionLimit").path("amount").asText(null)?.toBigDecimalOrNull(),
-            perTxLimitCurrency = node.path("perTransactionLimit").path("currency").asText(null),
-            validFrom = node.path("validFrom").asText(null)?.let {
-                runCatching { OffsetDateTime.parse(it) }.getOrNull()
-            },
-            validTo = node.path("validTo").asText(null)?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() },
-            lifecycleRevision = node.path("lifecycleRevision").takeIf { it.isIntegralNumber }?.longValue(),
-        )
     }
 
     private fun parseApprovalGroup(node: JsonNode): ApprovalGroupRevision? = runCatching {
@@ -136,18 +87,18 @@ class DelegationEventConsumer(
         )
     }.getOrNull()
 
-    private suspend fun dispatch(event: DelegationEvent) {
+    private suspend fun dispatch(event: DelegationGrantEvent) {
         if (event.resourceType !in PROJECTED_RESOURCE_TYPES && event.type in LIFECYCLE_TYPES) return
         when (event.type) {
-            "DelegationActivated", "DelegationReinstated" ->
+            in DelegationGrantEvents.ENABLING ->
                 if (event.lifecycleRevision != null) upsert(event) else Unit
-            "DelegationRevoked", "DelegationSuspended", "DelegationRenounced", "DelegationExpired" ->
+            in DelegationGrantEvents.DISABLING ->
                 projectionRepository.applyClosed(event.grantId, event.lifecycleRevision)
             else -> Unit // OFFERED/DECLINED/unknown: nothing enforceable to do, ack.
         }
     }
 
-    private suspend fun upsert(event: DelegationEvent) {
+    private suspend fun upsert(event: DelegationGrantEvent) {
         val accountId = event.resourceId ?: return
         projectionRepository.applyActive(
             DelegatedAccessGrant(
@@ -156,7 +107,10 @@ class DelegationEventConsumer(
                 grantorPartyId = event.grantorPartyId,
                 granteePartyId = event.granteePartyId,
                 capabilities = event.capabilities,
-                approvalPolicy = event.approvalPolicy,
+                // The shared decoder reports the wire value as-is; this default was in
+                // account-service's own parser and belongs at the use site, not in a decoder
+                // every service shares (ADR-0375 D2).
+                approvalPolicy = event.approvalPolicy ?: DelegatedAccessGrant.APPROVAL_POLICY_SOLO,
                 requiredApprovals = event.requiredApprovals,
                 approvalGroupId = event.approvalGroupId,
                 approvalGroupRevision = event.approvalGroupRevision,

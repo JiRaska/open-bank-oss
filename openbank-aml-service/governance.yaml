@@ -29,6 +29,12 @@ lineage:
     - serviceName: party-service
       relationType: topic
       description: triggers
+    - serviceName: ledger-service
+      relationType: topic
+      description: booked movements
+    - serviceName: transaction-service
+      relationType: topic
+      description: transaction rail
 databaseLineage:
   ownedDatabases:
     - openbank_aml

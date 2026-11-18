@@ -83,7 +83,7 @@ class RunbookGeneratorTest(unittest.TestCase):
             component = root / "openbank-infra/gitops/components/reviewed"
             component.mkdir(parents=True)
             manifest = component / "service.yaml"
-            manifest.write_text("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: reviewed\n  annotations:\n    openbank.io/operations-mode: reviewed-gitops\nspec:\n  replicas: 1\n")
+            manifest.write_text("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: reviewed\n  annotations:\n    open-bank.tech/operations-mode: reviewed-gitops\nspec:\n  replicas: 1\n")
             generator = load_module(root)
             text = generator.deployment_status("reviewed") + generator.runtime_sections("reviewed", "reviewed")
             self.assertIn("REVIEWED GITOPS ONLY", text)

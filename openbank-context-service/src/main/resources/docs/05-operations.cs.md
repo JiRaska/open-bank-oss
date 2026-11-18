@@ -46,3 +46,16 @@ uložení a není veřejným klíčem uzlu grafu.
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Pozdržené tuzemské platby (ADR-0374)
+
+Projekce tuzemských plateb přijímá stav `HELD`: platbu, kterou přijetí platby zastavilo dřív, než bylo cokoli odesláno. Promítá se jako fáze platby stejně jako `RECEIVED` a `VALIDATED`, nikdy jako důkaz z platební cesty. Slovník stavů této projekce je uzavřený a událost mimo něj se odmítne a skončí v dead-letter frontě, takže nový stav platební cesty sem musí být doplněn dřív, než jej cesta začne posílat. Žádost o případ `PAYMENT_HELD` na stejném topicu není událostí životního cyklu a ignoruje se.
+
+## Obnova klientského certifikátu (odchozí mTLS)
+
+Každá pojmenovaná konfigurace `quarkus.tls.<name>`, kterou se služba prokazuje vůči
+naslouchání 8443 jiné služby, nastavuje `reload-period: 1h`. cert-manager klientský certifikát
+obnoví před expirací; bez této volby by proces dál předkládal ten starý, dokud by ho protistrana
+neodmítla, zatímco všechny signály expirace měřily obnovený Secret a hlásily zelenou. Po obnově
+se nový certifikát použije do hodiny, bez restartu. Gate `tls-certificate-reload` hlídá, aby
+žádná taková konfigurace nevypadla.

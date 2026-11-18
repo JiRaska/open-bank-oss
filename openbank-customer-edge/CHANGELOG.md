@@ -1,5 +1,54 @@
 # Changelog
 
+## [1.12.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.12.1...customer-edge-v1.12.2) (2026-11-18)
+
+
+### Bug Fixes
+
+* **customer-edge:** isolate Redis quotas and preserve payment outages ([#16692](https://github.com/JiRaska/open-bank-oss/issues/16692)) ([6de680f](https://github.com/JiRaska/open-bank-oss/commit/6de680f182174776e68292bc3a0707da8d2454b7))
+
+## [1.12.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.12.0...customer-edge-v1.12.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* **customer-edge:** release the spend reservation on a withdrawn-delegation refusal ([#16558](https://github.com/JiRaska/open-bank-oss/issues/16558)) ([6895e98](https://github.com/JiRaska/open-bank-oss/commit/6895e985eeadab02bc7e7e8d09582a1469fdf4b7))
+
+## [1.12.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.11.1...customer-edge-v1.12.0) (2026-11-15)
+
+
+### Features
+
+* **customer-edge:** create delegated payments bound to their spend reservation ([#16166](https://github.com/JiRaska/open-bank-oss/issues/16166)) ([0369677](https://github.com/JiRaska/open-bank-oss/commit/03696770637439da5f1a61a58a5371acd1bfe047))
+
+## [1.11.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.11.0...customer-edge-v1.11.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **customer-edge:** gate account detail and statement reads on their own capability (ADR-0375 D7) ([#15879](https://github.com/JiRaska/open-bank-oss/issues/15879)) ([747573d](https://github.com/JiRaska/open-bank-oss/commit/747573dc3c8e3b90ca14fa3645bec80b48c846c9))
+
+## [1.11.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.10.0...customer-edge-v1.11.0) (2026-11-13)
+
+
+### Features
+
+* **customer-edge,transaction,ledger:** scope synthetic transfer canary ([#15669](https://github.com/JiRaska/open-bank-oss/issues/15669)) ([96f24f2](https://github.com/JiRaska/open-bank-oss/commit/96f24f28f5ac894be0821ef939a0d7019a19abc4))
+
+## [1.10.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.9.0...customer-edge-v1.10.0) (2026-11-12)
+
+
+### Features
+
+* **document:** ownership projection for delegated object grants, with ADR-0375 and its D4 gate ([#15824](https://github.com/JiRaska/open-bank-oss/issues/15824)) ([f15f8c1](https://github.com/JiRaska/open-bank-oss/commit/f15f8c133d3afbabd9bc34b65749559c1bc8eaf3))
+
+## [1.9.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.8.0...customer-edge-v1.9.0) (2026-11-12)
+
+
+### Features
+
+* **domestic-payment,customer-edge:** look up domestic payments after a timeout ([#15609](https://github.com/JiRaska/open-bank-oss/issues/15609)) ([f93e072](https://github.com/JiRaska/open-bank-oss/commit/f93e072a5a3ec1f978206eae789f7b0530a88a69))
+
 ## [1.8.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.7.0...customer-edge-v1.8.0) (2026-11-08)
 
 

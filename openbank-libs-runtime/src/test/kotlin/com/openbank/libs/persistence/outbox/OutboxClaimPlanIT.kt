@@ -15,12 +15,15 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.TestMethodOrder
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.wait.strategy.Wait
 import org.testcontainers.utility.DockerImageName
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.ResultSet
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -160,6 +163,112 @@ class OutboxClaimPlanIT {
             .isEmpty()
     }
 
+    @Order(3)
+    @ParameterizedTest(name = "replacement succeeds: {0}")
+    @ValueSource(booleans = [true, false])
+    fun `only the replacement claim can acknowledge a reclaimed head`(replacementSucceeds: Boolean) {
+        val fenced = OutboxTableShape("fenced_outbox")
+        val event = UUID.randomUUID()
+        val tail = UUID.randomUUID()
+        val aggregate = UUID.randomUUID()
+        val oldToken = UUID.randomUUID()
+        val newToken = UUID.randomUUID()
+        val claimTime = Instant.parse("2026-01-01T00:00:00Z")
+        val timeout = Duration.ofSeconds(5)
+        val reclaimTime = claimTime.plusSeconds(6)
+        seedFencedHead(event, tail, aggregate, claimTime)
+        try {
+            fun claimAt(now: Instant, token: UUID): List<UUID> = queryColumn(
+                OutboxClaimFenceSql.claim(fenced),
+                mapOf(
+                    "pending" to "PENDING",
+                    "failed" to "FAILED",
+                    "dispatching" to "DISPATCHING",
+                    "now" to now,
+                    "stale" to now.minus(timeout),
+                    "claimToken" to token,
+                    "limit" to 2,
+                ),
+            ) { it.getObject("event_id", UUID::class.java) }
+
+            fun sent(token: UUID): List<UUID> = queryColumn(
+                OutboxClaimFenceSql.markSent(fenced, 1),
+                mapOf(
+                    "sent" to "SENT",
+                    "dispatching" to "DISPATCHING",
+                    "now" to reclaimTime,
+                    "eventId0" to event,
+                    "claimToken0" to token,
+                ),
+            ) { it.getObject("event_id", UUID::class.java) }
+
+            val oldOwner = mapOf("eventId" to event, "dispatching" to "DISPATCHING", "claimToken" to oldToken)
+            val newOwner = oldOwner + ("claimToken" to newToken)
+            val failure = mapOf(
+                "status" to "FAILED",
+                "attempts" to 1,
+                "error" to "synthetic publish failure",
+                "now" to reclaimTime,
+                "nextAttemptAt" to reclaimTime.plusSeconds(30),
+            )
+            fun lockFailure(owner: Map<String, Any>): List<Int> =
+                queryColumn(OutboxClaimFenceSql.lockForFailure(fenced), owner) { it.getInt("attempt_count") }
+            fun recordFailure(owner: Map<String, Any>): Int = conn.createStatement().use { st ->
+                st.executeUpdate(bind(OutboxClaimFenceSql.markFailed(fenced), owner + failure))
+            }
+
+            assertThat(claimAt(claimTime, oldToken)).containsExactly(event)
+            assertThat(claimAt(claimTime.minusSeconds(1), newToken)).isEmpty()
+            assertThat(claimAt(claimTime.plus(timeout), newToken)).isEmpty()
+            assertThat(claimAt(reclaimTime, newToken)).containsExactly(event)
+            assertThat(sent(oldToken)).isEmpty()
+            assertThat(lockFailure(oldOwner)).isEmpty()
+            assertThat(recordFailure(oldOwner)).isZero()
+
+            if (replacementSucceeds) {
+                assertThat(sent(newToken)).containsExactly(event)
+                assertThat(sent(newToken)).isEmpty()
+            } else {
+                assertThat(lockFailure(newOwner)).containsExactly(0)
+                assertThat(recordFailure(newOwner)).isOne()
+                assertThat(recordFailure(newOwner)).isZero()
+            }
+            assertThat(sent(oldToken)).isEmpty()
+            assertThat(lockFailure(oldOwner)).isEmpty()
+            assertThat(recordFailure(oldOwner)).isZero()
+            val row = queryColumn(
+                "SELECT status, attempt_count, claim_token FROM fenced_outbox WHERE event_id = :eventId",
+                mapOf("eventId" to event),
+            ) { Triple(it.getString("status"), it.getInt("attempt_count"), it.getObject("claim_token")) }
+            assertThat(row).containsExactly(Triple(if (replacementSucceeds) "SENT" else "FAILED", 1, null))
+            assertThat(claimAt(reclaimTime, UUID.randomUUID()))
+                .containsExactlyElementsOf(if (replacementSucceeds) listOf(tail) else emptyList())
+        } finally {
+            conn.createStatement().use { it.execute("DROP TABLE fenced_outbox") }
+        }
+    }
+
+    private fun seedFencedHead(event: UUID, tail: UUID, aggregate: UUID, claimTime: Instant) {
+        conn.createStatement().use { st ->
+            st.execute(
+                """
+                CREATE TEMP TABLE fenced_outbox (LIKE ledger_outbox INCLUDING DEFAULTS);
+                ALTER TABLE fenced_outbox ADD COLUMN claim_token UUID;
+                INSERT INTO fenced_outbox (event_id, aggregate_id, event_type, payload, status, created_at)
+                VALUES ('$event', '$aggregate', 'test', '{}', 'PENDING', '$claimTime'),
+                       ('$tail', '$aggregate', 'test', '{}', 'PENDING', '${claimTime.plusSeconds(1)}');
+                """.trimIndent(),
+            )
+        }
+    }
+
+    private fun <T> queryColumn(sql: String, params: Map<String, Any>, read: (ResultSet) -> T): List<T> =
+        conn.createStatement().use { st ->
+            st.executeQuery(bind(sql, params)).use { rs ->
+                buildList { while (rs.next()) add(read(rs)) }
+            }
+        }
+
     // ── helpers ────────────────────────────────────────────────────────────────
 
     /** Runs `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` over [OutboxSql.claim] inside a rolled-back transaction. */
@@ -171,8 +280,8 @@ class OutboxClaimPlanIT {
                 "pending" to OutboxStatus.PENDING.name,
                 "failed" to OutboxStatus.FAILED.name,
                 "dispatching" to OutboxStatus.DISPATCHING.name,
-                "now" to now.toString(),
-                "stale" to now.minus(Duration.ofMinutes(2)).toString(),
+                "now" to now,
+                "stale" to now.minus(Duration.ofMinutes(2)),
                 "limit" to OutboxDispatch.DEFAULT_BATCH_SIZE,
             ),
         )
@@ -199,11 +308,8 @@ class OutboxClaimPlanIT {
             val literal = when (value) {
                 is Number -> value.toString()
                 is UUID -> "'$value'::uuid"
-                else -> "'${value.toString().replace("'", "''")}'::timestamptz".takeIf {
-                    name == "now" ||
-                        name == "stale"
-                }
-                    ?: "'${value.toString().replace("'", "''")}'"
+                is Instant -> "'$value'::timestamptz"
+                else -> "'${value.toString().replace("'", "''")}'"
             }
             acc.replace(Regex(":$name\\b"), literal)
         }

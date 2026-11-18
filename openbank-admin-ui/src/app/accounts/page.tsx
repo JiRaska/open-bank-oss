@@ -214,7 +214,7 @@ export default function AccountsPage() {
           setQuery(party.id)
           void search(party.id)
         }}
-        placeholder={t('Jméno, příjmení, rodné číslo nebo e-mail klienta…', 'Client name, surname, birth number or e-mail…')}
+        placeholder={t('Jméno nebo obchodní název klienta', 'Client name or trading name')}
       />
 
       <div className="card">

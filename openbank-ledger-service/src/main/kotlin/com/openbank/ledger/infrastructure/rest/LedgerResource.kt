@@ -34,6 +34,7 @@ import com.openbank.libs.web.SyntheticTaintContext
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -64,6 +65,7 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Ledger", description = "General ledger journal entries")
+@Suppress("TooManyFunctions") // Both journal posting routes share validation and authorization in this resource.
 class LedgerResource(
     private val clock: Clock,
     private val ledgerUseCase: LedgerUseCase,
@@ -202,7 +204,26 @@ class LedgerResource(
         request: PostJournalRequest?,
         @Context
         requestContext: ContainerRequestContext,
+    ): Response = bookJournal(request, isSynthetic(requestContext))
+
+    @POST
+    @Path("/synthetic")
+    @RolesAllowed(Roles.API, Roles.OPERATOR)
+    @Authorize(action = "ledger.create", resource = "")
+    @Operation(summary = "Post a journal that requires an authenticated synthetic origin")
+    suspend fun postSyntheticJournal(
+        request: PostJournalRequest?,
+        @Context requestContext: ContainerRequestContext,
     ): Response {
+        if (!isSynthetic(requestContext)) throw ForbiddenException("Synthetic journal requires a trusted origin")
+        return bookJournal(request, synthetic = true)
+    }
+
+    // Both values carry the filter's authenticated trust decision. Either true value wins.
+    private fun isSynthetic(requestContext: ContainerRequestContext): Boolean =
+        taintContext.tainted || requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true
+
+    private suspend fun bookJournal(request: PostJournalRequest?, synthetic: Boolean): Response {
         requireNotNull(request) { "a request body is required" }
         // ADR-0096 D3: this prefix is reserved for the year-end closing journal, whose attribution
         // is written only by the allocation's own transaction. A generic post under it would be an
@@ -218,11 +239,7 @@ class LedgerResource(
             description = request.description,
             lines = request.requireLines().map { it.toCommand(accountingClasses) },
             postedBy = request.createdBy,
-            // Both values carry the filter's authenticated trust decision; either true value wins.
-            // The property is a fallback when the holder is false, not when CDI is inactive.
-            // Never classify from a raw header or coroutine MDC. Controlled property-loss tests
-            // establish this read's role, not the older deployed image's loss mechanism.
-            synthetic = taintContext.tainted || requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
+            synthetic = synthetic,
             origin = request.origin?.let { origin ->
                 check(!callerIdentity.isAnonymous) { "authenticated journal submitter is required" }
                 origin.toDomain(callerIdentity.principal.name)

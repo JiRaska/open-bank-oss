@@ -16,6 +16,14 @@ spec:
         - alert: NotificationOutcomeStuckPending
           expr: max(openbank_notification_pending_stale{service="notification"}) > 0
           for: 5m
+          # One episode, not fifteen. The gauge is emitted per pod, so a rollout or restart
+          # leaves a minute or two with NO series; `max()` of nothing is nothing, the alert
+          # resolved, and re-fired five minutes later. Measured 2026-11-14 over 7d: a single
+          # ~4.5-day episode (6 stale rows, then reconciled to 0) reached Alertmanager as 15
+          # separate critical firings. keep_firing_for bridges a scrape gap; it does not hold a
+          # real resolution longer than 15m. Backtest (alert-backtest.py): 13 emulated onsets
+          # -> 1, firing minutes 6367 -> 6457.
+          keep_firing_for: 15m
           labels:
             severity: critical
           annotations:

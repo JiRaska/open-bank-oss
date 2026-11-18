@@ -225,7 +225,7 @@ else echo "  FAIL regression outranks provider-live: got ${got_plr}"; fails=$((f
 msg_pl="$(PACT_VERSION_PRESENT=no COUNTERPART_STATE=provider-live COUNTERPART_DETAIL="$PL_DETAIL" \
   bash "$CLASSIFY" openbank-demo-service <<< "$NO_VERIFIED_PACT" | cut -f2-)"
 case "$msg_pl" in
-  *"verify-provider.yml -f service=openbank-product-catalog -f ref=af04613a74c7d2cb27baf1b681448ebd3e3c7c33"*)
+  *"verify-provider.yml -f service=openbank-product-catalog -f provider_version=af04613a74c7d2cb27baf1b681448ebd3e3c7c33 -f consumer=openbank-demo-service "*)
     echo "  ok   PROVIDER_UNVERIFIED names a runnable remedy at the exact sha" ;;
   *) echo "  FAIL PROVIDER_UNVERIFIED remedy is not runnable: ${msg_pl}"; fails=$((fails + 1)) ;;
 esac

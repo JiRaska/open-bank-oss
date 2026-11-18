@@ -6,6 +6,7 @@ package com.openbank.sepainstant.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.web.SyntheticTaintContext
 import com.openbank.sepainstant.application.port.`in`.GetSctInstPaymentUseCase
 import com.openbank.sepainstant.application.port.`in`.RecallSctInstPaymentUseCase
 import com.openbank.sepainstant.application.port.`in`.SubmitSctInstCommand
@@ -40,6 +41,7 @@ class SctInstResource @Inject constructor(
     private val submitUseCase: SubmitSctInstPaymentUseCase,
     private val getUseCase: GetSctInstPaymentUseCase,
     private val recallUseCase: RecallSctInstPaymentUseCase,
+    private val taintContext: SyntheticTaintContext,
 ) {
 
     @GET
@@ -79,6 +81,7 @@ class SctInstResource @Inject constructor(
             amount = amount,
             remittanceInfo = body.remittanceInfo,
             endToEndId = body.endToEndId,
+            synthetic = taintContext.tainted,
         )
         return submitUseCase.submit(cmd).map { p ->
             Response.status(Response.Status.CREATED).entity(toResponse(p)).build()

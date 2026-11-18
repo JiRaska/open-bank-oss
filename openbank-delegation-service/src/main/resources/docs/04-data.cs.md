@@ -11,3 +11,84 @@ Tato stránka zatím popisuje jen životní cyklus outboxu; zbytek datového mod
 - Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
 - Signály: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total` a workflow liveness `outbox-sent-retention`.
 - Vypnutí: `openbank.outbox.retention.enabled=false` (při startu zaloguje WARN). Nesnižujte `sent-days` pod potřebu kteréhokoli čtenáře SENT řádků.
+
+## Čtení vlastnictví zdroje podle typu (ADR-0375 D5)
+
+Grant je sám o sobě autorita, jakmile si ho produktová služba promítne, takže před vystavením
+nabídky se tato služba zeptá služby, která zdroj **vlastní**, jestli ho poskytovatel grantu opravdu
+vlastní. Odpověď je fail-closed v obou chybových směrech: `NOT_OWNED` odmítá a `UNVERIFIABLE` taky —
+dohledání, které se nepovedlo provést, není povolení.
+
+| typ zdroje | kdo odpovídá | stav |
+|---|---|---|
+| `ACCOUNT`, `SAVINGS_GOAL` | account-service (spořicí cíl je klíčovaný vlastnícím účtem, ADR-0153) | vyřešeno |
+| `CARD` | card-issuance-service | vyřešeno |
+| `DOCUMENT` | document-service `GET /api/v1/documents/{id}/owner`, akce `document.verifyOwnership` | vyřešeno (ADR-0375 D5) |
+| `PAYMENT`, `STATEMENT` | nikdo — viz níže | vždy `UNVERIFIABLE`, takže každá taková nabídka je odmítnuta |
+
+Čtení dokumentu používá POJMENOVANÉHO OIDC klienta `m2m`, takže se autentizuje jako
+`service-account-openbank-delegation` (jen ROLE_API), ne jako sdílená identita `openbank-services`,
+kterou document-service pro tuto akci odmítá. `M2mOidcClientIdentityWiringTest` výběr klienta pojišťuje.
+
+`PAYMENT` a `STATEMENT` jsou odmítané na základě měření, ne proto, že by práce nebyla dokončená.
+statement-service je adresovaná `accountId` a nemá objekt výpisu s vlastním id, takže id zdroje typu
+`STATEMENT` neodkazuje na nic, co by vlastnící služba uměla dohledat. Id platby se neresolvuje v
+žádné jedné službě: platby vlastní šest railů a nic nemapuje id na rail. Ani jeden typ nemá koho se
+zeptat, takže oba zůstávají odmítané, dokud ty páry neodejdou z matice capabilities.
+
+### Opravy katalogu presetů jsou dopředné migrace (ADR-0375 D7)
+
+Katalog rolí se seeduje migrací a preset může být špatně způsobem, kterého si nikdo nevšimne,
+dokud je špatně i vynucování kolem něj. „Účetní" a „Pokladník" udělují `ACCOUNT_READ_BALANCES` bez
+`ACCOUNT_VIEW_DETAILS`; to bylo neviditelné tak dlouho, dokud se čtení detailu účtu na edge ptalo
+na capability pro zůstatky. V33 oběma presetům chybějící capability doplňuje.
+
+Sahá to jen na KATALOG. Už vystavené granty jsou neměnné snímky — grant nese to, s čím poskytovatel
+v té chvíli souhlasil, a jeho dodatečné rozšíření by znamenalo, že tahle služba edituje někomu
+mandát. Stávající držitel těch dvou rolí si nechává zůstatky i transakce a o detail účtu přijde,
+dokud mu poskytovatel nesdílí znovu z opraveného presetu.
+
+## Rezervace limitu vypořádané výsledkem platby (dodatek ADR-0249 D3, #16000)
+
+Rezervace limitu tuzemské platby se vypořádá podle toho, jak platba skutečně skončila, ne podle
+toho, že ji platební kanál přijal. `DomesticPaymentOutcomeConsumer` čte
+`openbank.domestic.payment.events` (skupina `delegation-service-domestic-payment-outcomes`) a
+rozhoduje podle hlavičky `ce-type`:
+
+| Událost | Rezervace |
+|---|---|
+| `domestic.payment.status-changed`, `newStatus` SETTLED | RESERVED → CONFIRMED |
+| … REJECTED, CANCELLED; `domestic.delegated-spend.finalized-absent` | RESERVED → RELEASED |
+| … RETURNED | RESERVED nebo CONFIRMED → RELEASED (jediná cesta ze stavu CONFIRMED) |
+| bez `reservationId`, nekoncový stav, `created`, `held` | beze změny (`ignored`) |
+| jiný nebo chybějící `ce-type`, nečitelné tělo | beze změny (`unrecognised`, s alertem) |
+
+Opakovaně doručený výsledek nic nezmění; protichůdný se potvrdí a započítá jako `conflict`. Každý
+záznam se počítá v `openbank_delegation_payment_outcome_events_total{outcome}`. Do
+`openbank.dlq.delegation.domestic-payment-events-in` jde jen záznam, jehož zápis selhal.
+
+Konzument je vypnutý, dokud není `OPENBANK_DELEGATION_PAYMENT_OUTCOME_CONSUMER_ENABLED=true`;
+vypnutý kanál vůbec neexistuje. Pořadí zapnutí: tento konzument, potom vazba rezervace v platebním
+kanálu, potom edge přestane potvrzovat na odpověď 2xx.
+
+## Příjemci typu MCP klient (ADR-0383 D3) — neaktivní
+
+Grant uvádí třídu příjemce ve sloupci `grantee_type` (V34): `PARTY` (výchozí; všechny granty před
+V34) nebo `MCP_CLIENT`, tedy MCP klient třetí strany, kterého zákazník připustil.
+
+- Grant `MCP_CLIENT` zaznamenává při udělení ID klienta (`grantee_client_id`, `azp` z tokenu) a
+  otisk klíče DPoP (`grantee_key_thumbprint`, `cnf.jkt`). Kontroly CHECK v databázi hlídají tvar:
+  u `MCP_CLIENT` jsou obě vazby vyplněné, u `PARTY` obě chybí. `grantee_party_id` je UUID verze 3
+  odvozené z ID klienta a grant `PARTY` tento tvar použít nesmí.
+- Oprávnění jsou výčtem povolených: čtení účtu (`ACCOUNT_READ_BALANCES`,
+  `ACCOUNT_READ_TRANSACTIONS`, `ACCOUNT_VIEW_DETAILS`, `ACCOUNT_DOWNLOAD_STATEMENTS`) a
+  `ACCOUNT_PROPOSE_PAYMENT`. Cokoli, co provádí nebo spravuje, je odmítnuto bez ohledu na limity.
+- Takový grant nikdy nepřijímá osoba. `accept()` ho odmítne; aktivaci zajistí budoucí tok
+  připojení s SCA v aplikaci banky (ADR-0383 D1).
+- Události životního cyklu nesou volitelná pole `granteeType` (chybí = `PARTY`) a
+  `granteeClientId` (AsyncAPI 1.7.0). Konzumenti musí grant s jiným `granteeType` než `PARTY`
+  ignorovat.
+- **Zatím neaktivní:** každá zapisující cesta grant `MCP_CLIENT` odmítne
+  (`400 MCP_CLIENT_GRANTEE_DORMANT`) a nelze pro něj sestavit žádnou událost, protože současní
+  konzumenti (account-service, card-issuance-service, context-service) znají jen osoby. Ochrana se
+  zruší až poté, co budou granty jiné než PARTY přeskakovat.

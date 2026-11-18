@@ -19,6 +19,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 
 /**
  * End-to-end journey for a Czech domestic credit transfer: **submit the payment, read it back,
@@ -163,6 +165,104 @@ class DomesticPaymentJourneyE2E {
         ).isEqualTo(404)
     }
 
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "sub", value = ACTOR),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `lookup reports only a committed payment bound to the exact account and customer scope`() {
+        val key = "e2e-lookup-${UUID.randomUUID()}"
+        val accountId = UUID.randomUUID()
+        val original = requestBody(accountId, AMOUNT, "E2E-LOOKUP", CUSTOMER_SCOPE)
+        val changed = requestBody(accountId, AMOUNT.add(BigDecimal("0.01")), "E2E-LOOKUP", CUSTOMER_SCOPE)
+        assertUnknown(lookup(key, accountId, CUSTOMER_SCOPE))
+
+        val created = post(key, original)
+        assertThat(created.statusCode).isEqualTo(201)
+        val paymentId = created.jsonPath().getString("id")
+        val found = lookup(key, accountId, CUSTOMER_SCOPE)
+        assertThat(found.statusCode).isEqualTo(200)
+        assertThat(found.header("Cache-Control")).isEqualTo("no-store")
+        assertThat(found.jsonPath().getMap<String, String>("")).containsExactlyInAnyOrderEntriesOf(
+            mapOf("outcome" to "FOUND", "paymentId" to paymentId, "status" to "RECEIVED"),
+        )
+
+        assertUnknown(lookup(key, UUID.randomUUID(), CUSTOMER_SCOPE))
+        assertUnknown(lookup(key, accountId, OTHER_SCOPE))
+        assertThat(post(key, changed).statusCode).isEqualTo(409)
+        assertThat(post(key, requestBody(accountId, AMOUNT, "E2E-LOOKUP", OTHER_SCOPE)).statusCode).isEqualTo(409)
+        assertThat(post(key, requestBody(accountId, AMOUNT, "E2E-LOOKUP")).statusCode).isEqualTo(409)
+        assertThat(post(key, original).header("X-Idempotency-Replayed")).isEqualTo("true")
+
+        val legacyKey = "$key-legacy"
+        assertThat(post(legacyKey, requestBody(accountId, AMOUNT, "E2E-LEGACY")).statusCode).isEqualTo(201)
+        assertUnknown(lookup(legacyKey, accountId, CUSTOMER_SCOPE))
+        assertThat(post(legacyKey, requestBody(accountId, AMOUNT, "E2E-LEGACY", CUSTOMER_SCOPE)).statusCode)
+            .isEqualTo(409)
+    }
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "sub", value = ACTOR),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `concurrent scoped and unscoped submissions have exactly one winner`() {
+        val key = "e2e-lookup-race-${UUID.randomUUID()}"
+        val accountId = UUID.randomUUID()
+        val scoped = CompletableFuture.supplyAsync {
+            post(key, requestBody(accountId, AMOUNT, "E2E-RACE", CUSTOMER_SCOPE))
+        }
+        val unscoped = CompletableFuture.supplyAsync {
+            post(key, requestBody(accountId, AMOUNT, "E2E-RACE"))
+        }
+        val scopedResponse = scoped.get(30, TimeUnit.SECONDS)
+        val unscopedResponse = unscoped.get(30, TimeUnit.SECONDS)
+        assertThat(listOf(scopedResponse.statusCode, unscopedResponse.statusCode)).containsExactlyInAnyOrder(201, 409)
+        val found = lookup(key, accountId, CUSTOMER_SCOPE)
+        if (scopedResponse.statusCode == 201) {
+            assertThat(found.jsonPath().getString("paymentId")).isEqualTo(scopedResponse.jsonPath().getString("id"))
+        } else {
+            assertUnknown(found)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-services"),
+            Claim(key = "sub", value = ACTOR),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `an operator role and a copied workload username cannot assert or look up customer scope`() {
+        val accountId = UUID.randomUUID()
+        assertThat(lookup("e2e-untrusted", accountId, CUSTOMER_SCOPE).statusCode).isEqualTo(403)
+        assertThat(post("e2e-untrusted", requestBody(accountId, AMOUNT, "E2E-AUTH", CUSTOMER_SCOPE)).statusCode)
+            .isEqualTo(403)
+    }
+
+    private fun lookup(key: String, accountId: UUID, scope: String): Response = RestAssured.given()
+        .contentType("application/json")
+        .header("Idempotency-Key", key)
+        .body("""{"debtorAccountId":"$accountId","customerSubmissionScope":"$scope"}""")
+        .post("/api/v1/domestic-payments/submissions/lookup")
+
+    private fun assertUnknown(response: Response) {
+        assertThat(response.statusCode).isEqualTo(200)
+        assertThat(response.header("Cache-Control")).isEqualTo("no-store")
+        assertThat(response.jsonPath().getMap<String, String>(""))
+            .containsExactlyEntriesOf(mapOf("outcome" to "UNKNOWN"))
+    }
+
     private fun post(key: String, body: String): Response = RestAssured.given()
         .contentType("application/json")
         .header("Idempotency-Key", key)
@@ -170,8 +270,14 @@ class DomesticPaymentJourneyE2E {
         .post("/api/v1/domestic-payments")
 
     /** Deliberately padded and lower-cased — step 2 asserts the stored row is normalised. */
-    private fun requestBody(debtorAccountId: UUID, amount: BigDecimal, endToEndId: String): String =
-        """
+    private fun requestBody(
+        debtorAccountId: UUID,
+        amount: BigDecimal,
+        endToEndId: String,
+        scope: String? = null,
+    ): String {
+        val optionalScope = scope?.let { ""","customerSubmissionScope":"$it"""" }.orEmpty()
+        return """
         {
           "debtorAccountId": "$debtorAccountId",
           "debtorAccountNumber": " 1234567890 ",
@@ -190,11 +296,15 @@ class DomesticPaymentJourneyE2E {
           "transferScope": null,
           "technicalAccountCode": null,
           "statementLabel": " Monthly settlement ",
-          "endToEndId": "$endToEndId"
+          "endToEndId": "$endToEndId"$optionalScope
         }
         """.trimIndent()
+    }
 
     private companion object {
+        const val EDGE = "service-account-openbank-edge"
+        val CUSTOMER_SCOPE = "a".repeat(64)
+        val OTHER_SCOPE = "b".repeat(64)
         const val ACTOR = "00000000-0000-0000-0000-000000000099"
         val AMOUNT: BigDecimal = BigDecimal("1500.00")
     }

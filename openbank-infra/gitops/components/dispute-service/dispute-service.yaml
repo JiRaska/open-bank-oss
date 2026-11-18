@@ -24,7 +24,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-dispute-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "100cb894e53c2098"
+        openbank.tech/policy-checksum: "b3140956fe768116"
       labels: {app.kubernetes.io/name: dispute-service, app.kubernetes.io/part-of: dispute}
     spec:
       securityContext:
@@ -35,7 +35,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: dispute-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-dispute-service:sandbox-e8e3b10a@sha256:111aceb70d2b84e5df125d72051d154c1bb081e0914689a71a108a011e29bda8
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-dispute-service:sandbox-50f230ca@sha256:7bd26d1c354f11ba415752023dd40e236d8626aa8df93555d9d6af804f108518
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8135}
@@ -98,14 +98,11 @@ spec:
             # (application.yaml: authz.enforce: "${AUTHZ_ENFORCE:true}") and NO sidecar — the
             # live pod had exactly one container — so every PDP call to localhost:8181 failed
             # and the interceptor failed closed for every caller, including the customer-edge
-            # dispute list the mobile app depends on. Kept ADVISORY (false) for this rollout:
-            # the interceptor evaluates and records every decision but does NOT block while
-            # false, so the "would DENY" population can be confirmed empty in the live decision
-            # log (openbank.authz.decisions, outcome=deny enforced=false) before the enforce
-            # flip — a separate, deliberate follow-up per the rules.yaml AUTHZ_ENFORCE
-            # guardrail. The app default is `true`, so this explicit `false` is load-bearing.
+            # dispute list the mobile app depends on. ENFORCED after an advisory window: the
+            # decision log's would-DENY population was confined to principals the current
+            # bundle now allows (opa eval against this bundle, per principal and action).
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe: {tcpSocket: {port: management}, initialDelaySeconds: 10, periodSeconds: 5, failureThreshold: 30}
           readinessProbe: {tcpSocket: {port: http}, periodSeconds: 10, failureThreshold: 3}
           livenessProbe: {httpGet: {path: /q/health/live, port: management}, periodSeconds: 15, failureThreshold: 3}

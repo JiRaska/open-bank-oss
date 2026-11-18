@@ -45,6 +45,13 @@ data class ModelRequest(
     val tools: List<ToolSpec> = emptyList(),
     val maxTokens: Int = 1024,
     val temperature: Double = 0.0,
+    /**
+     * The charter id of the agent this completion is for. Sent as the OpenAI `user` field so the
+     * LiteLLM gateway's `langfuse_otel` span carries `user.id`, which Langfuse records as the
+     * observation's userId — the per-agent dimension of the AI-cost exporter. Null leaves the
+     * field off. Set by [com.openbank.agent.application.ModelGateway], not by callers.
+     */
+    val endUserId: String? = null,
 )
 
 data class ModelResponse(

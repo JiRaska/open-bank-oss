@@ -282,6 +282,24 @@ journeys:
       must fail the listing check, and pointing CUSTOMER_BASE at a host that serves 200 for
       every path must fail the 401 and 403 negative checks rather than read as availability.
 
+  - id: synthetic-own-account-transfer
+    title: "Synthetic own-account transfer and return"
+    capability: >-
+      An isolated bank-owned party moves one minor unit between its two CZK accounts,
+      verifies customer history, the synthetic ledger posting and both balance deltas, and
+      returns both accounts to their starting balances.
+    status: planned
+    severity: ticket
+    money_moving: true
+    target_schedule: "15 3 * * *"
+    falsification: >-
+      Drop the trusted synthetic origin or return a mismatched ledger proof. The journey
+      must fail, and its return leg must not follow an unproven outbound leg. Retry the
+      same UTC day after an ambiguous response and verify there are still only two journals.
+    blocked_by: >-
+      Provision the separate sandbox party, funded accounts and read-only proof client
+      and deploy the compatible service versions. The standalone sandbox CronJob renders suspended.
+
   - id: sepa-credit-transfer
     title: "SEPA credit-transfer lifecycle"
     capability: >-
@@ -492,6 +510,35 @@ journeys:
       #2204 failure mode (a valid response carrying no rate) stay green for the service's
       whole life again.
 
+  - id: vop-verify-payee
+    title: "Verification of Payee answers through the public edge"
+    capability: >-
+      An authenticated customer can verify a payee name against an IBAN before confirming a
+      SEPA transfer (IPR Art. 5c): the check returns a well-formed no_data with reason
+      account_not_found for an IBAN the bank holds no name for, proving the full
+      edge → vop-service → account lookup path a payer's app takes.
+    status: active
+    severity: ticket
+    money_moving: false
+    covers:
+      - openbank-vop-service
+    cronjob: openbank-infra/gitops/components/observability/cronjob-journey-vop-verify-payee.yaml
+    schedule: "4,19,34,49 * * * *"
+    runtime_note: >-
+      Authenticates as the canary customer openbank-synthetic-retail (ADR-0331) through the
+      public token endpoint and the public customer edge — the same identity
+      wealth-declared-holding drives, reading the same OpenBao KV entry through its own
+      ExternalSecret. Should the secret ever be missing, the script logs "credential absent"
+      and fails every check, which is missing identity evidence and not a vop or edge result.
+      Each run writes one vop_verification evidence row (ibanHash/nameHash only, no party
+      link); the rate limiter at 60 req/min per requester is never near.
+    falsification: >-
+      Point the customer edge's vop-service URL at a dead host, or set CUSTOMER_BASE to
+      vop-service's ClusterIP: the journey must fail on the 5xx/timeout, not pass because a
+      service answered somewhere. Asserting only "HTTP 200" would pass a vop that lost its
+      account lookup — the checks pin the wire contract no_data + account_not_found, so a
+      vop that starts fabricating MATCH answers also goes red.
+
   - id: wealth-declared-holding
     title: "Declared holding appears in net worth"
     capability: >-
@@ -519,6 +566,52 @@ journeys:
       missing, or on the lost history entry, not pass because the net-worth call returned 200
       with a partial answer. Setting CUSTOMER_BASE to wealth-service's ClusterIP must also
       fail, since that proves the service answers and not that a customer can reach it.
+
+  - id: mcp-customer-read
+    title: "Customer MCP channel: read own accounts through a delegated client"
+    capability: >-
+      A synthetic customer can authorise an allowlisted MCP client (OAuth with PKCE, DPoP-bound
+      token, per-party grant) and that client can list the customer's accounts and read a
+      balance and recent transactions, scoped to the granted accounts and nothing else.
+    status: planned
+    severity: ticket
+    money_moving: false
+    covers:
+      - openbank-mcp-service
+    target_schedule: "*/30 * * * *"
+    falsification: >-
+      Revoke the grant, or present the token without its DPoP proof: the journey must fail on
+      the read being refused with the precise authorisation error, and it must also fail if a
+      second synthetic party's account is ever returned. Pointing the client at the staff realm
+      must fail, since that proves the service answers and not that a customer can reach it.
+    blocked_by: >-
+      #16617 / #16590 (ADR-0383, ADR-0384) — the customer MCP channel is not routable yet: no
+      public route, tokens are validated against the staff realm, and the customer-realm
+      client, grant lookup and DPoP validation are not built. Needs the bank-owned synthetic
+      customer identity of ADR-0331 and the hash-linked audit prerequisite (ADR-0384 D0).
+
+  - id: mcp-propose-approve
+    title: "Customer MCP channel: propose a payment and approve it in the app"
+    capability: >-
+      A synthetic customer's MCP client can create a payment proposal (never a debit), the
+      customer approves it with strong customer authentication in the app, and only then is
+      the instruction admitted, with the whole chain visible in the audit trail.
+    status: planned
+    severity: page
+    money_moving: true
+    covers:
+      - openbank-mcp-service
+    target_schedule: "0 * * * *"
+    falsification: >-
+      Approve proposal A and assert proposal B stays unreleased, or let the proposal expire
+      unapproved: the journey must fail on a released instruction without an SCA approval, and
+      on the proposal being mutated between creation and approval, not on a transport error.
+    blocked_by: >-
+      #16617 / #16590 (ADR-0383) — the channel is not routable yet and propose_payment is
+      refused by the unwired proposal store. Also blocked by the default money-moving blocker:
+      the SYNTHETIC taint must reach the ledger and the regulatory aggregates (ADR-0252 phase
+      1, #4348) before an approved proposal may post, and the in-app SCA approval needs the
+      test device of the end-to-end harness (layer 2 of #16617).
 
 # ---------------------------------------------------------------------------------------
 # MONEY-PATH ACCOUNTABILITY (ADR-0252 phase 2, #4348)
@@ -590,6 +683,10 @@ money_path_accountability:
         A control path, so a journey must prove it RUNS for synthetic traffic rather than
         being skipped for it — the one place where the taint must never suppress anything.
     - service: openbank-vop-service
+      note: >-
+        Covered by the active vop-verify-payee journey (no_data/account_not_found through the
+        public edge). A positive MATCH answer still needs a synthetic account fixture —
+        ADR-0252 phase 1 — so the happy path stays unwatched until then.
     - service: openbank-standing-order-service
     - service: openbank-psd2-service
       note: >-

@@ -14,7 +14,7 @@
 // Only a real browser with real timing can express that. The assertions below are the ones that were
 // RED before the generation-counter guard and green after it — the fix's own regression net.
 
-import { test, expect } from '@playwright/test'
+import { test, expect } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 const A = { id: '05a02ef1-381c-40e7-b73f-d6855eead42e', legalName: 'Jan Novák', email: 'jan@example.test', status: 'ACTIVE', kycStatus: 'VERIFIED' }
@@ -119,7 +119,10 @@ test.describe('party-name lookup (ADR-0210 D8)', () => {
     const lookup = page.getByRole('search', { name: /^(Vyhledání klienta nebo firmy|Find a customer or company)$/ })
       .getByRole('textbox', { name: /^(Vyhledat stranu|Search parties)$/ })
     await expect(lookup).toBeVisible()
-    await expect(lookup).toHaveAttribute('placeholder', /Jméno, příjmení|Name, surname/)
+    await expect(lookup).toHaveAttribute(
+      'placeholder',
+      /^(Jméno nebo obchodní název klienta|Client name or trading name)$/,
+    )
   })
 
   test('a lens switch invalidates an IN-FLIGHT lookup, not just the settled rows', async ({ page }) => {

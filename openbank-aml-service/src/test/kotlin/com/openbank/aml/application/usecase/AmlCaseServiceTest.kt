@@ -7,13 +7,20 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.kotlinModule
 import com.openbank.aml.application.port.`in`.CreateAmlCaseCommand
+import com.openbank.aml.application.port.`in`.HoldDecisionCommand
 import com.openbank.aml.application.port.`in`.UpdateAmlDecisionCommand
 import com.openbank.aml.application.port.out.AmlCaseRepository
+import com.openbank.aml.application.port.out.HoldDecisionRepository
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.AmlRiskLevel
+import com.openbank.aml.domain.model.CaseOrigin
+import com.openbank.aml.domain.model.HoldDecisionFourEyesException
+import com.openbank.aml.domain.model.HoldDisposition
 import com.openbank.aml.domain.model.ScreeningType
+import com.openbank.libs.governance.StaffIdentity
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -37,12 +44,17 @@ class AmlCaseServiceTest {
         .registerModule(JavaTimeModule())
 
     private val clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
+    private val meters = SimpleMeterRegistry()
     private lateinit var service: AmlCaseService
+    private lateinit var holdDecisions: HoldDecisionRepository
+    private lateinit var holdService: HoldDecisionService
 
     @BeforeEach
     fun setUp() {
         amlCaseRepository = mockk()
-        service = AmlCaseService(amlCaseRepository, objectMapper, clock)
+        service = AmlCaseService(amlCaseRepository, objectMapper, clock, meters)
+        holdDecisions = mockk()
+        holdService = HoldDecisionService(amlCaseRepository, holdDecisions, objectMapper, clock)
     }
 
     @Test
@@ -50,7 +62,11 @@ class AmlCaseServiceTest {
         val command = createCommand(riskLevel = AmlRiskLevel.HIGH)
 
         coEvery { amlCaseRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
-        coEvery { amlCaseRepository.save(any(), any()) } answers { firstArg() }
+        val built = mutableListOf<OutboxMessage>()
+        coEvery { amlCaseRepository.save(any(), any()) } answers {
+            built += secondArg<(AmlCase) -> OutboxMessage>()(firstArg())
+            firstArg()
+        }
 
         val result = service.createCase(command)
 
@@ -69,13 +85,14 @@ class AmlCaseServiceTest {
                         it.status == AmlCaseStatus.UNDER_REVIEW &&
                         it.alertDetail == "Multiple rapid inbound transfers"
                 },
-                match {
-                    it.aggregateId == result.id &&
-                        it.eventType == AmlCaseService.EVENT_CASE_CREATED &&
-                        it.payload.contains(result.id.toString())
-                },
+                any(),
             )
         }
+        assertThat(built).singleElement().satisfies({
+            assertThat(it.aggregateId).isEqualTo(result.id)
+            assertThat(it.eventType).isEqualTo(AmlCaseService.EVENT_CASE_CREATED)
+            assertThat(it.payload).contains(result.id.toString())
+        })
     }
 
     @Test
@@ -159,9 +176,294 @@ class AmlCaseServiceTest {
         assertThat(occurredAt).isEqualTo(expected)
     }
 
+    private val holdKey = "${AmlCase.PAYMENT_HOLD_KEY_PREFIX}domestic:${UUID.randomUUID()}"
+
+    private fun holdCommand(partyId: UUID? = UUID.randomUUID()) =
+        createCommand(idempotencyKey = holdKey).copy(origin = CaseOrigin.PAYMENT_HOLD_INTAKE, partyId = partyId)
+
+    @Test
+    fun `the hold intake refuses a hold whose key is held by a case of another origin`() {
+        // Stored as the create endpoint stored it before the namespace was reserved: with a request
+        // hash and without provenance. A REST origin must fare no better.
+        for (foreignOrigin in listOf(null, CaseOrigin.REST, CaseOrigin.PACK_EVALUATION)) {
+            val planted = amlCase().copy(idempotencyKey = holdKey, requestHash = "a".repeat(64), origin = foreignOrigin)
+            coEvery { amlCaseRepository.findByIdempotencyKey(holdKey) } returns planted
+
+            // An IllegalStateException: the intake's retry treats it as deterministic and dead-letters at once.
+            assertThatThrownBy { runBlocking { service.createCase(holdCommand()) } }
+                .describedAs("origin %s", foreignOrigin)
+                .isInstanceOf(ForeignCaseUnderHoldKeyException::class.java)
+                .isInstanceOf(IllegalStateException::class.java)
+        }
+        // Nothing adopted, nothing written.
+        coVerify(exactly = 0) { amlCaseRepository.save(any(), any()) }
+        assertThat(meters.counter(AmlCaseService.FOREIGN_KEY_CLAIM_METRIC).count()).isEqualTo(3.0)
+    }
+
+    @Test
+    fun `a redelivered hold finds the intake's own case`(): Unit = runBlocking {
+        val own = amlCase().copy(idempotencyKey = holdKey, origin = CaseOrigin.PAYMENT_HOLD_INTAKE)
+        coEvery { amlCaseRepository.findByIdempotencyKey(holdKey) } returns own
+
+        assertThat(service.createCase(holdCommand())).isEqualTo(own)
+
+        coVerify(exactly = 0) { amlCaseRepository.save(any(), any()) }
+        assertThat(meters.counter(AmlCaseService.FOREIGN_KEY_CLAIM_METRIC).count()).isZero()
+    }
+
+    @Test
+    fun `only the hold intake refuses - any other opener replays the case under its key`(): Unit = runBlocking {
+        val existing = amlCase().copy(idempotencyKey = "aml-idem-1", origin = null)
+        coEvery { amlCaseRepository.findByIdempotencyKey("aml-idem-1") } returns existing
+
+        for (origin in CaseOrigin.entries - CaseOrigin.PAYMENT_HOLD_INTAKE) {
+            assertThat(service.createCase(createCommand().copy(origin = origin))).isEqualTo(existing)
+        }
+        assertThat(meters.counter(AmlCaseService.FOREIGN_KEY_CLAIM_METRIC).count()).isZero()
+    }
+
+    @Test
+    fun `a case under a hold key that the intake did not open cannot be decided`(): Unit = runBlocking {
+        for (foreignOrigin in listOf(null, CaseOrigin.REST)) {
+            val planted = amlCase().copy(idempotencyKey = holdKey, origin = foreignOrigin)
+            coEvery { amlCaseRepository.findById(planted.id) } returns planted
+            for (target in listOf(AmlCaseStatus.CLEARED, AmlCaseStatus.BLOCKED, AmlCaseStatus.UNDER_REVIEW)) {
+                assertThatThrownBy {
+                    runBlocking {
+                        service.updateDecision(UpdateAmlDecisionCommand(planted.id, target, "reason", null, "analyst"))
+                    }
+                }.describedAs("origin %s -> %s", foreignOrigin, target)
+                    .isInstanceOf(InvalidAmlCaseStateTransitionException::class.java)
+                    .hasMessageContaining("held-payment key")
+            }
+        }
+        coVerify(exactly = 0) { amlCaseRepository.update(any(), any()) }
+    }
+
+    @Test
+    fun `one analyst alone cannot decide the intake's own case through the status endpoint`() {
+        val own = amlCase(
+            AmlCaseStatus.UNDER_REVIEW,
+        ).copy(idempotencyKey = holdKey, origin = CaseOrigin.PAYMENT_HOLD_INTAKE)
+        coEvery { amlCaseRepository.findById(own.id) } returns own
+        for (target in listOf(AmlCaseStatus.CLEARED, AmlCaseStatus.BLOCKED)) {
+            assertThatThrownBy {
+                runBlocking {
+                    service.updateDecision(UpdateAmlDecisionCommand(own.id, target, "reason", null, "analyst"))
+                }
+            }.isInstanceOf(HoldDecisionFourEyesException::class.java)
+                .hasMessageContaining("hold-decision/proposal")
+        }
+        coVerify(exactly = 0) { amlCaseRepository.update(any(), any()) }
+    }
+
+    @Test
+    fun `a hold case is proposed with no event and confirmed by another analyst with origin`(): Unit = runBlocking {
+        val own = amlCase(AmlCaseStatus.UNDER_REVIEW)
+            .copy(idempotencyKey = holdKey, origin = CaseOrigin.PAYMENT_HOLD_INTAKE, partyId = null)
+        val events = mutableListOf<OutboxMessage?>()
+        coEvery { amlCaseRepository.findById(own.id) } returns own
+        coEvery { holdDecisions.writeHoldDecision(any(), any(), any()) } answers {
+            events += thirdArg<OutboxMessage?>()
+            secondArg()
+        }
+
+        val proposed = holdService.proposeHoldDecision(
+            HoldDecisionCommand(
+                own.id,
+                HoldDisposition.CLEAR,
+                "false positive",
+                StaffIdentity("alice", "staff-alice", strongAuth = true),
+            ),
+        )
+        assertThat(proposed.status).isEqualTo(AmlCaseStatus.UNDER_REVIEW)
+        assertThat(events).containsExactly(null)
+
+        coEvery { amlCaseRepository.findById(own.id) } returns proposed
+        val decided = holdService.confirmHoldDecision(
+            HoldDecisionCommand(
+                own.id,
+                HoldDisposition.CLEAR,
+                "false positive",
+                StaffIdentity("bob", "staff-bob", strongAuth = true),
+            ),
+        )
+
+        assertThat(decided.status).isEqualTo(AmlCaseStatus.CLEARED)
+        assertThat(decided.decidedBy).isEqualTo("bob")
+        val payload = objectMapper.readTree(events.last()!!.payload)
+        assertThat(payload.get("idempotencyKey").asText()).isEqualTo(holdKey)
+        assertThat(payload.get("newStatus").asText()).isEqualTo("CLEARED")
+        assertThat(payload.has("partyId")).isTrue()
+        assertThat(payload.get("partyId").isNull).isTrue()
+        // ADR-0374: provenance on the wire, so a rail acts only on the intake's own case.
+        assertThat(payload.get("origin").asText()).isEqualTo("PAYMENT_HOLD_INTAKE")
+    }
+
+    @Test
+    fun `the proposer cannot confirm, and nothing is written`() {
+        val proposed = amlCase(AmlCaseStatus.UNDER_REVIEW)
+            .copy(idempotencyKey = holdKey, origin = CaseOrigin.PAYMENT_HOLD_INTAKE)
+            .proposeHoldDecision(
+                HoldDisposition.BLOCK,
+                "listed",
+                StaffIdentity("alice", "staff-alice", strongAuth = true),
+                Instant.now(clock),
+            )
+        coEvery { amlCaseRepository.findById(proposed.id) } returns proposed
+        assertThatThrownBy {
+            runBlocking {
+                holdService.confirmHoldDecision(
+                    HoldDecisionCommand(
+                        proposed.id,
+                        HoldDisposition.BLOCK,
+                        "listed",
+                        StaffIdentity("alice", "staff-alice", strongAuth = true),
+                    ),
+                )
+            }
+        }.isInstanceOf(HoldDecisionFourEyesException::class.java).hasMessageContaining("four-eyes")
+        coVerify(exactly = 0) { holdDecisions.writeHoldDecision(any(), any(), any()) }
+    }
+
+    /**
+     * Byte-identity of a case the intake did not open: the status-changed payload of a REST case is
+     * exactly what it was before hold-decision four-eyes existed (this test mapper renders the timestamp
+     * through the origin-stripping tree, as main does). A literal, so a new field fails it.
+     */
+    @Test
+    fun `a legacy case's status-changed event is byte-identical`(): Unit = runBlocking {
+        val id = UUID.fromString("00000000-0000-4000-8000-0000000000a1")
+        val party = UUID.fromString("00000000-0000-4000-8000-0000000000a2")
+        val txn = UUID.fromString("00000000-0000-4000-8000-0000000000a3")
+        val legacy = amlCase(AmlCaseStatus.UNDER_REVIEW)
+            .copy(id = id, partyId = party, transactionId = txn, origin = CaseOrigin.REST, idempotencyKey = "legacy-1")
+        val event = slot<OutboxMessage>()
+        coEvery { amlCaseRepository.findById(id) } returns legacy
+        coEvery { amlCaseRepository.update(any(), capture(event)) } answers { firstArg() }
+
+        service.updateDecision(UpdateAmlDecisionCommand(id, AmlCaseStatus.CLEARED, "false positive", null, "analyst"))
+
+        assertThat(event.captured.eventType).isEqualTo("aml.case.status_changed.v1")
+        assertThat(event.captured.payload).isEqualTo(
+            "{\"caseId\":\"$id\",\"partyId\":\"$party\"," +
+                "\"previousStatus\":\"UNDER_REVIEW\",\"newStatus\":\"CLEARED\"," +
+                "\"decisionReason\":\"false positive\",\"assignedAnalyst\":null,\"decidedBy\":\"analyst\"," +
+                "\"occurredAt\":1.70532E+9,\"transactionId\":\"$txn\",\"alertCode\":\"TM-900\"," +
+                "\"idempotencyKey\":\"legacy-1\"}",
+        )
+    }
+
+    @Test
+    fun `a decision on a case the intake did not open carries no origin`(): Unit = runBlocking {
+        val rest = amlCase(AmlCaseStatus.UNDER_REVIEW).copy(origin = CaseOrigin.REST)
+        val event = slot<OutboxMessage>()
+        coEvery { amlCaseRepository.findById(rest.id) } returns rest
+        coEvery { amlCaseRepository.update(any(), capture(event)) } answers { firstArg() }
+
+        service.updateDecision(
+            UpdateAmlDecisionCommand(rest.id, AmlCaseStatus.CLEARED, "false positive", null, "analyst"),
+        )
+
+        assertThat(objectMapper.readTree(event.captured.payload).has("origin")).isFalse()
+    }
+
+    @Test
+    fun `a case opened without a party is stored without one and its created event says so`(): Unit = runBlocking {
+        val saved = slot<AmlCase>()
+        val event = mutableListOf<OutboxMessage>()
+        coEvery { amlCaseRepository.findByIdempotencyKey(holdKey) } returns null
+        coEvery { amlCaseRepository.save(capture(saved), any()) } answers {
+            event += secondArg<(AmlCase) -> OutboxMessage>()(firstArg())
+            firstArg()
+        }
+
+        service.createCase(holdCommand(partyId = null))
+
+        assertThat(saved.captured.partyId).isNull()
+        assertThat(saved.captured.partyEstablished).isFalse()
+        assertThat(saved.captured.accountId).isNotNull()
+        val payload = objectMapper.readTree(event.single().payload)
+        assertThat(payload.has("partyId")).isTrue()
+        assertThat(payload.get("partyId").isNull).isTrue()
+    }
+
+    @Test
+    fun `a case with a party publishes it`(): Unit = runBlocking {
+        val event = mutableListOf<OutboxMessage>()
+        val command = createCommand()
+        coEvery { amlCaseRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        coEvery { amlCaseRepository.save(any(), any()) } answers {
+            event += secondArg<(AmlCase) -> OutboxMessage>()(firstArg())
+            firstArg()
+        }
+
+        val created = service.createCase(command)
+
+        val payload = objectMapper.readTree(event.single().payload)
+        assertThat(payload.get("partyId").asText()).isEqualTo(created.partyId.toString())
+    }
+
+    /**
+     * The wire of a case this service could already store before it learned to store a missing party
+     * is not this change's to alter: other services read it, deploy on their own schedule, and at
+     * least one refuses an event without a `partyId`. A rail that cannot name the party files the
+     * debtor ACCOUNT id in its place, so "party == account" is an everyday row, and it must publish
+     * exactly what it always did. The expected documents are written out, field for field, from the
+     * event classes as they stand on the main line; nothing here is derived from the code under test.
+     */
+    @Test
+    fun `a case whose party is the account id publishes the same two events it always did`(): Unit = runBlocking {
+        val account = UUID.fromString("00000000-0000-4000-8000-0000000000a1")
+        val payment = UUID.fromString("00000000-0000-4000-8000-0000000000d1")
+        val created = mutableListOf<OutboxMessage>()
+        val changed = slot<OutboxMessage>()
+        val command = createCommand(idempotencyKey = "aml-$payment-SANCTIONS").copy(
+            partyId = account,
+            accountId = account,
+            transactionId = payment,
+            customerReference = "1234567890/0800",
+            alertCode = "SANCTIONS_HIT",
+            matchedEntity = "Listed Merchant",
+        )
+        coEvery { amlCaseRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        coEvery { amlCaseRepository.save(any(), any()) } answers {
+            created += secondArg<(AmlCase) -> OutboxMessage>()(firstArg())
+            firstArg()
+        }
+        coEvery { amlCaseRepository.update(any(), capture(changed)) } answers { firstArg() }
+
+        val case = service.createCase(command)
+        coEvery { amlCaseRepository.findById(case.id) } returns case
+        service.updateDecision(UpdateAmlDecisionCommand(case.id, AmlCaseStatus.BLOCKED, "listed", null, "analyst"))
+
+        // 2024-01-15T12:00:00Z, as this mapper writes an Instant.
+        val at = "1705320000.000000000"
+        assertThat(objectMapper.readTree(created.single().payload)).isEqualTo(
+            objectMapper.readTree(
+                """
+                {"caseId":"${case.id}","idempotencyKey":"aml-$payment-SANCTIONS","partyId":"$account",
+                 "accountId":"$account","transactionId":"$payment","customerReference":"1234567890/0800",
+                 "screeningType":"TRANSACTION_MONITORING","riskLevel":"HIGH","status":"UNDER_REVIEW",
+                 "alertCode":"SANCTIONS_HIT","matchedEntity":"Listed Merchant","occurredAt":$at}
+                """,
+            ),
+        )
+        assertThat(objectMapper.readTree(changed.captured.payload)).isEqualTo(
+            objectMapper.readTree(
+                """
+                {"caseId":"${case.id}","partyId":"$account","previousStatus":"UNDER_REVIEW","newStatus":"BLOCKED",
+                 "decisionReason":"listed","assignedAnalyst":null,"decidedBy":"analyst","occurredAt":$at,
+                 "transactionId":"$payment","alertCode":"SANCTIONS_HIT","idempotencyKey":"aml-$payment-SANCTIONS"}
+                """,
+            ),
+        )
+    }
+
     private fun createCommand(idempotencyKey: String = "aml-idem-1", riskLevel: AmlRiskLevel = AmlRiskLevel.HIGH) =
         CreateAmlCaseCommand(
             idempotencyKey = idempotencyKey,
+            origin = CaseOrigin.REST,
             partyId = UUID.randomUUID(),
             accountId = UUID.randomUUID(),
             transactionId = UUID.randomUUID(),

@@ -14,9 +14,15 @@ import com.openbank.kyb.application.port.out.CeremonyStatus
 import com.openbank.kyb.application.port.out.DocumentGateway
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.MandateRequest
+import com.openbank.kyb.application.port.out.MonitoredSubjectRegistryException
+import com.openbank.kyb.application.port.out.MonitoredSubjectRegistryPort
 import com.openbank.kyb.application.port.out.PartyGateway
 import com.openbank.kyb.application.port.out.PepProfile
 import com.openbank.kyb.application.port.out.RegistryAdapter
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningPort
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningRequest
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningResult
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningUnavailableException
 import com.openbank.kyb.domain.model.EntityStatus
 import com.openbank.kyb.domain.model.ExtractVerification
 import com.openbank.kyb.domain.model.IdentifierScheme
@@ -31,14 +37,17 @@ import com.openbank.kyb.domain.model.RegistrySearchResult
 import com.openbank.kyb.domain.model.RepresentationMode
 import com.openbank.kyb.domain.model.RepresentationRule
 import com.openbank.kyb.domain.model.Representative
+import com.openbank.kyb.domain.model.ScreeningVerdict
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
+import kotlinx.coroutines.CompletableDeferred
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 
 /**
  * Test doubles for the two out-of-process collaborators. `@Alternative @Priority` beans in the
@@ -70,6 +79,41 @@ class StubAresAdapter : RegistryAdapter {
                 RepresentationRule(RepresentationMode.JOINT_N, 2, "dva jednatelé společně"),
                 listOf("Alena Krátká", "Tomáš Dlouhý"),
             )
+            // Three single-jednatel companies reserved for KybRelatedPartyScreeningIT, one per
+            // test, each with a representative no other test uses: the screening double answers
+            // by NAME, so a shared name would make one test's finding another test's surprise.
+            "71000011" -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf("Radim Prověřený"),
+            )
+            "71000020" -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf("Hana Čekající"),
+            )
+            "71000038" -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf("Petr Exponovaný"),
+            )
+            "71000046" -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf("Olga Souběžná"),
+            )
+            // Reserved for the ongoing-monitoring ITs, one entity and one representative per test,
+            // for the same reason as the screening ones above.
+            in MONITORING_ENTITIES -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf(MONITORING_ENTITIES.getValue(identifier.value)),
+            )
             // 26185610 — a sole trader.
             "26185610" -> extract(identifier, LegalFormClass.SOLE_TRADER, RepresentationRule.SOLE, listOf("Jan Novák"))
             else -> null
@@ -100,6 +144,47 @@ class StubAresAdapter : RegistryAdapter {
         val hits =
             query.city?.let { c -> all.filter { it.registeredAddress?.contains(c, ignoreCase = true) == true } } ?: all
         return RegistrySearchResult(hits = hits, totalMatches = hits.size)
+    }
+
+    companion object {
+        /** IČO -> the single jednatel of that company. Every name is invented. */
+        val MONITORING_ENTITIES = mapOf(
+            "71000054" to "Marek Sledovaný",
+            "71000062" to "Ivana Nedělitelná",
+            "71000071" to "Oskar Opakovaný",
+            "71000089" to "Zdena Odhlášená",
+            "71000097" to "Viktor Doplněný",
+            "71000101" to "Libor Nalezený",
+            "71000119" to "Dana Drátová",
+            "71000127" to "Emil Plánovaný",
+            "71000135" to "Nora Neviditelná",
+            "71000143" to "Alois Aktivní",
+            "71000151" to "Ctibor Odcházející",
+            "71000160" to "Bohdana Kontrolovaná",
+            "71000178" to "Hynek Ukončený",
+            "71000186" to "Radka Souběžná",
+            "71000194" to "Jitka Odmítnutá",
+            "71000208" to "Kamil Sdílený",
+            "71000216" to "Lada Druhá",
+            "71000224" to "Matyáš Starý",
+            "71000232" to "Nina Dvojitá",
+            "71000241" to "Otto Držený",
+            "71000259" to "Pavla Vypnutá",
+            "71000267" to "Roman Opuštěný",
+            "71000275" to "Sára Sdílená",
+            "71000283" to "Tomáš Souběžný",
+            "71000291" to "Ursula Nesouhlasná",
+            "71000305" to "Václav Odůvodněný",
+            "71000313" to "Wanda Souběžná",
+            "71000330" to "Xenie Čekající",
+            "71000348" to "Yvona Aktivovaná",
+            "71000356" to "Zbyněk Zadržený",
+            "71000364" to "Adéla Odvolaná",
+            "71000372" to "Bořek Vypínaný",
+            "71000381" to "Cyril Neodeslaný",
+            "71000399" to "Dalibor Odpojený",
+            "71000402" to "Edita Nikdy",
+        )
     }
 
     private fun extract(id: LegalEntityIdentifier, form: LegalFormClass, rule: RepresentationRule, reps: List<String>) =
@@ -146,6 +231,43 @@ class StubPartyGateway : PartyGateway {
     val pep = ConcurrentHashMap<UUID, Boolean>()
 
     override suspend fun pepProfile(partyId: UUID): PepProfile? = PepProfile(pep[partyId], null)
+
+    /** Parties party-service records as CLOSED; none unless a test closes one. */
+    val closed: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
+
+    override suspend fun partyClosed(partyId: UUID): Boolean = partyId in closed
+}
+
+/**
+ * sanctions-service double. Everyone is clear unless a test says otherwise BY NAME — the module's
+ * ITs share one Quarkus instance, so a per-name answer cannot leak into another test's journey.
+ * [unavailable] makes the screen of that name fail the way an outage does: by throwing, never by
+ * answering.
+ */
+@Alternative
+@Priority(1)
+@ApplicationScoped
+class StubRelatedPartyScreening : RelatedPartyScreeningPort {
+    val answers = ConcurrentHashMap<String, RelatedPartyScreeningResult>()
+    val unavailable: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    val requests = CopyOnWriteArrayList<RelatedPartyScreeningRequest>()
+
+    /**
+     * Holds the screen of one name open until the test releases it, so a test can put another
+     * request BETWEEN a use case's read of the case and its write. [entered] says the screen began.
+     */
+    val held = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+    val entered = ConcurrentHashMap<String, CountDownLatch>()
+
+    override suspend fun screen(request: RelatedPartyScreeningRequest): RelatedPartyScreeningResult {
+        requests += request
+        entered[request.name]?.countDown()
+        held[request.name]?.await()
+        if (request.name in unavailable) {
+            throw RelatedPartyScreeningUnavailableException(IllegalStateException("stubbed outage"))
+        }
+        return answers[request.name] ?: RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, false, null)
+    }
 }
 
 /**
@@ -201,5 +323,50 @@ class StubDocumentGateway : DocumentGateway {
             AgreementDisclosure("VOP_CS", "1.1.0", "Všeobecné obchodní podmínky", "b".repeat(64), null),
             AgreementDisclosure("SAZEBNIK_PO_CS", "1.0.0", "Sazebník", "c".repeat(64), null),
         )
+    }
+}
+
+/**
+ * Monitored-subject registry double. It accepts everything unless a test sets [failWith], which
+ * makes every call fail the way the adapter reports a failure: by throwing, with a reason and a
+ * kind. Calls are recorded per reference and in order, so a test asserts on its own subjects only.
+ *
+ * [holdRegistration] keeps the registration of one reference open until the test releases it, so
+ * a test can put a case write or a second relay BETWEEN a call and its recording; [entered] says
+ * the call began. [slowBy] makes every call take that long, so two relays really overlap.
+ */
+@Alternative
+@Priority(1)
+@ApplicationScoped
+class StubMonitoredSubjectRegistry : MonitoredSubjectRegistryPort {
+    data class Registration(val subjectRef: String, val organisation: Boolean, val name: String)
+
+    val registered = CopyOnWriteArrayList<Registration>()
+    val withdrawn = CopyOnWriteArrayList<String>()
+
+    /** Every call in arrival order: `PUT <ref>` / `DELETE <ref>`. */
+    val calls = CopyOnWriteArrayList<String>()
+
+    @Volatile var failWith: MonitoredSubjectRegistryException? = null
+
+    @Volatile var slowBy: Long = 0
+
+    val holdRegistration = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+    val entered = ConcurrentHashMap<String, CountDownLatch>()
+
+    override suspend fun register(subjectRef: String, organisation: Boolean, name: String) {
+        failWith?.let { throw it }
+        entered[subjectRef]?.countDown()
+        holdRegistration[subjectRef]?.await()
+        if (slowBy > 0) kotlinx.coroutines.delay(slowBy)
+        calls += "PUT $subjectRef"
+        registered += Registration(subjectRef, organisation, name)
+    }
+
+    override suspend fun withdraw(subjectRef: String) {
+        failWith?.let { throw it }
+        if (slowBy > 0) kotlinx.coroutines.delay(slowBy)
+        calls += "DELETE $subjectRef"
+        withdrawn += subjectRef
     }
 }
