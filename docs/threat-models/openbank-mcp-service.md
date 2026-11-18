@@ -458,7 +458,10 @@ a stub (T-T2/T-D2).
     audience check, so no path echoes a U+0000 id. Admission order (re-review of #16721): token
     and structural checks, then the STATELESS proof check (`DpopProofVerifier.check`: signature over
     the header key, `htm`, `htu` against the published resource, `iat`, `ath`, proof key == `cnf.jkt`),
-    then — only for a proof signed by the token's own key — the proof-key bucket and a coarse
+    then a non-mutating replay peek (a captured proof replayed on a victim's token is refused
+    REPLAYED before any budget, so replays cannot drain the victim's proof-key bucket; two
+    CONCURRENT copies of one proof can both pass the peek and both spend, and the claim still
+    admits only one), then — only for a proof signed by the token's own key — the proof-key bucket and a coarse
     per-client cap (minute-only), then the replay claim, then the per-(subject, client) window. A
     missing, duplicate or unparseable proof, a proof from another key, or a junk proof carrying a
     victim's PUBLIC key therefore spends no one's budget and writes nothing; raw volume before that
