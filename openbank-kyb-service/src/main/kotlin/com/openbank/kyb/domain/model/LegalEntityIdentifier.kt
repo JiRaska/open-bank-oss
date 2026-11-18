@@ -95,6 +95,16 @@ data class LegalEntityIdentifier private constructor(val scheme: IdentifierSchem
         }
 
         fun of(scheme: IdentifierScheme, raw: String): LegalEntityIdentifier = parse(scheme, raw).getOrThrow()
+
+        /**
+         * Rebuilds an identifier that was validated when it was STORED. Reads must not re-run the
+         * checksum: a rule tightened later (EU VAT check digits, #16748) would otherwise make an
+         * already-onboarded case unreadable. Only the shape is re-checked; input paths use [parse].
+         */
+        fun restore(scheme: IdentifierScheme, storedValue: String): LegalEntityIdentifier {
+            require(scheme.pattern.matches(storedValue)) { "stored ${scheme.displayName} is not in normalised form" }
+            return LegalEntityIdentifier(scheme, storedValue)
+        }
     }
 }
 
@@ -233,12 +243,20 @@ object EuVatChecksums {
         return (MOD_11 - product) % MOD_10 == n.last() - '0'
     }
 
-    /** FR TVA: 2-digit numeric key + SIREN; key = (12 + 3 × (SIREN mod 97)) mod 97, SIREN Luhn-valid. */
+    /**
+     * FR TVA: 2-character key + 9-digit SIREN. A numeric key must equal
+     * (12 + 3 × (SIREN mod 97)) mod 97; the SIREN must be Luhn-valid except for Monaco entities
+     * (SIREN prefix `000`), which carry no Luhn digit. An alphanumeric key (the newer allocation
+     * scheme) has a different, unpublished derivation, so it passes on format alone.
+     */
     private fun fr(n: String): Boolean {
-        if (n.length != FR_LENGTH || !n.all(Char::isDigit)) return false
+        if (n.length != FR_LENGTH) return false
+        val key = n.take(2)
         val siren = n.drop(2)
-        val key = (FR_KEY_BASE + FR_KEY_FACTOR * (siren.toLong() % MOD_97)) % MOD_97
-        return IdentifierChecksums.luhn(siren) && n.take(2).toLong() == key
+        if (!siren.all(Char::isDigit) || !key.all { it.isDigit() || it in 'A'..'Z' }) return false
+        if (!siren.startsWith(MONACO_PREFIX) && !IdentifierChecksums.luhn(siren)) return false
+        if (!key.all(Char::isDigit)) return true
+        return key.toLong() == (FR_KEY_BASE + FR_KEY_FACTOR * (siren.toLong() % MOD_97)) % MOD_97
     }
 
     /** AT UID: `U` + 8 digits; odd positions doubled with digit sum, check = (10 − (sum + 4) mod 10) mod 10. */
@@ -260,6 +278,7 @@ object EuVatChecksums {
     private const val AT_LENGTH = 9
     private const val AT_OFFSET = 4
     private const val FR_KEY_BASE = 12
+    private const val MONACO_PREFIX = "000"
     private const val FR_KEY_FACTOR = 3
     private const val MOD_10 = 10
     private const val MOD_11 = 11

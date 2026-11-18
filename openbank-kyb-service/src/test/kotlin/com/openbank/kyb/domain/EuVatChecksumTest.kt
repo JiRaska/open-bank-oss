@@ -16,19 +16,23 @@ import org.junit.jupiter.params.provider.ValueSource
  */
 class EuVatChecksumTest {
 
+    // Every value below is SYNTHETIC: constructed to satisfy (or break) the published algorithm,
+    // not taken from any register. The rodné čísla are dated 2053 and 1900 so no living person holds them.
     @ParameterizedTest
     @ValueSource(
         strings = [
-            "CZ45274649", // legal entity: CZ + IČO (ČEZ, a.s.)
-            "CZ00006947", // legal entity with leading zeros
-            "CZ7103192745", // natural person: CZ + 10-digit rodné číslo
-            "CZ510101123", // natural person: CZ + 9-digit pre-1954 rodné číslo
-            "CZ689127223", // "special" 9-digit DIČ (6xxxxxxxx) with its own check digit
-            "SK2020317068", // SK: 10 digits divisible by 11
-            "PL5260250274", // PL: NIP
-            "DE136695976", // DE: ISO 7064 MOD 11,10
-            "FR40303265045", // FR: key = (12 + 3 * (SIREN mod 97)) mod 97
-            "ATU13585627", // AT: U + 8 digits, Luhn-like weighted sum
+            "CZ12345679", // legal entity: CZ + IČO
+            "CZ00000124", // legal entity with leading zeros
+            "CZ5301011232", // natural person: CZ + 10-digit rodné číslo
+            "CZ000101001", // natural person: CZ + 9-digit pre-1954 rodné číslo
+            "CZ699127220", // "special" 9-digit DIČ (6xxxxxxxx) with its own check digit
+            "SK2000000002", // SK: 10 digits divisible by 11
+            "PL1234561001", // PL: NIP
+            "DE123456788", // DE: ISO 7064 MOD 11,10
+            "FR11123456782", // FR: numeric key = (12 + 3 * (SIREN mod 97)) mod 97
+            "FR90000012345", // FR Monaco: SIREN 000..., no Luhn digit
+            "FRAB123456782", // FR alphanumeric key: format only
+            "ATU12345675", // AT: U + 8 digits
         ],
     )
     fun `accepts valid VAT numbers`(raw: String) {
@@ -38,25 +42,35 @@ class EuVatChecksumTest {
     @ParameterizedTest
     @ValueSource(
         strings = [
-            "CZ45274648", // IČO check digit wrong
-            "CZ7103192746", // RČ not divisible by 11
-            "CZ7113192745", // RČ month 13 does not exist
+            "CZ12345678", // IČO check digit wrong
+            "CZ5301011233", // RČ not divisible by 11
+            "CZ5313011232", // RČ month 13 does not exist
             "CZ1234567", // 7 digits: no CZ DIČ has that length
-            "CZ95274649", // 8-digit DIČ never starts with 9
-            "CZ689127224", // special DIČ check digit wrong (month 91: not a rodné číslo either)
-            "SK2020317069",
-            "PL5260250275",
-            "DE136695977",
-            "FR41303265045",
-            "ATU13585628",
+            "CZ91234565", // 8-digit DIČ never starts with 9 (IČO checksum itself holds)
+            "CZ699127221", // special DIČ check digit wrong (month 91: not a rodné číslo either)
+            "SK2000000003",
+            "PL1234561002",
+            "DE123456789",
+            "FR12123456782", // numeric key wrong
+            "FR11123456783", // SIREN fails Luhn
+            "FRAB123456783", // alphanumeric key still needs a Luhn-valid SIREN
+            "ATU12345676",
         ],
     )
     fun `rejects a one-digit corruption`(raw: String) {
         assertThat(LegalEntityIdentifier.parse(IdentifierScheme.EU_VAT, raw).isFailure).describedAs(raw).isTrue()
     }
 
+    @org.junit.jupiter.api.Test
+    fun `a stored row restores even when a later rule would reject it`() {
+        // Persisted before VAT check digits were enforced; reads must not break onboarded cases.
+        val restored = LegalEntityIdentifier.restore(IdentifierScheme.EU_VAT, "CZ12345678")
+        assertThat(restored.value).isEqualTo("CZ12345678")
+        assertThat(runCatching { LegalEntityIdentifier.restore(IdentifierScheme.EU_VAT, "cz 1") }.isFailure).isTrue()
+    }
+
     @ParameterizedTest
-    @ValueSource(strings = ["NL004495445B01", "IE6388047V", "GB980780684"])
+    @ValueSource(strings = ["NL123456789B01", "IE1234567T", "GB123456789"])
     fun `countries without an implemented checksum still pass on format`(raw: String) {
         assertThat(LegalEntityIdentifier.parse(IdentifierScheme.EU_VAT, raw).isSuccess).describedAs(raw).isTrue()
     }

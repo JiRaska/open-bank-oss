@@ -752,7 +752,7 @@ class KybResource {
         IdentifierScheme.NL_KVK -> "12345678"
         IdentifierScheme.LEI -> "315700N6RX2TO0QO8T71"
         IdentifierScheme.EUID -> "CZOR.12345678"
-        IdentifierScheme.EU_VAT -> "CZ45274649"
+        IdentifierScheme.EU_VAT -> "CZ12345679"
     }
 
     companion object {
