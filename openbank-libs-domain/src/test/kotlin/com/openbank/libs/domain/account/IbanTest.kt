@@ -120,4 +120,38 @@ class IbanTest {
             assertThat(iban.toString()).isEqualTo("DE89370400440532013000")
         }
     }
+
+    @Test
+    fun `rejects a mod-97-valid IBAN whose length does not match its country`() {
+        // DE length (22) under a CZ country code; check digits recomputed so only length is wrong
+        val bban = "370400440532013000"
+        assertThat(Iban.isValid(withCheckDigits("CZ", bban))).isFalse()
+    }
+
+    @Test
+    fun `rejects check digits outside 02 to 98`() {
+        // 00 is congruent to 97 mod 97, so DE00 passes the checksum; only the range rule rejects it
+        assertThat(Iban.isValid("DE97370400440000000060")).isTrue()
+        assertThat(Iban.isValid("DE00370400440000000060")).isFalse()
+    }
+
+    @Test
+    fun `returns false instead of throwing on punctuation in the BBAN`() {
+        // a non-leading '-' made the old code throw NumberFormatException
+        assertThat(Iban.isValid("DE8937040044-532013000")).isFalse()
+    }
+
+    @Test
+    fun `rejects a country absent from the IBAN registry`() {
+        // check digits recomputed for US so only the registry rule can reject it
+        val bban = "370400440532013000"
+        assertThat(Iban.isValid(withCheckDigits("US", bban))).isFalse()
+    }
+
+    /** Builds an IBAN with correct mod-97 check digits, so only the other rules can reject it. */
+    private fun withCheckDigits(country: String, bban: String): String {
+        val numeric = "${bban}${country}00".map { if (it.isDigit()) "$it" else "${it.code - 55}" }
+        val check = 98 - numeric.joinToString("").toBigInteger().mod(97.toBigInteger()).toInt()
+        return "%s%02d%s".format(country, check, bban)
+    }
 }
