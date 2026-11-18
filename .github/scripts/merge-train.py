@@ -4302,38 +4302,48 @@ def fast_pass_blocker(git, base: str, view: dict, fragments: list[str], regen_te
     return None
 
 
-FAST_PASS_SCAN = (".github", "build-logic")   # every tree a CI job, gate, checker or build reads its inputs from
 FAST_PASS_GLOB_RE = r"[A-Za-z0-9_./{}-]*[*?][A-Za-z0-9_./*?{}-]*"
+# Directory-listing idioms (security review of #16736): a consumer that enumerates a directory never names
+# the file it runs. Over-broad on purpose — a false match only withholds a pass.
+FAST_PASS_LISTING_RE = (r"glob\(|rglob\(|listdir|iterdir|scandir|os\.walk|readdir|fileTree|Files\.(list|walk)"
+                        r"|ls-files|ls-tree|find |/\*|\*\*")
 
 
 def fast_pass_tokens(path: str) -> set[str]:
     """Every form in which a file can be named: full path, the path below .github/scripts/, basename, stem
-    (an import, or a sibling's `$DIR/<name>`), and each directory below .github/scripts/."""
+    (an import, or a sibling's `$DIR/<name>`), its parent directory's path, and each directory name below
+    .github/scripts/."""
     rel = path[len(".github/scripts/"):] if path.startswith(".github/scripts/") else path
     name = path.rsplit("/", 1)[-1]
     out = {path, rel, name, name.split(".", 1)[0]}
+    if "/" in rel:
+        out.add(path.rsplit("/", 1)[0])
     out |= {d for d in rel.split("/")[:-1] if d}
     return {t for t in out if t}
 
 
 def fast_pass_named_by(git, base: str, files: list[str]) -> str | None:
-    """Why some holder file is named ANYWHERE in FAST_PASS_SCAN on `base`, or None (review of #16736).
-    Fail closed by construction: a fixed-string grep for every token form, any extension, in any file other
-    than the holder's own — so a baseline a checker reads, a sourced or called script, an import or a
-    `$DIR/name` call all count, and transitivity needs no closure walk (an unnamed file is reachable from
-    nothing). Glob-shaped tokens in the same trees (`gen-*.py`, `steps/*.sh`, `dir/**`) are expanded with
-    fnmatch. Any git error is a reference."""
+    """Why some holder file may be READ by something on `base`, or None (reviews of #16736). The WHOLE tree is
+    scanned (no path allow-list: a Makefile, root build files, openbank-infra/scripts, docs/adr/*.sh and
+    package.json are consumers too), excluding only the holder's own files. A consumer is any file that
+    - names a holder file in any form (fast_pass_tokens: path, basename, stem, parent directory), which
+      covers baselines a checker reads, sourced and called scripts and imports, with no closure walk needed
+      (a file nothing names is reachable from nothing); or
+    - carries a glob that fnmatch expands onto a holder file; or
+    - LISTS a directory (FAST_PASS_LISTING_RE) while naming one of its ancestors, or sits in the holder's
+      own directory (a sibling enumerating `$DIR` or `__file__`'s parent names nothing).
+    Three `git grep` spawns per holder, whole tree each; any git error denies the pass (fail closed)."""
     excl = [f":(exclude){f}" for f in files]
     toks = sorted({t for f in files for t in fast_pass_tokens(f)})
     args = ["grep", "-l", "-F", "-I"]
     for t in toks:
         args += ["-e", t]
-    r = git(*args, base, "--", *FAST_PASS_SCAN, *excl, check=False)
+    r = git(*args, base, "--", ".", *excl, check=False)
     if r.returncode not in (0, 1):
         return "reference scan failed"
     if r.stdout.strip():
         return f"named by {r.stdout.split()[0].split(':', 1)[-1]}"
-    g = git("grep", "-h", "-o", "-I", "-E", FAST_PASS_GLOB_RE, base, "--", *FAST_PASS_SCAN, *excl, check=False)
+    g = git("grep", "-h", "-o", "-I", "-E", FAST_PASS_GLOB_RE, base, "--", ".", *excl, check=False)
     if g.returncode not in (0, 1):
         return "glob scan failed"
     for pat in set(g.stdout.split()):
@@ -4343,8 +4353,26 @@ def fast_pass_named_by(git, base: str, files: list[str]) -> str | None:
         for f in files:
             name = f.rsplit("/", 1)[-1]
             if (fnmatch.fnmatch(f, pat) or fnmatch.fnmatch(f, "*/" + pat) or fnmatch.fnmatch(name, pat)
-                    or fnmatch.fnmatch(name, pat.rsplit("/", 1)[-1]) or fnmatch.fnmatch(f, "*" + pat.rstrip("*") + "*")):
+                    or fnmatch.fnmatch(f, "*" + pat.rstrip("*") + "*")):
                 return f"{f} matches glob {pat}"
+    lst = git("grep", "-l", "-I", "-E", FAST_PASS_LISTING_RE, base, "--", ".", *excl, check=False)
+    if lst.returncode not in (0, 1):
+        return "listing scan failed"
+    listers = [ln.split(":", 1)[-1] for ln in lst.stdout.splitlines() if ln]
+    for f in files:
+        parts = f.split("/")[:-1]
+        ancestors = {"/".join(parts[:i]) for i in range(1, len(parts) + 1)}
+        own = "/".join(parts)
+        for c in listers:
+            if c.rsplit("/", 1)[0] == own if "/" in c else own == "":
+                return f"{c} lists the holder's directory {own or '.'}"
+        if listers:
+            hit = git("grep", "-l", "-F", "-I", *[x for a in sorted(ancestors) for x in ("-e", a)], base, "--",
+                      *listers, check=False) if ancestors else None
+            if hit is not None and hit.returncode not in (0, 1):
+                return "ancestor scan failed"
+            if hit is not None and hit.stdout.strip():
+                return f"{hit.stdout.split()[0].split(':', 1)[-1]} lists an ancestor of {f}"
     return None
 
 
@@ -6888,9 +6916,48 @@ def fast_pass_reference_self_test(check) -> None:
         def __init__(self, sha): self.sha = sha
         def main_sha(self): return self.sha
     pv = {"fast_pass_equivalent": True, "fast_pass_base": "a" * 40}
-    live = globals().get("fast_pass_base_live")
     check("fast pass: merges only over the main the equivalence was proven on",
-          live is not None and live(_G("a" * 40), pv) and not live(_G("b" * 40), pv))
+          fast_pass_base_live(_G("a" * 40), pv) and not fast_pass_base_live(_G("b" * 40), pv))
+
+
+def fast_pass_scan_scope_self_test(check) -> None:
+    """Security review of #16736: the reference scan covers the WHOLE tree (a Makefile, root build files,
+    openbank-infra/scripts, docs/adr/*.sh, package.json name holder files too), and a consumer that LISTS
+    the holder's directory (os.listdir, glob(, rglob(, `$DIR/*`, `for f in dir/*`) counts without naming
+    the file."""
+    with tempfile.TemporaryDirectory() as root:
+        git = Git(root)
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@example.invalid"); git("config", "user.name", "t")
+        files = {
+            ".github/workflows/ci.yml": "run: echo ok\n",
+            "Makefile": "lint:\n\tpython3 .github/scripts/made/made-tool.py\n",
+            "openbank-infra/scripts/run.sh": "bash .github/scripts/infra/infra-tool.sh\n",
+            ".github/scripts/made/made-tool.py": "x\n",
+            ".github/scripts/infra/infra-tool.sh": "x\n",
+            ".github/scripts/plugins/p1.py": "x\n",
+            ".github/scripts/plugins/loader.py": "for n in os.listdir(os.path.dirname(__file__)): run(n)\n",
+            ".github/scripts/sweep/s1.py": "x\n",
+            ".github/scripts/solo/lonely-tool.py": "x\n",
+        }
+        for path, text in files.items():
+            fp = pathlib.Path(root, path); fp.parent.mkdir(parents=True, exist_ok=True); fp.write_text(text)
+            git("add", path)
+        git("commit", "-q", "-m", "base")
+        clean = git("rev-parse", "HEAD").stdout.strip()
+        v = {"number": 1, "head_sha": clean, "files": [".github/scripts/solo/lonely-tool.py"], "app": {}}
+        check("fast pass: a file in a directory nothing names or lists still passes",
+              fast_pass_blocker(git, clean, v, [], "") is None, str(fast_pass_blocker(git, clean, v, [], "")))
+        fp = pathlib.Path(root, "docs/adr/walk.sh"); fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text('for f in .github/scripts/sweep/*; do "$f"; done\n')
+        git("add", "docs/adr/walk.sh"); git("commit", "-q", "-m", "a loop over a holder directory")
+        base = git("rev-parse", "HEAD").stdout.strip()
+        for f, how in ((".github/scripts/made/made-tool.py", "a consumer in the root Makefile"),
+                       (".github/scripts/infra/infra-tool.sh", "a consumer under openbank-infra/scripts"),
+                       (".github/scripts/plugins/p1.py", "a sibling that os.listdir()s the holder's directory"),
+                       (".github/scripts/sweep/s1.py", "a `for f in <dir>/*` loop outside .github")):
+            v = {"number": 1, "head_sha": base, "files": [f], "app": {}}
+            check(f"fast pass: {how} is no fast pass", fast_pass_blocker(git, base, v, [], "") is not None, f"{f} passed")
 
 
 def self_test() -> int:
@@ -6913,6 +6980,7 @@ def self_test() -> int:
     packed_fixture_self_test(check)
     fast_pass_self_test(check)
     fast_pass_reference_self_test(check)
+    fast_pass_scan_scope_self_test(check)
 
     freshness = subprocess.run(
         [sys.executable, ".github/scripts/test-merge-train-main-red-freshness.py"],
