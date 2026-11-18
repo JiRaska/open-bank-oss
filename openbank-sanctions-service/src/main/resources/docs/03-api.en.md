@@ -190,6 +190,8 @@ approves it in `/api/v1/sanctions/approvals/{id}`; the agent then retries the id
 agent is refused outright. The agent identity is never granted `sanctions.approval.decide`. `/api/v1/.../review`
 stays human-only.
 
+**Binding of the approval (#16593).** The agent's retry is executed only with the approval that four-eyes consumed for that same request. `X-Approval-Id` is a header read from the request context, never part of the request fingerprint, and an approval consumed by an earlier call is refused (403) even if the policy no longer gates the action.
+
 ### Get a specific check
 
 ```http
