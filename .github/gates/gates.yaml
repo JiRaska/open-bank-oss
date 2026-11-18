@@ -6842,7 +6842,7 @@ gates:
     min_subjects: 2
     selftest: python3 .github/scripts/check-mcp-client-realm-parity.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-mcp-client-realm-parity.py", "openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml", "openbank-infra/gitops/components/keycloak/customers-realm-template.json"]
+    selftest_inputs: [".github/scripts/check-mcp-client-realm-parity.py", "openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml", "openbank-infra/gitops/components/keycloak/customers-realm-template.json", "openbank-mcp-service/src/main/resources/mcp-clients/"]
     run: |
       python3 .github/scripts/gen-mcp-realm-clients.py --check
       python3 .github/scripts/check-mcp-client-realm-parity.py
