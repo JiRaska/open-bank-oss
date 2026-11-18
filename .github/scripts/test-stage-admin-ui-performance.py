@@ -427,6 +427,8 @@ class PerformanceStageTests(unittest.TestCase):
             "openbank-sepa-payment-sepa-payment-read-baseline",
             "openbank-sanctions-service-sanctions-read-baseline",
             "openbank-standing-order-service-standing-order-read-baseline",
+            "openbank-settlement-service-settlement-read-baseline",
+            "openbank-pension-service-pension-read-baseline",
             "openbank-sdd-service-sdd-read-baseline",
             "openbank-interest-service-interest-read-baseline",
             "openbank-card-processing-service-card-processing-read-baseline",
