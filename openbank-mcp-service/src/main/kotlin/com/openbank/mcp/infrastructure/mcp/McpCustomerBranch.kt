@@ -62,16 +62,27 @@ internal class McpCustomerBranch(
                 .build()
         }
         if (!admission.isCustomerToken(jwt)) return null
-        val outcome = runBlocking { admission.admit(jwt, authorization, dpop, ::spendWindow) }
+        val outcome = runBlocking { admission.admit(jwt, authorization, dpop, throttles) }
         return when (outcome) {
             is Outcome.Refused -> refuse(outcome, jwt.subject, method, params)
             is Outcome.Admitted -> admitted(outcome, method, id, params)
         }
     }
 
-    /** One slot of the per-(subject, client) window (ADR-0383 D5.3); the refusal reason, or null. */
-    private fun spendWindow(key: String): String? =
-        limiter.check(key).takeUnless { it == McpRateLimiter.Outcome.ALLOWED }?.let {
+    /** ADR-0383 D5.3 budgets on the shared limiter; which run before the DPoP check is decided in admission. */
+    private val throttles = object : CustomerChannelAdmission.Throttles {
+        override fun proofKey(thumbprint: String) =
+            refusal(limiter.check(CustomerChannelAdmission.proofKeyThrottleKey(thumbprint)))
+
+        override fun client(clientId: String) =
+            refusal(limiter.checkShared(CustomerChannelAdmission.clientThrottleKey(clientId)))
+
+        override fun subject(subject: String, clientId: String) =
+            refusal(limiter.check(CustomerChannelAdmission.throttleKey(subject, clientId)))
+    }
+
+    private fun refusal(outcome: McpRateLimiter.Outcome): String? =
+        outcome.takeUnless { it == McpRateLimiter.Outcome.ALLOWED }?.let {
             metrics.requestThrottled(
                 McpMetricsPort.ThrottleSurface.TOOLS_CALL,
                 McpMetricsPort.ThrottleCaller.AUTHENTICATED,

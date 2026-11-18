@@ -3,11 +3,13 @@
 package com.openbank.mcp
 
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.mcp.infrastructure.customer.DpopTestProofs
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
+import io.restassured.RestAssured
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import org.assertj.core.api.Assertions.assertThat
@@ -55,8 +57,9 @@ class McpCustomerTenantResolutionIT {
         )
     }
 
-    private fun sign(key: PrivateKey, iss: String, sub: String = "agent:test-agent"): String {
+    private fun sign(key: PrivateKey, iss: String, sub: String = "agent:test-agent", cnfJkt: String? = null): String {
         val claims = JwtClaims()
+        cnfJkt?.let { claims.setClaim("cnf", mapOf("jkt" to it)) }
         claims.issuer = iss
         claims.subject = sub
         claims.setAudience("openbank-mcp-service")
@@ -99,6 +102,29 @@ class McpCustomerTenantResolutionIT {
     @Test
     fun `a customers-issuer token signed by the staff key is refused by the customers tenant`() {
         list(sign(staffKey, CUSTOMERS, sub = "c0ffee00-0000-0000-0000-000000000001")).statusCode(401)
+    }
+
+    @Test
+    fun `a token signed by the real customers key passes the tenant and reaches the customer branch`() {
+        val dpopKey = DpopTestProofs.newKey()
+        val token = sign(
+            OidcItKeys.pair("customers").private,
+            CUSTOMERS,
+            sub = "c0ffee00-0000-0000-0000-000000000001",
+            cnfJkt = DpopTestProofs.jkt(dpopKey),
+        )
+        // Bound to the URL THIS request hits, so the tenant's own DPoP check (authorization-scheme
+        // DPoP) passes; the customer branch then checks htu against the PUBLISHED resource and refuses.
+        val proof = DpopTestProofs.proof(dpopKey, htu = "http://localhost:${RestAssured.port}/mcp", token = token)
+        val challenge = given().contentType(ContentType.JSON)
+            .header("Authorization", "DPoP $token")
+            .header("DPoP", proof)
+            .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
+            .post("/mcp").then()
+            .statusCode(401)
+            .extract().header("WWW-Authenticate")
+        // Only the customer branch emits resource_metadata; a tenant-level rejection would not.
+        assertThat(challenge).startsWith("DPoP").contains("invalid_dpop_proof").contains("resource_metadata=")
     }
 
     private companion object {

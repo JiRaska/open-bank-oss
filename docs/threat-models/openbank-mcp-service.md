@@ -455,9 +455,12 @@ a stub (T-T2/T-D2).
   - *Boot gate.* `CustomerChannel` is `@Startup`: with the channel on, a missing issuer or a
     missing/malformed allowlist stops the service from starting.
   - *Review hardening (same PR).* The fleet NUL guard now runs before the customer branch and the
-    audience check, so no path echoes a U+0000 id. A per-(subject, client) window is spent BEFORE
-    the DPoP replay claim (D5.3), and refused customer calls write at most one audit row per subject
-    per minute. Boot also refuses an allowlist whose `audience` differs from the staff path's, and
+    audience check, so no path echoes a U+0000 id. Before the DPoP check, only budgets keyed on what
+    the CALLER controls are spent: the proof header key's thumbprint and a coarse per-client cap. They
+    bound replay-store fill before any claim. The victim's per-(subject, client) window (D5.3) is spent
+    only after the proof is VALID, so a leaked access token sent with junk proofs cannot throttle its
+    owner (targeted-DoS finding in review). Refused customer calls write at most one audit row per
+    subject per minute, and that audit-window check also prunes closed windows. Boot also refuses an allowlist whose `audience` differs from the staff path's, and
     any parser failure (including a YAML syntax error). Measured with real signed tokens: Quarkus's
     issuer resolver returns no tenant for an unknown `iss` and the request FALLS BACK to the default
     (staff) tenant, so a foreign or forged issuer is stopped by that tenant's signature and issuer
@@ -465,7 +468,9 @@ a stub (T-T2/T-D2).
     key is accepted. Production relies on the discovered issuer for that check.
   - **Residual, and why the channel must stay off:** the replay store is the single-pod
     in-memory one (ADR-0383 P4 — a pod roll reopens the replay window); no server nonce; the
-    D5.3 window is the in-process limiter, not the shared Valkey bucket; an admitted customer reaches NO
+    D5.3 windows are the in-process limiter, not the shared Valkey bucket; the per-client cap is shared
+    by all of a client's customers, so a flood of rotating junk keys can still exhaust it (a coarse
+    cap by design, sized well above one customer's budget); an admitted customer reaches NO
     tool (empty `tools/list`, refused `tools/call`), because the `MCP_CLIENT` grant lookup (P2/D3)
     and downstream party enforcement (P5) do not exist; the customers tenant config is not yet
     verified against a live Keycloak (P3).
