@@ -68,3 +68,35 @@ test_another_machine_gets_no_maker_grant if {
 test_a_name_alone_is_not_the_agent if {
 	not "service-agent-sanctions-review-maker" in allowed_reasons with input as {"principal": impostor, "action": "sanctions.clear"}
 }
+
+# --- staff-only operator write: a machine holding ROLE_OPERATOR is never the checker ---
+
+# The shared client as the docker/CI realms provision it (ROLE_OPERATOR).
+operator_machine := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API", "ROLE_OPERATOR"]}
+
+# Marker absent (PEP not yet on phase-1 libs-runtime): still treated as a machine for staff rules.
+operator_legacy_machine := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+
+test_operator_machine_never_decides_an_approval if {
+	not allow with input as {"principal": operator_machine, "action": "sanctions.approval.decide"}
+}
+
+test_legacy_operator_machine_never_decides_an_approval if {
+	not allow with input as {"principal": operator_legacy_machine, "action": "sanctions.approval.decide"}
+}
+
+test_operator_machine_gets_no_staff_write if {
+	every a in {"sanctions.clear", "sanctions.update", "sanctions.trigger", "sanctions.approval.decide"} {
+		not "operator-sanctions-write" in allowed_reasons with input as {"principal": operator_machine, "action": a}
+	}
+}
+
+# Positive controls: the human operator decides; machine screening still allowed.
+test_human_operator_decide_is_allowed if {
+	d := allow with input as {"principal": operator, "action": "sanctions.approval.decide"}
+	d.allow == true
+}
+
+test_operator_machine_may_still_screen if {
+	"m2m-sanctions-screening" in allowed_reasons with input as {"principal": operator_machine, "action": "sanctions.create"}
+}
