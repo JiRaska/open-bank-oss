@@ -123,13 +123,13 @@ sequenceDiagram
   end
 ```
 
-**Outbox (ADR-0050).** The journal and its outbox row commit in one PostgreSQL transaction.
-The dispatcher publishes to Kafka with at-least-once delivery. Its atomic
-`FOR UPDATE SKIP LOCKED` claim coordinates concurrent replicas, and the scheduler skips
-overlapping ticks within each replica. The claim returns the entity's mapped columns
-explicitly, allowing this version to keep dispatching when a later migration adds columns.
-Bounded attempts move a poison row to `DEAD`. The dispatcher runs on the Vert.x event loop
-to retain the reactive Panache session.
+**Outbox (ADR-0050, ADR-0327).** The journal and its outbox row commit in one PostgreSQL
+transaction. The relay claims one head per aggregate and publishes independent aggregates
+concurrently. A publish acknowledgement can change a row only while its claim token owns
+the row. Failures back off and reach `DEAD` at the attempt cap. Kafka delivery is at least
+once, with the event ID available for consumer deduplication. The scheduler skips overlapping
+ticks within each replica and runs on the Vert.x event loop. The cutover quiesces the earlier
+dispatcher before V2 sends begin.
 
 ## Partition lifecycle
 

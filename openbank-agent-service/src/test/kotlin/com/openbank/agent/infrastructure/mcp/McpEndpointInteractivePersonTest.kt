@@ -104,7 +104,7 @@ class McpEndpointInteractivePersonTest {
     }
 
     @Test
-    fun `a machine token reaches the review tool with no person, so the tool refuses`() {
+    fun `a machine token reaches the review tool with no interactive person`() {
         listOf(
             mapOf("preferred_username" to "service-account-openbank-agent", "azp" to "openbank-agent"),
             mapOf("preferred_username" to "officer-1", "client_id" to "openbank-agent"),
