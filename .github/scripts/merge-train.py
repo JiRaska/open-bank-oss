@@ -3361,9 +3361,10 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     not_fix: dict[int, str] = {}   # summary["not_fix"]: refusals from EVERY settle view this tick, not just the last
     if defer_recovered_main_red(gh, base, main_red, summary):
         return summary
+    relevant = served_relevant_fixes(gh, git, base, strict, main_red, main_cache)
     holder, timed_out = strict_reservation(git, base, strict, shadow,
                                            fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
-                                           activity=gh.ci_activity)
+                                           activity=gh.ci_activity, relevant=relevant)
     # Strict carriers first (ADR-0343 amendment 2026-11-05): an open one holds the strict reservation.
     strict_carrier_open, acted = judge_strict_carriers(gh, git, repo, base, required, main_red, shadow, summary)
     if strict_carrier_open:
@@ -3675,9 +3676,10 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     if acted:  # a carrier was judged: main or member statuses may have changed — read everything again
         not_fix.update(main_cache.get(NOT_FIX_KEY, {}))
         base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required, stuck)
+        relevant = served_relevant_fixes(gh, git, base, strict, main_red, main_cache)
         holder, timed_out = strict_reservation(git, base, strict, shadow,
                                                fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
-                                           activity=gh.ci_activity)
+                                               activity=gh.ci_activity, relevant=relevant)
     summary["main_red"] = sorted(main_red)
     fragments = regen_inventory_fragments(regen_text)
     fast, train_waiting = partition(git, base, cands, fragments)
@@ -3737,7 +3739,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     # Strict lane first: an update-branch it issues starts a reservation THIS tick, so the fast lane
     # below must already see it.
     strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out,
-                yield_why)
+                yield_why, relevant=relevant)
     not_fix.update(main_cache.get(NOT_FIX_KEY, {}))
     if not_fix:
         summary["not_fix"] = dict(sorted(not_fix.items()))
@@ -4015,6 +4017,74 @@ def fix_preempts_strict_self_test(check) -> None:
     strict_lane(gh, git, "b", strict, False, False, summary, red, {}, holder=h, timed_out=[])
     check("main red: settle's strict lane update-branches the fix while a strict PR's CI runs",
           gh.updates == [15991], f"holder={h} updates={gh.updates} {summary}")
+
+    # 2026-11-17/18: perf PRs #16583/#16602 merged as "fixes" for a stale-ADR-registry red (their CI was green
+    # there) and main stayed red; #16586 held main ~1 h as a fix in CI while #16690, which regenerates the
+    # ADR files, waited. A fix whose diff touches what broke main is served first and pre-empts the others.
+    def fv(n, head, files, fix=True):
+        v = view(n, head, fix=fix)
+        v["files"] = files
+        return v
+    dirs = {"docs/adr"}
+    perf_ci = fv(16586, "cur-perf", ["perf/scenarios.yaml"])
+    regen = fv(16690, "old-regen", ["docs/adr/CURRENT.md", "docs/adr/index.json"])
+    strict = [("pending", perf_ci), ("green", regen)]
+    fx = strict_fixes(None, git, "b", strict, red)
+    rel = relevant_fixes(strict, fx, dirs) & preempting_fixes("b", strict, fx)
+    check("main red: only the fix touching the breakage is relevant", rel == {16690}, f"rel={rel}")
+    h = strict_reservation(git, "b", strict, now=now, fixes=fx, relevant=rel)[0]
+    check("main red: a fix in CI elsewhere is pre-empted by a green fix that touches the breakage",
+          h is None, f"holder={h}")
+    check("main red: without relevance a fix in CI is still not pre-empted (today's rule kept)",
+          strict_reservation(git, "b", strict, now=now, fixes=fx)[0] == 16586)
+    gh, summary = _Gh(), {}
+    strict_lane(gh, git, "b", strict, False, False, summary, red, {}, holder=h, timed_out=[], relevant=rel)
+    check("main red: the relevant fix is update-branched, not the other fix", gh.updates == [16690],
+          f"updates={gh.updates} {summary}")
+    perf_green = fv(16583, "cur-perf2", ["perf/scenarios.yaml"])
+
+    class _MergeGh(_Gh):
+        def __init__(self):
+            super().__init__()
+            self.merges = []
+
+        def main_sha(self):
+            return "b"
+
+        def merge(self, n, _head):
+            self.merges.append(n)
+            return True
+    saved_intent = globals()["live_source_intent"]
+    globals()["live_source_intent"] = lambda *_a, **_k: True
+    try:
+        gh, summary = _MergeGh(), {"merged": []}
+        strict_lane(gh, git, "b", [("green", perf_green), ("green", regen)], False, False, summary, red, {},
+                    holder=None, timed_out=[], relevant=rel)
+    finally:
+        globals()["live_source_intent"] = saved_intent
+    check("main red: a green up-to-date fix elsewhere does not merge onto red main ahead of the relevant fix",
+          gh.merges == [] and gh.updates == [16690], f"merges={gh.merges} updates={gh.updates} {summary}")
+    told = fv(16690, "old-regen", regen["files"])
+    told["app"][NOTICE_CONTEXT] = ("success", f"{CONFLICT_PREFIX}b: strict lane")
+    st2 = [("pending", perf_ci), ("green", told)]
+    fx2 = strict_fixes(None, git, "b", st2, red)
+    check("main red: a relevant fix that conflicts holds nobody",
+          relevant_fixes(st2, fx2, dirs) & preempting_fixes("b", st2, fx2) == set())
+    check("main red: unknown breakage ranks nothing", relevant_fixes(strict, fx, None) == set())
+
+    class _Hist:
+        def checks(self, c):
+            return {"c3": {"Validate manifests": "failure"}, "c2": {"Validate manifests": "failure"},
+                    "c1": {"Validate manifests": "success"}}.get(c, {})
+
+    def hgit(*a, **_k):
+        if a[0] == "rev-list":
+            return _R(0, "c3\nc2\nc1\n")
+        if a[0] == "diff":
+            return _R(0, "docs/adr/0386-x.md\0" if a[-2:] == ("c1", "c2") else "perf/x\0")
+        return _R(0, "")
+    check("main red: breakage is the diff from the last green to the FIRST red commit, not to main's tip",
+          breakage_dirs(_Hist(), hgit, "c3", red, {}) == {"docs/adr"}, str(breakage_dirs(_Hist(), hgit, "c3", red, {})))
 
 
 def train_turn_main_red_self_test(check) -> None:
@@ -4462,6 +4532,63 @@ def stack_verdict(gh, git, p: dict, live_main: str) -> tuple[str, str]:
     return "wait", f"holder #{n} has no verdict yet"
 
 
+def breakage_dirs(gh, git, base: str, main_red: dict[str, str], cache: dict | None = None) -> set[str] | None:
+    """The directories main changed where each main-red context turned red: the diff from the newest
+    first-parent commit main's own CI judged green on that context to the oldest one after it judged
+    red. None when any context has no such pair inside STALE_RED_WALK (relevance unknown, so nothing
+    is re-ranked). Read from main's CI verdicts and git only."""
+    if not main_red:
+        return None
+    walk = git("rev-list", "--first-parent", f"--max-count={STALE_RED_WALK}", base, check=False).stdout.split()
+    out: set[str] = set()
+    for ctx in main_red:
+        first_red = green = None
+        for c in walk:
+            if cache is not None and c in cache:
+                res = cache[c]
+            else:
+                res = gh.checks(c) or {}
+                if cache is not None:
+                    cache[c] = res
+            v = res.get(ctx)
+            if v == "failure":
+                first_red = c
+            elif v == "success":
+                green = c
+                break
+        if not (first_red and green):
+            return None
+        names = git("diff", "--name-only", "-z", green, first_red, check=False).stdout
+        out |= {posixpath.dirname(f) for f in zpaths(names)}
+    return out or None
+
+
+def relevant_fixes(strict: list, fixes: dict | None, dirs: set[str] | None) -> set[int]:
+    """Fixes (green in `fixes`, or a combined head in CI carrying the `fix` marker) whose own changed
+    files share a directory with what broke main (breakage_dirs). A fix claim is evidence that the PR's
+    CI went green where main's is red; it is not evidence that the PR repairs anything — #16583 and
+    #16602 (perf baselines) each merged as a "fix" for a stale-ADR-registry red and left main red,
+    while #16690 (the regenerated ADR files) waited hours behind them. Rank only: empty when unknown."""
+    if not dirs:
+        return set()
+    out: set[int] = set()
+    for state, view in strict:
+        n = view["number"]
+        if n in (fixes or {}) or (view.get("fix") and state == "pending"):
+            if {posixpath.dirname(f) for f in view.get("files") or []} & dirs:
+                out.add(n)
+    return out
+
+
+def served_relevant_fixes(gh, git, base: str, strict: list, main_red: dict[str, str], cache: dict | None = None) -> set[int]:
+    """relevant_fixes limited to fixes that can be served over this main (preempting_fixes): a relevant
+    fix that conflicts or was refused must not hold every other PR for nobody. Empty on a green main."""
+    if not main_red:
+        return set()
+    fixes = strict_fixes(gh, git, base, strict, main_red, cache)
+    return relevant_fixes(strict, fixes, breakage_dirs(gh, git, base, main_red, cache)) & preempting_fixes(base, strict, fixes)
+
+
 def preempting_fixes(base: str, strict: list, fixes: dict | None) -> set[int]:
     """Fixes that pre-empt a non-fix strict reservation on a red main (ADR-0343 amendment 2026-11-14):
     every green fix (`fixes`, strict_fixes) plus every fix whose COMBINED head is in CI (fix_head_state's
@@ -4482,7 +4609,8 @@ def preempting_fixes(base: str, strict: list, fixes: dict | None) -> set[int]:
 
 
 def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: float | None = None,
-                       fixes: dict | None = None, activity=None) -> tuple[int | None, list[int]]:
+                       fixes: dict | None = None, activity=None,
+                       relevant: set[int] | None = None) -> tuple[int | None, list[int]]:
     """(holder, timed_out). The holder is the oldest strict-lane PR whose head already contains live
     main and whose CI is still running with nothing failed — or has just gone green, so it merges this
     tick: main is reserved for it, so neither the
@@ -4498,7 +4626,9 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
     fixes = fixes or {}
     holder_state = None
     pre = preempting_fixes(base, strict, fixes)
-    ordered = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes or sv[1]["number"] in pre else 1)
+    relevant = relevant or set()
+    ordered = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in relevant
+                     else 1 if sv[1]["number"] in fixes or sv[1]["number"] in pre else 2)
     for state, view in ordered:
         n, head = view["number"], view["head_sha"]
         if state not in ("pending", "green"):
@@ -4530,6 +4660,13 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
     if holder is not None and pre and holder not in pre and holder not in fixes and holder_state == "pending":
         log(f"#{holder:>6} strict    reservation pre-empted: main is red and fix "
             f"{', '.join(f'#{f}' for f in sorted(pre))} is served first; main returns once green")
+        holder = None
+    # A fix whose diff touches what broke main (relevant_fixes) also pre-empts a running reservation of a
+    # fix that does not: #16586 (perf) held main for ~1 h as a "fix in CI" while #16690 (the ADR regen) waited.
+    elif (holder is not None and holder_state == "pending" and holder not in relevant
+            and relevant & pre):
+        log(f"#{holder:>6} strict    reservation pre-empted: main is red and fix "
+            f"{', '.join(f'#{f}' for f in sorted(relevant & pre))} touches what broke it; main returns once green")
         holder = None
     return holder, timed_out
 
@@ -4726,7 +4863,8 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
 
 def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shadow: bool, summary: dict,
                 main_red: dict[str, str] | None = None, cache: dict | None = None,
-                holder: int | None = None, timed_out: list | None = None, yield_why: str | None = None) -> None:
+                holder: int | None = None, timed_out: list | None = None, yield_why: str | None = None,
+                relevant: set[int] | None = None) -> None:
     """Manual-lane PRs merge exactly as strict up-to-date allowed: CI green on a head that already
     contains live main. Oldest first. Up to date + green -> status + merge pinned to that head; up to
     date + CI running -> main is RESERVED (in_flight, so no train is built under it); green but
@@ -4749,7 +4887,9 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
             summary["waiting"].append(view["number"])
     if main_red:
         fixes = strict_fixes(gh, git, base, strict, main_red, cache)
-        strict = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes else 1)  # stable: oldest first within
+        strict = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in (relevant or ())
+                        else 1 if sv[1]["number"] in fixes else 2)  # stable: oldest first within
+    relevant = relevant if main_red else set()
     updated = holder is not None  # main reserved (strict_reservation): no other strict-lane action while it runs
     main_health_checked = False  # one final inventory read, shared by this strict-lane invocation
     for state, view in strict:
@@ -4763,6 +4903,12 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         if current and state == "pending" and n in (timed_out or []):
             continue
         fix = fixes.get(n)
+        if relevant and n not in relevant:
+            # Main red and a fix that touches the breakage waits: nothing else moves main first, not even
+            # another "fix" whose diff is elsewhere (#16583/#16602 merged onto red main, main stayed red).
+            log(f"#{n:>6} strict    held: main is red and fix {', '.join(f'#{f}' for f in sorted(relevant))} "
+                f"touches what broke it — served first")
+            continue
         if fix and state == "green" and not main_health_checked:
             main_health_checked = True
             if defer_recovered_main_red(gh, base, main_red, summary):
