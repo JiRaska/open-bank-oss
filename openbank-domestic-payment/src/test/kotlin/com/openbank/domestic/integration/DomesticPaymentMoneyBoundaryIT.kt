@@ -202,10 +202,10 @@ class DomesticPaymentMoneyBoundaryIT {
         """
         {
           "debtorAccountId": "$debtorAccountId",
-          "debtorAccountNumber": "1234567890",
+          "debtorAccountNumber": "1234567899",
           "debtorBankCode": "0800",
           "debtorName": "Alice Example",
-          "creditorAccountNumber": "9876543210",
+          "creditorAccountNumber": "9876543211",
           "creditorBankCode": "0100",
           "creditorName": "Brno Utility",
           ${if (amount == null) "" else "\"amount\": $amount,"}

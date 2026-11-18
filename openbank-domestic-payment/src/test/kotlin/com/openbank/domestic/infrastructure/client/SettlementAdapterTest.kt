@@ -202,7 +202,7 @@ class SettlementAdapterTest {
 
     @Test
     fun `settle resolves the payee and sends targetAccountId for an internal transfer`(): Unit = runBlocking {
-        val p = payment() // INTERNAL_CLIENT, creditor 9876543210 / bank 0100
+        val p = payment() // INTERNAL_CLIENT, creditor 9876543211 / bank 0100
         val creditorId = UUID.randomUUID()
         val ibanSlot = slot<String>()
         coEvery { accountLookup.findAccountIdByIban(capture(ibanSlot)) } returns creditorId
@@ -213,10 +213,10 @@ class SettlementAdapterTest {
 
         adapter().settle(p)
 
-        // The constructed Czech IBAN: CZ + check + bank(0100) + 16-digit account(0000009876543210).
+        // The constructed Czech IBAN: CZ + check + bank(0100) + 16-digit account(0000009876543211).
         assertThat(ibanSlot.captured).hasSize(24)
         assertThat(ibanSlot.captured).startsWith("CZ")
-        assertThat(ibanSlot.captured.substring(4)).isEqualTo("01000000009876543210")
+        assertThat(ibanSlot.captured.substring(4)).isEqualTo("01000000009876543211")
         // The payee is credited: the booking carries the resolved target account.
         assertThat(reqSlot.captured.targetAccountId).isEqualTo(creditorId)
         // An in-house transfer never traverses CERTIS, so it must not be labelled "CERTIS".
@@ -333,10 +333,10 @@ class SettlementAdapterTest {
         idempotencyKey = "settle-test",
         status = DomesticPaymentStatus.SENT_TO_CLEARING,
         debtorAccountId = debtor,
-        debtorAccountNumber = "1234567890",
+        debtorAccountNumber = "1234567899",
         debtorBankCode = "0800",
         debtorName = "Alice",
-        creditorAccountNumber = "9876543210",
+        creditorAccountNumber = "9876543211",
         creditorBankCode = "0100",
         creditorName = "Bob",
         amount = Money.of(BigDecimal("500.00"), "CZK"),
