@@ -95,6 +95,15 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # glibc sizes its malloc arenas as 8 x ONLINE CPUs read from the host
+            # (/proc/cpuinfo), not from the cgroup quota: on Karpenter's 16-vCPU
+            # 4xlarge nodes that is 128 arenas of native memory against the same
+            # cgroup limit that fit on a 2-4 vCPU node, and the pod OOMKilled in
+            # startup warm-up (exit 137, no Java OOM — #16783, headroom raised in
+            # #16784). Cap the arenas; the JVM's own allocations do not go through
+            # glibc malloc.
+            - name: MALLOC_ARENA_MAX
+              value: "2"
             # Parallel private-CA TLS listener for new east-west clients (first: interest-service's
             # CatalogInterestSnapshotScheduler and lending-service's RestCatalogLoanProfilePort,
             # #10383). HTTP/8104 stays for existing callers and for the KEDA HTTP interceptor, which
