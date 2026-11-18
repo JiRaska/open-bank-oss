@@ -332,3 +332,9 @@ BuildInfo.toStack()  // returns LinkedHashMap suitable for JSON serialization
 `openbank-build-info.properties` generuje `openbank-libs-domain` (vedle `BuildInfo`, který ho čte) z version catalogu. Dřív žil v umbrella JARu `openbank-libs`, který služby závislé přímo na domain/runtime nemají, a `/api/v1/info` proto hlásilo Quarkus/Gradle/libs jako `unknown`. Git commit ani čas buildu se do `libs-domain` nerazítkují (JAR zůstává mezi commity stejný); `buildTime` je proto `unknown` a commit běžící služby pochází z `openbank-service-build.properties`. `BuildInfoTest` porovnává hodnoty s catalogem, takže chybějící resource build shodí.
 
 `ServiceInfoResource` automaticky vrací `toStack()` v `/api/v1/info` response.
+
+## Primitiva identifikátorů (#16748)
+
+- `CurrencyCode.of` odmítá kódy ISO 4217 stažené z oběhu (List Three: `DEM`, `FRF`, `HRK`, `SKK`, `VEF`, `ZWL`, ...), přestože je `java.util.Currency` stále zná. `CurrencyCode.isCanonical(code)` říká, zda je řetězec přesně platný kód velkými písmeny.
+- `IbanCheckDigits.compute/build` je jediný generátor kontrolních číslic ISO 7064 MOD 97-10; validace zůstává v `Iban.isValid`.
+- `CzechPaymentSymbol.isValid` / `requireValid`: variabilní, specifický a konstantní symbol mají 1-10 číslic ASCII.
