@@ -125,7 +125,6 @@ class CaseCoordinatorTraceContractIT {
     @Inject
     lateinit var exporter: RecordingSpanExporter
 
-
     @Test
     fun `applying an agent killswitch set keeps the consumed record and its INSERT in one trace`() {
         val eventId = UUID.randomUUID()
