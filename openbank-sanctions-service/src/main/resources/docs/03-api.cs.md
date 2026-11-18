@@ -156,6 +156,8 @@ s `X-Approval-Id`. Jako přezkoumávající se zaznamená tento lidský checker.
 vynucené, je agent odmítnut vždy. Identita agenta nikdy nedostává `sanctions.approval.decide`. `/api/v1/.../review`
 zůstává jen pro lidi.
 
+**Vazba schválení (#16593).** Opakovaný požadavek agenta se provede jen se schválením, které čtyři oči spotřebovaly právě pro tento požadavek. `X-Approval-Id` je hlavička čtená z kontextu požadavku, nikdy není součástí otisku požadavku, a schválení spotřebované dřívějším voláním je odmítnuto (403), i kdyby politika akci přestala hlídat.
+
 ### Získat konkrétní prověření
 
 ```http
