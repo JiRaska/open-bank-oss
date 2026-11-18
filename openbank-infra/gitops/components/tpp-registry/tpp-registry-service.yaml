@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: tpp-registry-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-tpp-registry-service:sandbox-85666585@sha256:297885174b635df67c841d202463f4aad07dcc13e3ee338cc309622f85e5d218
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-tpp-registry-service:sandbox-548fa683@sha256:56bfe6174c26a4dc03288053f3b130b127e9d68af065bd583374961d814fedfc
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
