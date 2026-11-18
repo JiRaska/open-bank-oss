@@ -53,7 +53,7 @@ class McpClientGrantResolverTest {
     )
 
     private fun given(vararg grants: DelegationGrant): List<DelegationGrant> {
-        coEvery { repository.findByGranteeId(DelegationGrant.mcpClientGranteeId(clientId)) } returns grants.toList()
+        coEvery { repository.findActiveMcpClientGrants(party, clientId, jkt) } returns grants.toList()
         return runBlocking { resolver.resolve(party, clientId, jkt) }
     }
 

@@ -37,7 +37,10 @@ class McpClientGrantResolver(private val delegationRepository: DelegationReposit
     override suspend fun resolve(grantorPartyId: UUID, clientId: String, keyThumbprint: String): List<DelegationGrant> {
         val now = OffsetDateTime.now(clock)
         val granteeId = DelegationGrant.mcpClientGranteeId(clientId)
-        return delegationRepository.findByGranteeId(granteeId).filter { grant ->
+        // The query already filters on all three keys and ACTIVE; the checks below repeat it as
+        // defence in depth, so a query regression cannot hand back another party's grant.
+        return delegationRepository.findActiveMcpClientGrants(grantorPartyId, clientId, keyThumbprint).filter { grant ->
+            grant.granteePartyId == granteeId &&
             grant.granteeType == DelegationGranteeType.MCP_CLIENT &&
                 grant.grantorPartyId == grantorPartyId &&
                 grant.granteeClientId == clientId &&

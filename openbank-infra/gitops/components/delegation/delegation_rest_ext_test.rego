@@ -304,3 +304,8 @@ test_staff_operator_may_not_resolve_mcp_client_grants if {
 test_renamed_machine_may_not_resolve_mcp_client_grants if {
 	not allow with input as object.union(resolve, {"principal": object.union(mcp_m2m, {"client_id": "openbank-services"})})
 }
+
+# machine_named's legacy branch admits a marker-less principal by name; this grant must not.
+test_mcp_name_without_service_account_marker_may_not_resolve if {
+	not allow with input as object.union(resolve, {"principal": {"type": "HUMAN", "id": "service-account-openbank-mcp", "roles": ["ROLE_API"]}})
+}

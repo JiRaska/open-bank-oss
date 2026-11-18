@@ -133,13 +133,21 @@ allowed_reasons contains "service-delegation-check" if {
 # identity, and vetoed for everyone else below so operator-read-any cannot reach it either.
 allowed_reasons contains "mcp-client-grant-resolve" if {
 	input.principal.type == "HUMAN"
+	# Pinned explicitly: machine_named's legacy branch admits a principal with NO service_account
+	# marker by name alone (phase-1 PEPs). This grant must never ride that fallback.
+	input.principal.service_account == true
 	machine_named("service-account-openbank-mcp")
 	input.action == "delegation.mcp-client.resolve"
 }
 
 prohibited if {
 	input.action == "delegation.mcp-client.resolve"
-	not machine_named("service-account-openbank-mcp")
+	not mcp_service_principal
+}
+
+mcp_service_principal if {
+	input.principal.service_account == true
+	machine_named("service-account-openbank-mcp")
 }
 
 # Only the authenticated customer edge may record a customer's review, regardless of other roles.
