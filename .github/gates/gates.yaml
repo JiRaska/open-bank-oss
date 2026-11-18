@@ -2336,6 +2336,9 @@ gates:
     group: supplychain
     mode: enforced
     rationale: "These suites prove deploy-side checkers (SBOM effective model, record-deployment manifest resolution, deploy publication race) and were committed without any invocation; a regression in the code they cover was invisible until #14697 showed the class."
+    # #16788: a budget above the effective hard timeout (default 420 s) fails run-gates load().
+    # #16785 raises this gate's budget to 439 (1.5 x p95), so the kill must sit above it: 660 = 1.5 x 439.
+    timeout_seconds: 660
     review_after: "2027-05-03"
     budget_seconds: 380
     run: |
@@ -3673,8 +3676,9 @@ gates:
     # Hard kill for this gate only (#16788). The runner default is 420 s and a budget above the
     # effective timeout is unenforceable (run-gates load() refuses it). Measured 2026-11-18: the
     # self-test read 335.9 s wall on main (run 44318606328), 75 s under the default kill and the
-    # local loaded-machine run already hit 420 s; 600 leaves the budget enforceable.
-    timeout_seconds: 600
+    # local loaded-machine run already hit 420 s. #16785 raises this budget to 495 (1.5 x p95);
+    # 750 = ~1.5 x 495 keeps it enforceable.
+    timeout_seconds: 750
     review_after: "2027-04-18"
     budget_seconds: 302   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 6 main CI runs 2026-11-03: 105.9 77.3 104.6 109.2 104.1 103.4 s (median ~104 s); with the strict-carrier cases (619) CI read 199.6 s on 2026-11-07; 302 = ceil(1.5 x p95 200.83 s over 30 main runs, gate-runtime-measurements.json)
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
