@@ -149,6 +149,13 @@ class FetchBrokerMcpRoutingIT {
     }
 
     @Test
+    fun `pdf extraction is off in the running application`() {
+        val enabled = org.eclipse.microprofile.config.ConfigProvider.getConfig()
+            .getValue("openbank.fetch-broker.pdf.enabled", Boolean::class.java)
+        assertThat(enabled).isFalse()
+    }
+
+    @Test
     fun `the metric and liveness gauge are exported`() {
         val metrics = given().get("/q/metrics").then().statusCode(200).extract().asString()
         assertThat(metrics).contains("openbank_workflow_last_success_age_seconds{workflow=\"web-fetch\"")

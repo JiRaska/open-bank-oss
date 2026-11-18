@@ -14,6 +14,7 @@ import com.openbank.fetchbroker.application.port.out.FetchMetricsPort
 import com.openbank.fetchbroker.infrastructure.charter.AgentsYamlCharterHosts
 import com.openbank.fetchbroker.infrastructure.render.HttpTransport
 import com.openbank.fetchbroker.infrastructure.render.KitesurfRenderer
+import com.openbank.fetchbroker.infrastructure.render.PdfTextExtractor
 import com.openbank.fetchbroker.infrastructure.render.PlainHttpRenderer
 import com.openbank.fetchbroker.infrastructure.render.RobotsGate
 import jakarta.enterprise.context.ApplicationScoped
@@ -49,6 +50,10 @@ class FetchBrokerProducer {
     @ConfigProperty(name = "openbank.fetch-broker.kitesurf.api-token")
     lateinit var kitesurfApiToken: Optional<String>
 
+    /** Off by default: in-process PDFBox is not bounded (see PdfTextExtractor). */
+    @ConfigProperty(name = "openbank.fetch-broker.pdf.enabled", defaultValue = "false")
+    lateinit var pdfEnabled: java.lang.Boolean
+
     @Inject
     lateinit var mapper: ObjectMapper
 
@@ -60,7 +65,12 @@ class FetchBrokerProducer {
         return WebFetchService(
             FetchCollaborators(
                 charters = AgentsYamlCharterHosts.fromClasspath(chartersResource),
-                plain = PlainHttpRenderer(transport, robots, userAgent),
+                plain = PlainHttpRenderer(
+                    transport,
+                    robots,
+                    userAgent,
+                    if (pdfEnabled.booleanValue()) PdfTextExtractor() else null,
+                ),
                 js = KitesurfRenderer(
                     kitesurfBaseUrl.orElse(null),
                     kitesurfApiToken.orElse(null),

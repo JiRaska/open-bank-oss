@@ -28,7 +28,8 @@ class PlainHttpRenderer(
     private val transport: HttpTransport,
     private val robots: RobotsGate,
     private val userAgent: String,
-    private val pdf: PdfTextExtractor = PdfTextExtractor(),
+    /** Null = PDF extraction disabled, the default — see [PdfTextExtractor] for why. */
+    private val pdf: PdfTextExtractor? = null,
 ) : RendererPort {
     override val name = NAME
 
@@ -67,8 +68,10 @@ class PlainHttpRenderer(
         val contentType = resp.header("content-type").orEmpty().lowercase()
         val text = when {
             "html" in contentType -> HtmlTextExtractor.extract(decode(resp, contentType), mode)
-            "application/pdf" in contentType -> pdf.extract(resp.body)
-                ?: return RenderResult.NotRenderable("unreadable pdf")
+            "application/pdf" in contentType -> {
+                val extractor = pdf ?: return RenderResult.NotRenderable(PDF_DISABLED)
+                extractor.extract(resp.body) ?: return RenderResult.NotRenderable("unreadable pdf")
+            }
             contentType.startsWith("text/plain") -> decode(resp, contentType)
             else -> return RenderResult.NotRenderable("unsupported content type")
         }
@@ -84,6 +87,7 @@ class PlainHttpRenderer(
 
     companion object {
         const val NAME = "plain-http"
+        const val PDF_DISABLED = "pdf extraction disabled"
         private const val MAX_HOPS = 5
         private const val HTTP_OK = 200
         private val REDIRECTS = setOf(301, 302, 303, 307, 308)

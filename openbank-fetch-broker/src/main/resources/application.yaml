@@ -69,6 +69,10 @@ openbank:
     max-response-bytes: 5242880
     max-content-chars: 200000
     per-host-min-interval: PT2S
+    pdf:
+      # OFF until PDF parsing runs in a separate memory-limited, killable process (#16754):
+      # in-process PDFBox cannot be bounded against a decompression bomb.
+      enabled: false
     # The JS renderer's base-url and api-token are deliberately NOT declared here: both are
     # supplied by the deployment (OPENBANK_FETCH_BROKER_KITESURF_BASE_URL, and
     # OPENBANK_FETCH_BROKER_KITESURF_API_TOKEN from the browser-run-api-token secret). Absent, every

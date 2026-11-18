@@ -50,7 +50,9 @@ class WebFetchService(
         val renderer = if (allowed.grant.render == RenderMode.JS) c.js else c.plain
         val envelope = when (val r = renderer.render(RenderRequest(allowed.uri, mode, grants))) {
             is RenderResult.Rendered -> {
-                val truncated = r.text.length > maxContentChars
+                // Sanitise BEFORE the cap: neutralising can lengthen the text (`>>>` -> `> > >`).
+                val clean = UntrustedContent.sanitise(r.text)
+                val truncated = clean.length > maxContentChars
                 FetchEnvelope(
                     url = url,
                     finalUrl = r.finalUrl,
@@ -59,7 +61,7 @@ class WebFetchService(
                     bytes = r.raw.size,
                     renderer = renderer.name,
                     outcome = FetchOutcome.FETCHED,
-                    content = UntrustedContent.wrap(if (truncated) r.text.take(maxContentChars) else r.text),
+                    content = UntrustedContent.wrapSanitised(if (truncated) clean.take(maxContentChars) else clean),
                     truncated = truncated,
                 )
             }

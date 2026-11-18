@@ -131,6 +131,13 @@ class FetchBrokerHardeningTest {
     }
 
     @Test
+    fun `an oversized pdf is refused before any parse`() {
+        val valid = pdf(1)
+        assertThat(PdfTextExtractor(maxInputBytes = valid.size).extract(valid)).isNotNull()
+        assertThat(PdfTextExtractor(maxInputBytes = valid.size - 1).extract(valid)).isNull()
+    }
+
+    @Test
     fun `a malformed pdf yields nothing`() {
         assertThat(PdfTextExtractor().extract("%PDF-1.7 garbage".toByteArray())).isNull()
     }

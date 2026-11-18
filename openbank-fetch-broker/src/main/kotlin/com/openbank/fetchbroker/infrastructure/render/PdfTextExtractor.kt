@@ -23,15 +23,24 @@ import java.util.concurrent.TimeoutException
  * [maxDecodedBytes] (PDFBox throws past it), at most [maxPages] pages are read, the text is cut at
  * [maxChars], and the whole extraction runs on a small bounded pool under a [timeout]. Any limit
  * hit or parse failure yields null, which the renderer reports as NOT_RENDERABLE.
+ *
+ * **Not safe to enable in-process, and OFF by default (`openbank.fetch-broker.pdf.enabled`).** The
+ * limits above are not a sandbox: [timeout] abandons the future but cannot stop PDFBox's thread,
+ * and the memory setting caps the stream cache, not Flate-decoded content, so one decompression
+ * bomb stream is unbounded. This class may only be enabled once it runs in a separate,
+ * memory-limited, killable process (follow-up on #16754). Input above [maxInputBytes] is refused
+ * before any parse.
  */
 class PdfTextExtractor(
     private val maxDecodedBytes: Long = DEFAULT_MAX_DECODED_BYTES,
     private val maxPages: Int = DEFAULT_MAX_PAGES,
     private val maxChars: Int = DEFAULT_MAX_CHARS,
     private val timeout: Duration = Duration.ofSeconds(DEFAULT_TIMEOUT_S),
+    private val maxInputBytes: Int = DEFAULT_MAX_INPUT_BYTES,
 ) {
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     fun extract(bytes: ByteArray): String? {
+        if (bytes.size > maxInputBytes) return null
         val future: Future<String> = try {
             POOL.submit<String> { run(bytes) }
         } catch (_: RejectedExecutionException) {
@@ -67,6 +76,7 @@ class PdfTextExtractor(
         const val DEFAULT_MAX_PAGES = 200
         const val DEFAULT_MAX_CHARS = 1_000_000
         const val DEFAULT_TIMEOUT_S = 20L
+        const val DEFAULT_MAX_INPUT_BYTES = 4 * 1024 * 1024
         private const val THREADS = 2
         private const val QUEUE = 4
 

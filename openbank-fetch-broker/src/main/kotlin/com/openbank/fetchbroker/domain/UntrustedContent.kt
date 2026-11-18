@@ -44,6 +44,9 @@ object UntrustedContent {
         return ANGLE_RUN.replace(noFormat) { m -> m.value.toCharArray().joinToString(" ") }
     }
 
-    fun wrap(text: String, nonce: String = newNonce()): String =
-        "$NOTICE\n${begin(nonce)}\n${sanitise(text)}\n${end(nonce)}"
+    fun wrap(text: String, nonce: String = newNonce()): String = wrapSanitised(sanitise(text), nonce)
+
+    /** For text that already went through [sanitise] (e.g. sanitised, then cut to a cap). */
+    fun wrapSanitised(clean: String, nonce: String = newNonce()): String =
+        "$NOTICE\n${begin(nonce)}\n$clean\n${end(nonce)}"
 }
