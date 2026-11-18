@@ -530,6 +530,7 @@ open class DomesticPaymentActivitiesImpl(
 
 /** Map the scheme's `pacs.002` reason code to the rail's reject reason (ADR-0104 D4). */
 private fun rejectReasonFor(reasonCode: String?): DomesticRejectReason = when (reasonCode) {
+    "AC01" -> DomesticRejectReason.INVALID_ACCOUNT_NUMBER
     "AC04", "AC06" -> DomesticRejectReason.BENEFICIARY_ACCOUNT_CLOSED
     "RC01" -> DomesticRejectReason.INVALID_BANK_CODE
     "AM05" -> DomesticRejectReason.INSUFFICIENT_FUNDS

@@ -60,15 +60,15 @@ class SchemeGatewayAdapter(
 
     @Suppress("TooGenericExceptionCaught")
     override suspend fun submit(payment: DomesticPayment): SchemeSubmissionOutcome {
-        // #16772: an account that is not issuable is refused BEFORE anything is transmitted, and
-        // must say so — a bare IllegalArgumentException reads to the activity as an ambiguous
-        // dispatch and would hold the payment in VALIDATED forever.
-        val (debtorIban, creditorIban) = try {
-            bbanToIban(payment.debtorAccountNumber, payment.debtorBankCode) to
-                bbanToIban(payment.creditorAccountNumber, payment.creditorBankCode)
-        } catch (ex: IllegalArgumentException) {
-            log.warnf("Payment %s carries a non-issuable Czech account; not transmitted", payment.id)
-            throw SchemeGatewayUnavailableException(ex, requestLeftThisProcess = false)
+        // #16772: an account no Czech bank can issue never becomes valid, so re-driving it is an
+        // endless retry. Answer it TERMINALLY, before anything is transmitted, with the ISO 20022
+        // reason the scheme itself would give (AC01 IncorrectAccountNumber); the activity maps that
+        // to REJECTED / INVALID_ACCOUNT_NUMBER like any scheme reject.
+        val debtorIban = CzechDomesticIban.fromAccountNumber(payment.debtorAccountNumber, payment.debtorBankCode)
+        val creditorIban = CzechDomesticIban.fromAccountNumber(payment.creditorAccountNumber, payment.creditorBankCode)
+        if (debtorIban == null || creditorIban == null) {
+            log.warnf("Payment %s carries a non-issuable Czech account; rejected locally, not transmitted", payment.id)
+            return SchemeSubmissionOutcome(accepted = false, reasonCode = INCORRECT_ACCOUNT_NUMBER)
         }
         val creditorAgentBic = bankCodeToBic(payment.creditorBankCode)
 
@@ -190,22 +190,14 @@ class SchemeGatewayAdapter(
         return parts.joinToString(" ").ifBlank { null }?.take(MAX_140)
     }
 
-    /**
-     * Derives the CZ IBAN for `prefix-base` + bank code via [CzechDomesticIban] — BBAN
-     * `bankCode(4) + prefix(6) + base(10)`, national mod-11 checked, kernel-[Iban] validated.
-     * Coordinates that denote no issuable account fail loudly rather than reach the scheme as a
-     * well-formed IBAN for somebody else's (or nobody's) account (#16748).
-     */
-    private fun bbanToIban(accountNumber: String, bankCode: String): String =
-        requireNotNull(CzechDomesticIban.fromAccountNumber(accountNumber, bankCode)) {
-            "not a valid Czech account for bank code $bankCode"
-        }
-
     /** Maps a Czech 4-digit bank code to a BIC (only own bank code is known; others use a synthetic form). */
     private fun bankCodeToBic(bankCode: String): String = if (bankCode == ownBankCode) ownBankBic else "${bankCode}CZPP"
 
     private companion object {
         const val MAX_35 = 35
         const val MAX_140 = 140
+
+        /** ISO 20022 ExternalStatusReason1Code: IncorrectAccountNumber. */
+        const val INCORRECT_ACCOUNT_NUMBER = "AC01"
     }
 }

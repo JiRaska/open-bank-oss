@@ -1144,16 +1144,20 @@ one builder, `CzechDomesticIban`: shape, mod-11 on prefix and base
 the result constructed as a kernel `Iban` (whose constructor re-checks mod-97).
 
 - **Tampering / integrity:** a mis-built creditor IBAN is a payment to the wrong account — the
-  worst outcome on this rail, and invisible because the IBAN itself is mod-97 valid. The adapter now
-  fails loudly (`IllegalArgumentException`) on coordinates that denote no issuable account instead
-  of emitting a pacs.008 for one.
+  worst outcome on this rail, and invisible because the IBAN itself is mod-97 valid. On coordinates
+  that denote no issuable account, the adapter transmits nothing. It answers with the ISO reason the
+  scheme would give (`AC01` IncorrectAccountNumber), so the payment ends terminally `REJECTED` /
+  `INVALID_ACCOUNT_NUMBER`. It is neither held as an ambiguous dispatch nor re-driven forever (#16772 review).
 - **Spoofing / input validation:** an invalid account is a 400 `VALIDATION_ERROR` at the REST edge,
   before the Idempotency-Key is bound or anything persists.
 - **Denial of service:** none new; the check is pure arithmetic on ≤20 digits.
 - **Information disclosure:** the error names the field and bank code, never the account number.
 
-**Residual risk.** Payments already persisted with a mod-11-invalid account would now fail at the
-scheme adapter rather than be sent; that is the intended fail-closed outcome. The other private
+**Residual risk.** Payments already persisted with a mod-11-invalid account are now rejected
+terminally at the scheme adapter instead of being sent, which is the intended fail-closed outcome.
+Accounts whose own number fails mod-11 (sandbox measurement: 7 of 116, issued before the generator
+enforced the checksum) are fixed at the source by re-issuing them in account-service. This PR does
+not exempt them, and it must not merge before that re-issue lands. The other private
 IBAN builders (`PaymentConfirmationMapper`, `SettlementAdapter`) are not yet routed through the
 shared builder — tracked on #16748.
 

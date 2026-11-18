@@ -89,30 +89,22 @@ class SchemeGatewayAdapterTest {
     }
 
     @Test
-    fun `bbanToIban refuses an account that fails the national mod-11 checksum`() {
-        every { client.submitCreditTransfer(any()) } returns Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
+    fun `bbanToIban refuses an account that fails the national mod-11 checksum`(): Unit = runBlocking {
+        // #16772 review: terminal AC01, never a re-drivable "unavailable" and never transmitted.
+        val outcome = adapter.submit(payment().copy(creditorAccountNumber = "1234567890"))
 
-        // #16772 review: must read as "never left this process", or the activity treats it as an
-        // ambiguous dispatch and holds the payment in VALIDATED forever.
-        assertThatThrownBy { runBlocking { adapter.submit(payment().copy(creditorAccountNumber = "1234567890")) } }
-            .isInstanceOfSatisfying(SchemeGatewayUnavailableException::class.java) {
-                assertThat(it.requestLeftThisProcess).isFalse()
-                assertThat(it.cause).isInstanceOf(IllegalArgumentException::class.java)
-            }
+        assertThat(outcome.accepted).isFalse()
+        assertThat(outcome.reasonCode).isEqualTo("AC01")
         verify(exactly = 0) { client.submitCreditTransfer(any()) }
     }
 
     @Test
-    fun `bbanToIban refuses a base longer than ten digits`() {
-        every { client.submitCreditTransfer(any()) } returns Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
+    fun `bbanToIban refuses a base longer than ten digits`(): Unit = runBlocking {
+        // #16772 review: terminal AC01, never a re-drivable "unavailable" and never transmitted.
+        val outcome = adapter.submit(payment().copy(creditorAccountNumber = "12000145399"))
 
-        // #16772 review: must read as "never left this process", or the activity treats it as an
-        // ambiguous dispatch and holds the payment in VALIDATED forever.
-        assertThatThrownBy { runBlocking { adapter.submit(payment().copy(creditorAccountNumber = "12000145399")) } }
-            .isInstanceOfSatisfying(SchemeGatewayUnavailableException::class.java) {
-                assertThat(it.requestLeftThisProcess).isFalse()
-                assertThat(it.cause).isInstanceOf(IllegalArgumentException::class.java)
-            }
+        assertThat(outcome.accepted).isFalse()
+        assertThat(outcome.reasonCode).isEqualTo("AC01")
         verify(exactly = 0) { client.submitCreditTransfer(any()) }
     }
 
