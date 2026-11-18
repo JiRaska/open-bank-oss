@@ -59,7 +59,7 @@ class CustomerChannel @Inject constructor(
                 IllegalStateException("mcp.customer.enabled=true but mcp.customer.allowlist is not set")
             }
             val text = read(where)
-                ?: throw IllegalStateException("MCP client allowlist not found at '$where'")
+                ?: error("MCP client allowlist not found at '$where'")
             val allowlist = try {
                 McpClientAllowlist.parse(text)
             } catch (e: IllegalArgumentException) {
