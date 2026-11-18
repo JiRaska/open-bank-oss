@@ -50,6 +50,27 @@ interface McpMetricsPort {
     /** Record one `tools/list` discovery, by outcome (ADR-0225 D4 — discovery recon is countable). */
     fun toolsListCompleted(outcome: ToolsListOutcome)
 
+    /**
+     * Record one request refused by the throttle (rate window or in-flight cap). Metered per request
+     * even where the audit trail is sampled to one row per window, so the aggregate stays exact.
+     */
+    fun requestThrottled(surface: ThrottleSurface, caller: ThrottleCaller)
+
+    /**
+     * Record one request refused by an input bound before dispatch (#16628). Default no-op so test
+     * doubles need not implement it; the Micrometer adapter overrides it.
+     */
+    fun inputRefused(reason: InputRefusal) = Unit
+
+    /** Why a request was refused before dispatch. A closed enum, so safe as a tag. */
+    enum class InputRefusal { NUL, }
+
+    /** Which JSON-RPC surface was throttled. A closed enum, so safe as a tag. */
+    enum class ThrottleSurface { TOOLS_CALL, TOOLS_LIST }
+
+    /** Whether the throttled request carried a resolvable caller identity. */
+    enum class ThrottleCaller { AUTHENTICATED, ANONYMOUS }
+
     /** Bounded `tools/list` outcome set — a closed enum, so it is safe as a metric tag. */
     enum class ToolsListOutcome {
         /** Discovery completed (possibly filtered to a subset, or empty on a policy deny). */

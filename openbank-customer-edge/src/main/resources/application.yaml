@@ -8,6 +8,11 @@ quarkus:
   # Redis: pending-onboarding store for four-eyes auto-resume (ADR-0072).
   redis:
     hosts: ${QUARKUS_REDIS_HOSTS:redis://localhost:6379}
+    rate-limit:
+      hosts: ${quarkus.redis.hosts}
+      max-pool-size: 32
+      max-pool-waiting: 64
+      timeout: 1s
 
   http:
     port: 8128

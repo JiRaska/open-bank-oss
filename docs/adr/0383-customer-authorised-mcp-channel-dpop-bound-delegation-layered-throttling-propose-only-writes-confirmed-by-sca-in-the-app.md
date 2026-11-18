@@ -1,12 +1,13 @@
 ---
 date: 2026-11-17
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ai-agents, authn, security, payments]
+followup: "#16590 — customer route, tenant, DPoP, grant lookup, proposal store and SCA approval not yet built"
 summary: "Customer MCP clients are MCP_CLIENT delegation grantees with read+propose only: allowlisted OAuth+PKCE, DPoP 5-min tokens, grant per party+client+key, throttled before OPA; MCP cannot write, the app authorises via SCA."
 ---
 
