@@ -4,6 +4,7 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.mcp.infrastructure.customer
 
+import com.openbank.libs.security.DpopProofParser
 import com.openbank.libs.security.DpopProofVerifier
 import com.openbank.libs.security.DpopRequest
 import com.openbank.libs.security.DpopResult
@@ -13,6 +14,7 @@ import jakarta.json.JsonString
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.net.URI
 import java.time.Clock
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Admission of one customer-realm call (ADR-0383 D1/D2, ADR-0385 D1). Pure apart from the replay
@@ -35,7 +37,29 @@ class CustomerChannelAdmission(
     val allowlist: McpClientAllowlist,
     private val verifier: DpopProofVerifier,
     private val clock: Clock,
+    /** The same JOSE front-end the verifier uses; read here only for the proof key's thumbprint. */
+    private val proofParser: DpopProofParser,
 ) {
+    /**
+     * The three ADR-0383 D5.3 budgets, split by WHAT EACH ONE KNOWS (review of #16721). Each returns
+     * the refusal reason, or null when within budget, and spends one slot when called.
+     *
+     * - [proofKey] and [client] run BEFORE the DPoP check, so they are keyed only on what the CALLER
+     *   controls: the thumbprint of the key in the proof header (unverified, computed from the parsed
+     *   header) and the client id. A leaked access token without its private key can exhaust only
+     *   the attacker's own proof-key bucket, never the victim's. Together they bound how fast anyone
+     *   can fill the replay store before a claim: per key, and per client across key rotation.
+     * - [subject] runs only AFTER the proof is VALID, i.e. after possession of the bound key is
+     *   proven, so only the token's holder can spend the victim's (subject, client) window.
+     */
+    interface Throttles {
+        fun proofKey(thumbprint: String): String?
+
+        fun client(clientId: String): String?
+
+        fun subject(subject: String, clientId: String): String?
+    }
+
     sealed interface Outcome {
         data class Admitted(val context: ConsentContext, val client: McpClientAllowlist.Client) : Outcome
 
@@ -58,18 +82,15 @@ class CustomerChannelAdmission(
     fun missingTokenChallenge(): String = "DPoP algs=\"$ALGS\", resource_metadata=\"$resourceMetadataUrl\""
 
     /**
-     * @param throttle spends one slot of the per-(subject, client) window for the given key and
-     *   returns the refusal reason, or null when within budget. It runs AFTER the cheap structural
-     *   gates and BEFORE the DPoP replay claim: the replay store's per-key quota bounds one proof key,
-     *   not many, so a caller rotating keys must be bounded here first (ADR-0383 D5.3,
-     *   dpop-proof-verifier.md "Replay store limits").
+     * @param throttles the D5.3 budgets; see [Throttles] for which runs before and which after the
+     *   DPoP check, and why.
      */
     @Suppress("ReturnCount") // each early return is one fail-closed admission gate, in order
     suspend fun admit(
         jwt: JsonWebToken,
         authorization: String?,
         dpopHeaders: List<String>,
-        throttle: (String) -> String?,
+        throttles: Throttles,
     ): Outcome {
         if (!isCustomerToken(jwt)) return invalidToken("token is not from the customers realm")
         val subject = jwt.subject?.takeIf { it.isNotBlank() } ?: return invalidToken("token has no subject")
@@ -82,16 +103,38 @@ class CustomerChannelAdmission(
         val raw = jwt.rawToken
         if (raw != null && raw != presented) return invalidToken("presented token does not match the validated token")
 
-        throttle(throttleKey(subject, client.clientId))?.let {
-            return Outcome.Refused(STATUS_TOO_MANY, null, it, throttled = true)
-        }
+        preVerifyRefusal(dpopHeaders, client.clientId, throttles)?.let { return throttled(it) }
 
         val result = verifier.verify(
             DpopRequest(dpopHeaders, HTTP_METHOD, allowlist.resource, presented, jkt),
             clock.instant(),
         )
+        if (result == DpopResult.VALID) {
+            throttles.subject(subject, client.clientId)?.let { return throttled(it) }
+        }
         return outcomeOf(result, subject, client)
     }
+
+    /**
+     * Pre-verify budgets: the proof key's own bucket when its thumbprint can be read, then the
+     * client's shared cap. A proof whose header cannot be parsed spends only the client cap and is
+     * then rejected MALFORMED by the verifier, which never reaches the replay store.
+     */
+    private fun preVerifyRefusal(dpopHeaders: List<String>, clientId: String, throttles: Throttles): String? {
+        val thumbprint = dpopHeaders.singleOrNull()?.trim()?.let(::thumbprintOrNull)
+        return thumbprint?.let(throttles::proofKey) ?: throttles.client(clientId)
+    }
+
+    @Suppress("TooGenericExceptionCaught") // a parser defect must never escape admission; verify() decides
+    private fun thumbprintOrNull(compact: String): String? = try {
+        proofParser.parse(compact)?.jwkThumbprint?.takeIf { it.isNotBlank() }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun throttled(reason: String) = Outcome.Refused(STATUS_TOO_MANY, null, reason, throttled = true)
 
     private fun outcomeOf(result: DpopResult, subject: String, client: McpClientAllowlist.Client): Outcome =
         when (result) {
@@ -146,6 +189,12 @@ class CustomerChannelAdmission(
 
         /** The limiter key of one (subject, client) pair on this channel. */
         fun throttleKey(subject: String, clientId: String): String = "customer:$subject|$clientId"
+
+        /** The limiter key of one DPoP proof key (unverified thumbprint). */
+        fun proofKeyThrottleKey(thumbprint: String): String = "customer-dpop-jkt:$thumbprint"
+
+        /** The limiter key of one client's shared pre-verify cap. */
+        fun clientThrottleKey(clientId: String): String = "customer-client:$clientId"
 
         fun metadataUrlFor(resource: String): String {
             val uri = URI(resource)
