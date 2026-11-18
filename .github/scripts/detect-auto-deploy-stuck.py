@@ -40,6 +40,16 @@ the fleet, so:
   R4  the query is bounded (one unfiltered page), then R1 is applied locally. The filtered
       GitHub index can be stale (#12189); missing or old lane verdicts fail this watch closed.
 
+A SECOND SUBJECT, per service: dropped and not re-pinned (`--dropped-pins`)
+----------------------------------------------------------------------------
+`deploy-window.py prune` reverts a stale image pin on a deploy PR and records it in one
+`<!-- deploy-prune -->` comment on that PR. The prune is safe, but 2026-11-17/18 #16701 lost 10 of
+12 pins, domestic-payment's outbox pin among them, and that service stayed undeployed for >12 h
+with no signal. A dropped pin is expected to be replaced by the next build of that service on
+main, within hours. `dropped_not_repinned` flags a recorded drop older than --hours (default 6)
+whose service has no pin other than the one the PR kept, neither on main nor in an open deploy
+PR. Reported like the lane check: JSON verdict, exit 0 clean / 2 found / 1 could not read.
+
 Three lanes
 -----------
   --self-test          offline fixtures, including the KNOWN-POSITIVE that was measured live
@@ -66,6 +76,7 @@ follow-up issue named in the PR that introduced this script.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -168,6 +179,92 @@ def require_current_population(runs: list[dict], now: datetime) -> None:
         raise RuntimeError(f"unfiltered page has only {len(verdicts)} scheduled verdicts; need {THRESHOLD}")
     if age(verdicts[0]) > MAX_LANE_AGE:
         raise RuntimeError("newest completed scheduled verdict is stale")
+
+
+# --------------------------------------------------------------------------- dropped, not re-pinned
+
+DROP_HOURS = 6
+# A drop this old is history: whatever is still unpinned has outlived this check's question.
+DROP_MAX_AGE_HOURS = 24 * 7
+GITOPS_DIR = "openbank-infra/gitops"
+DEPLOY_PR_PREFIX = "chore/gitops-auto-deploy-"
+DROPPED_MARKER = "<!-- deploy-prune-dropped -->"
+
+
+def _deploy_window():
+    """deploy-window.py is the single owner of the prune comment format; reuse, never re-parse."""
+    spec = importlib.util.spec_from_file_location(
+        "deploy_window", Path(__file__).resolve().parent / "deploy-window.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def dropped_not_repinned(drops: list[dict], pins: dict[str, set[str]], now: int,
+                         hours: float = DROP_HOURS) -> list[dict]:
+    """Drops older than `hours` (and younger than DROP_MAX_AGE_HOURS) whose service shows no pin
+    but the one the PR kept. `pins` is every tag currently pinned per service, on main AND in
+    open deploy PRs; a newer pin is any tag other than `kept`."""
+    out = []
+    for d in drops:
+        age_h = (now - int(d["at"])) / 3600
+        if age_h < hours or age_h > DROP_MAX_AGE_HOURS:
+            continue
+        if any(tag != d["kept"] for tag in pins.get(d["service"], set())):
+            continue
+        out.append({**d, "age_hours": round(age_h, 1)})
+    return sorted(out, key=lambda d: (d["service"], d["at"]))
+
+
+def evaluate_dropped(drops: list[dict], pins: dict[str, set[str]], now: int,
+                     hours: float = DROP_HOURS) -> dict:
+    found = dropped_not_repinned(drops, pins, now, hours)
+    return {"subject": "dropped-not-repinned", "hours": hours, "drops_seen": len(drops),
+            "stuck": bool(found), "services": found}
+
+
+def _gh_json(*args: str):
+    return json.loads(subprocess.run(["gh", *args], check=True, capture_output=True, text=True).stdout)
+
+
+def fetch_drops(repo: str, limit: int = 100) -> list[dict]:
+    """Every record in the prune comment of the newest `limit` gitops deploy PRs (any state)."""
+    dw = _deploy_window()
+    prs = _gh_json("pr", "list", "--repo", repo, "--state", "all", "--limit", str(limit),
+                   "--json", "number,headRefName,comments")
+    if not isinstance(prs, list):
+        raise RuntimeError("unexpected shape from gh pr list")
+    drops: list[dict] = []
+    for pr in prs:
+        if not str(pr.get("headRefName", "")).startswith(DEPLOY_PR_PREFIX):
+            continue
+        for c in pr.get("comments") or []:
+            if dw.PRUNE_MARKER in (c.get("body") or ""):
+                drops += [dict(r, pr=pr["number"]) for r in dw.parse_drop_records(c["body"])]
+    return drops
+
+
+def fetch_pins(repo: str, root: Path) -> dict[str, set[str]]:
+    """Tags pinned per service on main (the checkout) plus in every open gitops deploy PR."""
+    dw = _deploy_window()
+    pins: dict[str, set[str]] = {}
+
+    def add(text: str) -> None:
+        for m in dw.PIN_RE.finditer(text):
+            pins.setdefault(m["image"].rsplit("/", 1)[-1], set()).add(m["tag"])
+
+    for f in (root / GITOPS_DIR).rglob("*.y*ml"):
+        add(f.read_text(errors="replace"))
+    for pr in _gh_json("pr", "list", "--repo", repo, "--state", "open", "--limit", "100",
+                       "--json", "number,headRefName"):
+        if str(pr.get("headRefName", "")).startswith(DEPLOY_PR_PREFIX):
+            diff = subprocess.run(["gh", "pr", "diff", str(pr["number"]), "--repo", repo],
+                                  check=True, capture_output=True, text=True).stdout
+            add("\n".join(ln[1:] for ln in diff.splitlines()
+                          if ln.startswith("+") and not ln.startswith("+++")))
+    if not pins:
+        raise RuntimeError(f"no image pins found under {GITOPS_DIR}: wrong --root?")
+    return pins
 
 
 # --------------------------------------------------------------------------- online lane
@@ -391,6 +488,36 @@ def self_test() -> int:
           and not evaluate(complete_page)["stuck"]
           and evaluate(complete_page)["close_on"]["id"] == arrived["id"])
 
+    # ---- dropped, not re-pinned (2026-11-17/18, #16701) ----
+    dw = _deploy_window()
+    t0 = 1_800_000_000
+    reg = "registry.example/openbank"
+    stale = [("f.yaml", f"{reg}-domestic-payment", "sandbox-aaaaaaa1", None, "sandbox-bbbbbbb2", None),
+             ("g.yaml", f"{reg}-ledger", "sandbox-ccccccc3", None, "sandbox-ddddddd4", None)]
+    comment = dw.render_comment(dw.drop_records(stale, "abcd1234", t0), ["openbank-kyc:sandbox-1111111"])
+    drops = dw.parse_drop_records(comment)
+    check("dropped-pins: the prune comment round-trips through the shared parser",
+          [d["service"] for d in drops] == ["openbank-domestic-payment", "openbank-ledger"])
+    pins = {"openbank-domestic-payment": {"sandbox-aaaaaaa1"},
+            "openbank-ledger": {"sandbox-eeeeeee5"}}          # ledger was re-pinned, domestic-payment not
+    later = t0 + 7 * 3600
+    v = evaluate_dropped(drops, pins, later)
+    check("dropped-pins: a dropped service with no newer pin after 6h is FOUND",
+          v["stuck"] and [d["service"] for d in v["services"]] == ["openbank-domestic-payment"])
+    check("dropped-pins: a service re-pinned (on main or in an open PR) is NOT flagged",
+          all(d["service"] != "openbank-ledger" for d in v["services"]))
+    check("dropped-pins: younger than the threshold is not flagged yet",
+          not evaluate_dropped(drops, pins, t0 + 5 * 3600)["stuck"])
+    check("dropped-pins: the threshold is configurable",
+          evaluate_dropped(drops, pins, t0 + 2 * 3600, hours=1)["stuck"])
+    check("dropped-pins: a week-old drop is history, not a finding",
+          not evaluate_dropped(drops, pins, t0 + (DROP_MAX_AGE_HOURS + 1) * 3600)["stuck"])
+    check("dropped-pins: a service with no pin anywhere is still flagged (absent is not repinned)",
+          evaluate_dropped(drops, {}, later)["stuck"])
+    check("dropped-pins: only the pin the PR kept does not count as a re-pin",
+          evaluate_dropped(drops, {"openbank-domestic-payment": {"sandbox-aaaaaaa1"}}, later)["stuck"])
+    check("dropped-pins: nothing dropped -> clean", not evaluate_dropped([], pins, later)["stuck"])
+
     # Declaration lane, held to a known-positive and two sabotages on a synthetic tree.
     import tempfile
     with tempfile.TemporaryDirectory() as td:
@@ -433,6 +560,9 @@ def main() -> int:
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--check-declaration", action="store_true")
     ap.add_argument("--evaluate", action="store_true")
+    ap.add_argument("--dropped-pins", action="store_true",
+                    help="report services whose pin a prune dropped and nothing re-pinned")
+    ap.add_argument("--hours", type=float, default=DROP_HOURS)
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     ap.add_argument("--json", metavar="PATH", help="also write the verdict here")
     ap.add_argument("--root", default=".")
@@ -470,7 +600,27 @@ def main() -> int:
              f"{WORKFLOW_ID} {LANE} lane: {v['population']} verdicts, stuck={v['stuck']}")
         return 2 if v["stuck"] else 0
 
-    ap.error("pick one of --self-test / --check-declaration / --evaluate")
+    if a.dropped_pins:
+        if not a.repo:
+            print("::error::--repo (or GITHUB_REPOSITORY) is required", file=sys.stderr)
+            return 1
+        try:
+            v = evaluate_dropped(fetch_drops(a.repo), fetch_pins(a.repo, Path(a.root)),
+                                 int(datetime.now(timezone.utc).timestamp()), a.hours)
+        except (subprocess.CalledProcessError, TypeError, ValueError, RuntimeError, OSError) as e:
+            err = getattr(e, "stderr", "") or str(e)
+            print(f"::error::could not read dropped pins: {err.strip()[:400]}", file=sys.stderr)
+            emit("UNREADABLE", f"dropped pins: {err.strip()[:200]}")
+            return 1
+        text = json.dumps(v, indent=2)
+        print(text)
+        if a.json:
+            Path(a.json).write_text(text)
+        emit("FOUND" if v["stuck"] else "CLEAN",
+             f"dropped-not-repinned: {len(v['services'])} service(s) of {v['drops_seen']} drop(s)")
+        return 2 if v["stuck"] else 0
+
+    ap.error("pick one of --self-test / --check-declaration / --evaluate / --dropped-pins")
     return 2
 
 
