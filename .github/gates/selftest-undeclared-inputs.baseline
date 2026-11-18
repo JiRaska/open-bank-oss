@@ -39,7 +39,6 @@ edge-decoy-rule-parity openbank-infra/
 event-consumer-liveness build-logic/
 event-consumer-liveness openbank-*/
 event-contract-code-agreement build-logic/
-event-contract-code-agreement openbank-*/
 event-contract-coverage-ratchet build-logic/
 event-contract-coverage-ratchet openbank-*/
 event-handler-swallows fuzz/
@@ -99,7 +98,6 @@ gate-script-registration openbank-infra/
 gate-script-registration openbank-libs/
 gate-script-registration pacts/
 gate-script-registration perf/
-gate-script-registration pr-body.md
 gate-script-registration release-please-config.json
 gate-script-registration scripts/
 gate-script-registration settings.gradle.kts
