@@ -124,4 +124,16 @@ class RodneCisloTest {
         val r = RodneCislo.parse("0421010007") as RodneCislo.Parsed
         assertThat(r.birthdate).isEqualTo(LocalDate.of(2004, 1, 1))
     }
+
+    @Test
+    fun `rejects a nine-digit number carrying the plus-20 overflow`() {
+        assertThat(RodneCislo.parse("042101000")).isInstanceOf(RodneCislo.Invalid::class.java)
+    }
+
+    @Test
+    fun `rejects non-ASCII digits so the blind index cannot fork`() {
+        // Arabic-Indic digits for 7605060342: Char.isDigit() is true for them
+        val arabic = "7605060342".map { (it - '0' + 0x0660).toChar() }.joinToString("")
+        assertThat(RodneCislo.parse(arabic)).isInstanceOf(RodneCislo.Invalid::class.java)
+    }
 }

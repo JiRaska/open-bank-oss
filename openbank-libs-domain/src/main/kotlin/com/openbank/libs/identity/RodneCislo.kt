@@ -47,7 +47,7 @@ object RodneCislo {
     fun parse(raw: String): Result {
         val cleaned = raw.trim().replace("/", "").replace(" ", "")
         if (cleaned.isEmpty()) return Invalid("empty")
-        if (!cleaned.all { it.isDigit() }) return Invalid("non-digit characters")
+        if (!cleaned.all { it in '0'..'9' }) return Invalid("non-digit characters")
         if (cleaned.length != 9 && cleaned.length != 10) return Invalid("length must be 9 or 10 digits")
         val nineDigit = cleaned.length == NINE_DIGIT_LENGTH
 
@@ -85,6 +85,7 @@ object RodneCislo {
         // Century: the +20/+70 overflow only exists from 2004 on. Otherwise, the 10-digit
         // form maps 54..99 → 1900s and 00..53 → 2000s; the 9-digit form is pre-1954 → 1900s.
         if (nineDigit && yy > LAST_NINE_DIGIT_YY) return Invalid("9-digit form was issued only before 1954")
+        if (nineDigit && forces2000s) return Invalid("9-digit form never carries the +20/+70 overflow")
         if (forces2000s && yy < FIRST_OVERFLOW_YY) return Invalid("month overflow (+20/+70) exists only from 2004")
 
         val year = when {
