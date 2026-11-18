@@ -92,12 +92,14 @@ gate-script-registration fuzz/
 gate-script-registration gradle.properties
 gate-script-registration gradle/
 gate-script-registration gradlew
+gate-script-registration integrations/
 gate-script-registration openbank-*/
 gate-script-registration openbank-admin-ui/
 gate-script-registration openbank-infra/
 gate-script-registration openbank-libs/
 gate-script-registration pacts/
 gate-script-registration perf/
+gate-script-registration pr-body.md
 gate-script-registration release-please-config.json
 gate-script-registration scripts/
 gate-script-registration settings.gradle.kts
@@ -121,6 +123,7 @@ license-header-consistency codecov.yml
 license-header-consistency config/
 license-header-consistency docs/
 license-header-consistency fuzz/
+license-header-consistency integrations/
 license-header-consistency openbank-*/
 license-header-consistency openbank-admin-ui/
 license-header-consistency openbank-infra/
