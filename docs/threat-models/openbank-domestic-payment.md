@@ -1130,3 +1130,35 @@ read capabilities not accepted for a debit, unavailable holds rather than refuse
 arguments taken from the snapshot and not the command. Falsified: removing the step fails all five;
 making unavailable read as a refusal fails exactly the one written for it.
 Rollback: revert the commit; no migration, no config, no new identity.
+
+## 2026-11-18 — Czech account validity and canonical IBAN construction (#16748)
+
+**Change.** Creditor and debtor coordinates on the owner and delegated create requests, and on
+business batch draft items, were checked for presence and length only, so an account no Czech bank
+can issue (ČNB Decree 169/2011 mod-11 failing, e.g. `1234567890/0800`) was accepted and carried to
+the scheme. Separately, the scheme adapter built its own IBAN: it padded the whole
+`prefix-base` string into the 10-digit base slot, so `19-2000145399` produced a well-formed IBAN
+for a different account, and a base longer than ten digits overflowed the BBAN. Both now go through
+one builder, `CzechDomesticIban`: shape, mod-11 on prefix and base
+(`openbank-libs-domain` `CzechAccountNumber.isValid`), BBAN `bankCode(4)+prefix(6)+base(10)`, and
+the result constructed as a kernel `Iban` (whose constructor re-checks mod-97).
+
+- **Tampering / integrity:** a mis-built creditor IBAN is a payment to the wrong account — the
+  worst outcome on this rail, and invisible because the IBAN itself is mod-97 valid. The adapter now
+  fails loudly (`IllegalArgumentException`) on coordinates that denote no issuable account instead
+  of emitting a pacs.008 for one.
+- **Spoofing / input validation:** an invalid account is a 400 `VALIDATION_ERROR` at the REST edge,
+  before the Idempotency-Key is bound or anything persists.
+- **Denial of service:** none new; the check is pure arithmetic on ≤20 digits.
+- **Information disclosure:** the error names the field and bank code, never the account number.
+
+**Residual risk.** Payments already persisted with a mod-11-invalid account would now fail at the
+scheme adapter rather than be sent; that is the intended fail-closed outcome. The other private
+IBAN builders (`PaymentConfirmationMapper`, `SettlementAdapter`) are not yet routed through the
+shared builder — tracked on #16748.
+
+Tests: `CzechDomesticIbanTest`, `SchemeGatewayAdapterTest`, `DomesticPaymentDtosTest`,
+`BusinessPaymentBatchDraftValidationTest` — mod-11 failure on base and on prefix rejected, valid
+neighbours accepted, the prefix kept in the BBAN, an 11-digit base refused. Falsified: all nine new
+cases fail against the previous code.
+Rollback: revert the commit; no migration, no config.

@@ -19,9 +19,9 @@ class CzechDomesticIbanTest {
 
     @Test
     fun `canonicalizes a base account without a prefix`() {
-        val result = CzechDomesticIban.fromAccountNumber("1234567890", "0800")
+        val result = CzechDomesticIban.fromAccountNumber("2000145399", "0800")
 
-        assertThat(result).isEqualTo("CZ0708000000001234567890")
+        assertThat(result).isEqualTo("CZ7908000000002000145399")
         assertThat(Iban.isValid(result!!)).isTrue()
     }
 
@@ -33,5 +33,27 @@ class CzechDomesticIbanTest {
         assertThat(CzechDomesticIban.fromAccountNumber("19-2000145399", "０800")).isNull()
         assertThat(CzechDomesticIban.fromAccountNumber("", "0800")).isNull()
         assertThat(CzechDomesticIban.fromAccountNumber("12345678901", "0800")).isNull()
+    }
+
+    @Test
+    fun `rejects a base number that fails the national mod-11 checksum`() {
+        // 1234567890: weighted sum 255, 255 mod 11 = 2 - no Czech bank can issue it (#16748).
+        assertThat(CzechDomesticIban.fromAccountNumber("1234567890", "0800")).isNull()
+        // One digit off a valid base on either side of the checksum.
+        assertThat(CzechDomesticIban.fromAccountNumber("2000145398", "0800")).isNull()
+        assertThat(CzechDomesticIban.fromAccountNumber("2000145399", "0800")).isNotNull()
+    }
+
+    @Test
+    fun `rejects a prefix that fails the national mod-11 checksum`() {
+        assertThat(CzechDomesticIban.fromAccountNumber("18-2000145399", "0800")).isNull()
+        assertThat(CzechDomesticIban.fromAccountNumber("19-2000145399", "0800")).isNotNull()
+    }
+
+    @Test
+    fun `the canonical IBAN is a validated kernel Iban`() {
+        val result = CzechDomesticIban.fromAccountNumber("19-2000145399", "2000")
+        assertThat(result).isEqualTo("CZ3820000000192000145399")
+        assertThat(Iban.of(result!!).bban).isEqualTo("20000000192000145399")
     }
 }

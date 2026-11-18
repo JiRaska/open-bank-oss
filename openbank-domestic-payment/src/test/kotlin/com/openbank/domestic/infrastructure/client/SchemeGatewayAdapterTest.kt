@@ -66,20 +66,49 @@ class SchemeGatewayAdapterTest {
     fun `bbanToIban embeds bank codes in pacs008 CZ IBANs`(): Unit = runBlocking {
         every { client.submitCreditTransfer(any()) } answers { call ->
             val xml = call.invocation.args[0] as String
-            assertThat(xml).containsPattern("CZ[0-9]{2}20000000001234567890") // debtor bankCode=2000
-            assertThat(xml).containsPattern("CZ[0-9]{2}08000000009876543210") // creditor bankCode=0800
+            assertThat(xml).contains("CZ5220000000002000145399") // debtor bankCode=2000
+            assertThat(xml).contains("CZ8208000000009876543211") // creditor bankCode=0800
             Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
         }
 
         adapter.submit(payment())
     }
 
+    @Test
+    fun `bbanToIban keeps the account prefix in the BBAN`(): Unit = runBlocking {
+        // #16748: the old builder padded the whole "19-2000145399" into the base slot and lost the
+        // prefix position, producing an IBAN for a different (non-existent) account.
+        every { client.submitCreditTransfer(any()) } answers { call ->
+            val xml = call.invocation.args[0] as String
+            assertThat(xml).contains("CZ3820000000192000145399")
+            Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
+        }
+
+        adapter.submit(payment().copy(debtorAccountNumber = "19-2000145399"))
+    }
+
+    @Test
+    fun `bbanToIban refuses an account that fails the national mod-11 checksum`() {
+        every { client.submitCreditTransfer(any()) } returns Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
+
+        assertThatThrownBy { runBlocking { adapter.submit(payment().copy(creditorAccountNumber = "1234567890")) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `bbanToIban refuses a base longer than ten digits`() {
+        every { client.submitCreditTransfer(any()) } returns Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
+
+        assertThatThrownBy { runBlocking { adapter.submit(payment().copy(creditorAccountNumber = "12000145399")) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
     private fun payment() = DomesticPayment(
         id = UUID.fromString("33333333-3333-3333-3333-333333333333"),
         idempotencyKey = "test", status = DomesticPaymentStatus.VALIDATED,
         debtorAccountId = UUID.fromString("44444444-4444-4444-4444-444444444444"),
-        debtorAccountNumber = "1234567890", debtorBankCode = "2000",
-        debtorName = "Alice", creditorAccountNumber = "9876543210",
+        debtorAccountNumber = "2000145399", debtorBankCode = "2000",
+        debtorName = "Alice", creditorAccountNumber = "9876543211",
         creditorBankCode = "0800", creditorName = "Bob",
         amount = Money.of(BigDecimal("100.00"), "CZK"),
         variableSymbol = "123", specificSymbol = null, constantSymbol = null,

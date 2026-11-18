@@ -7,6 +7,7 @@ package com.openbank.domestic.infrastructure.client
 import com.openbank.domestic.application.port.out.SchemeGatewayPort
 import com.openbank.domestic.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.domestic.application.port.out.SchemeSubmissionOutcome
+import com.openbank.domestic.application.usecase.CzechDomesticIban
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.libs.iso20022.ChargeBearer
 import com.openbank.libs.iso20022.CreditTransferInstruction
@@ -26,7 +27,6 @@ import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.faulttolerance.exceptions.CircuitBreakerOpenException
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
-import java.math.BigInteger
 import java.net.ConnectException
 import java.net.UnknownHostException
 import java.time.OffsetDateTime
@@ -183,21 +183,15 @@ class SchemeGatewayAdapter(
     }
 
     /**
-     * Derives a Czech IBAN (CZ + 2 check digits + 4-digit bank code + 6-digit prefix + 10-digit
-     * account number) from a BBAN account number and bank code per ISO 13616 / CNB standard.
-     * The BBAN has no prefix (treated as 000000). Input is right-padded to the standard widths.
+     * Derives the CZ IBAN for `prefix-base` + bank code via [CzechDomesticIban] — BBAN
+     * `bankCode(4) + prefix(6) + base(10)`, national mod-11 checked, kernel-[Iban] validated.
+     * Coordinates that denote no issuable account fail loudly rather than reach the scheme as a
+     * well-formed IBAN for somebody else's (or nobody's) account (#16748).
      */
-    @Suppress("MagicNumber")
-    private fun bbanToIban(accountNumber: String, bankCode: String): String {
-        val bban = bankCode.padStart(4, '0') +
-            "000000" + // 6-digit prefix (no prefix ⟹ zeros)
-            accountNumber.padStart(10, '0')
-        val numeric = bban.map { it.digitToIntOrNull() ?: (it.code - 'A'.code + 10) }.joinToString("") +
-            "1235" + "00" // CZ = 12 35; check digits placeholder 00
-        val checkDigits = (98 - (BigInteger(numeric).mod(BigInteger.valueOf(97))).toInt())
-            .toString().padStart(2, '0')
-        return "CZ$checkDigits$bban"
-    }
+    private fun bbanToIban(accountNumber: String, bankCode: String): String =
+        requireNotNull(CzechDomesticIban.fromAccountNumber(accountNumber, bankCode)) {
+            "not a valid Czech account for bank code $bankCode"
+        }
 
     /** Maps a Czech 4-digit bank code to a BIC (only own bank code is known; others use a synthetic form). */
     private fun bankCodeToBic(bankCode: String): String = if (bankCode == ownBankCode) ownBankBic else "${bankCode}CZPP"
