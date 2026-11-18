@@ -57,8 +57,7 @@ class AuditTraceContractIT {
     class AuditTraceProfile : TraceContractProfile() {
         override fun disableGlobalTestResources() = true
 
-        override fun testResources() =
-            listOf(QuarkusTestProfile.TestResourceEntry(AuditTraceKafkaResource::class.java))
+        override fun testResources() = listOf(QuarkusTestProfile.TestResourceEntry(TraceKafkaResource::class.java))
 
         override fun extraConfigOverrides(): Map<String, String> = mapOf(
             // The deployment decision under test: the legacy stream ENABLED against a real broker,
@@ -76,7 +75,7 @@ class AuditTraceContractIT {
     }
 
     /** Real-broker twin of [com.openbank.audit.it.AuditKafkaTestResource] for this contract. */
-    class AuditTraceKafkaResource : QuarkusTestResourceLifecycleManager {
+    class TraceKafkaResource : QuarkusTestResourceLifecycleManager {
         private val postgres = PostgresTestResource()
         private var broker: RedpandaContainer? = null
 
@@ -135,7 +134,7 @@ class AuditTraceContractIT {
                 "acks" to "all",
             ),
         ).use { producer ->
-            producer.send(ProducerRecord(AuditTraceKafkaResource.TRACE_TOPIC, "trace-$eventId", envelope(eventId)))
+            producer.send(ProducerRecord(TraceKafkaResource.TRACE_TOPIC, "trace-$eventId", envelope(eventId)))
                 .get(15, TimeUnit.SECONDS)
         }
 
@@ -190,6 +189,6 @@ class AuditTraceContractIT {
     )
 
     companion object {
-        private const val TRACE_TOPIC = AuditTraceKafkaResource.TRACE_TOPIC
+        private const val TRACE_TOPIC = TraceKafkaResource.TRACE_TOPIC
     }
 }
