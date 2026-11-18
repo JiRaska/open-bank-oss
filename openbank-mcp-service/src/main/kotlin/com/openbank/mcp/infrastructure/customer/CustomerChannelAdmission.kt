@@ -40,7 +40,12 @@ class CustomerChannelAdmission(
         data class Admitted(val context: ConsentContext, val client: McpClientAllowlist.Client) : Outcome
 
         /** [status] is the HTTP status; [challenge] the `WWW-Authenticate` value (null for 429/503). */
-        data class Refused(val status: Int, val challenge: String?, val reason: String) : Outcome
+        data class Refused(
+            val status: Int,
+            val challenge: String?,
+            val reason: String,
+            val throttled: Boolean = false,
+        ) : Outcome
     }
 
     /** RFC 9728 metadata URL for [McpClientAllowlist.resource]: well-known prefix inserted before the path. */
@@ -52,8 +57,20 @@ class CustomerChannelAdmission(
     /** The 401 for a request that carries no token at all (RFC 9728 §5.1, RFC 6750 §3.1: no error code). */
     fun missingTokenChallenge(): String = "DPoP algs=\"$ALGS\", resource_metadata=\"$resourceMetadataUrl\""
 
+    /**
+     * @param throttle spends one slot of the per-(subject, client) window for the given key and
+     *   returns the refusal reason, or null when within budget. It runs AFTER the cheap structural
+     *   gates and BEFORE the DPoP replay claim: the replay store's per-key quota bounds one proof key,
+     *   not many, so a caller rotating keys must be bounded here first (ADR-0383 D5.3,
+     *   dpop-proof-verifier.md "Replay store limits").
+     */
     @Suppress("ReturnCount") // each early return is one fail-closed admission gate, in order
-    suspend fun admit(jwt: JsonWebToken, authorization: String?, dpopHeaders: List<String>): Outcome {
+    suspend fun admit(
+        jwt: JsonWebToken,
+        authorization: String?,
+        dpopHeaders: List<String>,
+        throttle: (String) -> String?,
+    ): Outcome {
         if (!isCustomerToken(jwt)) return invalidToken("token is not from the customers realm")
         val subject = jwt.subject?.takeIf { it.isNotBlank() } ?: return invalidToken("token has no subject")
         if (allowlist.audience !in audience(jwt)) return invalidToken("token audience does not include this server")
@@ -65,11 +82,19 @@ class CustomerChannelAdmission(
         val raw = jwt.rawToken
         if (raw != null && raw != presented) return invalidToken("presented token does not match the validated token")
 
+        throttle(throttleKey(subject, client.clientId))?.let {
+            return Outcome.Refused(STATUS_TOO_MANY, null, it, throttled = true)
+        }
+
         val result = verifier.verify(
             DpopRequest(dpopHeaders, HTTP_METHOD, allowlist.resource, presented, jkt),
             clock.instant(),
         )
-        return when (result) {
+        return outcomeOf(result, subject, client)
+    }
+
+    private fun outcomeOf(result: DpopResult, subject: String, client: McpClientAllowlist.Client): Outcome =
+        when (result) {
             DpopResult.VALID -> Outcome.Admitted(
                 ConsentContext(
                     agentId = subject,
@@ -97,7 +122,6 @@ class CustomerChannelAdmission(
                 "dpop proof rejected: $result",
             )
         }
-    }
 
     private fun invalidToken(reason: String) =
         Outcome.Refused(STATUS_UNAUTHORIZED, challenge("invalid_token", reason), reason)
@@ -119,6 +143,9 @@ class CustomerChannelAdmission(
         private const val DPOP_SCHEME = "DPoP "
         const val WELL_KNOWN = "/.well-known/oauth-protected-resource"
         val ALGS: String = DpopProofVerifier.ALLOWED_ALGORITHMS.sorted().joinToString(" ")
+
+        /** The limiter key of one (subject, client) pair on this channel. */
+        fun throttleKey(subject: String, clientId: String): String = "customer:$subject|$clientId"
 
         fun metadataUrlFor(resource: String): String {
             val uri = URI(resource)

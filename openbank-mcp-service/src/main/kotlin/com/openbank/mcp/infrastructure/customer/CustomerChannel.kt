@@ -7,6 +7,7 @@ package com.openbank.mcp.infrastructure.customer
 import com.openbank.libs.security.DpopProofVerifier
 import com.openbank.libs.security.InMemoryDpopReplayStore
 import com.openbank.libs.security.Jose4jDpopProofParser
+import com.openbank.mcp.infrastructure.mcp.CallerContextResolver
 import io.quarkus.runtime.Startup
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -17,6 +18,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Clock
 import java.util.Optional
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * The customer MCP channel switch (ADR-0383 / ADR-0385, #16590). OFF unless
@@ -51,6 +53,7 @@ class CustomerChannel @Inject constructor(
         private val log = Logger.getLogger(CustomerChannel::class.java)
         private const val CLASSPATH_PREFIX = "classpath:"
 
+        @Suppress("TooGenericExceptionCaught") // any parser failure must become a boot refusal, see below
         fun load(issuer: Optional<String>, location: Optional<String>): CustomerChannelAdmission {
             val iss = issuer.filter { it.isNotBlank() }.orElseThrow {
                 IllegalStateException("mcp.customer.enabled=true but mcp.customer.issuer is not set")
@@ -62,9 +65,21 @@ class CustomerChannel @Inject constructor(
                 ?: error("MCP client allowlist not found at '$where'")
             val allowlist = try {
                 McpClientAllowlist.parse(text)
-            } catch (e: IllegalArgumentException) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // IllegalArgumentException from our own checks, YAMLException (or anything else) from the
+                // parser: every one is a clean refusal to boot naming the file, never a raw stack trace.
                 throw IllegalStateException("MCP client allowlist at '$where' is malformed: ${e.message}", e)
             }
+            // ADR-0385 D1: the allowlist and the staff-path audience check must name the SAME audience,
+            // or a token admitted here would read as foreign there (and vice versa).
+            check(allowlist.audience == CallerContextResolver.MCP_AUDIENCE) {
+                "MCP client allowlist at '$where' declares audience '${allowlist.audience}', " +
+                    "but this server is '${CallerContextResolver.MCP_AUDIENCE}'"
+            }
+            // ADR-0385 D1: the allowlist and the staff-path audience check must name the SAME audience,
+            // or a token admitted here would read as foreign there (and vice versa).
             log.infof(
                 "customer MCP channel enabled: %d declared client(s), %d enabled, resource %s",
                 allowlist.clients.size,
