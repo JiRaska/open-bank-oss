@@ -437,6 +437,45 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-18 (ADR-0383 D3/D4, #16590) — customer grant lookup, exchanged downstream tokens, read
+  tools. Still behind `mcp.customer.enabled` (off).** An admitted customer now sees only the read
+  tools its active `MCP_CLIENT` grants allow, and every read runs on the customer's own exchanged
+  token.
+  - *Spoofing / confused deputy.* The grant is found from `(party_id of the verified token, admitted
+    azp, verified cnf.jkt)` — `CustomerGrantCache` -> `DelegationGrantSource` ->
+    delegation-service `POST /api/v1/delegations/mcp-client/resolve`. Nothing a client sends is a
+    lookup key, and the party is part of the key, so another customer's grant to the same client
+    never matches (unit + IT `a foreign party's grant ...`). A token with no UUID `party_id` is
+    refused before any lookup.
+  - *Elevation of privilege.* `CustomerReadTools` offers `list_accounts` / `get_balance` /
+    `list_transactions` only for capabilities a grant carries, and checks the ONE named account
+    against the grant carrying that tool's capability before anything else happens; a balance grant
+    cannot list transactions or reach another account, and no write tool exists on this channel
+    (`propose_payment` refused). The exchanged token asks the customers realm for ONE audience and ONE
+    read scope (`DownstreamAudience`), and its answer is checked: lifetime <= 60 s, `sub` == the
+    customer, `aud` contains the requested service. The customer-path REST clients
+    (`CustomerDownstream.kt`) carry no OIDC client filter, so mcp-service's own credential cannot
+    ride on them. The grant LOOKUP uses mcp-service's own `m2m` identity, which delegation-service
+    admits for that one action only (rego reason `mcp-client-grant-resolve` + an in-code client-id
+    check); it reads no account data.
+  - *Fail-closed.* Lookup error, empty grant set, exchange failure (including an unconfigured
+    exchange secret) and a downstream 401/403 are all refusals, audited `DENIED`
+    (`UNAVAILABLE` for lookup/exchange outages). Only positive lookups are cached, at most
+    `mcp.customer.grant-cache-ttl` (default 15 s, capped at 30 s in code) and never past a grant's
+    `validTo`; a downstream 401/403 drops the entry. Results pass `McpPiiMasker` then
+    `McpUntrustedData.wrap`, as on the staff path.
+  - **Residual, and why the channel stays off:** (1) downstream services validate only the STAFF
+    realm today, so an exchanged customers-realm token is refused by balance/transaction-service until
+    they accept that issuer and enforce party ownership on it (ADR-0383 P5) — the path fails closed
+    until then; (2) Keycloak standard exchange of a DPoP-bound subject token has not been run against
+    a live Keycloak of the deployed version (realm template checked statically only); (3) a revoked
+    grant stays usable for up to the cache TTL; (4) MCP's own PDP is not yet consulted on the
+    customer channel — the read-only boundary is the code allow-list plus the grant, and the D4 PDP
+    rule (`channel = mcp-customer`) is a follow-up; (5) no deployed route, netpol or env wiring for
+    delegation-service / the token endpoint is added; the exchange secret must be provisioned in
+    OpenBao (`keycloak/mcp-service-customer-exchange`) before the channel can work.
+    Rollback: revert the commit; nothing is persisted.
+
 - **2026-11-18 (ADR-0383 D1/D2, ADR-0385 D1, #16590)** — Customer-channel admission, **off by
   default** (`mcp.customer.enabled`). What it adds, and what it deliberately does not:
   - *Spoofing / tenant confusion.* The customers realm is a separate OIDC tenant selected by `iss`

@@ -115,6 +115,9 @@ class DelegationEventPactFolderProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // HTTP interactions (mcp-service's grant lookup) are replayed against the running service by
+        // DelegationMcpClientGrantPactFolderProviderVerificationTest; this class verifies messages only.
+        if (context != null && !context.interaction.isAsynchronousMessage()) return
         context?.verifyInteraction()
     }
 

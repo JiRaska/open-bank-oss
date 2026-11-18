@@ -15,6 +15,7 @@
 #   delegation.suspend    — bank-side fraud/AML signal
 #   delegation.reinstate  — bank-side undo of a suspend
 #   delegation.check      — "does an active grant cover this?" for services with no projection
+#   delegation.mcp-client.resolve — mcp-service only: ACTIVE MCP_CLIENT grants for (party, azp, jkt)
 #   delegation.recertification.read    — customer reads own pending review tasks
 #   delegation.recertification.confirm — customer records an authority-neutral review
 #
@@ -123,6 +124,22 @@ allowed_reasons contains "service-delegation-check" if {
 	input.principal.type == "HUMAN"
 	machine_grant_ok
 	input.action == "delegation.check"
+}
+
+# ADR-0383 D3: mcp-service resolving a customer's MCP_CLIENT grants from the triple
+# (grantor party, client id, DPoP key thumbprint) it has just verified on the customer channel.
+# Read-only, and the caller must already hold all three to ask - it cannot enumerate another
+# party's grants. Granted to mcp-service's OWN service-account only, never the shared backend
+# identity, and vetoed for everyone else below so operator-read-any cannot reach it either.
+allowed_reasons contains "mcp-client-grant-resolve" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-mcp")
+	input.action == "delegation.mcp-client.resolve"
+}
+
+prohibited if {
+	input.action == "delegation.mcp-client.resolve"
+	not machine_named("service-account-openbank-mcp")
 }
 
 # Only the authenticated customer edge may record a customer's review, regardless of other roles.

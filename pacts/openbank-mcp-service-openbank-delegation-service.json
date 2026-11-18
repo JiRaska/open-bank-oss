@@ -1,0 +1,118 @@
+{
+  "consumer": {
+    "name": "openbank-mcp-service"
+  },
+  "interactions": [
+    {
+      "description": "POST resolve the active MCP_CLIENT grants for a party, client and DPoP key",
+      "providerStates": [
+        {
+          "name": "an active MCP_CLIENT grant exists for the pact party, client and key"
+        }
+      ],
+      "request": {
+        "body": {
+          "clientId": "mcp-local-reference",
+          "grantorPartyId": "d3d3d3d3-0000-4000-8000-000000000001",
+          "keyThumbprint": "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/delegations/mcp-client/resolve"
+      },
+      "response": {
+        "body": {
+          "grants": [
+            {
+              "capabilities": [
+                "ACCOUNT_READ_BALANCES"
+              ],
+              "grantId": "d3d3d3d3-0000-4000-8000-000000000002",
+              "resourceId": "d3d3d3d3-0000-4000-8000-000000000003",
+              "resourceType": "ACCOUNT"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.grants": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.grants[*].grantId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.grants[*].resourceId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST resolve with no active MCP_CLIENT grant for the triple",
+      "providerStates": [
+        {
+          "name": "no MCP_CLIENT grant exists for the pact party, client and key"
+        }
+      ],
+      "request": {
+        "body": {
+          "clientId": "mcp-local-reference",
+          "grantorPartyId": "d3d3d3d3-0000-4000-8000-000000000001",
+          "keyThumbprint": "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/delegations/mcp-client/resolve"
+      },
+      "response": {
+        "body": {
+          "grants": [
+
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.7"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-delegation-service"
+  }
+}

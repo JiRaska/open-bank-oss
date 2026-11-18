@@ -230,6 +230,21 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
 
 ## Change log
 
+- **2026-11-18** — **`POST /api/v1/delegations/mcp-client/resolve`** (ADR-0383 D3, #16590), the lookup
+  the `(grantor, azp, jkt)` index was built for. Read-only. Information disclosure / spoofing: the
+  answer is keyed by all three of grantor party, client id and DPoP key thumbprint (constant-time
+  compared), so it cannot be used to enumerate another party's grants, and only ACTIVE, in-window,
+  non-exposure `MCP_CLIENT` grants are returned — id, resource, capabilities and `validTo`, never
+  names, limits, approval policy or the recorded thumbprint. Elevation of privilege: OPA admits only
+  `service-account-openbank-mcp` (reason `mcp-client-grant-resolve`) and VETOES the action for every
+  other principal, so staff `operator-delegation-write` and base `operator-read-any` cannot reach it;
+  the handler re-checks the verified client id in code and refuses any request carrying the
+  customer-party header, so an advisory PDP does not widen it. Proven by `opa test` (must-allow mcp,
+  must-deny shared backend / edge / staff operator / renamed machine; each guard removed went red)
+  and by the HTTP `@PactFolder` replay of mcp-service's pact. No write path changes: MCP_CLIENT grants
+  stay dormant, so in practice the endpoint answers empty until the connect flow ships. Residual:
+  none new beyond the dormant-grant notes below. Rollback: revert; no schema change.
+
 - **2026-11-17** — **New grantee class `MCP_CLIENT`** (ADR-0383 D3). A grant may now name a
   customer-admitted third-party MCP client as grantee instead of a party. Existing grants are
   `PARTY` (V34 defaults the column), and their behaviour is unchanged. Elevation of privilege is
