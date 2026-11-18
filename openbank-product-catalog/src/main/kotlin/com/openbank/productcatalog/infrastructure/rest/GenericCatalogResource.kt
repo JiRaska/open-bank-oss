@@ -306,11 +306,11 @@ class GenericCatalogResource(
     override suspend fun getPublishedRevisionForLegacyProductV2(
         productId: UUID,
         effectiveAt: java.time.OffsetDateTime?,
-    ): Response = Response.ok(
-        revisionResponse(
-            service.findPublishedForLegacyProduct(productId, effectiveAt?.toInstant() ?: Instant.now(clock)),
-        ),
-    ).build()
+    ): Response {
+        val revision = service.findPublishedForLegacyProduct(productId, effectiveAt?.toInstant() ?: Instant.now(clock))
+        val countries = service.findOffering(revision.offeringId).market.countries
+        return Response.ok(revisionResponse(revision).copy(marketCountries = countries.sorted())).build()
+    }
 
     @Suppress("LongMethod")
     private fun RevisionRequest.toContent(): RevisionContent {

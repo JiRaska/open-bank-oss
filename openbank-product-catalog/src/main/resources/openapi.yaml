@@ -14,7 +14,7 @@ info:
   # dry-run of the same parser a revision write runs; stores nothing.
   # 2.10.0 -> 2.11.0 (#12078): correction. The six v1 404s also document the ApiError body the
   # disabled banking-compatibility routes answer with; served behaviour is unchanged.
-  version: 2.11.0
+  version: 2.12.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -1262,6 +1262,10 @@ components:
       properties:
         id: { type: string, format: uuid }
         offeringId: { type: string, format: uuid }
+        marketCountries:
+          type: [array, 'null']
+          items: { type: string, pattern: '^[A-Z]{2}$' }
+          description: Current offering country restrictions, included in the legacy-product published-revision read.
         number: { type: integer, format: int64, minimum: 1 }
         schemaRef: { $ref: '#/components/schemas/SchemaRef' }
         state: { type: string, enum: [DRAFT, PUBLISHED, SUPERSEDED] }
