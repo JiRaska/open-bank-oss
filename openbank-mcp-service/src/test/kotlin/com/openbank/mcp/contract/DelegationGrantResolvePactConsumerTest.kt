@@ -119,7 +119,7 @@ class DelegationGrantResolvePactConsumerTest {
         const val GRANT_ID = "d3d3d3d3-0000-4000-8000-000000000002"
         const val ACCOUNT_ID = "d3d3d3d3-0000-4000-8000-000000000003"
         const val CLIENT_ID = "mcp-local-reference"
-        const val JKT = "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
+        const val JKT = "0000000000000000000000000000000000000000000"
 
         /** LITERAL, retyped from delegation-service's `McpClientGrantResource`. */
         const val EXPECTED_PATH = "/api/v1/delegations/mcp-client/resolve"

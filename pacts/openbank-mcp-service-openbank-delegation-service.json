@@ -14,7 +14,7 @@
         "body": {
           "clientId": "mcp-local-reference",
           "grantorPartyId": "d3d3d3d3-0000-4000-8000-000000000001",
-          "keyThumbprint": "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
+          "keyThumbprint": "0000000000000000000000000000000000000000000"
         },
         "headers": {
           "Content-Type": "application/json"
@@ -83,7 +83,7 @@
         "body": {
           "clientId": "mcp-local-reference",
           "grantorPartyId": "d3d3d3d3-0000-4000-8000-000000000001",
-          "keyThumbprint": "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
+          "keyThumbprint": "0000000000000000000000000000000000000000000"
         },
         "headers": {
           "Content-Type": "application/json"
