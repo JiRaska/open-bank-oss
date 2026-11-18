@@ -19,7 +19,7 @@ export type McpChannelPayload =
       syntheticCalls: number | null
       agentCalls: number | null
       rejectsByLayer: Record<string, number> | null
-      firingAlerts: string[]
+      firingAlerts: string[] | null
       activeGrants: number | null
     }
 
@@ -75,7 +75,9 @@ export function McpChannelHealth({ data }: { data: Extract<McpChannelPayload, { 
       </div>
       <div className="card p-4">
         <h2 className="text-sm font-semibold mb-2">{t('Aktivní upozornění', 'Firing alerts')}</h2>
-        {data.firingAlerts.length === 0 ? (
+        {data.firingAlerts === null ? (
+          <p className="text-sm text-muted-foreground" data-testid="mcp-alerts-unmeasured">{t('neměřeno', 'not measured')}</p>
+        ) : data.firingAlerts.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t('Žádné.', 'None.')}</p>
         ) : (
           <ul className="text-sm" data-testid="mcp-alerts">

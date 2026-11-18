@@ -41,6 +41,20 @@ describe('GET /api/delegations/mcp-channel', () => {
     expect((await get()).status).toBe(401)
   })
 
+  it('refuses a signed-in caller without delegations:view', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 't', roles: ['ROLE_TELLER'] } } as never)
+    const res = await get()
+    expect(res.status).toBe(403)
+    expect(vi.mocked(global.fetch)).not.toHaveBeenCalled()
+  })
+
+  it('a failed ALERTS query is null (unknown), not an empty list (none firing)', async () => {
+    respondBy(q => (q.includes('ALERTS') ? new Response('boom', { status: 500 }) : vector([])))
+    const body = await (await get()).json()
+    expect(body.state).toBe('ok')
+    expect(body.firingAlerts).toBeNull()
+  })
+
   it('t=0: reachable Prometheus with no customer series reports null, never 0', async () => {
     respondBy(() => vector([]))
     const body = await (await get()).json()

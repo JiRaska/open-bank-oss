@@ -16,6 +16,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { inCluster } from '@/lib/discovery'
+import { hasPermission } from '@/lib/auth/roles'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -67,6 +68,10 @@ export async function GET() {
   if (!session?.user?.accessToken) {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
   }
+  // The page's route permission is a UX gate; the data route enforces the same permission itself.
+  if (!hasPermission(session.user.roles ?? [], 'delegations:view')) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  }
 
   const base = prometheusBase()
   const [customer, synthetic, agent, rejects, alerts] = await Promise.all([
@@ -96,7 +101,8 @@ export async function GET() {
     agentCalls: scalar(agent),
     // null = no customer refusal series exists yet; {} would wrongly read as "none refused".
     rejectsByLayer: rejects && rejects.length > 0 ? rejectsByLayer : null,
-    firingAlerts: (alerts ?? []).map(a => a.metric.alertname).filter(Boolean).sort(),
+    // null = the ALERTS query failed: "unknown", which must not render as "none firing".
+    firingAlerts: alerts === null ? null : alerts.map(a => a.metric.alertname).filter(Boolean).sort(),
     // ADR-0384 D1 puts the active-grant gauge in a delegation-service projection that is not built
     // yet. Reported as not measured rather than derived from something that is not the same thing.
     activeGrants: null,
