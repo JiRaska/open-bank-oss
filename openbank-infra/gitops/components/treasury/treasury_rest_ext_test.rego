@@ -65,7 +65,7 @@ test_staff_may_read if {
 }
 
 test_renamed_service_account_cannot_use_staff_grants if {
-	every a in (all_writes | reads) | {"treasury.deal.override-limit", "treasury.nostro.upload"} {
+	every a in (all_writes | reads) | {"treasury.deal.override-limit", "treasury.nostro.upload", "treasury.nostro.break.propose-resolution", "treasury.nostro.break.approve-resolution", "treasury.nostro.break.reject-resolution"} {
 		not allowed(renamed_sa, a)
 	}
 }
@@ -137,13 +137,13 @@ test_shared_service_account_gets_no_treasury_reason if {
 # an AI_AGENT gets here would have to come from a treasury rule — which is the regression to catch:
 # add `treasury.deal.approve` for AI_AGENT to any rule above and this goes red.
 test_ai_agent_denied_every_treasury_action_by_this_file if {
-	every a in (all_writes | reads) | {"treasury.deal.override-limit", "treasury.nostro.upload"} {
+	every a in (all_writes | reads) | {"treasury.deal.override-limit", "treasury.nostro.upload", "treasury.nostro.break.propose-resolution", "treasury.nostro.break.approve-resolution", "treasury.nostro.break.reject-resolution"} {
 		not allowed(agent, a)
 	}
 }
 
 test_ai_agent_gets_no_treasury_reason if {
-	every a in (all_writes | reads) | {"treasury.deal.override-limit", "treasury.nostro.upload"} {
+	every a in (all_writes | reads) | {"treasury.deal.override-limit", "treasury.nostro.upload", "treasury.nostro.break.propose-resolution", "treasury.nostro.break.approve-resolution", "treasury.nostro.break.reject-resolution"} {
 		count({r | some r in rest.allowed_reasons with input as {"principal": agent, "action": a}; startswith(r, "treasury-")}) == 0
 	}
 }
@@ -206,6 +206,44 @@ test_approver_may_upload_nostro_statement if {
 test_nobody_else_may_upload_nostro_statement if {
 	every p in [dealer, senior, nobody, shared_sa, agent] {
 		not allowed(p, "treasury.nostro.upload")
+	}
+}
+
+# --- ADR-0315 D7: four-eyes manual nostro break resolution (#14770) ---
+
+decide_resolution := {"treasury.nostro.break.approve-resolution", "treasury.nostro.break.reject-resolution"}
+
+# Must-ALLOW the approver to propose; must-DENY everyone else, the senior included (the senior
+# decides, the approver proposes), and any machine or agent even holding the role.
+test_approver_may_propose_nostro_break_resolution if {
+	allowed(approver, "treasury.nostro.break.propose-resolution")
+}
+
+test_nobody_else_may_propose_nostro_break_resolution if {
+	every p in [dealer, senior, admin, nobody, shared_sa, renamed_sa, agent, chartered_agent] {
+		not allowed(p, "treasury.nostro.break.propose-resolution")
+	}
+}
+
+test_senior_may_decide_nostro_break_resolution if {
+	every a in decide_resolution { allowed(senior, a) }
+}
+
+test_nobody_else_may_decide_nostro_break_resolution if {
+	every a in decide_resolution {
+		every p in [dealer, approver, admin, nobody, shared_sa, renamed_sa, agent, chartered_agent] {
+			not allowed(p, a)
+		}
+	}
+}
+
+test_machines_and_agents_may_not_resolve_nostro_breaks_holding_the_roles if {
+	roles := ["ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"]
+	sa := object.union(shared_sa, {"roles": roles})
+	ag := object.union(agent, {"roles": roles})
+	every a in decide_resolution | {"treasury.nostro.break.propose-resolution"} {
+		not allowed(sa, a)
+		not allowed(ag, a)
 	}
 }
 

@@ -1,0 +1,105 @@
+{
+  "consumer": {
+    "name": "openbank-customer-edge"
+  },
+  "interactions": [
+    {
+      "description": "POST a delegated domestic payment bound to its RESERVED spend reservation",
+      "providerStates": [
+        {
+          "name": "a RESERVED spend reservation for a delegated domestic payment is projected"
+        }
+      ],
+      "request": {
+        "body": {
+          "actingPartyId": "7a1c0000-0000-4000-8000-000000016002",
+          "amount": 1500.00,
+          "creditorAccountNumber": "2000145399",
+          "creditorBankCode": "0100",
+          "creditorName": "Payee",
+          "currency": "CZK",
+          "debtorAccountId": "7a1c0000-0000-4000-8000-000000016003",
+          "debtorAccountNumber": "1234567890",
+          "debtorBankCode": "0800",
+          "debtorName": "Grantor Name",
+          "delegationId": "7a1c0000-0000-4000-8000-000000016001",
+          "priority": "STANDARD",
+          "reservationId": "7a1c0000-0000-4000-8000-000000016000"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "pact-bound-create-16000"
+        },
+        "method": "POST",
+        "path": "/api/v1/domestic-payments/delegated"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "status": "RECEIVED"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "POST a delegated domestic payment with no caller identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Idempotency-Key": "pact-bound-create-16000"
+        },
+        "method": "POST",
+        "path": "/api/v1/domestic-payments/delegated"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.7"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-domestic-payment"
+  }
+}

@@ -78,6 +78,8 @@ class AmlCaseCreateCallerGuardTest {
             "service-account-openbank-sepa-payment" to "openbank-sepa-payment",
             "service-account-openbank-sepa-instant" to "openbank-sepa-instant",
             "service-account-openbank-fx" to "openbank-fx-service",
+            "service-account-openbank-sdd" to "openbank-sdd-service",
+            "service-account-openbank-swift" to "openbank-swift-service",
         )
         assertThat(expected.keys).isEqualTo(AML_CASE_CREATE_CALLERS)
         expected.forEach { (caller, source) ->

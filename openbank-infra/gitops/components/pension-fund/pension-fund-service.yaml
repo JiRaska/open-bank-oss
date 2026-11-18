@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-pension-fund-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "80d09a92ecd6cabb"
+        openbank.tech/policy-checksum: "bc46a1d04a786697"
       labels:
         app.kubernetes.io/name: pension-fund-service
         app.kubernetes.io/part-of: pension-fund
@@ -47,7 +47,7 @@ spec:
         - name: pension-fund-service
           # Placeholder pin (fleet-attestation-placeholders.txt): no image is built until the merge
           # that adds openbank-pension-fund-service to ALL_SERVICES; auto-deploy rewrites it.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-fund-service:sandbox-548fa683@sha256:1b6acbe0d7a5a3a4d387853e289b237d1a9d114897898d9f7e27d976e2ea1c97
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-fund-service:sandbox-44fff644@sha256:114d1953a18c03eb6781d193a4cc93ff04ff75c05e0591049fa6b577fe51db27
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8162 and management 8090 — both read off the service's own application.yaml
@@ -66,6 +66,9 @@ spec:
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
               value: "8443"
+            # Verify the caller's client certificate against openbank-ca. The image requires one on
+            # 8443 (%prod quarkus.http.ssl.client-auth, build-time); tax-reporting presents
+            # tax-reporting-internal-tls.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
               value: /mnt/internal-tls/ca.crt
             - name: QUARKUS_HTTP_SSL_CLIENT_AUTH

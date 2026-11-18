@@ -6,7 +6,7 @@
 
 | Regulation | Relation to this service | Implementation |
 |---|---|---|
-| **AMLD** (Anti-Money Laundering Directives) | SWIFT wires are AML-sensitive; sanctions screening expected upstream before release | 10-year retention (`governance.yaml`); downstream lineage to `aml-service`; reject workflow |
+| **AMLD** (Anti-Money Laundering Directives) | SWIFT wires are AML-sensitive; both parties of every MT103 screened against sanctions before release (`SwiftSanctionsScreening`, fail-closed) | 10-year retention (`governance.yaml`); downstream lineage to `aml-service`; reject workflow |
 | **CTF / Sanctions (EU 2015/847 — funds transfer info)** | Ordering/beneficiary info must travel with the transfer ("travel rule") | `orderingCustomer*` + `beneficiary*` fields captured on every message |
 | **GDPR** | Customer names, IBANs, remittance text are PII | `dataClassification: confidential`; mask PII in logs; AML retention overrides erasure |
 | **PSD2** (Reg. (EU) 2015/2366) | Cross-border credit transfers | charge codes (OUR/SHA/BEN), value date, transparency fields |
@@ -68,7 +68,7 @@ sequenceDiagram
   participant AML as aml-service
   participant GW as SWIFT gateway / counterparty
 
-  Note over Ops,Swift: Sanctions screening expected UPSTREAM before release
+  Note over Ops,Swift: Debtor + beneficiary screened (sanctions-service) before release#59; hit = REJECTED + AML case
   Ops->>Swift: POST /api/v1/swift (validate → VALIDATED)
   Swift->>AML: event (screens) via Kafka
   Swift-->>GW: dispatch (SENT)
@@ -85,7 +85,7 @@ Threat-model highlights (STRIDE):
 - **Repudiation** — AuditEvent per create/ack/reject with actor + message id.
 - **EoP** — distinct roles; **four-eyes (MakerChecker) for high-value sends strongly recommended** (ADR-0034).
 
-Residual risks: message-level authenticity (signing) is the dominant control; sanctions screening is assumed upstream; four-eyes on high-value sends is recommended but not yet enforced in this service.
+Residual risks: message-level authenticity (signing) is the dominant control; MT103 sanctions screening is in-service (ADR-0032), but MT202 institution transfers carry BICs only and are not name-screened here; four-eyes on high-value sends is recommended but not yet enforced in this service.
 
 ## Authorization (ADR-0034)
 

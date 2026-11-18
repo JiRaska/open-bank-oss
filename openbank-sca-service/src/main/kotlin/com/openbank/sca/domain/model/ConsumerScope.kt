@@ -9,9 +9,31 @@ package com.openbank.sca.domain.model
  * namespace when its DEVICE-SIGNED [DynamicLinkingData.approvalRequestId] starts with [prefix] —
  * read from the stored challenge, never from what a consumer states.
  */
-enum class ReservedNamespace(val prefix: String, val purposes: Set<ScaPurpose>, private val shape: Regex) {
+enum class ReservedNamespace(
+    val prefix: String,
+    val purposes: Set<ScaPurpose>,
+    private val shape: Regex,
+    /**
+     * True when [purposes] belong to this namespace ALONE: a challenge of such a purpose is in the
+     * namespace whatever its approvalRequestId says, so no other consumer can spend it even when
+     * the id was mis-signed. False for PENSION, whose APPROVAL purpose is shared fleet-wide.
+     */
+    private val ownsPurposes: Boolean = false,
+) {
     /** pension-service operations: `pension-onboarding:…`, `pension-transfer-out:…`, `pension-exit:…`. */
     PENSION("pension-", setOf(ScaPurpose.APPROVAL), Regex("^pension-[a-z]+(-[a-z]+)*:\\S+$")),
+
+    /**
+     * ADR-0385 D3 — connecting a customer MCP client: `mcp-connect:<PAR request id>`. Only the
+     * authorization server's scoped consumer may spend it; no principal holds it yet (see
+     * ConsumerScopes), so until one is declared nobody can — fail closed.
+     */
+    MCP_CONNECT(
+        "mcp-connect:",
+        setOf(ScaPurpose.MCP_CLIENT_CONNECT),
+        Regex("^mcp-connect:[A-Za-z0-9._~:-]{1,140}$"),
+        ownsPurposes = true,
+    ),
     ;
 
     /** Is [approvalRequestId] a well-formed id of this namespace (operation token, colon, reference)? */
@@ -20,6 +42,7 @@ enum class ReservedNamespace(val prefix: String, val purposes: Set<ScaPurpose>, 
     companion object {
         /** The namespace [challenge] was signed into, or null for an unreserved challenge. */
         fun of(challenge: ScaChallenge): ReservedNamespace? {
+            entries.firstOrNull { it.ownsPurposes && challenge.purpose in it.purposes }?.let { return it }
             val id = challenge.dynamicLinkingData?.approvalRequestId ?: return null
             return entries.firstOrNull { id.startsWith(it.prefix) }
         }

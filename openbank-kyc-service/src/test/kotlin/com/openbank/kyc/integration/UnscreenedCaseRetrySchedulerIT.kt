@@ -234,6 +234,9 @@ class UnscreenedCaseRetrySchedulerIT {
         // The same idempotency key on every attempt, so a response lost after the provider stored
         // it is replayed rather than screened twice.
         for ((party, name) in listOf(clear to CLEAR, sanctioned to SANCTIONED, stillDown to STILL_DOWN)) {
+            // Await, never read once: the sweep's batch is two, so STILL_DOWN's second attempt can
+            // land a tick after the two cases settled above — a single read races the scheduler.
+            await("a second attempt for $name", { screening.keysFor(name).size }) { it >= 2 }
             val keys = screening.keysFor(name)
             assertThat(keys.size).describedAs("attempts for %s", name).isGreaterThanOrEqualTo(2)
             assertThat(keys.toSet()).containsExactly("kyc-screen-${row(party).caseId}")

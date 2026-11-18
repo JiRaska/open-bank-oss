@@ -149,3 +149,12 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 - Metrika: `openbank_aml_payment_held_events_total{outcome}` s hodnotami `case_opened`, `ignored` (jiný typ události) a `rejected`.
 - Před zapnutím kanálu: každý běžící pod aml-service musí používat sestavení, které umí přečíst případ bez strany, a každý konzument `openbank.aml.events` sestavení, které přijme `partyId: null`. Dokud je kanál vypnutý, žádný případ bez strany nevzniká a na topicu se nic neliší od dřívějška.
 - Zapínejte spolu s řetězcem platební cesty, nikdy jen platební cestu: pozdržení, jehož případ se neotevře, skončí vypršením, tedy zamítnutím.
+
+## Obnova klientského certifikátu (odchozí mTLS)
+
+Každá pojmenovaná konfigurace `quarkus.tls.<name>`, kterou se služba prokazuje vůči
+naslouchání 8443 jiné služby, nastavuje `reload-period: 1h`. cert-manager klientský certifikát
+obnoví před expirací; bez této volby by proces dál předkládal ten starý, dokud by ho protistrana
+neodmítla, zatímco všechny signály expirace měřily obnovený Secret a hlásily zelenou. Po obnově
+se nový certifikát použije do hodiny, bez restartu. Gate `tls-certificate-reload` hlídá, aby
+žádná taková konfigurace nevypadla.

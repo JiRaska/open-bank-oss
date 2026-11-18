@@ -86,4 +86,14 @@ class FxConversionProposalToolTest {
         assertThat(result.proposal).isNull()
         assertThat(result.error).isNotBlank()
     }
+
+    @Test
+    fun `a three-letter code that is not an active ISO 4217 currency is rejected`() {
+        listOf("ABC", "DEM").forEach { code ->
+            val result = tool.propose(
+                args("accountId" to validAccountId, "fromCurrency" to code, "toCurrency" to "CZK", "amount" to "10"),
+            )
+            assertThat(result.proposal).describedAs(code).isNull()
+        }
+    }
 }

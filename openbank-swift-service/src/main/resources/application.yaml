@@ -69,6 +69,16 @@ quarkus:
       connect-timeout: 2000
       read-timeout: 5000
       scope: jakarta.inject.Singleton
+    # ADR-0032: sanctions gate in front of every MT103 release (SwiftSanctionsScreening).
+    sanctions-service:
+      url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
+      connect-timeout: 2000
+      read-timeout: 5000
+    # AML case store, opened by the sanctions gate on a hit or when screening is unavailable.
+    aml-service:
+      url: ${AML_SERVICE_URL:http://localhost:8117}
+      connect-timeout: 2000
+      read-timeout: 5000
   redis:
     hosts: redis://localhost:6379
   smallrye-reactive-messaging:
@@ -277,3 +287,23 @@ authz:
   # deliberate, separate follow-up once the maker/checker runbook is reviewed.
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+"%prod":
+  quarkus:
+    # aml-service's 8443 listener requires a client certificate (private CA); the Certificate is
+    # swift-service-internal-tls, mounted at /mnt/aml-tls.
+    tls:
+      aml-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
+        key-store:
+          pem:
+            client:
+              cert: /mnt/aml-tls/tls.crt
+              key: /mnt/aml-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/aml-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      aml-service:
+        tls-configuration-name: aml-authority

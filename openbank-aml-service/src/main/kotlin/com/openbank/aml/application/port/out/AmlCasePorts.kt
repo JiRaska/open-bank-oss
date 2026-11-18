@@ -95,3 +95,15 @@ interface AmlCaseRepository {
      */
     suspend fun anonymizeByPartyId(partyId: UUID, erasedAt: Instant): Int
 }
+
+/** ADR-0374 point 3: the write side of a held payment's four-eyes decision. */
+interface HoldDecisionRepository {
+    /**
+     * Writes a held payment's case [decided] — a proposal, or its confirmation — and [event], if any,
+     * in one transaction under a lock on the case. [readAs] is the case as the caller read it: if the
+     * stored status, party or proposal differs from it, someone changed the case in between (another
+     * proposal replaced the one being confirmed), so nothing is written and
+     * [CaseChangedConcurrentlyException] is thrown.
+     */
+    suspend fun writeHoldDecision(readAs: AmlCase, decided: AmlCase, event: OutboxMessage?): AmlCase
+}
