@@ -7,6 +7,7 @@ package com.openbank.customeredge.infrastructure.rest
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.ObjectReader
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import java.math.BigDecimal
@@ -21,6 +22,10 @@ import java.time.Instant
  */
 internal object EdgeJson {
     val mapper: ObjectMapper = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+
+    /** Preserve numeric money and retain the caller's Jackson modules and input limits. */
+    fun decimalReader(mapper: ObjectMapper): ObjectReader =
+        mapper.reader().with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
     private const val UPSTREAM_SERVER_ERROR_MIN = 500
     private const val BAD_GATEWAY = 502

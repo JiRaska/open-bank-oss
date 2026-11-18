@@ -193,6 +193,14 @@ BASELINE: dict[str, str] = {
         "#7984 — mis-pairing: task lifecycle shares APPROVED/REJECTED with libs ApprovalStatus.",
     "openbank-customer-edge:ACKNOWLEDGED,COMPLETED,FAILED,PENDING,REJECTED,SENT,VALIDATED":
         "#7984 — mis-pairing: payment status shares FAILED/PENDING/SENT with libs OutboxStatus.",
+    # MIS-PAIRING (#15737): the domestic-submission lookup's `approvalStatus` is relayed verbatim
+    # from delegation-service's `receipt.status` (CustomerEdgeResource, a String), whose source is
+    # delegation's own `ApprovalStatus` in domain/model/BusinessSigning.kt — the spec lists exactly
+    # those seven values. The gate pairs it with libs-domain's four-eyes `ApprovalStatus`
+    # (PENDING/APPROVED/REJECTED/EXECUTED) on the shared names alone.
+    "openbank-customer-edge:APPROVED,AWAITING_INITIATOR,EXPIRED,PENDING,REJECTED,RELEASED,RELEASE_FAILED":
+        "#15737 — mis-pairing: relays delegation-service ApprovalStatus (BusinessSigning.kt), not "
+        "libs-domain ApprovalStatus; shares PENDING/APPROVED/REJECTED only.",
     # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
     # values are `RecordDecisionRequest.decision`, and a signer decides SIGNED or DECLINED;
     # PENDING is the state a signer starts in, never one they can submit.

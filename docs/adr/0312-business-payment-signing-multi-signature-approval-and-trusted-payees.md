@@ -155,6 +155,27 @@ creditor identifier and mandate reference. Changing an existing order's amount o
 exposed at the edge today (pause/resume/cancel only), so there is nothing further to hold; a
 future amend route must go through the same hold.
 
+### Addendum 2026-11-11 — recover a domestic submission after an ambiguous response
+
+An approval ID is generated after the caller sends its original key. A lost response can hide
+that ID, and a later policy evaluation can choose a different signing route for the same key
+([#12317](https://github.com/JiRaska/open-bank-oss/issues/12317)).
+
+1. Verified Customer Edge establishes the human, company, account and current debit authority.
+   Before SCA or either write path, Delegation binds the domain-separated key digest to that
+   authority, a fingerprint of the frozen payload and one dispatch mode in PostgreSQL. A changed
+   binding is refused. A later policy change can prevent dispatch in the original mode.
+2. A held receipt commits with the approval, first signature and outbox in one transaction.
+   Lookup rechecks the current authority and returns an existing receipt's approval ID and
+   lifecycle. A claim without a receipt leaves the outcome unknown.
+3. Domestic release keeps the approval ID as the rail idempotency key and conveys the original
+   digest separately. The rail enforces one instruction for that digest across original direct
+   keys and held releases. Bound release uses dedicated Delegation and rail routes. A reported
+   rail ID supplies release evidence.
+4. Deploy the rail constraint and Delegation contract before the Edge writer. Drain previous
+   company domestic writers before accepting mode-bound commands. The rollout has no original
+   key evidence for older held approvals, so an unmatched lookup keeps the client warning.
+
 ## Compliance impact
 
 - PCI DSS: not applicable — no card data is stored or processed by the approval flow.

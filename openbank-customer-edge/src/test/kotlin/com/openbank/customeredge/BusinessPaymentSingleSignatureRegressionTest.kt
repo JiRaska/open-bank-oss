@@ -23,11 +23,9 @@ import java.util.UUID
 
 /**
  * #10281: when the entity's policy needs ONE signature, a business payment must behave exactly as it
- * did before the multi-signature hold existed. Both runs below drive the same four payment routes
- * under `X-Acting-For`; one resource has no hold wired (the pre-change code path), the other has the
- * hold enforcing and answering `required = 1`. Every upstream call — URL, party header, body and
- * idempotency key, in order — and the response must be identical, apart from the one extra
- * evaluate call the hold makes to delegation-service.
+ * did before the multi-signature hold existed. Both runs drive the same four payment routes under
+ * `X-Acting-For`. One routes directly, the other exercises the business signing adapter port.
+ * The request sent to SCA and to each rail, and the client response, must agree in both runs.
  */
 class BusinessPaymentSingleSignatureRegressionTest {
 
@@ -91,9 +89,15 @@ class BusinessPaymentSingleSignatureRegressionTest {
         if (withHold) {
             val signing = mockk<BusinessSigningPort> {
                 every { evaluate(company, any()) } returns SigningReply(200, """{"required":1,"trusted":true}""")
+                every { claimDomesticSubmission(company, any()) } returns SigningReply(200, """{"mode":"DIRECT"}""")
             }
             businessApprovals =
                 BusinessPaymentApprovals(signing, upstream, ObjectMapper(), mockk(relaxed = true), enforce = true)
+        } else {
+            businessApprovals = mockk {
+                every { routeDomestic(any(), any(), any(), any(), any()) } returns null
+                every { hold(any(), any(), any(), any()) } returns null
+            }
         }
     }
 

@@ -61,6 +61,12 @@ class DelegationSigningAdapter(private val upstream: UpstreamClient, private val
     override fun createApproval(entity: UUID, body: String) =
         reply(upstream.post("${entities(entity)}/approval-requests", entity.toString(), body))
 
+    override fun claimDomesticSubmission(entity: UUID, body: String) =
+        reply(upstream.post("${entities(entity)}/approval-requests/submissions/claim", entity.toString(), body))
+
+    override fun lookupDomesticApproval(entity: UUID, body: String) =
+        reply(upstream.post("${entities(entity)}/approval-requests/submissions/lookup", entity.toString(), body))
+
     override fun approvals(entity: UUID, status: String?, signer: UUID?): SigningReply {
         val query = listOfNotNull(status?.let { "status=$it" }, signer?.let { "signer=$it" })
             .joinToString("&").let { if (it.isEmpty()) "" else "?$it" }
@@ -86,9 +92,12 @@ class DelegationSigningAdapter(private val upstream: UpstreamClient, private val
         ),
     )
 
-    override fun releaseClaim(entity: UUID, approvalId: UUID) = reply(
-        upstream.post("${entities(entity)}/approval-requests/$approvalId/release-claim", entity.toString(), "{}"),
-    )
+    override fun releaseClaim(entity: UUID, approvalId: UUID, domestic: Boolean): SigningReply {
+        val action = if (domestic) "domestic-release-claim" else "release-claim"
+        return reply(
+            upstream.post("${entities(entity)}/approval-requests/$approvalId/$action", entity.toString(), "{}"),
+        )
+    }
 
     override fun releaseResult(entity: UUID, approvalId: UUID, body: String) = reply(
         upstream.post("${entities(entity)}/approval-requests/$approvalId/release-result", entity.toString(), body),

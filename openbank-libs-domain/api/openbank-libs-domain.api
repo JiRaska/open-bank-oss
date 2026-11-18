@@ -1035,6 +1035,11 @@ public final class com/openbank/libs/domain/account/CzechAccountNumber {
 	public final fun isValidPrefix (Ljava/lang/String;)Z
 }
 
+public final class com/openbank/libs/domain/account/CzechDomesticIban {
+	public static final field INSTANCE Lcom/openbank/libs/domain/account/CzechDomesticIban;
+	public final fun fromAccountNumber (Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
+}
+
 public final class com/openbank/libs/domain/account/CzechPaymentSymbol {
 	public static final field INSTANCE Lcom/openbank/libs/domain/account/CzechPaymentSymbol;
 	public static final field MAX_LENGTH I

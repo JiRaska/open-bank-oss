@@ -131,6 +131,7 @@ class BusinessSigningHandlers(
             (status != "DONE" || a.path("status").asText() != "PENDING") &&
                 (mine != "initiated" || a.path("initiatorPartyId").asText() == human.toString())
         }
+        filtered.filterIsInstance<ObjectNode>().forEach(::projectDomesticReleaseStatus)
         return ok(objectMapper.createObjectNode().set("data", objectMapper.valueToTree(filtered)))
     }
 
@@ -170,7 +171,10 @@ class BusinessSigningHandlers(
         val after = objectOrNull(signed) ?: return passThrough(signed)
         val out = detail(after, human, SigningPolicySummary.lang(acceptLanguage))
         if (after.path("status").asText() == "APPROVED" && after.path("kind").asText() in RELEASABLE_KINDS) {
-            out.set<JsonNode>("release", objectMapper.valueToTree(approvals.release(entity, approvalId)))
+            val domestic = after.path("payload").path("rail").asText() == PaymentRail.DOMESTIC.name
+            approvals.release(entity, approvalId, domestic)?.let { release ->
+                out.set<JsonNode>("release", objectMapper.valueToTree(release))
+            }
         }
         return ok(out)
     }
@@ -243,7 +247,7 @@ class BusinessSigningHandlers(
     }
 
     private fun detail(node: JsonNode, human: UUID, lang: SigningPolicySummary.Lang): ObjectNode {
-        val out = (node.deepCopy<JsonNode>() as ObjectNode)
+        val out = (node.deepCopy<JsonNode>() as ObjectNode).also(::projectDomesticReleaseStatus)
         val me = human.toString()
         val signedBy = node.path("signatures").associate { it.path("partyId").asText() to it.path("at").asText(null) }
         val eligible = node.path("eligibleSignerIds").map { it.asText() }
@@ -268,6 +272,16 @@ class BusinessSigningHandlers(
         out.put("collected", signedBy.size)
         out.put("summaryText", SigningPolicySummary.approvalSummary(node, lang))
         return out
+    }
+
+    private fun projectDomesticReleaseStatus(approval: ObjectNode) {
+        val domesticPayment = approval.path("kind").asText() == "PAYMENT" &&
+            approval.path("payload").path("rail").asText() == "DOMESTIC"
+        val releaseId = canonicalPaymentId(approval.path("releaseRef").textOrNull())
+        if (domesticPayment && approval.path("status").asText() == "RELEASED" && releaseId == null) {
+            approval.put("status", "APPROVED")
+            approval.remove(listOf("releasedAt", "releaseRef"))
+        }
     }
 
     private fun legalName(partyId: String): String? {
