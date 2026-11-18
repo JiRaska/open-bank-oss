@@ -1388,7 +1388,7 @@ gates:
       a money-path service.
     review_after: 2027-04-17
     min_subjects: 15   # 18 services use the Redis ApprovalStore today (2026-10-17)
-    budget_seconds: 29
+    budget_seconds: 31   # 31 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     selftest_inputs: [".github/scripts/check-approval-store-redis-host.py"]
     selftest_expect: pass
     selftest: |
@@ -1586,7 +1586,7 @@ gates:
   - id: alert-rule-hygiene
     name: "new alert rules carry for:, runbook and (statistical) a backtest (enforced)"
     group: gitops
-    budget_seconds: 20
+    budget_seconds: 24   # 24 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     mode: enforced
     rationale: >-
       TrafficDropAnomaly, SpanLatencyTrendAnomaly and NodeDiskWillFillIn4h fired 16, 18 and 66
@@ -2337,7 +2337,7 @@ gates:
     mode: enforced
     rationale: "These suites prove deploy-side checkers (SBOM effective model, record-deployment manifest resolution, deploy publication race) and were committed without any invocation; a regression in the code they cover was invisible until #14697 showed the class."
     review_after: "2027-05-03"
-    budget_seconds: 380
+    budget_seconds: 439   # 439 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     run: |
       set -e
       python3 .github/scripts/test-sbom-effective-model-guard.py
@@ -2392,7 +2392,7 @@ gates:
     name: "governance-script unit tests"
     group: supplychain
     mode: enforced
-    budget_seconds: 180   # a real test suite
+    budget_seconds: 187   # a real test suite; 187 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     run: |
       python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
@@ -5550,7 +5550,7 @@ gates:
     selftest_exempt: "is-a-test-suite"
     rationale: "The detect step's logic moved out of services-ci.yml to get headroom under workflow-run-step-size; the self-test keeps the extracted selector falsifiable."
     review_after: "2027-04-23"
-    budget_seconds: 20
+    budget_seconds: 25   # 25 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     min_subjects: 4
     run: |
       bash .github/scripts/service-ci-select-modules.sh --self-test
@@ -7986,7 +7986,7 @@ gates:
     mode: enforced
     rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs; service CI must skip empty verification work without accepting an unknown build scope."
     review_after: "2026-12-08"
-    budget_seconds: 21
+    budget_seconds: 31   # 31 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     min_subjects: 80  # measured workflow files; both .yml and .yaml are scanned
     selftest_expect: pass
     selftest_inputs:
@@ -8412,7 +8412,7 @@ gates:
     name: "test cache excludes only source SHA while artifact provenance remains exact"
     group: supplychain
     mode: enforced
-    budget_seconds: 120
+    budget_seconds: 141   # 141 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     run: python3 .github/scripts/check-test-provenance-cache.py
     selftest: |
       python3 .github/scripts/check-test-provenance-cache.py --self-test
