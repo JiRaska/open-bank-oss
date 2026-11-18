@@ -60,3 +60,7 @@ obnoví před expirací; bez této volby by proces dál předkládal ten starý,
 neodmítla, zatímco všechny signály expirace měřily obnovený Secret a hlásily zelenou. Po obnově
 se nový certifikát použije do hodiny, bez restartu. Gate `tls-certificate-reload` hlídá, aby
 žádná taková konfigurace nevypadla.
+
+## Validace vstupů návrhů (#16748)
+
+`propose_payment` ověřuje IBAN příjemce přes `Iban.isValid` z libs-domain a měnu přes `CurrencyCode.isCanonical`. Chybějící měna znamená CZK; uvedená, ale neznámá nebo stažená měna je chyba a nikdy se nenahradí CZK. `propose_fx_conversion` používá stejnou kontrolu měny.
