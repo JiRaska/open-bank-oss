@@ -10,7 +10,7 @@
 # MCP and REST decision is unchanged before it writes.
 #
 # Derived paths (read out of the .rego sources, never listed by hand):
-#   data.agents.agents  (each element projected to: id, skills, tools.allow, tools.deny)
+#   data.agents.agents  (each element projected to: data_scope.public_web.hosts, id, skills, tools.allow, tools.deny)
 #   data.agents.tool_tiers.deny
 #   data.agents.tool_tiers.read
 #   data.agents.tool_tiers.write_proposal
@@ -56,6 +56,7 @@ tool_tiers:
   - product.sign
 agents:
 - id: compliance-officer
+  data_scope: {}
   tools:
     allow:
     - query.ledger.readonly
@@ -80,6 +81,7 @@ agents:
   - bump
   - open-pr
   - release
+  data_scope: {}
   tools:
     allow:
     - git.branch
@@ -93,6 +95,7 @@ agents:
     - gh.pr.approve
     - money.*
 - id: ui-assistant
+  data_scope: {}
   tools:
     allow:
     - query.ledger.readonly
@@ -110,6 +113,7 @@ agents:
     - query.disputes.readonly
     - query.observability.readonly
 - id: product-author
+  data_scope: {}
   tools:
     allow:
     - product.lint
@@ -125,6 +129,7 @@ agents:
     - '*.write'
     - secrets.read.raw
 - id: rca-investigator
+  data_scope: {}
   tools:
     allow:
     - query.observability.readonly
@@ -137,6 +142,7 @@ agents:
     - '*.write'
     - secrets.read.raw
 - id: customer-copilot
+  data_scope: {}
   tools:
     allow:
     - query.balance.readonly
@@ -149,6 +155,7 @@ agents:
     - gh.pr.*
     - secrets.read.raw
 - id: mcp-anonymous
+  data_scope: {}
   tools:
     allow:
     - query.account.readonly
@@ -162,6 +169,7 @@ agents:
     - '*.write'
     - secrets.read.raw
 - id: ap2-anonymous
+  data_scope: {}
   tools:
     allow:
     - verify.mandate
@@ -171,6 +179,7 @@ agents:
     - '*.write'
     - secrets.read.raw
 - id: card-scheme-bulletin-agent
+  data_scope: {}
   tools:
     allow:
     - tier: read
@@ -187,6 +196,7 @@ agents:
       resources:
       - '*'
 - id: regulatory-obligations-watcher
+  data_scope: {}
   tools:
     allow:
     - tier: read
@@ -203,6 +213,7 @@ agents:
       resources:
       - '*'
 - id: card-dispute-evidence-agent
+  data_scope: {}
   tools:
     allow:
     - tier: read
@@ -219,6 +230,7 @@ agents:
       resources:
       - '*'
 - id: treasury-dealing-assistant
+  data_scope: {}
   tools:
     allow:
     - treasury.deal.read
@@ -243,6 +255,7 @@ agents:
     - gh.pr.*
     - secrets.read.raw
 - id: finops-agent
+  data_scope: {}
   tools:
     allow:
     - tier: read
@@ -263,6 +276,7 @@ agents:
       resources:
       - '*'
 - id: devops-agent
+  data_scope: {}
   tools:
     allow:
     - tier: read
@@ -283,6 +297,7 @@ agents:
       resources:
       - '*'
 - id: control-liveness-sentinel
+  data_scope: {}
   tools:
     allow:
     - tier: read
@@ -300,6 +315,7 @@ agents:
       resources:
       - '*'
 - id: governance-auditor
+  data_scope: {}
   tools:
     allow:
     - tier: read
@@ -318,6 +334,7 @@ agents:
       resources:
       - '*'
 - id: release-steward
+  data_scope: {}
   tools:
     allow:
     - tier: read
@@ -335,6 +352,7 @@ agents:
       resources:
       - '*'
 - id: docs-truth-agent
+  data_scope: {}
   tools:
     allow:
     - tier: read
@@ -351,6 +369,7 @@ agents:
       resources:
       - '*'
 - id: authz-policy-auditor
+  data_scope: {}
   tools:
     allow:
     - tier: read
@@ -367,6 +386,7 @@ agents:
       resources:
       - '*'
 - id: flaky-test-hunter
+  data_scope: {}
   tools:
     allow:
     - tier: read
@@ -386,6 +406,7 @@ agents:
       resources:
       - '*'
 - id: case-coordinator
+  data_scope: {}
   tools:
     allow:
     - tier: read
@@ -408,6 +429,7 @@ agents:
       - gh.pr.*
       - secrets.*
 - id: kyb-analyst
+  data_scope: {}
   tools:
     allow:
     - tier: read
@@ -425,6 +447,7 @@ agents:
       resources:
       - '*'
 - id: business-copilot
+  data_scope: {}
   tools:
     allow:
     - query.balance.readonly

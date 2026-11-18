@@ -543,3 +543,88 @@ test_allow_draft_ticket_without_ref if {
 	agents.allow with data.agents as tier_charters
 		with input as {"agent": "flaky-test-hunter", "tool": "draft.ticket", "resource": "github-pr", "tier": "write_proposal"}
 }
+
+# ---------------------------------------------------------------------------------------
+# ADR-0387: read.public_web via the fetch broker. The broker sends the REST-bridged shape
+# {tool: "read.public_web", attributes: {tool: web.fetch, tier, host}} -- no tier, no resource.
+# ---------------------------------------------------------------------------------------
+web_charters := {
+	"agents": [
+		{
+			"id": "regulatory-obligations-watcher",
+			"tools": {"allow": [{"tier": "read", "resources": ["read.public_web"]}], "deny": [{"tier": "write", "resources": ["*"]}]},
+			"data_scope": {"public_web": {"hosts": ["eur-lex.europa.eu", {"host": "www.cnb.cz", "render": "js"}]}},
+		},
+		{
+			"id": "no-web-agent",
+			"tools": {"allow": [{"tier": "read", "resources": ["read.governance"]}]},
+			"data_scope": {"public_web": {"hosts": ["eur-lex.europa.eu"]}},
+		},
+		{
+			"id": "web-denied-agent",
+			"tools": {"allow": [{"tier": "read", "resources": ["read.public_web"]}], "deny": [{"tier": "read", "resources": ["read.*"]}]},
+			"data_scope": {"public_web": {"hosts": ["eur-lex.europa.eu"]}},
+		},
+	],
+	"tool_tiers": {"read": ["read.governance"], "write_proposal": [], "deny": []},
+}
+
+web_input(agent, tier, host) := {
+	"agent": agent,
+	"tool": "read.public_web",
+	"resource": null,
+	"attributes": {"tool": "web.fetch", "tier": tier, "host": host},
+}
+
+test_allow_public_web_listed_host if {
+	agents.allow with data.agents as web_charters
+		with input as web_input("regulatory-obligations-watcher", "read", "eur-lex.europa.eu")
+}
+
+test_allow_public_web_listed_host_mapping_entry if {
+	agents.allow with data.agents as web_charters
+		with input as web_input("agent:regulatory-obligations-watcher", "read", "www.cnb.cz")
+}
+
+test_deny_public_web_host_not_in_charter if {
+	not agents.allow with data.agents as web_charters
+		with input as web_input("regulatory-obligations-watcher", "read", "evil.example.com")
+}
+
+# A suffix or a parent of a listed host is not the listed host.
+test_deny_public_web_host_suffix_and_parent if {
+	not agents.allow with data.agents as web_charters
+		with input as web_input("regulatory-obligations-watcher", "read", "europa.eu")
+	not agents.allow with data.agents as web_charters
+		with input as web_input("regulatory-obligations-watcher", "read", "eur-lex.europa.eu.evil.com")
+}
+
+test_deny_public_web_charter_without_resource if {
+	not agents.allow with data.agents as web_charters
+		with input as web_input("no-web-agent", "read", "eur-lex.europa.eu")
+}
+
+test_deny_public_web_write_tier if {
+	not agents.allow with data.agents as web_charters
+		with input as web_input("regulatory-obligations-watcher", "write", "eur-lex.europa.eu")
+}
+
+test_deny_public_web_other_tool if {
+	not agents.allow with data.agents as web_charters
+		with input as {"agent": "regulatory-obligations-watcher", "tool": "read.public_web", "resource": null, "attributes": {"tool": "web.post", "tier": "read", "host": "eur-lex.europa.eu"}}
+}
+
+test_deny_public_web_missing_host if {
+	not agents.allow with data.agents as web_charters
+		with input as {"agent": "regulatory-obligations-watcher", "tool": "read.public_web", "resource": null, "attributes": {"tool": "web.fetch", "tier": "read"}}
+}
+
+test_deny_public_web_charter_deny_beats_allow if {
+	not agents.allow with data.agents as web_charters
+		with input as web_input("web-denied-agent", "read", "eur-lex.europa.eu")
+}
+
+test_deny_public_web_unknown_agent if {
+	not agents.allow with data.agents as web_charters
+		with input as web_input("ghost", "read", "eur-lex.europa.eu")
+}
