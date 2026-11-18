@@ -129,6 +129,10 @@ class AuthorizeInterceptor {
     @Inject
     lateinit var httpHeaders: Instance<HttpHeaders>
 
+    /** Records which approval this request consumed, for a resource that binds to it. */
+    @Inject
+    var fourEyesConsumption: Instance<FourEyesConsumption>? = null
+
     @Inject
     lateinit var clock: Clock
 
@@ -373,7 +377,7 @@ class AuthorizeInterceptor {
             val approval = store.find(approvalId)
             if (
                 approval.satisfies(annotation.action, resourceId, maker, binding.fingerprint) &&
-                store.markExecuted(approvalId) != null
+                store.markExecuted(approvalId)?.also { fourEyesConsumption.record(approvalId) } != null
             ) {
                 meters?.authzFourEyes(annotation.action, "approval_satisfied")
                 return

@@ -7,6 +7,7 @@ package com.openbank.sanctions.infrastructure.rest
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.PendingApproval
+import com.openbank.libs.authz.FourEyesConsumption
 import com.openbank.sanctions.application.port.`in`.ReviewCommand
 import com.openbank.sanctions.application.port.`in`.SanctionsUseCase
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
@@ -16,7 +17,9 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.quarkus.security.identity.SecurityIdentity
+import jakarta.enterprise.inject.Instance
 import jakarta.ws.rs.ForbiddenException
+import jakarta.ws.rs.core.HttpHeaders
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -38,6 +41,24 @@ class SanctionsResourceV3AgentReviewTest {
         it.approvals = approvals
         it.fourEyesEnforce = true
     }
+
+    /**
+     * Sends [approvalId] the way a client does, as the X-Approval-Id request header; [consumed] is
+     * the approval @Authorize consumed for this call (by default the same one, as on a real retry).
+     */
+    private suspend fun review(status: SanctionsCheckStatus, approvalId: String?, consumed: String? = approvalId) =
+        resource.also {
+            it.httpHeaders = mockk<Instance<HttpHeaders>> {
+                every { isResolvable } returns true
+                every { get() } returns mockk {
+                    every { getRequestHeader("X-Approval-Id") } returns listOfNotNull(approvalId)
+                }
+            }
+            it.fourEyesConsumption = mockk<Instance<FourEyesConsumption>> {
+                every { isResolvable } returns true
+                every { get() } returns mockk<FourEyesConsumption> { every { consumedApprovalId } returns consumed }
+            }
+        }.review(request(status))
 
     private fun caller(clientId: String, username: String) {
         resource.identity = mockk<SecurityIdentity> {
@@ -80,7 +101,7 @@ class SanctionsResourceV3AgentReviewTest {
     fun `the agent identity is refused every status except CLEAR`() {
         asAgent()
         SanctionsCheckStatus.entries.filter { it != SanctionsCheckStatus.CLEAR }.forEach { status ->
-            assertThatThrownBy { runBlocking { resource.review(request(status), "appr-1") } }
+            assertThatThrownBy { runBlocking { review(status, "appr-1") } }
                 .describedAs(status.name)
                 .isInstanceOf(ForbiddenException::class.java)
         }
@@ -91,7 +112,7 @@ class SanctionsResourceV3AgentReviewTest {
     fun `the agent identity is refused while four-eyes is not enforced`() {
         asAgent()
         resource.fourEyesEnforce = false
-        assertThatThrownBy { runBlocking { resource.review(request(SanctionsCheckStatus.CLEAR), "appr-1") } }
+        assertThatThrownBy { runBlocking { review(SanctionsCheckStatus.CLEAR, "appr-1") } }
             .isInstanceOf(ForbiddenException::class.java)
         coVerify(exactly = 0) { useCase.review(any()) }
     }
@@ -103,7 +124,7 @@ class SanctionsResourceV3AgentReviewTest {
         val cmd = slot<ReviewCommand>()
         coEvery { useCase.review(capture(cmd)) } returns mockk(relaxed = true)
 
-        runBlocking { resource.review(request(SanctionsCheckStatus.CLEAR), "appr-1") }
+        runBlocking { review(SanctionsCheckStatus.CLEAR, "appr-1") }
 
         assertThat(cmd.captured.reviewedBy).isEqualTo("officer-1")
         assertThat(cmd.captured.note).contains("service-account-openbank-agent")
@@ -113,7 +134,7 @@ class SanctionsResourceV3AgentReviewTest {
     fun `an agent CLEAR without a granted approval never executes`() {
         asAgent()
         coEvery { approvals.find(any()) } returns null
-        assertThatThrownBy { runBlocking { resource.review(request(SanctionsCheckStatus.CLEAR), "appr-x") } }
+        assertThatThrownBy { runBlocking { review(SanctionsCheckStatus.CLEAR, "appr-x") } }
             .isInstanceOf(ForbiddenException::class.java)
         coVerify(exactly = 0) { useCase.review(any()) }
     }
@@ -129,14 +150,27 @@ class SanctionsResourceV3AgentReviewTest {
             "other maker" to base.copy(makerId = "service-account-openbank-services"),
             "still pending" to base.copy(status = ApprovalStatus.PENDING),
             "rejected" to base.copy(status = ApprovalStatus.REJECTED),
+            "approved but not consumed by four-eyes" to base.copy(status = ApprovalStatus.APPROVED),
             "self-approved" to base.copy(decidedBy = "service-account-openbank-agent"),
             "undecided" to base.copy(decidedBy = null),
         ).forEach { (case, approval) ->
             coEvery { approvals.find("appr-1") } returns approval
-            assertThatThrownBy { runBlocking { resource.review(request(SanctionsCheckStatus.CLEAR), "appr-1") } }
+            assertThatThrownBy { runBlocking { review(SanctionsCheckStatus.CLEAR, "appr-1") } }
                 .describedAs(case)
                 .isInstanceOf(ForbiddenException::class.java)
         }
+        coVerify(exactly = 0) { useCase.review(any()) }
+    }
+
+    @Test
+    fun `an approval consumed by an earlier call cannot authorise this one`() {
+        asAgent()
+        approvedBy("officer-1")
+        // EXECUTED, right check, right maker, a different checker: everything but THIS call.
+        assertThatThrownBy { runBlocking { review(SanctionsCheckStatus.CLEAR, "appr-1", consumed = null) } }
+            .isInstanceOf(ForbiddenException::class.java)
+        assertThatThrownBy { runBlocking { review(SanctionsCheckStatus.CLEAR, "appr-1", consumed = "appr-2") } }
+            .isInstanceOf(ForbiddenException::class.java)
         coVerify(exactly = 0) { useCase.review(any()) }
     }
 
@@ -145,7 +179,7 @@ class SanctionsResourceV3AgentReviewTest {
         caller("openbank-admin-ui", "officer-1")
         val cmd = slot<ReviewCommand>()
         coEvery { useCase.review(capture(cmd)) } returns mockk(relaxed = true)
-        runBlocking { resource.review(request(SanctionsCheckStatus.HIT), null) }
+        runBlocking { review(SanctionsCheckStatus.HIT, null) }
         assertThat(cmd.captured.reviewedBy).isEqualTo("officer-1")
     }
 }
