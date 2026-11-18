@@ -173,7 +173,7 @@ kotlin-allopen = { id = "org.jetbrains.kotlin.plugin.allopen", version.ref = "ko
 quarkus = { id = "io.quarkus", version.ref = "quarkus-plugin" }
 jandex = { id = "org.kordamp.gradle.jandex", version = "2.3.0" }
 kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
-cyclonedx = { id = "org.cyclonedx.bom", version = "2.3.0" }
+cyclonedx = { id = "org.cyclonedx.bom", version = "3.6.1" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint-plugin" }
 # pitest = { id = "info.solidsoft.pitest", version.ref = "pitest-plugin" }  # deferred Gradle 9
