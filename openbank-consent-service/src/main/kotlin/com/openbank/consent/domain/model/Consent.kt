@@ -103,7 +103,7 @@ data class Consent(
     val granteeType: GranteeType,
     val granteeName: String, // Human-readable name for UI
     val scopes: Set<ConsentScope>,
-    val accountIbans: List<String>?, // null = all accounts
+    val accountIbans: List<String>?, // the accounts this consent covers; null and empty both cover none
     val status: ConsentStatus,
     val validFrom: OffsetDateTime,
     val validTo: OffsetDateTime, // PSD2 RTS Art. 10: max 90 days
@@ -132,7 +132,17 @@ data class Consent(
 
     fun hasScope(scope: ConsentScope): Boolean = scope in scopes
 
-    fun coversAccount(iban: String): Boolean = accountIbans == null || iban in accountIbans
+    /**
+     * True only when [iban] is explicitly listed. Fails closed: a consent with no list (`null`) and
+     * one with an empty list both cover no account.
+     *
+     * That matches storage: the account list is an element collection, so a consent created with
+     * `accountIbans = null` is read back with an empty list and has never covered an account
+     * through validate. An "all of the party's accounts" consent would need an ownership-verified
+     * lookup (does [partyId] hold [iban]?) that does not exist today. Adding it widens what existing
+     * consents grant, so it must come with its own decision, never as a change to this default.
+     */
+    fun coversAccount(iban: String): Boolean = accountIbans?.contains(iban) == true
 
     fun revoke(reason: String, now: OffsetDateTime): Consent = copy(
         status = ConsentStatus.REVOKED,
