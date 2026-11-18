@@ -148,6 +148,14 @@ class IbanTest {
         assertThat(Iban.isValid(withCheckDigits("US", bban))).isFalse()
     }
 
+    @Test
+    fun `rejects a BBAN that breaks its country's registry structure`() {
+        // check digits valid, length valid; only the per-position class is wrong
+        assertThat(Iban.isValid(withCheckDigits("GB", "123456987654321234"))).isFalse() // bank code must be 4 letters
+        assertThat(Iban.isValid(withCheckDigits("CZ", "0800A00019200014539X"))).isFalse() // CZ BBAN is all digits
+        assertThat(Iban.isValid(withCheckDigits("DE", "37040044053201300A"))).isFalse() // DE BBAN is all digits
+    }
+
     /** Builds an IBAN with correct mod-97 check digits, so only the other rules can reject it. */
     private fun withCheckDigits(country: String, bban: String): String {
         val numeric = "${bban}${country}00".map { if (it.isDigit()) "$it" else "${it.code - 55}" }
