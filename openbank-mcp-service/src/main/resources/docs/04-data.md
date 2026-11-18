@@ -66,11 +66,13 @@ The MCP tool catalog and audit decision pass `ConsentContext.serviceAccount` to 
 
 ## Customer-channel shared state (Valkey)
 
-With the customer MCP channel on and `mcp.customer.shared-store=valkey` (required in a production launch; the service refuses to boot otherwise), two kinds of short-lived key live in the Valkey named by `quarkus.redis.hosts`. Neither is a system of record; losing them only reopens the protections they carry, which is why the channel fails closed (503) whenever the store cannot answer.
+With the customer MCP channel on and `mcp.customer.shared-store=valkey` (required in a production launch; the service refuses to boot otherwise, and also without `quarkus.redis.hosts` or `mcp.customer.key-hmac-secret`), two kinds of short-lived key live in that Valkey. Neither is a system of record; losing them only reopens the protections they carry, which is why the channel fails closed (503) whenever the store cannot answer.
 
 | Key | Value | TTL | Purpose |
 |---|---|---|---|
-| `mcp:customer:dpop:<jkt>:<jti>` | `1` | the DPoP proof window (`DpopPolicy.replayTtl`, 370 s by default) | one-time use of a DPoP proof across every replica (`SET NX PX`) |
-| `mcp:customer:rl:<bucket>:m:<minute>` / `:d:<day>` | counter | window + 10 s | ADR-0383 D5.3 budgets per proof key, per client, per (subject, client) |
+| `mcp:customer:dpop:<H(jkt)>:<jti>` | `1` | the DPoP proof window (`DpopPolicy.replayTtl`, 365 s by default) | one-time use of a DPoP proof across every replica (`SET NX PX`) |
+| `mcp:customer:rl:<bucket>:<H(...)>:m:<minute>` / `:d:<day>` | counter | window + 10 s | ADR-0383 D5.3 budgets per proof key, per client, per (subject, client) |
 
-`jkt` is a public-key thumbprint and `jti` a random proof id; the subject in a rate-limit key is the customer-realm `sub` (a pseudonymous id, no name or account data). `memory` keeps the same state per pod and is for tests and dev only.
+`H` is HMAC-SHA-256 under the deployment secret `mcp.customer.key-hmac-secret` (at least 32 bytes), over length-prefixed fields. No key carries the customer-realm `sub`, the proof-key thumbprint or the client id in clear, and a key dump cannot be joined back to a customer without that secret. The `jti` stays readable: it is a random, single-use proof id with no meaning outside its 365 s window. Rotating the secret orphans live entries, so rotate only with the channel drained, or accept one proof window of reopened replay.
+
+**Required Valkey configuration:** `maxmemory-policy noeviction`. Under any evicting policy a full Valkey silently deletes live replay entries, which reopens their replay window without any error; with `noeviction` a full store refuses writes and the channel answers 503 instead. `memory` keeps the same state per pod and is for tests and dev only.

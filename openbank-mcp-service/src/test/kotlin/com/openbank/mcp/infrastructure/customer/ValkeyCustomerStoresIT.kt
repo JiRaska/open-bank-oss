@@ -89,12 +89,12 @@ class ValkeyCustomerStoresIT {
     private fun admission(ds: ReactiveRedisDataSourceImpl) = CustomerChannelAdmission(
         DpopTestProofs.ISSUER,
         allowlist,
-        DpopProofVerifier(Jose4jDpopProofParser(), ValkeyDpopReplayStore(ds, TIMEOUT)),
+        DpopProofVerifier(Jose4jDpopProofParser(), ValkeyDpopReplayStore(ds, TIMEOUT, HASHER)),
         Clock.systemUTC(),
     )
 
     private fun throttles(ds: ReactiveRedisDataSourceImpl, perMinute: Int = 1000, shared: Int = 1000) =
-        ValkeyCustomerThrottles(ds, TIMEOUT, ValkeyCustomerThrottles.Limits(perMinute, 10_000, shared), FIXED)
+        ValkeyCustomerThrottles(ds, TIMEOUT, ValkeyCustomerThrottles.Limits(perMinute, 10_000, shared), FIXED, HASHER)
 
     private fun token() = TestJsonWebToken(
         mapOf(
@@ -126,8 +126,8 @@ class ValkeyCustomerStoresIT {
 
     @Test
     fun `concurrent claims of one jti across two pods admit exactly one`(): Unit = runBlocking {
-        val a = ValkeyDpopReplayStore(podA, TIMEOUT)
-        val b = ValkeyDpopReplayStore(podB, TIMEOUT)
+        val a = ValkeyDpopReplayStore(podA, TIMEOUT, HASHER)
+        val b = ValkeyDpopReplayStore(podB, TIMEOUT, HASHER)
         val jti = UUID.randomUUID().toString()
         val claims = (1..RACE).map { i ->
             async(Dispatchers.IO) { (if (i % 2 == 0) a else b).firstUse("jkt", jti, TTL, Instant.now()) }
@@ -139,17 +139,17 @@ class ValkeyCustomerStoresIT {
 
     @Test
     fun `the claim carries the proof window as its TTL, and the peek sees it from the other pod`(): Unit = runBlocking {
-        val a = ValkeyDpopReplayStore(podA, TIMEOUT)
-        val b = ValkeyDpopReplayStore(podB, TIMEOUT)
+        val a = ValkeyDpopReplayStore(podA, TIMEOUT, HASHER)
+        val b = ValkeyDpopReplayStore(podB, TIMEOUT, HASHER)
         val ttl = DpopPolicy().replayTtl
 
         assertThat(b.isUsed("jkt", "j1", Instant.now())).isFalse()
-        assertThat(podA.execute("EXISTS", ValkeyDpopReplayStore.key("jkt", "j1")).awaitSuspending().toLong())
+        assertThat(podA.execute("EXISTS", a.key("jkt", "j1")).awaitSuspending().toLong())
             .`as`("the peek writes nothing").isZero()
         assertThat(a.firstUse("jkt", "j1", ttl, Instant.now())).isEqualTo(ReplayClaim.FIRST_USE)
         assertThat(b.isUsed("jkt", "j1", Instant.now())).isTrue()
 
-        val pttl = podB.execute("PTTL", ValkeyDpopReplayStore.key("jkt", "j1")).awaitSuspending().toLong()
+        val pttl = podB.execute("PTTL", a.key("jkt", "j1")).awaitSuspending().toLong()
         assertThat(pttl).isBetween(ttl.toMillis() - SLACK_MS, ttl.toMillis())
     }
 
@@ -187,7 +187,7 @@ class ValkeyCustomerStoresIT {
         assertThat((outcome as Outcome.Refused).status).isEqualTo(503)
         assertThat(outcome.reason).isEqualTo(CustomerChannelAdmission.REPLAY_STORE_UNAVAILABLE)
         // The replay claim alone also fails closed: UNAVAILABLE, never FIRST_USE.
-        assertThat(ValkeyDpopReplayStore(down, TIMEOUT).firstUse("jkt", "j", TTL, Instant.now()))
+        assertThat(ValkeyDpopReplayStore(down, TIMEOUT, HASHER).firstUse("jkt", "j", TTL, Instant.now()))
             .isEqualTo(ReplayClaim.UNAVAILABLE)
     }
 
@@ -201,10 +201,59 @@ class ValkeyCustomerStoresIT {
         assertThat(outcome.reason).isEqualTo(CustomerChannelAdmission.REPLAY_STORE_UNAVAILABLE)
     }
 
+    @Test
+    fun `a hung Valkey (container paused) answers 503 within the timeout, never admits`(): Unit = runBlocking {
+        val hung = GenericContainer(DockerImageName.parse("valkey/valkey:7.2-alpine")).withExposedPorts(6379)
+        hung.start()
+        try {
+            val ds = pod("redis://${hung.host}:${hung.firstMappedPort}")
+            ds.execute("PING").awaitSuspending() // connection pooled while healthy
+            DockerClientFactory.instance().client().pauseContainerCmd(hung.containerId).exec()
+            val short = Duration.ofMillis(HUNG_TIMEOUT_MS)
+            val admission = CustomerChannelAdmission(
+                DpopTestProofs.ISSUER,
+                allowlist,
+                DpopProofVerifier(Jose4jDpopProofParser(), ValkeyDpopReplayStore(ds, short, HASHER)),
+                Clock.systemUTC(),
+            )
+            val throttles =
+                ValkeyCustomerThrottles(ds, short, ValkeyCustomerThrottles.Limits(1000, 10_000, 1000), FIXED, HASHER)
+            val started = System.nanoTime()
+            val outcome = admission.admit(DpopTestProofs.proof(key), throttles)
+            val elapsedMs = (System.nanoTime() - started) / 1_000_000
+
+            assertThat(outcome).isInstanceOf(Outcome.Refused::class.java)
+            assertThat((outcome as Outcome.Refused).status).isEqualTo(503)
+            assertThat(outcome.reason).isEqualTo(CustomerChannelAdmission.REPLAY_STORE_UNAVAILABLE)
+            // The peek is the first store call and fails at the timeout; nothing after it waits.
+            assertThat(elapsedMs).isLessThan(HUNG_TIMEOUT_MS + HUNG_SLACK_MS)
+        } finally {
+            DockerClientFactory.instance().client().unpauseContainerCmd(hung.containerId).exec()
+            hung.stop()
+        }
+    }
+
+    @Test
+    fun `no key names the customer subject or proof key in clear`(): Unit = runBlocking {
+        val subject = "c0ffee00-0000-0000-0000-000000000001"
+        val jkt = DpopTestProofs.jkt(key)
+        assertThat(
+            admission(podA).admit(DpopTestProofs.proof(key), throttles(podA)),
+        ).isInstanceOf(Outcome.Admitted::class.java)
+        val keys = podA.execute("KEYS", "mcp:customer:*").awaitSuspending().map { it.toString() }
+        assertThat(keys).isNotEmpty()
+        keys.forEach { k ->
+            assertThat(k).doesNotContain(subject).doesNotContain(jkt).doesNotContain("|")
+        }
+    }
+
     private companion object {
+        const val HUNG_TIMEOUT_MS = 300L
+        const val HUNG_SLACK_MS = 1_500L
         const val RACE = 50
         const val SLACK_MS = 5_000L
         val TIMEOUT: Duration = Duration.ofSeconds(2)
+        val HASHER = ValkeyKeyHasher("0123456789abcdef0123456789abcdef-test-only")
         val TTL: Duration = Duration.ofMinutes(5)
         val FIXED: Clock = Clock.fixed(Instant.parse("2026-11-18T10:00:30Z"), ZoneOffset.UTC)
     }

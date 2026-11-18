@@ -14,6 +14,7 @@ import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.quarkus.runtime.LaunchMode
 import io.quarkus.runtime.Startup
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.context.Dependent
 import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -48,8 +49,7 @@ class CustomerChannel @Inject constructor(
     @ConfigProperty(name = "mcp.customer.enabled") enabled: Optional<Boolean>,
     @ConfigProperty(name = "mcp.customer.issuer") issuer: Optional<String>,
     @ConfigProperty(name = "mcp.customer.allowlist") allowlistLocation: Optional<String>,
-    @ConfigProperty(name = "mcp.customer.shared-store") sharedStore: Optional<String>,
-    @ConfigProperty(name = "mcp.customer.shared-store-timeout-ms") sharedStoreTimeoutMs: Optional<Long>,
+    storeSettings: CustomerStoreSettings,
     redis: Instance<ReactiveRedisDataSource>,
     limiter: McpRateLimiter,
     launchMode: LaunchMode,
@@ -62,7 +62,7 @@ class CustomerChannel @Inject constructor(
      */
     val admission: CustomerChannelAdmission? = if (enabled.orElse(false)) {
         load(issuer, allowlistLocation) {
-            selectStore(sharedStore, sharedStoreTimeoutMs, redis, limiter, launchMode).also { shared = it }.replayStore
+            selectStore(storeSettings, redis, limiter, launchMode).also { shared = it }.replayStore
         }
     } else {
         null
@@ -86,15 +86,16 @@ class CustomerChannel @Inject constructor(
         const val STORE_VALKEY = "valkey"
         const val STORE_MEMORY = "memory"
 
-        /** The boot decision, separated so it is testable without a Quarkus launch. */
+        /** Upper bound on one Valkey command's wait: beyond it, a slow store is a down store. */
+        const val MAX_TIMEOUT_MS = 2000L
+
         fun selectStore(
-            store: Optional<String>,
-            timeoutMs: Optional<Long>,
+            settings: CustomerStoreSettings,
             redis: Instance<ReactiveRedisDataSource>,
             limiter: McpRateLimiter,
             launchMode: LaunchMode,
         ): SharedState {
-            val mode = store.map { it.trim().lowercase() }.filter { it.isNotEmpty() }.orElseThrow {
+            val mode = settings.store.map { it.trim().lowercase() }.filter { it.isNotEmpty() }.orElseThrow {
                 IllegalStateException("mcp.customer.enabled=true but mcp.customer.shared-store is not set")
             }
             check(mode == STORE_VALKEY || mode == STORE_MEMORY) {
@@ -107,14 +108,23 @@ class CustomerChannel @Inject constructor(
             if (mode == STORE_MEMORY) {
                 return SharedState(mode, InMemoryDpopReplayStore(), null)
             }
-            val timeout = timeoutMs.filter { it > 0 }.map(Duration::ofMillis).orElseThrow {
+            val timeoutMs = settings.timeoutMs.orElseThrow {
                 IllegalStateException(
                     "mcp.customer.shared-store=valkey but mcp.customer.shared-store-timeout-ms is not set",
                 )
             }
-            check(redis.isResolvable) {
+            check(timeoutMs in 1..MAX_TIMEOUT_MS) {
+                "mcp.customer.shared-store-timeout-ms must be between 1 and $MAX_TIMEOUT_MS, was $timeoutMs"
+            }
+            // The hosts, not the bean: Quarkus can resolve a Redis client bean with no hosts configured.
+            check(settings.redisHosts.filter { it.isNotBlank() }.isPresent && redis.isResolvable) {
                 "mcp.customer.shared-store=valkey but no Redis client is configured (quarkus.redis.hosts)"
             }
+            val secret = settings.keyHmacSecret.filter { it.isNotBlank() }.orElseThrow {
+                IllegalStateException("mcp.customer.shared-store=valkey but mcp.customer.key-hmac-secret is not set")
+            }
+            val hasher = ValkeyKeyHasher(secret)
+            val timeout = Duration.ofMillis(timeoutMs)
             val ds = redis.get()
             val limits = ValkeyCustomerThrottles.Limits(
                 perMinute = limiter.callsPerMinute,
@@ -124,8 +134,8 @@ class CustomerChannel @Inject constructor(
             )
             return SharedState(
                 mode,
-                ValkeyDpopReplayStore(ds, timeout),
-                ValkeyCustomerThrottles(ds, timeout, limits, Clock.systemUTC()),
+                ValkeyDpopReplayStore(ds, timeout, hasher),
+                ValkeyCustomerThrottles(ds, timeout, limits, Clock.systemUTC(), hasher),
             )
         }
 
@@ -179,3 +189,16 @@ class CustomerChannel @Inject constructor(
         }
     }
 }
+
+/**
+ * The customer channel's shared-store settings, one bean so [CustomerChannel]'s constructor stays
+ * small. All `Optional`: which are required depends on the store chosen ([CustomerChannel.selectStore]).
+ * `quarkus.redis.hosts` is read here only to tell "configured" from "a bean exists".
+ */
+@Dependent
+class CustomerStoreSettings @Inject constructor(
+    @ConfigProperty(name = "mcp.customer.shared-store") val store: Optional<String>,
+    @ConfigProperty(name = "mcp.customer.shared-store-timeout-ms") val timeoutMs: Optional<Long>,
+    @ConfigProperty(name = "quarkus.redis.hosts") val redisHosts: Optional<String>,
+    @ConfigProperty(name = "mcp.customer.key-hmac-secret") val keyHmacSecret: Optional<String>,
+)

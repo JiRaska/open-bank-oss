@@ -455,11 +455,24 @@ a stub (T-T2/T-D2).
   - *Boot gate.* With the channel on, `shared-store` must be set; in a production launch
     (`LaunchMode.NORMAL`) anything but `valkey`, or `valkey` with no Redis client, refuses to boot.
     `memory` remains for tests and dev.
+  - *Review hardening (#16791).* A malformed reply is parsed inside the same guard, so it is a 503, not
+    a 500; the boot gate checks `quarkus.redis.hosts` itself (not only that a client bean resolves) and
+    is proved on the built fast-jar in `LaunchMode.NORMAL` (`CustomerChannelBootGuardIT`, with a
+    positive control that must boot); a hung Valkey (container paused) answers 503 within the bounded
+    command timeout, capped at 2000 ms; subject, proof key and client id are HMAC-SHA-256'd with a
+    deployment secret in every key name (required with `valkey`, boot refused otherwise).
+  - *Operational requirement.* The replay Valkey MUST run `maxmemory-policy noeviction`: an evicting
+    policy silently drops live `jti` entries and reopens their replay window with no error anywhere.
   - **Residual:** no Valkey is wired for mcp-service in GitOps yet (declared as a prerequisite, not
     provisioned), so the channel cannot be enabled in a cluster until it is — the boot gate makes
-    that a refusal rather than a silent per-pod store; the replay TTL runs on the Valkey clock while
-    `iat` is checked on the pod clock, so pod/Valkey skew beyond the 5 s grace narrows the window;
-    no per-key replay quota in Valkey (memory is bounded by the proof-key bucket that runs first).
+    that a refusal rather than a silent per-pod store. Replication is asynchronous: if the primary
+    acknowledges a `SET NX` and fails over before the replica has it, the promoted replica has no
+    entry and that one proof can be accepted once more (a single replayed proof, still within its
+    `iat` window and still bound to the token's key). `PX` is relative, so clock OFFSET between pods
+    and Valkey does not matter; only clock RATE drift does, and the entry's 365 s life against the
+    verifier's 360 s acceptance span (`maxAge` 300 s + `futureSkew` 60 s) leaves a 5 s margin that
+    any realistic drift stays far inside. No per-key replay quota in Valkey (memory is bounded by the
+    proof-key bucket that runs first).
 - **2026-11-18 (ADR-0383 D1/D2, ADR-0385 D1, #16590)** — Customer-channel admission, **off by
   default** (`mcp.customer.enabled`). What it adds, and what it deliberately does not:
   - *Spoofing / tenant confusion.* The customers realm is a separate OIDC tenant selected by `iss`

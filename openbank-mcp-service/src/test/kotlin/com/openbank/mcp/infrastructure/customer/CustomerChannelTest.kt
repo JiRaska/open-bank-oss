@@ -26,16 +26,74 @@ class CustomerChannelTest {
         store: String? = CustomerChannel.STORE_MEMORY,
         launchMode: LaunchMode = LaunchMode.TEST,
         redis: Instance<ReactiveRedisDataSource> = noRedis(),
+        settings: CustomerStoreSettings = settings(store),
     ) = CustomerChannel(
         Optional.ofNullable(enabled),
         Optional.ofNullable(issuer),
         Optional.ofNullable(location),
-        Optional.ofNullable(store),
-        Optional.of(TIMEOUT_MS),
+        settings,
         redis,
         McpRateLimiter.withDefaults(),
         launchMode,
     )
+
+    private fun settings(
+        store: String?,
+        timeoutMs: Long? = TIMEOUT_MS,
+        hosts: String? = HOSTS,
+        secret: String? = SECRET,
+    ) = CustomerStoreSettings(
+        Optional.ofNullable(store),
+        Optional.ofNullable(timeoutMs),
+        Optional.ofNullable(hosts),
+        Optional.ofNullable(secret),
+    )
+
+    private fun withRedis(): Instance<ReactiveRedisDataSource> {
+        val ds = mockk<ReactiveRedisDataSource>(relaxed = true)
+        return mockk {
+            every { isResolvable } returns true
+            every { get() } returns ds
+        }
+    }
+
+    private fun valkey(settings: CustomerStoreSettings) = channel(
+        true,
+        DpopTestProofs.ISSUER,
+        ALLOWLIST,
+        launchMode = LaunchMode.NORMAL,
+        redis = withRedis(),
+        settings = settings,
+    )
+
+    @Test
+    fun `valkey with a resolvable bean but NO quarkus_redis_hosts refuses to start`() {
+        assertThatThrownBy { valkey(settings(CustomerChannel.STORE_VALKEY, hosts = null)) }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("no Redis client is configured")
+    }
+
+    @Test
+    fun `valkey without the key HMAC secret, or with a short one, refuses to start`() {
+        assertThatThrownBy { valkey(settings(CustomerChannel.STORE_VALKEY, secret = null)) }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("key-hmac-secret is not set")
+        assertThatThrownBy { valkey(settings(CustomerChannel.STORE_VALKEY, secret = "too-short")) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("at least 32 bytes")
+    }
+
+    @Test
+    fun `the shared-store timeout must be set and within 1 to 2000 ms`() {
+        assertThatThrownBy { valkey(settings(CustomerChannel.STORE_VALKEY, timeoutMs = null)) }
+            .hasMessageContaining("shared-store-timeout-ms is not set")
+        listOf(0L, -5L, 2001L).forEach { bad ->
+            assertThatThrownBy { valkey(settings(CustomerChannel.STORE_VALKEY, timeoutMs = bad)) }
+                .isInstanceOf(IllegalStateException::class.java)
+                .hasMessageContaining("between 1 and 2000")
+        }
+        assertThat(valkey(settings(CustomerChannel.STORE_VALKEY, timeoutMs = 2000L)).enabled).isTrue()
+    }
 
     private fun noRedis(): Instance<ReactiveRedisDataSource> =
         mockk<Instance<ReactiveRedisDataSource>> { every { isResolvable } returns false }
@@ -90,6 +148,8 @@ class CustomerChannelTest {
 
     private companion object {
         const val TIMEOUT_MS = 250L
+        const val HOSTS = "redis://valkey.test:6379"
+        const val SECRET = "0123456789abcdef0123456789abcdef-test-only"
         const val ALLOWLIST = "classpath:test-mcp-client-allowlist.yaml"
     }
 

@@ -9,9 +9,12 @@ import com.openbank.libs.security.ReplayClaim
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.redis.client.Response
+import java.nio.charset.StandardCharsets
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -21,19 +24,67 @@ import kotlin.coroutines.cancellation.CancellationException
  */
 class SharedStoreUnavailableException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
-/** One Valkey command with a bounded wait; every failure becomes [SharedStoreUnavailableException]. */
+/**
+ * One Valkey command with a bounded wait. The reply is PARSED inside the same guard, so a timeout, a
+ * refused connection, a null where a value was required and a malformed reply all become
+ * [SharedStoreUnavailableException] (503) — never a parse exception escaping as a 500 (review of #16791).
+ */
 internal class ValkeyCommands(private val redis: ReactiveRedisDataSource, private val timeout: Duration) {
     init {
         require(!timeout.isNegative && !timeout.isZero) { "shared-store timeout must be positive" }
     }
 
-    @Suppress("TooGenericExceptionCaught", "SpreadOperator") // any client failure must fail closed
-    suspend fun execute(command: String, vararg args: String): Response? = try {
-        redis.execute(command, *args).ifNoItem().after(timeout).fail().awaitSuspending()
+    @Suppress("TooGenericExceptionCaught", "SpreadOperator") // any client or parse failure must fail closed
+    suspend fun <T> execute(command: String, vararg args: String, parse: (Response?) -> T): T = try {
+        parse(redis.execute(command, *args).ifNoItem().after(timeout).fail().awaitSuspending())
     } catch (e: CancellationException) {
+        throw e
+    } catch (e: SharedStoreUnavailableException) {
         throw e
     } catch (e: Exception) {
         throw SharedStoreUnavailableException("customer-channel shared store unavailable ($command)", e)
+    }
+
+    companion object {
+        /** An integer reply; anything else (null, a non-integer) is a store failure. */
+        fun integer(command: String): (Response?) -> Long = { reply ->
+            reply?.toLong()
+                ?: throw SharedStoreUnavailableException("customer-channel shared store gave no $command reply")
+        }
+    }
+}
+
+/**
+ * Key-name pseudonymisation (review of #16791, GDPR): the customer `sub` and the proof-key thumbprint
+ * never appear in a Valkey key in clear. Each is HMAC-SHA-256'd with a deployment secret, so a key
+ * dump names no customer and cannot be joined back without the secret; fixed-length hex also removes
+ * any separator ambiguity between fields.
+ */
+class ValkeyKeyHasher(secret: String) {
+    private val key: SecretKeySpec
+
+    init {
+        require(secret.toByteArray(StandardCharsets.UTF_8).size >= MIN_SECRET_BYTES) {
+            "the customer-channel key HMAC secret must be at least $MIN_SECRET_BYTES bytes"
+        }
+        key = SecretKeySpec(secret.toByteArray(StandardCharsets.UTF_8), ALGORITHM)
+    }
+
+    /** Hex HMAC over the fields, each length-prefixed so no two field lists share an input. */
+    fun hash(vararg fields: String): String {
+        val mac = Mac.getInstance(ALGORITHM)
+        mac.init(key)
+        fields.forEach { f ->
+            val bytes = f.toByteArray(StandardCharsets.UTF_8)
+            mac.update("${bytes.size}:".toByteArray(StandardCharsets.US_ASCII))
+            mac.update(bytes)
+        }
+        return mac.doFinal().joinToString("") { "%02x".format(it) }
+    }
+
+    companion object {
+        const val MIN_SECRET_BYTES = 32
+        private const val ALGORITHM = "HmacSHA256"
     }
 }
 
@@ -43,39 +94,44 @@ internal class ValkeyCommands(private val redis: ReactiveRedisDataSource, privat
  * and a pod roll does not reopen the window.
  *
  * - [firstUse] is `SET key 1 NX PX ttl` — atomic: of any number of concurrent claims, across any
- *   number of pods, exactly one gets `OK`. TTL is the verifier's proof window
- *   ([com.openbank.libs.security.DpopPolicy.replayTtl]), counted on the Valkey clock.
+ *   number of pods, exactly one gets `OK`. `PX` is RELATIVE: the entry lives `ttl` from the moment
+ *   Valkey writes it, so only clock RATE drift matters, not wall-clock offset.
  * - [isUsed] is `EXISTS key`, a peek that writes nothing.
- * - Fail-closed: a claim that cannot be answered is [ReplayClaim.UNAVAILABLE] (503); a peek that
- *   cannot be answered THROWS [SharedStoreUnavailableException] rather than returning `false`,
- *   because "not known to be replayed" would let the caller go on to spend budget against a store
- *   it already knows is down.
- * - No per-key quota: the in-memory store needs one to protect its own heap, Valkey's memory is
- *   bounded by the proof-key bucket that [CustomerChannelAdmission] spends BEFORE the claim.
+ * - Fail-closed: a claim that cannot be answered (or answers anything but `OK` / null) is
+ *   [ReplayClaim.UNAVAILABLE] (503); a peek that cannot be answered THROWS
+ *   [SharedStoreUnavailableException] rather than returning `false`.
+ * - Requires `maxmemory-policy noeviction`: an evicted entry silently reopens its replay window.
+ * - No per-key quota: Valkey memory is bounded by the proof-key bucket that [CustomerChannelAdmission]
+ *   spends BEFORE the claim.
  */
-class ValkeyDpopReplayStore internal constructor(private val commands: ValkeyCommands) : DpopReplayStore {
-    constructor(redis: ReactiveRedisDataSource, timeout: Duration) : this(ValkeyCommands(redis, timeout))
+class ValkeyDpopReplayStore internal constructor(
+    private val commands: ValkeyCommands,
+    private val hasher: ValkeyKeyHasher,
+) : DpopReplayStore {
+    constructor(redis: ReactiveRedisDataSource, timeout: Duration, hasher: ValkeyKeyHasher) :
+        this(ValkeyCommands(redis, timeout), hasher)
 
-    override suspend fun firstUse(jkt: String, jti: String, ttl: Duration, now: Instant): ReplayClaim {
-        val reply = try {
-            commands.execute("SET", key(jkt, jti), "1", "NX", "PX", ttl.toMillis().coerceAtLeast(1).toString())
-        } catch (_: SharedStoreUnavailableException) {
-            return ReplayClaim.UNAVAILABLE
+    override suspend fun firstUse(jkt: String, jti: String, ttl: Duration, now: Instant): ReplayClaim = try {
+        commands.execute("SET", key(jkt, jti), "1", "NX", "PX", ttl.toMillis().coerceAtLeast(1).toString()) {
+            // SET NX answers OK when it wrote, a null reply when the key already existed; else odd.
+            when {
+                it == null -> ReplayClaim.REPLAYED
+                it.toString() == "OK" -> ReplayClaim.FIRST_USE
+                else -> throw SharedStoreUnavailableException("customer-channel shared store gave an odd SET reply")
+            }
         }
-        // SET NX answers OK when it wrote, a null reply when the key already existed.
-        return if (reply != null && reply.toString() == "OK") ReplayClaim.FIRST_USE else ReplayClaim.REPLAYED
+    } catch (_: SharedStoreUnavailableException) {
+        ReplayClaim.UNAVAILABLE
     }
 
-    override suspend fun isUsed(jkt: String, jti: String, now: Instant): Boolean {
-        val reply = commands.execute("EXISTS", key(jkt, jti))
-            ?: throw SharedStoreUnavailableException("customer-channel shared store gave no EXISTS reply")
-        return reply.toLong() > 0
-    }
+    override suspend fun isUsed(jkt: String, jti: String, now: Instant): Boolean =
+        commands.execute("EXISTS", key(jkt, jti), parse = ValkeyCommands.integer("EXISTS")) > 0
+
+    /** `jti` is a random proof id and stays readable; `jkt` (a stable per-device key id) is hashed. */
+    fun key(jkt: String, jti: String): String = "$KEY_PREFIX${hasher.hash(jkt)}:$jti"
 
     companion object {
         const val KEY_PREFIX = "mcp:customer:dpop:"
-
-        fun key(jkt: String, jti: String): String = "$KEY_PREFIX$jkt:$jti"
     }
 }
 
@@ -86,26 +142,34 @@ class ValkeyDpopReplayStore internal constructor(private val commands: ValkeyCom
  * minute AND a day window, the per-client cap is minute-only.
  *
  * One window is one Lua call — `INCR` then, on the first hit, `PEXPIRE` — so a counter can never be
- * left without a TTL (the INCR-then-separate-EXPIRE race that a crash between the two would leave).
- * Every failure is [SharedStoreUnavailableException] (503), never "allowed".
+ * left without a TTL. Every failure is [SharedStoreUnavailableException] (503), never "allowed".
+ * Subject and proof key are HMAC'd ([ValkeyKeyHasher]); the client id is a public allowlist entry.
  */
 class ValkeyCustomerThrottles internal constructor(
     private val commands: ValkeyCommands,
     private val limits: Limits,
     private val clock: Clock,
+    private val hasher: ValkeyKeyHasher,
 ) : CustomerChannelAdmission.Throttles {
-    constructor(redis: ReactiveRedisDataSource, timeout: Duration, limits: Limits, clock: Clock) :
-        this(ValkeyCommands(redis, timeout), limits, clock)
+    constructor(
+        redis: ReactiveRedisDataSource,
+        timeout: Duration,
+        limits: Limits,
+        clock: Clock,
+        hasher: ValkeyKeyHasher,
+    ) :
+        this(ValkeyCommands(redis, timeout), limits, clock, hasher)
 
     data class Limits(val perMinute: Int, val perDay: Int, val sharedPerMinute: Int, val enabled: Boolean = true)
 
     override suspend fun proofKey(thumbprint: String): String? =
-        windows("jkt:$thumbprint", limits.perMinute, limits.perDay)
+        windows("jkt:${hasher.hash(thumbprint)}", limits.perMinute, limits.perDay)
 
-    override suspend fun client(clientId: String): String? = windows("client:$clientId", limits.sharedPerMinute, null)
+    override suspend fun client(clientId: String): String? =
+        windows("client:${hasher.hash(clientId)}", limits.sharedPerMinute, null)
 
     override suspend fun subject(subject: String, clientId: String): String? =
-        windows("subject:$subject|$clientId", limits.perMinute, limits.perDay)
+        windows("subject:${hasher.hash(subject, clientId)}", limits.perMinute, limits.perDay)
 
     private suspend fun windows(key: String, perMinute: Int, perDay: Int?): String? {
         if (!limits.enabled) return null
@@ -118,9 +182,14 @@ class ValkeyCustomerThrottles internal constructor(
 
     private suspend fun hit(key: String, windowSeconds: Long): Long {
         val ttlMs = (windowSeconds + GRACE_SECONDS) * MILLIS
-        val reply = commands.execute("EVAL", INCR_WITH_TTL, "1", key, ttlMs.toString())
-            ?: throw SharedStoreUnavailableException("customer-channel shared store gave no counter reply")
-        return reply.toLong()
+        return commands.execute(
+            "EVAL",
+            INCR_WITH_TTL,
+            "1",
+            key,
+            ttlMs.toString(),
+            parse = ValkeyCommands.integer("EVAL"),
+        )
     }
 
     companion object {
