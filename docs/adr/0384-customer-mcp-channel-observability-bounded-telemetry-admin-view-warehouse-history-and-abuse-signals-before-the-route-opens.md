@@ -1,12 +1,13 @@
 ---
 date: 2026-11-17
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [observability, ai-agents, fraud, privacy-gdpr]
+followup: "#16605 — D0 audit outbox, D1 grant gauges and replay-store gauge, D2/D3 warehouse facts, D4 actions, D5, journey and SLO unbuilt"
 summary: "Customer MCP opens only once observable: hash-linked audit, closed-label metrics, warehouse facts under per-party shreddable keys, single-actor client suspend and connection revoke, four-eyes unsuspend and bulk revoke."
 ---
 
@@ -577,6 +578,36 @@ removed. In the sandbox the route stays closed until all pass.
   {stage="rejected"}`.
 - **Order.** `kubectl get httproute,ingress -A | grep mcp` lists nothing until every line above
   holds, and the gate fails if one is added earlier.
+
+## Delivery status
+
+Slice 1 (this ADR's first PR, refs #16605) built:
+- D1, in mcp-service: `channel`, `client`, `synthetic` on `openbank_mcp_tool_calls_total` and
+  `openbank_mcp_tool_call_duration_seconds`, with the `none` / `false` placeholders on agent and
+  operator series; `openbank_mcp_customer_rejected_total{layer,reason,client,synthetic}` with the
+  reason enum bound to its layer; the 25-entry allowlist cap (`McpCustomerClientAllowlist`,
+  `@Startup`). Nothing calls the customer methods yet: the ADR-0383 customer path does not exist,
+  so every customer series is absent until it lands.
+- D6, partially: `McpCustomerDpopRejectSpike`, `McpCustomerClientErrorRate`, and
+  `McpCustomerReplayStoreUnavailable`, a critical alert on refusals with
+  `reason="replay_store_unavailable"`. It covers the replay-store outage until the 0/1 gauge
+  exists, because the store carries no readiness check. Each rule is promtool-tested to stay
+  silent at t=0 (absent series, and a counter born at 1).
+- D4, partially: a read-only "MCP kanál" page under `/delegations` with fixed BFF queries. An
+  absent series renders as "not measured", never 0.
+
+Not built yet, follow-ups under #16605:
+- D0, the hash-linked audit outbox.
+- D1: the remaining three series' channel tag, `openbank_mcp_customer_replay_store_up`, the
+  proposal series (these wait on the ADR-0383 D6 store), and the delegation-service grant gauges
+  with liveness.
+- D2/D3, the warehouse. Ingestion is gated by D3 on `ANALYTICS_ERASURE_BACKEND=vault`, which is
+  not deployed, so no DWH pipeline was started.
+- D4: the Clients, Connections and Abuse views, and the operator actions.
+- D5, fraud evidence.
+- D6: `McpCustomerReplayStoreDown`, `McpCustomerProposalRejectionHigh`,
+  `McpCustomerGrantProjectionStale`, the `mcp-customer-read` journey and the SLO schema.
+- The enforcement gate `mcp-customer-channel-observable`.
 
 ## Compliance impact
 
