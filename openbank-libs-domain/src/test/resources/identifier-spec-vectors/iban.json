@@ -1,0 +1,140 @@
+{
+  "identifier": "iban",
+  "reference": "stdnum.iban (check_country=False: ISO 13616 + registry structure)",
+  "sources": [
+    "https://www.swift.com/standards/data-standards/iban-international-bank-account-number",
+    "https://www.iso.org/standard/81090.html"
+  ],
+  "cases": [
+    {
+      "value": "CZ6508000000192000145399",
+      "valid": true,
+      "rule": "CZ registry example",
+      "stdnum": true
+    },
+    {
+      "value": "GB82WEST12345698765432",
+      "valid": true,
+      "rule": "GB registry example (letters in BBAN)",
+      "stdnum": true
+    },
+    {
+      "value": "DE89370400440532013000",
+      "valid": true,
+      "rule": "DE registry example",
+      "stdnum": true
+    },
+    {
+      "value": "NO9386011117947",
+      "valid": true,
+      "rule": "shortest registry length (NO, 15)",
+      "stdnum": true
+    },
+    {
+      "value": "cz65 0800 0000 1920 0014 5399",
+      "valid": true,
+      "rule": "lower case and spaces normalise",
+      "stdnum": true
+    },
+    {
+      "value": "CZ6508000000192000145398",
+      "valid": false,
+      "rule": "mod-97 mismatch",
+      "stdnum": false
+    },
+    {
+      "value": "CZ2708000000192000145",
+      "valid": false,
+      "rule": "mod-97 valid but CZ length 21, registry says 24",
+      "stdnum": false
+    },
+    {
+      "value": "CZ040800000019200014539912",
+      "valid": false,
+      "rule": "mod-97 valid but CZ length 26",
+      "stdnum": false
+    },
+    {
+      "value": "XA170800000019200014539",
+      "valid": false,
+      "rule": "country not in registry",
+      "stdnum": false
+    },
+    {
+      "value": "CZ9808000000192000000081",
+      "valid": true,
+      "rule": "check digits 98 (upper bound)",
+      "stdnum": true
+    },
+    {
+      "value": "CZ0108000000192000000081",
+      "valid": false,
+      "rule": "check digits 01 satisfy mod-97 but ISO 13616 allows 02..98",
+      "stdnum": true,
+      "stdnum_divergence": "stdnum does not restrict check digits to 02..98"
+    },
+    {
+      "value": "CZ0208000000192000000063",
+      "valid": true,
+      "rule": "check digits 02 (lower bound)",
+      "stdnum": true
+    },
+    {
+      "value": "CZ9908000000192000000063",
+      "valid": false,
+      "rule": "check digits 99 satisfy mod-97 but ISO 13616 allows 02..98",
+      "stdnum": true,
+      "stdnum_divergence": "stdnum does not restrict check digits to 02..98"
+    },
+    {
+      "value": "GB46123456987654321234",
+      "valid": false,
+      "rule": "mod-97 valid, length 22, but GB bank code must be 4 letters (registry 4!a6!n8!n)",
+      "stdnum": false
+    },
+    {
+      "value": "CZ930800A00019200014539X",
+      "valid": false,
+      "rule": "mod-97 valid, length 24, but CZ BBAN is 20 digits (registry 4!n16!n)",
+      "stdnum": false
+    },
+    {
+      "value": "DE0537040044053201300A",
+      "valid": false,
+      "rule": "mod-97 valid, length 22, letter in all-numeric DE BBAN",
+      "stdnum": false
+    },
+    {
+      "value": "C16508000000192000145399",
+      "valid": false,
+      "rule": "digit in country code",
+      "stdnum": false
+    },
+    {
+      "value": "CZA508000000192000145399",
+      "valid": false,
+      "rule": "letter in check digits",
+      "stdnum": false
+    },
+    {
+      "value": "CZ65080000001920001453-9",
+      "valid": false,
+      "rule": "non-alphanumeric in BBAN",
+      "stdnum": false
+    },
+    {
+      "value": "",
+      "valid": false,
+      "rule": "empty",
+      "stdnum": false
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-libs-domain",
+      "symbol": "com.openbank.libs.domain.account.Iban.isValid",
+      "file": "openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/account/Iban.kt"
+    }
+  ],
+  "differential": true
+}

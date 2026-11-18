@@ -18,6 +18,12 @@ import java.util.Locale
  * `XXX` for which the JDK reports `defaultFractionDigits == -1`. Such a code has no scale a
  * monetary amount could be held at, and a `-1` would reach every caller that writes
  * `setScale(currency.defaultFractionDigits)`. [defaultFractionDigits] is therefore always `>= 0`.
+ *
+ * **Withdrawn codes are rejected.** `java.util.Currency` still knows currencies that ISO 4217
+ * has withdrawn (`DEM`, `FRF`, `HRK`, `BGN` after 2026-01-01, and about fifty more), so on its own
+ * it accepts money in a currency that no longer exists. A code must also be on ISO 4217 List One
+ * ([ACTIVE]). The identifier differential test checks that list against an independent copy
+ * (pycountry / Debian iso-codes) over every three-letter string (#16748).
  */
 class CurrencyCode private constructor(val code: String, val defaultFractionDigits: Int) {
 
@@ -30,6 +36,22 @@ class CurrencyCode private constructor(val code: String, val defaultFractionDigi
     companion object {
         private const val CODE_LENGTH = 3
         private const val ECHO_LIMIT = 16
+
+        /** ISO 4217 List One (active codes), as of the 2026 amendments. */
+        private val ACTIVE: Set<String> = setOf(
+            "AED", "AFN", "ALL", "AMD", "AOA", "ARS", "AUD", "AWG", "AZN", "BAM", "BBD", "BDT", "BHD", "BIF", "BMD",
+            "BND", "BOB", "BOV", "BRL", "BSD", "BTN", "BWP", "BYN", "BZD", "CAD", "CDF", "CHE", "CHF", "CHW", "CLF",
+            "CLP", "CNY", "COP", "COU", "CRC", "CUP", "CVE", "CZK", "DJF", "DKK", "DOP", "DZD", "EGP", "ERN", "ETB",
+            "EUR", "FJD", "FKP", "GBP", "GEL", "GHS", "GIP", "GMD", "GNF", "GTQ", "GYD", "HKD", "HNL", "HTG", "HUF",
+            "IDR", "ILS", "INR", "IQD", "IRR", "ISK", "JMD", "JOD", "JPY", "KES", "KGS", "KHR", "KMF", "KPW", "KRW",
+            "KWD", "KYD", "KZT", "LAK", "LBP", "LKR", "LRD", "LSL", "LYD", "MAD", "MDL", "MGA", "MKD", "MMK", "MNT",
+            "MOP", "MRU", "MUR", "MVR", "MWK", "MXN", "MXV", "MYR", "MZN", "NAD", "NGN", "NIO", "NOK", "NPR", "NZD",
+            "OMR", "PAB", "PEN", "PGK", "PHP", "PKR", "PLN", "PYG", "QAR", "RON", "RSD", "RUB", "RWF", "SAR", "SBD",
+            "SCR", "SDG", "SEK", "SGD", "SHP", "SLE", "SOS", "SRD", "SSP", "STN", "SVC", "SYP", "SZL", "THB", "TJS",
+            "TMT", "TND", "TOP", "TRY", "TTD", "TWD", "TZS", "UAH", "UGX", "USD", "USN", "UYI", "UYU", "UYW", "UZS",
+            "VED", "VES", "VND", "VUV", "WST", "XAD", "XAF", "XAG", "XAU", "XBA", "XBB", "XBC", "XBD", "XCD", "XCG",
+            "XDR", "XOF", "XPD", "XPF", "XPT", "XSU", "XTS", "XUA", "XXX", "YER", "ZAR", "ZMW", "ZWG",
+        )
 
         val CZK = of("CZK")
         val EUR = of("EUR")
@@ -60,6 +82,7 @@ class CurrencyCode private constructor(val code: String, val defaultFractionDigi
         }
 
         private fun isoCurrency(normalised: String): Currency = try {
+            require(normalised in ACTIVE)
             Currency.getInstance(normalised)
         } catch (e: IllegalArgumentException) {
             throw unsupported("Unknown ISO 4217 currency code: $normalised", e)

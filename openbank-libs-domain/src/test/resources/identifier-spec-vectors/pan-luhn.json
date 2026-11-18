@@ -1,0 +1,47 @@
+{
+  "identifier": "pan-luhn",
+  "reference": "stdnum.luhn",
+  "sources": [
+    "https://www.iso.org/standard/70484.html"
+  ],
+  "cases": [
+    {
+      "value": "4111111111111111",
+      "valid": true,
+      "rule": "Visa test PAN",
+      "stdnum": true
+    },
+    {
+      "value": "5555555555554444",
+      "valid": true,
+      "rule": "Mastercard test PAN",
+      "stdnum": true
+    },
+    {
+      "value": "4111111111111112",
+      "valid": false,
+      "rule": "Luhn mismatch",
+      "stdnum": false
+    },
+    {
+      "value": "79927398713",
+      "valid": true,
+      "rule": "ISO/IEC 7812 Luhn example",
+      "stdnum": true
+    },
+    {
+      "value": "79927398710",
+      "valid": false,
+      "rule": "ISO/IEC 7812 Luhn example, wrong check",
+      "stdnum": false
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-card-issuance-service",
+      "symbol": "com.openbank.cardissuance.domain.model.SyntheticPan.isLuhnValid",
+      "file": "openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/domain/model/SyntheticPan.kt"
+    }
+  ],
+  "differential": true
+}

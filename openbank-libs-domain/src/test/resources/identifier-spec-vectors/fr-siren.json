@@ -1,0 +1,41 @@
+{
+  "identifier": "fr-siren",
+  "reference": "stdnum.fr.siren",
+  "sources": [
+    "https://www.insee.fr/fr/metadonnees/definition/c2047"
+  ],
+  "cases": [
+    {
+      "value": "732829320",
+      "valid": true,
+      "rule": "real SIREN",
+      "stdnum": true
+    },
+    {
+      "value": "732829321",
+      "valid": false,
+      "rule": "Luhn mismatch",
+      "stdnum": false
+    },
+    {
+      "value": "73282932",
+      "valid": false,
+      "rule": "8 digits",
+      "stdnum": false
+    },
+    {
+      "value": "000000000",
+      "valid": true,
+      "rule": "all zeros satisfies Luhn",
+      "stdnum": true
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-kyb-service",
+      "symbol": "LegalEntityIdentifier.parse(FR_SIREN)",
+      "file": "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt"
+    }
+  ],
+  "differential": true
+}

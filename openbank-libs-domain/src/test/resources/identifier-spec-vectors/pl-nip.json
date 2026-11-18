@@ -1,0 +1,54 @@
+{
+  "identifier": "pl-nip",
+  "reference": "stdnum.pl.nip",
+  "sources": [
+    "https://www.podatki.gov.pl/",
+    "https://isap.sejm.gov.pl/isap.nsf/DocDetails.xsp?id=WDU19950620310"
+  ],
+  "cases": [
+    {
+      "value": "5260250995",
+      "valid": true,
+      "rule": "real NIP",
+      "stdnum": true
+    },
+    {
+      "value": "5260250996",
+      "valid": false,
+      "rule": "checksum mismatch",
+      "stdnum": false
+    },
+    {
+      "value": "0000000017",
+      "valid": true,
+      "rule": "generated valid from 000000001",
+      "stdnum": true
+    },
+    {
+      "value": "9999999999",
+      "valid": true,
+      "rule": "generated valid from 999999999",
+      "stdnum": true
+    },
+    {
+      "value": "1000000160",
+      "valid": false,
+      "rule": "weighted sum mod 11 is 10: no check digit exists",
+      "stdnum": false
+    },
+    {
+      "value": "526025099",
+      "valid": false,
+      "rule": "9 digits",
+      "stdnum": false
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-kyb-service",
+      "symbol": "LegalEntityIdentifier.parse(PL_NIP)",
+      "file": "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt"
+    }
+  ],
+  "differential": true
+}

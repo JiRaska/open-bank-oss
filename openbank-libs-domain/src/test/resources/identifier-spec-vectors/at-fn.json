@@ -1,0 +1,36 @@
+{
+  "identifier": "at-fn",
+  "reference": "stdnum.at.businessid",
+  "sources": [
+    "https://www.justiz.gv.at/firmenbuch"
+  ],
+  "cases": [
+    {
+      "value": "FN122119M",
+      "valid": true,
+      "rule": "Firmenbuchnummer, upper-case check letter",
+      "stdnum": true
+    },
+    {
+      "value": "FN122119",
+      "valid": false,
+      "rule": "missing check letter",
+      "stdnum": false
+    },
+    {
+      "value": "FN1234567A",
+      "valid": false,
+      "rule": "seven digits",
+      "stdnum_divergence": "KYB caps the number at 6 digits, the most the register has issued; this is a local bound, not a published rule",
+      "stdnum": true
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-kyb-service",
+      "symbol": "LegalEntityIdentifier.parse(AT_FN)",
+      "file": "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt"
+    }
+  ],
+  "differential": true
+}

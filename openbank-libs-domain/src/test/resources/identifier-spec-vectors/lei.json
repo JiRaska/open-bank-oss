@@ -1,0 +1,42 @@
+{
+  "identifier": "lei",
+  "reference": "stdnum.lei",
+  "sources": [
+    "https://www.iso.org/standard/78829.html",
+    "https://www.gleif.org/en/about-lei/iso-17442-the-lei-code-structure"
+  ],
+  "cases": [
+    {
+      "value": "5493001KJTIIGC8Y1R12",
+      "valid": true,
+      "rule": "GLEIF example LEI",
+      "stdnum": true
+    },
+    {
+      "value": "5493001KJTIIGC8Y1R13",
+      "valid": false,
+      "rule": "mod-97 mismatch",
+      "stdnum": false
+    },
+    {
+      "value": "5493001KJTIIGC8Y1R1",
+      "valid": false,
+      "rule": "19 characters",
+      "stdnum": false
+    },
+    {
+      "value": "5493001KJTIIGC8Y1RA2",
+      "valid": false,
+      "rule": "letter in check digits",
+      "stdnum": false
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-kyb-service",
+      "symbol": "LegalEntityIdentifier.parse(LEI)",
+      "file": "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt"
+    }
+  ],
+  "differential": true
+}

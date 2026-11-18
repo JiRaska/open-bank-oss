@@ -369,6 +369,32 @@ export interface TestLayerCoverage {
   }>
 }
 
+/** One shared identifier validator as the identifier-conformance/v1 matrix describes it. */
+export interface IdentifierValidatorConformance {
+  identifier: string
+  module: string
+  symbol: string
+  file: string
+  status: 'conformance-tested' | 'known-defect' | 'unverified-ad-hoc-copy'
+  /** Derived verdict: an ad-hoc copy is `unknown`, a not-run differential never `passed`. */
+  state: EvidenceState
+  vectors: { count: number; sources: string[]; result: 'pass' | 'fail' | 'not-run' }
+  differential: { reference: string | null; result: 'pass' | 'fail' | 'not-run' | 'no-reference' }
+  fuzz: { fuzzer: string | null; label: 'semantic' | 'robustness-only' | 'none'; robustnessOnly: boolean }
+  pitest: 'advisory' | 'service-lane' | 'none'
+  knownDefects: string[]
+  lastRun: { at: string | null; url: string | null }
+}
+
+/** Spec conformance (ADR-0273 dimension), separate from execution and coverage. */
+export interface IdentifierConformanceEvidence {
+  state: 'absent' | 'invalid' | 'present'
+  observedAt: string | null
+  run: string | null
+  detail: string
+  validators: IdentifierValidatorConformance[]
+}
+
 export interface TestIntelligenceReport {
   schemaVersion: 1
   /** Added by the route at request time; absent in the on-disk/CI file. */
@@ -382,6 +408,8 @@ export interface TestIntelligenceReport {
   syntheticJourneys: SyntheticJourneyEvidence[]
   journeyCoverage?: JourneyCoverageSummary
   clientExperiences: ClientExperienceEvidence[]
+  /** Absent on snapshots older than the dimension: render as no evidence. */
+  identifierConformance?: IdentifierConformanceEvidence
   requiredControls?: RequiredTestControl[]
   platformCapabilities?: TestPlatformCapability[]
   /** Per-layer denominator from openbank-libs/governance/test-layer-applicability.yaml. */

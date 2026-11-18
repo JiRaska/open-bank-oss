@@ -1,0 +1,110 @@
+{
+  "identifier": "currency",
+  "reference": "pycountry (Debian iso-codes ISO 4217 active list)",
+  "sources": [
+    "https://www.six-group.com/en/products-services/financial-information/data-standards.html",
+    "https://salsa.debian.org/iso-codes-team/iso-codes"
+  ],
+  "cases": [
+    {
+      "value": "CZK",
+      "valid": true,
+      "rule": "active, 2 minor digits",
+      "stdnum": true
+    },
+    {
+      "value": "EUR",
+      "valid": true,
+      "rule": "active",
+      "stdnum": true
+    },
+    {
+      "value": "USD",
+      "valid": true,
+      "rule": "active",
+      "stdnum": true
+    },
+    {
+      "value": "JPY",
+      "valid": true,
+      "rule": "active, 0 minor digits",
+      "stdnum": true
+    },
+    {
+      "value": "KWD",
+      "valid": true,
+      "rule": "active, 3 minor digits",
+      "stdnum": true
+    },
+    {
+      "value": "CHF",
+      "valid": true,
+      "rule": "active",
+      "stdnum": true
+    },
+    {
+      "value": "XAU",
+      "valid": false,
+      "rule": "active but no minor unit (gold)",
+      "stdnum_divergence": "CurrencyCode rejects codes without a minor unit: Money needs a scale",
+      "stdnum": true
+    },
+    {
+      "value": "XXX",
+      "valid": false,
+      "rule": "no-currency code",
+      "stdnum_divergence": "CurrencyCode rejects codes without a minor unit: Money needs a scale",
+      "stdnum": true
+    },
+    {
+      "value": "DEM",
+      "valid": false,
+      "rule": "withdrawn 2002 (Deutsche Mark), still known to java.util.Currency",
+      "stdnum": false
+    },
+    {
+      "value": "FRF",
+      "valid": false,
+      "rule": "withdrawn 2002 (French franc), still known to java.util.Currency",
+      "stdnum": false
+    },
+    {
+      "value": "HRK",
+      "valid": false,
+      "rule": "withdrawn 2023 (Croatian kuna)",
+      "stdnum": false
+    },
+    {
+      "value": "CSK",
+      "valid": false,
+      "rule": "withdrawn 1993 (Czechoslovak koruna)",
+      "stdnum": false
+    },
+    {
+      "value": "ABC",
+      "valid": false,
+      "rule": "three letters, never assigned",
+      "stdnum": false
+    },
+    {
+      "value": "EU",
+      "valid": false,
+      "rule": "two letters",
+      "stdnum": false
+    },
+    {
+      "value": "EURO",
+      "valid": false,
+      "rule": "four letters",
+      "stdnum": false
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-libs-domain",
+      "symbol": "com.openbank.libs.domain.money.CurrencyCode.of",
+      "file": "openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/money/CurrencyCode.kt"
+    }
+  ],
+  "differential": true
+}

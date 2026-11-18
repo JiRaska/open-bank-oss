@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Ratchet on AD-HOC identifier validation outside openbank-libs-domain (#16748).
+#
+# The shared identifier validators (RodneCislo, Iban, CzechAccountNumber) are held to the
+# official specification by committed spec vectors and a differential test against
+# python-stdnum. A hand-rolled copy in a service is held to nothing: it is written from the
+# same mental model the shared code was, it never sees the vectors, and when the shared one is
+# fixed the copy keeps the old bug. This gate does not force today's copies to migrate; it
+# forbids NEW ones. Three shapes are counted per file in `*/src/main/**/*.kt`:
+#
+#   mod97           an ISO 7064 MOD 97-10 computation (`.mod(97…)`, `% 97`, `97.toBigInteger`,
+#                   `BigInteger.valueOf(97)`) — the IBAN / LEI / RF-reference check.
+#   iban-regex      a regex opening with `[A-Z]{2}` + two digits — an IBAN shape check.
+#   currency-regex  `[A-Z]{3}` — a currency "validation" that accepts every three-letter
+#                   string, ISO 4217 or not (libs-domain `CurrencyCode` knows the list).
+#   isin-regex      `[A-Z]{2}[A-Z0-9]{9}` — an ISIN shape check, which accepts every wrong check
+#                   digit and every non-ISO-3166 prefix.
+#   currency-jdk    `java.util.Currency.getInstance` as a check — it knows WITHDRAWN codes
+#                   (DEM, FRF, CSK), so it accepts currencies that no longer exist.
+#
+# The baseline (.github/gates/identifier-validator-baseline.json) maps category -> file ->
+# count. A count above its baseline, or a file not in it, FAILS. A count BELOW its baseline also
+# fails, asking for the baseline to be lowered in the same PR, so a removed copy cannot be
+# silently re-added later under the old allowance.
+#
+# EXIT CODES
+#   0  every count equals its baseline
+#   1  a new ad-hoc validator, or a stale (too generous) baseline entry
+#   2  the check could not run, or the self-test failed
+#
+# Run:  python3 .github/scripts/check-identifier-validator-ratchet.py [--root .]
+#                [--write-baseline] [--self-test]
+
+import argparse
+import json
+import pathlib
+import re
+import sys
+import tempfile
+
+PATTERNS = {
+    "mod97": re.compile(
+        r"(?<![0-9])97\s*\.toBigInteger|BigInteger\.valueOf\(\s*97\s*\)|%\s*97(?![0-9])|\.mod\(\s*97(?![0-9])"
+    ),
+    "iban-regex": re.compile(r"\[A-Z\]\{2\}(?:\[0-9\]|\\\\d)\{2\}"),
+    "currency-regex": re.compile(r"\[A-Z\]\{3\}"),
+    "isin-regex": re.compile(r"\[A-Z\]\{2\}\[A-Z0-9\]\{9\}"),
+    "currency-jdk": re.compile(r"Currency\.getInstance|getAvailableCurrencies"),
+}
+OWNER = "openbank-libs-domain/"
+BASELINE = pathlib.Path(".github/gates/identifier-validator-baseline.json")
+
+
+def scan(root: pathlib.Path):
+    counts = {k: {} for k in PATTERNS}
+    scanned = 0
+    for p in sorted(root.glob("*/src/main/**/*.kt")):
+        rel = p.relative_to(root).as_posix()
+        if rel.startswith(OWNER) or "/build/" in rel:
+            continue
+        scanned += 1
+        text = p.read_text(encoding="utf-8", errors="replace")
+        for cat, rx in PATTERNS.items():
+            n = len(rx.findall(text))
+            if n:
+                counts[cat][rel] = n
+    return counts, scanned
+
+
+def compare(counts, baseline):
+    problems = []
+    for cat in PATTERNS:
+        have, allowed = counts.get(cat, {}), baseline.get(cat, {})
+        for f, n in sorted(have.items()):
+            if n > allowed.get(f, 0):
+                problems.append(
+                    f"NEW {cat}: {f} has {n} (baseline {allowed.get(f, 0)}) — validate with "
+                    "openbank-libs-domain (Iban / CzechAccountNumber / RodneCislo / "
+                    "CurrencyCode) instead of a hand-rolled copy"
+                )
+        for f, n in sorted(allowed.items()):
+            if have.get(f, 0) < n:
+                problems.append(
+                    f"STALE {cat}: {f} has {have.get(f, 0)} (baseline {n}) — lower the baseline "
+                    "with --write-baseline in this PR"
+                )
+    return problems
+
+
+def run(root: pathlib.Path, baseline_path: pathlib.Path) -> int:
+    if not baseline_path.is_file():
+        print(f"::error::baseline missing: {baseline_path}")
+        return 2
+    counts, scanned = scan(root)
+    if scanned == 0:
+        print("::error::scanned zero Kotlin sources — wrong --root?")
+        return 2
+    problems = compare(counts, json.loads(baseline_path.read_text()))
+    for p in problems:
+        print(f"::error::{p}")
+    total = sum(sum(v.values()) for v in counts.values())
+    print(f"identifier-validator ratchet: {total} baselined occurrence(s), {len(problems)} problem(s)")
+    print(f"SUBJECTS={scanned}  # Kotlin main sources scanned outside {OWNER}")
+    return 1 if problems else 0
+
+
+def self_test() -> int:
+    with tempfile.TemporaryDirectory() as d:
+        root = pathlib.Path(d)
+        src = root / "openbank-x/src/main/kotlin/X.kt"
+        src.parent.mkdir(parents=True)
+        owner = root / "openbank-libs-domain/src/main/kotlin/Iban.kt"
+        owner.parent.mkdir(parents=True)
+        owner.write_text("val r = n.mod(97.toBigInteger()); val c = Regex(\"[A-Z]{3}\")\n")
+        src.write_text("val CURRENCY = Regex(\"[A-Z]{3}\")\n")
+        base = root / "baseline.json"
+        base.write_text(json.dumps({"currency-regex": {"openbank-x/src/main/kotlin/X.kt": 1}}))
+        cases = [
+            ("baselined copy only", None, 0),
+            ("new mod-97", "val r = BigInteger(s).mod(BigInteger.valueOf(97))\n", 1),
+            ("new percent 97", "var r = (r * 10 + d) % 97\n", 1),
+            ("new IBAN regex", 'val IBAN = Regex("^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$")\n', 1),
+            ("second currency regex", 'val C2 = Regex("^[A-Z]{3}$")\n', 1),
+            ("not a mod-97: 1997", "val year = 1997\n", 0),
+        ]
+        failed = False
+        for name, extra, want in cases:
+            src.write_text('val CURRENCY = Regex("[A-Z]{3}")\n' + (extra or ""))
+            got = run(root, base)
+            ok = got == want
+            failed |= not ok
+            print(f"self-test {'ok  ' if ok else 'FAIL'} {name}: exit {got}, want {want}")
+        src.write_text("val nothing = 1\n")
+        got = run(root, base)
+        failed |= got != 1
+        print(f"self-test {'ok  ' if got == 1 else 'FAIL'} stale baseline: exit {got}, want 1")
+    return 2 if failed else 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--root", default=".")
+    ap.add_argument("--write-baseline", action="store_true")
+    ap.add_argument("--self-test", action="store_true")
+    a = ap.parse_args()
+    if a.self_test:
+        return self_test()
+    root = pathlib.Path(a.root)
+    if a.write_baseline:
+        counts, _ = scan(root)
+        (root / BASELINE).write_text(json.dumps(counts, indent=2, sort_keys=True) + "\n")
+        return 0
+    return run(root, root / BASELINE)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

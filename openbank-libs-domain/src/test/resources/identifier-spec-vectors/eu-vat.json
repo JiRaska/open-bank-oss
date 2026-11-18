@@ -1,0 +1,52 @@
+{
+  "identifier": "eu-vat",
+  "reference": "stdnum.eu.vat",
+  "sources": [
+    "https://ec.europa.eu/taxation_customs/vies/"
+  ],
+  "cases": [
+    {
+      "value": "CZ25596641",
+      "valid": true,
+      "rule": "CZ VAT = CZ + IČO",
+      "stdnum": true
+    },
+    {
+      "value": "DE136695976",
+      "valid": true,
+      "rule": "real DE VAT",
+      "stdnum": true
+    },
+    {
+      "value": "CZ25596642",
+      "valid": false,
+      "rule": "CZ VAT with wrong IČO check digit",
+      "known_defect": {
+        "issue": "#16774",
+        "current": true,
+        "why": "EU_VAT is format-only (checksum=false); no per-member-state check is implemented"
+      },
+      "stdnum": false
+    },
+    {
+      "value": "C225596641",
+      "valid": false,
+      "rule": "digit in country prefix",
+      "stdnum": false
+    },
+    {
+      "value": "CZ1",
+      "valid": false,
+      "rule": "too short",
+      "stdnum": false
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-kyb-service",
+      "symbol": "LegalEntityIdentifier.parse(EU_VAT)",
+      "file": "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt"
+    }
+  ],
+  "differential": false
+}

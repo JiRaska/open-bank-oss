@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
+# Independent reference for the identifier differential test (#16748). Hash-pinned.
+python-stdnum==2.2 \
+    --hash=sha256:bdf98fd117a0ca152e4047aa8ad254bae63853d4e915ddd4e0effb33ba0e9260

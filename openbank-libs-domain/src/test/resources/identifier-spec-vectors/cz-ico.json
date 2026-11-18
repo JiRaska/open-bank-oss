@@ -1,0 +1,72 @@
+{
+  "identifier": "cz-ico",
+  "reference": "stdnum.cz.dic legal-entity check digit (zero-padded; DIČ-only 9-prefix rule not applied)",
+  "sources": [
+    "https://www.zakonyprolidi.cz/cs/2006-111",
+    "https://ares.gov.cz"
+  ],
+  "cases": [
+    {
+      "value": "25596641",
+      "valid": true,
+      "rule": "real IČO (registry example)",
+      "stdnum": true
+    },
+    {
+      "value": "25596642",
+      "valid": false,
+      "rule": "checksum mismatch",
+      "stdnum": false
+    },
+    {
+      "value": "2559664",
+      "valid": false,
+      "rule": "7 digits whose zero-padded form 02559664 fails the check",
+      "stdnum": false
+    },
+    {
+      "value": "2559664A",
+      "valid": false,
+      "rule": "non-digit",
+      "stdnum": false
+    },
+    {
+      "value": "00000019",
+      "valid": true,
+      "rule": "generated valid, remainder case 0000001",
+      "stdnum": true
+    },
+    {
+      "value": "00000108",
+      "valid": true,
+      "rule": "generated valid, remainder case 0000010",
+      "stdnum": true
+    },
+    {
+      "value": "00001007",
+      "valid": true,
+      "rule": "generated valid, remainder case 0000100",
+      "stdnum": true
+    },
+    {
+      "value": "90000005",
+      "valid": true,
+      "rule": "valid IČO with leading digit 9",
+      "stdnum": true
+    },
+    {
+      "value": "00000019",
+      "valid": true,
+      "rule": "valid IČO with leading digit 0",
+      "stdnum": true
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-kyb-service",
+      "symbol": "LegalEntityIdentifier.parse(CZ_ICO)",
+      "file": "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt"
+    }
+  ],
+  "differential": true
+}
