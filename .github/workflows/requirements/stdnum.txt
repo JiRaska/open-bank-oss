@@ -2,3 +2,5 @@
 # Independent reference for the identifier differential test (#16748). Hash-pinned.
 python-stdnum==2.2 \
     --hash=sha256:bdf98fd117a0ca152e4047aa8ad254bae63853d4e915ddd4e0effb33ba0e9260
+pycountry==26.2.16 \
+    --hash=sha256:115c4baf7cceaa30f59a4694d79483c9167dbce7a9de4d3d571c5f3ea77c305a
