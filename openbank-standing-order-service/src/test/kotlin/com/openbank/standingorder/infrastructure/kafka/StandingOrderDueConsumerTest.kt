@@ -144,6 +144,38 @@ class StandingOrderDueConsumerTest {
         coVerify(exactly = 0) { sepaClient.createPayment(any(), any()) }
     }
 
+    @Test
+    fun `SEPA_CREDIT sends the debit account's current number after a re-issue`(): Unit = runBlocking {
+        val debitAccountId = UUID.fromString("00000000-0000-0000-0000-0000000000d2")
+        val reissued = "CZ6508000000192000145399"
+        every { accountClient.getAccount(debitAccountId) } returns Uni.createFrom().item(
+            accountOk(mapper.writeValueAsString(mapOf("id" to debitAccountId, "accountNumber" to reissued))),
+        )
+        val req = slot<CreateSepaPaymentRequest>()
+        every { sepaClient.createPayment(any(), capture(req)) } returns
+            Uni.createFrom().item(Response.status(201).build())
+        coEvery { useCase.confirmExecution(orderId) } returns mockk(relaxed = true)
+
+        consumer.consume(dueEvent(debtorIban = "DE89370400440532013001"))
+
+        assertThat(req.captured.debtorIban).isEqualTo(reissued)
+        assertThat(req.captured.debtorAccountId).isEqualTo(debitAccountId)
+    }
+
+    @Test
+    fun `SEPA_CREDIT falls back to the stored debtor IBAN when account-service cannot answer`(): Unit = runBlocking {
+        every { accountClient.getAccount(any()) } returns
+            Uni.createFrom().failure(java.io.IOException("connection refused"))
+        val req = slot<CreateSepaPaymentRequest>()
+        every { sepaClient.createPayment(any(), capture(req)) } returns
+            Uni.createFrom().item(Response.status(201).build())
+        coEvery { useCase.confirmExecution(orderId) } returns mockk(relaxed = true)
+
+        consumer.consume(dueEvent(debtorIban = "DE89370400440532013001"))
+
+        assertThat(req.captured.debtorIban).isEqualTo("DE89370400440532013001")
+    }
+
     /**
      * The #3931-class defect this whole class of tests guards: before the fix, DOMESTIC/INTERNAL
      * fell straight to `else -> recordFailureSafely`, and the app only ever sends these two — so

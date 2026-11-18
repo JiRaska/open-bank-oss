@@ -118,3 +118,27 @@ data class SavingsWithdrawalApproved(
     override val eventType = "SavingsWithdrawalApproved"
     override val version = 1L
 }
+
+/**
+ * The account's number changed; the account (its UUID, owner, balance, history) did not (V35).
+ * Emitted once per re-issue in the same transaction as the number change and its audit row.
+ *
+ * Schema version 1, net-new event type on the account outbox topic. Every current consumer of that
+ * topic discriminates on `eventType` and acks a type it does not know, so adding it breaks no one.
+ * Holders of a copy of the number key it by [aggregateId] and replace [previousAccountNumber] with
+ * [accountNumber]. Fields may be added later; none will be removed or renamed within version 1.
+ */
+data class AccountNumberReissuedEvent(
+    override val aggregateId: UUID,
+    override val version: Long,
+    val previousAccountNumber: String,
+    val accountNumber: String,
+    val reason: String,
+    override val occurredAt: Instant,
+    /** See [AccountCreatedEvent.sourceService] (#3994/#5256). */
+    val sourceService: String = "account-service",
+    val schemaVersion: Int = 1,
+) : DomainEvent(occurredAt) {
+    override val aggregateType = "Account"
+    override val eventType = "AccountNumberReissued"
+}

@@ -108,8 +108,38 @@ class StandingOrderDueConsumer(
         }
     }
 
+    /**
+     * The debit account's CURRENT number. `debtor_iban` is a copy taken when the order was created, and
+     * account-service can re-issue an account's number while keeping its id (AccountNumberReissued, V35
+     * there), so the copy can name a number the account no longer has. The id is the stable key: ask
+     * account-service for it and fall back to the order's copy only when the lookup gives no answer, so
+     * an account-service outage never blocks a due order.
+     */
+    private suspend fun currentDebtorIban(orderId: UUID, accountId: UUID, stored: String?): String? {
+        val lookup = try {
+            AccountClient(accountClient).getAccount(accountId).awaitSuspending()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            log.warnf(e, "[standing-order-exec] order %s debit account lookup failed, using the stored IBAN", orderId)
+            return stored
+        }
+        val current = (lookup as? AccountLookup.Found)?.account?.accountNumber?.takeIf { it.isNotBlank() }
+        if (current != null && current != stored) {
+            log.infof(
+                "[standing-order-exec] order %s: debit account number changed since the order was created",
+                orderId,
+            )
+        }
+        return current ?: stored
+    }
+
     private suspend fun executeSepa(orderId: UUID, node: com.fasterxml.jackson.databind.JsonNode) {
-        val debtorIban = node.path("debtorIban").asText(null)?.takeIf { it.isNotBlank() }
+        val debitAccountId = UUID.fromString(node.path("debitAccountId").asText())
+        val debtorIban =
+            currentDebtorIban(orderId, debitAccountId, node.path("debtorIban").asText(null)?.takeIf { it.isNotBlank() })
         val debtorName = node.path("debtorName").asText(null)?.takeIf { it.isNotBlank() }
         if (debtorIban == null || debtorName == null) {
             log.warnf(
@@ -122,7 +152,7 @@ class StandingOrderDueConsumer(
         val currency = node.path("currency").asText()
         val request = CreateSepaPaymentRequest(
             type = "SCT",
-            debtorAccountId = UUID.fromString(node.path("debitAccountId").asText()),
+            debtorAccountId = debitAccountId,
             debtorIban = debtorIban,
             debtorName = debtorName,
             creditorIban = node.path("creditorIban").asText(),

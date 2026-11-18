@@ -180,6 +180,10 @@ spec:
             # listener (8443, client cert from account-internal-tls), like sca/delegation.
             - name: OPENBANK_ACCOUNT_ONBOARDING_BUSINESS_CATCH_UP_ENABLED
               value: "true"
+            # V35: re-issue account numbers failing the CNB mod-11 check; remove once
+            # openbank.account.number_invalid has read 0 (the job is then a no-op anyway).
+            - name: OPENBANK_ACCOUNT_NUMBER_REISSUE_ENABLED
+              value: "true"
             - name: PARTY_SERVICE_URL
               value: https://party-service.party.svc:8443
             # isn't flooded with connection-refused retries.

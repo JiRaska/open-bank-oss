@@ -301,6 +301,13 @@ openbank:
     opa-pdp-producer:
       enabled: true
   account:
+    # Re-issues accounts whose stored CZ number fails the CNB mod-11 check (V35,
+    # AccountNumberReissueService). Idempotent: once none fail a pass does nothing. OFF unless a
+    # deployment turns it on (the sandbox does, until openbank.account.number_invalid reads 0).
+    number-reissue:
+      enabled: ${OPENBANK_ACCOUNT_NUMBER_REISSUE_ENABLED:false}
+      interval: 10m
+      initial-delay: 30s
     onboarding:
       # Catch-up for ACTIVE business parties with no business current account (created before
       # business accounts were opened, or activated before this code was deployed). Needs
