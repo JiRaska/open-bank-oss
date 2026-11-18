@@ -27,10 +27,13 @@ import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
+import io.restassured.RestAssured.given
+import io.restassured.http.ContentType
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
 import java.time.OffsetDateTime
@@ -77,6 +80,27 @@ class DelegationMcpClientGrantPactFolderProviderVerificationTest {
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
         context?.verifyInteraction()
+    }
+
+    /**
+     * The negative half of the contract (ADR-0279 #3): a caller that is NOT mcp-service's own
+     * service-account must be refused by the handler's in-code identity guard, or the pact above
+     * would stay green even if the provider stopped enforcing authz.
+     */
+    @Test
+    @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "6a8f2c1e-0b4d-4e7a-9c3f-1d2e3f4a5b6c"),
+            Claim(key = "azp", value = "openbank-services"),
+            Claim(key = "preferred_username", value = "service-account-openbank-services"),
+        ],
+    )
+    fun `a caller that is not mcp-service is refused 403`() {
+        given().port(testPort.toInt()).contentType(ContentType.JSON)
+            .body("""{"grantorPartyId":"$PARTY","clientId":"$CLIENT","keyThumbprint":"$JKT"}""")
+            .post("/api/v1/delegations/mcp-client/resolve")
+            .then().statusCode(403)
     }
 
     /** Enables [FakeResolver] for this class only (a Kotlin bean class is final, so no QuarkusMock). */
@@ -133,6 +157,6 @@ class DelegationMcpClientGrantPactFolderProviderVerificationTest {
         val GRANT: UUID = UUID.fromString("d3d3d3d3-0000-4000-8000-000000000002")
         val ACCOUNT: UUID = UUID.fromString("d3d3d3d3-0000-4000-8000-000000000003")
         const val CLIENT = "mcp-local-reference"
-        const val JKT = "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
+        const val JKT = "0000000000000000000000000000000000000000000"
     }
 }

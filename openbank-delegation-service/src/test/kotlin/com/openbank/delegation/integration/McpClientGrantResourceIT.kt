@@ -149,6 +149,6 @@ class McpClientGrantResourceIT {
         const val SERVICES = "service-account-openbank-services"
         const val SUB = "6a8f2c1e-0b4d-4e7a-9c3f-1d2e3f4a5b6c"
         const val CLIENT = "mcp-local-reference"
-        const val JKT = "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
+        const val JKT = "0000000000000000000000000000000000000000000"
     }
 }
