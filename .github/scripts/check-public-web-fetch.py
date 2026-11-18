@@ -192,6 +192,119 @@ def evaluate_gitops(files: dict[str, str]) -> list[str]:
     return findings
 
 
+# --- network layer (ADR-0387 D7) ---------------------------------------------------------
+# The agent plane is DERIVED, never listed here: a workload is agent-plane when one of its
+# containers runs an image of an AGPL agent module (rules.yaml agpl_modules, the canonical list
+# of that plane). Its pods' labels decide which NetworkPolicies are agent-plane.
+WORKLOAD_KINDS = {"Deployment", "Rollout", "StatefulSet", "DaemonSet", "Job", "CronJob"}
+OPEN_CIDRS = {"0.0.0.0/0", "::/0"}
+REQUIRED_EXCEPT = {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "169.254.169.254/32"}
+BROKER_EGRESS = f"{BROKER}-egress"
+RULES_YAML = REPO / "openbank-libs" / "governance" / "rules.yaml"
+
+
+def agpl_modules(rules: dict) -> set[str]:
+    exc = ((rules.get("dependencies") or {}).get("license_boundary_exceptions") or [{}])[0] or {}
+    return {str(m) for m in (exc.get("agpl_modules") or [])}
+
+
+def _image_module(image: str) -> str:
+    name = image.rsplit("/", 1)[-1]
+    return re.split(r"[:@]", name, maxsplit=1)[0]
+
+
+def _pod_template(doc: dict) -> dict:
+    spec = doc.get("spec") or {}
+    if doc.get("kind") == "CronJob":
+        spec = ((spec.get("jobTemplate") or {}).get("spec")) or {}
+    return spec.get("template") or {}
+
+
+def agent_plane_pods(docs: list[dict], modules: set[str]) -> list[tuple[str, dict]]:
+    """(namespace, pod labels) of every workload running an agent-plane image."""
+    out = []
+    for doc in docs:
+        if doc.get("kind") not in WORKLOAD_KINDS:
+            continue
+        tpl = _pod_template(doc)
+        pspec = tpl.get("spec") or {}
+        images = [c.get("image", "") for c in (pspec.get("containers") or []) + (pspec.get("initContainers") or [])
+                  if isinstance(c, dict)]
+        if any(_image_module(str(i)) in modules for i in images):
+            ns = (doc.get("metadata") or {}).get("namespace", "default")
+            out.append((ns, (tpl.get("metadata") or {}).get("labels") or {}))
+    return out
+
+
+def _selects(selector: dict | None, labels: dict) -> bool:
+    selector = selector or {}
+    if selector.get("matchExpressions"):
+        return True  # conservative: an expression selector is treated as matching
+    return all(labels.get(k) == v for k, v in (selector.get("matchLabels") or {}).items())
+
+
+def _open_blocks(policy: dict) -> list[dict]:
+    blocks = []
+    for rule in ((policy.get("spec") or {}).get("egress") or []):
+        for peer in (rule.get("to") or []):
+            ip = (peer or {}).get("ipBlock") or {}
+            if ip.get("cidr") in OPEN_CIDRS:
+                blocks.append({"ipBlock": ip, "ports": rule.get("ports") or []})
+    return blocks
+
+
+def evaluate_network(docs_by_path: dict[str, list[dict]], modules: set[str]) -> list[str]:
+    findings: list[str] = []
+    all_docs = [d for ds in docs_by_path.values() for d in ds if isinstance(d, dict)]
+    pods = agent_plane_pods(all_docs, modules)
+    broker_seen = False
+    for path, docs in sorted(docs_by_path.items()):
+        for doc in docs:
+            if not isinstance(doc, dict) or doc.get("kind") != "NetworkPolicy":
+                continue
+            meta = doc.get("metadata") or {}
+            name, ns = meta.get("name"), meta.get("namespace", "default")
+            sel = (doc.get("spec") or {}).get("podSelector")
+            if not any(pns == ns and _selects(sel, labels) for pns, labels in pods):
+                continue
+            blocks = _open_blocks(doc)
+            is_broker = path.startswith(BROKER_DIR) and name == BROKER_EGRESS
+            if is_broker:
+                broker_seen = True
+                if not blocks:
+                    findings.append(f"{path}: {name} has no internet egress rule — the broker cannot fetch")
+                for b in blocks:
+                    missing = sorted(REQUIRED_EXCEPT - set(b["ipBlock"].get("except") or []))
+                    if missing:
+                        findings.append(f"{path}: {name} egress to {b['ipBlock']['cidr']} does not except {missing}")
+                    ports = {(p.get("protocol", "TCP"), p.get("port")) for p in b["ports"]}
+                    if ports != {("TCP", 443)}:
+                        findings.append(f"{path}: {name} internet egress must be TCP 443 only, got {sorted(map(str, ports)) or 'all ports'}")
+                continue
+            if blocks:
+                findings.append(
+                    f"{path}: NetworkPolicy {ns}/{name} gives agent-plane pods internet egress — "
+                    f"only {BROKER_EGRESS} in {BROKER_DIR} may (ADR-0387 D7)"
+                )
+    if any(BROKER in str(labels.get("app.kubernetes.io/name", "")) for _, labels in pods) and not broker_seen:
+        findings.append(f"{BROKER} is deployed but {BROKER_DIR} declares no NetworkPolicy {BROKER_EGRESS}")
+    return findings
+
+
+def _gitops_docs() -> dict[str, list[dict]]:
+    out: dict[str, list[dict]] = {}
+    if not GITOPS.is_dir():
+        return out
+    for p in (*gatelib.rglob(GITOPS, "*.yaml"), *gatelib.rglob(GITOPS, "*.yml")):
+        try:
+            docs = gatelib.loads_all(gatelib.read_text(p, errors="replace"))
+        except Exception:  # noqa: BLE001 — not a manifest this gate can read; others own parsing
+            continue
+        rel = str(p.relative_to(REPO))
+        out[rel] = [d for d in docs if isinstance(d, dict)]
+    return out
+
+
 def _gitops_files() -> dict[str, str]:
     if not GITOPS.is_dir():
         return {}
@@ -259,6 +372,56 @@ def self_test() -> int:
         failed += not ok
         print(f"  {'ok ' if ok else 'BAD'} gitops/{name}: findings={got}")
 
+    mods = {"openbank-docs-truth-agent", BROKER}
+
+    def wl(name, ns, module):
+        return {"kind": "Deployment", "metadata": {"name": name, "namespace": ns},
+                "spec": {"template": {"metadata": {"labels": {"app.kubernetes.io/name": name}},
+                                      "spec": {"containers": [{"image": f"reg.example/{module}:sandbox-1@sha256:ab"}]}}}}
+
+    def np(name, ns, app=None, cidr="0.0.0.0/0", except_=None, port=443):
+        ip = {"cidr": cidr}
+        if except_ is not None:
+            ip["except"] = except_
+        sel = {"matchLabels": {"app.kubernetes.io/name": app}} if app else {}
+        return {"kind": "NetworkPolicy", "metadata": {"name": name, "namespace": ns},
+                "spec": {"podSelector": sel, "policyTypes": ["Egress"],
+                         "egress": [{"to": [{"ipBlock": ip}], "ports": [{"protocol": "TCP", "port": port}]}]}}
+
+    full = sorted(REQUIRED_EXCEPT)
+    broker_wl = wl(BROKER, "fetch-broker", BROKER)
+    good_broker = np(BROKER_EGRESS, "fetch-broker", BROKER, except_=full)
+    agent_wl = wl("docs-truth-agent", "docs-truth-agent", "openbank-docs-truth-agent")
+    ncases = [
+        ("broker egress with all exceptions", {bdir + "w.yaml": [broker_wl], bdir + "np.yaml": [good_broker]}, 0),
+        ("broker missing metadata except", {bdir + "w.yaml": [broker_wl],
+                                            bdir + "np.yaml": [np(BROKER_EGRESS, "fetch-broker", BROKER, except_=[c for c in full if c != "169.254.169.254/32"])]}, 1),
+        ("broker missing RFC1918 except", {bdir + "w.yaml": [broker_wl],
+                                           bdir + "np.yaml": [np(BROKER_EGRESS, "fetch-broker", BROKER, except_=["169.254.0.0/16", "169.254.169.254/32"])]}, 1),
+        ("broker no except at all", {bdir + "w.yaml": [broker_wl], bdir + "np.yaml": [np(BROKER_EGRESS, "fetch-broker", BROKER)]}, 1),
+        ("broker internet on port 80", {bdir + "w.yaml": [broker_wl],
+                                        bdir + "np.yaml": [np(BROKER_EGRESS, "fetch-broker", BROKER, except_=full, port=80)]}, 1),
+        ("broker deployed, egress policy absent", {bdir + "w.yaml": [broker_wl]}, 1),
+        ("agent pod with internet egress", {"x/w.yaml": [agent_wl],
+                                            "x/np.yaml": [np("a-egress", "docs-truth-agent", "docs-truth-agent")]}, 1),
+        ("agent ns-wide (empty selector) internet egress", {"x/w.yaml": [agent_wl],
+                                                            "x/np.yaml": [np("a-egress", "docs-truth-agent")]}, 1),
+        ("agent ::/0 egress", {"x/w.yaml": [agent_wl], "x/np.yaml": [np("a", "docs-truth-agent", cidr="::/0")]}, 1),
+        ("agent egress even WITH the exceptions", {"x/w.yaml": [agent_wl],
+                                                   "x/np.yaml": [np("a", "docs-truth-agent", except_=full)]}, 1),
+        ("broker-named policy outside broker dir", {"x/w.yaml": [agent_wl],
+                                                    "x/np.yaml": [np(BROKER_EGRESS, "docs-truth-agent")]}, 1),
+        ("non-agent workload internet egress ignored", {"x/w.yaml": [wl("litellm", "ai-platform", "litellm")],
+                                                        "x/np.yaml": [np("litellm-egress", "ai-platform", "litellm")]}, 0),
+        ("agent pod with a private-only ipBlock", {"x/w.yaml": [agent_wl],
+                                                   "x/np.yaml": [np("a", "docs-truth-agent", cidr="10.0.0.0/8")]}, 0),
+    ]
+    for name, docs, want in ncases:
+        got = len(evaluate_network(docs, mods))
+        ok = (got > 0) == (want > 0)
+        failed += not ok
+        print(f"  {'ok ' if ok else 'BAD'} network/{name}: findings={got}")
+
     print("self-test:", "PASS" if not failed else f"FAIL ({failed})")
     return 1 if failed else 0
 
@@ -273,6 +436,13 @@ def main() -> int:
     doc = gatelib.load_yaml(AGENTS_YAML) or {}
     findings, count = evaluate_agents(doc)
     findings += evaluate_gitops(_gitops_files())
+    modules = agpl_modules(gatelib.load_yaml(RULES_YAML) or {})
+    if not modules:
+        findings.append("rules.yaml agpl_modules is empty or moved — the agent plane cannot be derived")
+    docs = _gitops_docs()
+    findings += evaluate_network(docs, modules)
+    pods = agent_plane_pods([d for ds in docs.values() for d in ds], modules)
+    print(f"network: {len(pods)} agent-plane workloads derived from {len(modules)} agent modules")
     gatelib.subjects(count, "agent charters examined for public-web access")
     for f in findings:
         print(f"::error title=public-web fetch (ADR-0387)::{f}")
